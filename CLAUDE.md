@@ -97,7 +97,9 @@ Hard rule: **no spec, no PR**, unless the PR is labeled `trivial`
 (typo, doc-only, one-line obvious fix). Schema-impacting changes
 carry a `## Schema impact` callout in the spec and a `CHANGELOG.md`
 entry on merge — Phase-0/1 schema-stability discipline; see
-`duhem-dev-process`.
+`duhem-dev-process`. The repo has no `CHANGELOG.md` yet because
+there is no schema in code yet; the first schema-impact PR creates
+the file.
 
 If the change introduces new product surface (a new action type, a
 new schema field, a new CLI command, new judge behavior), the spec

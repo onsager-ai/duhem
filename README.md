@@ -27,7 +27,10 @@ philosophy; `docs/duhem-brand.md` shows how the mark visualizes it.
    with §1 (Why), §4 (Solution Overview), §7 (Core Concepts).
 2. **`docs/duhem-brand.md`** — the mark, design rationale, and
    relationship to Onsager.
-3. **`.claude/skills/`** — the dev process for working on this repo
+3. **`CLAUDE.md`** (also exposed as `AGENTS.md`) — orientation for
+   AI assistants working in this repo: identity commitments, the
+   Onsager dogfood seam, and pointers to the dev-process skills.
+4. **`.claude/skills/`** — the dev process for working on this repo
    under Claude Code. Start with `duhem-dev-process`.
 
 ## Onsager

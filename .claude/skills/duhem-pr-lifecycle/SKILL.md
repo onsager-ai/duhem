@@ -133,10 +133,9 @@ Concretely, when a PR is opened:
 2. If the issue's status label is `planned`, flip it to
    `in-progress`: remove `planned`, add `in-progress`. Use
    `mcp__github__issue_write` (replace-vs-merge label semantics
-   matter — see Onsager's
-   [`references/github-ops.md`](../../../../../onsager/.claude/skills/onsager-pr-lifecycle/references/github-ops.md)
-   for the canonical mechanics; the same MCP semantics apply on
-   `onsager-ai/duhem`).
+   matter — see Onsager's canonical mechanics at
+   <https://github.com/onsager-ai/onsager/blob/main/.claude/skills/onsager-pr-lifecycle/references/github-ops.md>;
+   the same MCP semantics apply on `onsager-ai/duhem`).
 3. If the issue's status label is `draft`, **don't flip it**.
    Comment on the PR instead, asking the author to drive the spec
    through human review first.

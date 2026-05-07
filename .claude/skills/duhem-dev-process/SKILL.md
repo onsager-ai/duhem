@@ -66,9 +66,9 @@ on `onsager-ai/duhem` with:
 
 - `## Overview`, `## Design`, `## Plan`, `## Test`, `## Alignment`, `## Notes`
 - Labels: `spec`, one type (`feat` / `fix` / `refactor` / `perf`),
-  one `priority:*`, status `draft`. Area labels are deferred until
-  Duhem has more than one subsystem; today the whole repo is one
-  area.
+  one or more `area:*`, one `priority:*`, status `draft`. The full
+  area taxonomy lives in `issue-spec`'s SKILL.md and
+  `references/spec-format.md`.
 
 Hard rule: no spec → no PR, unless the PR is labeled `trivial` (typos,
 doc-only fixes, one-line obvious bug repair).

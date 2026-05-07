@@ -231,8 +231,14 @@ Examples:
 - Priority: `priority:critical`, `priority:high`,
   `priority:medium`, `priority:low`
 - Status: `draft` (initial state)
-- `schema-impact` — if `## Schema impact` is non-trivial; this
-  feeds the breaking-change-rate signal
+- `schema-impact` — apply whenever the spec includes a non-empty
+  `## Schema impact` section (i.e. the change touches the
+  Verification Definition format, action-type catalog, runtime
+  expressions, or judge semantics in *any* way — not just breaking
+  changes). The label is the discoverability signal for "which
+  specs touch the schema?". Whether the change is breaking is a
+  separate signal tracked inside the section via
+  `Breaking change? yes/no`, and feeds CHANGELOG on merge.
 
 **Sub-issues**: If this is a child of a parent spec, link it using
 `mcp__github__sub_issue_write`.

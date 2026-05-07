@@ -56,11 +56,15 @@ Apply labels when creating the issue:
 
 **Cross-cutting:**
 
-- `schema-impact` — set when the spec materially changes the
+- `schema-impact` — apply whenever the spec includes a non-empty
+  `## Schema impact` section. That covers *any* change to the
   Verification Definition format, action-type catalog, runtime
-  expressions, or judge semantics. This label is the
-  breaking-change-rate signal that gates the Phase 2 schema OSS
-  decision (`docs/duhem-spec.md` §15).
+  expressions, or judge semantics — not just breaking ones. The
+  label is the discoverability signal for "which specs touch
+  schema surface?". Breaking-vs-non-breaking is tracked inside the
+  section via `Breaking change? yes/no` and feeds CHANGELOG; the
+  filter "schema-impact specs with `Breaking change? yes`" is what
+  gates the Phase 2 schema OSS decision (`docs/duhem-spec.md` §15).
 - `trivial` (PR-only label, not a spec label) — opts a PR out of
   the spec-link requirement. See `duhem-dev-process`.
 
@@ -175,11 +179,14 @@ Format:
 - Breaking change? no
 ```
 
-If `Breaking change? yes`, also apply the `schema-impact` label to
-the spec issue (and later to the PR), and add a CHANGELOG entry on
+Apply the `schema-impact` label whenever this section is present
+on the spec (and mirror it onto the PR). Whether the change is
+breaking is a separate signal answered by the `Breaking change?`
+line. If `Breaking change? yes`, also add a CHANGELOG entry on
 merge. Pre-1.0 (Phase 0/1), breaking changes are allowed but
-counted — they feed the rate-of-change signal that gates Phase 2
-schema OSS.
+counted — the filter "schema-impact specs with
+`Breaking change? yes`" is the rate-of-change signal that gates
+Phase 2 schema OSS.
 
 ### Alignment
 

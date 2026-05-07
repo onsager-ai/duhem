@@ -40,7 +40,8 @@
 - Fields added / removed / renamed:
 - Semantics changed:
 - Migration path for in-flight Verification Definitions:
-- Breaking change?  yes / no — if yes, add `schema-impact` label
+- Breaking change?  yes / no — if yes, add a `CHANGELOG.md` entry
+  on merge (the `schema-impact` label is applied regardless)
 
 ## Worked example
 

@@ -1,0 +1,13 @@
+[package]
+name = "duhem-judge"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+description = "Deterministic verdict aggregator for verification check results."
+
+[dependencies]
+duhem-schema = { path = "../duhem-schema" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

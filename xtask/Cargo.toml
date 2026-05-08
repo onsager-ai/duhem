@@ -1,0 +1,18 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+base64 = "0.22"
+proc-macro2 = { version = "1", features = ["span-locations"] }
+rustc-hash = "1"
+syn = { version = "2", features = ["full", "extra-traits", "visit"] }
+tiktoken-rs = "0.11"

@@ -95,8 +95,9 @@ merger ticks the parent's Plan checkboxes manually.
 
 **Purpose**: Why does this work matter? What problem does it solve?
 
-**Good overview** (note: prose paragraphs are *not* hard-wrapped —
-GitHub renders single newlines as `<br>` in issue bodies):
+**Good overview** (note: prose, list items, and blockquote lines
+are *not* hard-wrapped — GitHub renders single newlines as `<br>`
+in issue bodies; see SKILL.md step 2):
 
 ```markdown
 ## Overview
@@ -167,11 +168,8 @@ Format:
 - Fields added: `verification.continue_on_failure: bool`, default `false`
 - Fields renamed: none
 - Fields removed: none
-- Semantics changed: `setup:` block now runs once per criterion
-  instead of once per verification (was undocumented; ratifying
-  observed behavior)
-- Migration path: existing verifications continue to work; field
-  is optional. No tooling migration needed.
+- Semantics changed: `setup:` block now runs once per criterion instead of once per verification (was undocumented; ratifying observed behavior)
+- Migration path: existing verifications continue to work; field is optional. No tooling migration needed.
 - Breaking change? no
 ```
 

@@ -5,19 +5,11 @@
 
 ## Overview
 
-<!-- Problem statement and motivation. 2-4 sentences.
-     Why does this matter? What's the impact of not doing it?
-     Don't describe the solution here — that's Design's job.
-     Tie back to commitments in docs/duhem-spec.md when relevant. -->
+<!-- Problem statement and motivation. 2-4 sentences. Why does this matter? What's the impact of not doing it? Don't describe the solution here — that's Design's job. Tie back to commitments in docs/duhem-spec.md when relevant. -->
 
 ## Design
 
-<!-- Technical approach at intent level.
-     Data flow, schema shape, judge contract — not line-by-line code.
-     Include what's explicitly OUT OF SCOPE.
-     Respect the Duhem invariants: holistic verification (no mocking
-     the web), mechanical judgment (no LLM-in-the-loop verdict),
-     stable criteria / derivative checks. -->
+<!-- Technical approach at intent level. Data flow, schema shape, judge contract — not line-by-line code. Include what's explicitly OUT OF SCOPE. Respect the Duhem invariants: holistic verification (no mocking the web), mechanical judgment (no LLM-in-the-loop verdict), stable criteria / derivative checks. -->
 
 ## Plan
 
@@ -32,10 +24,7 @@
 
 ## Schema impact
 
-<!-- Required when this change touches the Verification Definition format,
-     the action-type catalog, runtime expressions, judge semantics, or any
-     externally observable contract. Drop the section ONLY if the change
-     provably touches no schema surface (e.g. CI tweaks, repo hygiene). -->
+<!-- Required when this change touches the Verification Definition format, the action-type catalog, runtime expressions, judge semantics, or any externally observable contract. Drop the section ONLY if the change provably touches no schema surface (e.g. CI tweaks, repo hygiene). -->
 
 - Fields added / removed / renamed:
 - Semantics changed:
@@ -44,11 +33,7 @@
 
 ## Worked example
 
-<!-- Required when this change introduces or modifies user-visible
-     product surface (new action type, new schema field, new CLI
-     command, new judge behavior). A minimal Verification Definition
-     showing the surface end-to-end, or a link to one. See the
-     `verification-authoring` skill. -->
+<!-- Required when this change introduces or modifies user-visible product surface (new action type, new schema field, new CLI command, new judge behavior). A minimal Verification Definition showing the surface end-to-end, or a link to one. See the `verification-authoring` skill. -->
 
 ```yaml
 # minimal example exercising the new surface

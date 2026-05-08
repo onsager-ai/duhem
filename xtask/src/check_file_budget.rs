@@ -10,10 +10,10 @@
 //!
 //! ## What's counted
 //!
-//! - **Rust** (`.rs`): top-level items annotated with `#[cfg(test)]`
-//!   (and `#[cfg(test)] mod tests { ... }` blocks nested one level
-//!   deep) are stripped before counting. Test bulk doesn't pay the
-//!   prod-read tax.
+//! - **Rust** (`.rs`): items annotated with `#[cfg(test)]` are stripped
+//!   before counting at any depth — top-level items, nested `mod`
+//!   blocks, and items inside non-`cfg(test)` modules are all walked.
+//!   Test bulk doesn't pay the prod-read tax.
 //!
 //! Path-level test/example/bench dirs (`tests/`, `examples/`,
 //! `benches/`) and Rust sibling test files (`tests.rs`, `*_tests.rs`)
@@ -234,6 +234,9 @@ fn parse_args(args: Vec<String>) -> Result<(Mode, usize, Vec<PathBuf>)> {
             other => paths.push(PathBuf::from(other)),
         }
     }
+    if budget == 0 {
+        bail!("--budget expects a positive integer");
+    }
     Ok((mode, budget, paths))
 }
 
@@ -348,10 +351,12 @@ fn build_bpe() -> Result<CoreBPE> {
         .map_err(|e| anyhow!("build CoreBPE for o200k_base: {e}"))
 }
 
-/// Strip `#[cfg(test)]`-attributed top-level items (and `cfg(test)`
-/// mod blocks nested one level deep). Falls back to the original
-/// source if the file fails to parse — counting too much is preferable
-/// to silently dropping the file.
+/// Strip `#[cfg(test)]`-attributed items at any depth: a top-level
+/// item carrying the attribute is dropped wholesale; a non-`cfg(test)`
+/// module is recursed into so test items nested inside it are still
+/// removed. Falls back to the original source if the file fails to
+/// parse — counting too much is preferable to silently dropping the
+/// file.
 fn strip_rust_cfg_test(src: &str) -> Result<String> {
     let file: SynFile = syn::parse_file(src)?;
     let mut excluded: Vec<std::ops::Range<usize>> = Vec::new();

@@ -3,9 +3,9 @@
 //!     cargo run -p xtask -- check-file-budget        # bound per-file token cost
 //!     cargo run -p xtask -- count-tokens <file>      # one-file token count
 //!
-//! `check-file-budget` enforces a per-file token budget on every
-//! `.rs` file under `crates/` and `xtask/src/`. The vocab is `tiktoken
-//! o200k_base`, vendored at `xtask/assets/o200k_base.tiktoken` for
+//! `check-file-budget` enforces a per-file token budget on every `.rs`
+//! file under `crates/` and `xtask/src/`. The vocab is `tiktoken`'s
+//! `o200k_base`, vendored at `xtask/assets/o200k_base.tiktoken` for
 //! offline determinism. Ported from `onsager-ai/onsager` per
 //! `docs/duhem-spec.md` Phase-0 plan (issue #5).
 

@@ -1,0 +1,19 @@
+[package]
+name = "duhem-actions"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+description = "Built-in action library for verification checks (ui/*, api/*, db/*)."
+
+[dependencies]
+duhem-schema = { path = "../duhem-schema" }
+serde.workspace = true
+serde_json.workspace = true
+serde_yml.workspace = true
+reqwest.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true

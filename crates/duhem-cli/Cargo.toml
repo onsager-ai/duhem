@@ -1,0 +1,23 @@
+[package]
+name = "duhem-cli"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+description = "Duhem command-line interface (the `duhem` binary)."
+
+[[bin]]
+name = "duhem"
+path = "src/main.rs"
+
+[dependencies]
+duhem-schema = { path = "../duhem-schema" }
+duhem-judge = { path = "../duhem-judge" }
+duhem-runtime = { path = "../duhem-runtime" }
+duhem-actions = { path = "../duhem-actions" }
+duhem-evidence = { path = "../duhem-evidence" }
+clap.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

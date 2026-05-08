@@ -1,0 +1,28 @@
+Copyright (c) 2026 Onsager, Inc.
+
+All rights reserved.
+
+This repository contains the source for the Duhem product. No license to
+use, copy, modify, or distribute this source — in whole or in part — is
+granted by its presence on GitHub. The repository is public so that the
+specification, brand documents, and product surface evolve in the open;
+public visibility is not a grant of rights.
+
+Two distributions live outside this notice and are governed by their own
+terms:
+
+  * The free `duhem` CLI binary (Phase 0+, see `docs/duhem-spec.md` §13)
+    ships under terms that accompany the binary release.
+  * The Verification Definition schema and its accompanying documentation
+    (Phase 1+, see `docs/duhem-spec.md` §11.3) are released under terms
+    that accompany those documents.
+
+Neither distribution exists yet. Each will arrive with its own license
+text the day it is published.
+
+Contributions to this repository may only be accepted under a contributor
+agreement provided at the time of the contribution. Filing a pull request
+or issue does not, on its own, transfer any rights.
+
+For commercial licensing inquiries, contact the maintainers via the
+repository's contact channels.

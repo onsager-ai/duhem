@@ -1,0 +1,21 @@
+[package]
+name = "duhem-runtime"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+description = "Check executor — orchestrates step execution against the real delivery web."
+
+[dependencies]
+duhem-schema = { path = "../duhem-schema" }
+duhem-judge = { path = "../duhem-judge" }
+duhem-actions = { path = "../duhem-actions" }
+duhem-evidence = { path = "../duhem-evidence" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true

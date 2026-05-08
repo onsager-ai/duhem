@@ -1,0 +1,38 @@
+//! Duhem repo-local tasks. Currently:
+//!
+//!     cargo run -p xtask -- check-file-budget        # bound per-file token cost
+//!     cargo run -p xtask -- count-tokens <file>      # one-file token count
+//!
+//! `check-file-budget` enforces a per-file token budget on every
+//! `.rs` file under `crates/` and `xtask/src/`. The vocab is `tiktoken
+//! o200k_base`, vendored at `xtask/assets/o200k_base.tiktoken` for
+//! offline determinism. Ported from `onsager-ai/onsager` per
+//! `docs/duhem-spec.md` Phase-0 plan (issue #5).
+
+mod check_file_budget;
+
+use std::process::ExitCode;
+
+use anyhow::{Result, anyhow};
+
+fn main() -> ExitCode {
+    let mut args = std::env::args().skip(1);
+    let cmd = args.next();
+
+    let result: Result<()> = match cmd.as_deref() {
+        Some("check-file-budget") => check_file_budget::run(args.collect()),
+        Some("count-tokens") => check_file_budget::run_count(args.collect()),
+        Some(other) => Err(anyhow!("unknown subcommand: {other}")),
+        None => Err(anyhow!(
+            "usage:\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- count-tokens <file>"
+        )),
+    };
+
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("xtask: {e:#}");
+            ExitCode::FAILURE
+        }
+    }
+}

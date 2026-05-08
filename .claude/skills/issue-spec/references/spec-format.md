@@ -95,19 +95,15 @@ merger ticks the parent's Plan checkboxes manually.
 
 **Purpose**: Why does this work matter? What problem does it solve?
 
-**Good overview:**
+**Good overview** (note: prose paragraphs are *not* hard-wrapped —
+GitHub renders single newlines as `<br>` in issue bodies):
 
 ```markdown
 ## Overview
 
-Today, `duhem run` accepts a single Verification Definition file as
-its only input. Teams using Pattern B (per-feature directories) need
-to invoke `duhem run` against a glob, which loops in the shell — slow
-and breaks shared environment provisioning.
+Today, `duhem run` accepts a single Verification Definition file as its only input. Teams using Pattern B (per-feature directories) need to invoke `duhem run` against a glob, which loops in the shell — slow and breaks shared environment provisioning.
 
-This adds a `--filter` flag that selects a subset of verifications
-declared in `duhem.yml` by name pattern, so a team can run a
-focused subset without bypassing the manifest's shared defaults.
+This adds a `--filter` flag that selects a subset of verifications declared in `duhem.yml` by name pattern, so a team can run a focused subset without bypassing the manifest's shared defaults.
 ```
 
 **Bad overview:** describes the solution before the problem; spends

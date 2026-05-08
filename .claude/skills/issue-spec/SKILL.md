@@ -128,6 +128,14 @@ duplicate.
 Read [references/spec-format.md](references/spec-format.md) for the
 section-by-section format guide.
 
+**Don't hard-wrap prose paragraphs.** GitHub renders issue and
+comment bodies with `breaks: true` — every newline inside a paragraph
+becomes a `<br>`, producing visible mid-sentence line breaks. Source
+files in this repo wrap at ~70 columns; **issue bodies must not**.
+Each prose paragraph is one long line, separated from the next by a
+blank line. Lists, tables, fenced code blocks, blockquotes, and
+heading lines are unaffected — wrap those normally.
+
 Draft the issue body using the lean-spec structure:
 
 ```markdown
@@ -197,6 +205,8 @@ Add an **Alignment** section to the issue body:
 Before creating the issue, self-check:
 
 - [ ] Body is under ~2000 tokens (context economy)
+- [ ] Prose paragraphs are not hard-wrapped (one long line per
+      paragraph, blank line between paragraphs)
 - [ ] Overview explains *why*, not just *what*
 - [ ] Design captures intent, not implementation details
 - [ ] Plan items are concrete and independently verifiable

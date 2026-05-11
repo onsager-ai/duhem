@@ -54,7 +54,7 @@ fn parse_duration_str(s: &str) -> Option<Duration> {
     Some(match suffix {
         "ms" => Duration::from_millis(n),
         "s" => Duration::from_secs(n),
-        "m" => Duration::from_secs(n * 60),
+        "m" => Duration::from_secs(n.checked_mul(60)?),
         _ => unreachable!(),
     })
 }
@@ -90,5 +90,12 @@ mod tests {
     #[test]
     fn rejects_garbage() {
         assert!(serde_yml::from_str::<WithinSpec>("\"forever\"").is_err());
+    }
+
+    #[test]
+    fn rejects_minutes_overflow() {
+        // u64::MAX minutes would overflow when multiplied by 60.
+        let huge = format!("\"{}m\"", u64::MAX);
+        assert!(serde_yml::from_str::<WithinSpec>(&huge).is_err());
     }
 }

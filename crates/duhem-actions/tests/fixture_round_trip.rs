@@ -1,6 +1,9 @@
 //! Round-trip the worked-example fixture from issue #12 through #8's
-//! parser + validator, then confirm every `Step.with` deserializes
-//! into the corresponding action's typed `With` struct.
+//! parser, then check shape compatibility of each `Step.with` against
+//! a local mirror of the corresponding action's `With` (the real
+//! `With` structs are private to each action module, by design — the
+//! invariant under test is that the on-the-wire shape matches what
+//! the action accepts, not the identity of the type).
 //!
 //! Runs in CI (no browser, no axum). The actual Playwright smoke
 //! lives in `ui_smoke.rs` and is `#[ignore]`'d by default.

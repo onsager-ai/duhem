@@ -12,8 +12,12 @@
 //! - `click_present_button_succeeds`
 //! - `assert_element_visible_present_satisfies`
 //! - `assert_element_not_exists_with_present_alert_returns_false`
-//! - `assert_element_timeout_returns_outcome_timeout` (covers
-//!   the §11.1 "wait-with-timeout, not poll" structural choice).
+//! - `assert_element_timeout_returns_satisfied_false_quickly`
+//!   covers the §11.1 "wait-with-timeout, not poll" structural
+//!   choice: a missed `within:` is *not* `Outcome::Timeout`. It
+//!   yields `Outcome::Ok` with `satisfied: false` (a conclusive
+//!   "we waited and it never appeared" observation), and elapsed
+//!   wall time stays inside a loose multiple of `within:`.
 
 use std::net::SocketAddr;
 use std::sync::Arc;

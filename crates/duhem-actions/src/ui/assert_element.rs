@@ -72,11 +72,16 @@ impl Action for AssertElement {
 
         // `count` reflects matches at observation time. Even when the
         // expectation is `not_exists`/`hidden`, this is the literal
-        // post-wait DOM count.
-        let count = match ctx.page.query_selector_all(&selector).await {
-            Ok(v) => v.len() as u32,
-            Err(_) => 0,
-        };
+        // post-wait DOM count. A driver-level failure here (page
+        // closed, browser crashed) is propagated rather than silently
+        // reported as `count = 0` — that would conflate "nothing
+        // matched" with "we couldn't ask".
+        let count = ctx
+            .page
+            .query_selector_all(&selector)
+            .await
+            .map(|v| v.len() as u32)
+            .map_err(|e| ActionError::Playwright(format!("ui/assert-element: count: {e}")))?;
 
         Ok(ActionResult::ok()
             .with_output("satisfied", json!(satisfied))

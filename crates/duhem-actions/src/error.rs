@@ -20,7 +20,8 @@ pub enum ActionError {
     },
 
     /// Playwright driver returned a non-timeout error (e.g. browser
-    /// binary missing — see `playwright::ensure_browser_installed`).
+    /// binary missing — `playwright::RunBrowser::launch` rewrites
+    /// that one with the install hint via `humanize_launch_error`).
     #[error("playwright driver error: {0}")]
     Playwright(String),
 }

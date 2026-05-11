@@ -165,7 +165,10 @@ fn check_path(
     match path.root {
         PathRoot::Steps => {
             let segs = path.segments();
-            if segs.len() < 3 || segs[1] != "outputs" {
+            // Exactly `$steps.<step_id>.outputs.<output>` — no trailing
+            // segments. Deeper navigation into a structured output is
+            // the runtime evaluator's job, not the schema's.
+            if segs.len() != 3 || segs[1] != "outputs" {
                 errs.push(ValidationError::MalformedStepRef {
                     criterion: c.id.clone(),
                     check: ch.id.clone(),
@@ -197,7 +200,9 @@ fn check_path(
         }
         PathRoot::Inputs => {
             let segs = path.segments();
-            if segs.is_empty() {
+            // Exactly `$inputs.<name>` — no trailing segments. Same
+            // reasoning as the `$steps` rule above.
+            if segs.len() != 1 {
                 errs.push(ValidationError::MalformedInputRef {
                     criterion: c.id.clone(),
                     check: ch.id.clone(),
@@ -215,10 +220,10 @@ fn check_path(
                 });
             }
         }
-        PathRoot::Runtime => {
-            // Runtime catalog is open at the schema layer; the runtime
-            // spec validates `$runtime.<fn>` references against the
-            // built-in helper set.
+        PathRoot::Env | PathRoot::Runtime => {
+            // `$env` and `$runtime` are open catalogs at the schema
+            // layer; the runtime spec validates the whitelist /
+            // helper set.
         }
     }
 }
@@ -399,6 +404,71 @@ criteria:
             errs.iter()
                 .any(|e| matches!(e, ValidationError::MalformedStepRef { .. }))
         );
+    }
+
+    #[test]
+    fn step_ref_with_extra_segments_fails() {
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: api
+            uses: api/observe
+            with: {}
+            outputs:
+              body: response.body
+        assertions:
+          - exists: $steps.api.outputs.body.extra
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter()
+                .any(|e| matches!(e, ValidationError::MalformedStepRef { .. }))
+        );
+    }
+
+    #[test]
+    fn input_ref_with_extra_segments_fails() {
+        let y = r#"
+verification: x
+inputs:
+  name:
+    type: string
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - exists: $inputs.name.extra
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter()
+                .any(|e| matches!(e, ValidationError::MalformedInputRef { .. }))
+        );
+    }
+
+    #[test]
+    fn env_paths_pass() {
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - exists: $env.DATABASE_URL
+"#;
+        let v = parse(y);
+        validate(&v).expect("$env should not fail");
     }
 
     #[test]

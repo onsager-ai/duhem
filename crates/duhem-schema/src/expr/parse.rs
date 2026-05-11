@@ -80,11 +80,12 @@ fn expr_parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
                 .try_map(|s: &str, span| match s {
                     "steps" => Ok(PathRoot::Steps),
                     "inputs" => Ok(PathRoot::Inputs),
+                    "env" => Ok(PathRoot::Env),
                     "runtime" => Ok(PathRoot::Runtime),
                     other => Err(Rich::custom(
                         span,
                         format!(
-                            "unknown scope `${other}` (expected `$steps`, `$inputs`, or `$runtime`)"
+                            "unknown scope `${other}` (expected `$steps`, `$inputs`, `$env`, or `$runtime`)"
                         ),
                     )),
                 });
@@ -103,11 +104,22 @@ fn expr_parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
             .collect::<Vec<_>>()
             .delimited_by(just('('), just(')'));
 
+        // Function-call syntax (`(args)`) is only legal under
+        // `$runtime` per `docs/duhem-spec.md` §10.7. Reject it on
+        // other roots at parse time so structural validation isn't
+        // asked to enforce a grammar rule.
         let path_or_call = path
             .then(call_args.or_not())
-            .map(|(path, args)| match args {
-                Some(args) => Expr::Call { path, args },
-                None => Expr::Path(path),
+            .try_map(|(path, args), span| match (args, path.root) {
+                (Some(args), PathRoot::Runtime) => Ok(Expr::Call { path, args }),
+                (Some(_), other) => Err(Rich::custom(
+                    span,
+                    format!(
+                        "function-call syntax `(...)` is only valid on `$runtime`, not `${}`",
+                        other.as_str()
+                    ),
+                )),
+                (None, _) => Ok(Expr::Path(path)),
             });
 
         // ---- primary ----
@@ -229,6 +241,31 @@ mod tests {
             "got: {}",
             err.message
         );
+    }
+
+    #[test]
+    fn parses_env_scope() {
+        assert_eq!(
+            p("$env.DATABASE_URL"),
+            Expr::Path(Path {
+                root: PathRoot::Env,
+                segments: vec!["DATABASE_URL".into()],
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_call_on_non_runtime_root() {
+        let err = parse("$inputs.x()").unwrap_err();
+        assert!(
+            err.message.contains("only valid on `$runtime`"),
+            "got: {}",
+            err.message
+        );
+        let err = parse("$steps.a.outputs.x()").unwrap_err();
+        assert!(err.message.contains("only valid on `$runtime`"));
+        let err = parse("$env.X()").unwrap_err();
+        assert!(err.message.contains("only valid on `$runtime`"));
     }
 
     #[test]

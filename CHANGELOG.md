@@ -33,8 +33,10 @@ release.
 - `Expr` AST + `chumsky`-based parser. Boolean expressions are parsed
   at schema-load time (decision in #8) so syntax errors surface before
   the runtime is invoked. Grammar covers literals, `$steps.*` /
-  `$inputs.*` / `$runtime.*` paths, function calls, comparisons
-  (`== != < <= > >=`), boolean logic (`&& || !`), and parens.
+  `$inputs.*` / `$env.*` / `$runtime.*` paths (the four references
+  defined in `docs/duhem-spec.md` §10.7), function calls (legal only
+  under `$runtime`), comparisons (`== != < <= > >=`), boolean logic
+  (`&& || !`), and parens.
 - `validate()` — structural validator. Rules: non-empty `criteria`;
   unique `Criterion.id`, `Check.id` per criterion, and `Step.id` per
   check; every `$steps.<id>.outputs.<output>` and `$inputs.<name>`

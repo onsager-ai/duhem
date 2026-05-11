@@ -5,6 +5,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is described in `docs/duhem-spec.md` §11.3 (Phase 1 keeps
 the schema closed and breaking; deprecation policy lands at v1.0).
 
+## v0.3.0 — evidence trace v1
+
+First on-disk format for verification evidence. One run = one
+append-only directory under `.duhem/runs/<run_id>/`; the directory
+is the unit of replay. Schema version string `"v1"` is carried in
+both `manifest.json` and every `run_started` event (redundantly on
+purpose — the manifest can be lost).
+
+### Added
+
+- `trace.jsonl` — append-only structured event stream. One JSON
+  object per line; `seq` is monotonic per run (gap = bug); `ts` is
+  RFC 3339 with millisecond precision. Unknown `kind` on read is a
+  hard error.
+- `blobs/<sha256>` — content-addressed blob store. `step_observation`
+  values larger than 4 KiB serialized are written here and the event
+  carries `blob_sha256` instead of an inline `value`. Writes are
+  write-then-rename so the directory is poll-safe.
+- `manifest.json` — run-level header: `run_id`, `started_at`,
+  `definition_path`, `schema_version`.
+- Event kinds (closed set for v1; new kinds in future minor versions
+  are additive, existing kinds are stable):
+  `run_started`, `step_started`, `step_observation`,
+  `step_finished`, `assertion_evaluated`, `check_finished`,
+  `criterion_finished`, `run_finished`.
+- `EvidenceWriter` — `O_APPEND` writer with the v1 fsync policy:
+  fsync at every `*_finished` event, buffer step observations.
+- `Trace::open` — reader that fully materializes events and enforces
+  `seq` monotonicity on load.
+- `replay(trace) -> Result<RunVerdict, ReplayError>` — empirical
+  verifier of the §11.2 reproducibility commitment. Re-aggregates
+  recorded `assertion_evaluated` outcomes and returns
+  `ReplayDivergence` when the recomputed verdict disagrees with the
+  recorded `check_finished` / `criterion_finished` / `run_finished`.
+  The aggregation rule is a local minimal implementation (fail
+  dominates → inconclusive → pass) until `spec(judge): three-state
+  verdict aggregation rules` lands and replay delegates to
+  `duhem-judge::aggregate_run`.
+- `new_run_id()` — ULID generator for `.duhem/runs/<run_id>/`.
+
+### Reserved (not yet emitted)
+
+- `screen_recorded` — video recording, Phase 1+.
+
+### Operator notes
+
+- The run directory defaults to `.duhem/runs/<run_id>/`. Override
+  via `--evidence-dir` on `duhem run` (CLI wiring lands with the
+  CLI spec).
+- Cross-run indexing / dashboard query / cloud upload / retention /
+  compaction are explicitly out of scope for v1 (Phase 1+).
+
 ## v0.2.0 — ui/* action types v1 (minimal slice)
 
 First entries in the action-type catalog. `Step.uses` is still an

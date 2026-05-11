@@ -13,9 +13,14 @@ build:
 dev:
     cargo run -p duhem-cli -- --help
 
-# Run all unit + integration tests.
+# Run all unit + integration tests (skips `#[ignore]`'d tests).
 test:
     cargo test --workspace
+
+# Run the Playwright-backed UI smoke tests. Requires
+# `npx playwright install chromium` once on the host first.
+test-ui:
+    cargo test -p duhem-actions --test ui_smoke -- --ignored
 
 # Static checks. Mirrors what CI runs.
 lint:

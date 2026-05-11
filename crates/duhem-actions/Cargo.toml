@@ -17,3 +17,10 @@ tokio.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
+playwright.workspace = true
+async-trait.workspace = true
+futures-util.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+tower.workspace = true

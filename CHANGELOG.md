@@ -5,6 +5,65 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is described in `docs/duhem-spec.md` §11.3 (Phase 1 keeps
 the schema closed and breaking; deprecation policy lands at v1.0).
 
+## v0.3.0 — judge: three-state verdict aggregation
+
+First on-the-wire shape for verdicts. The judge is the architectural
+enforcement of the *mechanical judgment, not LLM judgment* identity
+commitment (`CLAUDE.md`, `docs/duhem-spec.md` §11.2): pure
+deterministic aggregation over structured runtime outcomes, no model
+in the loop. Wire shape lands now (ahead of the runtime that
+produces its inputs) so the surface is stable before evidence and
+PR-check rendering hang off it.
+
+### Added
+
+- `VerdictState` — closed enum `{ pass, fail, inconclusive(cause) }`
+  per §7.6. Doctrinally three-state; not `#[non_exhaustive]`.
+- `InconclusiveCause` — `#[non_exhaustive]` closed-at-v1 enum:
+  `timeout`, `missing_observation`, `environment_error`,
+  `empty_aggregation`. Wire tokens are snake_case.
+- `AssertionOutcome` — `{ assertion_index, state, detail? }`. The
+  runtime produces these by evaluating each `Assertion`
+  (`duhem-schema`) against observed state; the judge consumes them.
+- `CheckOutcome` — `{ check_id, assertions: Vec<AssertionOutcome> }`.
+  Input to `aggregate_check`.
+- `CheckVerdict` — `{ check_id, state }`. Output of
+  `aggregate_check`.
+- `CriterionVerdict` — `{ criterion_id, state, checks }`.
+- `RunVerdict` — `{ state, criteria }`. Top-level output of one
+  `duhem run`.
+- `aggregate_check` / `aggregate_criterion` / `aggregate_run` —
+  identical fold at every level: *any `fail` → fail; any
+  `inconclusive` and no `fail` → inconclusive (first cause wins);
+  all `pass` → pass*. Empty inputs are defensively
+  `inconclusive:empty_aggregation` (the schema validator forbids
+  empty `assertions`/`checks`/`criteria`, so this is unreachable in
+  a well-formed run).
+- Wire format for `VerdictState`: `"pass"`, `"fail"`,
+  `"inconclusive:<cause>"`. `Display` and `serde::{Serialize,
+  Deserialize}` are symmetric; unknown strings reject.
+
+### Identity-commitment notes
+
+- The `duhem-judge` `Cargo.toml` has a single runtime dependency:
+  `serde`. (`serde_json` is a dev-dependency for wire round-trip
+  tests.) No HTTP client, no async runtime, no AI SDK — the
+  runtime dep tree is auditable as the structural firewall behind
+  §11.2. A `cargo-deny` rule formalising this lands in a follow-up.
+- Aggregation rules are identical at every level (§7.6) and do not
+  try to localise blame within a check; the holistic-verification
+  principle (§8) lives in the *absence* of structured-causal
+  fields on `AssertionOutcome.detail`.
+
+### Deferred (named for traceability)
+
+- Producing `AssertionOutcome` from observed state —
+  `spec(runtime): expression evaluator v1`.
+- Persisting `RunVerdict` to evidence —
+  `spec(evidence): append-only run trace v1`.
+- Override / escalation policy (§9 Stage 5) — CLI / dashboard
+  concern, not the judge's.
+
 ## v0.2.0 — ui/* action types v1 (minimal slice)
 
 First entries in the action-type catalog. `Step.uses` is still an

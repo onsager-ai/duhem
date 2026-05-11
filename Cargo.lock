@@ -632,10 +632,8 @@ dependencies = [
 name = "duhem-judge"
 version = "0.1.0"
 dependencies = [
- "duhem-schema",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
 ]
 
 [[package]]

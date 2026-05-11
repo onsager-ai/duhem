@@ -7,7 +7,13 @@ publish = false
 description = "Deterministic verdict aggregator for verification check results."
 
 [dependencies]
-duhem-schema = { path = "../duhem-schema" }
+# Intentionally minimal — no HTTP, no async runtime, no AI SDK. This
+# crate is the structural firewall for the mechanical-judgment
+# identity commitment (`CLAUDE.md`, `docs/duhem-spec.md` §11.2): the
+# verdict logic ships independently of the runtime that produced its
+# inputs, and an audit can confirm the dep tree contains no model
+# client.
 serde.workspace = true
+
+[dev-dependencies]
 serde_json.workspace = true
-thiserror.workspace = true

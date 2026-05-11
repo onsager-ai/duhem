@@ -133,7 +133,21 @@ pub fn replay(trace: &Trace) -> Result<RunVerdict, ReplayError> {
                 check_id,
                 ..
             } => {
-                check_to_criterion.insert(check_id.clone(), criterion_id.clone());
+                // A check belongs to exactly one criterion. A trace
+                // that maps the same check_id under two different
+                // criteria is malformed — refuse it rather than
+                // silently letting "last write wins" mis-attribute
+                // recomputed verdicts.
+                match check_to_criterion.get(check_id) {
+                    Some(prev) if prev != criterion_id => {
+                        return Err(ReplayError::OutOfOrder(format!(
+                            "check {check_id} mapped to both criterion {prev} and {criterion_id}"
+                        )));
+                    }
+                    _ => {
+                        check_to_criterion.insert(check_id.clone(), criterion_id.clone());
+                    }
+                }
             }
             EventPayload::AssertionEvaluated {
                 check_id, state, ..
@@ -163,6 +177,26 @@ pub fn replay(trace: &Trace) -> Result<RunVerdict, ReplayError> {
         return Err(ReplayError::MissingRunStarted);
     }
     let recorded_run = recorded_run.ok_or(ReplayError::MissingRunFinished)?;
+
+    // Trace completeness: every check whose assertions were observed
+    // must have a `check_finished`, and every criterion that owns an
+    // observed check must have a `criterion_finished`. Without this,
+    // an incomplete trace could replay as "matching" simply because
+    // the orphan assertions never got folded in.
+    for check_id in assertions_by_check.keys() {
+        if !recorded_checks.contains_key(check_id) {
+            return Err(ReplayError::OutOfOrder(format!(
+                "assertions recorded for check {check_id} but no check_finished"
+            )));
+        }
+    }
+    for criterion_id in check_to_criterion.values() {
+        if !recorded_criteria.contains_key(criterion_id) {
+            return Err(ReplayError::OutOfOrder(format!(
+                "checks observed under criterion {criterion_id} but no criterion_finished"
+            )));
+        }
+    }
 
     // Recompute check verdicts; fall back to inconclusive if the check
     // finished with no recorded assertions (e.g. step error before any

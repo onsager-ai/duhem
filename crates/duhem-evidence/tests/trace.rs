@@ -256,11 +256,65 @@ fn seq_monotonicity_enforced_on_read() {
     drop(f);
 
     match Trace::open(&dir) {
-        Err(ReadError::SeqNotMonotonic { prev, got, .. }) => {
-            assert_eq!(prev, 0);
+        Err(ReadError::SeqNotMonotonic {
+            prev,
+            expected,
+            got,
+            ..
+        }) => {
+            assert_eq!(prev, Some(0));
+            assert_eq!(expected, 1);
             assert_eq!(got, 2);
         }
         other => panic!("expected SeqNotMonotonic, got {other:?}"),
+    }
+}
+
+#[test]
+fn first_event_with_nonzero_seq_reports_no_prev() {
+    let (_tmp, dir) = run_dir();
+    std::fs::create_dir_all(dir.join("blobs")).unwrap();
+    let mut f = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(dir.join("trace.jsonl"))
+        .unwrap();
+    writeln!(
+        f,
+        r#"{{"seq":5,"ts":"2026-05-08T12:00:00.000Z","kind":"run_started","verification_path":"x.yml","schema_version":"v1"}}"#
+    )
+    .unwrap();
+    drop(f);
+
+    match Trace::open(&dir) {
+        Err(ReadError::SeqNotMonotonic {
+            prev,
+            expected,
+            got,
+            ..
+        }) => {
+            assert_eq!(prev, None);
+            assert_eq!(expected, 0);
+            assert_eq!(got, 5);
+        }
+        other => panic!("expected SeqNotMonotonic with prev=None, got {other:?}"),
+    }
+}
+
+#[test]
+fn read_blob_rejects_path_traversal() {
+    let (_tmp, dir) = run_dir();
+    write_worked_example(&dir);
+    let trace = Trace::open(&dir).unwrap();
+    match trace.read_blob("../etc/passwd") {
+        Err(ReadError::BadBlobDigest(s)) => assert_eq!(s, "../etc/passwd"),
+        other => panic!("expected BadBlobDigest, got {other:?}"),
+    }
+    // Also rejects uppercase-hex (writer always emits lowercase).
+    match trace.read_blob(&"A".repeat(64)) {
+        Err(ReadError::BadBlobDigest(_)) => {}
+        other => panic!("expected BadBlobDigest, got {other:?}"),
     }
 }
 

@@ -28,8 +28,21 @@ pub enum ReadError {
         #[source]
         source: serde_json::Error,
     },
-    #[error("seq {got} on line {line} is not monotonic after seq {prev}")]
-    SeqNotMonotonic { line: usize, prev: u64, got: u64 },
+    #[error(
+        "seq {got} on line {line} is not monotonic (expected {expected}{})",
+        match prev {
+            Some(p) => format!(", after seq {p}"),
+            None => String::new(),
+        }
+    )]
+    SeqNotMonotonic {
+        line: usize,
+        prev: Option<u64>,
+        expected: u64,
+        got: u64,
+    },
+    #[error("blob digest {0:?} is not a 64-char lowercase hex sha-256")]
+    BadBlobDigest(String),
 }
 
 /// An open trace. The trace is fully materialized into memory on
@@ -67,7 +80,8 @@ impl Trace {
             if evt.seq != expected {
                 return Err(ReadError::SeqNotMonotonic {
                     line: idx + 1,
-                    prev: prev_seq.unwrap_or(0),
+                    prev: prev_seq,
+                    expected,
                     got: evt.seq,
                 });
             }
@@ -91,8 +105,38 @@ impl Trace {
     }
 
     /// Read a blob by its content address.
+    ///
+    /// Validates that `sha256` is exactly 64 lowercase hex characters
+    /// before joining it to the run directory. Without this check a
+    /// crafted trace could carry `../etc/passwd` (or similar) as a
+    /// `blob_sha256` and trick a tool that trusts evidence into
+    /// reading arbitrary files outside the run directory.
     pub fn read_blob(&self, sha256: &str) -> Result<Vec<u8>, ReadError> {
+        if !is_valid_sha256_hex(sha256) {
+            return Err(ReadError::BadBlobDigest(sha256.to_string()));
+        }
         let path = self.run_dir.join("blobs").join(sha256);
         Ok(std::fs::read(path)?)
+    }
+}
+
+fn is_valid_sha256_hex(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_valid_sha256_hex;
+
+    #[test]
+    fn rejects_path_traversal_and_separators() {
+        assert!(!is_valid_sha256_hex("../etc/passwd"));
+        assert!(!is_valid_sha256_hex("a/b"));
+        assert!(!is_valid_sha256_hex(""));
+        assert!(!is_valid_sha256_hex(&"f".repeat(63)));
+        assert!(!is_valid_sha256_hex(&"F".repeat(64)));
+        assert!(!is_valid_sha256_hex(&"g".repeat(64)));
+        assert!(is_valid_sha256_hex(&"a".repeat(64)));
+        assert!(is_valid_sha256_hex(&"0123456789abcdef".repeat(4)));
     }
 }

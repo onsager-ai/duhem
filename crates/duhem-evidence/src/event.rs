@@ -11,6 +11,26 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// Custom serde for `DateTime<Utc>` that always emits RFC 3339 with
+/// exactly millisecond precision (`...:SS.sssZ`). The spec pins the
+/// wire format at ms; in-memory values may carry more precision but
+/// the on-disk representation must not.
+pub(crate) mod ts_ms {
+    use chrono::{DateTime, Utc};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(dt: &DateTime<Utc>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<DateTime<Utc>, D::Error> {
+        let s = String::deserialize(d)?;
+        DateTime::parse_from_rfc3339(&s)
+            .map(|dt| dt.with_timezone(&Utc))
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 /// On-disk schema version carried in `manifest.json` and (redundantly)
 /// in every `run_started` event. The redundancy is on purpose: the
 /// manifest can be lost or copied without the directory and the trace
@@ -75,6 +95,7 @@ pub struct Event {
     pub seq: u64,
 
     /// Wall-clock timestamp, RFC 3339, millisecond precision.
+    #[serde(with = "ts_ms")]
     pub ts: DateTime<Utc>,
 
     /// Payload variant — the `kind` tag selects which fields are

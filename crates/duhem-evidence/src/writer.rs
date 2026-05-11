@@ -21,14 +21,37 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
+use chrono::{DateTime, SubsecRound, Utc};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::event::{
-    BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, ObservationValue, SCHEMA_VERSION,
+    BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, ObservationValue, SCHEMA_VERSION, ts_ms,
 };
+
+/// Best-effort directory fsync. After a `rename` of a temp file into
+/// place, the directory entry itself isn't durable until the
+/// containing directory is synced. POSIX-only — no-op on platforms
+/// where opening a directory as a file isn't supported.
+fn fsync_dir(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        File::open(path)?.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+/// Truncate to millisecond precision. The on-disk format pins `ts` at
+/// ms; in-memory `Utc::now()` carries ns. Truncate at the stamping
+/// boundary so the value matches the wire form exactly.
+fn now_ms() -> DateTime<Utc> {
+    Utc::now().trunc_subsecs(3)
+}
 
 #[derive(Debug, Error)]
 pub enum WriterError {
@@ -56,7 +79,8 @@ impl Sha256Hex {
 #[derive(Debug, Clone, Serialize)]
 pub struct Manifest {
     pub run_id: String,
-    pub started_at: chrono::DateTime<Utc>,
+    #[serde(with = "ts_ms")]
+    pub started_at: DateTime<Utc>,
     pub definition_path: String,
     pub schema_version: String,
 }
@@ -97,7 +121,7 @@ impl EvidenceWriter {
             .to_string();
         let manifest = Manifest {
             run_id,
-            started_at: Utc::now(),
+            started_at: now_ms(),
             definition_path: definition_path.to_string(),
             schema_version: SCHEMA_VERSION.to_string(),
         };
@@ -110,6 +134,10 @@ impl EvidenceWriter {
             f.sync_all()?;
         }
         std::fs::rename(&manifest_tmp, &manifest_final)?;
+        // The directory entry for trace.jsonl, blobs/, and the
+        // renamed manifest.json all need a directory fsync to be
+        // durable across a crash.
+        fsync_dir(&run_dir)?;
 
         Ok(Self {
             run_dir,
@@ -131,7 +159,7 @@ impl EvidenceWriter {
 
         let evt = Event {
             seq: self.next_seq,
-            ts: Utc::now(),
+            ts: now_ms(),
             payload,
         };
         let mut line = serde_json::to_vec(&evt)?;
@@ -189,6 +217,7 @@ impl EvidenceWriter {
             f.sync_all()?;
         }
         std::fs::rename(&tmp_path, &final_path)?;
+        fsync_dir(&self.run_dir.join("blobs"))?;
         Ok(Sha256Hex(sha))
     }
 

@@ -617,7 +617,6 @@ name = "duhem-evidence"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "duhem-schema",
  "hex",
  "serde",
  "serde_json",

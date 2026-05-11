@@ -1,0 +1,14 @@
+verification: duplicate check id
+inputs:
+  x:
+    type: string
+criteria:
+  - id: AC-1
+    description: two checks share an id
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.x == "a"
+      - id: AC-1.1
+        assertions:
+          - $inputs.x == "b"

@@ -5,7 +5,17 @@
 //! mechanically-judged assertions that verify it). Per
 //! `docs/duhem-spec.md` §7.2 / §7.3, criteria are stable; checks are
 //! derivative.
-//!
-//! This crate is a Phase 0 skeleton. The v0.1 type set is the subject
-//! of a follow-up spec (`spec(schema): Verification Definition v0.1
-//! types`).
+
+pub mod assertion;
+pub mod criterion;
+pub mod expr;
+pub mod step;
+pub mod validate;
+pub mod verification;
+
+pub use assertion::{Assertion, TypeCheckKind};
+pub use criterion::{Check, Criterion};
+pub use expr::{BinOp, Expr, ExprStr, Literal, ParseError, Path, PathRoot, UnaryOp};
+pub use step::Step;
+pub use validate::{ValidationError, validate};
+pub use verification::{InputDecl, SchemaError, VerificationDefinition};

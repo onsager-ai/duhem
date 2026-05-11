@@ -1,0 +1,41 @@
+verification: Create workspace E2E
+inputs:
+  workspace_name:
+    type: string
+    default: test-ws-{{uuid}}
+criteria:
+- id: AC-1
+  description: |
+    A user can create a workspace from the dashboard. The new workspace
+    becomes immediately visible, and no errors are shown.
+  checks:
+  - id: AC-1.1
+    description: API responds correctly to creation request
+    steps:
+    - uses: ui/click
+      with:
+        role: button
+        name: Create Workspace
+    - uses: ui/type
+      with:
+        role: textbox
+        label: Workspace Name
+        value: $inputs.workspace_name
+    - uses: ui/click
+      with:
+        role: button
+        name: Create
+    - id: api_call
+      uses: api/observe
+      with:
+        method: POST
+        path: /workspaces
+        within: '3s'
+      outputs:
+        status: response.status
+        workspace_id: response.body.id
+    assertions:
+    - $steps.api_call.outputs.status == 200
+    - type_check:
+        value: $steps.api_call.outputs.workspace_id
+        is: uuid

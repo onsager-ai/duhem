@@ -1,0 +1,26 @@
+verification: duplicate step id
+inputs:
+  x:
+    type: string
+criteria:
+  - id: AC-1
+    description: two steps share an id within one check
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: api
+            uses: api/observe
+            with:
+              method: GET
+              path: /a
+            outputs:
+              status: response.status
+          - id: api
+            uses: api/observe
+            with:
+              method: GET
+              path: /b
+            outputs:
+              status: response.status
+        assertions:
+          - $inputs.x == "ok"

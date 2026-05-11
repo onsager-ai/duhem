@@ -1,0 +1,12 @@
+verification: assertion references undeclared step
+inputs:
+  x:
+    type: string
+criteria:
+  - id: AC-1
+    description: $steps.nope is not declared in this check
+    checks:
+      - id: AC-1.1
+        steps: []
+        assertions:
+          - $steps.nope.outputs.status == 200

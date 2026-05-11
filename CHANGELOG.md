@@ -5,6 +5,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is described in `docs/duhem-spec.md` §11.3 (Phase 1 keeps
 the schema closed and breaking; deprecation policy lands at v1.0).
 
+## v0.2.0 — ui/* action types v1 (minimal slice)
+
+First entries in the action-type catalog. `Step.uses` is still an
+opaque string at the schema layer (#8); these names are not yet
+enforced as a closed set — that lands with `spec(schema):
+catalog-aware validation`.
+
+### Added
+
+- `ui/navigate` — drive the browser to a URL.
+  `with: { url: String, within: Duration? }`. No outputs.
+- `ui/click` — click an element via `getByRole`-style locator
+  fields. `with: { role, name?, text?, scope?, within? }`. No
+  outputs.
+- `ui/assert-element` — observe an element's existence/visibility.
+  `with: { locator: Locator, expected: ExistenceState, within? }`.
+  Native outputs: `satisfied: bool`, `count: u32`.
+- `Locator` — `{ role, name?, text?, scope? }` with recursive
+  `scope`. Stable shared shape across the `ui/*` catalog.
+- `ExistenceState` — closed enum `{ exists, not_exists, visible,
+  hidden }`.
+- `Action` trait + `ActionCtx` + `ActionResult` + `Outcome` +
+  `Observation` — the substrate every catalog entry implements.
+- `RunBrowser` / `CheckBrowser` — Playwright lifecycle helpers
+  (one Browser per `duhem run`, one Context+Page per check).
+  Headless by default; `--headed` opt-out lands with the CLI spec.
+
+### Reserved (not yet implemented)
+
+- `ui/type`, `ui/select`, `ui/assert-url`, `ui/assert-state` —
+  declared in `docs/duhem-spec.md` §10.5; same trait, follow-up
+  spec.
+
+### Operator notes
+
+- The Playwright Node driver is bundled via the `playwright` crate.
+  The browser binary is *not* — run `npx playwright install
+  chromium` once before first `duhem run`. `RunBrowser::launch`
+  emits the install command on missing-binary errors.
+- The `ui_smoke` integration test (Playwright + axum) is
+  `#[ignore]`'d by default. `just test-ui` runs it locally.
+
 ## v0.1.0 — schema introduced
 
 First on-the-wire shape for a Verification Definition (`Pattern A`,

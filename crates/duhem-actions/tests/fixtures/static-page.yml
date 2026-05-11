@@ -1,0 +1,39 @@
+# Worked example for spec(actions) ui/* v1 (issue #12).
+#
+# Drives a real browser (via the `playwright` crate) against the
+# tiny axum-served fixture in `tests/ui_smoke.rs`. The two-step
+# scenario is the smallest end-to-end exercise of the three v1
+# actions: `ui/navigate` to load the page, `ui/click` to interact,
+# `ui/assert-element` to observe a DOM state change.
+#
+# This file round-trips through #8's parser today; it executes
+# end-to-end once the runtime spec
+# (`spec(runtime): minimal step executor`) lands and wires the
+# action trait into a check executor.
+
+verification: Static page smoke
+
+inputs:
+  fixture_url:
+    type: string
+
+criteria:
+  - id: AC-1
+    description: |
+      The fixture page loads, the "Create" button exists, and clicking
+      it makes the success banner appear.
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.fixture_url }
+          - uses: ui/click
+            with: { role: "button", name: "Create" }
+          - id: banner
+            uses: ui/assert-element
+            with:
+              locator: { role: "alert", text: "Created" }
+              expected: visible
+              within: 2s
+        assertions:
+          - $steps.banner.outputs.satisfied == true

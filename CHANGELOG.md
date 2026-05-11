@@ -5,7 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is described in `docs/duhem-spec.md` §11.3 (Phase 1 keeps
 the schema closed and breaking; deprecation policy lands at v1.0).
 
-## v0.4.0 — evidence trace v1
+The product is pre-publication. Everything below accumulates under
+`v0.1.0` until first release; spec landings get sub-headings, not
+their own minor bumps.
+
+## v0.1.0 — unreleased
+
+### evidence trace v1
 
 First on-disk format for verification evidence. One run = one
 append-only directory under `.duhem/runs/<run_id>/`; the directory
@@ -13,7 +19,7 @@ is the unit of replay. Schema version string `"v1"` is carried in
 both `manifest.json` and every `run_started` event (redundantly on
 purpose — the manifest can be lost).
 
-### Added
+#### Added
 
 - `trace.jsonl` — append-only structured event stream. One JSON
   object per line; `seq` is monotonic per run (gap = bug); `ts` is
@@ -48,7 +54,7 @@ purpose — the manifest can be lost).
   checks/criteria fail replay rather than silently dropping.
 - `new_run_id()` — ULID generator for `.duhem/runs/<run_id>/`.
 
-### Wire format
+#### Wire format
 
 - Verdict-bearing fields (`assertion_evaluated.state`,
   `check_finished.verdict`, `criterion_finished.verdict`,
@@ -60,11 +66,11 @@ purpose — the manifest can be lost).
   (`...:SS.sssZ`), regardless of the wall-clock resolution at
   capture time.
 
-### Reserved (not yet emitted)
+#### Reserved (not yet emitted)
 
 - `screen_recorded` — video recording, Phase 1+.
 
-### Operator notes
+#### Operator notes
 
 - The run directory defaults to `.duhem/runs/<run_id>/`. Override
   via `--evidence-dir` on `duhem run` (CLI wiring lands with the
@@ -72,7 +78,7 @@ purpose — the manifest can be lost).
 - Cross-run indexing / dashboard query / cloud upload / retention /
   compaction are explicitly out of scope for v1 (Phase 1+).
 
-## v0.3.0 — judge: three-state verdict aggregation
+### judge: three-state verdict aggregation
 
 First on-the-wire shape for verdicts. The judge is the architectural
 enforcement of the *mechanical judgment, not LLM judgment* identity
@@ -82,7 +88,7 @@ in the loop. Wire shape lands now (ahead of the runtime that
 produces its inputs) so the surface is stable before evidence and
 PR-check rendering hang off it.
 
-### Added
+#### Added
 
 - `VerdictState` — closed enum `{ pass, fail, inconclusive(cause) }`
   per §7.6. Doctrinally three-state; not `#[non_exhaustive]`.
@@ -110,7 +116,7 @@ PR-check rendering hang off it.
   `"inconclusive:<cause>"`. `Display` and `serde::{Serialize,
   Deserialize}` are symmetric; unknown strings reject.
 
-### Identity-commitment notes
+#### Identity-commitment notes
 
 - The `duhem-judge` `Cargo.toml` has a single runtime dependency:
   `serde`. (`serde_json` is a dev-dependency for wire round-trip
@@ -122,7 +128,7 @@ PR-check rendering hang off it.
   principle (§8) lives in the *absence* of structured-causal
   fields on `AssertionOutcome.detail`.
 
-### Deferred (named for traceability)
+#### Deferred (named for traceability)
 
 - Producing `AssertionOutcome` from observed state —
   `spec(runtime): expression evaluator v1`.
@@ -131,14 +137,14 @@ PR-check rendering hang off it.
 - Override / escalation policy (§9 Stage 5) — CLI / dashboard
   concern, not the judge's.
 
-## v0.2.0 — ui/* action types v1 (minimal slice)
+### ui/* action types v1 (minimal slice)
 
 First entries in the action-type catalog. `Step.uses` is still an
 opaque string at the schema layer (#8); these names are not yet
 enforced as a closed set — that lands with `spec(schema):
 catalog-aware validation`.
 
-### Added
+#### Added
 
 - `ui/navigate` — drive the browser to a URL.
   `with: { url: String, within: Duration? }`. No outputs.
@@ -158,13 +164,13 @@ catalog-aware validation`.
   (one Browser per `duhem run`, one Context+Page per check).
   Headless by default; `--headed` opt-out lands with the CLI spec.
 
-### Reserved (not yet implemented)
+#### Reserved (not yet implemented)
 
 - `ui/type`, `ui/select`, `ui/assert-url`, `ui/assert-state` —
   declared in `docs/duhem-spec.md` §10.5; same trait, follow-up
   spec.
 
-### Operator notes
+#### Operator notes
 
 - The Playwright Node driver is bundled via the `playwright` crate.
   The browser binary is *not* — run `npx playwright install
@@ -173,13 +179,12 @@ catalog-aware validation`.
 - The `ui_smoke` integration test (Playwright + axum) is
   `#[ignore]`'d by default. `just test-ui` runs it locally.
 
-## v0.1.0 — schema introduced
+### schema introduced
 
 First on-the-wire shape for a Verification Definition (`Pattern A`,
-single-file). No prior version exists; this is a non-breaking initial
-release.
+single-file).
 
-### Added
+#### Added
 
 - `VerificationDefinition` — top-level document. Fields: `verification`,
   `spec_ref?`, `inputs?`, `setup?`, `criteria`. Unknown top-level keys
@@ -215,7 +220,7 @@ release.
   `init` / `validate` / `run` surface lives in
   `spec(cli): duhem init / validate / run skeletons`.
 
-### Deferred (named for traceability)
+#### Deferred (named for traceability)
 
 - Action-type catalog (`uses:` is a string today) —
   `spec(actions): ui/* action types v1`.

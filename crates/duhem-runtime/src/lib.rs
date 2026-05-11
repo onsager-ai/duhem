@@ -6,10 +6,17 @@
 //! together. The runtime drives that exercise, hands raw step
 //! outcomes to the judge, and writes evidence as it goes.
 //!
-//! Synchronous in-process for now — runtime → judge → evidence is one
-//! call path, not a bus topology. The minimal step executor lands in a
-//! follow-up spec (`spec(runtime): minimal step executor`).
+//! Synchronous in-process: runtime → judge → evidence is one call
+//! path, not a bus topology. The v1 minimal step executor lives in
+//! [`engine`]; the expression evaluator it drives lives in [`eval`].
 
+pub mod engine;
 pub mod eval;
 
+pub use engine::{Engine, EngineError, RunContext, RunState};
 pub use eval::{EvalContext, EvalResult, InconclusiveCause, Value, ValueShape, eval};
+
+// `assertion_to_expr` is deliberately not re-exported at the crate
+// root — it's a runtime-internal shim per its module docs and the
+// spec on issue #15. In-crate callers reach it via
+// `crate::engine::shim::assertion_to_expr`.

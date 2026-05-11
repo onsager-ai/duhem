@@ -37,6 +37,12 @@ pub enum InconclusiveCause {
     UnknownRuntimeHelper(String),
     /// Comparison applied to non-comparable shapes, e.g. `"a" < 5`.
     TypeMismatch { lhs: ValueShape, rhs: ValueShape },
+    /// A `$runtime.matches(value, pattern)` pattern that did not
+    /// compile as a regex. The operands are well-typed; the regex
+    /// source itself is malformed. Carries the regex-engine error
+    /// message so evidence `detail` can guide the author back to the
+    /// offending pattern.
+    InvalidPattern(String),
 }
 
 /// Runtime-side scalar value. Distinct from `duhem_schema::Literal`
@@ -98,6 +104,19 @@ pub fn eval(expr: &Expr, ctx: &dyn EvalContext) -> EvalResult {
         }),
         Err(cause) => EvalResult::Inconclusive(cause),
     }
+}
+
+/// Evaluate an expression to its raw scalar `Value`. Crate-internal
+/// wrapper over the value evaluator so the engine's `Step.with`
+/// template substitution can resolve `$inputs.X` / `$runtime.X()`
+/// references without going through the boolean-only `eval()`. Kept
+/// `pub(crate)` because it's an engine-internal helper — not a
+/// supported public API.
+pub(crate) fn eval_to_value(
+    expr: &Expr,
+    ctx: &dyn EvalContext,
+) -> Result<Value, InconclusiveCause> {
+    eval_value(expr, ctx)
 }
 
 type EvalRes = Result<Value, InconclusiveCause>;
@@ -182,7 +201,73 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
     match (helper, args.len()) {
         ("uuid", 0) => Ok(Value::Str(ctx.uuid().to_string())),
         ("now", 0) => Ok(Value::Int(ctx.now().timestamp_millis())),
+        // `exists(value)`: True if the value path resolves to a
+        // present scalar, False if any underlying lookup reports
+        // missing. Anything else (e.g. TypeMismatch) propagates as
+        // Inconclusive. The closed-enum `Assertion::Exists` shim in
+        // the engine emits this call.
+        ("exists", 1) => match eval_value(&args[0], ctx) {
+            Ok(_) => Ok(Value::Bool(true)),
+            Err(
+                InconclusiveCause::MissingObservation { .. }
+                | InconclusiveCause::MissingInput(_)
+                | InconclusiveCause::MissingEnv(_),
+            ) => Ok(Value::Bool(false)),
+            Err(c) => Err(c),
+        },
+        // `matches(value, pattern)`: regex match against a string.
+        // Both args must evaluate to strings; non-string operands
+        // surface as Inconclusive(TypeMismatch) the same way the
+        // comparison operators do.
+        ("matches", 2) => {
+            let v = eval_value(&args[0], ctx)?;
+            let p = eval_value(&args[1], ctx)?;
+            let (s, pat) = match (&v, &p) {
+                (Value::Str(s), Value::Str(p)) => (s.clone(), p.clone()),
+                _ => {
+                    return Err(InconclusiveCause::TypeMismatch {
+                        lhs: v.shape(),
+                        rhs: p.shape(),
+                    });
+                }
+            };
+            let re = regex::Regex::new(&pat)
+                .map_err(|e| InconclusiveCause::InvalidPattern(e.to_string()))?;
+            Ok(Value::Bool(re.is_match(&s)))
+        }
+        // `type_check(value, kind)`: structural shape check. `kind`
+        // is a string literal carrying the snake_case wire form of
+        // `TypeCheckKind` (`string`, `integer`, …, `uuid`). The
+        // `object` / `array` kinds aren't representable in the v1
+        // scalar value model and always evaluate to False — there is
+        // no scalar value that *is* an object.
+        ("type_check", 2) => {
+            let v = eval_value(&args[0], ctx)?;
+            let kind = match eval_value(&args[1], ctx)? {
+                Value::Str(s) => s,
+                other => {
+                    return Err(InconclusiveCause::TypeMismatch {
+                        lhs: other.shape(),
+                        rhs: ValueShape::Str,
+                    });
+                }
+            };
+            Ok(Value::Bool(matches_type(&v, &kind)))
+        }
         _ => Err(InconclusiveCause::UnknownRuntimeHelper(helper.to_string())),
+    }
+}
+
+fn matches_type(v: &Value, kind: &str) -> bool {
+    match (v, kind) {
+        (Value::Str(s), "uuid") => uuid::Uuid::parse_str(s).is_ok(),
+        (Value::Str(_), "string") => true,
+        (Value::Int(_), "integer") => true,
+        (Value::Float(_), "float") => true,
+        (Value::Bool(_), "boolean") => true,
+        (Value::Null, "null") => true,
+        // Object/array are unrepresentable in the v1 scalar Value model.
+        _ => false,
     }
 }
 

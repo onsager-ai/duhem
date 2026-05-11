@@ -16,7 +16,7 @@
 
 use std::fmt;
 
-use serde::de::{Error as DeError, Unexpected};
+use serde::de::{Error, Unexpected};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The three-state verdict. See `docs/duhem-spec.md` §7.6.
@@ -104,8 +104,7 @@ impl<'de> Deserialize<'de> for VerdictState {
                     .ok_or_else(|| {
                         D::Error::invalid_value(
                             Unexpected::Str(other),
-                            &"a known inconclusive cause \
-                              (timeout, missing_observation, environment_error, empty_aggregation)",
+                            &"a known inconclusive cause (timeout, missing_observation, environment_error, empty_aggregation)",
                         )
                     }),
                 None => Err(D::Error::invalid_value(

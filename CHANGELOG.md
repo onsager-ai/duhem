@@ -45,10 +45,11 @@ PR-check rendering hang off it.
 
 ### Identity-commitment notes
 
-- The `duhem-judge` `Cargo.toml` depends only on `serde`. No HTTP
-  client, no async runtime, no AI SDK — the dep tree is auditable
-  as the structural firewall behind §11.2. A `cargo-deny` rule
-  formalising this lands in a follow-up.
+- The `duhem-judge` `Cargo.toml` has a single runtime dependency:
+  `serde`. (`serde_json` is a dev-dependency for wire round-trip
+  tests.) No HTTP client, no async runtime, no AI SDK — the
+  runtime dep tree is auditable as the structural firewall behind
+  §11.2. A `cargo-deny` rule formalising this lands in a follow-up.
 - Aggregation rules are identical at every level (§7.6) and do not
   try to localise blame within a check; the holistic-verification
   principle (§8) lives in the *absence* of structured-causal

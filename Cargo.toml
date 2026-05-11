@@ -35,3 +35,4 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chumsky = "=1.0.0-alpha.8"
 playwright = "0.0.20"
 async-trait = "0.1"
+regex = "1"

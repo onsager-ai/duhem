@@ -15,4 +15,3 @@ pub mod template;
 
 pub use context::{RunContext, RunState};
 pub use runner::{Engine, EngineError};
-pub use shim::assertion_to_expr;

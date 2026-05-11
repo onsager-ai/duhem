@@ -37,6 +37,12 @@ pub enum InconclusiveCause {
     UnknownRuntimeHelper(String),
     /// Comparison applied to non-comparable shapes, e.g. `"a" < 5`.
     TypeMismatch { lhs: ValueShape, rhs: ValueShape },
+    /// A `$runtime.matches(value, pattern)` pattern that did not
+    /// compile as a regex. The operands are well-typed; the regex
+    /// source itself is malformed. Carries the regex-engine error
+    /// message so evidence `detail` can guide the author back to the
+    /// offending pattern.
+    InvalidPattern(String),
 }
 
 /// Runtime-side scalar value. Distinct from `duhem_schema::Literal`
@@ -100,12 +106,16 @@ pub fn eval(expr: &Expr, ctx: &dyn EvalContext) -> EvalResult {
     }
 }
 
-/// Evaluate an expression to its raw scalar `Value`. Wrapper over the
-/// crate-private value evaluator so callers outside this module
-/// (notably the engine's `Step.with` template substitution) can
-/// resolve `$inputs.X` / `$runtime.X()` references without going
-/// through the boolean-only `eval()` surface.
-pub fn eval_to_value(expr: &Expr, ctx: &dyn EvalContext) -> Result<Value, InconclusiveCause> {
+/// Evaluate an expression to its raw scalar `Value`. Crate-internal
+/// wrapper over the value evaluator so the engine's `Step.with`
+/// template substitution can resolve `$inputs.X` / `$runtime.X()`
+/// references without going through the boolean-only `eval()`. Kept
+/// `pub(crate)` because it's an engine-internal helper — not a
+/// supported public API.
+pub(crate) fn eval_to_value(
+    expr: &Expr,
+    ctx: &dyn EvalContext,
+) -> Result<Value, InconclusiveCause> {
     eval_value(expr, ctx)
 }
 
@@ -221,10 +231,8 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
                     });
                 }
             };
-            let re = regex::Regex::new(&pat).map_err(|_| InconclusiveCause::TypeMismatch {
-                lhs: ValueShape::Str,
-                rhs: ValueShape::Str,
-            })?;
+            let re = regex::Regex::new(&pat)
+                .map_err(|e| InconclusiveCause::InvalidPattern(e.to_string()))?;
             Ok(Value::Bool(re.is_match(&s)))
         }
         // `type_check(value, kind)`: structural shape check. `kind`

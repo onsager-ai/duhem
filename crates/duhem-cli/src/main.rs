@@ -119,7 +119,9 @@ async fn run_command(path: PathBuf, raw_inputs: Vec<String>) -> ExitCode {
         }
     };
 
-    let mut engine = Engine::new().with_browser(browser);
+    let mut engine = Engine::new()
+        .with_browser(browser)
+        .with_definition_path(path.display().to_string());
     let verdict = match engine.run(&def, inputs).await {
         Ok(v) => v,
         Err(e) => {

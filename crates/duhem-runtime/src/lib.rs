@@ -13,5 +13,10 @@
 pub mod engine;
 pub mod eval;
 
-pub use engine::{Engine, EngineError, RunContext, RunState, assertion_to_expr};
+pub use engine::{Engine, EngineError, RunContext, RunState};
 pub use eval::{EvalContext, EvalResult, InconclusiveCause, Value, ValueShape, eval};
+
+// `assertion_to_expr` is deliberately not re-exported at the crate
+// root — it's a runtime-internal shim per its module docs and the
+// spec on issue #15. In-crate callers reach it via
+// `crate::engine::shim::assertion_to_expr`.

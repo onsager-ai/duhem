@@ -67,6 +67,14 @@ pub struct Engine {
     /// `Engine::with_browser` so unit tests can construct an Engine
     /// without paying the Playwright launch cost.
     browser: Option<RunBrowser>,
+    /// Caller-supplied path / identifier for the Verification
+    /// Definition that's being run. Recorded as
+    /// `manifest.definition_path` and the `run_started.verification_path`
+    /// event field so evidence carries the actual on-disk source, not
+    /// the human-readable `verification:` name. Set via
+    /// [`Engine::with_definition_path`]; falls back to
+    /// `def.verification` when absent.
+    definition_path: Option<String>,
 }
 
 impl Engine {
@@ -77,6 +85,7 @@ impl Engine {
             registry: default_registry(),
             evidence_root: PathBuf::from(".duhem/runs"),
             browser: None,
+            definition_path: None,
         }
     }
 
@@ -92,6 +101,14 @@ impl Engine {
     /// (heavyweight) Playwright process is started.
     pub fn with_browser(mut self, browser: RunBrowser) -> Self {
         self.browser = Some(browser);
+        self
+    }
+
+    /// Record the source path / identifier of the Verification
+    /// Definition for evidence. The CLI threads the file path here;
+    /// programmatic callers can pass any stable identifier.
+    pub fn with_definition_path(mut self, path: impl Into<String>) -> Self {
+        self.definition_path = Some(path.into());
         self
     }
 
@@ -123,17 +140,24 @@ impl Engine {
 
         let run_id = new_run_id();
         let run_dir = self.evidence_root.join(&run_id);
-        let verification_path = def
-            .spec_ref
+        // Evidence records the *source* of the Verification
+        // Definition. Prefer the caller-supplied `definition_path`
+        // (the CLI threads the actual `.yml` path here). Fall back to
+        // the human-readable `verification:` name only as a
+        // last-resort identifier — it's not a file path, but it's
+        // stable across runs and at least lets evidence be matched
+        // back to a definition by name.
+        let evidence_path = self
+            .definition_path
             .clone()
             .unwrap_or_else(|| def.verification.clone());
-        let mut writer = EvidenceWriter::new(&run_dir, &verification_path)?;
+        let mut writer = EvidenceWriter::new(&run_dir, &evidence_path)?;
 
         let evidence_inputs: BTreeMap<String, serde_json::Value> = inputs
             .iter()
             .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
             .collect();
-        writer.append(run_started(verification_path.clone(), evidence_inputs))?;
+        writer.append(run_started(evidence_path.clone(), evidence_inputs))?;
 
         let mut criterion_verdicts: Vec<CriterionVerdict> = Vec::new();
         for criterion in &def.criteria {
@@ -188,61 +212,79 @@ impl Engine {
     ) -> Result<CheckVerdict, EngineError> {
         let mut ctx = RunContext::new(run);
 
-        // Per spec: a `Step.uses` not in the registry yields
-        // `Inconclusive(MissingObservation)` for *every* assertion in
-        // the check. Detect it up front — that lets us skip browser
-        // allocation entirely, and it short-circuits any
-        // step-execution loop work that wouldn't change the verdict.
+        // A `Step.uses` not in the registry means the step can't run
+        // and its outputs don't exist; per spec, the check's
+        // assertions all evaluate to Inconclusive(MissingObservation).
         let any_unknown = check
             .steps
             .iter()
             .any(|s| !self.registry.contains_key(s.uses.as_str()));
 
-        // Lazily acquire a per-check page. Only opened when at least
-        // one step exists and every step is known. If no browser is
-        // attached but a step needs a page, the production
-        // `Dispatch` wrapper surfaces `ActionError` on invoke, which
-        // we translate to `Outcome::Error` (aborting the rest of the
-        // check).
+        // A step that requires a page (production wrapper around a
+        // real `Action`) but has no browser attached is an
+        // environment failure: the assertions can't be exercised, so
+        // the check is Inconclusive(EnvironmentError) — not
+        // accidentally Pass on a literal-only assertion in the same
+        // check.
+        let needs_browser = check.steps.iter().any(|s| {
+            self.registry
+                .get(s.uses.as_str())
+                .map(|d| d.requires_page())
+                .unwrap_or(false)
+        });
+        let browser_missing = needs_browser && self.browser.is_none();
+
+        // Track per-check environment failures from open_check, too:
+        // a browser was attached but allocating a context failed.
+        let mut environment_failed = browser_missing;
+
         let mut check_browser = None;
         if !any_unknown
+            && !browser_missing
             && !check.steps.is_empty()
             && let Some(b) = self.browser.as_ref()
         {
             match b.open_check().await {
                 Ok(cb) => check_browser = Some(cb),
-                // CheckBrowser allocation failure is a per-check
-                // environment problem; do not bubble up. The
-                // production dispatcher then fails each invocation
-                // with ActionError → Outcome::Error → check aborts.
                 Err(e) => {
-                    debug!(error = %e, "open_check failed; steps will surface as Error")
+                    debug!(error = %e, "open_check failed; check will surface as Inconclusive(EnvironmentError)");
+                    environment_failed = true;
                 }
             }
         }
 
-        if !any_unknown {
-            let mut step_aborted = false;
-            for (idx, step) in check.steps.iter().enumerate() {
-                if step_aborted {
-                    break;
-                }
+        // Step execution loop. We emit `step_started` / `step_finished`
+        // for every step the document declares, even when the step
+        // can't run (unknown action, environment failure) — evidence
+        // is more useful when it records what the author wrote, not
+        // what the engine got around to invoking.
+        let mut step_aborted = false;
+        for (idx, step) in check.steps.iter().enumerate() {
+            // Resolve template references in `with:` against whatever
+            // context we have. Cheap and same-shape for every code
+            // path, so we don't bifurcate evidence on it.
+            let mut resolved_with = step.with.clone();
+            substitute_with(&mut resolved_with, &ctx);
 
-                let mut resolved_with = step.with.clone();
-                substitute_with(&mut resolved_with, &ctx);
+            writer.append(EventPayload::StepStarted {
+                criterion_id: criterion_id.to_string(),
+                check_id: check.id.clone(),
+                step_index: idx as u32,
+                uses: step.uses.clone(),
+                with: with_to_evidence_map(&resolved_with),
+            })?;
 
-                writer.append(EventPayload::StepStarted {
-                    criterion_id: criterion_id.to_string(),
-                    check_id: check.id.clone(),
-                    step_index: idx as u32,
-                    uses: step.uses.clone(),
-                    with: with_to_evidence_map(&resolved_with),
-                })?;
-
+            let known = self.registry.contains_key(step.uses.as_str());
+            let outcome = if !known || environment_failed || step_aborted {
+                // Step can't run — emit a synthetic Error so evidence
+                // carries the "not executed" signal alongside the
+                // upstream cause via the assertion `detail`s below.
+                Outcome::Error
+            } else {
                 let dispatcher = self
                     .registry
                     .get(step.uses.as_str())
-                    .expect("any_unknown filter guarantees presence");
+                    .expect("known checked above");
                 let page_ref: Option<&Page> = check_browser.as_ref().map(|cb| &cb.page);
                 let result = dispatcher.invoke(page_ref, idx, &resolved_with).await;
 
@@ -262,28 +304,44 @@ impl Engine {
                     }
                 }
 
-                writer.append(EventPayload::StepFinished {
-                    step_index: idx as u32,
-                    outcome: outcome_to_evidence(&outcome),
-                })?;
+                outcome
+            };
 
-                if matches!(outcome, Outcome::Error) {
-                    step_aborted = true;
-                }
+            writer.append(EventPayload::StepFinished {
+                step_index: idx as u32,
+                outcome: outcome_to_evidence(&outcome),
+            })?;
+
+            if matches!(outcome, Outcome::Error) {
+                step_aborted = true;
             }
         }
 
         let mut assertion_outcomes: Vec<AssertionOutcome> = Vec::new();
         for (i, assertion) in check.assertions.iter().enumerate() {
             let expr = assertion_to_expr(assertion);
-            let state = if any_unknown {
-                VerdictState::Inconclusive(InconclusiveCause::MissingObservation)
+            let (state, detail) = if any_unknown {
+                (
+                    VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+                    Some("unknown_action".to_string()),
+                )
+            } else if environment_failed {
+                (
+                    VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+                    Some(if browser_missing {
+                        "browser_unavailable".to_string()
+                    } else {
+                        "check_browser_failed".to_string()
+                    }),
+                )
             } else {
-                eval_to_state(&eval(&expr, &ctx))
-            };
-            let detail = match &state {
-                VerdictState::Inconclusive(c) => Some(c.as_wire().to_string()),
-                _ => None,
+                let r = eval(&expr, &ctx);
+                let state = eval_to_state(&r);
+                let detail = match &r {
+                    EvalResult::Inconclusive(c) => Some(eval_cause_detail(c)),
+                    _ => None,
+                };
+                (state, detail)
             };
             writer.append(EventPayload::AssertionEvaluated {
                 check_id: check.id.clone(),
@@ -329,9 +387,42 @@ fn map_eval_cause(c: &EvalCause) -> InconclusiveCause {
         EvalCause::MissingObservation { .. }
         | EvalCause::MissingInput(_)
         | EvalCause::MissingEnv(_) => InconclusiveCause::MissingObservation,
-        EvalCause::UnknownRuntimeHelper(_) | EvalCause::TypeMismatch { .. } => {
-            InconclusiveCause::EnvironmentError
+        EvalCause::UnknownRuntimeHelper(_)
+        | EvalCause::TypeMismatch { .. }
+        | EvalCause::InvalidPattern(_) => InconclusiveCause::EnvironmentError,
+    }
+}
+
+/// Format an evaluator-level `InconclusiveCause` for the
+/// evidence-side `detail` field. The judge's `VerdictState` cause set
+/// is intentionally coarse (`MissingObservation` /
+/// `EnvironmentError` / etc.); the evidence-side string preserves the
+/// specific reason so a reader can distinguish `missing_input(x)`
+/// from `missing_observation(api.body)`, or
+/// `invalid_pattern(...)` from `type_mismatch(str,int)`.
+fn eval_cause_detail(c: &EvalCause) -> String {
+    match c {
+        EvalCause::MissingObservation { step, output } => {
+            format!("missing_observation({step}.{output})")
         }
+        EvalCause::MissingInput(n) => format!("missing_input({n})"),
+        EvalCause::MissingEnv(n) => format!("missing_env({n})"),
+        EvalCause::UnknownRuntimeHelper(n) => format!("unknown_runtime_helper({n})"),
+        EvalCause::TypeMismatch { lhs, rhs } => {
+            format!("type_mismatch({}, {})", shape_wire(*lhs), shape_wire(*rhs))
+        }
+        EvalCause::InvalidPattern(msg) => format!("invalid_pattern({msg})"),
+    }
+}
+
+fn shape_wire(s: crate::eval::ValueShape) -> &'static str {
+    use crate::eval::ValueShape;
+    match s {
+        ValueShape::Bool => "bool",
+        ValueShape::Int => "int",
+        ValueShape::Float => "float",
+        ValueShape::Str => "str",
+        ValueShape::Null => "null",
     }
 }
 
@@ -415,6 +506,9 @@ mod tests {
         fn uses(&self) -> &'static str {
             self.uses
         }
+        fn requires_page(&self) -> bool {
+            false
+        }
         async fn invoke(
             &self,
             _page: Option<&Page>,
@@ -440,6 +534,7 @@ mod tests {
             registry: BTreeMap::new(),
             evidence_root: tmp.path().to_path_buf(),
             browser: None,
+            definition_path: None,
         };
         // Clear default registry so each test composes its own.
         e.registry.clear();
@@ -548,6 +643,164 @@ criteria:
             sibling_calls.load(Ordering::SeqCst),
             1,
             "sibling check should still run"
+        );
+    }
+
+    /// Production-flavor stub: claims to require a page, so the
+    /// engine treats the no-browser case as an environment failure.
+    struct PageRequiringStub {
+        uses: &'static str,
+    }
+
+    #[async_trait]
+    impl Dispatch for PageRequiringStub {
+        fn uses(&self) -> &'static str {
+            self.uses
+        }
+        fn requires_page(&self) -> bool {
+            true
+        }
+        async fn invoke(
+            &self,
+            _page: Option<&Page>,
+            _step_index: usize,
+            _with: &serde_yml::Value,
+        ) -> Result<ActionResult, ActionError> {
+            Ok(ActionResult::ok())
+        }
+    }
+
+    /// Walk the run directory left behind by an `Engine::run` and
+    /// return the parsed events for the (single) run inside it.
+    fn read_only_run_events(tmp: &tempfile::TempDir) -> Vec<duhem_evidence::Event> {
+        let entries: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .collect();
+        assert_eq!(entries.len(), 1, "exactly one run dir");
+        duhem_evidence::Trace::open(&entries[0])
+            .unwrap()
+            .into_events()
+    }
+
+    #[tokio::test]
+    async fn missing_browser_for_page_step_yields_environment_error_not_pass() {
+        let (mut engine, tmp) = engine_for_test();
+        engine.register_test_action(Box::new(PageRequiringStub {
+            uses: "ui/needs-page",
+        }));
+        // Literal `true` assertion next to a page-required step must
+        // not slip past as Pass: there's no way to actually exercise
+        // the artifact, so the check is Inconclusive(EnvironmentError).
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/needs-page
+        assertions:
+          - "true"
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+        );
+        let events = read_only_run_events(&tmp);
+        let detail = events
+            .iter()
+            .find_map(|e| match &e.payload {
+                duhem_evidence::EventPayload::AssertionEvaluated { detail, .. } => detail.clone(),
+                _ => None,
+            })
+            .expect("AssertionEvaluated event with detail");
+        assert_eq!(detail, "browser_unavailable");
+    }
+
+    #[tokio::test]
+    async fn assertion_detail_preserves_specific_evaluator_cause() {
+        let (mut engine, tmp) = engine_for_test();
+        let v = def(r#"
+verification: t
+inputs:
+  x:
+    type: string
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions:
+          - matches: { value: $inputs.x, pattern: "[" }
+"#);
+        let mut inputs = BTreeMap::new();
+        inputs.insert("x".to_string(), "ok".to_string());
+        let verdict = engine.run(&v, inputs).await.unwrap();
+        // Verdict is coarsely EnvironmentError; evidence detail names
+        // the specific invalid-pattern failure so an author can fix
+        // the regex.
+        assert!(matches!(
+            verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::EnvironmentError)
+        ));
+        let events = read_only_run_events(&tmp);
+        let detail = events
+            .iter()
+            .find_map(|e| match &e.payload {
+                duhem_evidence::EventPayload::AssertionEvaluated { detail, .. } => detail.clone(),
+                _ => None,
+            })
+            .unwrap_or_default();
+        assert!(
+            detail.starts_with("invalid_pattern("),
+            "expected invalid_pattern detail, got {detail:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_action_short_circuit_still_emits_step_events() {
+        let (mut engine, tmp) = engine_for_test();
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: nope/unknown
+        assertions:
+          - "true"
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert!(matches!(
+            verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+        ));
+        // The unknown step must still surface in evidence as
+        // step_started + step_finished(Error), so a reader can see
+        // *which* author-declared step couldn't run.
+        let events = read_only_run_events(&tmp);
+        let saw_started = events.iter().any(|e| {
+            matches!(&e.payload, duhem_evidence::EventPayload::StepStarted { uses, .. } if uses == "nope/unknown")
+        });
+        let saw_finished_error = events.iter().any(|e| {
+            matches!(
+                &e.payload,
+                duhem_evidence::EventPayload::StepFinished {
+                    outcome: duhem_evidence::StepOutcome::Error,
+                    ..
+                }
+            )
+        });
+        assert!(saw_started, "expected step_started for unknown action");
+        assert!(
+            saw_finished_error,
+            "expected step_finished(Error) for unknown action"
         );
     }
 

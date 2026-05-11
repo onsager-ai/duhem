@@ -1,12 +1,23 @@
 //! `RunContext` — concrete `EvalContext` for an in-flight check.
 //!
-//! Holds: declared inputs (resolved from CLI args, strings only at
-//! v1), observed `step.outputs` accumulated as steps run, whitelisted
-//! env vars, plus a borrow of the per-run `$runtime.uuid()` cache
-//! owned by the `Engine`. Per the spec on issue #15, the uuid cache
-//! lives on the Engine and is handed in fresh to each per-check
-//! context view so a definition that calls `$runtime.uuid()` twice in
-//! the same run gets the same value.
+//! Two layers:
+//!
+//! - [`RunState`] is per-run, owned by the engine's `run()` frame. It
+//!   carries the declared inputs (resolved from CLI args, strings
+//!   only at v1), the whitelisted env, and the run's
+//!   `$runtime.uuid()` value (computed once at run start so a
+//!   definition that uses `$runtime.uuid()` twice in the same run
+//!   sees the same value — the `"test-ws-{{uuid}}"` author-intent
+//!   pattern from `docs/duhem-spec.md` §10.3).
+//! - [`RunContext`] is per-check. It borrows `RunState` and owns its
+//!   own map of observed step outputs. Every check view of a run
+//!   sees the same inputs, env, and `uuid()` — only step outputs
+//!   reset across checks.
+//!
+//! The spec on issue #15 calls this "uuid cache on the Engine"; the
+//! implementation lives on `RunState` (per-run, constructed inside
+//! `Engine::run`). Same end-to-end behavior; lifetime is the run, not
+//! the engine handle.
 //!
 //! `$runtime.now()` is sampled fresh per call by the evaluator
 //! (cached only over a single comparison — see `eval.rs`).

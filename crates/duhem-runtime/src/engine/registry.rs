@@ -25,6 +25,17 @@ use playwright::api::Page;
 #[async_trait]
 pub(crate) trait Dispatch: Send + Sync {
     fn uses(&self) -> &'static str;
+
+    /// Whether invocation requires a Playwright `Page`. Production
+    /// wrappers around `duhem-actions::Action` default to `true`
+    /// (every v1 action is UI-backed); test stubs override to `false`
+    /// when they don't actually drive a browser. Lets the engine
+    /// distinguish "we tried to run a UI step without a browser"
+    /// (an environment failure) from "the test stub just ran".
+    fn requires_page(&self) -> bool {
+        true
+    }
+
     async fn invoke(
         &self,
         page: Option<&Page>,

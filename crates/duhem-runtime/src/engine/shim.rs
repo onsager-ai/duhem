@@ -45,12 +45,15 @@ pub fn assertion_to_expr(a: &Assertion) -> Expr {
         }
 
         Assertion::In { value, set } => {
-            if set.is_empty() {
-                return Expr::Lit(Literal::Bool(false));
-            }
+            // Drop entries that can't be faithfully represented as a
+            // v1 scalar literal (Null, mapping, sequence, tagged).
+            // They never legitimately match a v1 scalar `value`, so
+            // skipping them is equivalent to "no match here"; turning
+            // them into a `Bool(false)` literal (the old behavior)
+            // would incorrectly match a value of `false`.
             let chunks: Vec<Expr> = set
                 .iter()
-                .map(|lit| eq(value.parsed.clone(), yml_to_expr(lit)))
+                .filter_map(|lit| yml_to_expr(lit).map(|e| eq(value.parsed.clone(), e)))
                 .collect();
             chain(BinOp::Or, chunks).unwrap_or(Expr::Lit(Literal::Bool(false)))
         }
@@ -117,15 +120,17 @@ fn kind_wire(k: TypeCheckKind) -> &'static str {
 }
 
 /// Convert a YAML literal in an `in:` set into the equivalent `Expr`
-/// literal. Non-scalar YAML (mapping/sequence/tagged) is mapped to a
-/// `Bool(false)` literal so the corresponding `==` branch falls
-/// through cleanly without erroring at translation time — the v1
-/// value model is scalar-only and a non-scalar set entry can't match
-/// anything anyway.
-fn yml_to_expr(v: &serde_yml::Value) -> Expr {
+/// literal. Returns `None` for entries the v1 scalar value model
+/// cannot faithfully represent — Null (no `Lit::Null` in the
+/// expression AST) and composite shapes (mapping/sequence/tagged).
+/// `assertion_to_expr` filters those out so they neither match nor
+/// false-match: an entry of `{}` would otherwise collapse to `false`
+/// and *would* match a checked value of `false`. The right answer is
+/// "we can't represent this; skip"; the wrong answer is "pretend it's
+/// some scalar that might collide".
+fn yml_to_expr(v: &serde_yml::Value) -> Option<Expr> {
     use serde_yml::Value;
-    match v {
-        Value::Null => Expr::Lit(Literal::Str(String::new())),
+    Some(match v {
         Value::Bool(b) => Expr::Lit(Literal::Bool(*b)),
         Value::Number(n) => {
             if let Some(i) = n.as_i64() {
@@ -133,14 +138,12 @@ fn yml_to_expr(v: &serde_yml::Value) -> Expr {
             } else if let Some(f) = n.as_f64() {
                 Expr::Lit(Literal::Float(f))
             } else {
-                Expr::Lit(Literal::Bool(false))
+                return None;
             }
         }
         Value::String(s) => Expr::Lit(Literal::Str(s.clone())),
-        Value::Sequence(_) | Value::Mapping(_) | Value::Tagged(_) => {
-            Expr::Lit(Literal::Bool(false))
-        }
-    }
+        Value::Null | Value::Sequence(_) | Value::Mapping(_) | Value::Tagged(_) => return None,
+    })
 }
 
 #[cfg(test)]
@@ -238,6 +241,20 @@ mod tests {
         assert_eq!(eval(&assertion_to_expr(&a), &ctx), EvalResult::True);
 
         let ctx = Ctx::new().with_input("x", RtValue::Int(99));
+        assert_eq!(eval(&assertion_to_expr(&a), &ctx), EvalResult::False);
+    }
+
+    #[test]
+    fn in_set_skips_non_scalar_entries_without_false_matching_a_bool() {
+        // Regression for the lossy `yml_to_expr → Bool(false)` mapping.
+        // A set entry of `{}` (empty mapping) must not match the
+        // checked value `false`.
+        let empty_mapping = serde_yml::from_str::<serde_yml::Value>("{}").unwrap();
+        let a = Assertion::In {
+            value: es("$inputs.x"),
+            set: vec![empty_mapping],
+        };
+        let ctx = Ctx::new().with_input("x", RtValue::Bool(false));
         assert_eq!(eval(&assertion_to_expr(&a), &ctx), EvalResult::False);
     }
 

@@ -22,11 +22,11 @@ pub mod replay;
 pub mod writer;
 
 pub use event::{
-    AssertionState, BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, ObservationValue,
-    SCHEMA_VERSION, StepOutcome, Verdict,
+    BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, ObservationValue, SCHEMA_VERSION,
+    StepOutcome, VerdictState,
 };
 pub use reader::{ReadError, Trace};
-pub use replay::{ReplayDivergence, ReplayError, RunVerdict, replay};
+pub use replay::{ReplayDivergence, ReplayError, ReplayedRun, replay};
 pub use writer::{EvidenceWriter, Manifest, Sha256Hex, WriterError, run_started};
 
 /// Generate a new run id — a ULID (sortable, opaque, time-prefixed).

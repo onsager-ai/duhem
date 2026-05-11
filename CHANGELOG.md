@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning is described in `docs/duhem-spec.md` §11.3 (Phase 1 keeps
 the schema closed and breaking; deprecation policy lands at v1.0).
 
-## v0.3.0 — evidence trace v1
+## v0.4.0 — evidence trace v1
 
 First on-disk format for verification evidence. One run = one
 append-only directory under `.duhem/runs/<run_id>/`; the directory
@@ -32,18 +32,33 @@ purpose — the manifest can be lost).
   `criterion_finished`, `run_finished`.
 - `EvidenceWriter` — `O_APPEND` writer with the v1 fsync policy:
   fsync at every `*_finished` event, buffer step observations.
+  Directory entries (run dir + `blobs/`) fsynced after rename so
+  the format survives crash / power loss.
 - `Trace::open` — reader that fully materializes events and enforces
-  `seq` monotonicity on load.
-- `replay(trace) -> Result<RunVerdict, ReplayError>` — empirical
+  `seq` monotonicity on load. `Trace::read_blob` validates the
+  digest is exactly 64 lowercase hex characters before joining the
+  path (rejects path-traversal in adversarial traces).
+- `replay(trace) -> Result<ReplayedRun, ReplayError>` — empirical
   verifier of the §11.2 reproducibility commitment. Re-aggregates
-  recorded `assertion_evaluated` outcomes and returns
-  `ReplayDivergence` when the recomputed verdict disagrees with the
-  recorded `check_finished` / `criterion_finished` / `run_finished`.
-  The aggregation rule is a local minimal implementation (fail
-  dominates → inconclusive → pass) until `spec(judge): three-state
-  verdict aggregation rules` lands and replay delegates to
-  `duhem-judge::aggregate_run`.
+  recorded `assertion_evaluated` outcomes via
+  `duhem-judge::aggregate_run` and returns `ReplayDivergence` when
+  the recomputed verdict disagrees with the recorded
+  `check_finished` / `criterion_finished` / `run_finished`. Trace
+  completeness is enforced: orphan assertions or unfinished
+  checks/criteria fail replay rather than silently dropping.
 - `new_run_id()` — ULID generator for `.duhem/runs/<run_id>/`.
+
+### Wire format
+
+- Verdict-bearing fields (`assertion_evaluated.state`,
+  `check_finished.verdict`, `criterion_finished.verdict`,
+  `run_finished.verdict`) carry `duhem-judge::VerdictState` —
+  `"pass"` / `"fail"` / `"inconclusive:<cause>"`. The same wire
+  shape as the judge's output, so replay round-trips through the
+  canonical aggregator without translation.
+- All `ts` values are RFC 3339 with exactly millisecond precision
+  (`...:SS.sssZ`), regardless of the wall-clock resolution at
+  capture time.
 
 ### Reserved (not yet emitted)
 
@@ -56,6 +71,65 @@ purpose — the manifest can be lost).
   CLI spec).
 - Cross-run indexing / dashboard query / cloud upload / retention /
   compaction are explicitly out of scope for v1 (Phase 1+).
+
+## v0.3.0 — judge: three-state verdict aggregation
+
+First on-the-wire shape for verdicts. The judge is the architectural
+enforcement of the *mechanical judgment, not LLM judgment* identity
+commitment (`CLAUDE.md`, `docs/duhem-spec.md` §11.2): pure
+deterministic aggregation over structured runtime outcomes, no model
+in the loop. Wire shape lands now (ahead of the runtime that
+produces its inputs) so the surface is stable before evidence and
+PR-check rendering hang off it.
+
+### Added
+
+- `VerdictState` — closed enum `{ pass, fail, inconclusive(cause) }`
+  per §7.6. Doctrinally three-state; not `#[non_exhaustive]`.
+- `InconclusiveCause` — `#[non_exhaustive]` closed-at-v1 enum:
+  `timeout`, `missing_observation`, `environment_error`,
+  `empty_aggregation`. Wire tokens are snake_case.
+- `AssertionOutcome` — `{ assertion_index, state, detail? }`. The
+  runtime produces these by evaluating each `Assertion`
+  (`duhem-schema`) against observed state; the judge consumes them.
+- `CheckOutcome` — `{ check_id, assertions: Vec<AssertionOutcome> }`.
+  Input to `aggregate_check`.
+- `CheckVerdict` — `{ check_id, state }`. Output of
+  `aggregate_check`.
+- `CriterionVerdict` — `{ criterion_id, state, checks }`.
+- `RunVerdict` — `{ state, criteria }`. Top-level output of one
+  `duhem run`.
+- `aggregate_check` / `aggregate_criterion` / `aggregate_run` —
+  identical fold at every level: *any `fail` → fail; any
+  `inconclusive` and no `fail` → inconclusive (first cause wins);
+  all `pass` → pass*. Empty inputs are defensively
+  `inconclusive:empty_aggregation` (the schema validator forbids
+  empty `assertions`/`checks`/`criteria`, so this is unreachable in
+  a well-formed run).
+- Wire format for `VerdictState`: `"pass"`, `"fail"`,
+  `"inconclusive:<cause>"`. `Display` and `serde::{Serialize,
+  Deserialize}` are symmetric; unknown strings reject.
+
+### Identity-commitment notes
+
+- The `duhem-judge` `Cargo.toml` has a single runtime dependency:
+  `serde`. (`serde_json` is a dev-dependency for wire round-trip
+  tests.) No HTTP client, no async runtime, no AI SDK — the
+  runtime dep tree is auditable as the structural firewall behind
+  §11.2. A `cargo-deny` rule formalising this lands in a follow-up.
+- Aggregation rules are identical at every level (§7.6) and do not
+  try to localise blame within a check; the holistic-verification
+  principle (§8) lives in the *absence* of structured-causal
+  fields on `AssertionOutcome.detail`.
+
+### Deferred (named for traceability)
+
+- Producing `AssertionOutcome` from observed state —
+  `spec(runtime): expression evaluator v1`.
+- Persisting `RunVerdict` to evidence —
+  `spec(evidence): append-only run trace v1`.
+- Override / escalation policy (§9 Stage 5) — CLI / dashboard
+  concern, not the judge's.
 
 ## v0.2.0 — ui/* action types v1 (minimal slice)
 

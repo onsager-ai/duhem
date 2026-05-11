@@ -42,7 +42,10 @@ pub const SCHEMA_VERSION: &str = "v1";
 /// event carries `blob_sha256` instead.
 pub const BLOB_INLINE_THRESHOLD_BYTES: usize = 4 * 1024;
 
-/// Outcome of a single step invocation.
+/// Outcome of a single step invocation. Distinct from a verdict —
+/// this answers "did the action complete?", not "did the artifact
+/// pass?". A step can finish `ok` yet feed an `assertion_evaluated`
+/// with `state: fail`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StepOutcome {
@@ -51,27 +54,12 @@ pub enum StepOutcome {
     Timeout,
 }
 
-/// Outcome of evaluating a single assertion.
-///
-/// Three states by design — see `docs/duhem-spec.md` §7.6 / §11.2.
-/// The judge's `aggregate_run` (spec landing in parallel) folds these
-/// into a check / criterion / run verdict.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AssertionState {
-    Pass,
-    Fail,
-    Inconclusive,
-}
-
-/// Aggregated verdict for a check, criterion, or run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Verdict {
-    Pass,
-    Fail,
-    Inconclusive,
-}
+/// Verdict shape for `assertion_evaluated.state` and the three
+/// `*_finished.verdict` fields. Re-exported from `duhem-judge` so the
+/// evidence wire format and the judge's output share one canonical
+/// type — the wire token is `"pass"` / `"fail"` /
+/// `"inconclusive:<cause>"` (`docs/duhem-spec.md` §7.6).
+pub use duhem_judge::VerdictState;
 
 /// Either an inline JSON value (small observations) or a reference to
 /// a content-addressed blob (large observations). Exactly one variant
@@ -136,20 +124,20 @@ pub enum EventPayload {
     AssertionEvaluated {
         check_id: String,
         assertion_index: u32,
-        state: AssertionState,
+        state: VerdictState,
         #[serde(default)]
         detail: Option<String>,
     },
     CheckFinished {
         check_id: String,
-        verdict: Verdict,
+        verdict: VerdictState,
     },
     CriterionFinished {
         criterion_id: String,
-        verdict: Verdict,
+        verdict: VerdictState,
     },
     RunFinished {
-        verdict: Verdict,
+        verdict: VerdictState,
     },
 }
 
@@ -239,14 +227,14 @@ mod tests {
     fn is_finished_flags_the_right_variants() {
         assert!(
             EventPayload::RunFinished {
-                verdict: Verdict::Pass
+                verdict: VerdictState::Pass
             }
             .is_finished()
         );
         assert!(
             EventPayload::CheckFinished {
                 check_id: "x".into(),
-                verdict: Verdict::Pass
+                verdict: VerdictState::Pass
             }
             .is_finished()
         );

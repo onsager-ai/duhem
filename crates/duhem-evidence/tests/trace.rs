@@ -7,9 +7,8 @@ use std::fs::OpenOptions;
 use std::io::Write;
 
 use duhem_evidence::{
-    AssertionState, BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, EvidenceWriter,
-    ObservationValue, ReadError, ReplayDivergence, ReplayError, StepOutcome, Trace, Verdict,
-    replay, run_started,
+    BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, EvidenceWriter, ObservationValue, ReadError,
+    ReplayDivergence, ReplayError, StepOutcome, Trace, VerdictState, replay, run_started,
 };
 use tempfile::TempDir;
 
@@ -48,25 +47,25 @@ fn write_worked_example(dir: &std::path::Path) {
     w.append(EventPayload::AssertionEvaluated {
         check_id: "AC-1.1".into(),
         assertion_index: 0,
-        state: AssertionState::Pass,
+        state: VerdictState::Pass,
         detail: None,
     })
     .unwrap();
 
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
-        verdict: Verdict::Pass,
+        verdict: VerdictState::Pass,
     })
     .unwrap();
 
     w.append(EventPayload::CriterionFinished {
         criterion_id: "AC-1".into(),
-        verdict: Verdict::Pass,
+        verdict: VerdictState::Pass,
     })
     .unwrap();
 
     w.append(EventPayload::RunFinished {
-        verdict: Verdict::Pass,
+        verdict: VerdictState::Pass,
     })
     .unwrap();
 
@@ -85,7 +84,7 @@ fn round_trip_worked_example() {
     assert!(matches!(
         events.last().unwrap().payload,
         EventPayload::RunFinished {
-            verdict: Verdict::Pass
+            verdict: VerdictState::Pass
         }
     ));
 
@@ -108,7 +107,7 @@ fn crash_recovery_leaves_no_half_line() {
             w.append(EventPayload::AssertionEvaluated {
                 check_id: format!("C{i}"),
                 assertion_index: 0,
-                state: AssertionState::Pass,
+                state: VerdictState::Pass,
                 detail: None,
             })
             .unwrap();
@@ -185,10 +184,15 @@ fn replay_passes_on_recorded_trace() {
     let (_tmp, dir) = run_dir();
     write_worked_example(&dir);
     let trace = Trace::open(&dir).unwrap();
-    let v = replay(&trace).unwrap();
-    assert_eq!(v.run, Verdict::Pass);
-    assert_eq!(v.checks.get("AC-1.1"), Some(&Verdict::Pass));
-    assert_eq!(v.criteria.get("AC-1"), Some(&Verdict::Pass));
+    let replayed = replay(&trace).unwrap();
+    assert_eq!(replayed.run.state, VerdictState::Pass);
+    assert_eq!(replayed.run.criteria.len(), 1);
+    let criterion = &replayed.run.criteria[0];
+    assert_eq!(criterion.criterion_id, "AC-1");
+    assert_eq!(criterion.state, VerdictState::Pass);
+    assert_eq!(criterion.checks.len(), 1);
+    assert_eq!(criterion.checks[0].check_id, "AC-1.1");
+    assert_eq!(criterion.checks[0].state, VerdictState::Pass);
 }
 
 #[test]
@@ -225,8 +229,8 @@ fn replay_divergence_when_assertion_state_flipped() {
             recomputed,
         })) => {
             assert_eq!(check_id, "AC-1.1");
-            assert_eq!(recorded, Verdict::Pass);
-            assert_eq!(recomputed, Verdict::Fail);
+            assert_eq!(recorded, VerdictState::Pass);
+            assert_eq!(recomputed, VerdictState::Fail);
         }
         other => panic!("expected check divergence, got {other:?}"),
     }

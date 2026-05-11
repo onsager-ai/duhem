@@ -89,10 +89,7 @@ fn expr_parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
                     )),
                 });
 
-        let segments = just('.')
-            .ignore_then(ident)
-            .repeated()
-            .collect::<Vec<_>>();
+        let segments = just('.').ignore_then(ident).repeated().collect::<Vec<_>>();
 
         let path = root
             .then(segments)

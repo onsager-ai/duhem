@@ -1,0 +1,12 @@
+verification: assertion references undeclared input
+inputs:
+  x:
+    type: string
+criteria:
+  - id: AC-1
+    description: $inputs.nope is not in the inputs block
+    checks:
+      - id: AC-1.1
+        steps: []
+        assertions:
+          - $inputs.nope == "wat"

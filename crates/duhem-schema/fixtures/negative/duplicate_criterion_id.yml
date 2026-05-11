@@ -1,0 +1,17 @@
+verification: duplicate criterion id
+inputs:
+  x:
+    type: string
+criteria:
+  - id: AC-1
+    description: first
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.x == "a"
+  - id: AC-1
+    description: second; same id, illegal
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.x == "b"

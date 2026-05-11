@@ -186,19 +186,29 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
     }
 }
 
-/// Kleene three-valued logic. `true || X` is `true` even if `X` is
-/// inconclusive; `false && X` is `false` symmetrically.
+/// Kleene three-valued logic with true short-circuit on the left
+/// operand: `true || X` and `false && X` skip evaluating `X` entirely
+/// (so missing-context lookups, helper calls, and any future
+/// observable effects don't fire on the bypassed side). When `lhs` is
+/// inconclusive we still have to evaluate `rhs` because
+/// `Inconclusive || true` is `True` and `Inconclusive && false` is
+/// `False` under Kleene semantics.
 fn eval_logical(op: BinOp, lhs: &Expr, rhs: &Expr, ctx: &dyn EvalContext) -> EvalRes {
-    let l = to_bool3(eval_value(lhs, ctx));
-    let r = to_bool3(eval_value(rhs, ctx));
     use Bool3::*;
+    let l = to_bool3(eval_value(lhs, ctx));
+    match (op, &l) {
+        (BinOp::Or, T) => return Ok(Value::Bool(true)),
+        (BinOp::And, F) => return Ok(Value::Bool(false)),
+        _ => {}
+    }
+    let r = to_bool3(eval_value(rhs, ctx));
     let out = match (op, l, r) {
-        (BinOp::Or, T, _) | (BinOp::Or, _, T) => T,
+        (BinOp::Or, _, T) => T,
         (BinOp::Or, F, F) => F,
-        (BinOp::And, F, _) | (BinOp::And, _, F) => F,
+        (BinOp::And, _, F) => F,
         (BinOp::And, T, T) => T,
-        // Anything else reduces to inconclusive — pick the first
-        // available cause so the failure surface is deterministic.
+        // Anything else reduces to inconclusive — pick the left cause
+        // when present so the failure surface is deterministic.
         (_, I(c), _) | (_, _, I(c)) => I(c),
         _ => unreachable!("logical op with non-logical or unhandled operand pair"),
     };
@@ -278,6 +288,7 @@ fn apply_ord<T: PartialOrd>(op: BinOp, a: &T, b: &T) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
     use std::collections::HashMap;
 
     use duhem_schema::expr::parse;
@@ -501,6 +512,48 @@ mod tests {
         assert_eq!(eval(&e, &ctx), EvalResult::True);
     }
 
+    /// Context whose `now()` advances by one millisecond every call.
+    /// Used to verify the evaluator does not cache `now()` across call
+    /// sites within a single `eval`.
+    struct TickingCtx {
+        base: DateTime<Utc>,
+        counter: Cell<i64>,
+    }
+
+    impl EvalContext for TickingCtx {
+        fn input(&self, _: &str) -> Option<&Value> {
+            None
+        }
+        fn output(&self, _: &str, _: &str) -> Option<&Value> {
+            None
+        }
+        fn env(&self, _: &str) -> Option<&str> {
+            None
+        }
+        fn uuid(&self) -> &str {
+            "ticking"
+        }
+        fn now(&self) -> DateTime<Utc> {
+            let n = self.counter.get();
+            self.counter.set(n + 1);
+            self.base + chrono::Duration::milliseconds(n)
+        }
+    }
+
+    #[test]
+    fn now_is_sampled_fresh_on_each_call_site() {
+        let ctx = TickingCtx {
+            base: DateTime::<Utc>::from_timestamp_millis(1_700_000_000_000).unwrap(),
+            counter: Cell::new(0),
+        };
+        // First call yields base+0ms, second yields base+1ms, so the
+        // first sample is strictly less than the second. If the
+        // evaluator cached `now()`, this would be False or
+        // Inconclusive instead.
+        let e = parse("$runtime.now() < $runtime.now()").unwrap();
+        assert_eq!(eval(&e, &ctx), EvalResult::True);
+    }
+
     // ---- short-circuit in the presence of inconclusive ----------
 
     #[test]
@@ -528,6 +581,57 @@ mod tests {
             run("$steps.missing.outputs.x == 1 && false", &ctx),
             EvalResult::False
         );
+    }
+
+    /// Context that counts every `output()` lookup so a test can
+    /// assert the right-hand side of a short-circuited boolean was
+    /// never evaluated.
+    struct CountingCtx {
+        outputs: HashMap<(String, String), Value>,
+        lookups: Cell<usize>,
+    }
+
+    impl EvalContext for CountingCtx {
+        fn input(&self, _: &str) -> Option<&Value> {
+            None
+        }
+        fn output(&self, step_id: &str, output: &str) -> Option<&Value> {
+            self.lookups.set(self.lookups.get() + 1);
+            self.outputs.get(&(step_id.to_string(), output.to_string()))
+        }
+        fn env(&self, _: &str) -> Option<&str> {
+            None
+        }
+        fn uuid(&self) -> &str {
+            "counting"
+        }
+        fn now(&self) -> DateTime<Utc> {
+            Utc::now()
+        }
+    }
+
+    #[test]
+    fn or_does_not_evaluate_rhs_when_lhs_is_true() {
+        let ctx = CountingCtx {
+            outputs: HashMap::new(),
+            lookups: Cell::new(0),
+        };
+        // `true` short-circuits; `$steps.x.outputs.y` must not be
+        // looked up at all.
+        let e = parse("true || $steps.x.outputs.y == 1").unwrap();
+        assert_eq!(eval(&e, &ctx), EvalResult::True);
+        assert_eq!(ctx.lookups.get(), 0);
+    }
+
+    #[test]
+    fn and_does_not_evaluate_rhs_when_lhs_is_false() {
+        let ctx = CountingCtx {
+            outputs: HashMap::new(),
+            lookups: Cell::new(0),
+        };
+        let e = parse("false && $steps.x.outputs.y == 1").unwrap();
+        assert_eq!(eval(&e, &ctx), EvalResult::False);
+        assert_eq!(ctx.lookups.get(), 0);
     }
 
     #[test]

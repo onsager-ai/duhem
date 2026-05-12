@@ -39,8 +39,11 @@ Verification Definition claims to verify).
   does not.
 - `aggregate_run` is defined on empty criterion verdicts as
   `Inconclusive(EmptyAggregation)`. Setup-abort takes that path —
-  no criterion runs, the run-level verdict is
-  `Inconclusive(EnvironmentError)`.
+  no criterion runs, and the run-level verdict's
+  `InconclusiveCause` preserves the abort trigger: a setup-step
+  `Outcome::Timeout` surfaces as `Inconclusive(Timeout)`; an
+  `Outcome::Error`, unknown-action step, or missing browser
+  surfaces as `Inconclusive(EnvironmentError)`.
 - Schema-side support for `$setup.*` in assertion paths and the
   corresponding validator rules: `DuplicateSetupStepId`,
   `UnresolvedSetupStepRef`, `UnresolvedSetupStepOutput`,

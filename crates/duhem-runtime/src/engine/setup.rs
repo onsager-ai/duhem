@@ -9,14 +9,18 @@
 //!
 //! Failure policy is three-state-faithful (`docs/duhem-spec.md` §7.6):
 //! `Outcome::Error` or `Outcome::Timeout` from any setup step aborts
-//! setup, no criterion runs, and the run verdict is
-//! `Inconclusive(EnvironmentError)` — "we couldn't observe the
-//! workload in the state the Verification Definition claims to
-//! verify". Distinct from `Fail`, which would mean we observed the
-//! workload misbehaving.
+//! setup, no criterion runs, and the run verdict is `Inconclusive` —
+//! "we couldn't observe the workload in the state the Verification
+//! Definition claims to verify". The specific
+//! `InconclusiveCause` preserves the abort trigger: a setup-step
+//! `Timeout` surfaces as `Inconclusive(Timeout)`, while an `Error`,
+//! an unknown-action step, or a missing browser surfaces as
+//! `Inconclusive(EnvironmentError)` — the same cause family the
+//! per-check path uses for analogous infrastructure failures.
 
 use duhem_actions::{Outcome, RunBrowser};
 use duhem_evidence::{EventPayload, EvidenceWriter};
+use duhem_judge::InconclusiveCause;
 use duhem_schema::Step;
 use playwright::api::Page;
 use tracing::debug;
@@ -26,12 +30,40 @@ use crate::engine::registry::{ActionRegistry, Dispatch};
 use crate::engine::runner::{EngineError, outcome_to_evidence, with_to_evidence_map};
 use crate::engine::template::substitute_with;
 
+/// Why a setup block aborted. Distinct from a generic `aborted: bool`
+/// so the engine can map the trigger to the right
+/// `InconclusiveCause` — a setup-step `Timeout` and a missing-browser
+/// `EnvironmentError` are both Inconclusive, but conflating them
+/// would lose useful telemetry on the trace and the verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AbortReason {
+    /// A setup step returned `Outcome::Timeout` — the action ran but
+    /// didn't reach its requested state within `within:`.
+    Timeout,
+    /// A setup step returned `Outcome::Error`, used an unknown
+    /// `Step.uses`, or the runtime couldn't provision a setup browser
+    /// when one was required.
+    Environment,
+}
+
+impl AbortReason {
+    /// Map the abort trigger to a judge-level `InconclusiveCause` so
+    /// `Engine::run` can short-circuit to a meaningful `RunVerdict`.
+    pub fn cause(self) -> InconclusiveCause {
+        match self {
+            AbortReason::Timeout => InconclusiveCause::Timeout,
+            AbortReason::Environment => InconclusiveCause::EnvironmentError,
+        }
+    }
+}
+
 /// Outcome of walking the run-level `setup:` block.
 pub(crate) struct SetupResult {
-    /// `true` when any step produced `Outcome::Error` or
-    /// `Outcome::Timeout` and the rest of setup was skipped. Drives
-    /// the engine's "skip criteria, emit Inconclusive" path.
-    pub aborted: bool,
+    /// `Some(reason)` when any step produced `Outcome::Error` or
+    /// `Outcome::Timeout` (or an environmental precondition failed)
+    /// and the rest of setup was skipped. Drives the engine's
+    /// "skip criteria, emit Inconclusive" path.
+    pub aborted: Option<AbortReason>,
 }
 
 /// Execute every step in `setup` once, emitting `Setup*` evidence
@@ -80,7 +112,15 @@ pub(crate) async fn run_setup(
         }
     }
 
-    let mut aborted = false;
+    // First-cause-wins: once we record an abort reason, later steps
+    // are short-circuited as `Error` for evidence but the verdict
+    // cause stays pinned to the original trigger. Matches the
+    // judge's "first inconclusive cause wins" fold (#16 §7.6).
+    let mut aborted: Option<AbortReason> = if environment_failed {
+        Some(AbortReason::Environment)
+    } else {
+        None
+    };
     for (idx, step) in setup.iter().enumerate() {
         // Setup steps see the run state (inputs, env, uuid, plus any
         // outputs already published by earlier setup steps in this
@@ -97,7 +137,7 @@ pub(crate) async fn run_setup(
             with: with_to_evidence_map(&resolved_with),
         })?;
 
-        let outcome = if aborted || environment_failed {
+        let outcome = if aborted.is_some() {
             Outcome::Error
         } else {
             match registry.get(step.uses.as_str()) {
@@ -123,8 +163,12 @@ pub(crate) async fn run_setup(
             outcome: outcome_to_evidence(&outcome),
         })?;
 
-        if matches!(outcome, Outcome::Error | Outcome::Timeout) {
-            aborted = true;
+        if aborted.is_none() {
+            aborted = match outcome {
+                Outcome::Timeout => Some(AbortReason::Timeout),
+                Outcome::Error => Some(AbortReason::Environment),
+                Outcome::Ok => None,
+            };
         }
     }
 
@@ -132,7 +176,9 @@ pub(crate) async fn run_setup(
         let _ = cb.close().await;
     }
 
-    writer.append(EventPayload::SetupFinished { aborted })?;
+    writer.append(EventPayload::SetupFinished {
+        aborted: aborted.is_some(),
+    })?;
     Ok(SetupResult { aborted })
 }
 
@@ -273,7 +319,7 @@ mod tests {
         let r = run_setup(&mut w, &registry, None, &mut run, &setup)
             .await
             .unwrap();
-        assert!(!r.aborted);
+        assert!(r.aborted.is_none());
         assert_eq!(
             run.setup_outputs.get(&("warm".into(), "token".into())),
             Some(&crate::eval::Value::Str("abc".into())),
@@ -308,11 +354,60 @@ mod tests {
         let r = run_setup(&mut w, &registry, None, &mut run, &setup)
             .await
             .unwrap();
-        assert!(r.aborted, "setup should abort after Error");
+        assert_eq!(
+            r.aborted,
+            Some(AbortReason::Environment),
+            "Outcome::Error should pin the cause to Environment"
+        );
         assert_eq!(
             after.load(Ordering::SeqCst),
             0,
             "step after Error must not invoke"
+        );
+    }
+
+    #[tokio::test]
+    async fn setup_aborts_on_first_timeout() {
+        // Mirrors the Error-side test for the Timeout branch of the
+        // abort policy. A setup-step `Timeout` aborts setup, prevents
+        // later setup steps from running, and pins the abort reason
+        // to `Timeout` (which the engine maps to
+        // `Inconclusive(Timeout)` on the run verdict).
+        let (mut w, _tmp) = make_writer();
+        let mut registry: ActionRegistry = BTreeMap::new();
+        registry.insert(
+            "fake/slow",
+            Box::new(StubAction {
+                uses: "fake/slow",
+                outcome: Outcome::Timeout,
+                outputs: vec![],
+                invocations: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
+        let after = Arc::new(AtomicUsize::new(0));
+        registry.insert(
+            "fake/tracker",
+            Box::new(StubAction {
+                uses: "fake/tracker",
+                outcome: Outcome::Ok,
+                outputs: vec![],
+                invocations: after.clone(),
+            }),
+        );
+        let mut run = RunState::new(BTreeMap::new());
+        let setup = vec![step(None, "fake/slow"), step(None, "fake/tracker")];
+        let r = run_setup(&mut w, &registry, None, &mut run, &setup)
+            .await
+            .unwrap();
+        assert_eq!(
+            r.aborted,
+            Some(AbortReason::Timeout),
+            "Outcome::Timeout should pin the cause to Timeout"
+        );
+        assert_eq!(
+            after.load(Ordering::SeqCst),
+            0,
+            "step after Timeout must not invoke"
         );
     }
 }

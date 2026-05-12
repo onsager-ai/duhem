@@ -171,9 +171,14 @@ impl Engine {
                 &def.setup,
             )
             .await?;
-            if r.aborted {
+            if let Some(reason) = r.aborted {
+                // Preserve the trigger on the verdict: a setup-step
+                // `Timeout` surfaces as `Inconclusive(Timeout)`; an
+                // `Error` (or any environmental precondition) as
+                // `Inconclusive(EnvironmentError)`. Conflating the
+                // two would lose useful telemetry on the trace.
                 let verdict = RunVerdict {
-                    state: VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+                    state: VerdictState::Inconclusive(reason.cause()),
                     criteria: Vec::new(),
                 };
                 writer.append(EventPayload::RunFinished {
@@ -902,6 +907,58 @@ criteria:
             "criteria must not run after setup abort"
         );
         // Evidence carries `setup_finished { aborted: true }`.
+        let events = read_only_run_events(&tmp);
+        let saw_aborted = events.iter().any(|e| {
+            matches!(
+                &e.payload,
+                duhem_evidence::EventPayload::SetupFinished { aborted: true }
+            )
+        });
+        assert!(saw_aborted, "expected SetupFinished aborted=true");
+    }
+
+    #[tokio::test]
+    async fn setup_timeout_aborts_run_with_inconclusive_timeout() {
+        // Companion to `setup_error_aborts_run_with_inconclusive`:
+        // the abort policy applies to `Outcome::Timeout` too, and the
+        // verdict's `InconclusiveCause` distinguishes it from an
+        // environmental setup failure.
+        let (mut engine, tmp) = engine_for_test();
+        engine.register_test_action(Box::new(StubAction::new("fake/slow", Outcome::Timeout)));
+        let criterion_calls = Arc::new(AtomicUsize::new(0));
+        let criterion_tracker = StubAction {
+            uses: "fake/criterion",
+            outcome: Outcome::Ok,
+            outputs: Vec::new(),
+            invocations: criterion_calls.clone(),
+        };
+        engine.register_test_action(Box::new(criterion_tracker));
+        let v = def(r#"
+verification: t
+setup:
+  - uses: fake/slow
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/criterion
+        assertions:
+          - "true"
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::Timeout),
+            "got {verdict:?}"
+        );
+        assert!(verdict.criteria.is_empty(), "no criterion should execute");
+        assert_eq!(
+            criterion_calls.load(Ordering::SeqCst),
+            0,
+            "criteria must not run after setup timeout"
+        );
         let events = read_only_run_events(&tmp);
         let saw_aborted = events.iter().any(|e| {
             matches!(

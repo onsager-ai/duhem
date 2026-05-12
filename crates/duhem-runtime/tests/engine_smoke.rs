@@ -17,7 +17,7 @@ use std::net::SocketAddr;
 use axum::Router;
 use axum::routing::get;
 use duhem_actions::RunBrowser;
-use duhem_evidence::{EventPayload, Trace, replay};
+use duhem_evidence::{EventPayload, StepOutcome, Trace, replay};
 use duhem_judge::VerdictState;
 use duhem_runtime::Engine;
 use duhem_schema::VerificationDefinition;
@@ -92,17 +92,31 @@ async fn static_page_fixture_passes_end_to_end_and_replays() {
     let trace = Trace::open(&entries[0]).expect("open trace");
 
     // Setup ran once (issue #20). Evidence carries the boundary
-    // markers and at least one `setup_step_finished` event with
-    // outcome `Ok`. The check still passes thanks to the per-check
-    // assertion of `$setup.probe.outputs.satisfied`.
+    // markers, at least one `setup_step_finished` with outcome `Ok`,
+    // and the `setup_finished aborted=false` close. The check still
+    // passes thanks to the per-check assertion of
+    // `$setup.probe.outputs.satisfied`.
     let events = trace.events();
     let saw_setup_started = events
         .iter()
         .any(|e| matches!(e.payload, EventPayload::SetupStarted { .. }));
+    let saw_setup_step_finished_ok = events.iter().any(|e| {
+        matches!(
+            e.payload,
+            EventPayload::SetupStepFinished {
+                outcome: StepOutcome::Ok,
+                ..
+            }
+        )
+    });
     let saw_setup_finished_ok = events
         .iter()
-        .any(|e| matches!(e.payload, EventPayload::SetupFinished { aborted: false },));
+        .any(|e| matches!(e.payload, EventPayload::SetupFinished { aborted: false }));
     assert!(saw_setup_started, "expected setup_started event");
+    assert!(
+        saw_setup_step_finished_ok,
+        "expected setup_step_finished with outcome=ok"
+    );
     assert!(
         saw_setup_finished_ok,
         "expected setup_finished aborted=false"

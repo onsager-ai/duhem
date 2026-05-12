@@ -50,9 +50,19 @@ pub enum InconclusiveCause {
     InvalidPattern(String),
 }
 
-/// Runtime-side scalar value. Distinct from `duhem_schema::Literal`
-/// because runtime values come from observed JSON or extracted strings,
-/// not authored literals.
+/// Runtime-side value. Distinct from `duhem_schema::Literal` because
+/// runtime values come from observed JSON, declared inputs, or
+/// extracted strings — not authored literals.
+///
+/// Scalars (`Bool` / `Int` / `Float` / `Str` / `Null`) participate in
+/// the full comparison surface. The `Array` / `Object` variants exist
+/// so the typed-input catalog can carry declared `array` / `object`
+/// inputs end-to-end (`type_check: { value: $inputs.x, is: object }`);
+/// they are not comparable at v1 — operations against them produce
+/// `Inconclusive(TypeMismatch)`. Equality / ordering for collections
+/// is a separate spec; the grammar has no array/object *literals*
+/// today, so the only authored interactions are `type_check` and
+/// (via #15's template substitution) splicing into `Step.with`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Bool(bool),
@@ -60,6 +70,8 @@ pub enum Value {
     Float(f64),
     Str(String),
     Null,
+    Array(Vec<Value>),
+    Object(std::collections::BTreeMap<String, Value>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +81,8 @@ pub enum ValueShape {
     Float,
     Str,
     Null,
+    Array,
+    Object,
 }
 
 impl Value {
@@ -79,6 +93,8 @@ impl Value {
             Value::Float(_) => ValueShape::Float,
             Value::Str(_) => ValueShape::Str,
             Value::Null => ValueShape::Null,
+            Value::Array(_) => ValueShape::Array,
+            Value::Object(_) => ValueShape::Object,
         }
     }
 }
@@ -288,10 +304,13 @@ fn matches_type(v: &Value, kind: &str) -> bool {
         (Value::Str(s), "uuid") => uuid::Uuid::parse_str(s).is_ok(),
         (Value::Str(_), "string") => true,
         (Value::Int(_), "integer") => true,
+        // `number` matches any numeric shape; `integer` is a subset.
+        (Value::Int(_) | Value::Float(_), "number") => true,
         (Value::Float(_), "float") => true,
         (Value::Bool(_), "boolean") => true,
         (Value::Null, "null") => true,
-        // Object/array are unrepresentable in the v1 scalar Value model.
+        (Value::Array(_), "array") => true,
+        (Value::Object(_), "object") => true,
         _ => false,
     }
 }

@@ -51,6 +51,13 @@ pub enum EngineError {
     /// install-hint humanization from `RunBrowser::launch`.
     #[error("browser: {0}")]
     Browser(String),
+    /// A declared input's JSON value is outside the runtime `Value`
+    /// model — e.g. a numeric literal that fits neither `i64` nor a
+    /// finite `f64`. Surface this as an engine error instead of
+    /// silently dropping the input (which would manifest later as a
+    /// confusing `Inconclusive(MissingInput)`).
+    #[error("input `{name}`: value is not representable as a runtime value")]
+    InputUnrepresentable { name: String },
 }
 
 impl From<ActionError> for EngineError {
@@ -123,19 +130,23 @@ impl Engine {
     }
 
     /// Walk every criterion / check / step and produce a `RunVerdict`.
+    ///
+    /// `inputs` is the typed, fully-resolved input set (one entry per
+    /// declared `InputDecl`, coerced per its declared `InputType`).
+    /// Per the typed-input-catalog spec, the CLI does the coercion
+    /// and required/unknown-input checks before reaching here; the
+    /// engine treats the map as authoritative.
     pub async fn run(
         &mut self,
         def: &VerificationDefinition,
-        inputs: BTreeMap<String, String>,
+        inputs: BTreeMap<String, serde_json::Value>,
     ) -> Result<RunVerdict, EngineError> {
-        // Strings-only at v1; the `--inputs k=v` CLI shape resolves
-        // straight into `Value::Str` regardless of the declared
-        // `InputDecl.type`. Typed inputs land with the
-        // typed-input-catalog spec.
-        let input_values: BTreeMap<String, Value> = inputs
-            .iter()
-            .map(|(k, v)| (k.clone(), Value::Str(v.clone())))
-            .collect();
+        let mut input_values: BTreeMap<String, Value> = BTreeMap::new();
+        for (k, v) in &inputs {
+            let val = json_to_value(v)
+                .ok_or_else(|| EngineError::InputUnrepresentable { name: k.clone() })?;
+            input_values.insert(k.clone(), val);
+        }
         let mut run_state = RunState::new(input_values);
 
         let run_id = new_run_id();
@@ -153,11 +164,7 @@ impl Engine {
             .unwrap_or_else(|| def.verification.clone());
         let mut writer = EvidenceWriter::new(&run_dir, &evidence_path)?;
 
-        let evidence_inputs: BTreeMap<String, serde_json::Value> = inputs
-            .iter()
-            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-            .collect();
-        writer.append(run_started(evidence_path.clone(), evidence_inputs))?;
+        writer.append(run_started(evidence_path.clone(), inputs.clone()))?;
 
         // Run-level `setup:` runs once before any criterion. Skipped
         // entirely when empty so the wire shape stays byte-identical
@@ -457,6 +464,8 @@ fn shape_wire(s: crate::eval::ValueShape) -> &'static str {
         ValueShape::Float => "float",
         ValueShape::Str => "str",
         ValueShape::Null => "null",
+        ValueShape::Array => "array",
+        ValueShape::Object => "object",
     }
 }
 
@@ -772,7 +781,7 @@ criteria:
           - matches: { value: $inputs.x, pattern: "[" }
 "#);
         let mut inputs = BTreeMap::new();
-        inputs.insert("x".to_string(), "ok".to_string());
+        inputs.insert("x".to_string(), serde_json::Value::String("ok".to_string()));
         let verdict = engine.run(&v, inputs).await.unwrap();
         // Verdict is coarsely EnvironmentError; evidence detail names
         // the specific invalid-pattern failure so an author can fix
@@ -862,6 +871,39 @@ criteria:
           - $setup.warm.outputs.tok == "abc"
 "#);
         let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Pass);
+    }
+
+    #[tokio::test]
+    async fn typed_input_catalog_flows_end_to_end() {
+        // Typed-input-catalog spec worked example: declared integer /
+        // boolean / object inputs reach the evaluator as the right
+        // scalar/structured shape — not as opaque strings.
+        let (mut engine, _tmp) = engine_for_test();
+        let v = def(r#"
+verification: t
+inputs:
+  member_count: { type: integer }
+  allow_invites: { type: boolean }
+  feature_flags: { type: object }
+criteria:
+  - id: AC-1
+    description: typed inputs reach the evaluator typed
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.member_count == 3
+          - $inputs.allow_invites == true
+          - type_check: { value: $inputs.feature_flags, is: object }
+"#);
+        let mut inputs = BTreeMap::new();
+        inputs.insert("member_count".to_string(), serde_json::json!(3));
+        inputs.insert("allow_invites".to_string(), serde_json::json!(true));
+        inputs.insert(
+            "feature_flags".to_string(),
+            serde_json::json!({"dark_mode": true}),
+        );
+        let verdict = engine.run(&v, inputs).await.unwrap();
         assert_eq!(verdict.state, VerdictState::Pass);
     }
 
@@ -1037,6 +1079,31 @@ criteria:
             detail.starts_with("missing_setup_observation("),
             "expected missing_setup_observation detail, got {detail:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn integer_input_does_not_compare_equal_to_string_literal() {
+        // Before the typed catalog, `--inputs count=3` stored as
+        // `Value::Str("3")` and `count == 3` was a type_mismatch
+        // Inconclusive. With typed coercion this is now a real
+        // numeric comparison.
+        let (mut engine, _tmp) = engine_for_test();
+        let v = def(r#"
+verification: t
+inputs:
+  count: { type: integer }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.count == 3
+"#);
+        let mut inputs = BTreeMap::new();
+        inputs.insert("count".to_string(), serde_json::json!(3));
+        let verdict = engine.run(&v, inputs).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Pass);
     }
 
     #[tokio::test]

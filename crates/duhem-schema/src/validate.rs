@@ -14,7 +14,7 @@ use thiserror::Error;
 use crate::criterion::{Check, Criterion};
 use crate::expr::{Path, PathRoot};
 use crate::step::Step;
-use crate::verification::{InputDecl, VerificationDefinition};
+use crate::verification::{InputDecl, InputType, VerificationDefinition};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ValidationError {
@@ -115,6 +115,15 @@ pub enum ValidationError {
         check: String,
         raw: String,
     },
+
+    #[error(
+        "input `{input}`: default value type `{actual}` does not match declared type `{declared}`"
+    )]
+    InputDefaultTypeMismatch {
+        input: String,
+        declared: InputType,
+        actual: String,
+    },
 }
 
 /// Run every structural rule. Always reports as many errors as
@@ -128,6 +137,36 @@ pub fn validate(v: &VerificationDefinition) -> Result<(), Vec<ValidationError>> 
     }
 
     let setup_outputs = collect_setup_outputs(&v.setup, &mut errs);
+
+    for (name, decl) in &v.inputs {
+        if let Some(default) = &decl.default {
+            let unwrapped = unwrap_tagged(default);
+            match yml_shape(unwrapped) {
+                Some(actual)
+                    if actual != decl.kind && !matches_with_promotion(decl.kind, actual) =>
+                {
+                    errs.push(ValidationError::InputDefaultTypeMismatch {
+                        input: name.clone(),
+                        declared: decl.kind,
+                        actual: yml_shape_name(unwrapped).to_string(),
+                    });
+                }
+                // `null` doesn't map to any catalog member; `default:
+                // null` is a way to express "no default" that we
+                // don't support yet (optional inputs are a follow-up
+                // spec). Reject it now rather than letting `null`
+                // leak into the engine as a synthetic value.
+                None => {
+                    errs.push(ValidationError::InputDefaultTypeMismatch {
+                        input: name.clone(),
+                        declared: decl.kind,
+                        actual: yml_shape_name(unwrapped).to_string(),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
 
     let mut seen_criteria: HashSet<&str> = HashSet::new();
     for c in &v.criteria {
@@ -159,6 +198,76 @@ fn collect_setup_outputs<'a>(
         }
     }
     outputs
+}
+
+/// Classify a YAML default's structural shape against the input
+/// catalog. Returns `None` only for `Null` — every other shape has a
+/// catalog member. `Tagged` is unwrapped by [`unwrap_tagged`] before
+/// reaching here.
+///
+/// Out-of-`i64`-range numerics classify as `Number`, not `Integer`,
+/// because the downstream pipeline (`coerce_input` for `--inputs`,
+/// runtime `Value::Int(i64)`) can't represent them as integers; a
+/// `default: <huge>` under `type: integer` is a real mismatch and
+/// authors should see the error at validate time.
+fn yml_shape(v: &serde_yml::Value) -> Option<InputType> {
+    use serde_yml::Value as Y;
+    match v {
+        Y::String(_) => Some(InputType::String),
+        Y::Bool(_) => Some(InputType::Boolean),
+        Y::Number(n) => {
+            if n.is_i64() {
+                Some(InputType::Integer)
+            } else {
+                Some(InputType::Number)
+            }
+        }
+        Y::Sequence(_) => Some(InputType::Array),
+        Y::Mapping(_) => Some(InputType::Object),
+        Y::Null => None,
+        // Unreachable after `unwrap_tagged`; defensive `None` keeps
+        // the match total without panicking on a malformed tree.
+        Y::Tagged(_) => None,
+    }
+}
+
+/// Peel YAML `!tag scalar` wrappers (e.g. `!!str 3`) down to the
+/// underlying value so the catalog classifier sees the real shape.
+fn unwrap_tagged(v: &serde_yml::Value) -> &serde_yml::Value {
+    let mut cur = v;
+    while let serde_yml::Value::Tagged(t) = cur {
+        cur = &t.value;
+    }
+    cur
+}
+
+/// Human-readable wire name for a default's actual shape. Used only
+/// for the error message; the comparison itself goes through
+/// `yml_shape`.
+fn yml_shape_name(v: &serde_yml::Value) -> &'static str {
+    use serde_yml::Value as Y;
+    match v {
+        Y::String(_) => "string",
+        Y::Bool(_) => "boolean",
+        Y::Number(n) => {
+            if n.is_i64() {
+                "integer"
+            } else {
+                "number"
+            }
+        }
+        Y::Sequence(_) => "array",
+        Y::Mapping(_) => "object",
+        Y::Null => "null",
+        Y::Tagged(_) => "tagged",
+    }
+}
+
+/// An integer is also a valid `number` (no fractional part required).
+/// The reverse — a fractional `number` under `type: integer` — is a
+/// real mismatch and falls through to the error path.
+fn matches_with_promotion(declared: InputType, actual: InputType) -> bool {
+    matches!((declared, actual), (InputType::Number, InputType::Integer))
 }
 
 fn validate_criterion(
@@ -716,6 +825,129 @@ criteria:
 "#;
         let v = parse(y);
         validate(&v).expect("should validate");
+    }
+
+    #[test]
+    fn matching_defaults_validate_for_every_type() {
+        let y = r#"
+verification: ok
+inputs:
+  s: { type: string,  default: "hi" }
+  i: { type: integer, default: 3 }
+  n: { type: number,  default: 0.85 }
+  b: { type: boolean, default: true }
+  a: { type: array,   default: ["x", "y"] }
+  o: { type: object,  default: { k: 1 } }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        validate(&v).expect("all defaults match");
+    }
+
+    #[test]
+    fn integer_default_is_valid_for_number_type() {
+        let y = r#"
+verification: ok
+inputs:
+  threshold: { type: number, default: 1 }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        validate(&v).expect("integer default under `number` should validate");
+    }
+
+    #[test]
+    fn fractional_default_under_integer_type_fails() {
+        let y = r#"
+verification: x
+inputs:
+  count: { type: integer, default: 0.5 }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::InputDefaultTypeMismatch { input, declared, actual }
+                    if input == "count" && *declared == InputType::Integer && actual == "number"
+            )),
+            "expected InputDefaultTypeMismatch, got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn yaml_null_default_collapses_to_no_default() {
+        let y = r#"
+verification: x
+inputs:
+  name: { type: string, default: null }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        validate(&v).expect("validate");
+        assert!(v.inputs["name"].default.is_none());
+    }
+
+    #[test]
+    fn tagged_default_classifies_by_inner_shape() {
+        let y = r#"
+verification: x
+inputs:
+  name: { type: string, default: !!str 3 }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        validate(&v).expect("tagged string default matches `type: string`");
+    }
+
+    #[test]
+    fn string_default_under_integer_fails() {
+        let y = r#"
+verification: x
+inputs:
+  count: { type: integer, default: "nope" }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::InputDefaultTypeMismatch { input, .. } if input == "count"
+            )),
+            "expected mismatch on `count`, got {errs:?}"
+        );
     }
 
     #[test]

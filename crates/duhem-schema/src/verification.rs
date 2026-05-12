@@ -39,13 +39,49 @@ pub struct VerificationDefinition {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InputDecl {
-    /// The declared type name (e.g. `string`, `integer`). Opaque at
-    /// v0.1; the type catalog spec promotes this to an enum.
+    /// The declared type from the v1 catalog. Unknown names parse-fail
+    /// at `from_yaml_str` per the type-catalog spec.
     #[serde(rename = "type")]
-    pub kind: String,
+    pub kind: InputType,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<serde_yml::Value>,
+}
+
+/// The closed catalog of declared input types per the type-catalog
+/// spec. Wire form is snake_case. Unknown type names parse-fail at
+/// `VerificationDefinition::from_yaml_str`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InputType {
+    String,
+    Integer,
+    Number,
+    Boolean,
+    Array,
+    Object,
+}
+
+impl InputType {
+    /// Snake-case wire form. Matches the `serde(rename_all)` above so
+    /// error messages and validation diagnostics speak the same names
+    /// authors wrote.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            InputType::String => "string",
+            InputType::Integer => "integer",
+            InputType::Number => "number",
+            InputType::Boolean => "boolean",
+            InputType::Array => "array",
+            InputType::Object => "object",
+        }
+    }
+}
+
+impl std::fmt::Display for InputType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Top-level errors from loading a Verification Definition off the
@@ -129,7 +165,7 @@ criteria:
         inputs.insert(
             "name".into(),
             InputDecl {
-                kind: "string".into(),
+                kind: InputType::String,
                 default: Some(serde_yml::Value::String("hi".into())),
             },
         );
@@ -143,5 +179,33 @@ criteria:
         let y = v.to_yaml_string().unwrap();
         let back = VerificationDefinition::from_yaml_str(&y).unwrap();
         assert_eq!(v, back);
+    }
+
+    #[test]
+    fn all_catalog_types_parse() {
+        for name in ["string", "integer", "number", "boolean", "array", "object"] {
+            let y = format!("verification: x\ninputs:\n  k: {{ type: {name} }}\ncriteria: []\n");
+            let v = VerificationDefinition::from_yaml_str(&y)
+                .unwrap_or_else(|e| panic!("`{name}` should parse: {e}"));
+            let decl = v.inputs.get("k").expect("input decl present");
+            assert_eq!(decl.kind.as_str(), name);
+        }
+    }
+
+    #[test]
+    fn unknown_type_name_is_parse_error() {
+        let y = r#"
+verification: x
+inputs:
+  k: { type: bogus }
+criteria: []
+"#;
+        let err = VerificationDefinition::from_yaml_str(y).unwrap_err();
+        assert!(err.location().is_some(), "expected location info: {err}");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("bogus") || msg.contains("unknown variant"),
+            "expected variant error mentioning `bogus`, got: {msg}"
+        );
     }
 }

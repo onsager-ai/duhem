@@ -1,11 +1,11 @@
 //! Action registry — `Step.uses` → action dispatcher.
 //!
-//! The spec on issue #15 says the v1 registry is keyed by
-//! `Step.uses` and contains exactly the three actions from #12
-//! (`ui/navigate`, `ui/click`, `ui/assert-element`). Pluggable /
-//! user-defined `uses:` is §10.8 and lands in Phase 2+. The registry
-//! is `pub(crate)`-shaped: external callers only see
-//! [`Engine::new`](super::Engine), which wires the default catalog.
+//! The v1 registry is keyed by `Step.uses` and contains the closed
+//! action catalog: the three `ui/*` actions from #12 plus `api/call`
+//! from the spec on issue #21. Pluggable / user-defined `uses:` is
+//! §10.8 and lands in Phase 2+. The registry is `pub(crate)`-shaped:
+//! external callers only see [`Engine::new`](super::Engine), which
+//! wires the default catalog.
 //!
 //! Internally we dispatch through a thin [`Dispatch`] trait rather
 //! than holding `Box<dyn Action>` directly. Same registry semantics,
@@ -13,11 +13,20 @@
 //! invoke without needing a real Playwright `Page` (test-only stubs
 //! live under `#[cfg(test)]`, per spec). The production wrapper
 //! borrows the per-check `Page` and dispatches to the real `Action`.
+//!
+//! `api/call` is registered the same way `ui/*` actions are — through
+//! the default [`Dispatch::requires_page`] of `true`, even though the
+//! action itself ignores `ActionCtx.page`. Per spec on issue #21 the
+//! per-check `CheckBrowser` is still opened for API-only checks;
+//! stripping the browser when no `ui/*` step is present is an
+//! optimization deferred to a follow-up spec.
 
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
-use duhem_actions::{Action, ActionCtx, ActionError, ActionResult, AssertElement, Click, Navigate};
+use duhem_actions::{
+    Action, ActionCtx, ActionError, ActionResult, AssertElement, Call, Click, Navigate,
+};
 use playwright::api::Page;
 
 /// Engine-internal dispatcher. One implementor per registered action
@@ -84,12 +93,14 @@ impl Dispatch for ConcreteAction {
 /// in spec wording, with the dispatch layer made internal.
 pub(crate) type ActionRegistry = BTreeMap<&'static str, Box<dyn Dispatch>>;
 
-/// The v1 catalog: the three actions shipped in #12.
+/// The v1 catalog: the three `ui/*` actions from #12 and `api/call`
+/// from #21.
 pub(crate) fn default_registry() -> ActionRegistry {
     let mut m: ActionRegistry = BTreeMap::new();
     insert(&mut m, ConcreteAction::new(Box::new(Navigate)));
     insert(&mut m, ConcreteAction::new(Box::new(Click)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertElement)));
+    insert(&mut m, ConcreteAction::new(Box::new(Call)));
     m
 }
 
@@ -102,10 +113,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_catalog_lists_the_three_v1_actions() {
+    fn default_catalog_lists_the_v1_actions() {
         let m = default_registry();
         let mut keys: Vec<&str> = m.keys().copied().collect();
         keys.sort();
-        assert_eq!(keys, vec!["ui/assert-element", "ui/click", "ui/navigate"]);
+        assert_eq!(
+            keys,
+            vec!["api/call", "ui/assert-element", "ui/click", "ui/navigate"]
+        );
     }
 }

@@ -75,7 +75,7 @@ async fn static_page_fixture_passes_end_to_end_and_replays() {
         .with_evidence_root(tmp.path());
 
     let mut inputs = BTreeMap::new();
-    inputs.insert("fixture_url".to_string(), url);
+    inputs.insert("fixture_url".to_string(), serde_json::Value::String(url));
 
     let verdict = engine.run(&def, inputs).await.expect("engine.run");
     assert_eq!(verdict.state, VerdictState::Pass, "verdict = {verdict:?}");

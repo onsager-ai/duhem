@@ -3,8 +3,8 @@
 //! Two layers:
 //!
 //! - [`RunState`] is per-run, owned by the engine's `run()` frame. It
-//!   carries the declared inputs (resolved from CLI args, strings
-//!   only at v1), the whitelisted env, and the run's
+//!   carries the declared inputs (resolved from CLI args, typed per
+//!   the input catalog), the whitelisted env, and the run's
 //!   `$runtime.uuid()` value (computed once at run start so a
 //!   definition that uses `$runtime.uuid()` twice in the same run
 //!   sees the same value — the `"test-ws-{{uuid}}"` author-intent
@@ -119,10 +119,11 @@ impl<'r> EvalContext for RunContext<'r> {
     }
 }
 
-/// Best-effort conversion from a JSON value (an action's output
-/// shape) into the v1 scalar `Value` model. Returns `None` for
-/// composite shapes (object/array) — those are out of scope until
-/// the value model grows in a follow-up spec.
+/// Total conversion from a JSON value (an action's output shape, or
+/// a declared/coerced input) into the runtime `Value` model. Numerics
+/// that fall outside `i64`/`f64` representable range return `None`;
+/// every other shape is faithfully preserved, including arrays /
+/// objects (typed-input catalog spec).
 pub fn json_to_value(v: &serde_json::Value) -> Option<Value> {
     use serde_json::Value as J;
     Some(match v {
@@ -138,13 +139,26 @@ pub fn json_to_value(v: &serde_json::Value) -> Option<Value> {
             }
         }
         J::String(s) => Value::Str(s.clone()),
-        J::Array(_) | J::Object(_) => return None,
+        J::Array(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                out.push(json_to_value(item)?);
+            }
+            Value::Array(out)
+        }
+        J::Object(map) => {
+            let mut out = BTreeMap::new();
+            for (k, v) in map {
+                out.insert(k.clone(), json_to_value(v)?);
+            }
+            Value::Object(out)
+        }
     })
 }
 
-/// Inverse of [`json_to_value`] for substituting an evaluated scalar
-/// back into a `serde_yml::Value` slot inside `Step.with`. Always
-/// total — every scalar `Value` has a YAML representation.
+/// Inverse of [`json_to_value`] for substituting an evaluated value
+/// back into a `serde_yml::Value` slot inside `Step.with`. Total —
+/// every `Value` has a YAML representation.
 pub fn value_to_yml(v: &Value) -> serde_yml::Value {
     match v {
         Value::Null => serde_yml::Value::Null,
@@ -152,6 +166,14 @@ pub fn value_to_yml(v: &Value) -> serde_yml::Value {
         Value::Int(i) => serde_yml::to_value(*i).unwrap_or(serde_yml::Value::Null),
         Value::Float(f) => serde_yml::to_value(*f).unwrap_or(serde_yml::Value::Null),
         Value::Str(s) => serde_yml::Value::String(s.clone()),
+        Value::Array(items) => serde_yml::Value::Sequence(items.iter().map(value_to_yml).collect()),
+        Value::Object(map) => {
+            let mut m = serde_yml::Mapping::new();
+            for (k, v) in map {
+                m.insert(serde_yml::Value::String(k.clone()), value_to_yml(v));
+            }
+            serde_yml::Value::Mapping(m)
+        }
     }
 }
 
@@ -198,7 +220,27 @@ mod tests {
             Some(Value::Str("hi".into()))
         );
         assert_eq!(json_to_value(&serde_json::json!(null)), Some(Value::Null));
-        assert!(json_to_value(&serde_json::json!({})).is_none());
-        assert!(json_to_value(&serde_json::json!([1, 2])).is_none());
+    }
+
+    #[test]
+    fn json_arrays_and_objects_convert_recursively() {
+        // Typed-input catalog: declared `array` / `object` inputs flow
+        // end-to-end through `json_to_value` rather than being dropped.
+        let arr = json_to_value(&serde_json::json!([1, "two", true])).unwrap();
+        assert_eq!(
+            arr,
+            Value::Array(vec![
+                Value::Int(1),
+                Value::Str("two".into()),
+                Value::Bool(true),
+            ])
+        );
+        let obj = json_to_value(&serde_json::json!({"k": 1, "nested": {"x": "y"}})).unwrap();
+        let mut nested = BTreeMap::new();
+        nested.insert("x".into(), Value::Str("y".into()));
+        let mut top = BTreeMap::new();
+        top.insert("k".into(), Value::Int(1));
+        top.insert("nested".into(), Value::Object(nested));
+        assert_eq!(obj, Value::Object(top));
     }
 }

@@ -51,6 +51,13 @@ pub enum EngineError {
     /// install-hint humanization from `RunBrowser::launch`.
     #[error("browser: {0}")]
     Browser(String),
+    /// A declared input's JSON value is outside the runtime `Value`
+    /// model — e.g. a numeric literal that fits neither `i64` nor a
+    /// finite `f64`. Surface this as an engine error instead of
+    /// silently dropping the input (which would manifest later as a
+    /// confusing `Inconclusive(MissingInput)`).
+    #[error("input `{name}`: value is not representable as a runtime value")]
+    InputUnrepresentable { name: String },
 }
 
 impl From<ActionError> for EngineError {
@@ -134,10 +141,12 @@ impl Engine {
         def: &VerificationDefinition,
         inputs: BTreeMap<String, serde_json::Value>,
     ) -> Result<RunVerdict, EngineError> {
-        let input_values: BTreeMap<String, Value> = inputs
-            .iter()
-            .filter_map(|(k, v)| json_to_value(v).map(|val| (k.clone(), val)))
-            .collect();
+        let mut input_values: BTreeMap<String, Value> = BTreeMap::new();
+        for (k, v) in &inputs {
+            let val = json_to_value(v)
+                .ok_or_else(|| EngineError::InputUnrepresentable { name: k.clone() })?;
+            input_values.insert(k.clone(), val);
+        }
         let run_state = RunState::new(input_values);
 
         let run_id = new_run_id();

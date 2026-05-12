@@ -103,16 +103,32 @@ pub fn validate(v: &VerificationDefinition) -> Result<(), Vec<ValidationError>> 
     }
 
     for (name, decl) in &v.inputs {
-        if let Some(default) = &decl.default
-            && let Some(actual) = yml_shape(default)
-            && actual != decl.kind
-            && !matches_with_promotion(decl.kind, actual)
-        {
-            errs.push(ValidationError::InputDefaultTypeMismatch {
-                input: name.clone(),
-                declared: decl.kind,
-                actual: yml_shape_name(default).to_string(),
-            });
+        if let Some(default) = &decl.default {
+            let unwrapped = unwrap_tagged(default);
+            match yml_shape(unwrapped) {
+                Some(actual)
+                    if actual != decl.kind && !matches_with_promotion(decl.kind, actual) =>
+                {
+                    errs.push(ValidationError::InputDefaultTypeMismatch {
+                        input: name.clone(),
+                        declared: decl.kind,
+                        actual: yml_shape_name(unwrapped).to_string(),
+                    });
+                }
+                // `null` doesn't map to any catalog member; `default:
+                // null` is a way to express "no default" that we
+                // don't support yet (optional inputs are a follow-up
+                // spec). Reject it now rather than letting `null`
+                // leak into the engine as a synthetic value.
+                None => {
+                    errs.push(ValidationError::InputDefaultTypeMismatch {
+                        input: name.clone(),
+                        declared: decl.kind,
+                        actual: yml_shape_name(unwrapped).to_string(),
+                    });
+                }
+                _ => {}
+            }
         }
     }
 
@@ -127,17 +143,23 @@ pub fn validate(v: &VerificationDefinition) -> Result<(), Vec<ValidationError>> 
     if errs.is_empty() { Ok(()) } else { Err(errs) }
 }
 
-/// Best-effort `InputType` classification for a YAML default. Returns
-/// `None` for shapes that don't map to a v1 catalog member (e.g. tagged
-/// values, `null`); the caller treats those as "can't compare" and
-/// skips the structural check rather than firing a false positive.
+/// Classify a YAML default's structural shape against the input
+/// catalog. Returns `None` only for `Null` — every other shape has a
+/// catalog member. `Tagged` is unwrapped by [`unwrap_tagged`] before
+/// reaching here.
+///
+/// Out-of-`i64`-range numerics classify as `Number`, not `Integer`,
+/// because the downstream pipeline (`coerce_input` for `--inputs`,
+/// runtime `Value::Int(i64)`) can't represent them as integers; a
+/// `default: <huge>` under `type: integer` is a real mismatch and
+/// authors should see the error at validate time.
 fn yml_shape(v: &serde_yml::Value) -> Option<InputType> {
     use serde_yml::Value as Y;
     match v {
         Y::String(_) => Some(InputType::String),
         Y::Bool(_) => Some(InputType::Boolean),
         Y::Number(n) => {
-            if n.is_i64() || n.is_u64() {
+            if n.is_i64() {
                 Some(InputType::Integer)
             } else {
                 Some(InputType::Number)
@@ -145,8 +167,21 @@ fn yml_shape(v: &serde_yml::Value) -> Option<InputType> {
         }
         Y::Sequence(_) => Some(InputType::Array),
         Y::Mapping(_) => Some(InputType::Object),
-        Y::Null | Y::Tagged(_) => None,
+        Y::Null => None,
+        // Unreachable after `unwrap_tagged`; defensive `None` keeps
+        // the match total without panicking on a malformed tree.
+        Y::Tagged(_) => None,
     }
+}
+
+/// Peel YAML `!tag scalar` wrappers (e.g. `!!str 3`) down to the
+/// underlying value so the catalog classifier sees the real shape.
+fn unwrap_tagged(v: &serde_yml::Value) -> &serde_yml::Value {
+    let mut cur = v;
+    while let serde_yml::Value::Tagged(t) = cur {
+        cur = &t.value;
+    }
+    cur
 }
 
 /// Human-readable wire name for a default's actual shape. Used only
@@ -158,7 +193,7 @@ fn yml_shape_name(v: &serde_yml::Value) -> &'static str {
         Y::String(_) => "string",
         Y::Bool(_) => "boolean",
         Y::Number(n) => {
-            if n.is_i64() || n.is_u64() {
+            if n.is_i64() {
                 "integer"
             } else {
                 "number"
@@ -624,6 +659,51 @@ criteria:
             )),
             "expected InputDefaultTypeMismatch, got {errs:?}"
         );
+    }
+
+    #[test]
+    fn yaml_null_default_collapses_to_no_default() {
+        // `default: null` is indistinguishable from a missing
+        // `default:` field — serde's `Option<T>` deserializer maps
+        // both to `None`. The input is therefore required, and a
+        // run without `--inputs name=...` fails at the CLI seam.
+        // Tested here at the schema layer: validate() must succeed
+        // (no defaulted value, no mismatch to fire on) and the parsed
+        // `decl.default` is `None`.
+        let y = r#"
+verification: x
+inputs:
+  name: { type: string, default: null }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        validate(&v).expect("validate");
+        assert!(v.inputs["name"].default.is_none());
+    }
+
+    #[test]
+    fn tagged_default_classifies_by_inner_shape() {
+        // `!!str 3` is a string scalar with an explicit tag; the
+        // classifier should look through the tag and validate cleanly
+        // against `type: string` (not bypass the check entirely).
+        let y = r#"
+verification: x
+inputs:
+  name: { type: string, default: !!str 3 }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        validate(&v).expect("tagged string default matches `type: string`");
     }
 
     #[test]

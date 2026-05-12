@@ -104,6 +104,24 @@ async fn run_command(path: PathBuf, raw_inputs: Vec<String>) -> ExitCode {
         }
     };
 
+    // Run the structural validator before resolving inputs: among
+    // other rules it type-checks declared `default:` values against
+    // `type:`, which `resolve_inputs` then relies on when carrying
+    // defaults through unchanged. Without this, a buggy default
+    // would only surface from `duhem validate`, not `duhem run`.
+    if let Err(errs) = validate(&def) {
+        let plural = if errs.len() == 1 { "" } else { "s" };
+        eprintln!(
+            "{}: {} validation error{plural}:",
+            path.display(),
+            errs.len()
+        );
+        for e in errs {
+            eprintln!("  - {e}");
+        }
+        return ExitCode::FAILURE;
+    }
+
     // CLI-side fail-fast per the typed-input-catalog spec: missing /
     // unknown / mistyped inputs error before `Engine::run` is called.
     let inputs = match resolve_inputs(&raw_inputs, &def.inputs) {
@@ -182,7 +200,9 @@ fn resolve_inputs(
             let coerced = coerce_input(name, decl.kind, raw_value)?;
             out.insert(name.clone(), coerced);
         } else if let Some(default) = &decl.default {
-            out.insert(name.clone(), yml_to_json(default));
+            let value =
+                yml_to_json(default).map_err(|e| format!("input `{name}`: default: {e}"))?;
+            out.insert(name.clone(), value);
         } else {
             return Err(format!("missing required input: `{name}`"));
         }
@@ -263,24 +283,39 @@ fn json_shape_name(v: &serde_json::Value) -> &'static str {
     }
 }
 
-fn yml_to_json(v: &serde_yml::Value) -> serde_json::Value {
+/// Convert a YAML default value into JSON for engine consumption.
+///
+/// Fallible because YAML permits non-string mapping keys (e.g.
+/// `default: { 1: "x" }`); JSON does not. Silently dropping such
+/// entries would mutate the author's default; we surface them as a
+/// user-facing error instead.
+fn yml_to_json(v: &serde_yml::Value) -> Result<serde_json::Value, String> {
     use serde_yml::Value as Y;
-    match v {
+    Ok(match v {
         Y::Null => serde_json::Value::Null,
         Y::Bool(b) => serde_json::Value::Bool(*b),
         Y::Number(n) => serde_json::to_value(n).unwrap_or(serde_json::Value::Null),
         Y::String(s) => serde_json::Value::String(s.clone()),
-        Y::Sequence(seq) => serde_json::Value::Array(seq.iter().map(yml_to_json).collect()),
-        Y::Mapping(m) => serde_json::Value::Object(
-            m.iter()
-                .filter_map(|(k, v)| {
-                    let key = k.as_str()?.to_string();
-                    Some((key, yml_to_json(v)))
-                })
-                .collect(),
-        ),
-        Y::Tagged(t) => yml_to_json(&t.value),
-    }
+        Y::Sequence(seq) => {
+            let mut out = Vec::with_capacity(seq.len());
+            for item in seq {
+                out.push(yml_to_json(item)?);
+            }
+            serde_json::Value::Array(out)
+        }
+        Y::Mapping(m) => {
+            let mut out = serde_json::Map::with_capacity(m.len());
+            for (k, v) in m {
+                let key = k.as_str().ok_or_else(|| {
+                    "object default has a non-string mapping key (not representable as JSON)"
+                        .to_string()
+                })?;
+                out.insert(key.to_string(), yml_to_json(v)?);
+            }
+            serde_json::Value::Object(out)
+        }
+        Y::Tagged(t) => yml_to_json(&t.value)?,
+    })
 }
 
 #[cfg(test)]
@@ -418,5 +453,18 @@ mod tests {
         let d = decls("  name: { type: string, default: \"ws-default\" }");
         let out = resolve_inputs(&raw(&["name=other"]), &d).unwrap();
         assert_eq!(out["name"], serde_json::json!("other"));
+    }
+
+    #[test]
+    fn object_default_with_non_string_keys_errors() {
+        // YAML allows non-string mapping keys; JSON does not. Silently
+        // dropping such entries would mutate the author's default —
+        // surface it as a user-facing error from `resolve_inputs`.
+        let d = decls("  flags: { type: object, default: { 1: x } }");
+        let err = resolve_inputs(&raw(&[]), &d).unwrap_err();
+        assert!(
+            err.contains("flags") && err.contains("non-string"),
+            "error names the input and the cause: {err}"
+        );
     }
 }

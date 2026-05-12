@@ -33,8 +33,31 @@ is `api/call` only.
   - Native outputs: `status: u16`, `body: JSON Value` (parsed when
     the response `Content-Type` starts with `application/json`,
     `null` otherwise), `body_text: String` (raw bytes UTF-8 lossy),
-    `headers: Map<String, String>`. The author references them as
-    `$steps.<id>.outputs.<name>`.
+    `headers: Map<String, String>` (rendered via UTF-8 lossy from
+    raw header bytes so non-ASCII / opaque values are preserved).
+  - Scalar outputs (`status`, `body_text`) are reachable from
+    assertions as `$steps.<id>.outputs.<name>` against the v1
+    evaluator. Object / map outputs (`body` when JSON, `headers`)
+    land in the evidence trace but are not yet reachable from the
+    expression evaluator — `$steps.<id>.outputs.body` surfaces as
+    `Inconclusive(MissingObservation)` until the value-model
+    extension lands in a follow-up spec. Plan assertions over the
+    scalar outputs for now; nested navigation into `body` is the
+    follow-up.
+  - JSON-body parse failures (server advertised `application/json`
+    but emitted unparseable bytes) are surfaced as an
+    `api.json_parse_failure` observation on the action result;
+    `body` stays `null` and `body_text` carries the raw bytes for
+    triage.
+  - Template substitution in `Step.with` resolves whole-string
+    `$inputs.<name>` and `$runtime.<helper>()` references. String
+    concatenation (`$inputs.base + "/path"`) is not supported in
+    v1; authors pass the full URL as a single input.
+  - Outgoing JSON bodies require string mapping keys. A YAML
+    mapping with non-string keys (`{1: "x"}`) yields
+    `Outcome::Error` with an explicit message rather than silently
+    dropping the entry — the JSON sent on the wire matches what the
+    author wrote.
 - `ActionError::Http(String)` — surfaced for transport-layer
   failures (DNS, TCP, TLS, malformed method, malformed URL). The
   engine maps it to `Outcome::Error`. Timeouts are *not* errors —

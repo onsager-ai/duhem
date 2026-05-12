@@ -14,7 +14,24 @@
 //! - `body`: parsed JSON value when `Content-Type` starts with
 //!   `application/json`; `null` otherwise.
 //! - `body_text`: raw response bytes as UTF-8 (lossy).
-//! - `headers`: response headers as a JSON object.
+//! - `headers`: response headers as a JSON object (values rendered
+//!   via UTF-8 lossy from the raw header bytes so non-ASCII /
+//!   opaque values are still represented).
+//!
+//! The runtime evaluator (`duhem-runtime` issue #15) only records
+//! *scalar* outputs into the expression context — JSON object and
+//! array values, including `body` (when parsed as JSON) and
+//! `headers`, land in the evidence trace but are not yet reachable
+//! from `$steps.<id>.outputs.<name>` in an assertion. Plan for v1
+//! assertions over the scalar outputs (`status`, `body_text`);
+//! nested navigation into `body` requires an evaluator extension
+//! that is its own spec.
+//!
+//! Template substitution in `Step.with` resolves whole-string
+//! `$inputs.<name>` and `$runtime.<helper>()` references; it does
+//! *not* perform string concatenation. Authors who need to compose
+//! a URL from a base + path should pass the full URL as a single
+//! input (`$inputs.echo_url`), not `$inputs.base_url + "/echo"`.
 //!
 //! Outcome mapping:
 //!
@@ -24,8 +41,9 @@
 //!   assertion is where `200 vs. 500` gets judged. Same shape as
 //!   `ui/click` against a button that triggers a 500 page.
 //! - `within:` exceeded → `Outcome::Timeout`.
-//! - DNS / TCP / TLS / malformed method / malformed URL →
-//!   `ActionError::Http`, which the engine maps to `Outcome::Error`.
+//! - DNS / TCP / TLS / malformed method / malformed URL / non-string
+//!   body keys → `ActionError::Http`, which the engine maps to
+//!   `Outcome::Error`.
 //!
 //! `api/observe` (passive request sniffing) is documented in
 //! `docs/duhem-spec.md` §10.5 and is a separate spec.
@@ -38,7 +56,7 @@ use reqwest::Method;
 use reqwest::header::CONTENT_TYPE;
 use serde::Deserialize;
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN, Observation};
 use crate::error::ActionError;
 use crate::with::WithinSpec;
 
@@ -86,7 +104,18 @@ impl Action for Call {
 pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
     let timeout: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
 
-    let method = Method::from_bytes(with.method.as_bytes()).map_err(|e| {
+    // Uppercase ASCII before parsing so authors who type `get` /
+    // `post` get the conventional `GET` / `POST` instead of a
+    // server-side surprise — `reqwest::Method::from_bytes` happily
+    // accepts lowercase as a custom extension method, which most
+    // servers don't recognize. Non-ASCII inputs fall through and
+    // are rejected by `from_bytes`.
+    let method_normalized = if with.method.is_ascii() {
+        with.method.to_ascii_uppercase()
+    } else {
+        with.method.clone()
+    };
+    let method = Method::from_bytes(method_normalized.as_bytes()).map_err(|e| {
         ActionError::Http(format!(
             "api/call: invalid method `{}`: {e}",
             with.method.as_str()
@@ -106,7 +135,8 @@ pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
         req = match body {
             serde_yml::Value::String(s) => req.body(s),
             other => {
-                let bytes = serde_json::to_vec(&yml_to_json(&other))
+                let json = yml_to_json(&other)?;
+                let bytes = serde_json::to_vec(&json)
                     .map_err(|e| ActionError::Http(format!("api/call: serialize body: {e}")))?;
                 req.body(bytes)
             }
@@ -126,13 +156,18 @@ pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
         .and_then(|v| v.to_str().ok())
         .map(str::to_ascii_lowercase)
         .unwrap_or_default();
+    // Render header values via UTF-8 lossy from the raw bytes so a
+    // header that includes a `0xFF` (legal in HTTP/1.1) still
+    // appears in the `headers` output — silently dropping it would
+    // erase contract-relevant data from the trace.
     let headers: BTreeMap<String, String> = resp
         .headers()
         .iter()
-        .filter_map(|(k, v)| {
-            v.to_str()
-                .ok()
-                .map(|s| (k.as_str().to_string(), s.to_string()))
+        .map(|(k, v)| {
+            (
+                k.as_str().to_string(),
+                String::from_utf8_lossy(v.as_bytes()).into_owned(),
+            )
         })
         .collect();
 
@@ -141,13 +176,30 @@ pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
         .await
         .map_err(|e| ActionError::Http(format!("api/call: read body: {e}")))?;
     let body_text = String::from_utf8_lossy(&bytes).into_owned();
+    let mut observations: Vec<Observation> = Vec::new();
     let body_json: serde_json::Value = if content_type.starts_with("application/json") {
-        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
+        match serde_json::from_slice::<serde_json::Value>(&bytes) {
+            Ok(v) => v,
+            Err(e) => {
+                // The server *claimed* JSON but sent something the
+                // parser couldn't accept. Preserve the debug signal
+                // as an observation rather than masking it as a
+                // legitimate `null` response; assertions over
+                // `body_text` still work.
+                observations.push(Observation {
+                    kind: "api.json_parse_failure".to_string(),
+                    note: Some(format!(
+                        "response body declared application/json but failed to parse: {e}"
+                    )),
+                });
+                serde_json::Value::Null
+            }
+        }
     } else {
         serde_json::Value::Null
     };
 
-    Ok(ActionResult::ok()
+    let mut result = ActionResult::ok()
         .with_output("status", serde_json::Value::from(status))
         .with_output("body", body_json)
         .with_output("body_text", serde_json::Value::String(body_text))
@@ -159,23 +211,52 @@ pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
                     .map(|(k, v)| (k, serde_json::Value::String(v)))
                     .collect(),
             ),
-        ))
+        );
+    result.observations.append(&mut observations);
+    Ok(result)
 }
 
-fn yml_to_json(v: &serde_yml::Value) -> serde_json::Value {
+/// Convert a YAML value to a JSON value for outgoing request bodies.
+/// Non-string mapping keys are rejected explicitly: JSON requires
+/// string keys, and silently coercing or dropping them would produce
+/// a body that differs from what the author wrote.
+fn yml_to_json(v: &serde_yml::Value) -> Result<serde_json::Value, ActionError> {
     use serde_yml::Value as Y;
-    match v {
+    Ok(match v {
         Y::Null => serde_json::Value::Null,
         Y::Bool(b) => serde_json::Value::Bool(*b),
         Y::Number(n) => serde_json::to_value(n).unwrap_or(serde_json::Value::Null),
         Y::String(s) => serde_json::Value::String(s.clone()),
-        Y::Sequence(seq) => serde_json::Value::Array(seq.iter().map(yml_to_json).collect()),
-        Y::Mapping(m) => serde_json::Value::Object(
-            m.iter()
-                .filter_map(|(k, v)| k.as_str().map(|key| (key.to_string(), yml_to_json(v))))
-                .collect(),
-        ),
-        Y::Tagged(t) => yml_to_json(&t.value),
+        Y::Sequence(seq) => {
+            serde_json::Value::Array(seq.iter().map(yml_to_json).collect::<Result<Vec<_>, _>>()?)
+        }
+        Y::Mapping(m) => {
+            let mut obj = serde_json::Map::with_capacity(m.len());
+            for (k, v) in m.iter() {
+                let key = k.as_str().ok_or_else(|| {
+                    ActionError::Http(format!(
+                        "api/call: body has a non-string mapping key (got {}); JSON requires string keys",
+                        yml_kind(k)
+                    ))
+                })?;
+                obj.insert(key.to_string(), yml_to_json(v)?);
+            }
+            serde_json::Value::Object(obj)
+        }
+        Y::Tagged(t) => yml_to_json(&t.value)?,
+    })
+}
+
+fn yml_kind(v: &serde_yml::Value) -> &'static str {
+    use serde_yml::Value as Y;
+    match v {
+        Y::Null => "null",
+        Y::Bool(_) => "bool",
+        Y::Number(_) => "number",
+        Y::String(_) => "string",
+        Y::Sequence(_) => "sequence",
+        Y::Mapping(_) => "mapping",
+        Y::Tagged(_) => "tagged",
     }
 }
 
@@ -346,16 +427,107 @@ within: 2s
 
     #[tokio::test]
     async fn unreachable_host_yields_http_error() {
-        // Port 1 is reserved (tcpmux); a TCP connect there returns
-        // ECONNREFUSED quickly — that's a transport error.
-        let r = execute(parse_with(
-            r#"{ method: GET, url: "http://127.0.0.1:1/", within: 2s }"#,
-        ))
+        // Bind an ephemeral port, capture its address, then drop the
+        // listener. The OS gives the port back, so a connect there
+        // returns ECONNREFUSED (or an equivalent transport failure)
+        // deterministically — no reliance on a "probably unused"
+        // port like 1.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        let r = execute(parse_with(&format!(
+            r#"{{ method: GET, url: "http://{addr}/", within: 2s }}"#
+        )))
         .await;
         match r {
             Err(ActionError::Http(_)) => {}
             other => panic!("expected ActionError::Http, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn non_string_body_mapping_key_yields_http_error() {
+        // YAML mapping with an integer key isn't representable as
+        // JSON; we reject explicitly rather than silently dropping
+        // the entry.
+        let with: With = serde_yml::from_str(
+            r#"
+method: POST
+url: "http://127.0.0.1:0/"
+body:
+  1: "with-int-key"
+"#,
+        )
+        .unwrap();
+        match execute(with).await {
+            Err(ActionError::Http(msg)) => {
+                assert!(msg.contains("non-string mapping key"), "got: {msg}");
+            }
+            other => panic!("expected ActionError::Http, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn lowercase_method_is_normalized_to_uppercase() {
+        // Server records the method it sees. We send `get`; reqwest
+        // would happily pass that through as a custom extension
+        // method, but normalization upgrades it to `GET` so the
+        // server's standard-method dispatch matches.
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let seen_get = Arc::new(AtomicBool::new(false));
+        let flag = seen_get.clone();
+        let app = Router::new().route(
+            "/m",
+            axum::routing::get(move || {
+                let f = flag.clone();
+                async move {
+                    f.store(true, Ordering::SeqCst);
+                    StatusCode::OK
+                }
+            }),
+        );
+        let fx = start(app).await;
+        let r = execute(parse_with(&format!(
+            r#"{{ method: get, url: "{}", within: 2s }}"#,
+            url(&fx, "/m")
+        )))
+        .await
+        .unwrap();
+        assert_eq!(r.outputs.get("status").and_then(|v| v.as_u64()), Some(200));
+        assert!(seen_get.load(Ordering::SeqCst), "server didn't see GET");
+    }
+
+    #[tokio::test]
+    async fn malformed_json_response_records_observation_and_keeps_body_null() {
+        // Server claims JSON but emits garbage. `body` is `null` (no
+        // valid JSON to surface) and an observation captures the
+        // parse-failure signal so the trace explains the null.
+        let app = Router::new().route(
+            "/bad-json",
+            axum::routing::get(|| async {
+                (
+                    StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    "{not valid json",
+                )
+            }),
+        );
+        let fx = start(app).await;
+        let r = execute(parse_with(&format!(
+            r#"{{ method: GET, url: "{}", within: 2s }}"#,
+            url(&fx, "/bad-json")
+        )))
+        .await
+        .unwrap();
+        assert!(r.outputs.get("body").unwrap().is_null());
+        assert!(
+            r.observations
+                .iter()
+                .any(|o| o.kind == "api.json_parse_failure"),
+            "expected json_parse_failure observation"
+        );
     }
 
     #[tokio::test]

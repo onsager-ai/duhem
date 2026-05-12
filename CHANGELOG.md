@@ -11,6 +11,105 @@ their own minor bumps.
 
 ## v0.1.0 — unreleased
 
+### api/* action types v1 (minimal slice — `api/call`)
+
+First entry in the API half of the action-type catalog. The
+companion `api/observe` (passive request sniffing) requires
+Playwright `Route` plumbing and ships in its own spec; this slice
+is `api/call` only.
+
+#### Added
+
+- `api/call` — active HTTP request against a real server. Backed
+  by `reqwest` with `rustls-tls`. No mocks: real DNS, real TLS,
+  real handler — same Holistic Verification Principle posture as
+  the `ui/*` half.
+  - `with:` schema (`deny_unknown_fields`):
+    `{ method: String, url: String, headers?: Map<String, String>,
+       body?: YAML, within?: Duration }`.
+    `body:` as a YAML mapping/sequence is serialized as JSON; a
+    YAML string is sent verbatim under the author-declared
+    `Content-Type`.
+  - Native outputs: `status: u16`, `body: JSON Value` (parsed when
+    the response `Content-Type` starts with `application/json`,
+    `null` otherwise), `body_text: String` (raw bytes UTF-8 lossy),
+    `headers: Map<String, String>` (rendered via UTF-8 lossy from
+    raw header bytes so non-ASCII / opaque values are preserved).
+  - Scalar outputs (`status`, `body_text`) are reachable from
+    assertions as `$steps.<id>.outputs.<name>` against the v1
+    evaluator. Object / map outputs (`body` when JSON, `headers`)
+    land in the evidence trace but are not yet reachable from the
+    expression evaluator — `$steps.<id>.outputs.body` surfaces as
+    `Inconclusive(MissingObservation)` until the value-model
+    extension lands in a follow-up spec. Plan assertions over the
+    scalar outputs for now; nested navigation into `body` is the
+    follow-up.
+  - JSON-body parse failures (server advertised `application/json`
+    but emitted unparseable bytes) are surfaced as an
+    `api.json_parse_failure` observation on the action result;
+    `body` stays `null` and `body_text` carries the raw bytes for
+    triage.
+  - Template substitution in `Step.with` resolves whole-string
+    `$inputs.<name>` and `$runtime.<helper>()` references. String
+    concatenation (`$inputs.base + "/path"`) is not supported in
+    v1; authors pass the full URL as a single input.
+  - Outgoing JSON bodies require string mapping keys. A YAML
+    mapping with non-string keys (`{1: "x"}`) yields
+    `Outcome::Error` with an explicit message rather than silently
+    dropping the entry — the JSON sent on the wire matches what the
+    author wrote.
+- `ActionError::Http(String)` — surfaced for transport-layer
+  failures (DNS, TCP, TLS, malformed method, malformed URL). The
+  engine maps it to `Outcome::Error`. Timeouts are *not* errors —
+  they return `Outcome::Timeout` so the judge maps them to
+  `Inconclusive(Timeout)`.
+
+#### Outcome mapping
+
+- HTTP completes within `within:` → `Outcome::Ok`. **Status is data,
+  not a verdict** — a `500` response is still `Outcome::Ok` from
+  the action's standpoint; assertions are where `200 vs. 500` gets
+  judged. Same shape as `ui/click` against a button that triggers
+  a 500 page.
+- `within:` exceeded → `Outcome::Timeout`.
+- HTTP transport error / malformed `with:` → `Outcome::Error`.
+
+#### Registry
+
+- `api/call` is added to the default action registry. Verification
+  Definitions using `uses: api/call` move from
+  "registry miss → `Inconclusive(MissingObservation)`" (the v1
+  shape from `spec(runtime): minimal step executor`) to "runs
+  against a real HTTP server."
+- The per-check `CheckBrowser` is still opened even on API-only
+  checks — every catalog entry registers through the production
+  dispatcher whose `requires_page()` defaults to `true`. Stripping
+  the browser for API-only Verification Definitions is an
+  optimization deferred to a follow-up spec; the cost is one
+  Playwright launch per check.
+
+#### Reserved (not yet implemented)
+
+- `api/observe` — passive sniffing of requests the `ui/*` actions
+  trigger. Declared in `docs/duhem-spec.md` §10.5; same trait,
+  follow-up spec (needs Playwright `Route` / network-interception
+  plumbing).
+
+#### Wire format
+
+- No change to `VerificationDefinition`, `Step`, or `Assertion`
+  shapes — additive only.
+- Workspace `reqwest` dep tightened to
+  `default-features = false, features = ["json", "rustls-tls"]`
+  so the API client uses rustls end-to-end (no OS-level OpenSSL
+  dependency).
+
+#### Operator notes
+
+- No new install step beyond what `ui/*` already requires. The
+  `api_smoke` runtime integration test is `#[ignore]`'d because
+  the engine still launches Chromium per check (browser-strip
+  optimization is the follow-up).
 ### typed input catalog
 
 `InputDecl.type` was an opaque string at v0.1 (#13); CLI `--inputs k=v`

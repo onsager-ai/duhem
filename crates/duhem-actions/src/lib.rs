@@ -10,6 +10,7 @@
 //! invocations into a check) lives in `duhem-runtime`.
 
 pub mod action;
+pub mod api;
 pub mod error;
 pub mod locator;
 pub mod playwright;
@@ -17,6 +18,7 @@ pub mod ui;
 pub mod with;
 
 pub use action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN, Observation, Outcome};
+pub use api::Call;
 pub use error::ActionError;
 pub use locator::{ExistenceState, Locator};
 pub use playwright::{CheckBrowser, RunBrowser, to_selector};

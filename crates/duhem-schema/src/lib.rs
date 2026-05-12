@@ -18,4 +18,4 @@ pub use criterion::{Check, Criterion};
 pub use expr::{BinOp, Expr, ExprStr, Literal, ParseError, Path, PathRoot, UnaryOp};
 pub use step::Step;
 pub use validate::{ValidationError, validate};
-pub use verification::{InputDecl, SchemaError, VerificationDefinition};
+pub use verification::{InputDecl, InputType, SchemaError, VerificationDefinition};

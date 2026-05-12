@@ -1,0 +1,41 @@
+verification: Typed inputs smoke
+inputs:
+  allow_invites:
+    type: boolean
+    default: true
+  feature_flags:
+    type: object
+    default:
+      dark_mode: true
+  member_count:
+    type: integer
+    default: 3
+  roles:
+    type: array
+    default:
+    - admin
+    - viewer
+  threshold:
+    type: number
+    default: 0.85
+  workspace_name:
+    type: string
+    default: ws-default
+criteria:
+- id: AC-1
+  description: Typed inputs round-trip through expressions and assertions.
+  checks:
+  - id: AC-1.1
+    assertions:
+    - $inputs.member_count == 3
+    - $inputs.allow_invites == true
+    - type_check:
+        value: $inputs.feature_flags
+        is: object
+    - type_check:
+        value: $inputs.roles
+        is: array
+    - type_check:
+        value: $inputs.threshold
+        is: float
+    - $inputs.workspace_name == "ws-default"

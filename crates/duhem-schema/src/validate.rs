@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use crate::criterion::{Check, Criterion};
 use crate::expr::{Path, PathRoot};
-use crate::verification::{InputDecl, VerificationDefinition};
+use crate::verification::{InputDecl, InputType, VerificationDefinition};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ValidationError {
@@ -81,6 +81,15 @@ pub enum ValidationError {
         check: String,
         raw: String,
     },
+
+    #[error(
+        "input `{input}`: default value type `{actual}` does not match declared type `{declared}`"
+    )]
+    InputDefaultTypeMismatch {
+        input: String,
+        declared: InputType,
+        actual: String,
+    },
 }
 
 /// Run every structural rule. Always reports as many errors as
@@ -93,6 +102,20 @@ pub fn validate(v: &VerificationDefinition) -> Result<(), Vec<ValidationError>> 
         errs.push(ValidationError::NoCriteria);
     }
 
+    for (name, decl) in &v.inputs {
+        if let Some(default) = &decl.default
+            && let Some(actual) = yml_shape(default)
+            && actual != decl.kind
+            && !matches_with_promotion(decl.kind, actual)
+        {
+            errs.push(ValidationError::InputDefaultTypeMismatch {
+                input: name.clone(),
+                declared: decl.kind,
+                actual: yml_shape_name(default).to_string(),
+            });
+        }
+    }
+
     let mut seen_criteria: HashSet<&str> = HashSet::new();
     for c in &v.criteria {
         if !seen_criteria.insert(c.id.as_str()) {
@@ -102,6 +125,57 @@ pub fn validate(v: &VerificationDefinition) -> Result<(), Vec<ValidationError>> 
     }
 
     if errs.is_empty() { Ok(()) } else { Err(errs) }
+}
+
+/// Best-effort `InputType` classification for a YAML default. Returns
+/// `None` for shapes that don't map to a v1 catalog member (e.g. tagged
+/// values, `null`); the caller treats those as "can't compare" and
+/// skips the structural check rather than firing a false positive.
+fn yml_shape(v: &serde_yml::Value) -> Option<InputType> {
+    use serde_yml::Value as Y;
+    match v {
+        Y::String(_) => Some(InputType::String),
+        Y::Bool(_) => Some(InputType::Boolean),
+        Y::Number(n) => {
+            if n.is_i64() || n.is_u64() {
+                Some(InputType::Integer)
+            } else {
+                Some(InputType::Number)
+            }
+        }
+        Y::Sequence(_) => Some(InputType::Array),
+        Y::Mapping(_) => Some(InputType::Object),
+        Y::Null | Y::Tagged(_) => None,
+    }
+}
+
+/// Human-readable wire name for a default's actual shape. Used only
+/// for the error message; the comparison itself goes through
+/// `yml_shape`.
+fn yml_shape_name(v: &serde_yml::Value) -> &'static str {
+    use serde_yml::Value as Y;
+    match v {
+        Y::String(_) => "string",
+        Y::Bool(_) => "boolean",
+        Y::Number(n) => {
+            if n.is_i64() || n.is_u64() {
+                "integer"
+            } else {
+                "number"
+            }
+        }
+        Y::Sequence(_) => "array",
+        Y::Mapping(_) => "object",
+        Y::Null => "null",
+        Y::Tagged(_) => "tagged",
+    }
+}
+
+/// An integer is also a valid `number` (no fractional part required).
+/// The reverse — a fractional `number` under `type: integer` — is a
+/// real mismatch and falls through to the error path.
+fn matches_with_promotion(declared: InputType, actual: InputType) -> bool {
+    matches!((declared, actual), (InputType::Number, InputType::Integer))
 }
 
 fn validate_criterion(
@@ -485,6 +559,95 @@ criteria:
 "#;
         let v = parse(y);
         validate(&v).expect("$runtime should not fail");
+    }
+
+    #[test]
+    fn matching_defaults_validate_for_every_type() {
+        let y = r#"
+verification: ok
+inputs:
+  s: { type: string,  default: "hi" }
+  i: { type: integer, default: 3 }
+  n: { type: number,  default: 0.85 }
+  b: { type: boolean, default: true }
+  a: { type: array,   default: ["x", "y"] }
+  o: { type: object,  default: { k: 1 } }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        validate(&v).expect("all defaults match");
+    }
+
+    #[test]
+    fn integer_default_is_valid_for_number_type() {
+        // `integer` is a subset of `number`; the validator promotes.
+        let y = r#"
+verification: ok
+inputs:
+  threshold: { type: number, default: 1 }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        validate(&v).expect("integer default under `number` should validate");
+    }
+
+    #[test]
+    fn fractional_default_under_integer_type_fails() {
+        let y = r#"
+verification: x
+inputs:
+  count: { type: integer, default: 0.5 }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::InputDefaultTypeMismatch { input, declared, actual }
+                    if input == "count" && *declared == InputType::Integer && actual == "number"
+            )),
+            "expected InputDefaultTypeMismatch, got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn string_default_under_integer_fails() {
+        let y = r#"
+verification: x
+inputs:
+  count: { type: integer, default: "nope" }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::InputDefaultTypeMismatch { input, .. } if input == "count"
+            )),
+            "expected mismatch on `count`, got {errs:?}"
+        );
     }
 
     #[test]

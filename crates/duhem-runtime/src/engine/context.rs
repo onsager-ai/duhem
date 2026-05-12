@@ -37,6 +37,10 @@ pub struct RunState {
     pub inputs: BTreeMap<String, Value>,
     pub env: BTreeMap<String, String>,
     pub uuid: String,
+    /// `$setup.<step_id>.outputs.<name>` lookup map. Populated once
+    /// by `Engine::run` from the run-level `setup:` block (issue #20)
+    /// before any criterion runs; read-only from inside a check.
+    pub setup_outputs: BTreeMap<(String, String), Value>,
 }
 
 impl RunState {
@@ -45,6 +49,7 @@ impl RunState {
             inputs,
             env: BTreeMap::new(),
             uuid: uuid::Uuid::new_v4().to_string(),
+            setup_outputs: BTreeMap::new(),
         }
     }
 
@@ -53,6 +58,13 @@ impl RunState {
     pub fn with_env(mut self, env: BTreeMap<String, String>) -> Self {
         self.env = env;
         self
+    }
+
+    /// Record an observed `$setup.<step_id>.outputs.<name>` value.
+    /// Called by `Engine::run` while walking `def.setup`.
+    pub fn record_setup_output(&mut self, step_id: &str, name: &str, value: Value) {
+        self.setup_outputs
+            .insert((step_id.to_string(), name.to_string()), value);
     }
 }
 
@@ -86,6 +98,12 @@ impl<'r> EvalContext for RunContext<'r> {
 
     fn output(&self, step_id: &str, output: &str) -> Option<&Value> {
         self.outputs.get(&(step_id.to_string(), output.to_string()))
+    }
+
+    fn setup_output(&self, step_id: &str, output: &str) -> Option<&Value> {
+        self.run
+            .setup_outputs
+            .get(&(step_id.to_string(), output.to_string()))
     }
 
     fn env(&self, name: &str) -> Option<&str> {

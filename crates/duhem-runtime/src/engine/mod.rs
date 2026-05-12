@@ -10,6 +10,7 @@
 pub mod context;
 pub mod registry;
 pub mod runner;
+pub mod setup;
 pub mod shim;
 pub mod template;
 

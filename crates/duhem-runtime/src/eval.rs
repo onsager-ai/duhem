@@ -28,6 +28,11 @@ pub enum InconclusiveCause {
     /// `$steps.X.outputs.Y` references a step output that was never
     /// produced (timed out, didn't run, extractor returned no value).
     MissingObservation { step: String, output: String },
+    /// `$setup.X.outputs.Y` references a setup step output that was
+    /// never produced. Distinct from `MissingObservation` so evidence
+    /// `detail` can tell an author "the setup step didn't seed it"
+    /// from "the check step didn't capture it" (#20).
+    MissingSetupObservation { step: String, output: String },
     /// `$inputs.X` not present at run time. Defense-in-depth — the
     /// schema validator should catch this at authoring time.
     MissingInput(String),
@@ -83,6 +88,14 @@ impl Value {
 pub trait EvalContext {
     fn input(&self, name: &str) -> Option<&Value>;
     fn output(&self, step_id: &str, output: &str) -> Option<&Value>;
+    /// Lookup `$setup.<step_id>.outputs.<name>` against the run-level
+    /// setup block. Run-scoped and read-only across checks (#20).
+    /// Default implementation returns `None` so the trait stays
+    /// backwards-compatible with callers built before #20; in-tree
+    /// implementations override.
+    fn setup_output(&self, _step_id: &str, _output: &str) -> Option<&Value> {
+        None
+    }
     fn env(&self, name: &str) -> Option<&str>;
     /// UUID for this run; cached on the context so a definition that
     /// uses `$runtime.uuid()` twice gets the same value (the
@@ -172,6 +185,18 @@ fn eval_path(p: &Path, ctx: &dyn EvalContext) -> EvalRes {
                     step: step.to_string(),
                     output: output.to_string(),
                 })
+        }
+        PathRoot::Setup => {
+            // `$setup.<step_id>.outputs.<output>` — same shape as
+            // `$steps`, resolved against the run-level setup map.
+            let step = p.segments.first().map(String::as_str).unwrap_or("");
+            let output = p.segments.get(2).map(String::as_str).unwrap_or("");
+            ctx.setup_output(step, output).cloned().ok_or_else(|| {
+                InconclusiveCause::MissingSetupObservation {
+                    step: step.to_string(),
+                    output: output.to_string(),
+                }
+            })
         }
         PathRoot::Env => {
             let name = p.segments.first().map(String::as_str).unwrap_or("");

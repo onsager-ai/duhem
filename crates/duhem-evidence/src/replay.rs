@@ -140,7 +140,20 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
             EventPayload::RunFinished { verdict } => {
                 recorded_run = Some(*verdict);
             }
-            EventPayload::StepObservation { .. } | EventPayload::StepFinished { .. } => {}
+            EventPayload::StepObservation { .. }
+            | EventPayload::StepFinished { .. }
+            | EventPayload::SetupStarted { .. }
+            | EventPayload::SetupStepStarted { .. }
+            | EventPayload::SetupStepObservation { .. }
+            | EventPayload::SetupStepFinished { .. }
+            | EventPayload::SetupFinished { .. } => {
+                // Setup events don't produce per-criterion verdicts —
+                // they're a run-level boundary marker. The judge's
+                // fold sees only criterion verdicts, and `Engine::run`
+                // emits `RunFinished` directly on setup-abort (#20)
+                // so replay still has the recorded run verdict to
+                // compare against.
+            }
         }
     }
 

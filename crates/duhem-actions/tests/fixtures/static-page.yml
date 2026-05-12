@@ -17,6 +17,20 @@ inputs:
   fixture_url:
     type: string
 
+# Setup runs once before the criteria (#20). Pre-navigates and
+# probes for the Create button so the check can reference setup
+# outputs via `$setup.*`. Setup gets its own browser context — only
+# named outputs cross into the per-check browser; state does not.
+setup:
+  - uses: ui/navigate
+    with: { url: $inputs.fixture_url }
+  - id: probe
+    uses: ui/assert-element
+    with:
+      locator: { role: "button", name: "Create" }
+      expected: visible
+      within: 2s
+
 criteria:
   - id: AC-1
     description: |
@@ -37,3 +51,4 @@ criteria:
               within: 2s
         assertions:
           - $steps.banner.outputs.satisfied == true
+          - $setup.probe.outputs.satisfied == true

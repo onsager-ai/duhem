@@ -103,6 +103,28 @@ pub enum EventPayload {
         inputs: BTreeMap<String, serde_json::Value>,
         schema_version: String,
     },
+    SetupStarted {
+        step_count: u32,
+    },
+    SetupStepStarted {
+        step_index: u32,
+        uses: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        with: BTreeMap<String, serde_json::Value>,
+    },
+    SetupStepObservation {
+        step_index: u32,
+        output_name: String,
+        #[serde(flatten)]
+        value: ObservationValue,
+    },
+    SetupStepFinished {
+        step_index: u32,
+        outcome: StepOutcome,
+    },
+    SetupFinished {
+        aborted: bool,
+    },
     StepStarted {
         criterion_id: String,
         check_id: String,
@@ -148,7 +170,9 @@ impl EventPayload {
     pub fn is_finished(&self) -> bool {
         matches!(
             self,
-            EventPayload::StepFinished { .. }
+            EventPayload::SetupStepFinished { .. }
+                | EventPayload::SetupFinished { .. }
+                | EventPayload::StepFinished { .. }
                 | EventPayload::CheckFinished { .. }
                 | EventPayload::CriterionFinished { .. }
                 | EventPayload::RunFinished { .. }
@@ -221,6 +245,69 @@ mod tests {
     fn unknown_kind_is_a_hard_error() {
         let bad = r#"{"seq":0,"ts":"2026-05-08T12:00:00.000Z","kind":"made_up"}"#;
         assert!(serde_json::from_str::<Event>(bad).is_err());
+    }
+
+    #[test]
+    fn setup_variants_round_trip() {
+        let cases: Vec<EventPayload> = vec![
+            EventPayload::SetupStarted { step_count: 2 },
+            EventPayload::SetupStepStarted {
+                step_index: 0,
+                uses: "ui/navigate".into(),
+                with: BTreeMap::new(),
+            },
+            EventPayload::SetupStepObservation {
+                step_index: 0,
+                output_name: "landed_at".into(),
+                value: ObservationValue::Inline {
+                    value: serde_json::json!("http://x/"),
+                },
+            },
+            EventPayload::SetupStepFinished {
+                step_index: 0,
+                outcome: StepOutcome::Ok,
+            },
+            EventPayload::SetupFinished { aborted: false },
+        ];
+        for payload in cases {
+            let evt = Event {
+                seq: 1,
+                ts: ts(),
+                payload,
+            };
+            let line = serde_json::to_string(&evt).unwrap();
+            let back: Event = serde_json::from_str(&line).unwrap();
+            assert_eq!(evt, back, "round-trip via {line}");
+        }
+    }
+
+    #[test]
+    fn setup_finished_is_a_finished_event() {
+        // Setup spec on #20: `SetupFinished` fsyncs (same rule as the
+        // other `*_finished` events in #10). `is_finished()` is the
+        // wire on that policy.
+        assert!(EventPayload::SetupFinished { aborted: false }.is_finished());
+        assert!(EventPayload::SetupFinished { aborted: true }.is_finished());
+        assert!(
+            EventPayload::SetupStepFinished {
+                step_index: 0,
+                outcome: StepOutcome::Ok,
+            }
+            .is_finished()
+        );
+        // Setup-side started / observation events are non-finishing,
+        // same as their per-check counterparts.
+        assert!(!EventPayload::SetupStarted { step_count: 1 }.is_finished());
+        assert!(
+            !EventPayload::SetupStepObservation {
+                step_index: 0,
+                output_name: "n".into(),
+                value: ObservationValue::Inline {
+                    value: serde_json::json!(1),
+                },
+            }
+            .is_finished()
+        );
     }
 
     #[test]

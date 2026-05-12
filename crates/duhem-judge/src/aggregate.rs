@@ -105,6 +105,17 @@ pub fn aggregate_criterion(verdicts: &[CheckVerdict]) -> VerdictState {
 /// Roll up all criteria into a `RunVerdict`. Consumes the children
 /// so the caller does not have to clone them — they're already the
 /// canonical record for evidence.
+///
+/// **Empty input.** `aggregate_run(vec![])` is defined as
+/// `Inconclusive(EmptyAggregation)`. Before the setup-step spec
+/// (issue #20) the engine never called it with no criteria — the
+/// schema validator forbids empty `criteria`. Setup execution
+/// changes that: when run-level setup aborts under §10.3's failure
+/// policy, no criterion executes and the run finishes with an empty
+/// criterion vector. Returning `Inconclusive` here is the
+/// three-state-faithful answer — we couldn't observe the workload
+/// in the state the Verification Definition claims to verify, so
+/// the verdict is "we don't know," not "fail."
 pub fn aggregate_run(verdicts: Vec<CriterionVerdict>) -> RunVerdict {
     let state = fold_verdicts(verdicts.iter().map(|c| c.state));
     RunVerdict {

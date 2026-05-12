@@ -11,6 +11,76 @@ their own minor bumps.
 
 ## v0.1.0 — unreleased
 
+### typed input catalog
+
+`InputDecl.type` was an opaque string at v0.1 (#13); CLI `--inputs k=v`
+carried unchanged into `RunContext` as a string regardless of the
+declared type. This spec promotes `type` to a closed catalog and
+teaches the CLI to coerce values per the declaration so authors get
+real integers, booleans, arrays, and objects in expressions and
+`type_check` assertions.
+
+#### Changed (BREAKING)
+
+- `InputDecl.type` is now a closed catalog
+  (`string|integer|number|boolean|array|object`); unknown type names
+  are parse errors at `from_yaml_str`. (`docs/duhem-spec.md` §7.5
+  / §10.7.)
+- CLI `--inputs k=v` coerces `v` per the declared type:
+  - `string` — taken literally; no JSON parse.
+  - `integer` — parsed as `i64`; fractional rejected.
+  - `number` — parsed as integer or `f64`; fractional allowed.
+  - `boolean` — only `true` / `false` accepted (strict; rejects
+    `1`/`0`/`yes`/`no` per the Alignment decision).
+  - `array` / `object` — JSON-parsed; shape-checked against the
+    declared kind.
+- `Engine::run` input signature: `BTreeMap<String, String>` →
+  `BTreeMap<String, serde_json::Value>`. Callers pass typed values;
+  the engine no longer collapses everything to `Value::Str`.
+- Inputs declared without a `default:` and not supplied on the
+  command line now fail before `Engine::run` is invoked
+  (`missing required input: <name>`). Inputs not declared but
+  passed on the command line fail similarly (`unknown input:
+  <name>`).
+- Runtime `Value` grows `Array(Vec<Value>)` and
+  `Object(BTreeMap<String, Value>)` variants so declared `array` /
+  `object` inputs flow through the evaluator. Equality / ordering
+  over arrays / objects still surface as `TypeMismatch`; the
+  comparison surface is unchanged. `type_check` is the supported
+  interaction at v1.
+
+#### Added
+
+- `ValidationError::InputDefaultTypeMismatch { input, declared,
+  actual }` — fires when a declared `default:` doesn't structurally
+  match its `type:`. Integer defaults under `number` are
+  promoted (no error); everything else must match exactly.
+- `fixtures/typed-inputs.yml` — worked example exercising all six
+  catalog types in declarations and assertions.
+
+#### Migration
+
+- Verification Definitions whose `type:` value is in the catalog
+  (the only one used by fixtures today is `string`) work unchanged.
+- Out-of-catalog `type:` names become a parse error — fix the
+  Verification Definition.
+- Callers passing `--inputs count=3` against `type: integer` no
+  longer silently see `Value::Str("3")` — assertions like
+  `$inputs.count == 3` now compare like-against-like and pass.
+- Programmatic callers of `Engine::run` swap their string map for
+  `serde_json::Value`.
+
+#### Deferred (named for traceability)
+
+- Optional inputs (`optional: true` / explicit `null`). Today an
+  input without `default:` is required; opt-in absence is a follow-
+  up spec.
+- Refined-type catalog members (`uuid`, `email`, regex-bounded
+  strings). `type_check` already covers post-hoc typing; declaring
+  them upfront is Phase-2+.
+- Schema-driven `--<input-name>` CLI flags. Authors still pass
+  `--inputs key=value`.
+
 ### evidence trace v1
 
 First on-disk format for verification evidence. One run = one

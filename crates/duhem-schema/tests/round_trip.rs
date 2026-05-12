@@ -8,10 +8,19 @@
 use duhem_schema::{ValidationError, VerificationDefinition, validate};
 
 const POSITIVE: &str = include_str!("../fixtures/create-workspace.yml");
+const TYPED_INPUTS: &str = include_str!("../fixtures/typed-inputs.yml");
 
 #[test]
 fn worked_example_parses_and_validates() {
     let v = VerificationDefinition::from_yaml_str(POSITIVE).expect("parse");
+    validate(&v).expect("validate");
+}
+
+#[test]
+fn typed_inputs_fixture_parses_and_validates() {
+    // Worked example for the typed-input-catalog spec. Exercises all
+    // six catalog types in `inputs:` declarations and in assertions.
+    let v = VerificationDefinition::from_yaml_str(TYPED_INPUTS).expect("parse");
     validate(&v).expect("validate");
 }
 

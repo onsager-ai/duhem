@@ -100,14 +100,8 @@ async fn api_echo_fixture_passes_end_to_end_and_replays() {
         .with_evidence_root(tmp.path());
 
     let mut inputs = BTreeMap::new();
-    inputs.insert(
-        "echo_url".to_string(),
-        serde_json::Value::String(echo_url),
-    );
-    inputs.insert(
-        "uuid_url".to_string(),
-        serde_json::Value::String(uuid_url),
-    );
+    inputs.insert("echo_url".to_string(), serde_json::Value::String(echo_url));
+    inputs.insert("uuid_url".to_string(), serde_json::Value::String(uuid_url));
 
     let verdict = engine.run(&def, inputs).await.expect("engine.run");
     assert_eq!(verdict.state, VerdictState::Pass, "verdict = {verdict:?}");

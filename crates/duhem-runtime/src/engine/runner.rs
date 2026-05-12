@@ -147,7 +147,7 @@ impl Engine {
                 .ok_or_else(|| EngineError::InputUnrepresentable { name: k.clone() })?;
             input_values.insert(k.clone(), val);
         }
-        let run_state = RunState::new(input_values);
+        let mut run_state = RunState::new(input_values);
 
         let run_id = new_run_id();
         let run_dir = self.evidence_root.join(&run_id);
@@ -165,6 +165,36 @@ impl Engine {
         let mut writer = EvidenceWriter::new(&run_dir, &evidence_path)?;
 
         writer.append(run_started(evidence_path.clone(), inputs.clone()))?;
+
+        // Run-level `setup:` runs once before any criterion. Skipped
+        // entirely when empty so the wire shape stays byte-identical
+        // for setup-free Verification Definitions (issue #20).
+        if !def.setup.is_empty() {
+            let r = crate::engine::setup::run_setup(
+                &mut writer,
+                &self.registry,
+                self.browser.as_ref(),
+                &mut run_state,
+                &def.setup,
+            )
+            .await?;
+            if let Some(reason) = r.aborted {
+                // Preserve the trigger on the verdict: a setup-step
+                // `Timeout` surfaces as `Inconclusive(Timeout)`; an
+                // `Error` (or any environmental precondition) as
+                // `Inconclusive(EnvironmentError)`. Conflating the
+                // two would lose useful telemetry on the trace.
+                let verdict = RunVerdict {
+                    state: VerdictState::Inconclusive(reason.cause()),
+                    criteria: Vec::new(),
+                };
+                writer.append(EventPayload::RunFinished {
+                    verdict: verdict.state,
+                })?;
+                writer.finish()?;
+                return Ok(verdict);
+            }
+        }
 
         let mut criterion_verdicts: Vec<CriterionVerdict> = Vec::new();
         for criterion in &def.criteria {
@@ -392,6 +422,7 @@ fn eval_to_state(r: &EvalResult) -> VerdictState {
 fn map_eval_cause(c: &EvalCause) -> InconclusiveCause {
     match c {
         EvalCause::MissingObservation { .. }
+        | EvalCause::MissingSetupObservation { .. }
         | EvalCause::MissingInput(_)
         | EvalCause::MissingEnv(_) => InconclusiveCause::MissingObservation,
         EvalCause::UnknownRuntimeHelper(_)
@@ -411,6 +442,9 @@ fn eval_cause_detail(c: &EvalCause) -> String {
     match c {
         EvalCause::MissingObservation { step, output } => {
             format!("missing_observation({step}.{output})")
+        }
+        EvalCause::MissingSetupObservation { step, output } => {
+            format!("missing_setup_observation({step}.{output})")
         }
         EvalCause::MissingInput(n) => format!("missing_input({n})"),
         EvalCause::MissingEnv(n) => format!("missing_env({n})"),
@@ -435,7 +469,7 @@ fn shape_wire(s: crate::eval::ValueShape) -> &'static str {
     }
 }
 
-fn outcome_to_evidence(o: &Outcome) -> StepOutcome {
+pub(super) fn outcome_to_evidence(o: &Outcome) -> StepOutcome {
     match o {
         Outcome::Ok => StepOutcome::Ok,
         Outcome::Error => StepOutcome::Error,
@@ -443,7 +477,7 @@ fn outcome_to_evidence(o: &Outcome) -> StepOutcome {
     }
 }
 
-fn with_to_evidence_map(v: &serde_yml::Value) -> BTreeMap<String, serde_json::Value> {
+pub(super) fn with_to_evidence_map(v: &serde_yml::Value) -> BTreeMap<String, serde_json::Value> {
     match v {
         serde_yml::Value::Mapping(m) => m
             .iter()
@@ -814,6 +848,33 @@ criteria:
     }
 
     #[tokio::test]
+    async fn setup_output_threads_into_check_assertion() {
+        // Spec on #20: `$setup.<id>.outputs.<x>` resolves in a check
+        // assertion when a setup step produced output `<x>`. Inverse
+        // (missing output) yields the run-level
+        // Inconclusive(MissingObservation) path through the assertion.
+        let (mut engine, _tmp) = engine_for_test();
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/seed", Outcome::Ok).with_output("tok", serde_json::json!("abc")),
+        ));
+        let v = def(r#"
+verification: t
+setup:
+  - id: warm
+    uses: fake/seed
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $setup.warm.outputs.tok == "abc"
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Pass);
+    }
+
+    #[tokio::test]
     async fn typed_input_catalog_flows_end_to_end() {
         // Typed-input-catalog spec worked example: declared integer /
         // boolean / object inputs reach the evaluator as the right
@@ -844,6 +905,180 @@ criteria:
         );
         let verdict = engine.run(&v, inputs).await.unwrap();
         assert_eq!(verdict.state, VerdictState::Pass);
+    }
+
+    #[tokio::test]
+    async fn setup_error_aborts_run_with_inconclusive() {
+        // Spec on #20: a setup step returning Outcome::Error aborts
+        // setup, no criterion executes, the run verdict is
+        // Inconclusive, and `SetupFinished { aborted: true }` is on
+        // the trace.
+        let (mut engine, tmp) = engine_for_test();
+        engine.register_test_action(Box::new(StubAction::new("fake/boom", Outcome::Error)));
+        let criterion_calls = Arc::new(AtomicUsize::new(0));
+        let criterion_tracker = StubAction {
+            uses: "fake/criterion",
+            outcome: Outcome::Ok,
+            outputs: Vec::new(),
+            invocations: criterion_calls.clone(),
+        };
+        engine.register_test_action(Box::new(criterion_tracker));
+        let v = def(r#"
+verification: t
+setup:
+  - uses: fake/boom
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/criterion
+        assertions:
+          - "true"
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert!(
+            matches!(verdict.state, VerdictState::Inconclusive(_)),
+            "got {verdict:?}"
+        );
+        assert!(verdict.criteria.is_empty(), "no criterion should execute");
+        assert_eq!(
+            criterion_calls.load(Ordering::SeqCst),
+            0,
+            "criteria must not run after setup abort"
+        );
+        // Evidence carries `setup_finished { aborted: true }`.
+        let events = read_only_run_events(&tmp);
+        let saw_aborted = events.iter().any(|e| {
+            matches!(
+                &e.payload,
+                duhem_evidence::EventPayload::SetupFinished { aborted: true }
+            )
+        });
+        assert!(saw_aborted, "expected SetupFinished aborted=true");
+    }
+
+    #[tokio::test]
+    async fn setup_timeout_aborts_run_with_inconclusive_timeout() {
+        // Companion to `setup_error_aborts_run_with_inconclusive`:
+        // the abort policy applies to `Outcome::Timeout` too, and the
+        // verdict's `InconclusiveCause` distinguishes it from an
+        // environmental setup failure.
+        let (mut engine, tmp) = engine_for_test();
+        engine.register_test_action(Box::new(StubAction::new("fake/slow", Outcome::Timeout)));
+        let criterion_calls = Arc::new(AtomicUsize::new(0));
+        let criterion_tracker = StubAction {
+            uses: "fake/criterion",
+            outcome: Outcome::Ok,
+            outputs: Vec::new(),
+            invocations: criterion_calls.clone(),
+        };
+        engine.register_test_action(Box::new(criterion_tracker));
+        let v = def(r#"
+verification: t
+setup:
+  - uses: fake/slow
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/criterion
+        assertions:
+          - "true"
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::Timeout),
+            "got {verdict:?}"
+        );
+        assert!(verdict.criteria.is_empty(), "no criterion should execute");
+        assert_eq!(
+            criterion_calls.load(Ordering::SeqCst),
+            0,
+            "criteria must not run after setup timeout"
+        );
+        let events = read_only_run_events(&tmp);
+        let saw_aborted = events.iter().any(|e| {
+            matches!(
+                &e.payload,
+                duhem_evidence::EventPayload::SetupFinished { aborted: true }
+            )
+        });
+        assert!(saw_aborted, "expected SetupFinished aborted=true");
+    }
+
+    #[tokio::test]
+    async fn empty_setup_emits_no_setup_events() {
+        // Spec on #20: a definition with no `setup:` block produces a
+        // byte-identical trace to today's setup-free definitions.
+        let (mut engine, tmp) = engine_for_test();
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions:
+          - "true"
+"#);
+        let _ = engine.run(&v, BTreeMap::new()).await.unwrap();
+        let events = read_only_run_events(&tmp);
+        let has_setup = events.iter().any(|e| {
+            matches!(
+                e.payload,
+                duhem_evidence::EventPayload::SetupStarted { .. }
+                    | duhem_evidence::EventPayload::SetupStepStarted { .. }
+                    | duhem_evidence::EventPayload::SetupStepObservation { .. }
+                    | duhem_evidence::EventPayload::SetupStepFinished { .. }
+                    | duhem_evidence::EventPayload::SetupFinished { .. }
+            )
+        });
+        assert!(!has_setup, "no Setup* events for empty setup block");
+    }
+
+    #[tokio::test]
+    async fn missing_setup_output_in_assertion_is_inconclusive() {
+        // Spec on #20: `$setup.s1.outputs.missing` evaluates to
+        // Inconclusive(MissingObservation) — the
+        // `MissingSetupObservation` evaluator cause maps to the
+        // judge-level `MissingObservation` verdict.
+        let (mut engine, tmp) = engine_for_test();
+        engine.register_test_action(Box::new(StubAction::new("fake/seed", Outcome::Ok)));
+        let v = def(r#"
+verification: t
+setup:
+  - id: warm
+    uses: fake/seed
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $setup.warm.outputs.nope == "x"
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert!(matches!(
+            verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+        ));
+        let events = read_only_run_events(&tmp);
+        let detail = events
+            .iter()
+            .find_map(|e| match &e.payload {
+                duhem_evidence::EventPayload::AssertionEvaluated { detail, .. } => detail.clone(),
+                _ => None,
+            })
+            .unwrap_or_default();
+        assert!(
+            detail.starts_with("missing_setup_observation("),
+            "expected missing_setup_observation detail, got {detail:?}"
+        );
     }
 
     #[tokio::test]

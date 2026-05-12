@@ -180,6 +180,75 @@ fn blob_threshold_inlines_small_and_blobs_large() {
 }
 
 #[test]
+fn replay_handles_setup_events_transparently() {
+    // Spec on #20: a trace that contains `Setup*` events replays back
+    // to the recorded `RunVerdict`. Setup events don't feed the
+    // criterion fold — they're a run-level boundary — so injecting
+    // them into the worked-example trace must not change the replayed
+    // verdict.
+    let (_tmp, dir) = run_dir();
+    let mut w = EvidenceWriter::new(&dir, "create-workspace.yml").unwrap();
+    let mut inputs = BTreeMap::new();
+    inputs.insert("workspace_name".into(), serde_json::json!("test-ws-018f"));
+    w.append(run_started("create-workspace.yml", inputs))
+        .unwrap();
+    w.append(EventPayload::SetupStarted { step_count: 1 })
+        .unwrap();
+    w.append(EventPayload::SetupStepStarted {
+        step_index: 0,
+        uses: "ui/navigate".into(),
+        with: BTreeMap::new(),
+    })
+    .unwrap();
+    w.append(EventPayload::SetupStepFinished {
+        step_index: 0,
+        outcome: StepOutcome::Ok,
+    })
+    .unwrap();
+    w.append(EventPayload::SetupFinished { aborted: false })
+        .unwrap();
+    w.append(EventPayload::StepStarted {
+        criterion_id: "AC-1".into(),
+        check_id: "AC-1.1".into(),
+        step_index: 0,
+        uses: "ui/click".into(),
+        with: BTreeMap::new(),
+    })
+    .unwrap();
+    w.append(EventPayload::StepFinished {
+        step_index: 0,
+        outcome: StepOutcome::Ok,
+    })
+    .unwrap();
+    w.append(EventPayload::AssertionEvaluated {
+        check_id: "AC-1.1".into(),
+        assertion_index: 0,
+        state: VerdictState::Pass,
+        detail: None,
+    })
+    .unwrap();
+    w.append(EventPayload::CheckFinished {
+        check_id: "AC-1.1".into(),
+        verdict: VerdictState::Pass,
+    })
+    .unwrap();
+    w.append(EventPayload::CriterionFinished {
+        criterion_id: "AC-1".into(),
+        verdict: VerdictState::Pass,
+    })
+    .unwrap();
+    w.append(EventPayload::RunFinished {
+        verdict: VerdictState::Pass,
+    })
+    .unwrap();
+    w.finish().unwrap();
+
+    let trace = Trace::open(&dir).unwrap();
+    let replayed = replay(&trace).unwrap();
+    assert_eq!(replayed.run.state, VerdictState::Pass);
+}
+
+#[test]
 fn replay_passes_on_recorded_trace() {
     let (_tmp, dir) = run_dir();
     write_worked_example(&dir);

@@ -115,6 +115,10 @@ pub enum PathRoot {
     /// `$steps.<step_id>.outputs.<output_name>` — bound by the
     /// declaring check.
     Steps,
+    /// `$setup.<step_id>.outputs.<output_name>` — bound by the
+    /// Verification Definition's run-level `setup:` block. Run-scoped
+    /// and read-only from inside any check (per issue #20).
+    Setup,
     /// `$inputs.<input_name>` — bound by the Verification Definition's
     /// `inputs:` block.
     Inputs,
@@ -133,6 +137,7 @@ impl PathRoot {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Steps => "steps",
+            Self::Setup => "setup",
             Self::Inputs => "inputs",
             Self::Env => "env",
             Self::Runtime => "runtime",

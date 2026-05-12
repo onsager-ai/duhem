@@ -34,6 +34,11 @@ fn fixture_parses_at_schema_layer() {
         def.criteria[0].checks[0].steps[2].id.as_deref(),
         Some("banner")
     );
+    // Run-level setup block (issue #20).
+    assert_eq!(def.setup.len(), 2);
+    assert_eq!(def.setup[0].uses, "ui/navigate");
+    assert_eq!(def.setup[1].id.as_deref(), Some("probe"));
+    assert_eq!(def.setup[1].uses, "ui/assert-element");
 }
 
 #[test]

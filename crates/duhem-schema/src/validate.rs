@@ -13,6 +13,7 @@ use thiserror::Error;
 
 use crate::criterion::{Check, Criterion};
 use crate::expr::{Path, PathRoot};
+use crate::step::Step;
 use crate::verification::{InputDecl, InputType, VerificationDefinition};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -82,6 +83,39 @@ pub enum ValidationError {
         raw: String,
     },
 
+    #[error("setup: duplicate step id `{id}`")]
+    DuplicateSetupStepId { id: String },
+
+    #[error(
+        "criterion `{criterion}` / check `{check}`: assertion `{raw}` references undeclared setup step `{step}`"
+    )]
+    UnresolvedSetupStepRef {
+        criterion: String,
+        check: String,
+        step: String,
+        raw: String,
+    },
+
+    #[error(
+        "criterion `{criterion}` / check `{check}`: assertion `{raw}` references undeclared output `{output}` on setup step `{step}`"
+    )]
+    UnresolvedSetupStepOutput {
+        criterion: String,
+        check: String,
+        step: String,
+        output: String,
+        raw: String,
+    },
+
+    #[error(
+        "criterion `{criterion}` / check `{check}`: malformed `$setup` reference `{raw}` (expected `$setup.<step_id>.outputs.<output>`)"
+    )]
+    MalformedSetupRef {
+        criterion: String,
+        check: String,
+        raw: String,
+    },
+
     #[error(
         "input `{input}`: default value type `{actual}` does not match declared type `{declared}`"
     )]
@@ -101,6 +135,8 @@ pub fn validate(v: &VerificationDefinition) -> Result<(), Vec<ValidationError>> 
     if v.criteria.is_empty() {
         errs.push(ValidationError::NoCriteria);
     }
+
+    let setup_outputs = collect_setup_outputs(&v.setup, &mut errs);
 
     for (name, decl) in &v.inputs {
         if let Some(default) = &decl.default {
@@ -137,10 +173,31 @@ pub fn validate(v: &VerificationDefinition) -> Result<(), Vec<ValidationError>> 
         if !seen_criteria.insert(c.id.as_str()) {
             errs.push(ValidationError::DuplicateCriterionId { id: c.id.clone() });
         }
-        validate_criterion(c, &v.inputs, &mut errs);
+        validate_criterion(c, &v.inputs, &setup_outputs, &mut errs);
     }
 
     if errs.is_empty() { Ok(()) } else { Err(errs) }
+}
+
+/// Walk the run-level `setup:` block. Enforces id-uniqueness and
+/// returns the map of `step_id → declared outputs` so per-check
+/// assertion validation can resolve `$setup.<id>.outputs.<name>`
+/// references.
+fn collect_setup_outputs<'a>(
+    setup: &'a [Step],
+    errs: &mut Vec<ValidationError>,
+) -> HashMap<&'a str, &'a BTreeMap<String, String>> {
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut outputs: HashMap<&str, &BTreeMap<String, String>> = HashMap::new();
+    for s in setup {
+        if let Some(id) = &s.id {
+            if !seen.insert(id.as_str()) {
+                errs.push(ValidationError::DuplicateSetupStepId { id: id.clone() });
+            }
+            outputs.insert(id.as_str(), &s.outputs);
+        }
+    }
+    outputs
 }
 
 /// Classify a YAML default's structural shape against the input
@@ -216,6 +273,7 @@ fn matches_with_promotion(declared: InputType, actual: InputType) -> bool {
 fn validate_criterion(
     c: &Criterion,
     inputs: &BTreeMap<String, InputDecl>,
+    setup_outputs: &HashMap<&str, &BTreeMap<String, String>>,
     errs: &mut Vec<ValidationError>,
 ) {
     let mut seen_checks: HashSet<&str> = HashSet::new();
@@ -226,14 +284,25 @@ fn validate_criterion(
                 id: ch.id.clone(),
             });
         }
-        validate_check(c, ch, inputs, errs);
+        validate_check(c, ch, inputs, setup_outputs, errs);
     }
+}
+
+/// Per-check view of resolvable references — bundled to keep
+/// `check_path`'s arity within clippy's `too_many_arguments` lint.
+struct PathScope<'a> {
+    c: &'a Criterion,
+    ch: &'a Check,
+    step_outputs: &'a HashMap<&'a str, &'a BTreeMap<String, String>>,
+    setup_outputs: &'a HashMap<&'a str, &'a BTreeMap<String, String>>,
+    inputs: &'a BTreeMap<String, InputDecl>,
 }
 
 fn validate_check(
     c: &Criterion,
     ch: &Check,
     inputs: &BTreeMap<String, InputDecl>,
+    setup_outputs: &HashMap<&str, &BTreeMap<String, String>>,
     errs: &mut Vec<ValidationError>,
 ) {
     let mut step_outputs: HashMap<&str, &BTreeMap<String, String>> = HashMap::new();
@@ -252,25 +321,31 @@ fn validate_check(
         }
     }
 
+    let scope = PathScope {
+        c,
+        ch,
+        step_outputs: &step_outputs,
+        setup_outputs,
+        inputs,
+    };
     for assertion in &ch.assertions {
         assertion.walk_exprs(|expr_str| {
             let raw = expr_str.raw.as_str();
             expr_str.parsed.walk_paths(|p| {
-                check_path(c, ch, p, raw, &step_outputs, inputs, errs);
+                check_path(&scope, p, raw, errs);
             });
         });
     }
 }
 
-fn check_path(
-    c: &Criterion,
-    ch: &Check,
-    path: &Path,
-    raw: &str,
-    step_outputs: &HashMap<&str, &BTreeMap<String, String>>,
-    inputs: &BTreeMap<String, InputDecl>,
-    errs: &mut Vec<ValidationError>,
-) {
+fn check_path(scope: &PathScope<'_>, path: &Path, raw: &str, errs: &mut Vec<ValidationError>) {
+    let PathScope {
+        c,
+        ch,
+        step_outputs,
+        setup_outputs,
+        inputs,
+    } = *scope;
     match path.root {
         PathRoot::Steps => {
             let segs = path.segments();
@@ -297,6 +372,40 @@ fn check_path(
                 Some(outputs) => {
                     if !outputs.contains_key(output_name) {
                         errs.push(ValidationError::UnresolvedStepOutput {
+                            criterion: c.id.clone(),
+                            check: ch.id.clone(),
+                            step: step_id.to_string(),
+                            output: output_name.to_string(),
+                            raw: raw.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        PathRoot::Setup => {
+            let segs = path.segments();
+            // `$setup.<step_id>.outputs.<output>` — same shape as
+            // `$steps`, resolved against the run-level setup block.
+            if segs.len() != 3 || segs[1] != "outputs" {
+                errs.push(ValidationError::MalformedSetupRef {
+                    criterion: c.id.clone(),
+                    check: ch.id.clone(),
+                    raw: raw.to_string(),
+                });
+                return;
+            }
+            let step_id = segs[0].as_str();
+            let output_name = segs[2].as_str();
+            match setup_outputs.get(step_id) {
+                None => errs.push(ValidationError::UnresolvedSetupStepRef {
+                    criterion: c.id.clone(),
+                    check: ch.id.clone(),
+                    step: step_id.to_string(),
+                    raw: raw.to_string(),
+                }),
+                Some(outputs) => {
+                    if !outputs.contains_key(output_name) {
+                        errs.push(ValidationError::UnresolvedSetupStepOutput {
                             criterion: c.id.clone(),
                             check: ch.id.clone(),
                             step: step_id.to_string(),
@@ -597,6 +706,128 @@ criteria:
     }
 
     #[test]
+    fn duplicate_setup_step_id_fails() {
+        let y = r#"
+verification: x
+setup:
+  - id: warm
+    uses: ui/navigate
+    with: {}
+  - id: warm
+    uses: ui/navigate
+    with: {}
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter()
+                .any(|e| matches!(e, ValidationError::DuplicateSetupStepId { .. })),
+            "got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn unresolved_setup_step_ref_fails() {
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $setup.nope.outputs.x == 1
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::UnresolvedSetupStepRef { step, .. } if step == "nope"
+            )),
+            "got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn unresolved_setup_step_output_fails() {
+        let y = r#"
+verification: x
+setup:
+  - id: warm
+    uses: ui/navigate
+    with: {}
+    outputs:
+      landed_at: page.url
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $setup.warm.outputs.missing == 1
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::UnresolvedSetupStepOutput { output, .. } if output == "missing"
+            )),
+            "got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn malformed_setup_ref_fails() {
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - exists: $setup.foo
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter()
+                .any(|e| matches!(e, ValidationError::MalformedSetupRef { .. })),
+            "got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn good_setup_block_passes() {
+        let y = r#"
+verification: ok
+setup:
+  - id: warm
+    uses: ui/navigate
+    with: {}
+    outputs:
+      landed_at: page.url
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $setup.warm.outputs.landed_at == "x"
+"#;
+        let v = parse(y);
+        validate(&v).expect("should validate");
+    }
+
+    #[test]
     fn matching_defaults_validate_for_every_type() {
         let y = r#"
 verification: ok
@@ -620,7 +851,6 @@ criteria:
 
     #[test]
     fn integer_default_is_valid_for_number_type() {
-        // `integer` is a subset of `number`; the validator promotes.
         let y = r#"
 verification: ok
 inputs:
@@ -663,13 +893,6 @@ criteria:
 
     #[test]
     fn yaml_null_default_collapses_to_no_default() {
-        // `default: null` is indistinguishable from a missing
-        // `default:` field — serde's `Option<T>` deserializer maps
-        // both to `None`. The input is therefore required, and a
-        // run without `--inputs name=...` fails at the CLI seam.
-        // Tested here at the schema layer: validate() must succeed
-        // (no defaulted value, no mismatch to fire on) and the parsed
-        // `decl.default` is `None`.
         let y = r#"
 verification: x
 inputs:
@@ -688,9 +911,6 @@ criteria:
 
     #[test]
     fn tagged_default_classifies_by_inner_shape() {
-        // `!!str 3` is a string scalar with an explicit tag; the
-        // classifier should look through the tag and validate cleanly
-        // against `type: string` (not bypass the check entirely).
         let y = r#"
 verification: x
 inputs:

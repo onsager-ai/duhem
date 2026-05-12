@@ -11,6 +11,53 @@ their own minor bumps.
 
 ## v0.1.0 — unreleased
 
+### runtime: setup-step ordering (#20)
+
+`VerificationDefinition.setup:` has lived in the schema since #8 but
+the runtime added in #15 / #19 walked `def.criteria` only — setup
+was silently dropped. This landing defines setup semantics and wires
+execution into the `Engine`. Per `docs/duhem-spec.md` §10.3 setup
+runs once before the criteria; the failure policy is
+three-state-faithful (a setup failure yields `Inconclusive`, not
+`Fail` — we couldn't observe the workload in the state the
+Verification Definition claims to verify).
+
+#### Added
+
+- Evidence `Setup*` event variants (additive — no existing variant
+  changes shape, byte-identical wire for setup-free definitions):
+  `setup_started { step_count }`,
+  `setup_step_started { step_index, uses, with? }`,
+  `setup_step_observation { step_index, output_name, value | blob_sha256 }`,
+  `setup_step_finished { step_index, outcome }`,
+  `setup_finished { aborted }`. `setup_finished` and
+  `setup_step_finished` fsync (same rule as the other `*_finished`
+  events).
+- `$setup.<step_id>.outputs.<name>` namespace in runtime expressions.
+  Run-scoped, read-only across checks. Setup gets its own browser
+  context; only named outputs cross the boundary, browser state
+  does not.
+- `aggregate_run` is defined on empty criterion verdicts as
+  `Inconclusive(EmptyAggregation)`. Setup-abort takes that path —
+  no criterion runs, and the run-level verdict's
+  `InconclusiveCause` preserves the abort trigger: a setup-step
+  `Outcome::Timeout` surfaces as `Inconclusive(Timeout)`; an
+  `Outcome::Error`, unknown-action step, or missing browser
+  surfaces as `Inconclusive(EnvironmentError)`.
+- Schema-side support for `$setup.*` in assertion paths and the
+  corresponding validator rules: `DuplicateSetupStepId`,
+  `UnresolvedSetupStepRef`, `UnresolvedSetupStepOutput`,
+  `MalformedSetupRef`.
+
+#### Wire compatibility
+
+- Traces written before this landing contain no `Setup*` events;
+  readers (`replay()`) treat absence as "no setup ran" — identical
+  to today's behavior.
+- New traces from definitions without `setup:` are byte-identical
+  to today's. `SetupStarted` is the boundary marker; it is only
+  emitted when `def.setup` is non-empty.
+
 ### api/* action types v1 (minimal slice — `api/call`)
 
 First entry in the API half of the action-type catalog. The
@@ -110,6 +157,7 @@ is `api/call` only.
   `api_smoke` runtime integration test is `#[ignore]`'d because
   the engine still launches Chromium per check (browser-strip
   optimization is the follow-up).
+
 ### typed input catalog
 
 `InputDecl.type` was an opaque string at v0.1 (#13); CLI `--inputs k=v`

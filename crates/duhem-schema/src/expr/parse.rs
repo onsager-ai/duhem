@@ -79,13 +79,14 @@ fn expr_parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
                 .ignore_then(text::ident().to_slice())
                 .try_map(|s: &str, span| match s {
                     "steps" => Ok(PathRoot::Steps),
+                    "setup" => Ok(PathRoot::Setup),
                     "inputs" => Ok(PathRoot::Inputs),
                     "env" => Ok(PathRoot::Env),
                     "runtime" => Ok(PathRoot::Runtime),
                     other => Err(Rich::custom(
                         span,
                         format!(
-                            "unknown scope `${other}` (expected `$steps`, `$inputs`, `$env`, or `$runtime`)"
+                            "unknown scope `${other}` (expected `$steps`, `$setup`, `$inputs`, `$env`, or `$runtime`)"
                         ),
                     )),
                 });

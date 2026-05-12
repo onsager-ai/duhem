@@ -24,4 +24,12 @@ pub enum ActionError {
     /// that one with the install hint via `humanize_launch_error`).
     #[error("playwright driver error: {0}")]
     Playwright(String),
+
+    /// HTTP transport-layer failure (DNS, TCP, TLS, malformed method
+    /// or URL). Timeouts do *not* land here — they surface as a
+    /// successful return with `Outcome::Timeout`. This variant is the
+    /// `api/*` analogue of `Playwright`: structural failure that the
+    /// engine maps to `Outcome::Error`.
+    #[error("http transport error: {0}")]
+    Http(String),
 }

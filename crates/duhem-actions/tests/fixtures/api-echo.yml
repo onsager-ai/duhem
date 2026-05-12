@@ -1,0 +1,58 @@
+# Worked example for spec(actions): api/* v1 minimal slice (issue #21).
+#
+# Drives a real HTTP server (via `reqwest`) against the tiny axum
+# fixture in `tests/api_smoke.rs`. Two `api/call` steps in one check:
+#
+# - `echo` POSTs a JSON body and expects to see it reflected in the
+#   text-form response body (status 200 + body_text content).
+# - `uuid_step` GETs a plain-text endpoint that returns a UUID and
+#   confirms it via the existing `type_check` assertion form.
+#
+# Why this fixture exists: it's the smallest exercise of `api/call`'s
+# four native outputs that runs against a real HTTP listener — no
+# mocks, no recorded fixtures, per the Holistic Verification Principle
+# (`CLAUDE.md` / `docs/duhem-spec.md` §8). Assertions only reach into
+# `status` and `body_text` (both scalar outputs in the v0.1 value
+# model); `body` (JSON object) and `headers` (JSON map) are surfaced
+# by the action but require an evaluator that can navigate into
+# structured values, which is a separate spec.
+
+verification: API echo smoke
+
+inputs:
+  echo_url:
+    type: string
+  uuid_url:
+    type: string
+
+criteria:
+  - id: AC-1
+    description: |
+      POST /echo returns 200 and echoes the request payload in
+      body_text; GET /uuid returns 200 with a UUID-shaped body_text.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: echo
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.echo_url
+              headers:
+                Content-Type: application/json
+              body:
+                hello: world
+              within: 2s
+          - id: uuid_step
+            uses: api/call
+            with:
+              method: GET
+              url: $inputs.uuid_url
+              within: 2s
+        assertions:
+          - $steps.echo.outputs.status == 200
+          - $runtime.matches($steps.echo.outputs.body_text, "world")
+          - $steps.uuid_step.outputs.status == 200
+          - type_check:
+              value: $steps.uuid_step.outputs.body_text
+              is: uuid

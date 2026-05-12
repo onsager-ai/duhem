@@ -613,6 +613,8 @@ dependencies = [
  "duhem-judge",
  "duhem-runtime",
  "duhem-schema",
+ "serde_json",
+ "serde_yml",
  "tokio",
  "tracing",
  "tracing-subscriber",

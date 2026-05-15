@@ -1,21 +1,23 @@
 # Spec Format Reference
 
-Section-by-section guide for writing lean-spec style GitHub issue specs on `onsager-ai/duhem`. Based on the [lean-spec SDD methodology](https://github.com/codervisor/lean-spec), adapted to use GitHub issues as the sole spec medium and to fit Duhem's product invariants.
+Section-by-section guide for writing lean-spec style GitHub issue specs. Based on the [lean-spec SDD methodology](https://github.com/codervisor/lean-spec), adapted to use GitHub issues as the sole spec medium.
+
+This reference is repo-agnostic. Consumer repos overlay their area-label taxonomy, custom body sections (e.g. Provider impact, Schema impact), and additional principles via their `CLAUDE.md` and `*-dev-process` / `*-pre-push` / `*-pr-lifecycle` sister skills — read those first.
 
 ## Metadata via GitHub Issue Features
 
 No YAML frontmatter — all metadata lives in native GitHub features:
 
-| lean-spec field | GitHub equivalent     | Example                                  |
-|-----------------|-----------------------|------------------------------------------|
-| `status`        | Labels                | `draft`, `planned`, `in-progress`        |
-| `priority`      | Labels                | `priority:high`                          |
-| `tags`          | Labels                | `area:schema`, `feat`                    |
-| `depends_on`    | Issue body reference  | `depends on #42`                         |
-| `parent/child`  | Sub-issues            | Created via `mcp__github__sub_issue_write` |
-| `assignee`      | Issue assignee        | `@username`                              |
-| `created/updated` | Issue timestamps    | Automatic                                |
-| `transitions`  | Issue timeline         | Automatic audit trail                    |
+| lean-spec field    | GitHub equivalent     | Example                                      |
+|--------------------|-----------------------|----------------------------------------------|
+| `status`           | Labels                | `draft`, `planned`, `in-progress`            |
+| `priority`         | Labels                | `priority:high`                              |
+| `tags`             | Labels                | `area:<subsystem>`, `feat`                   |
+| `depends_on`       | Issue body reference  | `depends on #42`                             |
+| `parent/child`     | Sub-issues            | Created via `mcp__github__sub_issue_write`   |
+| `assignee`         | Issue assignee        | `@username`                                  |
+| `created/updated`  | Issue timestamps      | Automatic                                    |
+| `transitions`      | Issue timeline        | Automatic audit trail                        |
 
 ### Label Taxonomy
 
@@ -32,9 +34,9 @@ Apply labels when creating the issue:
 - `refactor` — restructuring without behavior change
 - `perf` — performance improvement
 
-**Area** (pick one or more — see SKILL.md "Area label taxonomy"):
+**Area** (pick one or more):
 
-- `area:schema`, `area:cli`, `area:runtime`, `area:judge`, `area:generation`, `area:dashboard`, `area:integrations`, `area:evidence`, `area:dogfood`, `area:infra`, `area:docs`
+Drawn from the consumer repo's area taxonomy — read the repo's `*-dev-process` sister skill (or `CLAUDE.md`) for the canonical list. Examples observed across consumer repos: `area:spine`, `area:dashboard`, `area:cli`, `area:ui`, `area:provider`, `area:schema`, `area:runtime`, `area:judge`, `area:docs`, `area:infra`. Respect each repo's architectural invariants when picking the area: a spec that crosses two areas should usually be split into per-area child specs with a shared parent.
 
 **Priority** (pick one):
 
@@ -49,10 +51,9 @@ Apply labels when creating the issue:
 - `planned` — human reviewed, decisions made, ready for implementation
 - `in-progress` — actively being worked on (PR open)
 
-**Cross-cutting:**
+**Cross-cutting (consumer-repo overlay):**
 
-- `schema-impact` — apply whenever the spec includes a non-empty `## Schema impact` section. That covers *any* change to the Verification Definition format, action-type catalog, runtime expressions, or judge semantics — not just breaking ones. The label is the discoverability signal for "which specs touch schema surface?". Breaking-vs-non-breaking is tracked inside the section via `Breaking change? yes/no` and feeds CHANGELOG; the filter "schema-impact specs with `Breaking change? yes`" is what gates the Phase 2 schema OSS decision (`docs/duhem-spec.md` §15).
-- `trivial` (PR-only label, not a spec label) — opts a PR out of the spec-link requirement. See `duhem-dev-process`.
+Some consumer repos define additional discoverability labels for cross-cutting concerns — e.g. `provider-impact` for specs that touch a provider seam, `schema-impact` for schema changes, `i18n` for user-visible string changes, `trivial` (PR-only) for specs-not-required. Apply the ones that exist in the target repo; the repo's CLAUDE.md / sister skill is authoritative.
 
 ### Status Lifecycle
 
@@ -66,7 +67,7 @@ The `draft → planned` transition is the **human-AI alignment gate**. Only a hu
 - Design approach is approved
 - Scope and priority are accepted
 
-`planned → in-progress` happens **manually on this repo** when a PR referencing the issue opens. (Onsager has automation for this; Duhem does not yet.) See `duhem-pr-lifecycle`.
+`planned → in-progress` happens **automatically** on PR open in repos that ship a `pr-spec-sync.yml` workflow, and **manually** in repos that don't. Check the repo's `*-pr-lifecycle` sister skill.
 
 `in-progress → closed` happens automatically on PR merge with a `Closes #N` keyword. `Part of #N` PRs don't close the parent; the merger ticks the parent's Plan checkboxes manually.
 
@@ -76,128 +77,201 @@ The `draft → planned` transition is the **human-AI alignment gate**. Only a hu
 
 **Purpose**: Why does this work matter? What problem does it solve?
 
-**Good overview** (note: prose, list items, and blockquote lines are *not* hard-wrapped — GitHub renders single newlines as `<br>` in issue bodies; see SKILL.md step 2):
+**Good overview** (note: prose, list items, and blockquote lines are *not* hard-wrapped — GitHub renders single newlines as `<br>` in issue bodies):
 
 ```markdown
 ## Overview
 
-Today, `duhem run` accepts a single Verification Definition file as its only input. Teams using Pattern B (per-feature directories) need to invoke `duhem run` against a glob, which loops in the shell — slow and breaks shared environment provisioning.
-
-This adds a `--filter` flag that selects a subset of verifications declared in `duhem.yml` by name pattern, so a team can run a focused subset without bypassing the manifest's shared defaults.
+Sessions in `WAITING_INPUT` state can hang indefinitely if the user disconnects. This wastes agent capacity and leaves stale sessions in the dashboard. We need a configurable timeout that transitions idle sessions to `FAILED` after a period of inactivity.
 ```
 
-**Bad overview:** describes the solution before the problem; spends two paragraphs on context already in `docs/duhem-spec.md`; mentions a specific function name.
+**Bad overview:**
+
+```markdown
+## Overview
+
+Add a timeout feature to sessions.
+```
+
+The bad version says *what* but not *why*. The AI has no context to make tradeoff decisions during implementation.
+
+**Guidelines:**
+
+- 2-4 sentences. Problem → impact → what we need.
+- Reference specific code/behavior when possible.
+- Don't describe the solution here — that's Design's job.
 
 ### Design
 
-**Purpose**: Capture intent, not implementation. A reader should understand the *shape* of the change without reading the diff.
+**Purpose**: How should this work? What's the technical approach?
 
-Cover:
+**Write intent, not implementation:**
 
-- Data flow (or YAML flow) at intent level
-- Schema changes (link to `docs/duhem-spec.md` sections)
-- Judge contract changes
-- Out-of-scope: what this spec deliberately doesn't do
+```markdown
+## Design
 
-Don't:
+Each session gets an inactivity timer that resets on any WebSocket message. When the timer expires:
+1. Emit a `SessionTimeoutWarning` event 5 minutes before deadline
+2. Transition state to `Failed` with reason `session_timeout`
+3. Preserve all session output collected before timeout
 
-- Quote 50 lines of code
-- Specify exact function signatures (those go in the PR)
-- Describe how to write the test (that's `## Test`)
+The timeout duration is server-configurable via environment variable. Per-session overrides are out of scope for now.
+```
+
+**Guidelines:**
+
+- Describe data flow, state changes, API surface — not line-by-line code.
+- Include what's explicitly **out of scope** to prevent scope creep.
+- If design is complex, create child sub-issues for subsections.
+- Reference existing architecture when relevant.
+- Respect the consumer repo's architectural invariants (e.g. event-bus seam rules, provider-agnostic core, holistic verification). The repo's `CLAUDE.md` is authoritative.
 
 ### Plan
 
-A checklist of concrete deliverables. Each item:
+**Purpose**: Concrete deliverables as a checklist. Each item is independently verifiable.
 
-- Starts with a verb
-- Is independently verifiable
-- Has a single owner (AI or human, not both)
-- Order reflects implementation sequence (top-down dependencies)
+```markdown
+## Plan
 
-A 2–6 item Plan is healthy. A Plan with 12 items is two specs hiding in a trench coat — split it.
+- [ ] Add `SESSION_TIMEOUT` env var to server config (default: 30m)
+- [ ] Implement per-session inactivity timer in `SessionManager`
+- [ ] Add `SessionTimeoutWarning` event type
+- [ ] Emit warning event 5 minutes before timeout
+- [ ] Transition `WaitingInput → Failed` on timeout expiry
+- [ ] Preserve session output on timeout (no data deletion)
+- [ ] Add timeout info to `GET /api/sessions/:id` response
+```
+
+**Guidelines:**
+
+- Each item starts with a verb: Add, Implement, Update, Remove, Fix.
+- Items should be small enough to verify in isolation.
+- Order reflects implementation sequence.
+- If a plan has more than ~10 items, the spec is too big — split into sub-issues.
+- Checkboxes serve as progress tracking on the issue itself; tick them manually as `Part of #N` PRs merge (see the repo's `*-pr-lifecycle` sister skill).
 
 ### Test
 
-How each Plan item is verified. Map 1:1 to Plan items where possible. Include:
-
-- Unit tests (file path / function name)
-- Integration tests
-- Schema validation (the validator should accept the new shape and reject older malformed shapes)
-- Manual checks (only when automation is genuinely impossible)
-- A worked Verification Definition (when this is a product-surface change — see SKILL.md Philosophy #4)
-
-### Schema impact
-
-Required when the change touches the Verification Definition format, action-type catalog, runtime expressions, judge semantics, or any externally observable contract.
-
-Format:
+**Purpose**: How to verify each plan item is done correctly.
 
 ```markdown
-## Schema impact
+## Test
 
-- Fields added: `verification.continue_on_failure: bool`, default `false`
-- Fields renamed: none
-- Fields removed: none
-- Semantics changed: `setup:` block now runs once per criterion instead of once per verification (was undocumented; ratifying observed behavior)
-- Migration path: existing verifications continue to work; field is optional. No tooling migration needed.
-- Breaking change? no
+- [ ] Unit test: config parses valid duration strings, rejects invalid
+- [ ] Unit test: timer resets on incoming message
+- [ ] Integration test: session transitions to Failed after timeout
+- [ ] Integration test: warning event emitted 5 minutes before timeout
+- [ ] Integration test: session output preserved after timeout
+- [ ] Manual: dashboard shows timeout state and warning indicator
 ```
 
-Apply the `schema-impact` label whenever this section is present on the spec (and mirror it onto the PR). Whether the change is breaking is a separate signal answered by the `Breaking change?` line. If `Breaking change? yes`, also add a CHANGELOG entry on merge. Pre-1.0 (Phase 0/1), breaking changes are allowed but counted — the filter "schema-impact specs with `Breaking change? yes`" is the rate-of-change signal that gates Phase 2 schema OSS.
+**Guidelines:**
+
+- Each test item maps to one or more plan items.
+- Specify test type: unit, integration, manual, type check, lint.
+- Include negative cases: "rejects invalid", "does not delete".
+- For manual tests, describe what to check — not exact click paths.
+- Consumer repos may require additional test classes (e.g. i18n locale parity, schema validation) — read the repo's CLAUDE.md / sister skill.
 
 ### Alignment
 
-Three sub-sections:
+**Purpose**: Explicit partition of work between human and AI. This section extends the lean-spec format for human-AI collaborative development.
 
-#### Human decides
+```markdown
+## Alignment
 
-Decisions requiring judgment, scope authority, or domain knowledge the AI doesn't have. Examples:
+### Human decides
+- [ ] Timeout default value (proposed: 30m)
+- [ ] Whether to show UI warning (toast vs. banner)
+- [ ] Behavior on network partition
 
-- Which of two schema shapes to commit to
-- Whether a behavior is in scope for this spec or a follow-up
-- Whether a breaking change is acceptable now vs deferred
+### AI implements
+- [ ] Config parsing and validation
+- [ ] Timer logic in SessionManager
+- [ ] Event types and emission
+- [ ] State transition + database update
+- [ ] Unit and integration tests per Test section
 
-#### AI implements
+### Open questions
+> Should timed-out sessions be retryable, or must the user create a new task?
+> Impact: changes whether final state is `Failed` or `Pending`.
+```
 
-Concrete code tasks tied to Plan items. Examples:
+**Guidelines:**
 
-- "Add `--filter` flag handling in `duhem-cli/src/run.rs`"
-- "Update validator schema to accept `continue_on_failure`"
-
-#### Open questions
-
-`>` blockquoted questions that block `draft → planned`. Each must:
-
-- State the question
-- Note the impact (which Plan items are affected)
-- Include enough context that a human can answer without rereading the whole spec
-
-### Worked example
-
-Required when the spec introduces or modifies user-visible product surface. A minimal Verification Definition demonstrating the change. See `verification-authoring` for the template.
+- Every Plan item maps to exactly one of: "Human decides" or "AI implements."
+- Human items are decisions/tradeoffs. AI items are execution.
+- Open questions block implementation — they must be resolved (via issue comments) before the `draft → planned` label transition.
+- Once a human answers a question in a comment, update the Alignment section and record the decision.
 
 ### Notes
 
-Optional. Tradeoffs, related issues, prior art. Omit if empty.
+**Purpose**: Context, tradeoffs, references — anything that doesn't fit elsewhere.
 
-## Sub-issue decomposition
+```markdown
+## Notes
 
-When a spec exceeds ~2000 tokens or covers more than one independent concern, split it into a parent + child specs:
-
-```
-spec(schema): action-type catalog v1            ← parent
-├── spec(schema): ui/* action types              ← child sub-issue
-├── spec(schema): api/* action types             ← child sub-issue
-├── spec(schema): db/* action types              ← child sub-issue
-└── spec(schema): event/* action types           ← child sub-issue
+- Considered per-session timeout overrides via API, but deferred to keep scope small. Can add in a follow-up spec.
+- The timeout timer approach uses a per-session async timer. At 100+ concurrent sessions this may need optimization.
+- Related: #23, #31
 ```
 
-The parent spec carries the overarching intent and a high-level Plan that's a list of the children. Each child is independently implementable and has its own Design, Plan, Test, Schema impact, Alignment.
+**Guidelines:**
 
-Use `mcp__github__sub_issue_write` to attach children to the parent.
+- Tradeoffs considered and why you chose this approach.
+- Performance or scalability concerns for future reference.
+- Links to related issues, PRs, or external resources.
+- Keep it brief — notes are context, not a second design section.
+- Omit this section entirely if there's nothing to note.
 
-## Cross-references
+### Consumer-repo overlay sections
 
-- `docs/duhem-spec.md` — canonical product spec; cite section numbers when grounding a spec issue
-- `docs/duhem-brand.md` — brand mark, design discipline (rarely relevant to engineering specs)
-- Onsager's spec for the same domain (when work spans the dogfood seam) — see the `onsager-dogfood` skill for guidance on which side of the seam owns the spec
+Some consumer repos require additional sections in the issue body. Apply the ones that exist in the target repo:
+
+- **`## Provider impact`** (lean-spec) — required whenever a change touches the provider abstraction or anything crossing the markdown / github backend seam. Captures types added/removed/renamed, trait changes, per-backend semantics, migration path, breaking?-flag.
+- **`## Schema impact`** (Duhem) — required whenever a change touches the Verification Definition format, action-type catalog, runtime expressions, judge semantics, or any externally observable contract. Captures fields added/removed/renamed, semantics changes, migration path for in-flight definitions, breaking?-flag.
+- **`## Worked example`** (Duhem) — required when a spec introduces or modifies user-visible product surface. A minimal Verification Definition (or link to one) that exercises the surface end-to-end.
+- **Reach plan items** (Onsager) — when a spec introduces a new user-facing primitive, the Plan must include nav entry, first-run flow, empty-state CTAs, and auth gating.
+
+The repo's CLAUDE.md / sister skill is authoritative for which extras it requires. Drop a section only if the change provably doesn't touch its surface.
+
+## Context Economy Rules
+
+Smaller specs produce better results — for both AI implementation and human review:
+
+| Issue body size | Action                                            |
+|-----------------|---------------------------------------------------|
+| < 500 tokens    | Good for bug fixes and small changes              |
+| 500–2000 tokens | Standard spec — covers most features              |
+| > 2000 tokens   | **Split into parent + sub-issues**                |
+
+**How to split:**
+
+1. Create a parent issue with Overview + high-level Plan listing the children.
+2. Create child issues via `mcp__github__sub_issue_write`, one per independent concern.
+3. Each child has its own Design, Plan, Test, Alignment sections.
+4. Parent tracks overall progress; children track individual concerns.
+
+**Example:**
+
+```
+#50 spec(<area>): umbrella feature                ← parent
+  ├── #51 spec(<area>): concern A                 ← sub-issue
+  ├── #52 spec(<area>): concern B                 ← sub-issue
+  └── #53 spec(<other-area>): UI surface for A+B  ← sub-issue
+```
+
+## Title Convention
+
+```
+spec(<area>): <short description in imperative mood>
+```
+
+`<area>` is one of the consumer repo's `area:*` labels with the `area:` prefix dropped. Examples across consumer repos:
+
+- `spec(stiglab): add session timeout for idle sessions`
+- `spec(provider): github provider — issue CRUD via MCP`
+- `spec(schema): add api/observe action type`
+- `spec(dashboard): show real-time node heartbeat status`
+- `spec(judge): three-state verdict aggregation rules`
+- `spec(infra): pin CI action versions to SHAs`

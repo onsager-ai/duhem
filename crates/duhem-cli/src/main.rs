@@ -85,10 +85,13 @@ enum Cmd {
         /// `--filter` resolves to the pairs you expect (spec on #33).
         #[arg(long = "dry-run", default_value_t = false)]
         dry_run: bool,
-        /// Seed for the runtime's entropy source (`$runtime.uuid()`
-        /// today; future random helpers). Default is nondeterministic
-        /// per-run uuid; setting this is the path to byte-identical
-        /// replay traces (spec on issue #33).
+        /// Seed for the runtime's entropy source. With a seed set,
+        /// `$runtime.uuid()` is derived deterministically from the
+        /// seed (two runs with the same seed see the same uuid
+        /// string). Run IDs and event timestamps are not seeded, so
+        /// `trace.jsonl` is not byte-identical across runs; the
+        /// guarantee is over evaluator-visible entropy. Spec on
+        /// issue #33.
         #[arg(long = "seed", value_name = "U64")]
         seed: Option<u64>,
     },

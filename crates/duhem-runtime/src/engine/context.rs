@@ -50,11 +50,13 @@ impl RunState {
 
     /// Like [`RunState::new`] but derives `uuid` deterministically from
     /// a u64 seed instead of `Uuid::new_v4()`. Two runs with the same
-    /// seed see the same `$runtime.uuid()` value — the byte-identical
-    /// replay property the `--seed` CLI flag advertises (spec on
-    /// issue #33). The mapping is a splitmix64 expansion of the seed
-    /// over 16 bytes followed by `Uuid::from_bytes`; collision
-    /// resistance is not the property we're after, determinism is.
+    /// seed see the same `$runtime.uuid()` value (spec on issue #33).
+    /// Scope is the cached `uuid` only — run IDs and event timestamps
+    /// remain nondeterministic, so `trace.jsonl` is not byte-identical
+    /// across runs. The guarantee is over evaluator-visible entropy.
+    /// The mapping is a splitmix64 expansion of the seed over 16 bytes
+    /// followed by `Uuid::from_bytes`; collision resistance is not the
+    /// property we're after, determinism is.
     pub fn new_with_seed(inputs: BTreeMap<String, Value>, seed: u64) -> Self {
         Self::new_inner(inputs, seeded_uuid(seed))
     }

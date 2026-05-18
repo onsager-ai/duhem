@@ -110,6 +110,11 @@ pub struct Engine {
     /// matching checks execute; non-matching checks are skipped with
     /// no evidence emission.
     filter: Option<Box<dyn CheckFilter>>,
+    /// Optional u64 seed for runtime entropy (spec on issue #33). When
+    /// set, the per-run `$runtime.uuid()` value is derived
+    /// deterministically from the seed instead of `Uuid::new_v4`. No
+    /// other runtime semantics depend on this today.
+    seed: Option<u64>,
 }
 
 impl Engine {
@@ -122,6 +127,7 @@ impl Engine {
             browser: None,
             definition_path: None,
             filter: None,
+            seed: None,
         }
     }
 
@@ -153,6 +159,14 @@ impl Engine {
     /// entirely — no events, no verdict slot. Spec on issue #23.
     pub fn with_filter(mut self, filter: impl CheckFilter + 'static) -> Self {
         self.filter = Some(Box::new(filter));
+        self
+    }
+
+    /// Seed the runtime's entropy source so `$runtime.uuid()` is
+    /// derived deterministically from `seed`. Two runs with the same
+    /// seed see identical uuid output (spec on issue #33).
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = Some(seed);
         self
     }
 
@@ -195,7 +209,10 @@ impl Engine {
                 .ok_or_else(|| EngineError::InputUnrepresentable { name: k.clone() })?;
             input_values.insert(k.clone(), val);
         }
-        let mut run_state = RunState::new(input_values);
+        let mut run_state = match self.seed {
+            Some(s) => RunState::new_with_seed(input_values, s),
+            None => RunState::new(input_values),
+        };
 
         let run_id = new_run_id();
         let run_dir = self.evidence_root.join(&run_id);
@@ -644,6 +661,7 @@ mod tests {
             browser: None,
             definition_path: None,
             filter: None,
+            seed: None,
         };
         // Clear default registry so each test composes its own.
         e.registry.clear();

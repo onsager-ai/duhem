@@ -45,10 +45,25 @@ pub struct RunState {
 
 impl RunState {
     pub fn new(inputs: BTreeMap<String, Value>) -> Self {
+        Self::new_inner(inputs, uuid::Uuid::new_v4().to_string())
+    }
+
+    /// Like [`RunState::new`] but derives `uuid` deterministically from
+    /// a u64 seed instead of `Uuid::new_v4()`. Two runs with the same
+    /// seed see the same `$runtime.uuid()` value — the byte-identical
+    /// replay property the `--seed` CLI flag advertises (spec on
+    /// issue #33). The mapping is a splitmix64 expansion of the seed
+    /// over 16 bytes followed by `Uuid::from_bytes`; collision
+    /// resistance is not the property we're after, determinism is.
+    pub fn new_with_seed(inputs: BTreeMap<String, Value>, seed: u64) -> Self {
+        Self::new_inner(inputs, seeded_uuid(seed))
+    }
+
+    fn new_inner(inputs: BTreeMap<String, Value>, uuid: String) -> Self {
         Self {
             inputs,
             env: BTreeMap::new(),
-            uuid: uuid::Uuid::new_v4().to_string(),
+            uuid,
             setup_outputs: BTreeMap::new(),
         }
     }
@@ -117,6 +132,24 @@ impl<'r> EvalContext for RunContext<'r> {
     fn now(&self) -> DateTime<Utc> {
         Utc::now()
     }
+}
+
+/// Derive a deterministic uuid string from a u64 seed via splitmix64.
+/// Used by [`RunState::new_with_seed`] to produce a stable
+/// `$runtime.uuid()` value when the CLI passes `--seed`. Same seed →
+/// same uuid, byte for byte.
+fn seeded_uuid(seed: u64) -> String {
+    let mut state = seed;
+    let mut bytes = [0u8; 16];
+    for chunk in bytes.chunks_mut(8) {
+        state = state.wrapping_add(0x9E3779B97F4A7C15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+        z ^= z >> 31;
+        chunk.copy_from_slice(&z.to_le_bytes());
+    }
+    uuid::Uuid::from_bytes(bytes).to_string()
 }
 
 /// Total conversion from a JSON value (an action's output shape, or
@@ -206,6 +239,31 @@ mod tests {
         let a = RunContext::new(&run);
         let b = RunContext::new(&run);
         assert_eq!(a.uuid(), b.uuid());
+    }
+
+    #[test]
+    fn seeded_uuid_is_deterministic_across_runstates() {
+        // Spec on #33: byte-identical `$runtime.uuid()` for the same
+        // seed. Two RunStates constructed with seed=42 must produce
+        // exactly the same uuid string.
+        let a = RunState::new_with_seed(BTreeMap::new(), 42);
+        let b = RunState::new_with_seed(BTreeMap::new(), 42);
+        assert_eq!(a.uuid, b.uuid);
+        // Sanity: a different seed must produce a different uuid (the
+        // splitmix64 expansion is injective on 64 bits).
+        let c = RunState::new_with_seed(BTreeMap::new(), 43);
+        assert_ne!(a.uuid, c.uuid);
+        // Sanity: result is a parseable uuid.
+        uuid::Uuid::parse_str(&a.uuid).expect("parseable uuid");
+    }
+
+    #[test]
+    fn unseeded_runs_have_distinct_uuids() {
+        // Regression: omitting `--seed` must preserve today's
+        // nondeterministic uuid behavior.
+        let a = RunState::new(BTreeMap::new());
+        let b = RunState::new(BTreeMap::new());
+        assert_ne!(a.uuid, b.uuid);
     }
 
     #[test]

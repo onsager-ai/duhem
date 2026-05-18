@@ -8,6 +8,7 @@
 //! they make iteration on Verification Definitions practical.
 
 mod filter;
+mod inputs;
 mod reporter;
 
 use std::collections::BTreeMap;
@@ -72,6 +73,27 @@ enum Cmd {
         /// evidence_dir}`).
         #[arg(long = "reporter", value_enum, default_value_t = ReporterArg::Default)]
         reporter: ReporterArg,
+        /// YAML or JSON file of `key: value` input pairs. Merged with
+        /// any `--inputs k=v` flags; explicit `--inputs` always wins
+        /// on the same key (spec on issue #33).
+        #[arg(long = "inputs-file", value_name = "PATH")]
+        inputs_file: Option<PathBuf>,
+        /// Parse + validate the definition, resolve the filter, print
+        /// the `(criterion::check)` pairs that *would* run, and exit
+        /// 0 without launching the browser or writing evidence. Use
+        /// when authoring a Verification Definition to confirm a
+        /// `--filter` resolves to the pairs you expect (spec on #33).
+        #[arg(long = "dry-run", default_value_t = false)]
+        dry_run: bool,
+        /// Seed for the runtime's entropy source. With a seed set,
+        /// `$runtime.uuid()` is derived deterministically from the
+        /// seed (two runs with the same seed see the same uuid
+        /// string). Run IDs and event timestamps are not seeded, so
+        /// `trace.jsonl` is not byte-identical across runs; the
+        /// guarantee is over evaluator-visible entropy. Spec on
+        /// issue #33.
+        #[arg(long = "seed", value_name = "U64")]
+        seed: Option<u64>,
     },
 }
 
@@ -115,6 +137,9 @@ fn main() -> ExitCode {
             headed,
             evidence_dir,
             reporter,
+            inputs_file,
+            dry_run,
+            seed,
         }) => {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -127,6 +152,9 @@ fn main() -> ExitCode {
                 headed,
                 evidence_dir,
                 reporter: reporter.into(),
+                inputs_file,
+                dry_run,
+                seed,
             }))
         }
     }
@@ -141,6 +169,9 @@ struct RunArgs {
     headed: bool,
     evidence_dir: Option<PathBuf>,
     reporter: Reporter,
+    inputs_file: Option<PathBuf>,
+    dry_run: bool,
+    seed: Option<u64>,
 }
 
 fn run_validate(path: &std::path::Path) -> Result<(), String> {
@@ -168,6 +199,9 @@ async fn run_command(args: RunArgs) -> ExitCode {
         headed,
         evidence_dir,
         reporter,
+        inputs_file,
+        dry_run,
+        seed,
     } = args;
 
     let src = match std::fs::read_to_string(&path) {
@@ -203,9 +237,24 @@ async fn run_command(args: RunArgs) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    // Load `--inputs-file` before resolving so file values participate
+    // in the same required/unknown/typed checks as explicit flags.
+    let file_inputs = match inputs_file.as_deref() {
+        Some(p) => match inputs::load_inputs_file(p) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => BTreeMap::new(),
+    };
+
     // CLI-side fail-fast per the typed-input-catalog spec: missing /
     // unknown / mistyped inputs error before `Engine::run` is called.
-    let inputs = match resolve_inputs(&raw_inputs, &def.inputs) {
+    // Explicit `--inputs k=v` overrides any file value on the same key
+    // (#33 Alignment: "explicit --inputs wins").
+    let inputs = match resolve_inputs(&raw_inputs, &file_inputs, &def.inputs) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("{e}");
@@ -227,6 +276,47 @@ async fn run_command(args: RunArgs) -> ExitCode {
         }
     };
 
+    // `--dry-run` short-circuits before any browser launch: print the
+    // resolved `(criterion::check)` plan and exit 0. Distinguished from
+    // `duhem validate`: dry-run answers "what *would* this invocation
+    // execute", honoring `--filter`. No evidence is written.
+    if dry_run {
+        let mut stdout = std::io::stdout().lock();
+        let mut wrote = false;
+        for criterion in &def.criteria {
+            for check in &criterion.checks {
+                let matched = match &check_filter {
+                    None => true,
+                    Some(f) => {
+                        use duhem_runtime::CheckFilter;
+                        f.matches(&criterion.id, &check.id)
+                    }
+                };
+                if matched {
+                    if let Err(e) = writeln!(stdout, "WOULD RUN: {}::{}", criterion.id, check.id) {
+                        eprintln!("dry-run: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                    wrote = true;
+                }
+            }
+        }
+        if !wrote {
+            // Authors who typo a filter into "matches nothing" deserve
+            // a clear signal — silence here would look identical to a
+            // Verification Definition with no checks.
+            if let Err(e) = writeln!(stdout, "WOULD RUN: (no checks matched filter)") {
+                eprintln!("dry-run: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+        if let Err(e) = stdout.flush() {
+            eprintln!("dry-run: {e}");
+            return ExitCode::FAILURE;
+        }
+        return ExitCode::SUCCESS;
+    }
+
     let browser = match RunBrowser::launch(headed).await {
         Ok(b) => b,
         Err(e) => {
@@ -243,6 +333,9 @@ async fn run_command(args: RunArgs) -> ExitCode {
     }
     if let Some(f) = check_filter {
         engine = engine.with_filter(f);
+    }
+    if let Some(s) = seed {
+        engine = engine.with_seed(s);
     }
     let outcome = match engine.run_with_metadata(&def, inputs).await {
         Ok(o) => o,
@@ -289,16 +382,21 @@ fn parse_inputs(raw: &[String]) -> Result<BTreeMap<String, String>, String> {
     Ok(out)
 }
 
-/// Resolve `--inputs k=v` flags against the Verification Definition's
-/// `inputs:` block. Per the typed-input-catalog spec:
+/// Resolve `--inputs k=v` flags + an optional `--inputs-file` map
+/// against the Verification Definition's `inputs:` block. Per the
+/// typed-input-catalog spec plus #33:
 ///
-/// - Unknown input → error.
-/// - Provided value → coerced per declared `InputType`.
-/// - Not provided + default present → default carried through as-is
-///   (the schema validator already type-checked it).
-/// - Not provided + no default → error.
+/// - Unknown input (in either source) → error.
+/// - Explicit `--inputs k=v` value → coerced per declared `InputType`.
+///   Always wins over a same-key file value.
+/// - File value → validated against declared `InputType` (the file's
+///   parser already produced typed JSON; we only need to confirm shape).
+/// - Not provided in either source + default present → default carried
+///   through as-is (the schema validator type-checked it at parse time).
+/// - Not provided in either source + no default → error.
 fn resolve_inputs(
     raw: &[String],
+    file: &BTreeMap<String, serde_json::Value>,
     decls: &BTreeMap<String, InputDecl>,
 ) -> Result<BTreeMap<String, serde_json::Value>, String> {
     let provided = parse_inputs(raw)?;
@@ -307,11 +405,19 @@ fn resolve_inputs(
             return Err(format!("unknown input: `{name}`"));
         }
     }
+    for name in file.keys() {
+        if !decls.contains_key(name) {
+            return Err(format!("unknown input (from --inputs-file): `{name}`"));
+        }
+    }
     let mut out = BTreeMap::new();
     for (name, decl) in decls {
         if let Some(raw_value) = provided.get(name) {
             let coerced = coerce_input(name, decl.kind, raw_value)?;
             out.insert(name.clone(), coerced);
+        } else if let Some(file_value) = file.get(name) {
+            validate_file_value(name, decl.kind, file_value)?;
+            out.insert(name.clone(), file_value.clone());
         } else if let Some(default) = &decl.default {
             let value =
                 yml_to_json(default).map_err(|e| format!("input `{name}`: default: {e}"))?;
@@ -321,6 +427,30 @@ fn resolve_inputs(
         }
     }
     Ok(out)
+}
+
+/// Type-check a value loaded from `--inputs-file` against its declared
+/// `InputType`. The file's parser already gave us a typed JSON value,
+/// so this is a shape check, not a string coercion. Mirrors the
+/// promotion rule used by the schema validator: an `integer` is a
+/// valid `number`, but not vice versa.
+fn validate_file_value(name: &str, kind: InputType, v: &serde_json::Value) -> Result<(), String> {
+    let actual = json_shape_name(v);
+    let ok = match kind {
+        InputType::String => matches!(v, serde_json::Value::String(_)),
+        InputType::Integer => v.as_i64().is_some(),
+        InputType::Number => v.is_number(),
+        InputType::Boolean => matches!(v, serde_json::Value::Bool(_)),
+        InputType::Array => matches!(v, serde_json::Value::Array(_)),
+        InputType::Object => matches!(v, serde_json::Value::Object(_)),
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "input `{name}` (from --inputs-file): expected {kind}, got {actual}"
+        ))
+    }
 }
 
 /// Coerce a `--inputs k=v` value to its declared `InputType`. Failure
@@ -509,17 +639,27 @@ mod tests {
         args.iter().map(|s| s.to_string()).collect()
     }
 
+    /// Test-only shorthand: resolve with no `--inputs-file` source.
+    /// The file-merge code path is exercised separately below.
+    fn resolve(
+        cli: &[String],
+        decls: &BTreeMap<String, InputDecl>,
+    ) -> Result<BTreeMap<String, serde_json::Value>, String> {
+        let empty = BTreeMap::new();
+        resolve_inputs(cli, &empty, decls)
+    }
+
     #[test]
     fn coerces_integer_input() {
         let d = decls("  count: { type: integer }");
-        let out = resolve_inputs(&raw(&["count=3"]), &d).expect("ok");
+        let out = resolve(&raw(&["count=3"]), &d).expect("ok");
         assert_eq!(out["count"], serde_json::json!(3));
     }
 
     #[test]
     fn integer_rejects_non_numeric() {
         let d = decls("  count: { type: integer }");
-        let err = resolve_inputs(&raw(&["count=foo"]), &d).unwrap_err();
+        let err = resolve(&raw(&["count=foo"]), &d).unwrap_err();
         assert!(err.contains("count"), "error names the input: {err}");
         assert!(
             err.contains("integer"),
@@ -530,31 +670,31 @@ mod tests {
     #[test]
     fn integer_rejects_fractional() {
         let d = decls("  count: { type: integer }");
-        let err = resolve_inputs(&raw(&["count=1.5"]), &d).unwrap_err();
+        let err = resolve(&raw(&["count=1.5"]), &d).unwrap_err();
         assert!(err.contains("count"), "error names the input: {err}");
     }
 
     #[test]
     fn number_accepts_fractional_and_integer() {
         let d = decls("  threshold: { type: number }");
-        let frac = resolve_inputs(&raw(&["threshold=0.85"]), &d).unwrap();
+        let frac = resolve(&raw(&["threshold=0.85"]), &d).unwrap();
         assert_eq!(frac["threshold"], serde_json::json!(0.85));
-        let whole = resolve_inputs(&raw(&["threshold=1"]), &d).unwrap();
+        let whole = resolve(&raw(&["threshold=1"]), &d).unwrap();
         assert_eq!(whole["threshold"], serde_json::json!(1));
     }
 
     #[test]
     fn boolean_accepts_only_true_or_false() {
         let d = decls("  flag: { type: boolean }");
-        let t = resolve_inputs(&raw(&["flag=true"]), &d).unwrap();
+        let t = resolve(&raw(&["flag=true"]), &d).unwrap();
         assert_eq!(t["flag"], serde_json::json!(true));
-        let f = resolve_inputs(&raw(&["flag=false"]), &d).unwrap();
+        let f = resolve(&raw(&["flag=false"]), &d).unwrap();
         assert_eq!(f["flag"], serde_json::json!(false));
         // `1` / `yes` are rejected per the Alignment §"Boolean
         // strictness" decision: shell ergonomics don't justify
         // ambiguous parses for a verifier.
         for bad in ["1", "0", "yes", "no", "True", "FALSE"] {
-            let err = resolve_inputs(&raw(&[&format!("flag={bad}")]), &d).unwrap_err();
+            let err = resolve(&raw(&[&format!("flag={bad}")]), &d).unwrap_err();
             assert!(err.contains("boolean"), "rejecting `{bad}`: {err}");
         }
     }
@@ -565,42 +705,42 @@ mod tests {
         // gives the literal `foo`, never the JSON parse of `foo`
         // (which would error).
         let d = decls("  name: { type: string }");
-        let out = resolve_inputs(&raw(&["name=hello world"]), &d).unwrap();
+        let out = resolve(&raw(&["name=hello world"]), &d).unwrap();
         assert_eq!(out["name"], serde_json::json!("hello world"));
     }
 
     #[test]
     fn array_parses_as_json() {
         let d = decls("  roles: { type: array }");
-        let out = resolve_inputs(&raw(&[r#"roles=["admin","viewer"]"#]), &d).unwrap();
+        let out = resolve(&raw(&[r#"roles=["admin","viewer"]"#]), &d).unwrap();
         assert_eq!(out["roles"], serde_json::json!(["admin", "viewer"]));
     }
 
     #[test]
     fn array_rejects_object_json() {
         let d = decls("  roles: { type: array }");
-        let err = resolve_inputs(&raw(&[r#"roles={"a":1}"#]), &d).unwrap_err();
+        let err = resolve(&raw(&[r#"roles={"a":1}"#]), &d).unwrap_err();
         assert!(err.contains("array"), "error names expected type: {err}");
     }
 
     #[test]
     fn object_parses_as_json() {
         let d = decls("  flags: { type: object }");
-        let out = resolve_inputs(&raw(&[r#"flags={"dark":true}"#]), &d).unwrap();
+        let out = resolve(&raw(&[r#"flags={"dark":true}"#]), &d).unwrap();
         assert_eq!(out["flags"], serde_json::json!({"dark": true}));
     }
 
     #[test]
     fn object_rejects_array_json() {
         let d = decls("  flags: { type: object }");
-        let err = resolve_inputs(&raw(&[r#"flags=[1,2]"#]), &d).unwrap_err();
+        let err = resolve(&raw(&[r#"flags=[1,2]"#]), &d).unwrap_err();
         assert!(err.contains("object"), "error names expected type: {err}");
     }
 
     #[test]
     fn missing_required_input_errors() {
         let d = decls("  count: { type: integer }");
-        let err = resolve_inputs(&raw(&[]), &d).unwrap_err();
+        let err = resolve(&raw(&[]), &d).unwrap_err();
         assert!(
             err.contains("missing required input") && err.contains("count"),
             "got: {err}"
@@ -610,7 +750,7 @@ mod tests {
     #[test]
     fn unknown_input_errors() {
         let d = decls("  count: { type: integer }");
-        let err = resolve_inputs(&raw(&["count=1", "bogus=3"]), &d).unwrap_err();
+        let err = resolve(&raw(&["count=1", "bogus=3"]), &d).unwrap_err();
         assert!(
             err.contains("unknown input") && err.contains("bogus"),
             "got: {err}"
@@ -620,14 +760,14 @@ mod tests {
     #[test]
     fn declared_default_is_used_when_input_absent() {
         let d = decls("  name: { type: string, default: \"ws-default\" }");
-        let out = resolve_inputs(&raw(&[]), &d).unwrap();
+        let out = resolve(&raw(&[]), &d).unwrap();
         assert_eq!(out["name"], serde_json::json!("ws-default"));
     }
 
     #[test]
     fn explicit_input_overrides_default() {
         let d = decls("  name: { type: string, default: \"ws-default\" }");
-        let out = resolve_inputs(&raw(&["name=other"]), &d).unwrap();
+        let out = resolve(&raw(&["name=other"]), &d).unwrap();
         assert_eq!(out["name"], serde_json::json!("other"));
     }
 
@@ -637,10 +777,115 @@ mod tests {
         // dropping such entries would mutate the author's default —
         // surface it as a user-facing error from `resolve_inputs`.
         let d = decls("  flags: { type: object, default: { 1: x } }");
-        let err = resolve_inputs(&raw(&[]), &d).unwrap_err();
+        let err = resolve(&raw(&[]), &d).unwrap_err();
         assert!(
             err.contains("flags") && err.contains("non-string"),
             "error names the input and the cause: {err}"
         );
+    }
+
+    // ---- #33: --inputs-file merge / --dry-run / --seed CLI parsing ----
+
+    /// Spec on #33 § Alignment "Conflict semantics between `--inputs`
+    /// and `--inputs-file`": explicit `--inputs k=v` wins over a file
+    /// value on the same key.
+    #[test]
+    fn explicit_inputs_override_inputs_file_on_same_key() {
+        let d = decls("  base_url: { type: string }");
+        let mut file = BTreeMap::new();
+        file.insert("base_url".into(), serde_json::json!("from-file"));
+        let out = resolve_inputs(&raw(&["base_url=from-flag"]), &file, &d).unwrap();
+        assert_eq!(out["base_url"], serde_json::json!("from-flag"));
+    }
+
+    #[test]
+    fn inputs_file_supplies_value_when_flag_absent() {
+        let d = decls("  count: { type: integer }");
+        let mut file = BTreeMap::new();
+        file.insert("count".into(), serde_json::json!(7));
+        let out = resolve_inputs(&raw(&[]), &file, &d).unwrap();
+        assert_eq!(out["count"], serde_json::json!(7));
+    }
+
+    #[test]
+    fn inputs_file_typed_value_validates_against_declared_type() {
+        // A file value whose JSON shape doesn't match the declared
+        // `InputType` is a real authoring error — surface it as a
+        // CLI-side failure, not as a confusing runtime
+        // `Inconclusive(TypeMismatch)` later.
+        let d = decls("  count: { type: integer }");
+        let mut file = BTreeMap::new();
+        file.insert("count".into(), serde_json::json!("not a number"));
+        let err = resolve_inputs(&raw(&[]), &file, &d).unwrap_err();
+        assert!(
+            err.contains("count") && err.contains("integer"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn unknown_input_in_file_is_an_error() {
+        let d = decls("  count: { type: integer }");
+        let mut file = BTreeMap::new();
+        file.insert("bogus".into(), serde_json::json!(1));
+        file.insert("count".into(), serde_json::json!(1));
+        let err = resolve_inputs(&raw(&[]), &file, &d).unwrap_err();
+        assert!(
+            err.contains("--inputs-file") && err.contains("bogus"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn explicit_input_still_overrides_default_even_with_file() {
+        // Resolution order: explicit `--inputs` > `--inputs-file` >
+        // declared default > error. Confirm the precedence with all
+        // three present.
+        let d = decls("  name: { type: string, default: ws-default }");
+        let mut file = BTreeMap::new();
+        file.insert("name".into(), serde_json::json!("from-file"));
+        let out = resolve_inputs(&raw(&["name=from-flag"]), &file, &d).unwrap();
+        assert_eq!(out["name"], serde_json::json!("from-flag"));
+    }
+
+    #[test]
+    fn dry_run_flag_parses_and_defaults_false() {
+        let default = Cli::try_parse_from(["duhem", "run", "v.yml"]).expect("parse");
+        match default.cmd {
+            Some(Cmd::Run { dry_run, .. }) => assert!(!dry_run, "default off"),
+            _ => panic!("expected Run"),
+        }
+        let opted = Cli::try_parse_from(["duhem", "run", "v.yml", "--dry-run"]).expect("parse");
+        match opted.cmd {
+            Some(Cmd::Run { dry_run, .. }) => assert!(dry_run, "--dry-run opts in"),
+            _ => panic!("expected Run"),
+        }
+    }
+
+    #[test]
+    fn seed_flag_parses_as_u64() {
+        let parsed = Cli::try_parse_from(["duhem", "run", "v.yml", "--seed", "42"]).expect("parse");
+        match parsed.cmd {
+            Some(Cmd::Run { seed, .. }) => assert_eq!(seed, Some(42)),
+            _ => panic!("expected Run"),
+        }
+        // Negative / non-numeric seed rejected by clap's u64 parser:
+        // protects authors from accidentally passing an option-looking
+        // arg that silently parses as 0.
+        let err = Cli::try_parse_from(["duhem", "run", "v.yml", "--seed", "-1"]);
+        assert!(err.is_err(), "negative seed should reject");
+    }
+
+    #[test]
+    fn inputs_file_flag_parses_as_path() {
+        let parsed =
+            Cli::try_parse_from(["duhem", "run", "v.yml", "--inputs-file", "ci-inputs.yml"])
+                .expect("parse");
+        match parsed.cmd {
+            Some(Cmd::Run { inputs_file, .. }) => {
+                assert_eq!(inputs_file, Some(PathBuf::from("ci-inputs.yml")))
+            }
+            _ => panic!("expected Run"),
+        }
     }
 }

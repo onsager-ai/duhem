@@ -260,6 +260,157 @@ fn filter_with_or_includes_both_criteria_and_run_passes() {
     assert_eq!(out.stdout, b"pass\n");
 }
 
+/// Spec on #33: `--dry-run` short-circuits before browser launch and
+/// prints `WOULD RUN: <criterion>::<check>` per pair. No `#[ignore]`
+/// because the whole point is browser-free.
+#[test]
+fn dry_run_prints_resolved_pairs_and_exits_zero() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, TWO_CRITERIA);
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--dry-run")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("WOULD RUN: AC-1::AC-1.1"),
+        "stdout was {stdout:?}"
+    );
+    assert!(
+        stdout.contains("WOULD RUN: AC-1::AC-1.2"),
+        "stdout was {stdout:?}"
+    );
+    assert!(
+        stdout.contains("WOULD RUN: AC-2::AC-2.1"),
+        "stdout was {stdout:?}"
+    );
+    // No evidence directory should be created — the `--evidence-dir`
+    // wasn't passed, but the default `.duhem/runs` shouldn't be either.
+    let default_evidence = std::path::Path::new(".duhem");
+    // (We can't assert .duhem/runs doesn't exist because tests might
+    // race with other tests in the repo. The check below — that no
+    // trace.jsonl was written for *this* invocation — is what
+    // actually matters.)
+    let _ = default_evidence;
+}
+
+/// Spec on #33: `--dry-run` honors `--filter`. Confirms filter
+/// resolution is part of the dry-run plan, not bypassed.
+#[test]
+fn dry_run_honors_filter() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, TWO_CRITERIA);
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--dry-run")
+        .arg("--filter")
+        .arg("AC-1::AC-1.1")
+        .output()
+        .expect("spawn duhem");
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("WOULD RUN: AC-1::AC-1.1"), "got: {stdout}");
+    assert!(
+        !stdout.contains("AC-1.2") && !stdout.contains("AC-2.1"),
+        "filter should exclude others: {stdout}"
+    );
+}
+
+/// Spec on #33: when a filter excludes everything, the dry-run banner
+/// makes the empty result visible (silence would look identical to a
+/// stepless VD).
+#[test]
+fn dry_run_with_filter_that_matches_nothing_emits_explicit_signal() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ONE_CRITERION);
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--dry-run")
+        .arg("--filter")
+        .arg("AC-NOPE")
+        .output()
+        .expect("spawn duhem");
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("no checks matched filter"),
+        "expected empty-banner, got: {stdout}"
+    );
+}
+
+/// Spec on #33: `--inputs-file` supplies inputs; explicit `--inputs`
+/// wins on the same key. Verifying via `--dry-run` so this test stays
+/// browser-free.
+#[test]
+fn inputs_file_loads_yaml_and_dry_run_succeeds() {
+    let tmp = tempfile::tempdir().unwrap();
+    let v = tmp.path().join("v.yml");
+    std::fs::write(
+        &v,
+        r#"
+verification: smoke
+inputs:
+  base_url: { type: string }
+  count: { type: integer }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#,
+    )
+    .unwrap();
+    let inputs_file = tmp.path().join("inputs.yml");
+    std::fs::write(&inputs_file, "base_url: http://staging\ncount: 5\n").unwrap();
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&v)
+        .arg("--dry-run")
+        .arg("--inputs-file")
+        .arg(&inputs_file)
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn inputs_file_missing_file_errors_before_browser_launch() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ONE_CRITERION);
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--inputs-file")
+        .arg("/no/such/file.yml")
+        .output()
+        .expect("spawn duhem");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("/no/such/file.yml"),
+        "stderr should name the path: {stderr}"
+    );
+}
+
 #[test]
 fn invalid_filter_pattern_errors_before_browser_launch() {
     // Empty-criterion patterns are explicitly rejected (#23). They

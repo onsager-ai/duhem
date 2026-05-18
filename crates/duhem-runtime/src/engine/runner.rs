@@ -110,6 +110,11 @@ pub struct Engine {
     /// matching checks execute; non-matching checks are skipped with
     /// no evidence emission.
     filter: Option<Box<dyn CheckFilter>>,
+    /// Optional u64 seed for runtime entropy (spec on issue #33). When
+    /// set, the per-run `$runtime.uuid()` value is derived
+    /// deterministically from the seed instead of `Uuid::new_v4`. No
+    /// other runtime semantics depend on this today.
+    seed: Option<u64>,
 }
 
 impl Engine {
@@ -122,6 +127,7 @@ impl Engine {
             browser: None,
             definition_path: None,
             filter: None,
+            seed: None,
         }
     }
 
@@ -153,6 +159,14 @@ impl Engine {
     /// entirely — no events, no verdict slot. Spec on issue #23.
     pub fn with_filter(mut self, filter: impl CheckFilter + 'static) -> Self {
         self.filter = Some(Box::new(filter));
+        self
+    }
+
+    /// Seed the runtime's entropy source so `$runtime.uuid()` is
+    /// derived deterministically from `seed`. Two runs with the same
+    /// seed see identical uuid output (spec on issue #33).
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = Some(seed);
         self
     }
 
@@ -195,7 +209,10 @@ impl Engine {
                 .ok_or_else(|| EngineError::InputUnrepresentable { name: k.clone() })?;
             input_values.insert(k.clone(), val);
         }
-        let mut run_state = RunState::new(input_values);
+        let mut run_state = match self.seed {
+            Some(s) => RunState::new_with_seed(input_values, s),
+            None => RunState::new(input_values),
+        };
 
         let run_id = new_run_id();
         let run_dir = self.evidence_root.join(&run_id);
@@ -644,6 +661,7 @@ mod tests {
             browser: None,
             definition_path: None,
             filter: None,
+            seed: None,
         };
         // Clear default registry so each test composes its own.
         e.registry.clear();
@@ -1248,6 +1266,56 @@ criteria:
             VerdictState::Inconclusive(InconclusiveCause::EmptyAggregation),
         );
         assert!(ac2.checks.is_empty());
+    }
+
+    /// Spec on #33: a seeded run plumbs the seed through the engine
+    /// to the evaluator, so `$runtime.uuid()` resolves to the
+    /// deterministic uuid `RunState::new_with_seed(_, 42)` would
+    /// produce. The CLI / RunState unit tests cover the input and
+    /// output ends; this test covers the full engine path so any
+    /// future change that forgets to thread `seed` to `RunState`
+    /// flips the verdict here.
+    #[tokio::test]
+    async fn seeded_engine_evaluates_runtime_uuid_deterministically() {
+        let expected = RunState::new_with_seed(BTreeMap::new(), 42).uuid;
+        let yaml = format!(
+            r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $runtime.uuid() == "{expected}"
+"#
+        );
+        let v = def(&yaml);
+        let (mut e1, _tmp1) = engine_for_test();
+        e1.seed = Some(42);
+        let v1 = e1.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            v1.state,
+            VerdictState::Pass,
+            "seed=42 must evaluate $runtime.uuid() to the seeded literal"
+        );
+
+        // Sanity: a second seeded engine reaches the same verdict.
+        let (mut e2, _tmp2) = engine_for_test();
+        e2.seed = Some(42);
+        let v2 = e2.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(v2.state, VerdictState::Pass);
+
+        // Sanity: omitting the seed flips the verdict — `Uuid::new_v4`
+        // colliding with the seeded literal would be a one-in-2^122
+        // event, so this is a real determinism signal.
+        let (mut e3, _tmp3) = engine_for_test();
+        let v3 = e3.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            v3.state,
+            VerdictState::Fail,
+            "unseeded run should not accidentally match the seeded uuid"
+        );
     }
 
     #[tokio::test]

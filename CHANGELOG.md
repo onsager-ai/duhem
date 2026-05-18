@@ -32,13 +32,24 @@ API call/observe, basic assertions."
     engine extension.
   - `within: Duration` *(optional)* — max wait for a matching event;
     defaults to `DEFAULT_WITHIN` (5 s).
-- Native outputs: `method` (uppercased), `url` (full URL), `status`
-  (u16 widened to integer), `request_body` (parsed JSON when the
-  request `Content-Type` starts with `application/json`; `null`
-  otherwise), `response_body` (same rule, response side),
-  `request_headers` / `response_headers` (JSON object, header names
-  lowercased on collection for case-insensitive lookup, values
-  preserved verbatim).
+- Outputs (response-side names match `api/call`'s so authors can
+  write assertions like `$steps.x.outputs.status == 201` regardless
+  of which `api/*` action produced the traffic):
+  - **Request side** (new — `api/call` doesn't surface these since
+    its caller specifies them in `with:`):
+    `method` (uppercased), `url` (full URL), `request_body` (parsed
+    JSON when the request `Content-Type` starts with
+    `application/json`; `null` otherwise), `request_headers` (JSON
+    object of strings, names lowercased for case-insensitive lookup).
+  - **Response side** (shape matches `api/call`):
+    `status` (u16 widened to integer), `body` (parsed JSON when the
+    response `Content-Type` starts with `application/json`; `null`
+    otherwise), `body_text` (raw response bytes as UTF-8 lossy),
+    `headers` (JSON object of strings).
+- When the request or response declares `application/json` but the
+  body fails to parse, the corresponding output stays `null` and an
+  `api.json_parse_failure` observation is recorded — same shape as
+  `api/call`'s parse-failure signal.
 - Implementation listens to `page.subscribe_event()` and matches on
   the first `Response` event whose URL + method satisfy the filters.
   The originating `Request` is reached via `response.request()`. No

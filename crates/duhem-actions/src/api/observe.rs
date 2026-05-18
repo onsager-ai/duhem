@@ -4,23 +4,34 @@
 //! Spec on issue #38. Where `api/call` (#21) actively *issues* a
 //! request, `api/observe` *records* one that some other step
 //! triggered — typically a `ui/click` that causes the page's JS to
-//! `fetch()` something. The two actions share an output shape so an
-//! author can assert against `$steps.<id>.outputs.status`,
-//! `$steps.<id>.outputs.response_body`, etc., regardless of how the
-//! HTTP traffic was produced.
+//! `fetch()` something. The two actions share the response-side
+//! output shape (`status`, `body`, `body_text`, `headers`) so an
+//! author can assert against `$steps.<id>.outputs.status` or
+//! `$steps.<id>.outputs.body` regardless of how the HTTP traffic
+//! was produced.
 //!
-//! Outputs (`response.*` mirror `api/call`'s; `request.*` are new):
+//! Outputs (response side matches `api/call`'s names; `request_*`
+//! are new):
 //!
 //! - `method`: request method (uppercased).
 //! - `url`: full request URL (`https://host/path?q=1`).
 //! - `request_body`: parsed JSON when the request `Content-Type`
 //!   starts with `application/json`; `null` otherwise.
+//! - `request_headers`: request headers as a JSON object of strings.
 //! - `status`: response status code (u16 widened to integer).
-//! - `response_body`: parsed JSON when the response `Content-Type`
-//!   starts with `application/json`; `null` otherwise.
-//! - `response_headers`: response headers as a JSON object (values
-//!   rendered via UTF-8 lossy from the raw header bytes).
-//! - `request_headers`: request headers as a JSON object.
+//! - `body`: parsed JSON when the response `Content-Type` starts with
+//!   `application/json`; `null` otherwise. Matches `api/call`.
+//! - `body_text`: raw response bytes as UTF-8 (lossy). Matches
+//!   `api/call`.
+//! - `headers`: response headers as a JSON object of strings. Matches
+//!   `api/call`. Playwright surfaces header values as `String` —
+//!   there is no byte-fidelity path here, unlike `api/call`'s
+//!   `reqwest`-backed UTF-8-lossy rendering.
+//!
+//! When the request or response declares `application/json` but the
+//! body fails to parse, the output value stays `null` and an
+//! `api.json_parse_failure` observation is appended to the action
+//! result. Same shape as `api/call`'s parse-failure signal.
 //!
 //! ## v1 ordering caveat
 //!
@@ -71,7 +82,7 @@ use playwright::api::{Request, Response};
 use serde::Deserialize;
 use tokio::time::timeout;
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN, Observation};
 use crate::error::ActionError;
 use crate::with::WithinSpec;
 
@@ -132,6 +143,12 @@ impl Action for Observe {
         // payload, and (via `response.request()`) the originating
         // request. `RequestFinished` would also work for the request
         // side but lacks the response body.
+        //
+        // Two-phase matching: the cheap URL/method check filters
+        // first; only on a confirmed match do we read body/headers
+        // (which can fail transiently). Errors during collection
+        // propagate as `ActionError` rather than being swallowed
+        // back into a misleading `Outcome::Timeout`.
         let outcome = timeout(timeout_dur, async {
             loop {
                 let evt_res = stream.next().await?;
@@ -143,26 +160,121 @@ impl Action for Observe {
                     Event::Response(r) => r,
                     _ => continue,
                 };
-                match match_response(&resp, &matcher, method_filter.as_deref()).await {
-                    Ok(Some(outputs)) => return Some(outputs),
+                // Cheap filter — if reading the URL itself fails we
+                // can't tell if this event would have matched, so we
+                // skip it. (Distinct from the post-match-collect
+                // failures handled below.)
+                let matched = match filter_response(&resp, &matcher, method_filter.as_deref()) {
+                    Ok(Some(m)) => m,
                     Ok(None) => continue,
-                    Err(_) => continue, // Skip events that fail to introspect
-                }
+                    Err(_) => continue,
+                };
+                // Match confirmed: from here on, any error is real
+                // and should bubble out as ActionError, not as a
+                // misleading Timeout.
+                return Some(collect_match(&resp, matched).await);
             }
         })
         .await;
 
-        let outputs = match outcome {
-            Ok(Some(outputs)) => outputs,
+        let matched = match outcome {
+            Ok(Some(Ok(matched))) => matched,
+            Ok(Some(Err(e))) => return Err(e),
             Ok(None) | Err(_) => return Ok(ActionResult::timeout()),
         };
 
         let mut result = ActionResult::ok();
-        for (k, v) in outputs {
+        for (k, v) in matched.outputs {
             result = result.with_output(&k, v);
         }
+        result.observations.extend(matched.observations);
         Ok(result)
     }
+}
+
+/// Result of a successful `(url, method)` filter match. The outputs
+/// and observations are collected separately in [`collect_match`] so
+/// the latter can surface JSON-parse failures as a structured
+/// observation rather than silently coercing to `null`.
+struct MatchedEvent {
+    outputs: BTreeMap<String, serde_json::Value>,
+    observations: Vec<Observation>,
+}
+
+/// The cheap-filter half of the match: read URL and method off the
+/// `Response`, check both filters, return the normalized values on
+/// match. Errors here are read failures on Playwright's URL/method
+/// accessors — the safer default is to skip the event rather than
+/// fail the whole observe, since we can't tell from outside whether
+/// the event would have been a match.
+struct FilterMatch {
+    method_norm: String,
+    url: String,
+}
+
+fn filter_response(
+    resp: &Response,
+    url_matcher: &UrlMatcher,
+    method_filter: Option<&str>,
+) -> Result<Option<FilterMatch>, ActionError> {
+    let url = resp
+        .url()
+        .map_err(|e| ActionError::Playwright(format!("api/observe: response.url: {e}")))?;
+    if !url_matcher.matches(&url) {
+        return Ok(None);
+    }
+    let req = resp.request();
+    let method_norm = req
+        .method()
+        .map_err(|e| ActionError::Playwright(format!("api/observe: request.method: {e}")))?
+        .to_ascii_uppercase();
+    if let Some(want) = method_filter
+        && method_norm != want
+    {
+        return Ok(None);
+    }
+    Ok(Some(FilterMatch { method_norm, url }))
+}
+
+/// The heavy half of the match: collect status, headers, bodies, and
+/// produce outputs + observations. Called only after [`filter_response`]
+/// confirmed the URL/method filter passes — errors here are real,
+/// not "look elsewhere for the match", so they propagate as
+/// `ActionError`.
+async fn collect_match(resp: &Response, m: FilterMatch) -> Result<MatchedEvent, ActionError> {
+    let FilterMatch { method_norm, url } = m;
+    let req = resp.request();
+
+    let status = resp
+        .status()
+        .map_err(|e| ActionError::Playwright(format!("api/observe: response.status: {e}")))?
+        as u16;
+
+    let request_headers = collect_request_headers(&req)?;
+    let response_headers = collect_response_headers(resp).await?;
+
+    let mut observations: Vec<Observation> = Vec::new();
+    let request_body = decode_request_body(&req, &request_headers, &mut observations)?;
+    let (response_body, body_text) =
+        decode_response_body(resp, &response_headers, &mut observations).await?;
+
+    let mut outputs: BTreeMap<String, serde_json::Value> = BTreeMap::new();
+    outputs.insert("method".into(), serde_json::Value::String(method_norm));
+    outputs.insert("url".into(), serde_json::Value::String(url));
+    outputs.insert("status".into(), serde_json::Value::from(status));
+    outputs.insert("request_body".into(), request_body);
+    outputs.insert("request_headers".into(), headers_to_json(&request_headers));
+    // Response-side output names mirror `api/call`'s so authors can
+    // write assertions like `$steps.x.outputs.status == 201` and
+    // `$steps.x.outputs.body.id == "..."` regardless of whether `x`
+    // was an `api/call` or `api/observe` step.
+    outputs.insert("body".into(), response_body);
+    outputs.insert("body_text".into(), serde_json::Value::String(body_text));
+    outputs.insert("headers".into(), headers_to_json(&response_headers));
+    Ok(MatchedEvent {
+        outputs,
+        observations,
+    })
 }
 
 /// Wrapper around the two `url_pattern` flavors. Parsed once at
@@ -195,56 +307,6 @@ impl UrlMatcher {
     }
 }
 
-/// Inspect one `Response` event, decide whether it matches the
-/// observe filter, and if so collect outputs. Async because reading
-/// response body/headers is async over the Playwright wire.
-async fn match_response(
-    resp: &Response,
-    url_matcher: &UrlMatcher,
-    method_filter: Option<&str>,
-) -> Result<Option<BTreeMap<String, serde_json::Value>>, ActionError> {
-    let url = resp
-        .url()
-        .map_err(|e| ActionError::Playwright(format!("api/observe: response.url: {e}")))?;
-    if !url_matcher.matches(&url) {
-        return Ok(None);
-    }
-
-    let req = resp.request();
-    let method_norm = req
-        .method()
-        .map_err(|e| ActionError::Playwright(format!("api/observe: request.method: {e}")))?
-        .to_ascii_uppercase();
-    if let Some(want) = method_filter
-        && method_norm != want
-    {
-        return Ok(None);
-    }
-
-    let status = resp
-        .status()
-        .map_err(|e| ActionError::Playwright(format!("api/observe: response.status: {e}")))?
-        as u16;
-
-    let request_headers = collect_request_headers(&req)?;
-    let request_body = decode_request_body(&req, &request_headers)?;
-    let response_headers = collect_response_headers(resp).await?;
-    let response_body = decode_response_body(resp, &response_headers).await?;
-
-    let mut outputs: BTreeMap<String, serde_json::Value> = BTreeMap::new();
-    outputs.insert("method".into(), serde_json::Value::String(method_norm));
-    outputs.insert("url".into(), serde_json::Value::String(url));
-    outputs.insert("status".into(), serde_json::Value::from(status));
-    outputs.insert("request_body".into(), request_body);
-    outputs.insert("response_body".into(), response_body);
-    outputs.insert("request_headers".into(), headers_to_json(&request_headers));
-    outputs.insert(
-        "response_headers".into(),
-        headers_to_json(&response_headers),
-    );
-    Ok(Some(outputs))
-}
-
 fn collect_request_headers(req: &Request) -> Result<BTreeMap<String, String>, ActionError> {
     let h = req
         .headers()
@@ -275,6 +337,7 @@ async fn collect_response_headers(
 fn decode_request_body(
     req: &Request,
     headers: &BTreeMap<String, String>,
+    observations: &mut Vec<Observation>,
 ) -> Result<serde_json::Value, ActionError> {
     let bytes = match req
         .post_data()
@@ -286,21 +349,54 @@ fn decode_request_body(
     if !is_json_content_type(headers) {
         return Ok(serde_json::Value::Null);
     }
-    Ok(serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+    match serde_json::from_slice(&bytes) {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            // Mirror `api/call`'s parse-failure observation so authors
+            // can distinguish "no JSON body" from "declared JSON but
+            // unparseable" in the trace.
+            observations.push(Observation {
+                kind: "api.json_parse_failure".to_string(),
+                note: Some(format!(
+                    "request body declared application/json but failed to parse: {e}"
+                )),
+            });
+            Ok(serde_json::Value::Null)
+        }
+    }
 }
 
+/// Returns `(body_as_json_or_null, body_text)`. `body_text` is the
+/// raw response bytes rendered as UTF-8 lossy — same shape as
+/// `api/call`. JSON parse failures on a `Content-Type:
+/// application/json` body surface as an `api.json_parse_failure`
+/// observation.
 async fn decode_response_body(
     resp: &Response,
     headers: &BTreeMap<String, String>,
-) -> Result<serde_json::Value, ActionError> {
-    if !is_json_content_type(headers) {
-        return Ok(serde_json::Value::Null);
-    }
+    observations: &mut Vec<Observation>,
+) -> Result<(serde_json::Value, String), ActionError> {
     let bytes = resp
         .body()
         .await
         .map_err(|e| ActionError::Playwright(format!("api/observe: response.body: {e}")))?;
-    Ok(serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+    let body_text = String::from_utf8_lossy(&bytes).into_owned();
+    if !is_json_content_type(headers) {
+        return Ok((serde_json::Value::Null, body_text));
+    }
+    let parsed = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            observations.push(Observation {
+                kind: "api.json_parse_failure".to_string(),
+                note: Some(format!(
+                    "response body declared application/json but failed to parse: {e}"
+                )),
+            });
+            serde_json::Value::Null
+        }
+    };
+    Ok((parsed, body_text))
 }
 
 fn is_json_content_type(headers: &BTreeMap<String, String>) -> bool {

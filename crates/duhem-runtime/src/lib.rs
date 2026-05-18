@@ -13,7 +13,7 @@
 pub mod engine;
 pub mod eval;
 
-pub use engine::{Engine, EngineError, RunContext, RunState};
+pub use engine::{CheckFilter, Engine, EngineError, RunContext, RunOutcome, RunState};
 pub use eval::{EvalContext, EvalResult, InconclusiveCause, Value, ValueShape, eval};
 
 // `assertion_to_expr` is deliberately not re-exported at the crate

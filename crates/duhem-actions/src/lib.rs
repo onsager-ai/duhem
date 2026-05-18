@@ -22,5 +22,5 @@ pub use api::Call;
 pub use error::ActionError;
 pub use locator::{ExistenceState, Locator};
 pub use playwright::{CheckBrowser, RunBrowser, to_selector};
-pub use ui::{AssertElement, Click, Navigate};
+pub use ui::{AssertElement, AssertState, AssertUrl, Click, Navigate, Select, Type};
 pub use with::WithinSpec;

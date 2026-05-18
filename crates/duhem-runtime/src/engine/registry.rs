@@ -1,11 +1,11 @@
 //! Action registry — `Step.uses` → action dispatcher.
 //!
 //! The v1 registry is keyed by `Step.uses` and contains the closed
-//! action catalog: the three `ui/*` actions from #12 plus `api/call`
-//! from the spec on issue #21. Pluggable / user-defined `uses:` is
-//! §10.8 and lands in Phase 2+. The registry is `pub(crate)`-shaped:
-//! external callers only see [`Engine::new`](super::Engine), which
-//! wires the default catalog.
+//! action catalog: the full `ui/*` slice (three from #12, four from
+//! #37) plus `api/call` from the spec on issue #21. Pluggable /
+//! user-defined `uses:` is §10.8 and lands in Phase 2+. The registry
+//! is `pub(crate)`-shaped: external callers only see
+//! [`Engine::new`](super::Engine), which wires the default catalog.
 //!
 //! Internally we dispatch through a thin [`Dispatch`] trait rather
 //! than holding `Box<dyn Action>` directly. Same registry semantics,
@@ -25,7 +25,8 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use duhem_actions::{
-    Action, ActionCtx, ActionError, ActionResult, AssertElement, Call, Click, Navigate,
+    Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertState, AssertUrl, Call,
+    Click, Navigate, Select, Type,
 };
 use playwright::api::Page;
 
@@ -93,13 +94,18 @@ impl Dispatch for ConcreteAction {
 /// in spec wording, with the dispatch layer made internal.
 pub(crate) type ActionRegistry = BTreeMap<&'static str, Box<dyn Dispatch>>;
 
-/// The v1 catalog: the three `ui/*` actions from #12 and `api/call`
-/// from #21.
+/// The v1 catalog: the full `ui/*` slice (`ui/navigate`, `ui/click`,
+/// `ui/assert-element`, `ui/type`, `ui/select`, `ui/assert-url`,
+/// `ui/assert-state`) and `api/call`.
 pub(crate) fn default_registry() -> ActionRegistry {
     let mut m: ActionRegistry = BTreeMap::new();
     insert(&mut m, ConcreteAction::new(Box::new(Navigate)));
     insert(&mut m, ConcreteAction::new(Box::new(Click)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertElement)));
+    insert(&mut m, ConcreteAction::new(Box::new(Type)));
+    insert(&mut m, ConcreteAction::new(Box::new(Select)));
+    insert(&mut m, ConcreteAction::new(Box::new(AssertUrl)));
+    insert(&mut m, ConcreteAction::new(Box::new(AssertState)));
     insert(&mut m, ConcreteAction::new(Box::new(Call)));
     m
 }
@@ -119,7 +125,16 @@ mod tests {
         keys.sort();
         assert_eq!(
             keys,
-            vec!["api/call", "ui/assert-element", "ui/click", "ui/navigate"]
+            vec![
+                "api/call",
+                "ui/assert-element",
+                "ui/assert-state",
+                "ui/assert-url",
+                "ui/click",
+                "ui/navigate",
+                "ui/select",
+                "ui/type",
+            ]
         );
     }
 }

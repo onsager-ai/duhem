@@ -11,6 +11,81 @@ their own minor bumps.
 
 ## v0.1.0 — unreleased
 
+### ui/* action types — rest-of-slice (#37)
+
+Closes the §10.5 UI catalog by landing the four actions that the
+#12 minimal slice reserved. The first Onsager Verification
+Definition (#35) calls `ui/type` (typing a project name) and
+`ui/assert-url` (matching the post-submit URL); landing these
+unblocks that VD from `Inconclusive(MissingObservation)` per #15.
+
+#### Added
+
+- `ui/type` — type into an input addressed by a `Locator`.
+  `with: { locator: Locator, text: String, clear?: bool,
+  within?: Duration }`. No outputs. `clear: true` (the default)
+  replaces existing text via Playwright's `Locator.fill`;
+  `clear: false` appends via `Locator.type`. The clear-first default
+  matches authoring intuition — "type 'Alice' into the name field"
+  usually means *replace*.
+- `ui/select` — choose an option in a `<select>` or
+  `role=combobox` widget. `with: { locator: Locator, by: <By>,
+  within?: Duration }` where `by:` is the tagged union
+  `{ value: String } | { label: String } | { index: u32 }`.
+  No outputs. Dispatches to Playwright's `selectOption`. The
+  `by:` variants are mutually exclusive — setting two of
+  `value`/`label`/`index` is a `with:` validation error at
+  deserialize time.
+- `ui/assert-url` — observe the current page URL. `with: {
+  equals?: String, matches?: String, within?: Duration }`. Exactly
+  one of `equals:` (literal match) or `matches:` (regex) is
+  required; both-set and neither-set are rejected at invocation.
+  Outputs: `satisfied: bool`, `actual: String` (the URL observed
+  at decision time, included on both pass and timeout for triage).
+  Timeout shape: a URL that never matches within `within:` yields
+  `Outcome::Timeout` (the assertion didn't reach a conclusive
+  positive observation), distinct from `ui/assert-element`'s
+  `Outcome::Ok + satisfied: false`. The judge maps it to
+  `Inconclusive(Timeout)`.
+- `ui/assert-state` — observe a page-level state. `with: { state:
+  PageState, marker?: Marker, within?: Duration }` where
+  `PageState ∈ { loaded, network_idle, authenticated, signed_out }`.
+  `loaded` waits for `document.readyState === 'complete'`;
+  `network_idle` waits until the `performance.resource` entry
+  count stays flat for 500 ms (heuristic — the Rust playwright
+  binding does not expose `waitForLoadState('networkidle')`
+  directly); `authenticated`/`signed_out` require
+  `marker: { kind: cookie|local_storage, name: String }` and
+  strictly observe presence/absence of the named cookie or
+  local-storage key. No app-specific logic. Output:
+  `satisfied: bool`. Same wait-with-deadline shape as
+  `ui/assert-element` (`Outcome::Ok` + `satisfied: false` on miss,
+  not `Outcome::Timeout`).
+- `Locator` shape unchanged — reused as-is.
+- `regex` workspace crate is now a `duhem-actions` runtime
+  dependency (compiles `ui/assert-url`'s `matches:` patterns).
+
+#### Registry
+
+- All four actions land in the default registry alongside the
+  `ui/*` trio from #12 and `api/call` from #21. The full v1
+  catalog is now `api/call`, `ui/assert-element`,
+  `ui/assert-state`, `ui/assert-url`, `ui/click`, `ui/navigate`,
+  `ui/select`, `ui/type`.
+
+#### Wire format
+
+- No change to `VerificationDefinition`, `Step`, or `Assertion`
+  shapes — additive only. Existing VDs and fixtures unchanged.
+- Breaking change? **no** (additive).
+
+#### Operator notes
+
+- No new install step beyond what the existing `ui/*` already
+  requires (`npx playwright install chromium`). The new
+  `ui_smoke` cases are `#[ignore]`'d by default — `just test-ui`
+  runs them locally.
+
 ### runtime: setup-step ordering (#20)
 
 `VerificationDefinition.setup:` has lived in the schema since #8 but
@@ -385,7 +460,7 @@ catalog-aware validation`.
 
 - `ui/type`, `ui/select`, `ui/assert-url`, `ui/assert-state` —
   declared in `docs/duhem-spec.md` §10.5; same trait, follow-up
-  spec.
+  spec. (Landed in #37.)
 
 #### Operator notes
 

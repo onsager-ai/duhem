@@ -52,3 +52,35 @@ criteria:
         assertions:
           - $steps.banner.outputs.satisfied == true
           - $setup.probe.outputs.satisfied == true
+
+  # Exercises the rest-of-slice actions from #37 — `ui/type`,
+  # `ui/select`, `ui/assert-url`, `ui/assert-state` — on the same
+  # fixture page. Same trait / lifecycle / Locator as AC-1.
+  - id: AC-2
+    description: |
+      Fill the name input, pick a role from the select, submit, and
+      observe the post-submit URL and load state.
+    checks:
+      - id: AC-2.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.fixture_url }
+          - uses: ui/type
+            with:
+              locator: { role: "textbox", name: "Name" }
+              text: "Alice"
+          - uses: ui/select
+            with:
+              locator: { role: "combobox", name: "Role" }
+              by: { label: "Admin" }
+          - uses: ui/click
+            with: { role: "button", name: "Submit" }
+          - id: landed
+            uses: ui/assert-url
+            with: { matches: "/thanks", within: 2s }
+          - id: loaded
+            uses: ui/assert-state
+            with: { state: loaded, within: 2s }
+        assertions:
+          - $steps.landed.outputs.satisfied == true
+          - $steps.loaded.outputs.satisfied == true

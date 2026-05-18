@@ -1,89 +1,271 @@
 //! `duhem run --reporter` stdout formatters.
 //!
-//! Spec on issue #23. Three v1 reporters:
+//! Two surfaces:
 //!
-//! - `default` — matches the pre-spec output byte-for-byte: a single
-//!   line with the run verdict.
-//! - `quiet` — no stdout; the exit code is the only signal.
-//! - `json` — one JSON line: `{ run_id, verdict, criteria, evidence_dir }`.
+//! - **Built-in reporters** (spec on issue #23): `default` / `quiet` /
+//!   `json`. Their output is the CLI's externally-frozen baseline.
+//! - **Plugin reporters** (spec on issue #34): author-supplied
+//!   subprocesses. The CLI writes one line of [`RunSummary`] JSON to
+//!   the plugin's stdin, captures its stdout, and propagates exit
+//!   code (non-zero → reporter error, distinct from the verification
+//!   verdict). Discovery is via `.duhem.toml` (repo) and
+//!   `~/.duhem/config.toml` (user). Resolution order from `main.rs`:
+//!   built-in match → repo config → user config → error. Built-ins
+//!   are not shadowable.
 //!
-//! Reporters format post-run summary only. `trace.jsonl` is identical
-//! regardless of the chosen reporter.
+//! Reporters format the post-run summary only. `trace.jsonl` is
+//! identical regardless of the chosen reporter.
 
 use std::io::Write;
-use std::path::Path;
+use std::process::{Command, Stdio};
 
-use duhem_judge::VerdictState;
 use duhem_runtime::RunOutcome;
-use serde::Serialize;
+use duhem_summary::{CriterionSummary, RunSummary};
 
-/// Selectable reporter. `clap::ValueEnum` is implemented in `main.rs`
-/// to keep this module free of CLI dependencies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Selectable reporter. Built-ins are tagged variants; plugins carry
+/// the full argv they were discovered with so the dispatch is uniform.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reporter {
     Default,
     Quiet,
     Json,
+    /// Author-supplied subprocess reporter. `argv[0]` is the program,
+    /// `argv[1..]` are its arguments. The `name` field is the
+    /// `--reporter <name>` value the user typed; it's not passed to
+    /// the subprocess but appears in error messages.
+    Plugin {
+        name: String,
+        argv: Vec<String>,
+    },
+}
+
+/// Errors returned by [`render`] that need to surface to the CLI
+/// dispatcher. Plain I/O errors from stdout flushing stay as
+/// `std::io::Error` and are handled by the caller.
+#[derive(Debug)]
+pub enum RenderError {
+    /// Plain stdout write failure (built-in reporters).
+    Io(std::io::Error),
+    /// Plugin subprocess failed to spawn (program not on PATH, etc).
+    PluginSpawn {
+        name: String,
+        source: std::io::Error,
+    },
+    /// Plugin exited with a non-zero status. The CLI treats this as a
+    /// reporter error distinct from the verification verdict —
+    /// `Outcome::Fail` from the run is still authoritative.
+    PluginExit {
+        name: String,
+        code: Option<i32>,
+        stderr: String,
+    },
+}
+
+impl std::fmt::Display for RenderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RenderError::Io(e) => write!(f, "{e}"),
+            RenderError::PluginSpawn { name, source } => {
+                write!(f, "reporter `{name}`: failed to spawn: {source}")
+            }
+            RenderError::PluginExit { name, code, stderr } => {
+                let c = code
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "signal".to_string());
+                if stderr.is_empty() {
+                    write!(f, "reporter `{name}`: exited with status {c}")
+                } else {
+                    write!(
+                        f,
+                        "reporter `{name}`: exited with status {c}: {}",
+                        stderr.trim_end()
+                    )
+                }
+            }
+        }
+    }
+}
+
+impl std::error::Error for RenderError {}
+
+impl From<std::io::Error> for RenderError {
+    fn from(e: std::io::Error) -> Self {
+        RenderError::Io(e)
+    }
 }
 
 /// Render the post-run summary for `outcome` to `out`. Reporter
 /// selection is a stdout-only concern; the writer is parametric so
 /// tests can capture output without going through the real stdout.
 pub fn render(
-    reporter: Reporter,
+    reporter: &Reporter,
     out: &mut dyn Write,
     outcome: &RunOutcome,
-) -> std::io::Result<()> {
+) -> Result<(), RenderError> {
     match reporter {
-        Reporter::Default => writeln!(out, "{}", outcome.verdict.state),
+        Reporter::Default => {
+            writeln!(out, "{}", outcome.verdict.state)?;
+            Ok(())
+        }
         Reporter::Quiet => Ok(()),
         Reporter::Json => {
-            let summary = JsonSummary::from_outcome(outcome);
+            let summary = build_summary(outcome);
             // One JSON object per run, newline-terminated. Authors
             // who want bulk-parsing get JSON-lines-friendly output.
-            serde_json::to_writer(&mut *out, &summary)?;
-            writeln!(out)
+            serde_json::to_writer(&mut *out, &summary)
+                .map_err(|e| RenderError::Io(std::io::Error::other(e)))?;
+            writeln!(out)?;
+            Ok(())
         }
+        Reporter::Plugin { name, argv } => render_plugin(name, argv, out, outcome),
     }
 }
 
-#[derive(Debug, Serialize)]
-struct JsonSummary<'a> {
-    run_id: &'a str,
-    verdict: VerdictState,
-    criteria: Vec<JsonCriterion<'a>>,
-    evidence_dir: &'a Path,
+fn build_summary(o: &RunOutcome) -> RunSummary {
+    RunSummary::new(
+        o.run_id.clone(),
+        o.verdict.state,
+        o.verdict
+            .criteria
+            .iter()
+            .map(|c| CriterionSummary {
+                id: c.criterion_id.clone(),
+                verdict: c.state,
+            })
+            .collect(),
+        o.run_dir.clone(),
+    )
 }
 
-#[derive(Debug, Serialize)]
-struct JsonCriterion<'a> {
-    id: &'a str,
-    verdict: VerdictState,
-}
+/// Spawn a plugin subprocess, write the `RunSummary` JSON line to its
+/// stdin, copy its stdout to `out`, and propagate any non-zero exit
+/// code as a `RenderError`. Stderr is captured and inlined into the
+/// error message so author plugins can fail loudly.
+///
+/// I/O posture:
+///
+/// - **Stdin is written on a helper thread.** A plugin that exits
+///   without reading stdin (parse-time failure, `/bin/false`, etc.)
+///   would otherwise hand us a `BrokenPipe` here that masks the
+///   plugin's real `PluginExit` failure. Writing in a separate thread
+///   lets the main thread proceed to `wait_with_output`, which reaps
+///   the child and gives us the actual exit status + stderr.
+/// - **Stdout and stderr are drained concurrently** via
+///   `wait_with_output`. Reading one pipe to EOF before draining the
+///   other can deadlock when a noisy plugin fills the second pipe's
+///   buffer while keeping the first open.
+fn render_plugin(
+    name: &str,
+    argv: &[String],
+    out: &mut dyn Write,
+    outcome: &RunOutcome,
+) -> Result<(), RenderError> {
+    // argv is non-empty per `PluginRegistry::load`'s validation, so
+    // [0] is safe.
+    let mut cmd = Command::new(&argv[0]);
+    cmd.args(&argv[1..]);
+    cmd.stdin(Stdio::piped());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| RenderError::PluginSpawn {
+        name: name.to_string(),
+        source: e,
+    })?;
 
-impl<'a> JsonSummary<'a> {
-    fn from_outcome(o: &'a RunOutcome) -> Self {
-        Self {
-            run_id: &o.run_id,
-            verdict: o.verdict.state,
-            criteria: o
-                .verdict
-                .criteria
-                .iter()
-                .map(|c| JsonCriterion {
-                    id: &c.criterion_id,
-                    verdict: c.state,
-                })
-                .collect(),
-            evidence_dir: &o.run_dir,
+    // Serialize the RunSummary up-front so the writer thread doesn't
+    // need to know about it.
+    let summary = build_summary(outcome);
+    let line =
+        serde_json::to_vec(&summary).map_err(|e| RenderError::Io(std::io::Error::other(e)))?;
+
+    let stdin = child
+        .stdin
+        .take()
+        .expect("stdin pipe is configured above; take() must succeed");
+    let writer = std::thread::spawn(move || -> std::io::Result<()> {
+        let mut stdin = stdin;
+        // Best-effort write: a `BrokenPipe` here means the plugin
+        // exited without reading. Swallow it so the main thread can
+        // proceed to `wait_with_output` and surface `PluginExit`
+        // with the plugin's real failure. Other errors are propagated.
+        match stdin.write_all(&line).and_then(|_| stdin.write_all(b"\n")) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+            Err(e) => Err(e),
         }
+        // Drop closes the pipe.
+    });
+
+    // Drain stdout + stderr concurrently and wait for exit. This is
+    // the standard non-deadlock idiom for capturing both streams.
+    let output = child.wait_with_output().map_err(RenderError::Io)?;
+
+    // Surface a writer-thread I/O failure only if the plugin
+    // otherwise exited successfully — a PluginExit failure carries
+    // more useful information for the operator.
+    let writer_result = writer.join().expect("stdin writer thread panicked");
+
+    if !output.status.success() {
+        let stderr_text = String::from_utf8_lossy(&output.stderr).into_owned();
+        return Err(RenderError::PluginExit {
+            name: name.to_string(),
+            code: output.status.code(),
+            stderr: stderr_text,
+        });
+    }
+
+    writer_result?;
+
+    out.write_all(&output.stdout)?;
+    Ok(())
+}
+
+/// Convert the `Reporter::Json` summary into its serialized JSON
+/// form. Exposed for tests that want to assert on the contract shape
+/// without going through stdout.
+#[cfg(test)]
+pub(crate) fn json_line_for(outcome: &RunOutcome) -> String {
+    let summary = build_summary(outcome);
+    serde_json::to_string(&summary).unwrap()
+}
+
+/// Match `name` against the built-in reporters (`default` / `quiet`
+/// / `json`). Returns `None` if `name` is not a built-in. Split out
+/// from plugin resolution so the CLI can answer for built-ins
+/// without paying the cost of reading `~/.duhem/config.toml` or
+/// `.duhem.toml` — a malformed plugin config must not break
+/// `--reporter default` (spec on #34: built-ins are never shadowable).
+pub fn resolve_built_in(name: &str) -> Option<Reporter> {
+    match name {
+        "default" => Some(Reporter::Default),
+        "quiet" => Some(Reporter::Quiet),
+        "json" => Some(Reporter::Json),
+        _ => None,
+    }
+}
+
+/// Resolve a non-built-in name against the plugin registry. The CLI
+/// only calls this after [`resolve_built_in`] returns `None`.
+pub fn resolve_plugin(
+    name: &str,
+    registry: &crate::reporter_config::PluginRegistry,
+) -> Result<Reporter, String> {
+    match registry.get(name) {
+        Some(entry) => Ok(Reporter::Plugin {
+            name: name.to_string(),
+            argv: entry.command.clone(),
+        }),
+        None => Err(format!("unknown reporter: {name}")),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use duhem_judge::{CheckVerdict, CriterionVerdict, InconclusiveCause, RunVerdict};
+    use crate::reporter_config::{PluginEntry, PluginRegistry};
+    use duhem_judge::{
+        CheckVerdict, CriterionVerdict, InconclusiveCause, RunVerdict, VerdictState,
+    };
     use std::path::PathBuf;
 
     fn outcome(state: VerdictState) -> RunOutcome {
@@ -104,7 +286,7 @@ mod tests {
         }
     }
 
-    fn capture(reporter: Reporter, o: &RunOutcome) -> String {
+    fn capture(reporter: &Reporter, o: &RunOutcome) -> String {
         let mut buf = Vec::new();
         render(reporter, &mut buf, o).unwrap();
         String::from_utf8(buf).unwrap()
@@ -112,16 +294,14 @@ mod tests {
 
     #[test]
     fn default_reporter_writes_single_verdict_line() {
-        let s = capture(Reporter::Default, &outcome(VerdictState::Pass));
-        // Byte-for-byte regression safety with the pre-spec output:
-        // `println!("{}", verdict.state)` → "pass\n".
+        let s = capture(&Reporter::Default, &outcome(VerdictState::Pass));
         assert_eq!(s, "pass\n");
     }
 
     #[test]
     fn default_reporter_emits_inconclusive_state() {
         let s = capture(
-            Reporter::Default,
+            &Reporter::Default,
             &outcome(VerdictState::Inconclusive(InconclusiveCause::Timeout)),
         );
         assert_eq!(s, "inconclusive:timeout\n");
@@ -129,13 +309,13 @@ mod tests {
 
     #[test]
     fn quiet_reporter_writes_nothing() {
-        let s = capture(Reporter::Quiet, &outcome(VerdictState::Fail));
+        let s = capture(&Reporter::Quiet, &outcome(VerdictState::Fail));
         assert_eq!(s, "");
     }
 
     #[test]
     fn json_reporter_is_single_line_valid_json() {
-        let s = capture(Reporter::Json, &outcome(VerdictState::Pass));
+        let s = capture(&Reporter::Json, &outcome(VerdictState::Pass));
         let trimmed = s.trim_end_matches('\n');
         assert!(!trimmed.contains('\n'), "single line: {s:?}");
         let v: serde_json::Value = serde_json::from_str(trimmed).expect("valid JSON");
@@ -144,17 +324,115 @@ mod tests {
         assert_eq!(v["criteria"][0]["id"], "AC-1");
         assert_eq!(v["criteria"][0]["verdict"], "pass");
         assert_eq!(v["evidence_dir"], ".duhem/runs/01J000000000000000000RUN");
+        // Spec on #34: the contract surfaces schema_version on the wire.
+        assert_eq!(v["schema_version"], "1");
     }
 
     #[test]
     fn json_reporter_emits_inconclusive_wire_form() {
         let s = capture(
-            Reporter::Json,
+            &Reporter::Json,
             &outcome(VerdictState::Inconclusive(
                 InconclusiveCause::MissingObservation,
             )),
         );
         let v: serde_json::Value = serde_json::from_str(s.trim()).unwrap();
         assert_eq!(v["verdict"], "inconclusive:missing_observation");
+    }
+
+    #[test]
+    fn resolve_built_in_returns_built_in_variant() {
+        // Spec on #34: built-ins are not shadowable, and `main.rs`
+        // tries `resolve_built_in` BEFORE reading any plugin config —
+        // so a built-in name never even touches the registry.
+        assert_eq!(resolve_built_in("default"), Some(Reporter::Default));
+        assert_eq!(resolve_built_in("quiet"), Some(Reporter::Quiet));
+        assert_eq!(resolve_built_in("json"), Some(Reporter::Json));
+        assert_eq!(resolve_built_in("pretty"), None);
+    }
+
+    #[test]
+    fn resolve_plugin_returns_argv_from_registry() {
+        let registry = PluginRegistry::from_entries([(
+            "pretty".to_string(),
+            PluginEntry {
+                command: vec!["duhem-reporter-pretty".to_string()],
+            },
+        )])
+        .unwrap();
+        let r = resolve_plugin("pretty", &registry).unwrap();
+        match r {
+            Reporter::Plugin { name, argv } => {
+                assert_eq!(name, "pretty");
+                assert_eq!(argv, vec!["duhem-reporter-pretty".to_string()]);
+            }
+            other => panic!("expected Plugin, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_plugin_unknown_name_errors() {
+        let registry = PluginRegistry::default();
+        let err = resolve_plugin("nope", &registry).unwrap_err();
+        assert!(
+            err.contains("unknown reporter") && err.contains("nope"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn plugin_subprocess_receives_run_summary_on_stdin_and_round_trips_stdout() {
+        // Spec on #34 Test § "fake `[bash, -c, cat]` reporter receives
+        // RunSummary on stdin and round-trips byte-identical output".
+        let plugin = Reporter::Plugin {
+            name: "echo".to_string(),
+            argv: vec!["/bin/cat".to_string()],
+        };
+        let o = outcome(VerdictState::Pass);
+        let captured = capture(&plugin, &o);
+        let expected = json_line_for(&o);
+        // `cat` doesn't add a trailing newline beyond what was sent;
+        // the launcher writes the json line plus `\n` to stdin, so the
+        // expected round-trip is the json + newline.
+        assert_eq!(captured, format!("{expected}\n"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn plugin_nonzero_exit_surfaces_as_render_error() {
+        // Spec on #34 Test § "unknown name yields exit 2 with `unknown
+        // reporter:` on stderr." We test the adjacent shape: a plugin
+        // that returns non-zero status must surface as a `RenderError`,
+        // not silently succeed.
+        let plugin = Reporter::Plugin {
+            name: "boom".to_string(),
+            argv: vec!["/bin/false".to_string()],
+        };
+        let o = outcome(VerdictState::Pass);
+        let mut buf = Vec::new();
+        let err = render(&plugin, &mut buf, &o).unwrap_err();
+        match err {
+            RenderError::PluginExit { name, code, .. } => {
+                assert_eq!(name, "boom");
+                assert_eq!(code, Some(1));
+            }
+            other => panic!("expected PluginExit, got {other}"),
+        }
+    }
+
+    #[test]
+    fn plugin_missing_program_surfaces_as_spawn_error() {
+        let plugin = Reporter::Plugin {
+            name: "nope".to_string(),
+            argv: vec!["/no/such/binary".to_string()],
+        };
+        let o = outcome(VerdictState::Pass);
+        let mut buf = Vec::new();
+        let err = render(&plugin, &mut buf, &o).unwrap_err();
+        match err {
+            RenderError::PluginSpawn { name, .. } => assert_eq!(name, "nope"),
+            other => panic!("expected PluginSpawn, got {other}"),
+        }
     }
 }

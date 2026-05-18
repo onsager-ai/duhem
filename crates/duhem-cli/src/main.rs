@@ -10,13 +10,14 @@
 mod filter;
 mod inputs;
 mod reporter;
+mod reporter_config;
 
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 use duhem_actions::RunBrowser;
 use duhem_judge::VerdictState;
 use duhem_runtime::Engine;
@@ -24,6 +25,7 @@ use duhem_schema::{InputDecl, InputType, VerificationDefinition, validate};
 
 use crate::filter::CliCheckFilter;
 use crate::reporter::Reporter;
+use crate::reporter_config::PluginRegistry;
 
 /// Duhem — holistic verification for AI-delivered software.
 #[derive(Debug, Parser)]
@@ -67,12 +69,14 @@ enum Cmd {
         /// when absent; created if missing.
         #[arg(long = "evidence-dir", value_name = "PATH")]
         evidence_dir: Option<PathBuf>,
-        /// Stdout formatting for the post-run summary:
-        /// `default` (verdict line), `quiet` (exit code only),
-        /// `json` (one-line summary `{run_id, verdict, criteria,
-        /// evidence_dir}`).
-        #[arg(long = "reporter", value_enum, default_value_t = ReporterArg::Default)]
-        reporter: ReporterArg,
+        /// Stdout formatting for the post-run summary. Built-in
+        /// names: `default` (verdict line), `quiet` (exit code
+        /// only), `json` (one-line `RunSummary`). Other names are
+        /// resolved against `.duhem.toml` (repo) + `~/.duhem/config.toml`
+        /// (user) per the reporter-plugin spec on issue #34. Built-ins
+        /// always win over a same-named plugin entry.
+        #[arg(long = "reporter", value_name = "NAME", default_value = "default")]
+        reporter: String,
         /// YAML or JSON file of `key: value` input pairs. Merged with
         /// any `--inputs k=v` flags; explicit `--inputs` always wins
         /// on the same key (spec on issue #33).
@@ -95,25 +99,6 @@ enum Cmd {
         #[arg(long = "seed", value_name = "U64")]
         seed: Option<u64>,
     },
-}
-
-/// `clap`-facing reporter enum, kept separate from `reporter::Reporter`
-/// so the reporter module stays CLI-dep-free.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum ReporterArg {
-    Default,
-    Quiet,
-    Json,
-}
-
-impl From<ReporterArg> for Reporter {
-    fn from(r: ReporterArg) -> Self {
-        match r {
-            ReporterArg::Default => Reporter::Default,
-            ReporterArg::Quiet => Reporter::Quiet,
-            ReporterArg::Json => Reporter::Json,
-        }
-    }
 }
 
 fn main() -> ExitCode {
@@ -141,6 +126,35 @@ fn main() -> ExitCode {
             dry_run,
             seed,
         }) => {
+            // Resolve the reporter name BEFORE we boot the tokio
+            // runtime / browser: a typoed `--reporter` should exit 2
+            // with `unknown reporter:` on stderr without any work
+            // happening first.
+            //
+            // Try built-ins first so a malformed `.duhem.toml` or
+            // `~/.duhem/config.toml` doesn't break `--reporter
+            // default`/`quiet`/`json` — the documented resolution
+            // order has built-ins winning before any config is read.
+            let resolved_reporter = match reporter::resolve_built_in(&reporter) {
+                Some(r) => r,
+                None => {
+                    let registry = match PluginRegistry::load() {
+                        Ok(r) => r,
+                        Err(e) => {
+                            eprintln!("{e}");
+                            return ExitCode::FAILURE;
+                        }
+                    };
+                    match reporter::resolve_plugin(&reporter, &registry) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            eprintln!("{e}");
+                            // Spec on #34 Test § "unknown name yields exit 2".
+                            return ExitCode::from(2);
+                        }
+                    }
+                }
+            };
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
@@ -151,7 +165,7 @@ fn main() -> ExitCode {
                 filter,
                 headed,
                 evidence_dir,
-                reporter: reporter.into(),
+                reporter: resolved_reporter,
                 inputs_file,
                 dry_run,
                 seed,
@@ -346,7 +360,7 @@ async fn run_command(args: RunArgs) -> ExitCode {
     };
 
     let mut stdout = std::io::stdout().lock();
-    if let Err(e) = reporter::render(reporter, &mut stdout, &outcome) {
+    if let Err(e) = reporter::render(&reporter, &mut stdout, &outcome) {
         eprintln!("reporter: {e}");
         return ExitCode::FAILURE;
     }
@@ -586,21 +600,21 @@ mod tests {
     }
 
     #[test]
-    fn reporter_flag_parses_and_defaults_to_default() {
+    fn reporter_flag_parses_as_free_string_and_defaults_to_default() {
+        // After the reporter-plugin spec (#34) the `--reporter` flag
+        // is a free string: built-ins (`default`/`quiet`/`json`) are
+        // matched at runtime against the config registry. clap-level
+        // we only verify the name is captured.
         let default = Cli::try_parse_from(["duhem", "run", "v.yml"]).expect("parse");
         match default.cmd {
-            Some(Cmd::Run { reporter, .. }) => assert_eq!(reporter, ReporterArg::Default),
+            Some(Cmd::Run { reporter, .. }) => assert_eq!(reporter, "default"),
             _ => panic!("expected Run"),
         }
-        for (s, want) in [
-            ("default", ReporterArg::Default),
-            ("quiet", ReporterArg::Quiet),
-            ("json", ReporterArg::Json),
-        ] {
+        for name in ["default", "quiet", "json", "pretty", "junit"] {
             let parsed =
-                Cli::try_parse_from(["duhem", "run", "v.yml", "--reporter", s]).expect("parse");
+                Cli::try_parse_from(["duhem", "run", "v.yml", "--reporter", name]).expect("parse");
             match parsed.cmd {
-                Some(Cmd::Run { reporter, .. }) => assert_eq!(reporter, want, "for `{s}`"),
+                Some(Cmd::Run { reporter, .. }) => assert_eq!(reporter, name, "for `{name}`"),
                 _ => panic!("expected Run"),
             }
         }

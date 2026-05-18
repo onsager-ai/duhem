@@ -6,7 +6,10 @@ members = [
     "crates/duhem-runtime",
     "crates/duhem-actions",
     "crates/duhem-evidence",
+    "crates/duhem-summary",
     "crates/duhem-cli",
+    "crates/duhem-reporter-pretty",
+    "crates/duhem-reporter-junit",
     "xtask",
 ]
 
@@ -36,3 +39,4 @@ chumsky = "=1.0.0-alpha.8"
 playwright = "0.0.20"
 async-trait = "0.1"
 regex = "1"
+toml = "0.8"

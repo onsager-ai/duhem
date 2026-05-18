@@ -11,6 +11,86 @@ their own minor bumps.
 
 ## v0.1.0 — unreleased
 
+### Reporter contract — v1, plus subprocess plugin loader (#34)
+
+Introduces `RunSummary` as the externally-frozen reporter-plugin
+contract and a subprocess-based plugin loader that lets authors
+register custom `--reporter <name>` formatters (`pretty`, `junit`,
+etc.) without forking the CLI.
+
+#### Reporter contract
+
+- New crate `duhem-summary` carries the contract:
+
+  ```jsonc
+  {
+    "schema_version": "1",
+    "run_id": "01J...",
+    "verdict": "pass" | "fail" | "inconclusive:<cause>",
+    "criteria": [ { "id": "AC-1", "verdict": "pass" } ],
+    "evidence_dir": ".duhem/runs/01J..."
+  }
+  ```
+
+- `schema_version` is on the wire so a plugin written against today's
+  contract can refuse a future shape rather than silently misrender.
+  Changes to the contract are schema-impacting and require a new
+  `### Reporter contract — vN ...` heading in the current unreleased
+  v0.x section, plus a bump of `RunSummary::SCHEMA_VERSION`.
+
+#### Plugin discovery
+
+- Repo config: `.duhem.toml` at cwd or any ancestor.
+- User config: `~/.duhem/config.toml`.
+- Schema:
+
+  ```toml
+  [reporter.pretty]
+  command = ["duhem-reporter-pretty"]
+
+  [reporter.junit]
+  command = ["python3", "-m", "duhem_reporter_junit"]
+  ```
+
+- Resolution order: built-in (`default` / `quiet` / `json`) → repo
+  config → user config → error. Built-ins are not shadowable; a config
+  entry naming one of them is ignored. Empty `command` is rejected
+  at load time.
+
+#### Invocation protocol
+
+- The CLI invokes the plugin's `command` with `stdin` piped, writes
+  one line of `RunSummary` JSON, closes `stdin`, captures `stdout` (the
+  formatted output), and waits for the process to exit.
+- Non-zero exit surfaces as a CLI reporter error (distinct from the
+  verification verdict). Stderr is captured and inlined into the error
+  message.
+- Unknown `--reporter <name>` exits 2 with `unknown reporter: <name>`
+  on stderr.
+
+#### Reference plugins
+
+Two new crates ship as separate (optional) binaries — *not* built into
+the `duhem` binary; they prove the contract end-to-end:
+
+- `duhem-reporter-pretty` — ANSI 2-column table (criterion id +
+  verdict), with a run/evidence header/footer.
+- `duhem-reporter-junit` — minimal JUnit XML: one `<testsuite>` per
+  run, one `<testcase>` per criterion. `pass` → empty case; `fail` →
+  `<failure type="fail"/>`; `inconclusive:<cause>` →
+  `<skipped type="<cause>"/>`.
+
+#### Wire format
+
+- `RunSummary` is a new external surface, separate from the
+  Verification Definition schema, but stable enough that external
+  consumers depend on it. Treated as schema-impacting.
+- The built-in `--reporter json` output already matched the
+  `RunSummary` shape from #23; this spec adds the `schema_version`
+  field (additive) and freezes the rest.
+- Breaking change? **no** (additive — `schema_version` is the only new
+  field; existing JSON consumers ignore unknown keys).
+
 ### ui/* action types — rest-of-slice (#37)
 
 Closes the §10.5 UI catalog by landing the four actions that the

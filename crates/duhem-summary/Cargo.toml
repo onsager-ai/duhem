@@ -1,0 +1,14 @@
+[package]
+name = "duhem-summary"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+description = "Frozen RunSummary contract consumed by reporter plugins (subprocess stdin)."
+
+[dependencies]
+duhem-judge = { path = "../duhem-judge" }
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

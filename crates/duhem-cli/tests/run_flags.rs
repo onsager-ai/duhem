@@ -411,6 +411,45 @@ fn inputs_file_missing_file_errors_before_browser_launch() {
     );
 }
 
+/// Spec on #34 Test § "Error: unknown name yields exit 2 with
+/// `unknown reporter:` on stderr." Routes through the CLI surface so
+/// the exit code and stderr shape are both pinned. Browser-free
+/// because reporter resolution happens before any browser launch.
+#[test]
+fn unknown_reporter_name_exits_with_code_two() {
+    // Isolate `HOME` and the current directory under a tempdir so the
+    // CLI's reporter resolver never reads the developer's real
+    // `~/.duhem/config.toml` or an ancestor's `.duhem.toml`. Without
+    // this, a stale or malformed local config would surface here as a
+    // load-time failure instead of the expected unknown-reporter
+    // path (Copilot review on PR #43).
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ONE_CRITERION);
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--reporter")
+        .arg("definitely-not-a-real-reporter")
+        .current_dir(tmp.path())
+        .env("HOME", tmp.path())
+        .output()
+        .expect("spawn duhem");
+    // Exit 2 is the spec-confirmed code for reporter-not-found —
+    // distinguished from `Inconclusive` (FAILURE / exit 1) and from
+    // pass (SUCCESS / exit 0).
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("unknown reporter"),
+        "stderr should name the failure mode: {stderr}"
+    );
+    assert!(
+        stderr.contains("definitely-not-a-real-reporter"),
+        "stderr should echo the bad name: {stderr}"
+    );
+}
+
 #[test]
 fn invalid_filter_pattern_errors_before_browser_launch() {
     // Empty-criterion patterns are explicitly rejected (#23). They

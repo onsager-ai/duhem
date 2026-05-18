@@ -1,0 +1,50 @@
+# Worked example for spec(actions): api/observe (issue #38).
+#
+# Drives a real Playwright browser against an in-process axum fixture
+# (`tests/api_observe_smoke.rs`). A button on the page schedules a
+# `fetch('/projects', { method: 'POST', body: '{"name":"Acme"}' })`
+# 200 ms after click — the delay matters: v1's `api/observe` attaches
+# the listener at its step's runtime, so the trigger needs to be
+# late-enough that observe is already listening when the request
+# fires. The concurrent-listener engine extension (Phase 1+) will let
+# observe live in parallel with subsequent steps; until then,
+# trigger-then-observe with an in-flight request is the working
+# pattern.
+#
+# Assertions cover the four output shapes called out in the spec:
+# `method`, `url`, `status`, plus the `request_body` scalar wired
+# through the structured-output extension.
+
+verification: api/observe smoke
+
+inputs:
+  base_url:
+    type: string
+
+criteria:
+  - id: AC-1
+    description: |
+      Clicking the trigger button issues a POST /projects that the
+      server responds to with 201 + JSON; `api/observe` captures the
+      request/response pair.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: nav
+            uses: ui/navigate
+            with:
+              url: $inputs.base_url
+          - id: arm
+            uses: ui/click
+            with:
+              role: button
+              name: trigger
+          - id: observe
+            uses: api/observe
+            with:
+              method: POST
+              url_pattern: "re:/projects$"
+              within: 3s
+        assertions:
+          - $steps.observe.outputs.method == "POST"
+          - $steps.observe.outputs.status == 201

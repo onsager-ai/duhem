@@ -1,0 +1,16 @@
+[package]
+name = "duhem-reporter-junit"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+description = "Reference plugin reporter: JUnit XML over RunSummary stdin."
+
+[[bin]]
+name = "duhem-reporter-junit"
+path = "src/main.rs"
+
+[dependencies]
+duhem-summary = { path = "../duhem-summary" }
+duhem-judge = { path = "../duhem-judge" }
+serde_json.workspace = true

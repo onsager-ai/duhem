@@ -2,13 +2,20 @@
 //!
 //! Four states per the spec on issue #37:
 //!
-//! - `loaded` — `document.readyState === 'complete'`.
+//! - `loaded` — `document.readyState === 'complete'` (the
+//!   readyState value the browser sets on the `load` event).
 //! - `network_idle` — no new resource entries observed for 500 ms.
 //! - `authenticated` / `signed_out` — strictly observational checks
 //!   for the presence (or absence) of an author-named cookie or
 //!   local-storage key. The action carries no app-specific logic;
 //!   the *meaning* of "authenticated" lives in the marker the
 //!   Verification Definition chose.
+//!
+//! The state / marker pairing is enforced at deserialize time via
+//! an internally-tagged enum: `marker:` is structurally required on
+//! `authenticated` / `signed_out` and structurally rejected on
+//! `loaded` / `network_idle`. No runtime branch validates this;
+//! `serde` does.
 //!
 //! Outputs in every case: `satisfied: bool`. Timeout shape matches
 //! `ui/assert-element` — the wait-with-deadline returns
@@ -39,15 +46,6 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PageState {
-    Loaded,
-    NetworkIdle,
-    Authenticated,
-    SignedOut,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
 enum MarkerKind {
     Cookie,
     LocalStorage,
@@ -60,14 +58,44 @@ struct Marker {
     name: String,
 }
 
+/// Discriminated state. The internally-tagged `state:` field selects
+/// the variant; `marker:` is structurally required on `authenticated`
+/// / `signed_out` and structurally rejected on `loaded` /
+/// `network_idle`. Each variant carries its own `within:` so the
+/// outer `With` doesn't need to flatten.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct With {
-    state: PageState,
-    #[serde(default)]
-    marker: Option<Marker>,
-    #[serde(default)]
-    within: Option<WithinSpec>,
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+enum With {
+    Loaded {
+        #[serde(default)]
+        within: Option<WithinSpec>,
+    },
+    NetworkIdle {
+        #[serde(default)]
+        within: Option<WithinSpec>,
+    },
+    Authenticated {
+        marker: Marker,
+        #[serde(default)]
+        within: Option<WithinSpec>,
+    },
+    SignedOut {
+        marker: Marker,
+        #[serde(default)]
+        within: Option<WithinSpec>,
+    },
+}
+
+impl With {
+    fn timeout(&self) -> Duration {
+        let w = match self {
+            With::Loaded { within }
+            | With::NetworkIdle { within }
+            | With::Authenticated { within, .. }
+            | With::SignedOut { within, .. } => within,
+        };
+        w.map(Into::into).unwrap_or(DEFAULT_WITHIN)
+    }
 }
 
 pub struct AssertState;
@@ -88,77 +116,34 @@ impl Action for AssertState {
                 action: "ui/assert-state",
                 source: e,
             })?;
-        let timeout: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
+        let timeout = with.timeout();
+        let deadline = Instant::now() + timeout;
 
-        // Marker is required for the auth states and forbidden for
-        // the others — the validator runs at invocation time so
-        // authors get the schema error before the deadline ticks.
-        let needs_marker = matches!(with.state, PageState::Authenticated | PageState::SignedOut);
-        match (needs_marker, &with.marker) {
-            (true, None) => {
-                return Err(ActionError::InvalidWith {
-                    action: "ui/assert-state",
-                    source: serde::de::Error::custom(
-                        "`marker:` is required for state `authenticated` / `signed_out`",
-                    ),
-                });
+        let satisfied = loop {
+            let observed = check_state(ctx, &with, deadline).await?;
+            if observed {
+                break true;
             }
-            (false, Some(_)) => {
-                return Err(ActionError::InvalidWith {
-                    action: "ui/assert-state",
-                    source: serde::de::Error::custom(
-                        "`marker:` is only valid for state `authenticated` / `signed_out`",
-                    ),
-                });
+            if Instant::now() >= deadline {
+                break false;
             }
-            _ => {}
-        }
-
-        let started = Instant::now();
-        let satisfied = wait_until(timeout, started, || async {
-            check_state(ctx, with.state, with.marker.as_ref()).await
-        })
-        .await?;
+            sleep(POLL_INTERVAL).await;
+        };
 
         Ok(ActionResult::ok().with_output("satisfied", json!(satisfied)))
     }
 }
 
-/// Poll `probe` every `POLL_INTERVAL` until it returns `true` or
-/// `timeout` elapses. Probe errors propagate; a poll that runs out
-/// of time returns `Ok(false)` per the assert-element convention.
-async fn wait_until<F, Fut>(
-    timeout: Duration,
-    started: Instant,
-    mut probe: F,
-) -> Result<bool, ActionError>
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = Result<bool, ActionError>>,
-{
-    loop {
-        if probe().await? {
-            return Ok(true);
-        }
-        if started.elapsed() >= timeout {
-            return Ok(false);
-        }
-        sleep(POLL_INTERVAL).await;
-    }
-}
-
 async fn check_state(
     ctx: &ActionCtx<'_>,
-    state: PageState,
-    marker: Option<&Marker>,
+    with: &With,
+    deadline: Instant,
 ) -> Result<bool, ActionError> {
-    match state {
-        PageState::Loaded => check_loaded(ctx).await,
-        PageState::NetworkIdle => check_network_idle(ctx).await,
-        PageState::Authenticated => marker_present(ctx, marker.expect("validated above")).await,
-        PageState::SignedOut => marker_present(ctx, marker.expect("validated above"))
-            .await
-            .map(|present| !present),
+    match with {
+        With::Loaded { .. } => check_loaded(ctx).await,
+        With::NetworkIdle { .. } => check_network_idle(ctx, deadline).await,
+        With::Authenticated { marker, .. } => marker_present(ctx, marker).await,
+        With::SignedOut { marker, .. } => marker_present(ctx, marker).await.map(|p| !p),
     }
 }
 
@@ -175,17 +160,28 @@ async fn check_loaded(ctx: &ActionCtx<'_>) -> Result<bool, ActionError> {
 /// entries must stay flat for `NETWORK_IDLE_QUIET`. Implemented
 /// in-process (not via Playwright's `networkidle` load state)
 /// because the Rust binding doesn't expose `wait_for_load_state`.
-async fn check_network_idle(ctx: &ActionCtx<'_>) -> Result<bool, ActionError> {
+///
+/// The probe bails as soon as `deadline` is reached so we don't
+/// overshoot the user's `within:` budget — important when
+/// `within:` is shorter than `NETWORK_IDLE_QUIET` (e.g. 200 ms).
+async fn check_network_idle(ctx: &ActionCtx<'_>, deadline: Instant) -> Result<bool, ActionError> {
     let initial: u64 = ctx
         .page
         .eval("performance.getEntriesByType('resource').length")
         .await
         .map_err(|e| ActionError::Playwright(format!("ui/assert-state: resources: {e}")))?;
 
-    // Hold the count steady across the quiet window. If it moves,
-    // bail; the outer wait loop will resample.
-    let deadline = Instant::now() + NETWORK_IDLE_QUIET;
-    while Instant::now() < deadline {
+    let quiet_until = Instant::now() + NETWORK_IDLE_QUIET;
+    loop {
+        if Instant::now() >= quiet_until {
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            // Out of `within:` budget. Let the outer loop record
+            // `satisfied: false`; don't claim quietness we haven't
+            // actually observed.
+            return Ok(false);
+        }
         sleep(POLL_INTERVAL).await;
         let now_count: u64 = ctx
             .page
@@ -196,7 +192,6 @@ async fn check_network_idle(ctx: &ActionCtx<'_>) -> Result<bool, ActionError> {
             return Ok(false);
         }
     }
-    Ok(true)
 }
 
 async fn marker_present(ctx: &ActionCtx<'_>, marker: &Marker) -> Result<bool, ActionError> {
@@ -225,16 +220,16 @@ mod tests {
     #[test]
     fn parses_loaded() {
         let yaml = r#"{ state: loaded, within: 2s }"#;
-        let v: With = serde_yml::from_str(yaml).unwrap();
-        assert_eq!(v.state, PageState::Loaded);
-        assert!(v.marker.is_none());
+        let w: With = serde_yml::from_str(yaml).unwrap();
+        assert!(matches!(w, With::Loaded { .. }));
+        assert_eq!(w.timeout(), Duration::from_secs(2));
     }
 
     #[test]
     fn parses_network_idle() {
         let yaml = r#"{ state: network_idle }"#;
-        let v: With = serde_yml::from_str(yaml).unwrap();
-        assert_eq!(v.state, PageState::NetworkIdle);
+        let w: With = serde_yml::from_str(yaml).unwrap();
+        assert!(matches!(w, With::NetworkIdle { .. }));
     }
 
     #[test]
@@ -244,11 +239,14 @@ state: authenticated
 marker: { kind: cookie, name: "session" }
 within: 1s
 "#;
-        let v: With = serde_yml::from_str(yaml).unwrap();
-        assert_eq!(v.state, PageState::Authenticated);
-        let m = v.marker.as_ref().unwrap();
-        assert_eq!(m.kind, MarkerKind::Cookie);
-        assert_eq!(m.name, "session");
+        let w: With = serde_yml::from_str(yaml).unwrap();
+        match w {
+            With::Authenticated { ref marker, .. } => {
+                assert_eq!(marker.kind, MarkerKind::Cookie);
+                assert_eq!(marker.name, "session");
+            }
+            _ => panic!("expected Authenticated"),
+        }
     }
 
     #[test]
@@ -257,9 +255,13 @@ within: 1s
 state: signed_out
 marker: { kind: local_storage, name: "auth_token" }
 "#;
-        let v: With = serde_yml::from_str(yaml).unwrap();
-        assert_eq!(v.state, PageState::SignedOut);
-        assert_eq!(v.marker.as_ref().unwrap().kind, MarkerKind::LocalStorage);
+        let w: With = serde_yml::from_str(yaml).unwrap();
+        match w {
+            With::SignedOut { ref marker, .. } => {
+                assert_eq!(marker.kind, MarkerKind::LocalStorage);
+            }
+            _ => panic!("expected SignedOut"),
+        }
     }
 
     #[test]
@@ -279,6 +281,27 @@ marker: { kind: local_storage, name: "auth_token" }
         let yaml = r#"
 state: authenticated
 marker: { kind: jwt, name: "x" }
+"#;
+        assert!(serde_yml::from_str::<With>(yaml).is_err());
+    }
+
+    /// Spec promise: marker is required on the auth states. The
+    /// internally-tagged enum's `marker:` field has no `Option`
+    /// wrapper, so this fails at parse time.
+    #[test]
+    fn rejects_authenticated_without_marker() {
+        let yaml = r#"{ state: authenticated }"#;
+        assert!(serde_yml::from_str::<With>(yaml).is_err());
+    }
+
+    /// Spec promise: marker is rejected on the non-auth states.
+    /// `Loaded` has no `marker:` field, so `deny_unknown_fields`
+    /// rejects the mapping at parse time.
+    #[test]
+    fn rejects_loaded_with_marker() {
+        let yaml = r#"
+state: loaded
+marker: { kind: cookie, name: "x" }
 "#;
         assert!(serde_yml::from_str::<With>(yaml).is_err());
     }

@@ -169,4 +169,35 @@ extra: nope
 "#;
         assert!(serde_yml::from_str::<With>(yaml).is_err());
     }
+
+    /// `deny_unknown_fields` on each variant must reject the
+    /// degenerate three-set case too, not just the two-set case.
+    #[test]
+    fn rejects_select_with_all_three_by_variants() {
+        let yaml = r#"
+locator: { role: combobox, name: Role }
+by: { value: a, label: "B", index: 1 }
+"#;
+        assert!(serde_yml::from_str::<With>(yaml).is_err());
+    }
+
+    /// Author-controlled YAML: indices outside `u32` range fail
+    /// at parse time rather than truncating silently.
+    #[test]
+    fn rejects_select_with_negative_index() {
+        let yaml = r#"
+locator: { role: combobox, name: Role }
+by: { index: -1 }
+"#;
+        assert!(serde_yml::from_str::<With>(yaml).is_err());
+    }
+
+    #[test]
+    fn rejects_select_with_index_overflowing_u32() {
+        let yaml = r#"
+locator: { role: combobox, name: Role }
+by: { index: 4294967296 }
+"#;
+        assert!(serde_yml::from_str::<With>(yaml).is_err());
+    }
 }

@@ -77,7 +77,7 @@ criteria:
             with: { role: "button", name: "Submit" }
           - id: landed
             uses: ui/assert-url
-            with: { matches: "/thanks$", within: 2s }
+            with: { matches: "/thanks", within: 2s }
           - id: loaded
             uses: ui/assert-state
             with: { state: loaded, within: 2s }

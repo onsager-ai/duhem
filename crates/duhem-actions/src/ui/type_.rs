@@ -61,6 +61,9 @@ impl Action for Type {
                 .fill()
                 .await
         } else {
+            // `type_builer` — sic. That's how the upstream `playwright`
+            // crate (0.0.20) names the builder; do not "fix" the typo
+            // here without bumping the crate.
             ctx.page
                 .type_builer(&selector, &with.text)
                 .timeout(timeout_ms)

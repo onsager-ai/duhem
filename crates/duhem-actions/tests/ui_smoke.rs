@@ -21,7 +21,9 @@
 //! - `type_fills_input_then_assert_element_reads_it_back`
 //! - `select_by_value_label_index_dispatches_to_playwright`
 //! - `assert_url_passes_on_navigation_and_times_out_on_stale_url`
-//! - `assert_state_loaded_resolves_after_dom_content_loaded`
+//! - `assert_state_loaded_resolves_when_ready_state_is_complete`
+//! - `assert_state_authenticated_observes_cookie_marker_present_and_absent`
+//! - `assert_state_signed_out_observes_local_storage_marker_present_and_absent`
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -409,7 +411,7 @@ async fn assert_url_passes_on_navigation_and_times_out_on_stale_url() {
 
 #[tokio::test]
 #[ignore = "requires `npx playwright install chromium`"]
-async fn assert_state_loaded_resolves_after_dom_content_loaded() {
+async fn assert_state_loaded_resolves_when_ready_state_is_complete() {
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
@@ -429,5 +431,164 @@ async fn assert_state_loaded_resolves_after_dom_content_loaded() {
     assert_eq!(
         r.outputs.get("satisfied").and_then(|v| v.as_bool()),
         Some(true)
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
+async fn assert_state_authenticated_observes_cookie_marker_present_and_absent() {
+    use playwright::api::Cookie;
+
+    let fx = start_fixture().await;
+    let run = fresh_browser().await;
+    let check = run.open_check().await.unwrap();
+    let ctx = ActionCtx {
+        page: &check.page,
+        step_index: 0,
+    };
+    Navigate
+        .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
+        .await
+        .unwrap();
+
+    // Before the cookie is set: authenticated → false.
+    let r = AssertState
+        .invoke(
+            &ctx,
+            &yaml(
+                r#"
+state: authenticated
+marker: { kind: cookie, name: "session" }
+within: 200ms
+"#,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.outcome, Outcome::Ok);
+    assert_eq!(
+        r.outputs.get("satisfied").and_then(|v| v.as_bool()),
+        Some(false)
+    );
+
+    // Add the cookie. Same name; auth observation now → true.
+    let cookie = Cookie::with_url("session", "deadbeef", &url(&fx));
+    check.context.add_cookies(&[cookie]).await.unwrap();
+
+    let r = AssertState
+        .invoke(
+            &ctx,
+            &yaml(
+                r#"
+state: authenticated
+marker: { kind: cookie, name: "session" }
+within: 1s
+"#,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.outcome, Outcome::Ok);
+    assert_eq!(
+        r.outputs.get("satisfied").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+
+    // signed_out is the inverse — with the cookie present, false.
+    let r = AssertState
+        .invoke(
+            &ctx,
+            &yaml(
+                r#"
+state: signed_out
+marker: { kind: cookie, name: "session" }
+within: 200ms
+"#,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        r.outputs.get("satisfied").and_then(|v| v.as_bool()),
+        Some(false)
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
+async fn assert_state_signed_out_observes_local_storage_marker_present_and_absent() {
+    let fx = start_fixture().await;
+    let run = fresh_browser().await;
+    let check = run.open_check().await.unwrap();
+    let ctx = ActionCtx {
+        page: &check.page,
+        step_index: 0,
+    };
+    Navigate
+        .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
+        .await
+        .unwrap();
+
+    // Empty local storage → signed_out true.
+    let r = AssertState
+        .invoke(
+            &ctx,
+            &yaml(
+                r#"
+state: signed_out
+marker: { kind: local_storage, name: "auth_token" }
+within: 200ms
+"#,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.outcome, Outcome::Ok);
+    assert_eq!(
+        r.outputs.get("satisfied").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+
+    // Set the key — signed_out flips to false, authenticated true.
+    check
+        .page
+        .evaluate::<_, serde_json::Value>("() => { localStorage.setItem('auth_token', 'x'); }", ())
+        .await
+        .unwrap();
+
+    let r = AssertState
+        .invoke(
+            &ctx,
+            &yaml(
+                r#"
+state: authenticated
+marker: { kind: local_storage, name: "auth_token" }
+within: 1s
+"#,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        r.outputs.get("satisfied").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+
+    let r = AssertState
+        .invoke(
+            &ctx,
+            &yaml(
+                r#"
+state: signed_out
+marker: { kind: local_storage, name: "auth_token" }
+within: 200ms
+"#,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        r.outputs.get("satisfied").and_then(|v| v.as_bool()),
+        Some(false)
     );
 }

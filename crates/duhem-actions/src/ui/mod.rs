@@ -19,6 +19,26 @@
 //! - `ui/select`
 //! - `ui/assert-url`
 //! - `ui/assert-state`
+//!
+//! ## Waiter-action outcome shape
+//!
+//! The three "waiter" actions diverge on the verdict shape they
+//! emit when their deadline elapses without the expectation being
+//! met. The divergence is intentional but easy to miss:
+//!
+//! - `ui/assert-element` and `ui/assert-state`: `Outcome::Ok` with
+//!   `satisfied: false`. Reaching the deadline is itself a
+//!   *conclusive* observation that the element / state never
+//!   appeared.
+//! - `ui/assert-url`: `Outcome::Timeout`. A page that never lands
+//!   on the expected URL is not "we observed the wrong URL" — it's
+//!   "we never got to where we said we would," which is the
+//!   timeout-shaped outcome the judge maps to
+//!   `Inconclusive(Timeout)`.
+//!
+//! Assertions over `$steps.<id>.outputs.satisfied` work in both
+//! shapes; assertions that depend on a `pass` vs.
+//! `inconclusive` verdict need to know which waiter they reference.
 
 pub mod assert_element;
 pub mod assert_state;

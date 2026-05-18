@@ -1,21 +1,28 @@
 //! `duhem` — the command-line entry point.
 //!
 //! Phase-0 skeleton. The free CLI binary (`docs/duhem-spec.md` §13)
-//! ultimately offers `init`, `validate`, and `run`; subcommands land
-//! in `spec(cli): duhem init / validate / run skeletons`. `validate`
-//! and the minimal `run` form (`<file> [--inputs k=v ...]`) ship
-//! today; the larger CLI surface (`--filter`, `--headed`,
-//! `--evidence-dir`, `--reporter`) lands with `spec(cli): duhem run`.
+//! ultimately offers `init`, `validate`, and `run`; the `run`
+//! subcommand carries the full authoring-ergonomics surface
+//! (`--filter`, `--headed`, `--evidence-dir`, `--reporter`) per the
+//! spec on issue #23. None of those flags are correctness gates —
+//! they make iteration on Verification Definitions practical.
+
+mod filter;
+mod reporter;
 
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use duhem_actions::RunBrowser;
 use duhem_judge::VerdictState;
 use duhem_runtime::Engine;
 use duhem_schema::{InputDecl, InputType, VerificationDefinition, validate};
+
+use crate::filter::CliCheckFilter;
+use crate::reporter::Reporter;
 
 /// Duhem — holistic verification for AI-delivered software.
 #[derive(Debug, Parser)]
@@ -34,17 +41,57 @@ enum Cmd {
     },
     /// Execute a Verification Definition end-to-end.
     ///
-    /// Minimal v1 form per `spec(runtime): minimal step executor`
-    /// (issue #15). Strings-only `--inputs`; richer flags
-    /// (`--filter`, `--headed`, `--evidence-dir`, `--reporter`) land
-    /// with the full `spec(cli): duhem run`.
+    /// `--filter`, `--headed`, `--evidence-dir`, `--reporter` are
+    /// authoring-ergonomics flags from the spec on issue #23; none
+    /// change the verdict on a non-filtered run.
     Run {
         /// Path to a `.yml` Verification Definition.
         path: PathBuf,
         /// `key=value` inputs, repeatable.
         #[arg(long = "inputs", value_name = "KEY=VALUE")]
         inputs: Vec<String>,
+        /// Limit the run to a subset of `(criterion, check)` pairs.
+        ///
+        /// Grammar: `AC-1` (every check under `AC-1`),
+        /// `AC-1::AC-1.2` (one pair), `AC-*::AC-*.1` (globbed). Repeat
+        /// the flag to OR patterns: `--filter AC-1 --filter AC-2`.
+        #[arg(long = "filter", value_name = "PATTERN")]
+        filter: Vec<String>,
+        /// Launch the browser with a visible window. Default is
+        /// headless. Has no effect on `api/*` actions.
+        #[arg(long = "headed", default_value_t = false)]
+        headed: bool,
+        /// Directory under which `EvidenceWriter` creates the per-run
+        /// trace. Falls back to the engine default (`.duhem/runs`)
+        /// when absent; created if missing.
+        #[arg(long = "evidence-dir", value_name = "PATH")]
+        evidence_dir: Option<PathBuf>,
+        /// Stdout formatting for the post-run summary:
+        /// `default` (verdict line), `quiet` (exit code only),
+        /// `json` (one-line summary `{run_id, verdict, criteria,
+        /// evidence_dir}`).
+        #[arg(long = "reporter", value_enum, default_value_t = ReporterArg::Default)]
+        reporter: ReporterArg,
     },
+}
+
+/// `clap`-facing reporter enum, kept separate from `reporter::Reporter`
+/// so the reporter module stays CLI-dep-free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ReporterArg {
+    Default,
+    Quiet,
+    Json,
+}
+
+impl From<ReporterArg> for Reporter {
+    fn from(r: ReporterArg) -> Self {
+        match r {
+            ReporterArg::Default => Reporter::Default,
+            ReporterArg::Quiet => Reporter::Quiet,
+            ReporterArg::Json => Reporter::Json,
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -61,14 +108,39 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        Some(Cmd::Run { path, inputs }) => {
+        Some(Cmd::Run {
+            path,
+            inputs,
+            filter,
+            headed,
+            evidence_dir,
+            reporter,
+        }) => {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .expect("tokio runtime");
-            rt.block_on(run_command(path, inputs))
+            rt.block_on(run_command(RunArgs {
+                path,
+                inputs,
+                filter,
+                headed,
+                evidence_dir,
+                reporter: reporter.into(),
+            }))
         }
     }
+}
+
+/// Resolved `duhem run` arguments. Kept as a struct so the dispatch
+/// function's signature doesn't grow unbounded as new flags land.
+struct RunArgs {
+    path: PathBuf,
+    inputs: Vec<String>,
+    filter: Vec<String>,
+    headed: bool,
+    evidence_dir: Option<PathBuf>,
+    reporter: Reporter,
 }
 
 fn run_validate(path: &std::path::Path) -> Result<(), String> {
@@ -88,7 +160,16 @@ fn run_validate(path: &std::path::Path) -> Result<(), String> {
     })
 }
 
-async fn run_command(path: PathBuf, raw_inputs: Vec<String>) -> ExitCode {
+async fn run_command(args: RunArgs) -> ExitCode {
+    let RunArgs {
+        path,
+        inputs: raw_inputs,
+        filter: raw_filter,
+        headed,
+        evidence_dir,
+        reporter,
+    } = args;
+
     let src = match std::fs::read_to_string(&path) {
         Ok(s) => s,
         Err(e) => {
@@ -132,7 +213,21 @@ async fn run_command(path: PathBuf, raw_inputs: Vec<String>) -> ExitCode {
         }
     };
 
-    let browser = match RunBrowser::launch(false).await {
+    // Filter parse failures must surface before we boot a browser —
+    // a typoed pattern shouldn't pay the Playwright launch cost.
+    let check_filter = if raw_filter.is_empty() {
+        None
+    } else {
+        match CliCheckFilter::parse(&raw_filter) {
+            Ok(f) => Some(f),
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    };
+
+    let browser = match RunBrowser::launch(headed).await {
         Ok(b) => b,
         Err(e) => {
             eprintln!("browser: {e}");
@@ -143,16 +238,28 @@ async fn run_command(path: PathBuf, raw_inputs: Vec<String>) -> ExitCode {
     let mut engine = Engine::new()
         .with_browser(browser)
         .with_definition_path(path.display().to_string());
-    let verdict = match engine.run(&def, inputs).await {
-        Ok(v) => v,
+    if let Some(dir) = evidence_dir {
+        engine = engine.with_evidence_root(dir);
+    }
+    if let Some(f) = check_filter {
+        engine = engine.with_filter(f);
+    }
+    let outcome = match engine.run_with_metadata(&def, inputs).await {
+        Ok(o) => o,
         Err(e) => {
             eprintln!("engine: {e}");
             return ExitCode::FAILURE;
         }
     };
 
-    println!("{}", verdict.state);
-    match verdict.state {
+    let mut stdout = std::io::stdout().lock();
+    if let Err(e) = reporter::render(reporter, &mut stdout, &outcome) {
+        eprintln!("reporter: {e}");
+        return ExitCode::FAILURE;
+    }
+    let _ = stdout.flush();
+
+    match outcome.verdict.state {
         VerdictState::Pass => ExitCode::SUCCESS,
         // Both Fail and Inconclusive must gate downstream actions —
         // exit non-zero so a CI step that ignores stdout still
@@ -321,6 +428,69 @@ fn yml_to_json(v: &serde_yml::Value) -> Result<serde_json::Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    /// Spec on #23 § Alignment "Headless default": `--headed` opts
+    /// into a visible window; default stays headless. The runtime
+    /// `RunBrowser::launch(headed: bool)` is keyed off this exact
+    /// boolean, so the CLI → launch-arg translation is the smallest
+    /// thing we can validate without booting Playwright.
+    #[test]
+    fn headed_flag_defaults_to_false_and_opts_in() {
+        let default = Cli::try_parse_from(["duhem", "run", "v.yml"]).expect("parse");
+        match default.cmd {
+            Some(Cmd::Run { headed, .. }) => assert!(!headed, "default is headless"),
+            other => panic!("expected Run, got {other:?}"),
+        }
+        let opted = Cli::try_parse_from(["duhem", "run", "v.yml", "--headed"]).expect("parse");
+        match opted.cmd {
+            Some(Cmd::Run { headed, .. }) => assert!(headed, "--headed opts in"),
+            other => panic!("expected Run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reporter_flag_parses_and_defaults_to_default() {
+        let default = Cli::try_parse_from(["duhem", "run", "v.yml"]).expect("parse");
+        match default.cmd {
+            Some(Cmd::Run { reporter, .. }) => assert_eq!(reporter, ReporterArg::Default),
+            _ => panic!("expected Run"),
+        }
+        for (s, want) in [
+            ("default", ReporterArg::Default),
+            ("quiet", ReporterArg::Quiet),
+            ("json", ReporterArg::Json),
+        ] {
+            let parsed =
+                Cli::try_parse_from(["duhem", "run", "v.yml", "--reporter", s]).expect("parse");
+            match parsed.cmd {
+                Some(Cmd::Run { reporter, .. }) => assert_eq!(reporter, want, "for `{s}`"),
+                _ => panic!("expected Run"),
+            }
+        }
+    }
+
+    #[test]
+    fn filter_flag_collects_repeated_values() {
+        // Spec on #23: repeat `--filter` for OR. Verify the CLI surface
+        // collects into the expected `Vec<String>` shape.
+        let parsed = Cli::try_parse_from([
+            "duhem",
+            "run",
+            "v.yml",
+            "--filter",
+            "AC-1",
+            "--filter",
+            "AC-2::AC-2.3",
+        ])
+        .expect("parse");
+        match parsed.cmd {
+            Some(Cmd::Run { filter, .. }) => {
+                assert_eq!(filter, vec!["AC-1".to_string(), "AC-2::AC-2.3".to_string()]);
+            }
+            _ => panic!("expected Run"),
+        }
+    }
 
     fn decls(yaml: &str) -> BTreeMap<String, InputDecl> {
         let y = format!("verification: x\ninputs:\n{yaml}\ncriteria: []\n");

@@ -66,6 +66,30 @@ impl From<ActionError> for EngineError {
     }
 }
 
+/// Predicate that decides whether the engine should execute a given
+/// `(criterion_id, check_id)` pair. Used by the CLI `--filter` flag
+/// (spec on issue #23) to skip checks the author isn't iterating on.
+///
+/// A filtered-out check is **skipped entirely**: no `StepStarted` /
+/// `CheckFinished` events on the trace, no `AssertionOutcome` slot. A
+/// criterion whose checks are all filtered out aggregates as empty →
+/// `Inconclusive(EmptyAggregation)` per `aggregate_criterion(&[])`.
+pub trait CheckFilter: Send + Sync {
+    fn matches(&self, criterion_id: &str, check_id: &str) -> bool;
+}
+
+/// Engine-side run summary that carries the evidence location
+/// alongside the verdict. Returned by [`Engine::run_with_metadata`];
+/// thin convenience around [`Engine::run`] for callers (the CLI's
+/// `--reporter json`, replay tooling) that need to point a downstream
+/// reader at `trace.jsonl`.
+#[derive(Debug, Clone)]
+pub struct RunOutcome {
+    pub verdict: RunVerdict,
+    pub run_id: String,
+    pub run_dir: PathBuf,
+}
+
 /// The minimal step executor.
 pub struct Engine {
     registry: ActionRegistry,
@@ -82,6 +106,10 @@ pub struct Engine {
     /// [`Engine::with_definition_path`]; falls back to
     /// `def.verification` when absent.
     definition_path: Option<String>,
+    /// Optional check-level filter (spec on issue #23). When set, only
+    /// matching checks execute; non-matching checks are skipped with
+    /// no evidence emission.
+    filter: Option<Box<dyn CheckFilter>>,
 }
 
 impl Engine {
@@ -93,6 +121,7 @@ impl Engine {
             evidence_root: PathBuf::from(".duhem/runs"),
             browser: None,
             definition_path: None,
+            filter: None,
         }
     }
 
@@ -119,6 +148,14 @@ impl Engine {
         self
     }
 
+    /// Attach a [`CheckFilter`]. With a filter set, checks for which
+    /// `matches(criterion_id, check_id)` returns `false` are skipped
+    /// entirely — no events, no verdict slot. Spec on issue #23.
+    pub fn with_filter(mut self, filter: impl CheckFilter + 'static) -> Self {
+        self.filter = Some(Box::new(filter));
+        self
+    }
+
     /// Register a test-only dispatcher under a `Step.uses` key. The
     /// real catalog is closed at v1 (per the spec); this hook exists
     /// so the runner can be exercised in unit tests without booting
@@ -141,6 +178,17 @@ impl Engine {
         def: &VerificationDefinition,
         inputs: BTreeMap<String, serde_json::Value>,
     ) -> Result<RunVerdict, EngineError> {
+        Ok(self.run_with_metadata(def, inputs).await?.verdict)
+    }
+
+    /// Same as [`Engine::run`] but also returns the run identifier and
+    /// the on-disk evidence directory. Used by the CLI's structured
+    /// reporters and replay tooling (spec on issue #23).
+    pub async fn run_with_metadata(
+        &mut self,
+        def: &VerificationDefinition,
+        inputs: BTreeMap<String, serde_json::Value>,
+    ) -> Result<RunOutcome, EngineError> {
         let mut input_values: BTreeMap<String, Value> = BTreeMap::new();
         for (k, v) in &inputs {
             let val = json_to_value(v)
@@ -192,7 +240,11 @@ impl Engine {
                     verdict: verdict.state,
                 })?;
                 writer.finish()?;
-                return Ok(verdict);
+                return Ok(RunOutcome {
+                    verdict,
+                    run_id,
+                    run_dir,
+                });
             }
         }
 
@@ -214,7 +266,11 @@ impl Engine {
         })?;
         writer.finish()?;
 
-        Ok(run_verdict)
+        Ok(RunOutcome {
+            verdict: run_verdict,
+            run_id,
+            run_dir,
+        })
     }
 
     async fn run_criterion(
@@ -225,6 +281,15 @@ impl Engine {
     ) -> Result<CriterionVerdict, EngineError> {
         let mut check_verdicts: Vec<CheckVerdict> = Vec::new();
         for check in &criterion.checks {
+            // Filtered-out checks emit no events and don't contribute
+            // to verdict aggregation. A criterion with all checks
+            // filtered out aggregates as empty → Inconclusive
+            // (spec on issue #23).
+            if let Some(f) = &self.filter
+                && !f.matches(&criterion.id, &check.id)
+            {
+                continue;
+            }
             let cv = self.run_check(writer, run, &criterion.id, check).await?;
             writer.append(EventPayload::CheckFinished {
                 check_id: check.id.clone(),
@@ -578,6 +643,7 @@ mod tests {
             evidence_root: tmp.path().to_path_buf(),
             browser: None,
             definition_path: None,
+            filter: None,
         };
         // Clear default registry so each test composes its own.
         e.registry.clear();
@@ -1104,6 +1170,84 @@ criteria:
         inputs.insert("count".to_string(), serde_json::json!(3));
         let verdict = engine.run(&v, inputs).await.unwrap();
         assert_eq!(verdict.state, VerdictState::Pass);
+    }
+
+    /// Trivial filter for engine-level tests: keeps an explicit set of
+    /// `(criterion, check)` pairs.
+    struct AllowList(Vec<(&'static str, &'static str)>);
+
+    impl CheckFilter for AllowList {
+        fn matches(&self, criterion_id: &str, check_id: &str) -> bool {
+            self.0
+                .iter()
+                .any(|(c, k)| *c == criterion_id && *k == check_id)
+        }
+    }
+
+    #[tokio::test]
+    async fn filtered_out_check_emits_no_events_and_no_verdict_slot() {
+        let (mut engine, tmp) = engine_for_test();
+        engine.filter = Some(Box::new(AllowList(vec![("AC-1", "AC-1.1")])));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+      - id: AC-1.2
+        assertions: ["false"]
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        // AC-1.2 is filtered out: it must not contribute a Fail.
+        assert_eq!(verdict.state, VerdictState::Pass);
+        let only_check = &verdict.criteria[0].checks;
+        assert_eq!(only_check.len(), 1, "filtered check absent from verdict");
+        assert_eq!(only_check[0].check_id, "AC-1.1");
+        let events = read_only_run_events(&tmp);
+        let saw_filtered_check = events.iter().any(|e| {
+            matches!(&e.payload, duhem_evidence::EventPayload::CheckFinished { check_id, .. } if check_id == "AC-1.2")
+        });
+        assert!(!saw_filtered_check, "filtered check must emit no events");
+    }
+
+    #[tokio::test]
+    async fn criterion_with_all_checks_filtered_is_inconclusive_empty() {
+        // Spec (#23): a criterion whose checks are all filtered out
+        // aggregates as empty → Inconclusive(EmptyAggregation), which
+        // bubbles up to the run-level verdict.
+        let (mut engine, _tmp) = engine_for_test();
+        engine.filter = Some(Box::new(AllowList(vec![("AC-1", "AC-1.1")])));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+  - id: AC-2
+    description: x
+    checks:
+      - id: AC-2.1
+        assertions: ["true"]
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::EmptyAggregation),
+        );
+        let ac2 = verdict
+            .criteria
+            .iter()
+            .find(|c| c.criterion_id == "AC-2")
+            .expect("AC-2 in verdict vector");
+        assert_eq!(
+            ac2.state,
+            VerdictState::Inconclusive(InconclusiveCause::EmptyAggregation),
+        );
+        assert!(ac2.checks.is_empty());
     }
 
     #[tokio::test]

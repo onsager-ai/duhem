@@ -53,6 +53,15 @@ pub fn parse_pattern(spec: &str) -> Result<FilterPattern, String> {
             if k.is_empty() {
                 return Err(format!("--filter `{spec}`: empty check id"));
             }
+            // v1 grammar permits at most one `::` separator. A
+            // remaining `::` in either half would silently match
+            // nothing under the glob, so reject it with a clear
+            // error rather than letting authors debug an empty run.
+            if c.contains("::") || k.contains("::") {
+                return Err(format!(
+                    "--filter `{spec}`: malformed pattern (at most one `::` separator)"
+                ));
+            }
             Ok(FilterPattern {
                 criterion: c.to_string(),
                 check: Some(k.to_string()),
@@ -61,8 +70,11 @@ pub fn parse_pattern(spec: &str) -> Result<FilterPattern, String> {
     }
 }
 
-/// OR-of-patterns filter. Empty pattern list is rejected at the CLI
-/// boundary; this struct only models the non-empty case.
+/// OR-of-patterns filter. `parse` does *not* itself reject an empty
+/// pattern list — an empty `CliCheckFilter` is a well-defined
+/// "matches nothing" predicate — but `main.rs` skips constructing
+/// one when the user passed no `--filter` flags, so the empty case
+/// never reaches the engine in practice.
 #[derive(Debug, Clone)]
 pub struct CliCheckFilter {
     patterns: Vec<FilterPattern>,
@@ -151,6 +163,15 @@ mod tests {
     fn rejects_empty_check() {
         let err = parse_pattern("AC-1::").unwrap_err();
         assert!(err.contains("empty check"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_multiple_separators() {
+        // v1 grammar allows at most one `::`. A typo'd third
+        // component (e.g. `AC-1::AC-1.1::typo`) would otherwise
+        // silently match nothing — surface it as a parse error.
+        let err = parse_pattern("AC-1::AC-1.1::typo").unwrap_err();
+        assert!(err.contains("malformed pattern"), "got: {err}");
     }
 
     #[test]

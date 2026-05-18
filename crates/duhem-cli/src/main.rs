@@ -257,7 +257,13 @@ async fn run_command(args: RunArgs) -> ExitCode {
         eprintln!("reporter: {e}");
         return ExitCode::FAILURE;
     }
-    let _ = stdout.flush();
+    // Propagate flush errors: when stdout is a closed pipe (a common
+    // CI shape), a silent drop would let the command claim success
+    // even though the summary never reached the consumer.
+    if let Err(e) = stdout.flush() {
+        eprintln!("reporter: {e}");
+        return ExitCode::FAILURE;
+    }
 
     match outcome.verdict.state {
         VerdictState::Pass => ExitCode::SUCCESS,

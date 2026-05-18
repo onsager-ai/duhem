@@ -9,4 +9,6 @@ description = "Frozen RunSummary contract consumed by reporter plugins (subproce
 [dependencies]
 duhem-judge = { path = "../duhem-judge" }
 serde.workspace = true
+
+[dev-dependencies]
 serde_json.workspace = true

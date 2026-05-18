@@ -34,9 +34,9 @@ etc.) without forking the CLI.
 
 - `schema_version` is on the wire so a plugin written against today's
   contract can refuse a future shape rather than silently misrender.
-  Changes to the contract are schema-impacting and require a new entry
-  under this `## Reporter contract` heading plus a bump of
-  `RunSummary::SCHEMA_VERSION`.
+  Changes to the contract are schema-impacting and require a new
+  `### Reporter contract — vN ...` heading in the current unreleased
+  v0.x section, plus a bump of `RunSummary::SCHEMA_VERSION`.
 
 #### Plugin discovery
 

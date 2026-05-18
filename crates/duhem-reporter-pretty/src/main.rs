@@ -1,12 +1,19 @@
-//! Reference plugin reporter: a terminal ANSI table over the
+//! Reference plugin reporter: a terminal 2-column table over the
 //! `RunSummary` plugin contract (spec on issue #34).
 //!
 //! Reads one line of JSON from stdin (the `RunSummary` v1 shape),
-//! renders an ANSI-colored 2-column table to stdout (criterion id +
-//! verdict), and exits 0. A malformed or unsupported `schema_version`
-//! exits 2 with a recognizable message on stderr — plugin-side parse
-//! failures must surface as reporter errors, not as a silently-zero
-//! exit with empty stdout.
+//! renders a plain-text 2-column table to stdout (criterion id +
+//! verdict), and exits 0. The output is intentionally ANSI-free at
+//! v1 — this crate's job is to prove the subprocess contract
+//! end-to-end, not to demonstrate every styling capability a real
+//! reporter might add. A third-party "pretty" plugin that ships
+//! ANSI styling, color, or icons follows the same protocol; nothing
+//! in the contract precludes it.
+//!
+//! A malformed or unsupported `schema_version` exits 2 with a
+//! recognizable message on stderr — plugin-side parse failures must
+//! surface as reporter errors, not as a silently-zero exit with
+//! empty stdout.
 //!
 //! This is *not* built into the `duhem` binary. It is shipped as a
 //! separate crate so it proves the subprocess contract end-to-end: a
@@ -54,9 +61,8 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
     let title = format!("run {} — {}", s.run_id, verdict_label(&s.verdict));
     writeln!(out, "{title}")?;
     // Column width: long enough for `AC-99.99` style ids; verdict
-    // column auto-sizes off the rendered label width. ANSI codes are
-    // present but minimal — bold/dim only, no full-color palette — so
-    // the output is readable on terminals without truecolor.
+    // column shares a single space-padded gap. Plain text only at
+    // v1 — see the module docstring for the rationale.
     let id_w = s
         .criteria
         .iter()

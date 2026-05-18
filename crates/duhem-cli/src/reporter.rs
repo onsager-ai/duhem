@@ -16,7 +16,7 @@
 //! Reporters format the post-run summary only. `trace.jsonl` is
 //! identical regardless of the chosen reporter.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::process::{Command, Stdio};
 
 use duhem_runtime::RunOutcome;
@@ -141,6 +141,19 @@ fn build_summary(o: &RunOutcome) -> RunSummary {
 /// stdin, copy its stdout to `out`, and propagate any non-zero exit
 /// code as a `RenderError`. Stderr is captured and inlined into the
 /// error message so author plugins can fail loudly.
+///
+/// I/O posture:
+///
+/// - **Stdin is written on a helper thread.** A plugin that exits
+///   without reading stdin (parse-time failure, `/bin/false`, etc.)
+///   would otherwise hand us a `BrokenPipe` here that masks the
+///   plugin's real `PluginExit` failure. Writing in a separate thread
+///   lets the main thread proceed to `wait_with_output`, which reaps
+///   the child and gives us the actual exit status + stderr.
+/// - **Stdout and stderr are drained concurrently** via
+///   `wait_with_output`. Reading one pipe to EOF before draining the
+///   other can deadlock when a noisy plugin fills the second pipe's
+///   buffer while keeping the first open.
 fn render_plugin(
     name: &str,
     argv: &[String],
@@ -159,47 +172,51 @@ fn render_plugin(
         source: e,
     })?;
 
+    // Serialize the RunSummary up-front so the writer thread doesn't
+    // need to know about it.
     let summary = build_summary(outcome);
-    let mut stdin = child
+    let line =
+        serde_json::to_vec(&summary).map_err(|e| RenderError::Io(std::io::Error::other(e)))?;
+
+    let stdin = child
         .stdin
         .take()
         .expect("stdin pipe is configured above; take() must succeed");
-    // Write inside a scoped block so stdin closes before we wait on
-    // the child. Plugins that block on EOF need this; without it
-    // child.wait() would deadlock waiting for them to exit.
-    {
-        let line =
-            serde_json::to_vec(&summary).map_err(|e| RenderError::Io(std::io::Error::other(e)))?;
-        stdin.write_all(&line)?;
-        stdin.write_all(b"\n")?;
+    let writer = std::thread::spawn(move || -> std::io::Result<()> {
+        let mut stdin = stdin;
+        // Best-effort write: a `BrokenPipe` here means the plugin
+        // exited without reading. Swallow it so the main thread can
+        // proceed to `wait_with_output` and surface `PluginExit`
+        // with the plugin's real failure. Other errors are propagated.
+        match stdin.write_all(&line).and_then(|_| stdin.write_all(b"\n")) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+            Err(e) => Err(e),
+        }
         // Drop closes the pipe.
-    }
-    drop(stdin);
+    });
 
-    let mut stdout = child
-        .stdout
-        .take()
-        .expect("stdout pipe is configured above");
-    let mut buf = Vec::new();
-    stdout.read_to_end(&mut buf)?;
-    out.write_all(&buf)?;
+    // Drain stdout + stderr concurrently and wait for exit. This is
+    // the standard non-deadlock idiom for capturing both streams.
+    let output = child.wait_with_output().map_err(RenderError::Io)?;
 
-    let mut stderr = child
-        .stderr
-        .take()
-        .expect("stderr pipe is configured above");
-    let mut err_buf = Vec::new();
-    let _ = stderr.read_to_end(&mut err_buf);
-    let stderr_text = String::from_utf8_lossy(&err_buf).into_owned();
+    // Surface a writer-thread I/O failure only if the plugin
+    // otherwise exited successfully — a PluginExit failure carries
+    // more useful information for the operator.
+    let writer_result = writer.join().expect("stdin writer thread panicked");
 
-    let status = child.wait().map_err(RenderError::Io)?;
-    if !status.success() {
+    if !output.status.success() {
+        let stderr_text = String::from_utf8_lossy(&output.stderr).into_owned();
         return Err(RenderError::PluginExit {
             name: name.to_string(),
-            code: status.code(),
+            code: output.status.code(),
             stderr: stderr_text,
         });
     }
+
+    writer_result?;
+
+    out.write_all(&output.stdout)?;
     Ok(())
 }
 
@@ -212,25 +229,33 @@ pub(crate) fn json_line_for(outcome: &RunOutcome) -> String {
     serde_json::to_string(&summary).unwrap()
 }
 
-/// Helper used by `main::resolve_reporter` to look up a name and
-/// produce the matching `Reporter`. Returns `Ok(Reporter::Plugin)`
-/// only if `name` is in `registry` AND not one of the built-in
-/// reserved names. Built-ins are never shadowable.
-pub fn resolve_by_name(
+/// Match `name` against the built-in reporters (`default` / `quiet`
+/// / `json`). Returns `None` if `name` is not a built-in. Split out
+/// from plugin resolution so the CLI can answer for built-ins
+/// without paying the cost of reading `~/.duhem/config.toml` or
+/// `.duhem.toml` — a malformed plugin config must not break
+/// `--reporter default` (spec on #34: built-ins are never shadowable).
+pub fn resolve_built_in(name: &str) -> Option<Reporter> {
+    match name {
+        "default" => Some(Reporter::Default),
+        "quiet" => Some(Reporter::Quiet),
+        "json" => Some(Reporter::Json),
+        _ => None,
+    }
+}
+
+/// Resolve a non-built-in name against the plugin registry. The CLI
+/// only calls this after [`resolve_built_in`] returns `None`.
+pub fn resolve_plugin(
     name: &str,
     registry: &crate::reporter_config::PluginRegistry,
 ) -> Result<Reporter, String> {
-    match name {
-        "default" => Ok(Reporter::Default),
-        "quiet" => Ok(Reporter::Quiet),
-        "json" => Ok(Reporter::Json),
-        other => match registry.get(other) {
-            Some(entry) => Ok(Reporter::Plugin {
-                name: other.to_string(),
-                argv: entry.command.clone(),
-            }),
-            None => Err(format!("unknown reporter: {other}")),
-        },
+    match registry.get(name) {
+        Some(entry) => Ok(Reporter::Plugin {
+            name: name.to_string(),
+            argv: entry.command.clone(),
+        }),
+        None => Err(format!("unknown reporter: {name}")),
     }
 }
 
@@ -316,19 +341,14 @@ mod tests {
     }
 
     #[test]
-    fn resolve_built_in_wins_even_when_shadowed_in_config() {
-        // Spec on #34: built-ins are not shadowable. Even if a config
-        // file declares `json`, `--reporter json` must reach the
-        // built-in (`Reporter::Json`), not the plugin.
-        let registry = PluginRegistry::from_entries([(
-            "json".to_string(),
-            PluginEntry {
-                command: vec!["fake-json".to_string()],
-            },
-        )])
-        .unwrap();
-        let r = resolve_by_name("json", &registry).unwrap();
-        assert_eq!(r, Reporter::Json);
+    fn resolve_built_in_returns_built_in_variant() {
+        // Spec on #34: built-ins are not shadowable, and `main.rs`
+        // tries `resolve_built_in` BEFORE reading any plugin config —
+        // so a built-in name never even touches the registry.
+        assert_eq!(resolve_built_in("default"), Some(Reporter::Default));
+        assert_eq!(resolve_built_in("quiet"), Some(Reporter::Quiet));
+        assert_eq!(resolve_built_in("json"), Some(Reporter::Json));
+        assert_eq!(resolve_built_in("pretty"), None);
     }
 
     #[test]
@@ -340,7 +360,7 @@ mod tests {
             },
         )])
         .unwrap();
-        let r = resolve_by_name("pretty", &registry).unwrap();
+        let r = resolve_plugin("pretty", &registry).unwrap();
         match r {
             Reporter::Plugin { name, argv } => {
                 assert_eq!(name, "pretty");
@@ -351,9 +371,9 @@ mod tests {
     }
 
     #[test]
-    fn resolve_unknown_name_errors() {
+    fn resolve_plugin_unknown_name_errors() {
         let registry = PluginRegistry::default();
-        let err = resolve_by_name("nope", &registry).unwrap_err();
+        let err = resolve_plugin("nope", &registry).unwrap_err();
         assert!(
             err.contains("unknown reporter") && err.contains("nope"),
             "got: {err}"

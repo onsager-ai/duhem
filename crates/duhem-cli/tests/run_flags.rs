@@ -417,6 +417,12 @@ fn inputs_file_missing_file_errors_before_browser_launch() {
 /// because reporter resolution happens before any browser launch.
 #[test]
 fn unknown_reporter_name_exits_with_code_two() {
+    // Isolate `HOME` and the current directory under a tempdir so the
+    // CLI's reporter resolver never reads the developer's real
+    // `~/.duhem/config.toml` or an ancestor's `.duhem.toml`. Without
+    // this, a stale or malformed local config would surface here as a
+    // load-time failure instead of the expected unknown-reporter
+    // path (Copilot review on PR #43).
     let tmp = tempfile::tempdir().unwrap();
     let path = fixture(&tmp, ONE_CRITERION);
 
@@ -425,6 +431,8 @@ fn unknown_reporter_name_exits_with_code_two() {
         .arg(&path)
         .arg("--reporter")
         .arg("definitely-not-a-real-reporter")
+        .current_dir(tmp.path())
+        .env("HOME", tmp.path())
         .output()
         .expect("spawn duhem");
     // Exit 2 is the spec-confirmed code for reporter-not-found —

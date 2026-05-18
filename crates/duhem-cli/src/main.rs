@@ -130,19 +130,29 @@ fn main() -> ExitCode {
             // runtime / browser: a typoed `--reporter` should exit 2
             // with `unknown reporter:` on stderr without any work
             // happening first.
-            let registry = match PluginRegistry::load() {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("{e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            let resolved_reporter = match reporter::resolve_by_name(&reporter, &registry) {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("{e}");
-                    // Spec on #34 Test § "unknown name yields exit 2".
-                    return ExitCode::from(2);
+            //
+            // Try built-ins first so a malformed `.duhem.toml` or
+            // `~/.duhem/config.toml` doesn't break `--reporter
+            // default`/`quiet`/`json` — the documented resolution
+            // order has built-ins winning before any config is read.
+            let resolved_reporter = match reporter::resolve_built_in(&reporter) {
+                Some(r) => r,
+                None => {
+                    let registry = match PluginRegistry::load() {
+                        Ok(r) => r,
+                        Err(e) => {
+                            eprintln!("{e}");
+                            return ExitCode::FAILURE;
+                        }
+                    };
+                    match reporter::resolve_plugin(&reporter, &registry) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            eprintln!("{e}");
+                            // Spec on #34 Test § "unknown name yields exit 2".
+                            return ExitCode::from(2);
+                        }
+                    }
                 }
             };
             let rt = tokio::runtime::Builder::new_multi_thread()

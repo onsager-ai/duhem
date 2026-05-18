@@ -4,8 +4,9 @@
 //! Reporter plugins are subprocesses: the CLI writes one line of JSON
 //! to the plugin's stdin and captures its stdout. The shape of that
 //! line is `RunSummary` and it is **frozen**. Changes are
-//! schema-impacting and require a `CHANGELOG.md` entry under
-//! `## Reporter contract`, plus a bump of [`RunSummary::SCHEMA_VERSION`].
+//! schema-impacting and require a `CHANGELOG.md` entry under the
+//! `### Reporter contract` heading in the current `v0.x — unreleased`
+//! section, plus a bump of [`RunSummary::SCHEMA_VERSION`].
 //!
 //! Phase-0 scope: criterion-level verdicts only. Per-check verdicts
 //! stay in `trace.jsonl` (the trace is the trace; the summary is the
@@ -41,7 +42,9 @@ pub struct RunSummary {
 
 impl RunSummary {
     /// Current contract version. Bumping this is schema-impacting and
-    /// requires a `CHANGELOG.md` entry under `## Reporter contract`.
+    /// requires a `CHANGELOG.md` entry under the
+    /// `### Reporter contract` heading in the current
+    /// `## v0.x — unreleased` section.
     pub const SCHEMA_VERSION: &'static str = "1";
 
     /// Construct a summary at the current schema version.

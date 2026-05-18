@@ -95,22 +95,28 @@ impl PluginRegistry {
     }
 }
 
-/// Merge two reporter sections with repo overlaying user. Empty
-/// command lists are rejected here (rather than at plugin-invocation
-/// time) so a typoed config fails before the run starts. Exposed for
-/// tests; production callers go through [`PluginRegistry::load`].
+/// Merge two reporter sections with repo overlaying user. Validation
+/// runs AFTER the overlay so a broken user entry does not block a
+/// valid same-named repo entry from taking precedence — that would
+/// contradict the repo-overrides-user precedence rule. Empty command
+/// lists in the final merged map are rejected here (rather than at
+/// plugin-invocation time) so a typoed config fails before the run
+/// starts. Exposed for tests; production callers go through
+/// [`PluginRegistry::load`].
 fn merge_layered(
     user: BTreeMap<String, PluginEntry>,
     repo: BTreeMap<String, PluginEntry>,
 ) -> Result<BTreeMap<String, PluginEntry>, String> {
     let mut out: BTreeMap<String, PluginEntry> = BTreeMap::new();
     for (name, entry) in user.into_iter().chain(repo) {
+        out.insert(name, entry);
+    }
+    for (name, entry) in &out {
         if entry.command.is_empty() {
             return Err(format!(
                 "reporter `{name}`: `command` must be a non-empty argv list"
             ));
         }
-        out.insert(name, entry);
     }
     Ok(out)
 }
@@ -229,6 +235,25 @@ command = ["python3", "-m", "duhem_reporter_junit"]
         repo.insert("pretty".to_string(), repo_entry.clone());
         let merged = merge_layered(user, repo).unwrap();
         assert_eq!(merged["pretty"], repo_entry);
+    }
+
+    #[test]
+    fn valid_repo_entry_overrides_broken_user_entry_with_same_name() {
+        // Regression: validation must run AFTER the repo overlay. A
+        // user `pretty` with `command = []` should not block a valid
+        // repo `pretty` — repo wins, so the merged map carries the
+        // repo's command and load succeeds.
+        let mut user = BTreeMap::new();
+        user.insert("pretty".to_string(), PluginEntry { command: vec![] });
+        let mut repo = BTreeMap::new();
+        repo.insert(
+            "pretty".to_string(),
+            PluginEntry {
+                command: vec!["repo-pretty".to_string()],
+            },
+        );
+        let merged = merge_layered(user, repo).unwrap();
+        assert_eq!(merged["pretty"].command, vec!["repo-pretty".to_string()]);
     }
 
     #[test]

@@ -13,7 +13,7 @@
 //! Exits 0 on success, 2 on parse / schema-version failure (mirrors
 //! the `pretty` reference plugin).
 
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 
 use duhem_judge::VerdictState;
 use duhem_summary::RunSummary;
@@ -43,7 +43,13 @@ fn main() {
     }
 
     let xml = render(&summary);
-    print!("{xml}");
+    // Use `write_all` rather than `print!` so a closed downstream
+    // pipe surfaces as a tidy exit-2 with a recognizable message,
+    // not a Rust panic / exit 101.
+    if let Err(e) = io::stdout().write_all(xml.as_bytes()) {
+        eprintln!("duhem-reporter-junit: write stdout: {e}");
+        std::process::exit(2);
+    }
 }
 
 /// Render the `RunSummary` as a JUnit XML document. Returned as a

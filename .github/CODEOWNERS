@@ -1,0 +1,30 @@
+# CODEOWNERS — review gates on Duhem.
+#
+# Spec: onsager-ai/duhem#36. The `verifications/**` gate is the
+# Duhem half of the asymmetric-trust seam (`docs/duhem-spec.md`
+# §11.2): a Verification Definition is the human commitment about
+# what "done" means for a feature, and edits to one must pass
+# through a Duhem maintainer. A consumer repo's PR cannot smuggle
+# in a self-attesting edit to its own check by opening a PR on
+# this repo.
+#
+# Pair this file with branch-protection rules on `main` that
+# require CODEOWNERS approval; the file alone is advisory.
+
+# Catch-all default — any path without a more specific rule still
+# routes to a maintainer.
+*                       @tikazyq
+
+# Verification Definitions. The first deployment of the trust
+# boundary; the only path that exists today is the
+# create-project dogfood, but the glob covers any future VD.
+/verifications/         @tikazyq
+
+# Schema and judge — the wire format and the verdict engine. A
+# regression here would corrupt every downstream verdict.
+/crates/duhem-schema/   @tikazyq
+/crates/duhem-judge/    @tikazyq
+
+# The action that wires Duhem into a consumer's PR pipeline.
+# A change here ships into every consumer that pins a new tag.
+/.github/actions/run/   @tikazyq

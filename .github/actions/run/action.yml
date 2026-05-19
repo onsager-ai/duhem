@@ -1,0 +1,183 @@
+# duhem/run — composite GitHub Action.
+#
+# Runs a Duhem Verification Definition against the calling workflow's
+# environment and surfaces a verdict suitable for a required-check
+# status gate. Spec: onsager-ai/duhem#36 (§12.1 of `docs/duhem-spec.md`).
+#
+# Trust contract (§11.2 of the spec, restated in this directory's
+# README). When this action is referenced as
+# `onsager-ai/duhem/.github/actions/run@<tag>`, GitHub clones
+# `onsager-ai/duhem` at `<tag>` into a runner-local directory and uses
+# the `action.yml` and Verification Definition from THAT clone — not
+# from the caller's repo. The caller can pass `inputs:` (URLs, fixture
+# credentials, fresh project names) but cannot substitute the
+# Verification Definition body. That asymmetry is what makes the
+# Onsager-side workflow consume a verdict it did not author.
+name: duhem/run
+description: Run a Duhem Verification Definition and surface the verdict.
+author: Duhem (https://github.com/onsager-ai/duhem)
+
+inputs:
+  verification-path:
+    description: |
+      Path to a Verification Definition `.yml` file. Always resolved
+      relative to the `onsager-ai/duhem` repo root at the action's
+      pinned tag — NOT relative to the caller's workspace. The caller
+      cannot point this at a file in their own PR.
+    required: true
+  inputs:
+    description: |
+      Newline-separated `key=value` pairs forwarded to `duhem run` as
+      repeated `--inputs key=value` flags. Coerced per the
+      Verification Definition's typed input catalog.
+    required: false
+    default: ""
+  reporter:
+    description: |
+      Stdout reporter for the post-run summary. Defaults to `json` so
+      the action can parse the verdict line. Built-ins: `default`,
+      `quiet`, `json`. The action's verdict + evidence-dir outputs
+      depend on parsing the json summary, so callers should leave this
+      at the default unless they have a plugin reporter that emits the
+      same single-line JSON contract.
+    required: false
+    default: "json"
+
+outputs:
+  verdict:
+    description: |
+      The run's verdict as emitted by `duhem run --reporter json`
+      (`pass`, `fail`, or `inconclusive:<cause>`). Empty when the CLI
+      failed before producing a summary (e.g. browser launch failure).
+    value: ${{ steps.run.outputs.verdict }}
+  evidence-dir:
+    description: |
+      Path on the runner to the per-run evidence directory
+      (`.duhem/runs/<run-id>`). Empty when no summary was produced.
+    value: ${{ steps.run.outputs.evidence-dir }}
+
+runs:
+  using: composite
+  steps:
+    # `$GITHUB_ACTION_PATH` is the directory containing this action.yml,
+    # so the Duhem repo root is three parents up (`run/` → `actions/` →
+    # `.github/` → repo). Same shape whether the action was referenced
+    # as `onsager-ai/duhem/.github/actions/run@v0.1` (cross-repo:
+    # $GITHUB_ACTION_PATH points at the runner's clone of Duhem at
+    # v0.1) or `./.github/actions/run` (in-repo dogfood:
+    # $GITHUB_ACTION_PATH points at this PR's checkout). The trust
+    # boundary holds in the first case because the clone is fetched by
+    # GitHub's action runtime, not by the caller's workflow steps.
+    - name: Resolve Duhem source
+      id: src
+      shell: bash
+      run: |
+        DUHEM_SRC="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        # Defensive check: a Duhem checkout always carries Cargo.toml
+        # plus the `duhem-cli` crate. If we landed somewhere else (a
+        # consumer that vendored just the action.yml, say), fail loudly
+        # rather than silently building the wrong thing.
+        if [ ! -f "$DUHEM_SRC/Cargo.toml" ] || [ ! -d "$DUHEM_SRC/crates/duhem-cli" ]; then
+          echo "::error::duhem/run: expected a Duhem repo checkout at $DUHEM_SRC, did not find Cargo.toml + crates/duhem-cli/. Action must be referenced as onsager-ai/duhem/.github/actions/run@<tag>, not vendored."
+          exit 1
+        fi
+        echo "src=$DUHEM_SRC" >> "$GITHUB_OUTPUT"
+
+    # `rust-toolchain.toml` pins the channel + components; rustup
+    # honors it automatically once the toolchain is on PATH. We use
+    # the GitHub-hosted runner's pre-installed rustup rather than
+    # dtolnay/rust-toolchain to keep the action dependency-free
+    # against third-party actions (the trust contract gets easier to
+    # audit when the action only depends on official actions and the
+    # runner's preinstalled tooling).
+    - name: Activate pinned Rust toolchain
+      shell: bash
+      working-directory: ${{ steps.src.outputs.src }}
+      run: |
+        rustup show active-toolchain
+        cargo --version
+        rustc --version
+
+    - name: Cache cargo build
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: ${{ steps.src.outputs.src }}
+
+    - name: Build duhem CLI
+      shell: bash
+      working-directory: ${{ steps.src.outputs.src }}
+      run: cargo build --release -p duhem-cli
+
+    # The Playwright driver ships inside the `playwright` crate but the
+    # browser binary does not (see
+    # `crates/duhem-actions/src/playwright.rs` module docs). Without
+    # this step every check that runs `ui/*` actions fails with
+    # `chromium binary not installed`.
+    - name: Install Playwright Chromium
+      shell: bash
+      run: npx --yes playwright install --with-deps chromium
+
+    - name: Run verification
+      id: run
+      shell: bash
+      working-directory: ${{ steps.src.outputs.src }}
+      env:
+        VERIFICATION_PATH: ${{ inputs.verification-path }}
+        VD_INPUTS: ${{ inputs.inputs }}
+        REPORTER: ${{ inputs.reporter }}
+      run: |
+        # We propagate the CLI's exit code (Pass → 0, Fail /
+        # Inconclusive → non-zero) so the calling workflow step turns
+        # red on a failing verdict — that is the verdict-as-status-check
+        # contract. But we also want to set `outputs.verdict` /
+        # `outputs.evidence-dir` even when the run failed, so downstream
+        # steps can post a comment or upload evidence on red. The
+        # `set +e` / explicit `exit $RC` dance is what gives us both.
+        set +e
+        # The action surface accepts inputs as a multi-line block:
+        #   inputs: |
+        #     base_url=https://staging.example.com
+        #     test_email=fixture@example.com
+        # Each non-empty line becomes one `--inputs k=v` flag. We
+        # tolerate `\r` line endings from authors editing on Windows.
+        ARGS=()
+        while IFS= read -r line; do
+          line="${line%$'\r'}"
+          [ -z "$line" ] && continue
+          ARGS+=(--inputs "$line")
+        done <<< "$VD_INPUTS"
+
+        OUT_FILE="$(mktemp)"
+        ./target/release/duhem run "$VERIFICATION_PATH" \
+          --reporter "$REPORTER" \
+          "${ARGS[@]}" \
+          | tee "$OUT_FILE"
+        RC=${PIPESTATUS[0]}
+        set -e
+
+        # The json reporter emits a single JSON-object line. `default`
+        # emits `pass` / `fail` / `inconclusive:<cause>` — not parseable
+        # as the structured summary, so callers using `--reporter
+        # default` get empty outputs (the action's exit code still
+        # gates downstream steps correctly). `quiet` emits nothing.
+        if [ "$REPORTER" = "json" ]; then
+          SUMMARY="$(grep -E '^\{.*\}$' "$OUT_FILE" | tail -n 1 || true)"
+          if [ -n "$SUMMARY" ]; then
+            VERDICT="$(printf '%s' "$SUMMARY" | jq -r '.verdict // ""')"
+            EDIR="$(printf '%s' "$SUMMARY" | jq -r '.evidence_dir // ""')"
+          else
+            # Reached when the CLI errored before the reporter ran
+            # (e.g. browser launch failure, validation error). The
+            # action's exit code below still surfaces the failure.
+            echo "::warning::duhem/run: no json summary on stdout; outputs.verdict will be empty. Inspect the step log for the underlying error."
+            VERDICT=""
+            EDIR=""
+          fi
+        else
+          VERDICT=""
+          EDIR=""
+        fi
+
+        echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+        echo "evidence-dir=$EDIR" >> "$GITHUB_OUTPUT"
+        exit "$RC"

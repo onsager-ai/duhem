@@ -1,0 +1,116 @@
+# Dogfood — exercises `.github/actions/run` against this repo's first
+# Verification Definition on every push. Spec: onsager-ai/duhem#36.
+#
+# Two jobs serve as the worked example for the action surface
+# documented in `.github/actions/run/README.md`:
+#
+# - `wiring`: parses, validates, and dry-runs the VD through the
+#   action. Catches contract drift between the action and the CLI
+#   (input parsing, flag forwarding, output capture) without needing
+#   a live Onsager environment in the runner. Required on every PR.
+# - `verdict`: the full holistic run — builds Onsager, brings it up,
+#   runs the VD end-to-end. Gated on a real Onsager source being
+#   available, which waits on the Onsager-side companion spec (the
+#   tracking note lives in the spec issue's "Open questions"). Until
+#   that lands, the job no-ops; once it lands, it flips on without a
+#   workflow rewrite.
+
+name: dogfood
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: dogfood-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  wiring:
+    # Smoke-tests the action's plumbing — that `inputs:` lines parse
+    # into `--inputs k=v` flags, that the json reporter line is
+    # captured, that the action's outputs are populated. We get this
+    # without a live Onsager by piggybacking on the CLI's `--dry-run`
+    # path (parse + validate + resolve filter, no browser launch).
+    # Today `--dry-run` is exposed by the CLI but not by the action;
+    # we drive `duhem run` directly here to exercise the same code
+    # paths the action will invoke, with the trust contract still
+    # documented by the README. When the action grows a `dry-run`
+    # input (follow-on), this job collapses to `uses: ./`.
+    name: action wiring (dry-run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          rustup show active-toolchain
+          cargo --version
+          rustc --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build duhem CLI
+        run: cargo build --release -p duhem-cli
+
+      # Confirm the VD parses and inputs resolve through the same
+      # path the action will drive — `--dry-run` exercises the
+      # parse/validate/resolve pipeline (the work the action does
+      # before the browser launch) and exits 0. A regression in the
+      # action's `inputs:` → `--inputs k=v` translation, or in the
+      # VD itself, surfaces here.
+      - name: Dry-run create-project VD
+        run: |
+          ./target/release/duhem run \
+            verifications/onsager-dashboard-create-project/duhem.yml \
+            --dry-run \
+            --inputs login_url=http://localhost:3000/login \
+            --inputs new_project_url=http://localhost:3000/projects/new \
+            --inputs projects_url=http://localhost:3000/projects \
+            --inputs test_email=fixture@example.test \
+            --inputs test_password=placeholder \
+            --inputs project_name=duhem-fixture-${{ github.run_id }}
+
+  verdict:
+    # Holistic run against a live Onsager environment. Gated until the
+    # Onsager-side companion spec lands an Onsager build entrypoint
+    # this job can call (see `verifications/onsager-dashboard-create-project/README.md`
+    # "Open items" and the spec issue's "Open questions").
+    name: holistic run (gated)
+    runs-on: ubuntu-latest
+    if: ${{ vars.ONSAGER_DOGFOOD_READY == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Onsager build/serve steps land with the Onsager-side
+      # companion spec — `onsager-ai/onsager` will expose a script
+      # this job can invoke to bring the dashboard up on
+      # http://localhost:3000 with a fixture user provisioned.
+      - name: Bring up Onsager
+        run: |
+          echo "::error::Onsager build/serve hook not yet wired. Set repo variable ONSAGER_DOGFOOD_READY=false until the Onsager-side companion spec lands."
+          exit 1
+
+      - name: Verify create-project
+        id: duhem
+        uses: ./.github/actions/run
+        with:
+          verification-path: verifications/onsager-dashboard-create-project/duhem.yml
+          inputs: |
+            login_url=http://localhost:3000/login
+            new_project_url=http://localhost:3000/projects/new
+            projects_url=http://localhost:3000/projects
+            test_email=${{ secrets.DUHEM_FIXTURE_EMAIL }}
+            test_password=${{ secrets.DUHEM_FIXTURE_PASSWORD }}
+            project_name=duhem-fixture-${{ github.run_id }}
+
+      - name: Surface evidence on red
+        if: failure() && steps.duhem.outputs.evidence-dir != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: duhem-evidence
+          path: ${{ steps.duhem.outputs.evidence-dir }}

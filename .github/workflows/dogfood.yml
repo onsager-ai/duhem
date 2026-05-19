@@ -31,16 +31,30 @@ env:
 
 jobs:
   wiring:
-    # Two-step smoke test of the composite action itself. Step 1
-    # drives `duhem run --dry-run` directly to confirm the VD parses
-    # and inputs resolve cleanly (fast, no browser). Step 2 invokes
-    # `./.github/actions/run` end-to-end against the same VD against
-    # a non-existent localhost server; the verdict will be
-    # non-`pass`, which is the point — we're asserting the action's
-    # plumbing (path validation, inputs parsing, build, browser
-    # install, json-summary capture, output extraction) round-trips
-    # whatever the CLI produces, not that the run itself succeeds.
-    # The full holistic-green run lives in `verdict` below.
+    # Smoke-tests the bits of the composite action that we can
+    # reliably exercise without a live Onsager environment:
+    #
+    # - Step 1: direct CLI `--dry-run` confirms the VD parses and
+    #   inputs resolve cleanly. Mirrors the action's own
+    #   parse/validate/resolve pipeline.
+    # - Step 2: action-invoked negative test for the trust-boundary
+    #   path validation — pointing the action at an absolute or
+    #   escaping `verification-path` must fail before `duhem run`
+    #   is invoked. This is the regression harness for the action's
+    #   first responsibility (asymmetric-trust seam, §11.2).
+    #
+    # An active smoke test of the action's HAPPY path (path-valid,
+    # CLI runs, json summary captured, outputs populated) would
+    # require a Chromium revision that pairs with the
+    # `playwright = "0.0.20"` Rust crate's bundled driver
+    # (`1.11.0-1620331022000`). `npx playwright install` floats to
+    # the current Chromium revision, which the bundled driver
+    # cannot drive — making any happy-path smoke test fail for
+    # reasons unrelated to the action's logic. That coverage lives
+    # in the gated `verdict` job below, which assumes a real
+    # Onsager environment and therefore a real browser launch is in
+    # scope. The longer-term fix is bumping the Rust `playwright`
+    # crate dependency.
     name: action wiring
     runs-on: ubuntu-latest
     steps:
@@ -52,9 +66,6 @@ jobs:
           cargo --version
           rustc --version
 
-      # Direct CLI dry-run. Fastest possible signal that the VD +
-      # input catalog parse cleanly, before paying for the full
-      # action smoke test below.
       - name: Build duhem CLI
         run: cargo build --release -p duhem-cli
 
@@ -70,51 +81,42 @@ jobs:
             --inputs test_password=placeholder \
             --inputs project_name=duhem-fixture-${{ github.run_id }}
 
-      # Active smoke test of the composite action. No Onsager server
-      # is listening on localhost:3000, so the very first
-      # `ui/navigate` will fail; we expect `verdict` to surface as a
-      # non-`pass` value but to be NON-EMPTY — that's the assertion
-      # that the action's json-summary capture + output extraction
-      # actually ran. `continue-on-error: true` keeps the workflow
-      # green on the non-pass exit code, so the subsequent assertion
-      # step gets to inspect outputs.
-      - name: Smoke-test action against create-project VD
-        id: action-smoke
+      # Trust-boundary negative test #1: an absolute
+      # verification-path must be rejected by the action before
+      # `duhem run` is invoked. We assert the step's `outcome` is
+      # `failure` — that's the contract a consumer's required check
+      # depends on. A regression here would silently re-open the
+      # path the asymmetric-trust seam exists to close.
+      - name: Action rejects absolute verification-path
+        id: reject-absolute
         continue-on-error: true
         uses: ./.github/actions/run
         with:
-          verification-path: verifications/onsager-dashboard-create-project/duhem.yml
-          inputs: |
-            login_url=http://localhost:3000/login
-            new_project_url=http://localhost:3000/projects/new
-            projects_url=http://localhost:3000/projects
-            test_email=fixture@example.test
-            test_password=placeholder
-            project_name=duhem-fixture-${{ github.run_id }}
+          verification-path: /etc/passwd
 
-      - name: Assert action surfaced verdict outputs
-        env:
-          ACTION_VERDICT: ${{ steps.action-smoke.outputs.verdict }}
-          ACTION_EVIDENCE_DIR: ${{ steps.action-smoke.outputs.evidence-dir }}
+      - name: Assert absolute path was rejected
         run: |
-          # Both outputs must be populated. An empty `verdict` here
-          # means the CLI exited before the reporter ran (e.g.
-          # browser launch crash, validation failure) — a real
-          # regression in the action's setup steps. An empty
-          # `evidence-dir` means the json summary was malformed.
-          echo "verdict=$ACTION_VERDICT"
-          echo "evidence-dir=$ACTION_EVIDENCE_DIR"
-          if [ -z "$ACTION_VERDICT" ]; then
-            echo "::error::composite action did not surface a verdict — its setup steps regressed"
+          if [ "${{ steps.reject-absolute.outcome }}" != "failure" ]; then
+            echo "::error::action accepted an absolute verification-path; trust-boundary regression"
             exit 1
           fi
-          if [ -z "$ACTION_EVIDENCE_DIR" ]; then
-            echo "::error::composite action did not surface an evidence-dir — json reporter contract regressed"
+
+      # Trust-boundary negative test #2: a path that normalizes
+      # outside the Duhem checkout must be rejected. Catches a
+      # regression in the `realpath -m` + prefix-match logic.
+      - name: Action rejects path-traversal verification-path
+        id: reject-traversal
+        continue-on-error: true
+        uses: ./.github/actions/run
+        with:
+          verification-path: ../../etc/passwd
+
+      - name: Assert traversal path was rejected
+        run: |
+          if [ "${{ steps.reject-traversal.outcome }}" != "failure" ]; then
+            echo "::error::action accepted a traversal verification-path; trust-boundary regression"
             exit 1
           fi
-          # We DO NOT assert verdict == pass here: no Onsager server
-          # is running, so the holistic run cannot succeed. The
-          # green-verdict assertion lives in `verdict` below.
 
   verdict:
     # Holistic run against a live Onsager environment. Gated until the

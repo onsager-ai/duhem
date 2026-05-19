@@ -83,6 +83,42 @@ runs:
         fi
         echo "src=$DUHEM_SRC" >> "$GITHUB_OUTPUT"
 
+    # Trust-boundary enforcement: `verification-path` must resolve
+    # to a file inside the Duhem checkout. An absolute path or any
+    # traversal that lands outside `$DUHEM_SRC` would let a caller
+    # substitute their own VD body, which is exactly the
+    # asymmetric-trust violation §11.2 forbids. The CLI happily
+    # reads any path the OS reads, so the gate has to live here.
+    # Runs BEFORE the build / Chromium install so a malicious path
+    # fails fast and doesn't pay the cold-build cost.
+    - name: Validate verification-path stays inside the Duhem checkout
+      shell: bash
+      env:
+        VERIFICATION_PATH: ${{ inputs.verification-path }}
+        DUHEM_SRC: ${{ steps.src.outputs.src }}
+      run: |
+        case "$VERIFICATION_PATH" in
+          /*)
+            echo "::error::verification-path must be relative to the Duhem checkout, not absolute (got: $VERIFICATION_PATH)"
+            exit 1
+            ;;
+        esac
+        # `realpath -m` resolves `..` segments without requiring the
+        # file to exist yet; we want the normalized form, then a
+        # prefix check against the Duhem source root.
+        RESOLVED="$(realpath -m "$DUHEM_SRC/$VERIFICATION_PATH")"
+        case "$RESOLVED" in
+          "$DUHEM_SRC"/*|"$DUHEM_SRC") : ;;
+          *)
+            echo "::error::verification-path escapes the Duhem checkout ($RESOLVED is outside $DUHEM_SRC)"
+            exit 1
+            ;;
+        esac
+        if [ ! -f "$RESOLVED" ]; then
+          echo "::error::verification-path does not exist: $VERIFICATION_PATH"
+          exit 1
+        fi
+
     # `rust-toolchain.toml` pins the channel + components; rustup
     # honors it automatically once the toolchain is on PATH. We use
     # the GitHub-hosted runner's pre-installed rustup rather than
@@ -143,37 +179,9 @@ runs:
         VD_INPUTS: ${{ inputs.inputs }}
         REPORTER: ${{ inputs.reporter }}
       run: |
-        # Trust-boundary enforcement: `verification-path` must
-        # resolve to a file inside the Duhem checkout. An absolute
-        # path or any traversal that lands outside `$DUHEM_SRC`
-        # would let a caller substitute their own VD body, which is
-        # exactly the asymmetric-trust violation §11.2 forbids. The
-        # CLI happily reads any path the OS reads, so the gate has
-        # to live here.
-        DUHEM_SRC="$(pwd -P)"
-        case "$VERIFICATION_PATH" in
-          /*)
-            echo "::error::verification-path must be relative to the Duhem checkout, not absolute (got: $VERIFICATION_PATH)"
-            exit 1
-            ;;
-        esac
-        # `realpath -m` resolves `..` segments without requiring the
-        # file to exist yet; we want the normalized form, then a
-        # prefix check against the Duhem source root.
-        RESOLVED="$(realpath -m "$DUHEM_SRC/$VERIFICATION_PATH")"
-        case "$RESOLVED" in
-          "$DUHEM_SRC"/*|"$DUHEM_SRC") : ;;
-          *)
-            echo "::error::verification-path escapes the Duhem checkout ($RESOLVED is outside $DUHEM_SRC)"
-            exit 1
-            ;;
-        esac
-        if [ ! -f "$RESOLVED" ]; then
-          echo "::error::verification-path does not exist: $VERIFICATION_PATH"
-          exit 1
-        fi
-
-        # We propagate the CLI's exit code (Pass → 0, Fail /
+        # Path validation already ran in `Validate verification-path
+        # stays inside the Duhem checkout`. We propagate the CLI's
+        # exit code (Pass → 0, Fail /
         # Inconclusive → non-zero) so the calling workflow step turns
         # red on a failing verdict — that is the verdict-as-status-check
         # contract. But we also want to set `outputs.verdict` /

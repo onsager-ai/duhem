@@ -164,7 +164,11 @@ for the Chromium binary only. Pinning a specific
 revision the bundled driver can't drive. The real supply-chain
 hardening to do is bumping the Rust `playwright` crate to a
 maintained version with a contemporary driver; that's tracked as
-a follow-on and is out of scope for this action.
+a follow-on and is out of scope for this action. Note also that
+the same crate-version pairing constraint is the reason the
+`dogfood.yml` `wiring` job only exercises the action through
+negative path-validation tests today — a happy-path active smoke
+test waits on the crate upgrade.
 
 If we ever bring caching back, the rule is: pin every third-party
 action by full commit SHA in `action.yml`, list it here, and

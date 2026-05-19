@@ -50,11 +50,16 @@ duhem run verifications/onsager-dashboard-create-project/duhem.yml \
 Pass staging URLs explicitly. Credentials come from CI secrets;
 never commit them.
 
+Replace `<staging-host>` with the actual Onsager staging
+hostname — the real domain is still an open item (see "Open
+items" at the bottom of this file) and the example below uses
+a placeholder, not a confirmed URL.
+
 ```sh
 duhem run verifications/onsager-dashboard-create-project/duhem.yml \
-  --inputs login_url=https://staging.onsager.ai/login \
-  --inputs new_project_url=https://staging.onsager.ai/projects/new \
-  --inputs projects_url=https://staging.onsager.ai/projects \
+  --inputs login_url=https://<staging-host>/login \
+  --inputs new_project_url=https://<staging-host>/projects/new \
+  --inputs projects_url=https://<staging-host>/projects \
   --inputs test_email="$ONSAGER_STAGING_FIXTURE_EMAIL" \
   --inputs test_password="$ONSAGER_STAGING_FIXTURE_PASSWORD" \
   --inputs project_name="duhem-fixture-$(uuidgen)"
@@ -66,7 +71,11 @@ To iterate on one criterion at a time (e.g. while diagnosing a
 locator change after the dashboard's form heading is renamed):
 
 ```sh
-duhem run … --filter AC-1
+duhem run verifications/onsager-dashboard-create-project/duhem.yml \
+  --inputs test_email="$DUHEM_FIXTURE_EMAIL" \
+  --inputs test_password="$DUHEM_FIXTURE_PASSWORD" \
+  --inputs project_name="duhem-fixture-$(uuidgen)" \
+  --filter AC-1
 ```
 
 ## Fixture user provisioning

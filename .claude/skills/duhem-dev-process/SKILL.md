@@ -247,7 +247,7 @@ mechanics.
 
 | Stage                                       | Skill / workflow                                                |
 |---------------------------------------------|-----------------------------------------------------------------|
-| Write the spec                              | [`issue-spec`](../issue-spec/SKILL.md)                          |
+| Write the spec                              | [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) (installed globally from `onsager-ai/dev-skills`) |
 | Pre-push checks                             | [`duhem-pre-push`](../duhem-pre-push/SKILL.md)                  |
 | CI triage, review, iterate                  | [`duhem-pr-lifecycle`](../duhem-pr-lifecycle/SKILL.md)          |
 | On PR merge → tick Plan items               | [`duhem-pr-lifecycle`](../duhem-pr-lifecycle/SKILL.md) (manual) |

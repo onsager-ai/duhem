@@ -87,7 +87,7 @@ just points at them.
 | Stage                          | Skill                                    |
 |--------------------------------|------------------------------------------|
 | Decide what to build           | `.claude/skills/duhem-dev-process`       |
-| Write the spec                 | `.claude/skills/issue-spec`              |
+| Write the spec                 | `issue-spec` (global, from `onsager-ai/dev-skills`) |
 | Author Verification Definitions| `.claude/skills/verification-authoring`  |
 | Pre-push checks                | `.claude/skills/duhem-pre-push`          |
 | PR triage / review / merge     | `.claude/skills/duhem-pr-lifecycle`      |

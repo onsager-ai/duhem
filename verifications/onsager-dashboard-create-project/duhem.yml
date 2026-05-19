@@ -1,0 +1,199 @@
+# Onsager dashboard — create project (dogfood)
+#
+# Duhem's first Verification Definition that targets a real Onsager
+# feature end-to-end. Spec: onsager-ai/duhem#35. Criteria prose:
+# `./criteria.md`. Operator setup: `./README.md`.
+#
+# Holistic posture (`docs/duhem-spec.md` §8): every check exercises
+# the real Onsager dashboard against a real database via a real
+# browser. No mocks at the web boundary.
+#
+# Setup-state isolation: per the runtime today, `setup:` outputs
+# cross into checks but browser state (cookies, localStorage) does
+# not. That means each check authenticates from scratch. When
+# session-passing setup lands (future spec), the login prelude
+# collapses into setup and each check shrinks.
+
+verification: Onsager dashboard — create project
+
+inputs:
+  # Absolute URLs are passed per-environment by the operator. The
+  # defaults assume a local Onsager dev server on the conventional
+  # Next.js port; staging passes the deployed hostname instead.
+  # Three explicit URL inputs (rather than one `base_url` plus
+  # path-joining) because string interpolation isn't shipped yet
+  # (`crates/duhem-runtime/src/engine/template.rs` is conservative
+  # to whole-string substitution).
+  login_url:
+    type: string
+    default: http://localhost:3000/login
+  new_project_url:
+    type: string
+    default: http://localhost:3000/projects/new
+  projects_url:
+    type: string
+    default: http://localhost:3000/projects
+
+  # Fixture user provisioned out-of-band — see `./README.md`.
+  # Never commit real credentials; CI passes these via secrets.
+  test_email:
+    type: string
+  test_password:
+    type: string
+
+  # Fresh project name per run keeps AC-2 / AC-3 deterministic
+  # without requiring a between-run cleanup pass. The operator
+  # supplies a unique value (e.g. `duhem-fixture-$(uuidgen)`)
+  # rather than the VD generating one, because `$runtime.uuid()`
+  # interpolation inside a default value is not yet available.
+  project_name:
+    type: string
+
+criteria:
+  - id: AC-1
+    description: |
+      An authenticated user lands on the create-project page and
+      sees the create-project form, including a heading that
+      identifies the page and a project-name input ready for
+      entry.
+    checks:
+      - id: AC-1.1
+        description: |
+          Authenticate, navigate to the create-project page, and
+          observe the form's identifying heading and the
+          project-name input.
+        steps:
+          - uses: ui/navigate
+            with:
+              url: $inputs.login_url
+          - uses: ui/type
+            with:
+              locator: { role: textbox, name: Email }
+              text: $inputs.test_email
+          - uses: ui/type
+            with:
+              locator: { role: textbox, name: Password }
+              text: $inputs.test_password
+          - uses: ui/click
+            with: { role: button, name: Sign in }
+          - uses: ui/navigate
+            with:
+              url: $inputs.new_project_url
+          - id: form_heading
+            uses: ui/assert-element
+            with:
+              locator: { role: heading, name: New project }
+              expected: visible
+              within: 5s
+            outputs:
+              satisfied: satisfied
+          - id: name_input
+            uses: ui/assert-element
+            with:
+              locator: { role: textbox, name: Name }
+              expected: visible
+              within: 5s
+            outputs:
+              satisfied: satisfied
+        assertions:
+          - $steps.form_heading.outputs.satisfied == true
+          - $steps.name_input.outputs.satisfied == true
+
+  - id: AC-2
+    description: |
+      Submitting the form with a valid project name navigates the
+      user to the new project's settings page.
+    checks:
+      - id: AC-2.1
+        description: |
+          Authenticate, fill the create-project form with a fresh
+          name, submit, and observe the post-submit URL settling
+          on the new project's settings page.
+        steps:
+          - uses: ui/navigate
+            with:
+              url: $inputs.login_url
+          - uses: ui/type
+            with:
+              locator: { role: textbox, name: Email }
+              text: $inputs.test_email
+          - uses: ui/type
+            with:
+              locator: { role: textbox, name: Password }
+              text: $inputs.test_password
+          - uses: ui/click
+            with: { role: button, name: Sign in }
+          - uses: ui/navigate
+            with:
+              url: $inputs.new_project_url
+          - uses: ui/type
+            with:
+              locator: { role: textbox, name: Name }
+              text: $inputs.project_name
+          - uses: ui/click
+            with: { role: button, name: Create project }
+          - id: settings_url
+            uses: ui/assert-url
+            with:
+              # The new project's ID is unknown ahead of time, so
+              # the URL is asserted via regex. The pattern is
+              # anchored at the tail so an intermediate redirect
+              # page (e.g. `/projects/<id>`) doesn't satisfy it.
+              matches: "/projects/[^/]+/settings(?:[/?#]|$)"
+              within: 10s
+            outputs:
+              satisfied: satisfied
+        assertions:
+          - $steps.settings_url.outputs.satisfied == true
+
+  - id: AC-3
+    description: |
+      Within five seconds of creation, the new project appears in
+      the user's project list at the projects-index page.
+    checks:
+      - id: AC-3.1
+        description: |
+          Authenticate, create a fresh project, navigate to the
+          projects index, and observe the new name appearing in
+          the project list within five seconds.
+        steps:
+          - uses: ui/navigate
+            with:
+              url: $inputs.login_url
+          - uses: ui/type
+            with:
+              locator: { role: textbox, name: Email }
+              text: $inputs.test_email
+          - uses: ui/type
+            with:
+              locator: { role: textbox, name: Password }
+              text: $inputs.test_password
+          - uses: ui/click
+            with: { role: button, name: Sign in }
+          - uses: ui/navigate
+            with:
+              url: $inputs.new_project_url
+          - uses: ui/type
+            with:
+              locator: { role: textbox, name: Name }
+              text: $inputs.project_name
+          - uses: ui/click
+            with: { role: button, name: Create project }
+          - uses: ui/navigate
+            with:
+              url: $inputs.projects_url
+          - id: in_list
+            uses: ui/assert-element
+            with:
+              locator:
+                role: listitem
+                text: $inputs.project_name
+                scope: { role: list, name: Projects }
+              expected: visible
+              within: 5s
+            outputs:
+              satisfied: satisfied
+              count: count
+        assertions:
+          - $steps.in_list.outputs.satisfied == true
+          - $steps.in_list.outputs.count == 1

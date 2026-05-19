@@ -737,7 +737,7 @@ This phase is contingent on Onsager’s own roadmap. It is not blocking for Duhe
 |-----------|-------------------------------------------------|---------------------------------------------------------------------|
 |Weeks 1–4  |Schema v0.1, CLI scaffold, basic runtime         |None                                                                 |
 |Weeks 5–8  |Judge implementation, 5–10 action types          |Onsager has 1 active feature                                         |
-|Weeks 9–12 |First Onsager check shipped (manual authoring)   |Onsager begins using Duhem on selected PRs                           |
+|Weeks 9–12 |First Onsager check shipped (manual authoring) — [`verifications/onsager-dashboard-create-project/`](../verifications/onsager-dashboard-create-project/) |Onsager begins using Duhem on selected PRs                           |
 |Weeks 13–20|Generation service alpha; expanded action library|Onsager’s PRs require Duhem verdict                                  |
 |Weeks 21–28|External alpha; schema lock-down preparation     |Onsager continues daily-use dogfood                                  |
 |Months 7–12|Schema OSS; public alpha; commercial tier        |Duhem sufficiently mature that Onsager’s pace would suffer without it|

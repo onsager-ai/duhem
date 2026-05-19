@@ -98,24 +98,35 @@ runs:
         cargo --version
         rustc --version
 
-    - name: Cache cargo build
-      uses: Swatinem/rust-cache@v2
-      with:
-        workspaces: ${{ steps.src.outputs.src }}
-
+    # No cargo cache here on purpose. A `Swatinem/rust-cache` or
+    # similar third-party action would be pulled at floating tag and
+    # would re-enter the trust boundary every run — exactly the
+    # supply-chain surface the asymmetric-trust seam is designed to
+    # narrow. Cold-build cost is the documented price (see the README
+    # "Why composite" table). If/when we want caching back, we either
+    # pin a third-party action by full commit SHA in this file and
+    # document the dependency in the README's trust-contract section,
+    # or ship a pre-built `duhem` binary release that this action
+    # downloads instead of compiling from source.
     - name: Build duhem CLI
       shell: bash
       working-directory: ${{ steps.src.outputs.src }}
       run: cargo build --release -p duhem-cli
 
-    # The Playwright driver ships inside the `playwright` crate but the
-    # browser binary does not (see
-    # `crates/duhem-actions/src/playwright.rs` module docs). Without
-    # this step every check that runs `ui/*` actions fails with
-    # `chromium binary not installed`.
+    # The Playwright driver ships inside the `playwright` Rust crate
+    # but the browser binary does not (see
+    # `crates/duhem-actions/src/playwright.rs` module docs). The npm
+    # package version is pinned so a tagged Duhem release behaves
+    # identically across re-runs even if the Playwright project
+    # releases a new npm version — same supply-chain posture as
+    # pinning the Rust crate via Cargo.lock. The version below must
+    # be re-pinned (alongside README docs) whenever the `playwright`
+    # Rust crate's bundled driver version moves.
     - name: Install Playwright Chromium
       shell: bash
-      run: npx --yes playwright install --with-deps chromium
+      env:
+        PLAYWRIGHT_NPM_VERSION: "1.55.0"
+      run: npx --yes "playwright@${PLAYWRIGHT_NPM_VERSION}" install --with-deps chromium
 
     - name: Run verification
       id: run
@@ -126,6 +137,36 @@ runs:
         VD_INPUTS: ${{ inputs.inputs }}
         REPORTER: ${{ inputs.reporter }}
       run: |
+        # Trust-boundary enforcement: `verification-path` must
+        # resolve to a file inside the Duhem checkout. An absolute
+        # path or any traversal that lands outside `$DUHEM_SRC`
+        # would let a caller substitute their own VD body, which is
+        # exactly the asymmetric-trust violation §11.2 forbids. The
+        # CLI happily reads any path the OS reads, so the gate has
+        # to live here.
+        DUHEM_SRC="$(pwd -P)"
+        case "$VERIFICATION_PATH" in
+          /*)
+            echo "::error::verification-path must be relative to the Duhem checkout, not absolute (got: $VERIFICATION_PATH)"
+            exit 1
+            ;;
+        esac
+        # `realpath -m` resolves `..` segments without requiring the
+        # file to exist yet; we want the normalized form, then a
+        # prefix check against the Duhem source root.
+        RESOLVED="$(realpath -m "$DUHEM_SRC/$VERIFICATION_PATH")"
+        case "$RESOLVED" in
+          "$DUHEM_SRC"/*|"$DUHEM_SRC") : ;;
+          *)
+            echo "::error::verification-path escapes the Duhem checkout ($RESOLVED is outside $DUHEM_SRC)"
+            exit 1
+            ;;
+        esac
+        if [ ! -f "$RESOLVED" ]; then
+          echo "::error::verification-path does not exist: $VERIFICATION_PATH"
+          exit 1
+        fi
+
         # We propagate the CLI's exit code (Pass → 0, Fail /
         # Inconclusive → non-zero) so the calling workflow step turns
         # red on a failing verdict — that is the verdict-as-status-check

@@ -20,7 +20,7 @@ and §11.2 (trust boundary).
 
 | Name                | Required | Default | Description |
 |---------------------|----------|---------|-------------|
-| `verification-path` | yes      | —       | Path to a `.yml` Verification Definition, **resolved relative to the `onsager-ai/duhem` repo at the pinned action tag** — not relative to the caller's checkout. See "Trust contract" below. |
+| `verification-path` | yes      | —       | Path to a `.yml` Verification Definition, **resolved relative to the `onsager-ai/duhem` repo at the pinned action tag** — not relative to the caller's checkout. Absolute paths and paths that normalize to anything outside the Duhem checkout are rejected before invoking `duhem run`; see "Trust contract" below. |
 | `inputs`            | no       | `""`    | Newline-separated `key=value` pairs forwarded as repeated `--inputs key=value` flags to `duhem run`. Coerced per the Verification Definition's typed input catalog. |
 | `reporter`          | no       | `json`  | Stdout reporter (`default` / `quiet` / `json`, plus plugin reporters from `.duhem.toml`). The action's `verdict` + `evidence-dir` outputs depend on parsing the json summary, so leave at the default unless you have a plugin that emits the same single-line JSON contract. |
 
@@ -103,6 +103,10 @@ What the action does:
   checkout that GitHub fetches when the action is referenced as
   `onsager-ai/duhem/.github/actions/run@<tag>`. The caller's
   workflow steps never touch that checkout.
+- Rejects `verification-path` values that are absolute or normalize
+  (via `realpath -m`) to anything outside the Duhem checkout root.
+  An attempt to set `verification-path: ../../my-attacker-vd.yml`
+  fails before `duhem run` is invoked.
 - Builds the `duhem` CLI from that same Duhem clone — pinned by tag.
 - Runs `duhem run` with the caller-supplied `inputs:` block. Inputs
   flow through the typed input catalog (see
@@ -136,6 +140,29 @@ Two checks keep the boundary honest:
 The combination — caller cannot pick the VD, caller cannot pick
 the version, and editing the VD is gated by review on Duhem's
 side — is the asymmetric-trust seam.
+
+### Third-party dependencies (none, by policy)
+
+The action references only `actions/checkout` (GitHub-owned) and
+the runner's preinstalled `rustup`, `npm`, and `jq`. No
+third-party actions (no `Swatinem/rust-cache`, no
+`dtolnay/rust-toolchain`) — those would re-enter the trust
+boundary at a floating tag every run, which is precisely the
+supply-chain surface the asymmetric-trust seam is designed to
+narrow. The cost is cold-start (full Cargo build every run); the
+benefit is that every line of action runtime is auditable from
+this directory plus the Duhem source it builds.
+
+The Playwright npm package version is pinned in `action.yml`
+(`PLAYWRIGHT_NPM_VERSION`) so the installer code and bundled
+browser revision do not move between re-runs of a tagged action
+version. The pin must be re-bumped (and this README updated) any
+time the `playwright` Rust crate's bundled driver version moves;
+the two need to stay paired.
+
+If we ever bring caching back, the rule is: pin every third-party
+action by full commit SHA in `action.yml`, list it here, and
+re-review on every bump.
 
 ## Local invocation (dogfood)
 

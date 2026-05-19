@@ -31,17 +31,17 @@ env:
 
 jobs:
   wiring:
-    # Smoke-tests the action's plumbing — that `inputs:` lines parse
-    # into `--inputs k=v` flags, that the json reporter line is
-    # captured, that the action's outputs are populated. We get this
-    # without a live Onsager by piggybacking on the CLI's `--dry-run`
-    # path (parse + validate + resolve filter, no browser launch).
-    # Today `--dry-run` is exposed by the CLI but not by the action;
-    # we drive `duhem run` directly here to exercise the same code
-    # paths the action will invoke, with the trust contract still
-    # documented by the README. When the action grows a `dry-run`
-    # input (follow-on), this job collapses to `uses: ./`.
-    name: action wiring (dry-run)
+    # Two-step smoke test of the composite action itself. Step 1
+    # drives `duhem run --dry-run` directly to confirm the VD parses
+    # and inputs resolve cleanly (fast, no browser). Step 2 invokes
+    # `./.github/actions/run` end-to-end against the same VD against
+    # a non-existent localhost server; the verdict will be
+    # non-`pass`, which is the point — we're asserting the action's
+    # plumbing (path validation, inputs parsing, build, browser
+    # install, json-summary capture, output extraction) round-trips
+    # whatever the CLI produces, not that the run itself succeeds.
+    # The full holistic-green run lives in `verdict` below.
+    name: action wiring
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,18 +52,13 @@ jobs:
           cargo --version
           rustc --version
 
-      - uses: Swatinem/rust-cache@v2
-
+      # Direct CLI dry-run. Fastest possible signal that the VD +
+      # input catalog parse cleanly, before paying for the full
+      # action smoke test below.
       - name: Build duhem CLI
         run: cargo build --release -p duhem-cli
 
-      # Confirm the VD parses and inputs resolve through the same
-      # path the action will drive — `--dry-run` exercises the
-      # parse/validate/resolve pipeline (the work the action does
-      # before the browser launch) and exits 0. A regression in the
-      # action's `inputs:` → `--inputs k=v` translation, or in the
-      # VD itself, surfaces here.
-      - name: Dry-run create-project VD
+      - name: Dry-run create-project VD (direct CLI)
         run: |
           ./target/release/duhem run \
             verifications/onsager-dashboard-create-project/duhem.yml \
@@ -74,6 +69,52 @@ jobs:
             --inputs test_email=fixture@example.test \
             --inputs test_password=placeholder \
             --inputs project_name=duhem-fixture-${{ github.run_id }}
+
+      # Active smoke test of the composite action. No Onsager server
+      # is listening on localhost:3000, so the very first
+      # `ui/navigate` will fail; we expect `verdict` to surface as a
+      # non-`pass` value but to be NON-EMPTY — that's the assertion
+      # that the action's json-summary capture + output extraction
+      # actually ran. `continue-on-error: true` keeps the workflow
+      # green on the non-pass exit code, so the subsequent assertion
+      # step gets to inspect outputs.
+      - name: Smoke-test action against create-project VD
+        id: action-smoke
+        continue-on-error: true
+        uses: ./.github/actions/run
+        with:
+          verification-path: verifications/onsager-dashboard-create-project/duhem.yml
+          inputs: |
+            login_url=http://localhost:3000/login
+            new_project_url=http://localhost:3000/projects/new
+            projects_url=http://localhost:3000/projects
+            test_email=fixture@example.test
+            test_password=placeholder
+            project_name=duhem-fixture-${{ github.run_id }}
+
+      - name: Assert action surfaced verdict outputs
+        env:
+          ACTION_VERDICT: ${{ steps.action-smoke.outputs.verdict }}
+          ACTION_EVIDENCE_DIR: ${{ steps.action-smoke.outputs.evidence-dir }}
+        run: |
+          # Both outputs must be populated. An empty `verdict` here
+          # means the CLI exited before the reporter ran (e.g.
+          # browser launch crash, validation failure) — a real
+          # regression in the action's setup steps. An empty
+          # `evidence-dir` means the json summary was malformed.
+          echo "verdict=$ACTION_VERDICT"
+          echo "evidence-dir=$ACTION_EVIDENCE_DIR"
+          if [ -z "$ACTION_VERDICT" ]; then
+            echo "::error::composite action did not surface a verdict — its setup steps regressed"
+            exit 1
+          fi
+          if [ -z "$ACTION_EVIDENCE_DIR" ]; then
+            echo "::error::composite action did not surface an evidence-dir — json reporter contract regressed"
+            exit 1
+          fi
+          # We DO NOT assert verdict == pass here: no Onsager server
+          # is running, so the holistic run cannot succeed. The
+          # green-verdict assertion lives in `verdict` below.
 
   verdict:
     # Holistic run against a live Onsager environment. Gated until the

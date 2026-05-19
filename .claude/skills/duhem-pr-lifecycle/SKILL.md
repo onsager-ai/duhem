@@ -295,7 +295,7 @@ PR.
 | Related surface                                              | Role                                                                                              |
 |--------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
 | [`duhem-dev-process`](../duhem-dev-process/SKILL.md)         | Top-level SDD loop; points here for the post-push stage.                                          |
-| [`issue-spec`](../issue-spec/SKILL.md)                       | Creates the spec issue this PR links to.                                                          |
+| [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) | Creates the spec issue this PR links to. Installed globally from `onsager-ai/dev-skills`.         |
 | [`duhem-pre-push`](../duhem-pre-push/SKILL.md)               | Runs before `git push`; enforces the spec-link check locally.                                     |
 | [`verification-authoring`](../verification-authoring/SKILL.md) | Worked Verification Definitions for product-surface PRs.                                          |
 | [`onsager-dogfood`](../onsager-dogfood/SKILL.md)             | When a Duhem change affects how the platform runs against Onsager, coordinate with Onsager-side. |

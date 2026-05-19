@@ -176,7 +176,7 @@ the work needs to migrate.
 | Related surface                                                                        | Role                                                                                |
 |----------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
 | [`duhem-dev-process`](../duhem-dev-process/SKILL.md)                                   | Top-level SDD loop on Duhem; this skill is invoked from its delegation map.         |
-| [`issue-spec`](../issue-spec/SKILL.md)                                                 | Files dogfood specs (`area:dogfood`).                                               |
+| [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) | Files dogfood specs (`area:dogfood`). Installed globally from `onsager-ai/dev-skills`.       |
 | [`verification-authoring`](../verification-authoring/SKILL.md)                         | Writes the Verification Definitions this skill registers.                           |
 | [`duhem-pr-lifecycle`](../duhem-pr-lifecycle/SKILL.md)                                 | Manages the Duhem-side PR for a dogfood change.                                     |
 | Onsager's `onsager-dev-process`, `issue-spec`, `onsager-pr-lifecycle` (other repo)     | Manage the Onsager-side change when work spans the seam. Don't invoke from here — the Onsager session has its own loaded skills. |

@@ -18,7 +18,7 @@ pub mod ui;
 pub mod with;
 
 pub use action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN, Observation, Outcome};
-pub use api::Call;
+pub use api::{Call, Observe};
 pub use error::ActionError;
 pub use locator::{ExistenceState, Locator};
 pub use playwright::{CheckBrowser, RunBrowser, to_selector};

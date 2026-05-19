@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use duhem_actions::{
     Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertState, AssertUrl, Call,
-    Click, Navigate, Select, Type,
+    Click, Navigate, Observe, Select, Type,
 };
 use playwright::api::Page;
 
@@ -107,6 +107,7 @@ pub(crate) fn default_registry() -> ActionRegistry {
     insert(&mut m, ConcreteAction::new(Box::new(AssertUrl)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertState)));
     insert(&mut m, ConcreteAction::new(Box::new(Call)));
+    insert(&mut m, ConcreteAction::new(Box::new(Observe)));
     m
 }
 
@@ -127,6 +128,7 @@ mod tests {
             keys,
             vec![
                 "api/call",
+                "api/observe",
                 "ui/assert-element",
                 "ui/assert-state",
                 "ui/assert-url",

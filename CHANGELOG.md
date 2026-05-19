@@ -11,6 +11,90 @@ their own minor bumps.
 
 ## v0.1.0 — unreleased
 
+### api/observe action — passive HTTP observation via Playwright network interception (#38)
+
+Lands the second `api/*` action — passive observation of requests the
+browser issues (typically as a side effect of a `ui/click`) — and
+completes the Phase 0 §14 action minimum of "UI click/type/assert,
+API call/observe, basic assertions."
+
+#### Added
+
+- `api/observe` — passive HTTP recorder. `with:` schema
+  (`deny_unknown_fields`):
+  - `method: String` *(optional)* — exact-string-uppercased comparison.
+    Omitted matches any method.
+  - `url_pattern: String` *(required)* — exact full-URL match by
+    default; regex when prefixed `re:` (substring `Regex::is_match`,
+    not anchored — authors who want anchoring write `re:^...$`).
+  - `after: String` *(optional, reserved)* — accepted today but not
+    enforced at runtime; reserved for the future concurrent-listener
+    engine extension.
+  - `within: Duration` *(optional)* — max wait for a matching event;
+    defaults to `DEFAULT_WITHIN` (5 s).
+- Outputs (response-side names match `api/call`'s so authors can
+  write assertions like `$steps.x.outputs.status == 201` regardless
+  of which `api/*` action produced the traffic):
+  - **Request side** (new — `api/call` doesn't surface these since
+    its caller specifies them in `with:`):
+    `method` (uppercased), `url` (full URL), `request_body` (parsed
+    JSON when the request `Content-Type` starts with
+    `application/json`; `null` otherwise), `request_headers` (JSON
+    object of strings, names lowercased for case-insensitive lookup).
+  - **Response side** (shape matches `api/call`):
+    `status` (u16 widened to integer), `body` (parsed JSON when the
+    response `Content-Type` starts with `application/json`; `null`
+    otherwise), `body_text` (raw response bytes as UTF-8 lossy),
+    `headers` (JSON object of strings).
+- When the request or response declares `application/json` but the
+  body fails to parse, the corresponding output stays `null` and an
+  `api.json_parse_failure` observation is recorded — same shape as
+  `api/call`'s parse-failure signal.
+- Implementation listens to `page.subscribe_event()` and matches on
+  the first `Response` event whose URL + method satisfy the filters.
+  The originating `Request` is reached via `response.request()`. No
+  routing / interception is installed — observation is read-only,
+  preserving the Holistic Verification Principle.
+
+#### Outcome mapping
+
+- Matching event arrives within `within:` → `Outcome::Ok`.
+- No matching event within `within:` → `Outcome::Timeout`
+  (judge maps to `Inconclusive(Timeout)`).
+- Subscription failure / malformed regex in `url_pattern` →
+  `ActionError`.
+
+#### v1 ordering caveat
+
+The spec's worked example places `api/observe` *before* the
+`ui/click` it conceptually observes. That ordering needs the engine
+to run the observe listener concurrently with subsequent steps — a
+Phase-1 follow-up. **v1 is synchronous**: the listener subscribes at
+this step's runtime and waits up to `within:` for a matching event,
+so authors who want to capture a click-triggered request either
+(a) place `api/observe` AFTER the trigger and rely on Playwright's
+event stream still carrying the in-flight or just-finished event, or
+(b) wait for the concurrent-listener engine extension. The
+`api-observe.yml` fixture uses pattern (a) with a 200 ms delayed
+fetch so the listener has time to attach.
+
+#### Registry
+
+- `api/observe` joins the default registry alongside `api/call`
+  and the seven `ui/*` actions. Full v1 catalog is now `api/call`,
+  `api/observe`, `ui/assert-element`, `ui/assert-state`,
+  `ui/assert-url`, `ui/click`, `ui/navigate`, `ui/select`, `ui/type`.
+
+#### Wire format
+
+- Action type `api/observe` added to the closed action catalog. Typed
+  `with:` schema; new outputs documented above.
+- No change to `VerificationDefinition`, `Step`, or `Assertion`
+  shapes — additive only. Existing VDs and fixtures unchanged.
+- Breaking change? **no** (additive).
+- New workspace dependency on `futures = "0.3"` for stream
+  combinators against Playwright's broadcast subscription.
+
 ### Reporter contract — v1, plus subprocess plugin loader (#34)
 
 Introduces `RunSummary` as the externally-frozen reporter-plugin

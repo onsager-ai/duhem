@@ -153,12 +153,18 @@ narrow. The cost is cold-start (full Cargo build every run); the
 benefit is that every line of action runtime is auditable from
 this directory plus the Duhem source it builds.
 
-The Playwright npm package version is pinned in `action.yml`
-(`PLAYWRIGHT_NPM_VERSION`) so the installer code and bundled
-browser revision do not move between re-runs of a tagged action
-version. The pin must be re-bumped (and this README updated) any
-time the `playwright` Rust crate's bundled driver version moves;
-the two need to stay paired.
+Playwright's npm CLI is invoked floating (`npx --yes playwright
+install --with-deps chromium`). This is a deliberate seam, not an
+oversight: the runtime driver is bundled into the Rust
+`playwright = "0.0.20"` crate (driver `1.11.0-1620331022000`,
+locked by `Cargo.lock`), so Cargo.lock already pins the bits that
+touch the browser at runtime. The npm package is the *installer*
+for the Chromium binary only. Pinning a specific
+`playwright@x.y.z` here would risk downloading a Chromium
+revision the bundled driver can't drive. The real supply-chain
+hardening to do is bumping the Rust `playwright` crate to a
+maintained version with a contemporary driver; that's tracked as
+a follow-on and is out of scope for this action.
 
 If we ever bring caching back, the rule is: pin every third-party
 action by full commit SHA in `action.yml`, list it here, and

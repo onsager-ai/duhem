@@ -114,19 +114,25 @@ runs:
       run: cargo build --release -p duhem-cli
 
     # The Playwright driver ships inside the `playwright` Rust crate
-    # but the browser binary does not (see
-    # `crates/duhem-actions/src/playwright.rs` module docs). The npm
-    # package version is pinned so a tagged Duhem release behaves
-    # identically across re-runs even if the Playwright project
-    # releases a new npm version — same supply-chain posture as
-    # pinning the Rust crate via Cargo.lock. The version below must
-    # be re-pinned (alongside README docs) whenever the `playwright`
-    # Rust crate's bundled driver version moves.
+    # (driver `1.11.0-1620331022000`, bundled into the binary at
+    # build time — see
+    # `crates/duhem-actions/src/playwright.rs` module docs and the
+    # crate's `src/build.rs::DRIVER_VERSION`). The npm CLI here is
+    # just the *installer* for the Chromium browser binary; the
+    # runtime driver is whichever version the Cargo.lock'd
+    # `playwright` crate carries. Pinning a specific
+    # `playwright@x.y.z` npm version is therefore lower-leverage
+    # than it looks — Cargo.lock is already the source of truth for
+    # the bits that touch the browser at runtime — and an
+    # arbitrarily-chosen pin risks pointing at an npm version that
+    # downloads a Chromium revision the bundled driver can't drive.
+    # We match the project's existing dev posture (justfile:21) and
+    # keep the install command floating; the supply-chain hardening
+    # to do here is bumping the Rust `playwright` crate to a
+    # maintained version, not pinning the installer.
     - name: Install Playwright Chromium
       shell: bash
-      env:
-        PLAYWRIGHT_NPM_VERSION: "1.55.0"
-      run: npx --yes "playwright@${PLAYWRIGHT_NPM_VERSION}" install --with-deps chromium
+      run: npx --yes playwright install --with-deps chromium
 
     - name: Run verification
       id: run

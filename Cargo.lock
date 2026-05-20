@@ -3875,8 +3875,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "duhem-schema",
  "proc-macro2",
  "rustc-hash 1.1.0",
+ "serde_yml",
  "syn 2.0.117",
  "tiktoken-rs",
 ]

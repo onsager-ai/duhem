@@ -29,11 +29,21 @@ use crate::reporter_config::PluginRegistry;
 
 /// Duhem — holistic verification for AI-delivered software.
 #[derive(Debug, Parser)]
-#[command(name = "duhem", version, about, long_about = None)]
+#[command(name = "duhem", version = VERSION_STRING, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,
 }
+
+/// `--version` output. Bakes the Verification Definition schema version
+/// in alongside the CLI version so authors can see at a glance which
+/// schema `duhem validate` / `duhem run` will parse against.
+const VERSION_STRING: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (schema v",
+    duhem_schema::schema_version!(),
+    ")"
+);
 
 #[derive(Debug, Subcommand)]
 enum Cmd {
@@ -191,12 +201,30 @@ struct RunArgs {
 fn run_validate(path: &std::path::Path) -> Result<(), String> {
     let src = std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
     let v = VerificationDefinition::from_yaml_str(&src).map_err(|e| match e.location() {
-        Some(loc) => format!("{}:{}:{}: {e}", path.display(), loc.line(), loc.column()),
-        None => format!("{}: {e}", path.display()),
+        Some(loc) => format!(
+            "{}:{}:{}: [schema v{}] {e}",
+            path.display(),
+            loc.line(),
+            loc.column(),
+            duhem_schema::SCHEMA_VERSION
+        ),
+        None => format!(
+            "{}: [schema v{}] {e}",
+            path.display(),
+            duhem_schema::SCHEMA_VERSION
+        ),
     })?;
     validate(&v).map_err(|errs| {
         let plural = if errs.len() == 1 { "" } else { "s" };
-        let mut s = format!("{} validation error{plural}:", errs.len());
+        // Preamble names the schema version the file was validated
+        // against — when authors hit a validation error, the next
+        // question is "which schema?", and a downstream VD that pinned
+        // a different version needs to see the mismatch.
+        let mut s = format!(
+            "[schema v{}] {} validation error{plural}:",
+            duhem_schema::SCHEMA_VERSION,
+            errs.len()
+        );
         for e in errs {
             s.push_str("\n  - ");
             s.push_str(&e.to_string());
@@ -228,7 +256,11 @@ async fn run_command(args: RunArgs) -> ExitCode {
     let def = match VerificationDefinition::from_yaml_str(&src) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("{}: {e}", path.display());
+            eprintln!(
+                "{}: [schema v{}] {e}",
+                path.display(),
+                duhem_schema::SCHEMA_VERSION
+            );
             return ExitCode::FAILURE;
         }
     };
@@ -241,8 +273,9 @@ async fn run_command(args: RunArgs) -> ExitCode {
     if let Err(errs) = validate(&def) {
         let plural = if errs.len() == 1 { "" } else { "s" };
         eprintln!(
-            "{}: {} validation error{plural}:",
+            "{}: [schema v{}] {} validation error{plural}:",
             path.display(),
+            duhem_schema::SCHEMA_VERSION,
             errs.len()
         );
         for e in errs {

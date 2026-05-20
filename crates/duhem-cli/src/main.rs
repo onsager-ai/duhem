@@ -1,13 +1,16 @@
 //! `duhem` — the command-line entry point.
 //!
 //! Phase-0 skeleton. The free CLI binary (`docs/duhem-spec.md` §13)
-//! ultimately offers `init`, `validate`, and `run`; the `run`
-//! subcommand carries the full authoring-ergonomics surface
+//! offers `init`, `validate`, and `run`. `init` (issue #48)
+//! scaffolds a runnable Verification Definition skeleton; the `run`
+//! subcommand carries the authoring-ergonomics surface
 //! (`--filter`, `--headed`, `--evidence-dir`, `--reporter`) per the
-//! spec on issue #23. None of those flags are correctness gates —
-//! they make iteration on Verification Definitions practical.
+//! spec on issue #23. None of the `run` flags are correctness
+//! gates — they make iteration on Verification Definitions
+//! practical.
 
 mod filter;
+mod init;
 mod inputs;
 mod reporter;
 mod reporter_config;
@@ -47,6 +50,34 @@ const VERSION_STRING: &str = concat!(
 
 #[derive(Debug, Subcommand)]
 enum Cmd {
+    /// Scaffold a runnable Verification Definition skeleton.
+    ///
+    /// Produces a minimal, schema-valid Verification Definition the
+    /// author can mutate toward their real workload. Deterministic
+    /// and offline — AI-assisted generation is the Phase 1
+    /// `duhem author` command (spec `docs/duhem-spec.md` §14), not
+    /// this one. Spec on issue #48.
+    Init {
+        /// Target directory. Defaults to `./verifications/<name>/`
+        /// when omitted.
+        path: Option<PathBuf>,
+        /// File-organization pattern from `docs/duhem-spec.md` §10.4.
+        /// `A` (default) emits a single-file VD; `B` co-locates the
+        /// VD under a sibling root manifest (stub until the manifest
+        /// loader spec lands).
+        #[arg(long = "pattern", value_name = "A|B", default_value = "A")]
+        pattern: String,
+        /// Verification slug, e.g. `dashboard-create-project`. Used
+        /// for the default target dir and the `verification:` field
+        /// in the generated YAML. Required on non-TTY stdin; prompted
+        /// otherwise.
+        #[arg(long = "name", value_name = "SLUG")]
+        name: Option<String>,
+        /// Overwrite a non-empty target. Without this, init exits 2
+        /// and names the conflicting paths.
+        #[arg(long = "force", default_value_t = false)]
+        force: bool,
+    },
     /// Parse and structurally validate a Verification Definition file.
     Validate {
         /// Path to a `.yml` Verification Definition.
@@ -115,6 +146,12 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.cmd {
         None => ExitCode::SUCCESS,
+        Some(Cmd::Init {
+            path,
+            pattern,
+            name,
+            force,
+        }) => run_init(path, &pattern, name, force),
         Some(Cmd::Validate { path }) => match run_validate(&path) {
             Ok(()) => {
                 println!("OK");
@@ -196,6 +233,74 @@ struct RunArgs {
     inputs_file: Option<PathBuf>,
     dry_run: bool,
     seed: Option<u64>,
+}
+
+/// `duhem init` dispatch. Wraps `init::run` with the CLI-level
+/// translation: parse `--pattern`, map outcomes to the three exit
+/// codes the spec defines (0 success / 2 conflict / 3 warning),
+/// and print post-init guidance.
+fn run_init(path: Option<PathBuf>, pattern: &str, name: Option<String>, force: bool) -> ExitCode {
+    let pattern: init::Pattern = match pattern.parse() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let args = init::InitArgs {
+        path,
+        pattern,
+        name,
+        force,
+    };
+    match init::run(args) {
+        Ok(outcome) => {
+            let mut stdout = std::io::stdout().lock();
+            let _ = writeln!(stdout, "Created:");
+            for p in &outcome.created {
+                let _ = writeln!(stdout, "  {}", p.display());
+            }
+            // The per-feature `duhem.yml` is always the first entry
+            // `init::run` pushes (Pattern A: only one; Pattern B:
+            // pushed before the parent root manifest). Use that as
+            // the next-command pointer.
+            let vd_path = outcome
+                .created
+                .first()
+                .cloned()
+                .unwrap_or_else(|| PathBuf::from("<verification>/duhem.yml"));
+            let _ = writeln!(stdout, "\nNext:");
+            let _ = writeln!(stdout, "  duhem validate {}", vd_path.display());
+            let _ = writeln!(stdout, "  duhem run      {}", vd_path.display());
+            let _ = writeln!(
+                stdout,
+                "\nAuthoring guide: .claude/skills/verification-authoring/SKILL.md"
+            );
+            let _ = stdout.flush();
+
+            if outcome.warnings.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                for w in &outcome.warnings {
+                    eprintln!("warning: {w}");
+                }
+                // Spec § Plan: "exit with a non-zero warning code
+                // (distinct from the error code)." Reserve 2 for the
+                // conflict-refusal error path; use 3 for warnings.
+                ExitCode::from(3)
+            }
+        }
+        Err(e @ init::InitError::ExistingNonEmpty { .. }) => {
+            eprintln!("{e}");
+            // Spec § Design: existing non-empty target without
+            // --force exits 2.
+            ExitCode::from(2)
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn run_validate(path: &std::path::Path) -> Result<(), String> {

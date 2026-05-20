@@ -25,6 +25,11 @@ criteria) lives in the spec issue that introduced
   `duhem --version` and `duhem validate`'s error preamble) and
   `cargo xtask schema-drift` / `cargo xtask schema-changelog-check`
   CI gates. (#51)
+- [additive] Environment provisioning v1 — optional `environment:`
+  block on `VerificationDefinition` with operator-supplied `up:` /
+  `down:` scripts + HTTP readiness probe; new `EventPayload::Env*`
+  evidence variants; `--no-env-up` / `--keep-env` CLI flags;
+  sanitized child env. (#50)
 
 ## v0.1.0 — unreleased
 
@@ -34,11 +39,6 @@ original detail. The first version-bump commit will rename this heading
 to `## v0.1.0 — YYYY-MM-DD` and start a fresh `## Unreleased` section
 above.
 
-- [additive] Environment provisioning v1 — optional `environment:`
-  block on `VerificationDefinition` with operator-supplied `up:` /
-  `down:` scripts + HTTP readiness probe; new `EventPayload::Env*`
-  evidence variants; `--no-env-up` / `--keep-env` CLI flags;
-  sanitized child env. (#50)
 - [additive] `api/observe` action — passive HTTP observation via
   Playwright network interception. (#38)
 - [additive] Reporter contract v1 (`RunSummary`) + subprocess plugin

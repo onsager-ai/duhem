@@ -1,6 +1,6 @@
 ---
 name: duhem-pr-lifecycle
-description: Manage a Duhem PR after it's been pushed — spec-issue linking, manual planned→in-progress label flip, CI triage, review-comment discipline, merge-conflict recovery on open PRs, webhook subscription, and schema/CHANGELOG follow-through on merge. Triggers include "CI is failing", "check is red", "link this issue", "Closes vs Part of", "respond to review", "subscribe to PR", "triage PR", "the PR is ready", "PR has conflicts", "branch has conflicts with main", "merge conflict on the PR", or when a github-webhook-activity event arrives on a Duhem PR. Paired with `duhem-dev-process` (overall loop), `issue-spec` (spec creation), and `duhem-pre-push` (which owns the pre-push conflict walkthrough).
+description: Manage a Duhem PR after it's been pushed — spec-issue linking, CI triage, review-comment discipline, merge-conflict recovery on open PRs, webhook subscription, and schema/CHANGELOG follow-through on merge. Triggers include "CI is failing", "check is red", "link this issue", "Closes vs Part of", "respond to review", "subscribe to PR", "triage PR", "the PR is ready", "PR has conflicts", "branch has conflicts with main", "merge conflict on the PR", or when a github-webhook-activity event arrives on a Duhem PR. Paired with `duhem-dev-process` (overall loop), `issue-spec` (spec creation), and `duhem-pre-push` (which owns the pre-push conflict walkthrough).
 ---
 
 # duhem-pr-lifecycle
@@ -8,12 +8,11 @@ description: Manage a Duhem PR after it's been pushed — spec-issue linking, ma
 Everything that happens after `git push` on a Duhem PR. Covers
 spec-issue linking and manual label upkeep, CI triage,
 review-comment discipline, webhook subscription, and the manual
-ticking of Plan items / CHANGELOG entries on merge.
+ticking of Plan items / CHANGELOG entries on merge. No status-label
+upkeep — that lifecycle was retired.
 
 This is Duhem's analogue of Onsager's `onsager-pr-lifecycle`
-skill. The discipline is the same; this repo doesn't yet have the
-`pr-spec-sync` workflow, so a few label transitions Onsager
-automates are still manual here.
+skill. The discipline is the same.
 
 ## Tool discipline
 
@@ -112,40 +111,15 @@ don't have to context-switch.
 If `Breaking change? yes`, the PR must also touch `CHANGELOG.md`.
 Comment on the PR if either is missing.
 
-## Issue progress labels — manual on this repo
+## Issue progress
 
-Onsager has a `pr-spec-sync` workflow that flips spec labels
-automatically. Duhem doesn't have one yet. Until it does, **this
-skill is responsible for the flips**:
+Spec issues use only their open/closed state — no status labels.
+Lifecycle moves:
 
-| Spec label    | What it means                              | Who flips it (Duhem)                       |
-|---------------|--------------------------------------------|--------------------------------------------|
-| `draft`       | AI/human-drafted, not yet reviewed         | Human (via `planned` move — alignment gate)|
-| `planned`     | Ready for implementation                   | Human (alignment gate)                     |
-| `in-progress` | At least one open PR                       | **This skill, manually, on PR open**       |
-| closed        | Delivered, tests passing                   | GitHub (via `Closes` keyword on merge)     |
-
-Concretely, when a PR is opened:
-
-1. Read the PR body. If it contains a `Closes #N` / `Part of #N` /
-   `Fixes #N` / `Refs #N` line, look up issue `#N` on
-   `onsager-ai/duhem`.
-2. If the issue's status label is `planned`, flip it to
-   `in-progress`: remove `planned`, add `in-progress`. Use
-   `mcp__github__issue_write` (replace-vs-merge label semantics
-   matter — see Onsager's canonical mechanics at
-   <https://github.com/onsager-ai/onsager/blob/main/.claude/skills/onsager-pr-lifecycle/references/github-ops.md>;
-   the same MCP semantics apply on `onsager-ai/duhem`).
-3. If the issue's status label is `draft`, **don't flip it**.
-   Comment on the PR instead, asking the author to drive the spec
-   through human review first.
-
-When a PR is closed unmerged:
-
-1. Search for any other open PR referencing the same issue. If one
-   exists, leave the spec at `in-progress`.
-2. If no other PR references it, flip the spec back to `planned`:
-   remove `in-progress`, add `planned`.
+- PR merged with `Closes #N` → issue auto-closes (GitHub).
+- PR merged with `Part of #N` → spec stays open; tick the delivered
+  Plan items on the parent manually (see below).
+- PR closed unmerged → spec issue stays open as-is.
 
 When a PR is merged with `Part of #N` (parent stays open):
 

@@ -370,20 +370,26 @@ async fn run_command(args: RunArgs) -> ExitCode {
 
     let mut leaf_outcomes: Vec<(String, RunOutcome)> = Vec::with_capacity(resolved.len());
     for (name, leaf_path, def, inputs) in resolved {
-        // Per-leaf filter: drop patterns scoped to other verifications
-        // and skip the leaf entirely when nothing matches. Single-leaf
-        // invocations apply the filter as-is — `for_verification` is a
-        // manifest-only narrowing.
-        let leaf_filter = if is_manifest {
-            match check_filter.as_ref() {
-                Some(f) => match f.for_verification(&name) {
-                    Some(narrowed) => Some(narrowed),
-                    None => continue,
-                },
-                None => None,
+        // Per-leaf filter: every leaf is narrowed by name regardless
+        // of `is_manifest`, so a `<verification>::<criterion>::<check>`
+        // pattern behaves identically against a single leaf and a
+        // manifest leaf (Copilot PR #60 review). On a manifest, an
+        // empty post-narrow filter means "skip this leaf entirely";
+        // on a single leaf, it falls through to the engine as an
+        // empty filter so the run produces the same empty-aggregation
+        // signal a typo'd `--filter` would on any leaf — consistent
+        // with `--dry-run` which already prints
+        // `(no checks matched filter)` for the same case.
+        let leaf_filter = match check_filter.as_ref() {
+            Some(f) => {
+                let narrowed = f.for_verification(&name);
+                match (narrowed, is_manifest) {
+                    (Some(n), _) => Some(n),
+                    (None, true) => continue,
+                    (None, false) => Some(CliCheckFilter::matches_nothing()),
+                }
             }
-        } else {
-            check_filter.clone()
+            None => None,
         };
 
         // One browser per leaf. Phase-0 leaves run serially (#49) and
@@ -473,14 +479,25 @@ async fn run_command(args: RunArgs) -> ExitCode {
 }
 
 /// Derive the canonical "verification name" of a leaf for evidence
-/// namespacing and `--filter` matching. Uses the parent directory's
-/// name when it's distinguishing (Pattern B / C layout); falls back
-/// to the file stem when the leaf is a bare `.yml` next to its
-/// manifest. Empty / `.` / `..` segments all defeat the parent-dir
-/// signal — we don't want a leaf called `.` polluting the evidence
-/// tree.
+/// namespacing and `--filter` matching.
+///
+/// The leaf file's *name* drives the choice:
+///
+/// - `duhem.yml` (the §10.4 Pattern B / C layout) → the parent
+///   directory name. This is the case where the parent dir is the
+///   real feature identifier and the file is generic.
+/// - any other filename (e.g. `verifications/create-workspace.yml`)
+///   → the file stem. Falling through to the parent dir name here
+///   would collapse every sibling leaf to the same name and break
+///   per-leaf evidence isolation (Copilot PR #60 review).
+///
+/// Empty / `.` / `..` parent segments defeat the parent-dir signal,
+/// in which case we always fall back to the file stem.
 fn leaf_name(path: &std::path::Path) -> String {
-    if let Some(parent) = path.parent()
+    let file_name = path.file_name().and_then(|n| n.to_str());
+    let is_duhem_yml = matches!(file_name, Some("duhem.yml") | Some("duhem.yaml"));
+    if is_duhem_yml
+        && let Some(parent) = path.parent()
         && let Some(name) = parent.file_name().and_then(|n| n.to_str())
         && !name.is_empty()
         && name != "."
@@ -492,6 +509,54 @@ fn leaf_name(path: &std::path::Path) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or("leaf")
         .to_string()
+}
+
+#[cfg(test)]
+mod leaf_name_tests {
+    use super::leaf_name;
+    use std::path::PathBuf;
+
+    #[test]
+    fn duhem_yml_uses_parent_dir_name() {
+        // Pattern B layout: every leaf is `duhem.yml` and the dir
+        // around it carries the feature identifier.
+        assert_eq!(leaf_name(&PathBuf::from("leaf-a/duhem.yml")), "leaf-a");
+        assert_eq!(
+            leaf_name(&PathBuf::from("verifications/login/duhem.yml")),
+            "login"
+        );
+        assert_eq!(leaf_name(&PathBuf::from("duhem.yaml")), "duhem");
+    }
+
+    #[test]
+    fn bare_yml_uses_file_stem() {
+        // Pattern C with named files: sibling leaves share a parent
+        // dir, so the file stem is the only thing that disambiguates
+        // them. Returning the parent dir name would collide.
+        assert_eq!(
+            leaf_name(&PathBuf::from("verifications/login.yml")),
+            "login"
+        );
+        assert_eq!(
+            leaf_name(&PathBuf::from("verifications/create-workspace.yml")),
+            "create-workspace"
+        );
+    }
+
+    #[test]
+    fn sibling_named_leaves_get_distinct_names() {
+        // Direct regression check for the bug Copilot flagged on the
+        // pre-fix heuristic: two sibling leaves under the same parent
+        // dir must not collapse to the same evidence namespace.
+        let a = leaf_name(&PathBuf::from("verifications/login.yml"));
+        let b = leaf_name(&PathBuf::from("verifications/signup.yml"));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn no_parent_dir_falls_back_to_stem() {
+        assert_eq!(leaf_name(&PathBuf::from("leaf.yml")), "leaf");
+    }
 }
 
 /// Parse the raw `--inputs k=v` flags into a `(name, raw)` map.

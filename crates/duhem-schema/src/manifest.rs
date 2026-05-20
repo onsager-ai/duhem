@@ -128,9 +128,34 @@ pub enum LoadError {
         #[source]
         source: glob::PatternError,
     },
+    /// A `glob:` entry is absolute or contains `..` segments — same
+    /// path discipline as `path:` entries.
+    #[error(
+        "{manifest}: glob pattern `{pattern}` is absolute or escapes the manifest's parent directory via `..`"
+    )]
+    UnconstrainedGlob { manifest: PathBuf, pattern: String },
+    /// A `glob:` match resolved outside the manifest's parent
+    /// directory (e.g. via a symlink). Surfaced separately from
+    /// `PathEscape` so the diagnostic names the actually-matched file.
+    #[error("{manifest}: glob match `{entry}` lies outside the manifest's parent directory")]
+    GlobMatchEscaped { manifest: PathBuf, entry: PathBuf },
+    /// The manifest declares a `manifest_version` this loader does
+    /// not understand. v1 is the only supported value today; future
+    /// shape changes bump this and older loaders fail loudly rather
+    /// than silently misinterpreting.
+    #[error("{path}: unsupported manifest_version {found} (this loader understands {supported})")]
+    UnsupportedManifestVersion {
+        path: PathBuf,
+        found: u32,
+        supported: u32,
+    },
     #[error("directory `{path}` has no `duhem.yml`")]
     DirectoryMissingManifest { path: PathBuf },
 }
+
+/// Currently-supported `manifest_version` value. Bumping this is
+/// schema-impacting and requires a `CHANGELOG.md` entry.
+pub const SUPPORTED_MANIFEST_VERSION: u32 = 1;
 
 /// Resolve a CLI `path` argument to a [`Loaded`].
 ///
@@ -162,7 +187,7 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
         source: e,
     })?;
 
-    match classify_yaml(&src) {
+    match classify_yaml(&path, &src)? {
         Shape::Manifest => load_manifest(&path, &src),
         Shape::Leaf => load_leaf(&path, &src).map(|definition| Loaded::Leaf {
             path: path.clone(),
@@ -182,24 +207,30 @@ enum Shape {
 
 /// Top-level key sniff. We parse the YAML once as an untyped Mapping
 /// and check which discriminator key is present. Both `verifications:`
-/// and `criteria:` → ambiguous; neither → unknown.
-fn classify_yaml(src: &str) -> Shape {
-    let value: serde_yml::Value = match serde_yml::from_str(src) {
-        Ok(v) => v,
-        Err(_) => return Shape::Unknown,
-    };
+/// and `criteria:` → ambiguous; neither → unknown. A YAML parse
+/// failure surfaces as `LoadError::Yaml` so the user sees the real
+/// line/column rather than a confusing "unknown shape" message.
+fn classify_yaml(path: &Path, src: &str) -> Result<Shape, LoadError> {
+    let value: serde_yml::Value = serde_yml::from_str(src).map_err(|e| LoadError::Yaml {
+        path: path.to_path_buf(),
+        source: SchemaError::from(e),
+    })?;
     let map = match value.as_mapping() {
         Some(m) => m,
-        None => return Shape::Unknown,
+        // Non-mapping documents (e.g. `null`, a top-level sequence)
+        // are real authoring mistakes, not shape ambiguity — surface
+        // as "unknown shape" so the diagnostic names both
+        // discriminator keys.
+        None => return Ok(Shape::Unknown),
     };
     let has_verifications = map.contains_key(serde_yml::Value::String("verifications".into()));
     let has_criteria = map.contains_key(serde_yml::Value::String("criteria".into()));
-    match (has_verifications, has_criteria) {
+    Ok(match (has_verifications, has_criteria) {
         (true, true) => Shape::Ambiguous,
         (true, false) => Shape::Manifest,
         (false, true) => Shape::Leaf,
         (false, false) => Shape::Unknown,
-    }
+    })
 }
 
 fn load_leaf(path: &Path, src: &str) -> Result<VerificationDefinition, LoadError> {
@@ -214,8 +245,20 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
         path: manifest_path.to_path_buf(),
         source: e,
     })?;
+    if manifest.manifest_version != SUPPORTED_MANIFEST_VERSION {
+        return Err(LoadError::UnsupportedManifestVersion {
+            path: manifest_path.to_path_buf(),
+            found: manifest.manifest_version,
+            supported: SUPPORTED_MANIFEST_VERSION,
+        });
+    }
     let parent = manifest_path.parent().unwrap_or_else(|| Path::new("."));
     let manifest_canonical = canonical_or_self(manifest_path);
+    // Pre-canonicalize the manifest's parent so we can verify that
+    // every glob hit stays inside it. `canonical_or_self` falls back
+    // to the input on `canonicalize` failure (e.g. relative paths in
+    // tests), which still gives us a stable prefix to compare against.
+    let parent_canonical = canonical_or_self(parent);
 
     let mut leaves: Vec<LoadedLeaf> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
@@ -228,6 +271,9 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
                 vec![parent.join(path)]
             }
             ManifestEntry::Glob { glob: pattern } => {
+                // Same path discipline as `path:` entries — `glob:`
+                // is not an escape hatch out of the manifest tree.
+                validate_glob_pattern(manifest_path, pattern)?;
                 let joined = parent.join(pattern);
                 let pattern_str = joined.to_string_lossy().into_owned();
                 let matches = glob::glob(&pattern_str).map_err(|e| LoadError::InvalidGlob {
@@ -237,6 +283,18 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
                 })?;
                 let mut hits: Vec<PathBuf> = Vec::new();
                 for p in matches.flatten() {
+                    // Symlinks / weird filesystem shapes can land a
+                    // match outside the manifest's parent tree even
+                    // when the pattern was well-behaved. Reject those
+                    // explicitly so the spec's "Patterns are
+                    // normalized: no `..` escaping the manifest's
+                    // parent dir" guarantee survives the expansion.
+                    if !is_under(&parent_canonical, &p) {
+                        return Err(LoadError::GlobMatchEscaped {
+                            manifest: manifest_path.to_path_buf(),
+                            entry: p,
+                        });
+                    }
                     hits.push(p);
                 }
                 // Self-only globs (the glob expanded to *just* the
@@ -285,7 +343,7 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
             // Each resolved leaf must be a Verification Definition.
             // A nested manifest is a real authoring mistake, not a
             // composition feature in v1.
-            match classify_yaml(&src) {
+            match classify_yaml(&leaf_path, &src)? {
                 Shape::Leaf => {}
                 Shape::Manifest => {
                     return Err(LoadError::UnknownShape {
@@ -317,6 +375,39 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
         leaves,
         warnings,
     })
+}
+
+/// Validate a `glob:` pattern under the same discipline as `path:`
+/// entries: no absolute roots, no `..` segments. Wildcard chars (`*`,
+/// `?`, `[`, `]`) inside literal path components are fine; the check
+/// runs purely on the path-segment shape of the pattern.
+fn validate_glob_pattern(manifest: &Path, pattern: &str) -> Result<(), LoadError> {
+    let candidate = Path::new(pattern);
+    if candidate.is_absolute() {
+        return Err(LoadError::UnconstrainedGlob {
+            manifest: manifest.to_path_buf(),
+            pattern: pattern.to_string(),
+        });
+    }
+    for component in candidate.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err(LoadError::UnconstrainedGlob {
+                manifest: manifest.to_path_buf(),
+                pattern: pattern.to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// `true` when `candidate`'s canonicalized path lives under `root`'s
+/// canonicalized path. Falls back to lexical comparison when
+/// canonicalization fails (the same fallback `canonical_or_self`
+/// uses), which is good enough to catch the symlinked-escape case in
+/// practice and identical for the lexical-only test inputs.
+fn is_under(root: &Path, candidate: &Path) -> bool {
+    let c = canonical_or_self(candidate);
+    c.starts_with(root)
 }
 
 fn validate_entry_path(manifest: &Path, entry: &Path) -> Result<(), LoadError> {
@@ -661,6 +752,85 @@ verifications:
             }
             other => panic!("expected Yaml, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn unsupported_manifest_version_is_load_error() {
+        // Older loaders must refuse a future shape rather than
+        // silently misinterpreting it.
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 2
+verifications: []
+"#,
+        );
+        let err = load(&tmp.path().join("duhem.yml")).unwrap_err();
+        match err {
+            LoadError::UnsupportedManifestVersion {
+                found, supported, ..
+            } => {
+                assert_eq!(found, 2);
+                assert_eq!(supported, SUPPORTED_MANIFEST_VERSION);
+            }
+            other => panic!("expected UnsupportedManifestVersion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn malformed_yaml_surfaces_parse_error_not_unknown_shape() {
+        // YAML parse failure should produce `LoadError::Yaml` with
+        // line/column context, not a "missing both discriminator
+        // keys" message.
+        let tmp = tempfile::tempdir().unwrap();
+        // Tab where YAML expects spaces — produces a real Yaml
+        // location error.
+        write(tmp.path(), "duhem.yml", "criteria:\n\t- id: AC-1\n");
+        let err = load(&tmp.path().join("duhem.yml")).unwrap_err();
+        assert!(
+            matches!(err, LoadError::Yaml { .. }),
+            "expected Yaml parse error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn glob_with_parent_dir_segment_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+verifications:
+  - glob: ../**/duhem.yml
+"#,
+        );
+        let err = load(&tmp.path().join("duhem.yml")).unwrap_err();
+        assert!(
+            matches!(err, LoadError::UnconstrainedGlob { .. }),
+            "expected UnconstrainedGlob, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn absolute_glob_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+verifications:
+  - glob: /tmp/**/duhem.yml
+"#,
+        );
+        let err = load(&tmp.path().join("duhem.yml")).unwrap_err();
+        assert!(
+            matches!(err, LoadError::UnconstrainedGlob { .. }),
+            "expected UnconstrainedGlob, got {err:?}"
+        );
     }
 
     #[test]

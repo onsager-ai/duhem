@@ -158,18 +158,60 @@ pub fn render_set(
             Ok(())
         }
         Reporter::Plugin { name, argv } => {
+            // Wrap `out` so we can observe the final byte each plugin
+            // wrote. A plugin that emits its own output without a
+            // trailing newline would otherwise share the line with
+            // the aggregated verdict, breaking the "final stdout
+            // line is the aggregate verdict" contract (Copilot PR
+            // #60 review).
+            let mut tracked = NewlineTracker::new(out);
             for (_, outcome) in leaves {
-                render_plugin(name, argv, out, outcome)?;
+                render_plugin(name, argv, &mut tracked, outcome)?;
             }
-            // The CLI's own top-level verdict line: identical to the
-            // `Default` set-finalizer, written *after* the last
-            // plugin invocation so the aggregate is always the final
-            // line on stdout. This is the "fn run_set_finished
-            // default no-op" baseline behavior — plugins that want a
-            // structured set summary will get it via a later spec.
-            writeln!(out, "{}", set_verdict.state)?;
+            if !tracked.at_line_start() {
+                writeln!(&mut tracked)?;
+            }
+            writeln!(&mut tracked, "{}", set_verdict.state)?;
             Ok(())
         }
+    }
+}
+
+/// `Write` adapter that remembers whether the last byte written was
+/// `\n`. Used by the manifest + plugin reporter path to make sure the
+/// aggregated verdict lands on its own line even when a plugin's
+/// stdout does not end with a newline.
+struct NewlineTracker<'w> {
+    inner: &'w mut dyn Write,
+    last_byte_was_newline: bool,
+}
+
+impl<'w> NewlineTracker<'w> {
+    fn new(inner: &'w mut dyn Write) -> Self {
+        // Start in the "at line start" state — an empty stream is
+        // logically at the beginning of a line.
+        Self {
+            inner,
+            last_byte_was_newline: true,
+        }
+    }
+
+    fn at_line_start(&self) -> bool {
+        self.last_byte_was_newline
+    }
+}
+
+impl Write for NewlineTracker<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        if n > 0 {
+            self.last_byte_was_newline = buf[..n].last().copied() == Some(b'\n');
+        }
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
     }
 }
 

@@ -8,10 +8,14 @@
 //!   leaf.
 //! - `<verification>::AC-1::AC-1.2` — exactly one
 //!   `(verification, criterion, check)` triple. `<verification>` is
-//!   the leaf's directory name when running a root manifest; for a
-//!   single-leaf invocation it matches against the leaf's parent
-//!   directory or the `verification:` field, whichever the loader
-//!   recorded.
+//!   matched against the leaf's **derived name**, which the CLI
+//!   computes from the leaf path (`leaf_name` in `main.rs`): the
+//!   parent directory's name when the file is `duhem.yml` /
+//!   `duhem.yaml` (Pattern B / C layout from spec §10.4), otherwise
+//!   the file stem. The leaf's YAML `verification:` field is not
+//!   consulted today — `<verification>` axis matching is purely
+//!   path-derived. The two are typically authored to agree, but the
+//!   filter axis is the path-derived name.
 //! - Glob `*` is allowed in every axis (`*::AC-*::AC-*.1` etc.).
 //!
 //! Multiple `--filter` flags OR together. The implementation lives in
@@ -130,6 +134,17 @@ impl CliCheckFilter {
             patterns.push(parse_pattern(s)?);
         }
         Ok(Self { patterns })
+    }
+
+    /// Filter that rejects every `(criterion, check)` pair. Used by
+    /// the CLI on a single-leaf run when a verification-axis filter
+    /// pattern doesn't apply to the loaded leaf — the engine then
+    /// produces an `Inconclusive(EmptyAggregation)` instead of
+    /// silently running every check (Copilot PR #60 review).
+    pub fn matches_nothing() -> Self {
+        Self {
+            patterns: Vec::new(),
+        }
     }
 
     /// Narrow this filter to one verification by name. Patterns that

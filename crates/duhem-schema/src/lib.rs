@@ -21,3 +21,45 @@ pub use manifest::{LoadError, Loaded, LoadedLeaf, ManifestEntry, RootManifest, l
 pub use step::Step;
 pub use validate::{ValidationError, validate};
 pub use verification::{InputDecl, InputType, SchemaError, VerificationDefinition};
+
+/// Current Verification Definition schema version. Pre-1.0 per
+/// `docs/duhem-spec.md` §11.3 — breaking changes bump the minor under
+/// v0.x, additive changes bump patch, clarifying changes don't bump.
+/// The versioning policy lives in the spec issue that introduced this
+/// constant; see `CHANGELOG.md` for the rolling ledger.
+pub const SCHEMA_VERSION: &str = schema_version!();
+
+/// `concat!`-friendly form of [`SCHEMA_VERSION`]. Exists because
+/// `concat!` only accepts literal tokens, not `&'static str` consts —
+/// callers that need the schema version baked into a compile-time
+/// string (e.g. the CLI's `--version` line) reach for this. Kept in
+/// sync with `SCHEMA_VERSION` by `version_macro_matches_const`.
+#[macro_export]
+macro_rules! schema_version {
+    () => {
+        "0.1.0"
+    };
+}
+
+#[cfg(test)]
+mod schema_version_tests {
+    use super::SCHEMA_VERSION;
+
+    #[test]
+    fn parses_as_semver_triple() {
+        let parts: Vec<&str> = SCHEMA_VERSION.split('.').collect();
+        assert_eq!(parts.len(), 3, "expected MAJOR.MINOR.PATCH");
+        for p in &parts {
+            assert!(!p.is_empty(), "empty component in `{SCHEMA_VERSION}`");
+            assert!(
+                p.chars().all(|c| c.is_ascii_digit()),
+                "non-numeric component `{p}` in `{SCHEMA_VERSION}`"
+            );
+        }
+    }
+
+    #[test]
+    fn version_macro_matches_const() {
+        assert_eq!(SCHEMA_VERSION, schema_version!());
+    }
+}

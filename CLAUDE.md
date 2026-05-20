@@ -6,9 +6,18 @@ acceptance criteria, translates them into mechanically-judged checks
 that exercise the real delivery web (code + prompts + tools + data +
 runtime), and gates merge/deploy on the verdict.
 
-> **Status:** Phase 0 — Foundation. The repo currently contains the
-> product spec and brand docs only; the CLI, runtime, and judge are
-> being stood up. See `docs/duhem-spec.md` §14 for the roadmap.
+> **Status:** Phase 0 — Foundation. The Cargo workspace ships nine
+> crates (`duhem-cli`, `duhem-runtime`, `duhem-judge`,
+> `duhem-schema`, `duhem-actions`, `duhem-evidence`, `duhem-summary`,
+> `duhem-reporter-pretty`, `duhem-reporter-junit`); the CLI exposes
+> `init` / `run` / `validate` / `--version`; the `ui/*` and
+> `api/observe` action families are implemented; environment
+> provisioning (`up:` / `down:` hooks) is wired into the runtime;
+> the first Onsager dogfood verification lives at
+> `verifications/onsager-dashboard-create-project/` and runs through
+> the `duhem/run` composite GitHub Action. Schema is still v0.x —
+> breaking changes are expected. See `docs/duhem-spec.md` §14 for
+> the roadmap and `CHANGELOG.md` for the per-landing ledger.
 
 ## What makes Duhem Duhem
 
@@ -49,7 +58,16 @@ Changes to those four bullets are spec-level changes to
 2. **`docs/duhem-brand.md`** — the mark, design rationale, and
    relationship to Onsager. §3 carries the visual statement of the
    sister-product relationship.
-3. **`.claude/skills/`** — dev process under Claude Code. Start with
+3. **`crates/`** — the shipped implementation. `duhem-schema`,
+   `duhem-cli`, `duhem-runtime`, `duhem-judge`, `duhem-actions`,
+   `duhem-evidence`, `duhem-summary`, `duhem-reporter-pretty`,
+   `duhem-reporter-junit`. Each crate's `src/lib.rs` (or `main.rs`)
+   is the concrete answer to "what does §10 / §11 actually look like
+   today?".
+4. **`verifications/`** — Verification Definitions in-tree. The
+   dogfood VD lives at `verifications/onsager-dashboard-create-project/`
+   and is the worked example for §10's VD shape.
+5. **`.claude/skills/`** — dev process under Claude Code. Start with
    `duhem-dev-process`; it delegates to the rest.
 
 ## Onsager — the first customer
@@ -97,9 +115,10 @@ Hard rule: **no spec, no PR**, unless the PR is labeled `trivial`
 (typo, doc-only, one-line obvious fix). Schema-impacting changes
 carry a `## Schema impact` callout in the spec and a `CHANGELOG.md`
 entry on merge — Phase-0/1 schema-stability discipline; see
-`duhem-dev-process`. The repo has no `CHANGELOG.md` yet because
-there is no schema in code yet; the first schema-impact PR creates
-the file.
+`duhem-dev-process`. The live schema version is the
+`duhem_schema::SCHEMA_VERSION` constant (surfaced via `duhem
+--version` and `duhem validate`'s error preamble); the per-landing
+ledger lives in `CHANGELOG.md`.
 
 If the change introduces new product surface (a new action type, a
 new schema field, a new CLI command, new judge behavior), the spec

@@ -682,11 +682,11 @@ The roadmap reflects a solo founder building with Claude Code as the primary dev
 
 **Goal**: stand up minimum viable Duhem; first real verification running against Onsager.
 
-- Solo build the schema, CLI, runtime, and judge using Claude Code as primary development assistant.
-- Schema spec v0.1 → v0.5 (rapid iteration; expected breaking changes).
-- Built-in action library: minimum useful subset (UI click/type/assert, API call/observe, basic assertions).
-- First Onsager feature verified using Duhem (manually-authored checks, no AI generation yet).
-- Parallel: 5–10 customer interviews with AI-coding-agent power users (Cursor, Claude Code, Devin) to validate market hypothesis beyond Onsager.
+- Solo build the schema, CLI, runtime, and judge using Claude Code as primary development assistant. ✅ shipped (Cargo workspace landed via #7; nine crates `duhem-cli`, `duhem-runtime`, `duhem-judge`, `duhem-schema`, `duhem-actions`, `duhem-evidence`, `duhem-summary`, `duhem-reporter-pretty`, `duhem-reporter-junit`; CLI verbs `init` / `run` / `validate` / `--version` via #13, #16, #17, #18, #19, #24, #40, #42, #43, #58, #60).
+- Schema spec v0.1 → v0.5 (rapid iteration; expected breaking changes). ⏳ in progress (current: v0.1.0 via `duhem_schema::SCHEMA_VERSION`; per-landing ledger in `CHANGELOG.md`; v0.5 lockdown criteria tracked under #51 / shipped via #59).
+- Built-in action library: minimum useful subset (UI click/type/assert, API call/observe, basic assertions). ✅ shipped (`ui/*` slice via #14, #41; `api/observe` via #44; `api/call` v1 via #25; full catalog under `duhem-actions`).
+- First Onsager feature verified using Duhem (manually-authored checks, no AI generation yet). ✅ shipped (#46, #47; in-tree at [`verifications/onsager-dashboard-create-project/`](../verifications/onsager-dashboard-create-project/); environment `up:` / `down:` hooks via #61).
+- Parallel: 5–10 customer interviews with AI-coding-agent power users (Cursor, Claude Code, Devin) to validate market hypothesis beyond Onsager. ⏳ outstanding.
 
 **Onsager dependency**: Onsager has at least one feature in active development to verify against. If Onsager is not at this stage yet, Phase 0 starts with a smaller toy app instead.
 
@@ -741,9 +741,9 @@ This phase is contingent on Onsager’s own roadmap. It is not blocking for Duhe
 
 |Window     |Duhem milestone                                  |Onsager dependency                                                   |
 |-----------|-------------------------------------------------|---------------------------------------------------------------------|
-|Weeks 1–4  |Schema v0.1, CLI scaffold, basic runtime         |None                                                                 |
-|Weeks 5–8  |Judge implementation, 5–10 action types          |Onsager has 1 active feature                                         |
-|Weeks 9–12 |First Onsager check shipped (manual authoring) — [`verifications/onsager-dashboard-create-project/`](../verifications/onsager-dashboard-create-project/) |Onsager begins using Duhem on selected PRs                           |
+|Weeks 1–4  |Schema v0.1, CLI scaffold, basic runtime ✅ shipped (#7, #13, #17, #19) |None                                                                 |
+|Weeks 5–8  |Judge implementation, 5–10 action types ✅ shipped (#14, #16, #25, #41, #44) |Onsager has 1 active feature                                         |
+|Weeks 9–12 |First Onsager check shipped (manual authoring) ✅ shipped (#46, #47) — [`verifications/onsager-dashboard-create-project/`](../verifications/onsager-dashboard-create-project/) |Onsager begins using Duhem on selected PRs                           |
 |Weeks 13–20|Generation service alpha; expanded action library|Onsager’s PRs require Duhem verdict                                  |
 |Weeks 21–28|External alpha; schema lock-down preparation     |Onsager continues daily-use dogfood                                  |
 |Months 7–12|Schema OSS; public alpha; commercial tier        |Duhem sufficiently mature that Onsager’s pace would suffer without it|
@@ -834,7 +834,7 @@ Onsager is Duhem’s first customer. This is not a placeholder relationship unti
 
 **Real urgency.** Onsager’s development velocity depends on trustworthy verification of AI-delivered features. The builder of Duhem is the user of Duhem. The cost of Duhem being broken is felt by the same person who can fix it. This collapses the feedback loop that normally takes external customers months to close.
 
-**Continuous use.** Duhem is exercised every PR, every day. Design flaws surface fast because they cause friction in the builder’s own work. This is the strongest possible signal-to-noise ratio for early product iteration.
+**Continuous use.** Duhem is exercised every PR, every day. Design flaws surface fast because they cause friction in the builder’s own work. This is the strongest possible signal-to-noise ratio for early product iteration. The first dogfood Verification Definition lives in-tree at [`verifications/onsager-dashboard-create-project/`](../verifications/onsager-dashboard-create-project/) and runs through the `duhem/run` composite GitHub Action.
 
 **Proof point for external sales.** When Duhem is ready for external customers, “we use it ourselves to verify a complex AI-orchestration platform” is a stronger claim than any synthetic case study. The product carries its own proof.
 

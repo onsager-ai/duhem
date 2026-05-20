@@ -8,8 +8,7 @@ default:
 build:
     cargo build --workspace
 
-# Start the binary in dev mode (placeholder until the CLI grows
-# subcommands — `spec(cli): duhem init / validate / run skeletons`).
+# Show the CLI's top-level help (`init` / `run` / `validate` / etc.).
 dev:
     cargo run -p duhem-cli -- --help
 

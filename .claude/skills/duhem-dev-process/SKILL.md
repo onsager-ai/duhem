@@ -10,11 +10,17 @@ change starts as a GitHub spec issue on `onsager-ai/duhem`, proceeds
 through a PR that references it, and closes when the PR merges.
 
 Duhem is in **Phase 0 — Foundation** (per `docs/duhem-spec.md` §14). The
-repo currently contains spec docs only; tooling (CLI, runtime, judge)
-is being stood up. The dev loop below is intentionally lean — it
-mirrors the discipline used on `onsager-ai/onsager`, but does not
-inherit Onsager's seam rule, area taxonomy, or Rust toolchain checks.
-Add those skill sections only when the corresponding code lands.
+Cargo workspace ships nine crates (`duhem-cli`, `duhem-runtime`,
+`duhem-judge`, `duhem-schema`, `duhem-actions`, `duhem-evidence`,
+`duhem-summary`, `duhem-reporter-pretty`, `duhem-reporter-junit`); the
+CLI exposes `init` / `run` / `validate` / `--version`; the `ui/*` and
+`api/observe` action families and the `up:` / `down:` environment
+hooks are wired in; and the first Onsager dogfood verification ships
+at `verifications/onsager-dashboard-create-project/`. The dev loop
+below is intentionally lean — it mirrors the discipline used on
+`onsager-ai/onsager`, but does not inherit Onsager's seam rule, area
+taxonomy, or Rust toolchain checks beyond what `cargo`, `clippy`, and
+the `xtask` gates already enforce.
 
 ## The loop
 

@@ -6,9 +6,18 @@ criteria, translates them into mechanically-judged checks that exercise
 the real delivery web (code + prompts + tools + data + runtime), and
 gates merge/deploy on the verdict.
 
-> **Status:** Phase 0 — Foundation. The repo currently contains the
-> product spec and brand docs; the CLI, runtime, and judge are being
-> stood up. See `docs/duhem-spec.md` §14 for the roadmap.
+> **Status:** Phase 0 — Foundation. The Cargo workspace ships nine
+> crates (`duhem-cli`, `duhem-runtime`, `duhem-judge`, `duhem-schema`,
+> `duhem-actions`, `duhem-evidence`, `duhem-summary`,
+> `duhem-reporter-pretty`, `duhem-reporter-junit`); the CLI exposes
+> `init` / `run` / `validate` / `--version`; the `ui/*` and
+> `api/observe` action families are implemented; environment
+> provisioning (`up:` / `down:` hooks) is wired into the runtime; and
+> the first Onsager dogfood verification ships in-tree at
+> [`verifications/onsager-dashboard-create-project/`](verifications/onsager-dashboard-create-project/)
+> with a working `duhem/run` composite GitHub Action. Schema is still
+> v0.x — breaking changes are expected. See `docs/duhem-spec.md` §14
+> for the roadmap and `CHANGELOG.md` for the per-landing ledger.
 
 ## Why "Duhem"
 
@@ -20,6 +29,21 @@ tool config × data state × runtime × upstream contracts. Verification
 must be holistic, mechanical, and structurally independent of the AI
 making the claim. `docs/duhem-spec.md` Appendix C unpacks the
 philosophy; `docs/duhem-brand.md` shows how the mark visualizes it.
+
+## Quickstart
+
+```sh
+cargo build --workspace
+cargo run -p duhem-cli -- init /tmp/sample --name sample
+cargo run -p duhem-cli -- validate /tmp/sample/duhem.yml
+cargo run -p duhem-cli -- run /tmp/sample/duhem.yml
+```
+
+`duhem init` scaffolds a minimal Verification Definition that passes
+on first run against `https://example.com`. Mutate from that
+known-good baseline. For a real-world example — including the
+`up:` / `down:` environment hooks Duhem sequences around a check —
+see [`verifications/onsager-dashboard-create-project/`](verifications/onsager-dashboard-create-project/).
 
 ## Reading order
 

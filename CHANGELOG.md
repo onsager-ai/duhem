@@ -35,6 +35,8 @@ criteria) lives in the spec issue that introduced
   `down:` scripts + HTTP readiness probe; new `EventPayload::Env*`
   evidence variants; `--no-env-up` / `--keep-env` CLI flags;
   sanitized child env. (#50)
+- [clarifying] Phase 0 status sync across README, CLAUDE.md,
+  dev-process skill, justfile, spec §14, Appendix D. (#62)
 
 ## v0.1.0 — unreleased
 

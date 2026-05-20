@@ -25,11 +25,6 @@ Add those skill sections only when the corresponding code lands.
      │        ↓                                                        │
      │   spec(<area>): ...    ← issue-spec skill                       │
      │        │                                                        │
-     │        │ label: draft                                           │
-     │        ↓                                                        │
-     │   human review   ← alignment gate (human sets label=planned)    │
-     │        │                                                        │
-     │        │ label: planned                                         │
      │        ↓                                                        │
      │   branch + implement                                            │
      │        │                                                        │
@@ -66,9 +61,8 @@ on `onsager-ai/duhem` with:
 
 - `## Overview`, `## Design`, `## Plan`, `## Test`, `## Alignment`, `## Notes`
 - Labels: `spec`, one type (`feat` / `fix` / `refactor` / `perf`),
-  one or more `area:*`, one `priority:*`, status `draft`. The full
-  area taxonomy lives in `issue-spec`'s SKILL.md and
-  `references/spec-format.md`.
+  one or more `area:*`, one `priority:*`. The full area taxonomy
+  lives in `issue-spec`'s SKILL.md and `references/spec-format.md`.
 
 Hard rule: no spec → no PR, unless the PR is labeled `trivial` (typos,
 doc-only fixes, one-line obvious bug repair).
@@ -81,23 +75,16 @@ If the spec proposes new **product surface** (new action type, new
 schema field, new CLI command, new judge behavior), the spec must
 either include or link a worked Verification Definition example
 showing how the surface is exercised — see `verification-authoring`.
-A surface that has no example by the time the spec moves to
-`planned` is a surface we cannot dogfood, which means we cannot ship
-it on Onsager, which means we cannot validate it. Skip this only
-for purely internal scaffolding (build configuration, repo
-hygiene).
+A surface that has no example by the time implementation starts is
+a surface we cannot dogfood, which means we cannot ship it on
+Onsager, which means we cannot validate it. Skip this only for
+purely internal scaffolding (build configuration, repo hygiene).
 
-### 2. The alignment gate (`draft → planned`)
+### 2. Resolve open questions
 
-Only a human moves the `draft` label to `planned`. This signals:
-
-- Open questions resolved (answered via comments; Alignment section
-  updated).
-- Design approach approved.
-- Scope and priority accepted.
-
-Never bypass this gate automatically. An AI may draft the spec and
-propose the flip; it may not execute the flip.
+Before opening a PR, resolve any open questions on the spec issue
+thread. A spec with unanswered `### Open questions` is not ready to
+implement — its design isn't pinned yet.
 
 ### 3. Branch and implement
 
@@ -211,11 +198,9 @@ Trigger `duhem-pr-lifecycle` (or say "triage PR" / "CI is failing"
 
 ### 8. Closed-unmerged path
 
-If you close a PR without merging (e.g. abandoned approach), check
-whether any other PR still references the spec. If none, flip the
-spec back to `planned` so the next implementer can pick it up. (No
-`pr-spec-sync` workflow yet on this repo — until one lands, this
-flip is manual.)
+If you close a PR without merging (e.g. abandoned approach), the
+spec issue stays open as-is — the next implementer can pick it up
+from there.
 
 ## The `trivial` escape hatch
 
@@ -238,25 +223,18 @@ When in doubt, write the spec.
 
 ## Issue progress is the source of truth
 
-The labels on a spec issue must reflect reality at all times:
-
-| Label         | Meaning                                          |
-|---------------|--------------------------------------------------|
-| `draft`       | AI-drafted or human-drafted, human review pending. |
-| `planned`     | Ready for implementation. Preconditions met.     |
-| `in-progress` | At least one PR is open against this spec.       |
-| (closed)      | All Plan items delivered, spec closed.           |
-
-Until automation lands on this repo, the `planned → in-progress`
-flip on PR open is **manual** — `duhem-pr-lifecycle` covers the
-mechanics.
+A spec issue's open/closed state plus its Plan checkboxes are the
+source of truth. The issue stays open while any Plan item is unticked
+or any linked PR is in flight; it closes when GitHub fires
+`Closes #N` on PR merge (or a human closes it manually after the
+last `Part of #N` PR lands). Plan-item ticks on merge are manual;
+`duhem-pr-lifecycle` covers the mechanics.
 
 ## Anti-patterns (don't)
 
 - **PR without a spec and no `trivial` label.** Reviewers will ask;
   the PR should not merge until the author either adds a spec link
   or the `trivial` label.
-- **Moving `draft → planned` as the AI.** Human-only transition.
 - **Closing a spec manually when you meant `Closes #N`.** Let GitHub
   do it via the PR merge so the timeline has the auditable link.
 - **Editing Plan checkboxes to mark items done before the PR

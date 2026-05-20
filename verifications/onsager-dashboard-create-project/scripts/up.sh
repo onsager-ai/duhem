@@ -39,8 +39,13 @@ fi
 # Boot the Next.js dev server in the background. The readiness probe
 # (`environment.ready.http.url`) gates `setup:` on `/healthz`, so the
 # VD will wait for the server to come up before any check runs.
+#
+# `exec` inside the subshell replaces the subshell with the npm
+# process, so `$!` captures the dev-server PID (not an intermediate
+# subshell that would exit immediately and leave the server
+# orphaned beyond `down.sh`'s reach).
 echo "up.sh: starting onsager dev server"
-( cd "$ONSAGER_REPO" && npm run dev >"${TMPDIR:-/tmp}/onsager-dev.log" 2>&1 ) &
+( cd "$ONSAGER_REPO" && exec npm run dev >"${TMPDIR:-/tmp}/onsager-dev.log" 2>&1 ) &
 echo $! > "${TMPDIR:-/tmp}/onsager-dev.pid"
 
 # Exit zero immediately — Duhem polls readiness asynchronously. The

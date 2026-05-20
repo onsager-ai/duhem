@@ -61,15 +61,16 @@ impl EnvAbortReason {
 
 /// Outcome of `bring_environment_up`. `aborted: None` means up
 /// succeeded and readiness was observed (or no probe was declared);
-/// the engine proceeds to setup/criteria. `up_succeeded: true` means
-/// the script exited 0 — the engine uses this to decide whether
-/// teardown should still run (spec on issue #50: `down:` runs iff
-/// `up:` succeeded, so a half-booted SUT from a failed `up:` cleans
-/// up nothing, while a successful `up:` followed by a `ready:`
-/// timeout still calls `down:` to undo what `up:` provisioned).
+/// the engine proceeds to setup/criteria. `should_tear_down: true`
+/// means teardown should still run — either `up:` exited 0
+/// (Duhem provisioned, Duhem cleans up), or `up:` was skipped via
+/// `--no-env-up` (the operator opted into Duhem-managed teardown
+/// against a pre-booted SUT, and can pass `--keep-env` if they
+/// don't want that). A non-zero `up:` exit pins this to `false`:
+/// nothing came up, so there is nothing for `down:` to undo.
 pub(crate) struct EnvUpResult {
     pub aborted: Option<EnvAbortReason>,
-    pub up_succeeded: bool,
+    pub should_tear_down: bool,
 }
 
 /// Bring the environment up: fork `up:`, await exit, poll the
@@ -85,9 +86,12 @@ pub(crate) async fn bring_environment_up(
 ) -> Result<EnvUpResult, EngineError> {
     if skip_env_up {
         debug!("--no-env-up: skipping environment.up + readiness probe");
+        // The operator opted into Duhem-managed teardown against a
+        // pre-booted SUT; if they want both halves skipped they pass
+        // `--keep-env` as well.
         return Ok(EnvUpResult {
             aborted: None,
-            up_succeeded: false,
+            should_tear_down: true,
         });
     }
 
@@ -97,7 +101,7 @@ pub(crate) async fn bring_environment_up(
         command: command_str.clone(),
     })?;
 
-    let (exit_code, duration, stdout, stderr) = run_script(&up_script).await;
+    let (exit_code, duration, stdout, stderr) = run_script(&up_script, vd_dir).await;
     let stdout_blob = write_blob_if_nonempty(writer, &stdout)?;
     let stderr_blob = write_blob_if_nonempty(writer, &stderr)?;
     writer.append(EventPayload::EnvUpFinished {
@@ -109,10 +113,10 @@ pub(crate) async fn bring_environment_up(
 
     if exit_code != 0 {
         // `up:` failed: nothing was provisioned, so teardown must
-        // not run. Pinned via `up_succeeded: false`.
+        // not run.
         return Ok(EnvUpResult {
             aborted: Some(EnvAbortReason::Environment),
-            up_succeeded: false,
+            should_tear_down: false,
         });
     }
 
@@ -134,34 +138,34 @@ pub(crate) async fn bring_environment_up(
             // itself.
             return Ok(EnvUpResult {
                 aborted: Some(EnvAbortReason::Timeout),
-                up_succeeded: true,
+                should_tear_down: true,
             });
         }
     }
 
     Ok(EnvUpResult {
         aborted: None,
-        up_succeeded: true,
+        should_tear_down: true,
     })
 }
 
 /// Tear the environment down. Best-effort: teardown failures are
 /// recorded as evidence but never change the run verdict. Skipped
-/// when `keep_env` is true (the `--keep-env` debug flag), or when
-/// `down:` is not declared, or when `up:` never ran (nothing to tear
-/// down).
+/// when `keep_env` is true (the `--keep-env` debug flag), when
+/// `down:` is not declared, or when caller signals no teardown
+/// (e.g. a failed `up:` provisioned nothing).
 pub(crate) async fn tear_environment_down(
     writer: &mut EvidenceWriter,
     env: &Environment,
     vd_dir: Option<&Path>,
     keep_env: bool,
-    up_succeeded: bool,
+    should_tear_down: bool,
 ) -> Result<(), EngineError> {
     if keep_env {
         debug!("--keep-env: skipping environment.down");
         return Ok(());
     }
-    if !up_succeeded {
+    if !should_tear_down {
         return Ok(());
     }
     let Some(down) = env.down.as_ref() else {
@@ -171,7 +175,7 @@ pub(crate) async fn tear_environment_down(
     writer.append(EventPayload::EnvDownStarted {
         command: down_script.display().to_string(),
     })?;
-    let (exit_code, duration, stdout, stderr) = run_script(&down_script).await;
+    let (exit_code, duration, stdout, stderr) = run_script(&down_script, vd_dir).await;
     let stdout_blob = write_blob_if_nonempty(writer, &stdout)?;
     let stderr_blob = write_blob_if_nonempty(writer, &stderr)?;
     writer.append(EventPayload::EnvDownFinished {
@@ -201,17 +205,29 @@ fn resolve_script_path(path: &Path, vd_dir: Option<&Path>) -> PathBuf {
 /// stderr, and return `(exit_code, wall_time, stdout, stderr)`.
 /// `exit_code` is `-1` on signal exit and `-2` on spawn failure so
 /// the caller can distinguish "ran and failed" from "could not run".
-async fn run_script(script: &Path) -> (i32, Duration, Vec<u8>, Vec<u8>) {
+///
+/// The child's cwd is the Verification Definition's directory when
+/// known (so author-relative paths inside the script — `./scripts/`,
+/// fixture lookups, etc. — resolve from the same anchor as
+/// `environment.up:` itself). When the VD path is unknown, the
+/// runtime inherits cwd from the parent process; we deliberately do
+/// NOT set cwd to `script.parent()`, which would (a) contradict the
+/// "cwd = VD directory" contract and (b) silently break the
+/// relative-path fallback (a script invoked as `./scripts/up.sh`
+/// would re-resolve as `./scripts/./scripts/up.sh` after the cwd
+/// change). Scripts that need their own directory can compute it
+/// from `$0` / `argv[0]`.
+async fn run_script(script: &Path, vd_dir: Option<&Path>) -> (i32, Duration, Vec<u8>, Vec<u8>) {
     let started = Instant::now();
     let mut cmd = Command::new(script);
     cmd.env_clear();
     for (k, v) in sanitized_env_vars(std::env::vars()) {
         cmd.env(k, v);
     }
-    if let Some(parent) = script.parent()
-        && !parent.as_os_str().is_empty()
+    if let Some(dir) = vd_dir
+        && !dir.as_os_str().is_empty()
     {
-        cmd.current_dir(parent);
+        cmd.current_dir(dir);
     }
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());

@@ -143,10 +143,11 @@ the SDD loop's spec-link rule.
    If you can't find one, stop and create one via `issue-spec` (or
    triage whether this is truly `trivial`).
 
-2. **Confirm any open questions on the spec are resolved.** If the
-   spec's `### Open questions` subsection still has unanswered
-   items, stop and resolve them in the issue thread first — the
-   design isn't pinned yet.
+2. **Confirm any open questions on the spec are resolved.** Open
+   questions live under `## Alignment` as a `### Open questions`
+   subsection (see `duhem-dev-process` § "Write the spec"). If any
+   are unanswered, stop and resolve them in the issue thread first
+   — the design isn't pinned yet.
 
 3. **Draft the PR body linking line** so you can paste it in:
 

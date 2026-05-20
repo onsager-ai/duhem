@@ -8,7 +8,8 @@ description: Manage a Duhem PR after it's been pushed — spec-issue linking, CI
 Everything that happens after `git push` on a Duhem PR. Covers
 spec-issue linking and manual label upkeep, CI triage,
 review-comment discipline, webhook subscription, and the manual
-ticking of Plan items / CHANGELOG entries on merge.
+ticking of Plan items / CHANGELOG entries on merge. No status-label
+upkeep — that lifecycle was retired.
 
 This is Duhem's analogue of Onsager's `onsager-pr-lifecycle`
 skill. The discipline is the same.

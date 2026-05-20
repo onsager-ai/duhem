@@ -60,6 +60,9 @@ Trigger `issue-spec` (or say "spec this"). It creates a GitHub issue
 on `onsager-ai/duhem` with:
 
 - `## Overview`, `## Design`, `## Plan`, `## Test`, `## Alignment`, `## Notes`
+- Open questions live under `## Alignment` as a `### Open questions`
+  subsection (omit if none) — `duhem-pre-push` blocks on unresolved
+  items there.
 - Labels: `spec`, one type (`feat` / `fix` / `refactor` / `perf`),
   one or more `area:*`, one `priority:*`. The full area taxonomy
   lives in `issue-spec`'s SKILL.md and `references/spec-format.md`.
@@ -224,11 +227,13 @@ When in doubt, write the spec.
 ## Issue progress is the source of truth
 
 A spec issue's open/closed state plus its Plan checkboxes are the
-source of truth. The issue stays open while any Plan item is unticked
-or any linked PR is in flight; it closes when GitHub fires
-`Closes #N` on PR merge (or a human closes it manually after the
-last `Part of #N` PR lands). Plan-item ticks on merge are manual;
-`duhem-pr-lifecycle` covers the mechanics.
+source of truth. Use `Closes #N` only on a PR that delivers the final
+unticked Plan items, so GitHub's auto-close fires once the spec is
+actually complete; use `Part of #N` for partial slices that leave
+items behind, then tick the delivered checkboxes manually on merge.
+If a multi-PR spec finishes via `Part of` PRs only, a human closes
+the parent once the last Plan item ticks. Plan-item ticks on merge
+are manual; `duhem-pr-lifecycle` covers the mechanics.
 
 ## Anti-patterns (don't)
 

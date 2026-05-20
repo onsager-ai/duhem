@@ -23,6 +23,7 @@ uuid.workspace = true
 async-trait.workspace = true
 regex.workspace = true
 playwright.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 axum.workspace = true

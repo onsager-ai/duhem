@@ -19,7 +19,7 @@
 //! `Inconclusive(MissingObservation)` naturally.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use duhem_actions::{ActionError, Outcome, RunBrowser};
 use duhem_evidence::{
@@ -115,6 +115,15 @@ pub struct Engine {
     /// deterministically from the seed instead of `Uuid::new_v4`. No
     /// other runtime semantics depend on this today.
     seed: Option<u64>,
+    /// Skip `environment.up:` + readiness probe (the `--no-env-up`
+    /// escape hatch on issue #50). The operator is presumed to have
+    /// brought the SUT up already. Teardown still runs unless
+    /// [`Engine::keep_env`] is also set.
+    skip_env_up: bool,
+    /// Skip `environment.down:` (the `--keep-env` debug flag on
+    /// issue #50). Useful when an author wants the SUT to outlive the
+    /// run for triage.
+    keep_env: bool,
 }
 
 impl Engine {
@@ -128,6 +137,8 @@ impl Engine {
             definition_path: None,
             filter: None,
             seed: None,
+            skip_env_up: false,
+            keep_env: false,
         }
     }
 
@@ -167,6 +178,23 @@ impl Engine {
     /// seed see identical uuid output (spec on issue #33).
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = Some(seed);
+        self
+    }
+
+    /// Skip `environment.up:` + readiness probing. Used by the CLI's
+    /// `--no-env-up` flag; useful when the operator brought the SUT
+    /// up out-of-band. Teardown still runs unless [`Engine::keep_env`]
+    /// is also set — that combination is the "do absolutely no
+    /// lifecycle plumbing" debug shape.
+    pub fn skip_env_up(mut self, skip: bool) -> Self {
+        self.skip_env_up = skip;
+        self
+    }
+
+    /// Skip `environment.down:`. Used by the CLI's `--keep-env` flag
+    /// so an author can poke at the SUT after a failing run.
+    pub fn keep_env(mut self, keep: bool) -> Self {
+        self.keep_env = keep;
         self
     }
 
@@ -231,6 +259,57 @@ impl Engine {
 
         writer.append(run_started(evidence_path.clone(), inputs.clone()))?;
 
+        // Resolve the Verification Definition's directory so relative
+        // `environment.up:` / `down:` paths anchor at the same place
+        // an author would `cd` to before running the script by hand.
+        let vd_dir: Option<PathBuf> = self
+            .definition_path
+            .as_deref()
+            .and_then(|p| Path::new(p).parent().map(Path::to_path_buf));
+
+        // `environment:` lifecycle precedes `setup:` (spec on
+        // issue #50). On `up:` failure or `ready:` timeout we record
+        // the verdict as `Inconclusive`, skip setup + criteria, and
+        // delegate the teardown decision to `bring_environment_up`'s
+        // `should_tear_down` signal (so a half-booted SUT or a
+        // `--no-env-up` run still gets its `down:` invocation unless
+        // `--keep-env` is also on).
+        let mut env_should_tear_down = false;
+        if let Some(env) = def.environment.as_ref() {
+            let r = crate::engine::env::bring_environment_up(
+                &mut writer,
+                env,
+                vd_dir.as_deref(),
+                &run_state,
+                self.skip_env_up,
+            )
+            .await?;
+            env_should_tear_down = r.should_tear_down;
+            if let Some(reason) = r.aborted {
+                let verdict = RunVerdict {
+                    state: VerdictState::Inconclusive(reason.cause()),
+                    criteria: Vec::new(),
+                };
+                crate::engine::env::tear_environment_down(
+                    &mut writer,
+                    env,
+                    vd_dir.as_deref(),
+                    self.keep_env,
+                    env_should_tear_down,
+                )
+                .await?;
+                writer.append(EventPayload::RunFinished {
+                    verdict: verdict.state,
+                })?;
+                writer.finish()?;
+                return Ok(RunOutcome {
+                    verdict,
+                    run_id,
+                    run_dir,
+                });
+            }
+        }
+
         // Run-level `setup:` runs once before any criterion. Skipped
         // entirely when empty so the wire shape stays byte-identical
         // for setup-free Verification Definitions (issue #20).
@@ -253,6 +332,16 @@ impl Engine {
                     state: VerdictState::Inconclusive(reason.cause()),
                     criteria: Vec::new(),
                 };
+                if let Some(env) = def.environment.as_ref() {
+                    crate::engine::env::tear_environment_down(
+                        &mut writer,
+                        env,
+                        vd_dir.as_deref(),
+                        self.keep_env,
+                        env_should_tear_down,
+                    )
+                    .await?;
+                }
                 writer.append(EventPayload::RunFinished {
                     verdict: verdict.state,
                 })?;
@@ -278,6 +367,16 @@ impl Engine {
         }
 
         let run_verdict = aggregate_run(criterion_verdicts);
+        if let Some(env) = def.environment.as_ref() {
+            crate::engine::env::tear_environment_down(
+                &mut writer,
+                env,
+                vd_dir.as_deref(),
+                self.keep_env,
+                env_should_tear_down,
+            )
+            .await?;
+        }
         writer.append(EventPayload::RunFinished {
             verdict: run_verdict.state,
         })?;
@@ -662,6 +761,8 @@ mod tests {
             definition_path: None,
             filter: None,
             seed: None,
+            skip_env_up: false,
+            keep_env: false,
         };
         // Clear default registry so each test composes its own.
         e.registry.clear();
@@ -1352,5 +1453,400 @@ criteria:
         // AC-3 fails → run fails (aggregate_run is being driven over
         // the document-ordered vector we just asserted on).
         assert_eq!(verdict.state, VerdictState::Fail);
+    }
+
+    /// Spec on #50: `environment.up:` exits 0, criteria run normally,
+    /// and `environment.down:` is invoked after the criteria loop.
+    /// Both scripts emit the `Env*` evidence events.
+    #[tokio::test]
+    async fn env_up_success_runs_criteria_and_invokes_down() {
+        use std::fs::Permissions;
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt;
+
+        let (mut engine, tmp) = engine_for_test();
+        let scripts_dir = tmp.path().join("scripts");
+        std::fs::create_dir_all(&scripts_dir).unwrap();
+        let up = scripts_dir.join("up.sh");
+        let down = scripts_dir.join("down.sh");
+        std::fs::write(&up, "#!/bin/sh\necho up\nexit 0\n").unwrap();
+        std::fs::write(&down, "#!/bin/sh\necho down\nexit 0\n").unwrap();
+        std::fs::set_permissions(&up, Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&down, Permissions::from_mode(0o755)).unwrap();
+
+        // Place a VD next to scripts/ so the relative paths resolve.
+        let vd_path = tmp.path().join("vd.yml");
+        let mut f = std::fs::File::create(&vd_path).unwrap();
+        writeln!(
+            f,
+            r#"
+verification: env-up-success
+environment:
+  up: ./scripts/up.sh
+  down: ./scripts/down.sh
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#
+        )
+        .unwrap();
+        engine = engine.with_definition_path(vd_path.display().to_string());
+
+        let def = duhem_schema::VerificationDefinition::from_yaml_str(
+            &std::fs::read_to_string(&vd_path).unwrap(),
+        )
+        .unwrap();
+        let outcome = engine
+            .run_with_metadata(&def, BTreeMap::new())
+            .await
+            .unwrap();
+        assert_eq!(outcome.verdict.state, VerdictState::Pass);
+
+        let events = duhem_evidence::Trace::open(&outcome.run_dir)
+            .unwrap()
+            .into_events();
+        let kinds: Vec<&'static str> = events
+            .iter()
+            .map(|e| match &e.payload {
+                duhem_evidence::EventPayload::EnvUpStarted { .. } => "env_up_started",
+                duhem_evidence::EventPayload::EnvUpFinished { .. } => "env_up_finished",
+                duhem_evidence::EventPayload::EnvDownStarted { .. } => "env_down_started",
+                duhem_evidence::EventPayload::EnvDownFinished { .. } => "env_down_finished",
+                duhem_evidence::EventPayload::RunFinished { .. } => "run_finished",
+                _ => "other",
+            })
+            .collect();
+        // Ordering: up_started → up_finished → ... → down_started →
+        // down_finished → run_finished.
+        let up_started = kinds.iter().position(|k| *k == "env_up_started").unwrap();
+        let up_finished = kinds.iter().position(|k| *k == "env_up_finished").unwrap();
+        let down_started = kinds.iter().position(|k| *k == "env_down_started").unwrap();
+        let down_finished = kinds
+            .iter()
+            .position(|k| *k == "env_down_finished")
+            .unwrap();
+        let run_finished = kinds.iter().position(|k| *k == "run_finished").unwrap();
+        assert!(up_started < up_finished);
+        assert!(up_finished < down_started);
+        assert!(down_started < down_finished);
+        assert!(down_finished < run_finished);
+    }
+
+    /// Spec on #50: a non-zero `environment.up:` exit aborts the run
+    /// with `Inconclusive(EnvironmentError)`; no setup or criterion
+    /// runs; `environment.down:` is NOT invoked (nothing came up).
+    #[tokio::test]
+    async fn env_up_failure_yields_inconclusive_and_skips_down() {
+        use std::fs::Permissions;
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt;
+
+        let (mut engine, tmp) = engine_for_test();
+        let scripts_dir = tmp.path().join("scripts");
+        std::fs::create_dir_all(&scripts_dir).unwrap();
+        let up = scripts_dir.join("up.sh");
+        let down = scripts_dir.join("down.sh");
+        std::fs::write(&up, "#!/bin/sh\necho boom 1>&2\nexit 1\n").unwrap();
+        std::fs::write(&down, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&up, Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&down, Permissions::from_mode(0o755)).unwrap();
+
+        let vd_path = tmp.path().join("vd.yml");
+        let mut f = std::fs::File::create(&vd_path).unwrap();
+        writeln!(
+            f,
+            r#"
+verification: env-up-fail
+environment:
+  up: ./scripts/up.sh
+  down: ./scripts/down.sh
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#
+        )
+        .unwrap();
+        engine = engine.with_definition_path(vd_path.display().to_string());
+
+        let def = duhem_schema::VerificationDefinition::from_yaml_str(
+            &std::fs::read_to_string(&vd_path).unwrap(),
+        )
+        .unwrap();
+        let outcome = engine
+            .run_with_metadata(&def, BTreeMap::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome.verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+        );
+        assert!(outcome.verdict.criteria.is_empty(), "no criterion runs");
+
+        let events = duhem_evidence::Trace::open(&outcome.run_dir)
+            .unwrap()
+            .into_events();
+        let saw_down = events.iter().any(|e| {
+            matches!(
+                &e.payload,
+                duhem_evidence::EventPayload::EnvDownStarted { .. }
+                    | duhem_evidence::EventPayload::EnvDownFinished { .. }
+            )
+        });
+        assert!(!saw_down, "down: must not run when up: failed");
+    }
+
+    /// Spec on #50: `up:` exits 0, but `ready:` times out → run
+    /// verdict `Inconclusive(Timeout)`, `down:` still runs.
+    #[tokio::test]
+    async fn env_ready_timeout_yields_inconclusive_and_runs_down() {
+        use std::fs::Permissions;
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt;
+
+        let (mut engine, tmp) = engine_for_test();
+        let scripts_dir = tmp.path().join("scripts");
+        std::fs::create_dir_all(&scripts_dir).unwrap();
+        let up = scripts_dir.join("up.sh");
+        let down = scripts_dir.join("down.sh");
+        std::fs::write(&up, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::write(&down, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&up, Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&down, Permissions::from_mode(0o755)).unwrap();
+
+        let vd_path = tmp.path().join("vd.yml");
+        let mut f = std::fs::File::create(&vd_path).unwrap();
+        // Point at an unbound port via 127.0.0.1:1 — connect refuses
+        // immediately; the timeout governs the polling loop.
+        writeln!(
+            f,
+            r#"
+verification: env-ready-timeout
+environment:
+  up: ./scripts/up.sh
+  down: ./scripts/down.sh
+  ready:
+    http:
+      url: http://127.0.0.1:1/healthz
+      timeout: 600ms
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#
+        )
+        .unwrap();
+        engine = engine.with_definition_path(vd_path.display().to_string());
+
+        let def = duhem_schema::VerificationDefinition::from_yaml_str(
+            &std::fs::read_to_string(&vd_path).unwrap(),
+        )
+        .unwrap();
+        let outcome = engine
+            .run_with_metadata(&def, BTreeMap::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome.verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::Timeout),
+        );
+
+        let events = duhem_evidence::Trace::open(&outcome.run_dir)
+            .unwrap()
+            .into_events();
+        let saw_ready_fail = events.iter().any(|e| {
+            matches!(
+                &e.payload,
+                duhem_evidence::EventPayload::EnvReady { ok: false, .. }
+            )
+        });
+        let saw_down = events.iter().any(|e| {
+            matches!(
+                &e.payload,
+                duhem_evidence::EventPayload::EnvDownFinished { .. }
+            )
+        });
+        assert!(saw_ready_fail, "expected EnvReady ok=false");
+        assert!(saw_down, "down: should run after a ready timeout");
+    }
+
+    /// Spec on #50: `--no-env-up` (modeled here as `Engine::skip_env_up(true)`)
+    /// skips `up:` and the readiness probe entirely. Criteria still
+    /// run; `down:` does NOT run since `up:` never ran.
+    #[tokio::test]
+    async fn skip_env_up_bypasses_provisioning_but_runs_criteria() {
+        use std::fs::Permissions;
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt;
+
+        let (mut engine, tmp) = engine_for_test();
+        let scripts_dir = tmp.path().join("scripts");
+        std::fs::create_dir_all(&scripts_dir).unwrap();
+        let up = scripts_dir.join("up.sh");
+        // Up script that would fail if it ran — confirms we skipped it.
+        std::fs::write(&up, "#!/bin/sh\nexit 99\n").unwrap();
+        std::fs::set_permissions(&up, Permissions::from_mode(0o755)).unwrap();
+
+        let vd_path = tmp.path().join("vd.yml");
+        let mut f = std::fs::File::create(&vd_path).unwrap();
+        writeln!(
+            f,
+            r#"
+verification: skip-env-up
+environment:
+  up: ./scripts/up.sh
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#
+        )
+        .unwrap();
+        engine = engine
+            .with_definition_path(vd_path.display().to_string())
+            .skip_env_up(true);
+
+        let def = duhem_schema::VerificationDefinition::from_yaml_str(
+            &std::fs::read_to_string(&vd_path).unwrap(),
+        )
+        .unwrap();
+        let outcome = engine
+            .run_with_metadata(&def, BTreeMap::new())
+            .await
+            .unwrap();
+        assert_eq!(outcome.verdict.state, VerdictState::Pass);
+
+        let events = duhem_evidence::Trace::open(&outcome.run_dir)
+            .unwrap()
+            .into_events();
+        let saw_env = events.iter().any(|e| {
+            matches!(
+                &e.payload,
+                duhem_evidence::EventPayload::EnvUpStarted { .. }
+                    | duhem_evidence::EventPayload::EnvUpFinished { .. }
+                    | duhem_evidence::EventPayload::EnvDownStarted { .. }
+                    | duhem_evidence::EventPayload::EnvDownFinished { .. }
+            )
+        });
+        assert!(!saw_env, "no Env* events when --no-env-up is on");
+    }
+
+    /// `--no-env-up` skips `up:` + readiness probing but still runs
+    /// `down:` (unless `--keep-env` is also on) — the operator's
+    /// expressed contract is "I brought it up; you tear it down".
+    /// Verifies the CLI / runtime alignment that the doc on
+    /// [`Engine::skip_env_up`] promises.
+    #[tokio::test]
+    async fn skip_env_up_still_runs_down_unless_keep_env_is_also_set() {
+        use std::fs::Permissions;
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt;
+
+        let (mut engine, tmp) = engine_for_test();
+        let scripts_dir = tmp.path().join("scripts");
+        std::fs::create_dir_all(&scripts_dir).unwrap();
+        let up = scripts_dir.join("up.sh");
+        let down = scripts_dir.join("down.sh");
+        // Up would fail if it ran; --no-env-up should keep it from
+        // running.
+        std::fs::write(&up, "#!/bin/sh\nexit 99\n").unwrap();
+        std::fs::write(&down, "#!/bin/sh\necho down-ran\nexit 0\n").unwrap();
+        std::fs::set_permissions(&up, Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&down, Permissions::from_mode(0o755)).unwrap();
+
+        let vd_path = tmp.path().join("vd.yml");
+        let mut f = std::fs::File::create(&vd_path).unwrap();
+        writeln!(
+            f,
+            r#"
+verification: skip-env-up-still-tears-down
+environment:
+  up: ./scripts/up.sh
+  down: ./scripts/down.sh
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#
+        )
+        .unwrap();
+        engine = engine
+            .with_definition_path(vd_path.display().to_string())
+            .skip_env_up(true);
+
+        let def = duhem_schema::VerificationDefinition::from_yaml_str(
+            &std::fs::read_to_string(&vd_path).unwrap(),
+        )
+        .unwrap();
+        let outcome = engine
+            .run_with_metadata(&def, BTreeMap::new())
+            .await
+            .unwrap();
+        assert_eq!(outcome.verdict.state, VerdictState::Pass);
+
+        let events = duhem_evidence::Trace::open(&outcome.run_dir)
+            .unwrap()
+            .into_events();
+        // No up-side events (skipped).
+        let saw_up = events.iter().any(|e| {
+            matches!(
+                e.payload,
+                duhem_evidence::EventPayload::EnvUpStarted { .. }
+                    | duhem_evidence::EventPayload::EnvUpFinished { .. }
+            )
+        });
+        assert!(!saw_up, "--no-env-up must skip up: + readiness events");
+        // But down: ran.
+        let saw_down_finished = events.iter().any(|e| {
+            matches!(
+                &e.payload,
+                duhem_evidence::EventPayload::EnvDownFinished { exit_code: 0, .. }
+            )
+        });
+        assert!(
+            saw_down_finished,
+            "--no-env-up alone should still invoke down: (operator's expressed contract)"
+        );
+    }
+
+    /// Spec on #50: a VD without `environment:` produces a
+    /// byte-shape-identical trace to today's setup-only definitions
+    /// (no `Env*` events).
+    #[tokio::test]
+    async fn no_environment_block_emits_no_env_events() {
+        let (mut engine, tmp) = engine_for_test();
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#);
+        let _ = engine.run(&v, BTreeMap::new()).await.unwrap();
+        let events = read_only_run_events(&tmp);
+        let saw_env = events.iter().any(|e| {
+            matches!(
+                e.payload,
+                duhem_evidence::EventPayload::EnvUpStarted { .. }
+                    | duhem_evidence::EventPayload::EnvUpFinished { .. }
+                    | duhem_evidence::EventPayload::EnvReady { .. }
+                    | duhem_evidence::EventPayload::EnvDownStarted { .. }
+                    | duhem_evidence::EventPayload::EnvDownFinished { .. }
+            )
+        });
+        assert!(!saw_env, "VDs without `environment:` emit no Env* events");
     }
 }

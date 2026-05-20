@@ -30,6 +30,11 @@ criteria) lives in the spec issue that introduced
   `duhem --version` and `duhem validate`'s error preamble) and
   `cargo xtask schema-drift` / `cargo xtask schema-changelog-check`
   CI gates. (#51)
+- [additive] Environment provisioning v1 — optional `environment:`
+  block on `VerificationDefinition` with operator-supplied `up:` /
+  `down:` scripts + HTTP readiness probe; new `EventPayload::Env*`
+  evidence variants; `--no-env-up` / `--keep-env` CLI flags;
+  sanitized child env. (#50)
 
 ## v0.1.0 — unreleased
 
@@ -136,6 +141,110 @@ reporters that don't yet understand `RunSetSummary` continue to work:
 on a manifest run, each leaf still produces a `RunSummary` they
 receive; the set-level aggregated verdict is written by the CLI as a
 final stdout line.
+
+### runtime/schema: environment provisioning v1 — operator-supplied setup + teardown hooks (#50)
+
+Stage 3 of `docs/duhem-spec.md` §9 ("Provision Environment") was
+implicit before this landed: `duhem run` assumed the SUT was already
+up. v1 closes that gap with operator-supplied scripts and a readiness
+probe the runtime sequences around `setup:` and the criteria loop.
+Phase 0's pragmatic answer is "Duhem invokes the operator's script,"
+deliberately under the future Phase 1+ "AI provisions" extension —
+no containerization, no ephemeral envs.
+
+#### Added
+
+- New optional top-level field `environment:` on
+  `VerificationDefinition`:
+
+  ```yaml
+  environment:
+    up:   ./scripts/up.sh        # required when environment: present
+    down: ./scripts/down.sh      # optional
+    ready:
+      http:
+        url: $inputs.health_url  # whole-string $inputs.<name> resolved
+        expect_status: 200       # default 200
+        timeout: 60s
+  ```
+
+  Absent `environment:` → no behavior change vs setup-only definitions;
+  the wire shape for `environment:`-less VDs is byte-identical to today.
+  Relative `up:` / `down:` paths resolve against the directory
+  containing the Verification Definition.
+- Five additive `EventPayload::Env*` variants on the evidence trace:
+  `env_up_started { command }`,
+  `env_up_finished { exit_code, duration_ms, stdout_blob_sha256?, stderr_blob_sha256? }`,
+  `env_ready { probe_kind, ok, elapsed_ms }`,
+  `env_down_started { command }`,
+  `env_down_finished { exit_code, duration_ms, stdout_blob_sha256?, stderr_blob_sha256? }`.
+  `*_finished` variants fsync (same rule as other `*_finished`
+  events). Stdout/stderr of `up:` / `down:` are captured to
+  content-addressed blobs and referenced by sha256 from the
+  `*_finished` events — never inlined into the JSONL.
+- Lifecycle:
+  `input resolution → environment.up → environment.ready → setup → criteria → environment.down → run verdict`.
+  `down:` runs after the last criterion regardless of verdict.
+- Sanitized child env per the Alignment whitelist: `PATH`, `HOME`,
+  `TMPDIR`, `LANG`, `LC_*`, `DUHEM_*`. Attacker-shaped vars like
+  `LD_PRELOAD` are dropped before `up:` / `down:` are forked.
+- `duhem run` flags:
+  - `--no-env-up` — skip `up:` + readiness probing; trust that the
+    operator brought the SUT up out-of-band. Teardown still runs
+    unless `--keep-env` is also set.
+  - `--keep-env` — skip `down:` so the SUT outlives the run for
+    triage.
+  Both default off.
+
+#### Failure policy
+
+- `up:` non-zero exit → run verdict `Inconclusive(EnvironmentError)`,
+  no setup or criterion runs, `down:` is NOT invoked (nothing came
+  up).
+- `up:` exits 0 but `ready:` times out → run verdict
+  `Inconclusive(Timeout)`, no setup or criterion runs, `down:` STILL
+  runs (so a half-booted SUT can clean up after itself).
+- `down:` non-zero exit → recorded as evidence (the
+  `env_down_finished.exit_code` field), verdict unchanged. Teardown
+  is best-effort.
+
+Same three-state-faithful reasoning as the `setup:` failure policy
+on issue #20: a boot failure means Duhem could not observe the
+workload in the verified state — definitionally "we don't know"
+(Inconclusive), not "we saw the workload misbehave" (Fail).
+
+#### Wire format
+
+- Schema: new `Environment` / `ReadyProbe` / `HttpReadyProbe` types
+  in `duhem-schema`; optional on `VerificationDefinition`.
+- Evidence: five new `EventPayload::Env*` variants. No existing
+  variant renamed or restructured.
+- Breaking change? **no** (additive throughout). VDs without
+  `environment:` see no new events on the wire.
+- New workspace dependency on `reqwest` from `duhem-runtime` for
+  HTTP readiness polling. The runtime previously consumed `reqwest`
+  transitively via `duhem-actions`.
+
+#### Worked example
+
+The dogfood Verification Definition at
+`verifications/onsager-dashboard-create-project/duhem.yml` gains
+an `environment:` block plus `scripts/up.sh` / `scripts/down.sh`.
+The boot sequence the README previously described as a manual
+prerequisite is now first-class: a fresh contributor can run
+`duhem run` and Duhem boots Onsager, waits for `/healthz`, runs
+the verification, then shuts Onsager down.
+
+#### Reserved (Phase 1+ follow-ups)
+
+- Duhem-managed provisioning (containers, ephemeral envs, DB-seed
+  primitives, flag-store integration).
+- Probe kinds beyond `http:` (`tcp:`, gRPC health, Kafka topic
+  existence).
+- Manifest-level `environment:` for multi-leaf runs. v1 only
+  declares it at the leaf level.
+- `down:` invocation on Ctrl-C via signal handlers. Today
+  `down:` runs only after the criteria loop returns normally.
 
 ### api/observe action — passive HTTP observation via Playwright network interception (#38)
 

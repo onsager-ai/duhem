@@ -142,6 +142,17 @@ enum Cmd {
         /// issue #33.
         #[arg(long = "seed", value_name = "U64")]
         seed: Option<u64>,
+        /// Skip `environment.up:` and readiness probing. Use when the
+        /// operator brought the SUT up out-of-band. Teardown still
+        /// runs unless `--keep-env` is also passed. Has no effect on
+        /// VDs without an `environment:` block. Spec on issue #50.
+        #[arg(long = "no-env-up", default_value_t = false)]
+        no_env_up: bool,
+        /// Skip `environment.down:`. Use when an author wants the
+        /// SUT to outlive the run for triage. Has no effect on VDs
+        /// without an `environment:` block. Spec on issue #50.
+        #[arg(long = "keep-env", default_value_t = false)]
+        keep_env: bool,
     },
 }
 
@@ -175,6 +186,8 @@ fn main() -> ExitCode {
             inputs_file,
             dry_run,
             seed,
+            no_env_up,
+            keep_env,
         }) => {
             // Resolve the reporter name BEFORE we boot the tokio
             // runtime / browser: a typoed `--reporter` should exit 2
@@ -219,6 +232,8 @@ fn main() -> ExitCode {
                 inputs_file,
                 dry_run,
                 seed,
+                no_env_up,
+                keep_env,
             }))
         }
     }
@@ -236,6 +251,8 @@ struct RunArgs {
     inputs_file: Option<PathBuf>,
     dry_run: bool,
     seed: Option<u64>,
+    no_env_up: bool,
+    keep_env: bool,
 }
 
 /// `duhem init` dispatch. Wraps `init::run` with the CLI-level
@@ -352,6 +369,8 @@ async fn run_command(args: RunArgs) -> ExitCode {
         inputs_file,
         dry_run,
         seed,
+        no_env_up,
+        keep_env,
     } = args;
 
     // Polymorphic load: directory → `<dir>/duhem.yml`; manifest →
@@ -543,7 +562,9 @@ async fn run_command(args: RunArgs) -> ExitCode {
 
         let mut engine = Engine::new()
             .with_browser(browser)
-            .with_definition_path(leaf_path.display().to_string());
+            .with_definition_path(leaf_path.display().to_string())
+            .skip_env_up(no_env_up)
+            .keep_env(keep_env);
         let root = match (evidence_dir.as_ref(), is_manifest) {
             (Some(dir), true) => dir.join(&name),
             (Some(dir), false) => dir.clone(),
@@ -1203,6 +1224,38 @@ mod tests {
         // arg that silently parses as 0.
         let err = Cli::try_parse_from(["duhem", "run", "v.yml", "--seed", "-1"]);
         assert!(err.is_err(), "negative seed should reject");
+    }
+
+    #[test]
+    fn env_lifecycle_flags_parse_and_default_off() {
+        // Spec on #50: `--no-env-up` and `--keep-env` are independent
+        // escape hatches; both default off so the runtime manages the
+        // full lifecycle when `environment:` is present.
+        let default = Cli::try_parse_from(["duhem", "run", "v.yml"]).expect("parse");
+        match default.cmd {
+            Some(Cmd::Run {
+                no_env_up,
+                keep_env,
+                ..
+            }) => {
+                assert!(!no_env_up, "default off");
+                assert!(!keep_env, "default off");
+            }
+            _ => panic!("expected Run"),
+        }
+        let opted = Cli::try_parse_from(["duhem", "run", "v.yml", "--no-env-up", "--keep-env"])
+            .expect("parse");
+        match opted.cmd {
+            Some(Cmd::Run {
+                no_env_up,
+                keep_env,
+                ..
+            }) => {
+                assert!(no_env_up);
+                assert!(keep_env);
+            }
+            _ => panic!("expected Run"),
+        }
     }
 
     #[test]

@@ -8,6 +8,7 @@
 
 pub mod assertion;
 pub mod criterion;
+pub mod environment;
 pub mod expr;
 pub mod manifest;
 pub mod step;
@@ -16,6 +17,7 @@ pub mod verification;
 
 pub use assertion::{Assertion, TypeCheckKind};
 pub use criterion::{Check, Criterion};
+pub use environment::{DurationSpec, Environment, HttpReadyProbe, ReadyProbe};
 pub use expr::{BinOp, Expr, ExprStr, Literal, ParseError, Path, PathRoot, UnaryOp};
 pub use manifest::{LoadError, Loaded, LoadedLeaf, ManifestEntry, RootManifest, load};
 pub use step::Step;

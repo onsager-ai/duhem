@@ -393,8 +393,10 @@ criteria:
               scope: {role: "list", name: "Workspaces"}
               expected: exists
               within: 5s
+            outputs:
+              satisfied: satisfied
         assertions:
-          - $steps.list_check.satisfied == true
+          - $steps.list_check.outputs.satisfied == true
 
       - id: AC-1.3
         description: User is navigated to workspace home
@@ -404,8 +406,10 @@ criteria:
             with:
               matches: "/workspaces/{{$steps.api_call.outputs.workspace_id}}"
               within: 3s
+            outputs:
+              satisfied: satisfied
         assertions:
-          - $steps.nav_check.satisfied == true
+          - $steps.nav_check.outputs.satisfied == true
 
       - id: AC-1.4
         description: No error UI is shown
@@ -415,8 +419,10 @@ criteria:
             with:
               locator: {role: "alert"}
               expected: not_exists
+            outputs:
+              satisfied: satisfied
         assertions:
-          - $steps.error_check.satisfied == true
+          - $steps.error_check.outputs.satisfied == true
 ```
 
 Notice that AC-1.1 alone exercises five different layers: UI input capture, UI button activation, network observation, API response shape, and ID semantics. That is intentional. The check verifies a slice of the holistic web.

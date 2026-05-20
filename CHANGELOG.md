@@ -2,14 +2,67 @@
 
 All notable schema-impacting changes to Duhem are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
-versioning is described in `docs/duhem-spec.md` §11.3 (Phase 1 keeps
-the schema closed and breaking; deprecation policy lands at v1.0).
+the schema-versioning policy (categories, bump cadence, v0.5 readiness
+criteria) lives in the spec issue that introduced
+`duhem_schema::SCHEMA_VERSION`. Each entry is tagged with one of
+`[breaking]`, `[additive]`, or `[clarifying]`:
 
-The product is pre-publication. Everything below accumulates under
-`v0.1.0` until first release; spec landings get sub-headings, not
-their own minor bumps.
+- **breaking** — field renamed/removed, action-type removed, semantic
+  change. Bumps the minor under v0.x (v0.x → v0.x+1).
+- **additive** — new optional field, new action type, new evidence
+  variant. Bumps the patch (v0.x.y → v0.x.y+1).
+- **clarifying** — doc-only, error-message wording, internal rename.
+  Does not bump.
+
+`SCHEMA_VERSION` advances in a dedicated bump commit that converts
+`## Unreleased` to `## v0.x.y — YYYY-MM-DD` and tags the git commit
+`schema-v0.x.y`.
+
+## Unreleased
+
+- [clarifying] formalized Schema impact callout shape; introduced
+  `duhem_schema::SCHEMA_VERSION` constant (surfaced via
+  `duhem --version` and `duhem validate`'s error preamble) and
+  `cargo xtask schema-drift` / `cargo xtask schema-changelog-check`
+  CI gates. (#51)
 
 ## v0.1.0 — unreleased
+
+The cumulative pre-release line. Entries below are summarized one bullet
+per landing; the per-feature sections following the summary preserve the
+original detail. The first version-bump commit will rename this heading
+to `## v0.1.0 — YYYY-MM-DD` and start a fresh `## Unreleased` section
+above.
+
+- [additive] `api/observe` action — passive HTTP observation via
+  Playwright network interception. (#38)
+- [additive] Reporter contract v1 (`RunSummary`) + subprocess plugin
+  loader for `--reporter <name>`; reference plugins
+  `duhem-reporter-pretty` and `duhem-reporter-junit`. (#34)
+- [additive] `ui/type`, `ui/select`, `ui/assert-url`, `ui/assert-state`
+  — completes the §10.5 UI action catalog. (#37)
+- [additive] Setup-step ordering: `Setup*` evidence variants,
+  `$setup.<id>.outputs.<name>` namespace, runtime wiring. (#20)
+- [additive] `api/call` action — active HTTP request, first entry in
+  the API half of the action-type catalog. (#21)
+- [breaking] Typed input catalog: `InputDecl.type` promoted to a closed
+  catalog (`string|integer|number|boolean|array|object`); CLI
+  `--inputs k=v` coerces per declared type; `Engine::run` input
+  signature changes from `BTreeMap<String, String>` to
+  `BTreeMap<String, serde_json::Value>`. (#22)
+- [additive] Evidence trace v1: `trace.jsonl` + content-addressed
+  `blobs/<sha256>` + `manifest.json`; `EvidenceWriter` / `Trace::open`
+  / `replay()`. (#10)
+- [additive] Judge v1: three-state verdict aggregation (`pass` / `fail`
+  / `inconclusive:<cause>`), `VerdictState` / `InconclusiveCause`,
+  `aggregate_check` / `aggregate_criterion` / `aggregate_run`. (#9)
+- [additive] `ui/navigate`, `ui/click`, `ui/assert-element` —
+  first entries in the UI action-type catalog; `Action` trait,
+  `RunBrowser` / `CheckBrowser`. (#12)
+- [additive] Initial schema: `VerificationDefinition`, `Criterion`,
+  `Check`, `Step`, `Assertion` (closed enum of six forms),
+  `TypeCheckKind`, `Expr` AST + `chumsky` parser, structural
+  `validate()`, `duhem validate <path>` CLI preview. (#8)
 
 ### api/observe action — passive HTTP observation via Playwright network interception (#38)
 

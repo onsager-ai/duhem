@@ -40,3 +40,26 @@ jobs:
 
       - name: file-budget lint
         run: cargo run -p xtask --quiet -- check-file-budget --mode=fail
+
+      # Schema-versioning discipline (per the spec issue that introduced
+      # `duhem_schema::SCHEMA_VERSION`). schema-drift: every fenced YAML
+      # example under `docs/duhem-spec.md` §10 must parse + validate
+      # against the current `SCHEMA_VERSION`. schema-changelog-check:
+      # touching `crates/duhem-schema/src/**` or
+      # `crates/duhem-evidence/src/**` requires an entry in
+      # `CHANGELOG.md`'s `## Unreleased` section; `clarifying` PRs
+      # bypass via `DUHEM_CHANGELOG_CLARIFYING=1`.
+      - name: spec/code drift check
+        run: cargo run -p xtask --quiet -- schema-drift
+
+      - name: changelog touch check
+        if: github.event_name == 'pull_request'
+        env:
+          # The xtask compares against `origin/<GITHUB_BASE_REF>`; PR
+          # checkouts under actions/checkout@v4 default to a detached
+          # HEAD with no upstream, so we make sure the base branch is
+          # fetched before running.
+          DUHEM_CHANGELOG_CLARIFYING: ${{ contains(github.event.pull_request.body, '<!-- schema:clarifying -->') && '1' || '' }}
+        run: |
+          git fetch --no-tags --depth=50 origin "${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
+          cargo run -p xtask --quiet -- schema-changelog-check

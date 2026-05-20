@@ -19,8 +19,9 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+use duhem_judge::RunSetVerdict;
 use duhem_runtime::RunOutcome;
-use duhem_summary::{CriterionSummary, RunSummary};
+use duhem_summary::{CriterionSummary, RunSetSummary, RunSummary};
 
 /// Selectable reporter. Built-ins are tagged variants; plugins carry
 /// the full argv they were discovered with so the dispatch is uniform.
@@ -118,6 +119,99 @@ pub fn render(
             Ok(())
         }
         Reporter::Plugin { name, argv } => render_plugin(name, argv, out, outcome),
+    }
+}
+
+/// Render a manifest's per-leaf outcomes plus the aggregated
+/// run-set verdict (spec on issue #49). Per-built-in behavior:
+///
+/// - `Default` — one `<name>: <verdict>` line per leaf, then the
+///   aggregated verdict on its own line.
+/// - `Quiet` — nothing.
+/// - `Json` — a single `RunSetSummary` JSON object on one line.
+/// - `Plugin` — fan out: one plugin invocation per leaf (each with
+///   the leaf's `RunSummary` on stdin), then the aggregated verdict
+///   on stdout from the CLI. The set-level summary is not yet shipped
+///   to plugins — issue #49 explicitly calls out `run_set_finished`
+///   as an optional, no-op-by-default extension.
+pub fn render_set(
+    reporter: &Reporter,
+    out: &mut dyn Write,
+    leaves: &[(String, RunOutcome)],
+    set_verdict: &RunSetVerdict,
+) -> Result<(), RenderError> {
+    match reporter {
+        Reporter::Default => {
+            for (name, outcome) in leaves {
+                writeln!(out, "{name}: {}", outcome.verdict.state)?;
+            }
+            writeln!(out, "{}", set_verdict.state)?;
+            Ok(())
+        }
+        Reporter::Quiet => Ok(()),
+        Reporter::Json => {
+            let runs: Vec<RunSummary> = leaves.iter().map(|(_, o)| build_summary(o)).collect();
+            let summary = RunSetSummary::new(set_verdict.state, runs);
+            serde_json::to_writer(&mut *out, &summary)
+                .map_err(|e| RenderError::Io(std::io::Error::other(e)))?;
+            writeln!(out)?;
+            Ok(())
+        }
+        Reporter::Plugin { name, argv } => {
+            // Wrap `out` so we can observe the final byte each plugin
+            // wrote. A plugin that emits its own output without a
+            // trailing newline would otherwise share the line with
+            // the aggregated verdict, breaking the "final stdout
+            // line is the aggregate verdict" contract (Copilot PR
+            // #60 review).
+            let mut tracked = NewlineTracker::new(out);
+            for (_, outcome) in leaves {
+                render_plugin(name, argv, &mut tracked, outcome)?;
+            }
+            if !tracked.at_line_start() {
+                writeln!(&mut tracked)?;
+            }
+            writeln!(&mut tracked, "{}", set_verdict.state)?;
+            Ok(())
+        }
+    }
+}
+
+/// `Write` adapter that remembers whether the last byte written was
+/// `\n`. Used by the manifest + plugin reporter path to make sure the
+/// aggregated verdict lands on its own line even when a plugin's
+/// stdout does not end with a newline.
+struct NewlineTracker<'w> {
+    inner: &'w mut dyn Write,
+    last_byte_was_newline: bool,
+}
+
+impl<'w> NewlineTracker<'w> {
+    fn new(inner: &'w mut dyn Write) -> Self {
+        // Start in the "at line start" state — an empty stream is
+        // logically at the beginning of a line.
+        Self {
+            inner,
+            last_byte_was_newline: true,
+        }
+    }
+
+    fn at_line_start(&self) -> bool {
+        self.last_byte_was_newline
+    }
+}
+
+impl Write for NewlineTracker<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        if n > 0 {
+            self.last_byte_was_newline = buf[..n].last().copied() == Some(b'\n');
+        }
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
     }
 }
 
@@ -419,6 +513,64 @@ mod tests {
             }
             other => panic!("expected PluginExit, got {other}"),
         }
+    }
+
+    fn leaves_pair() -> (Vec<(String, RunOutcome)>, RunSetVerdict) {
+        let a = outcome(VerdictState::Pass);
+        let b = outcome(VerdictState::Fail);
+        let set = RunSetVerdict {
+            state: VerdictState::Fail,
+            runs: vec![a.verdict.clone(), b.verdict.clone()],
+        };
+        (
+            vec![("leaf-a".to_string(), a), ("leaf-b".to_string(), b)],
+            set,
+        )
+    }
+
+    fn capture_set(
+        reporter: &Reporter,
+        leaves: &[(String, RunOutcome)],
+        set: &RunSetVerdict,
+    ) -> String {
+        let mut buf = Vec::new();
+        render_set(reporter, &mut buf, leaves, set).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test]
+    fn render_set_default_prints_per_leaf_and_aggregate() {
+        // Spec on #49: default reporter on a manifest prints one
+        // `<name>: <verdict>` line per leaf, then the aggregated
+        // verdict on its own line as the final line of stdout.
+        let (leaves, set) = leaves_pair();
+        let s = capture_set(&Reporter::Default, &leaves, &set);
+        assert_eq!(s, "leaf-a: pass\nleaf-b: fail\nfail\n");
+    }
+
+    #[test]
+    fn render_set_quiet_writes_nothing() {
+        let (leaves, set) = leaves_pair();
+        let s = capture_set(&Reporter::Quiet, &leaves, &set);
+        assert_eq!(s, "");
+    }
+
+    #[test]
+    fn render_set_json_emits_run_set_summary() {
+        // Spec on #49: the JSON reporter on a manifest emits one
+        // `RunSetSummary` line — wraps the per-leaf `RunSummary`s
+        // and the aggregated verdict.
+        let (leaves, set) = leaves_pair();
+        let s = capture_set(&Reporter::Json, &leaves, &set);
+        let trimmed = s.trim_end_matches('\n');
+        assert!(!trimmed.contains('\n'), "single line: {s:?}");
+        let v: serde_json::Value = serde_json::from_str(trimmed).expect("valid JSON");
+        assert_eq!(v["schema_version"], "1");
+        assert_eq!(v["verdict"], "fail");
+        let runs = v["runs"].as_array().expect("runs array");
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0]["verdict"], "pass");
+        assert_eq!(runs[1]["verdict"], "fail");
     }
 
     #[test]

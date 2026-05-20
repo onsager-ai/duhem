@@ -71,6 +71,42 @@ pub struct CriterionSummary {
     pub verdict: VerdictState,
 }
 
+/// Aggregated summary across all leaves of a root-manifest run (spec
+/// on issue #49). Shape is "the top-level verdict plus per-leaf
+/// `RunSummary`s in execution order" — i.e. the same wire shape as a
+/// reporter would see for a single leaf, lifted one level.
+///
+/// Version is decoupled from [`RunSummary::SCHEMA_VERSION`]: the
+/// run-set wrapper is additive, so a plugin understanding `"1"` of
+/// `RunSetSummary` necessarily understands the embedded `RunSummary`s'
+/// own `schema_version`. Bumping either is schema-impacting and
+/// requires a `CHANGELOG.md` entry.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunSetSummary {
+    /// Always `"1"` at v1. See [`RunSummary::schema_version`] for the
+    /// rationale.
+    pub schema_version: String,
+    /// Aggregated verdict per `aggregate_run_set`.
+    pub verdict: VerdictState,
+    /// Per-leaf summaries, in execution order.
+    pub runs: Vec<RunSummary>,
+}
+
+impl RunSetSummary {
+    /// Current contract version. Bumping this is schema-impacting and
+    /// requires a `CHANGELOG.md` entry under the
+    /// `### Reporter contract` heading.
+    pub const SCHEMA_VERSION: &'static str = "1";
+
+    pub fn new(verdict: VerdictState, runs: Vec<RunSummary>) -> Self {
+        Self {
+            schema_version: Self::SCHEMA_VERSION.to_string(),
+            verdict,
+            runs,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,5 +134,24 @@ mod tests {
     fn schema_version_constant_matches_runtime() {
         let s = RunSummary::new("x", VerdictState::Pass, vec![], PathBuf::from("."));
         assert_eq!(s.schema_version, RunSummary::SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn run_set_summary_round_trips_through_json() {
+        let leaf = RunSummary::new(
+            "01J00000000000000000000001",
+            VerdictState::Pass,
+            vec![CriterionSummary {
+                id: "AC-1".into(),
+                verdict: VerdictState::Pass,
+            }],
+            PathBuf::from(".duhem/runs/leaf-a/01J00000000000000000000001"),
+        );
+        let set = RunSetSummary::new(VerdictState::Pass, vec![leaf]);
+        let line = serde_json::to_string(&set).unwrap();
+        let back: RunSetSummary = serde_json::from_str(&line).unwrap();
+        assert_eq!(back, set);
+        assert!(line.contains("\"schema_version\":\"1\""));
+        assert!(line.contains("\"runs\""));
     }
 }

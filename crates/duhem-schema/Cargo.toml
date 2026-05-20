@@ -14,3 +14,7 @@ thiserror.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 chumsky.workspace = true
+glob = "0.3"
+
+[dev-dependencies]
+tempfile = "3"

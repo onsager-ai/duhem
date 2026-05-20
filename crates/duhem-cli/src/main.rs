@@ -22,9 +22,12 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use duhem_actions::RunBrowser;
-use duhem_judge::VerdictState;
-use duhem_runtime::Engine;
-use duhem_schema::{InputDecl, InputType, VerificationDefinition, validate};
+use duhem_judge::{RunVerdict, VerdictState, aggregate_run_set};
+use duhem_runtime::{Engine, RunOutcome};
+use duhem_schema::{
+    InputDecl, InputType, Loaded, LoadedLeaf, VerificationDefinition, load as load_definition,
+    validate,
+};
 
 use crate::filter::CliCheckFilter;
 use crate::reporter::Reporter;
@@ -370,46 +373,24 @@ async fn run_command(args: RunArgs) -> ExitCode {
         keep_env,
     } = args;
 
-    let src = match std::fs::read_to_string(&path) {
-        Ok(s) => s,
+    // Polymorphic load: directory → `<dir>/duhem.yml`; manifest →
+    // expand leaves; leaf → single Verification Definition (today's
+    // behavior). Spec on issue #49. The loader annotates YAML / shape
+    // failures with the offending path; we prefix the schema version
+    // so authors see at a glance which schema the loader parsed
+    // against (spec on #51).
+    let loaded = match load_definition(&path) {
+        Ok(l) => l,
         Err(e) => {
-            eprintln!("read {}: {e}", path.display());
+            eprintln!("[schema v{}] {e}", duhem_schema::SCHEMA_VERSION);
             return ExitCode::FAILURE;
         }
     };
-    let def = match VerificationDefinition::from_yaml_str(&src) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!(
-                "{}: [schema v{}] {e}",
-                path.display(),
-                duhem_schema::SCHEMA_VERSION
-            );
-            return ExitCode::FAILURE;
-        }
-    };
-
-    // Run the structural validator before resolving inputs: among
-    // other rules it type-checks declared `default:` values against
-    // `type:`, which `resolve_inputs` then relies on when carrying
-    // defaults through unchanged. Without this, a buggy default
-    // would only surface from `duhem validate`, not `duhem run`.
-    if let Err(errs) = validate(&def) {
-        let plural = if errs.len() == 1 { "" } else { "s" };
-        eprintln!(
-            "{}: [schema v{}] {} validation error{plural}:",
-            path.display(),
-            duhem_schema::SCHEMA_VERSION,
-            errs.len()
-        );
-        for e in errs {
-            eprintln!("  - {e}");
-        }
-        return ExitCode::FAILURE;
-    }
 
     // Load `--inputs-file` before resolving so file values participate
     // in the same required/unknown/typed checks as explicit flags.
+    // Inputs apply to every leaf the manifest expands to — per the
+    // issue, the manifest does not remap inputs per leaf in v1.
     let file_inputs = match inputs_file.as_deref() {
         Some(p) => match inputs::load_inputs_file(p) {
             Ok(m) => m,
@@ -421,20 +402,10 @@ async fn run_command(args: RunArgs) -> ExitCode {
         None => BTreeMap::new(),
     };
 
-    // CLI-side fail-fast per the typed-input-catalog spec: missing /
-    // unknown / mistyped inputs error before `Engine::run` is called.
-    // Explicit `--inputs k=v` overrides any file value on the same key
-    // (#33 Alignment: "explicit --inputs wins").
-    let inputs = match resolve_inputs(&raw_inputs, &file_inputs, &def.inputs) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::FAILURE;
-        }
-    };
-
     // Filter parse failures must surface before we boot a browser —
-    // a typoed pattern shouldn't pay the Playwright launch cost.
+    // a typoed pattern shouldn't pay the Playwright launch cost. The
+    // manifest case also benefits: a typo blocks every leaf, not the
+    // first one to spin up.
     let check_filter = if raw_filter.is_empty() {
         None
     } else {
@@ -447,39 +418,104 @@ async fn run_command(args: RunArgs) -> ExitCode {
         }
     };
 
+    // Normalize the load into a list of `(leaf_name, leaf_path, def)`
+    // tuples plus the evidence-namespacing strategy. A single leaf
+    // stays in the today's evidence layout (`<root>/<run_id>/`); a
+    // manifest namespaces per-leaf (`<root>/<leaf>/<run_id>/`).
+    enum Scope {
+        SingleLeaf,
+        Manifest { warnings: Vec<String> },
+    }
+    let (leaves, scope): (Vec<LoadedLeaf>, Scope) = match loaded {
+        Loaded::Leaf { path, definition } => {
+            (vec![LoadedLeaf { path, definition }], Scope::SingleLeaf)
+        }
+        Loaded::Manifest {
+            leaves, warnings, ..
+        } => (leaves, Scope::Manifest { warnings }),
+    };
+    if let Scope::Manifest { warnings } = &scope {
+        for w in warnings {
+            eprintln!("warning: {w}");
+        }
+    }
+    let is_manifest = matches!(scope, Scope::Manifest { .. });
+
+    // Validate + resolve inputs for every leaf up front, before any
+    // browser launch. A malformed leaf in a manifest should not
+    // produce a half-run; the loader already fails the load on a
+    // YAML-parse leaf failure, this catches structural validation.
+    let mut resolved: Vec<(
+        String,
+        std::path::PathBuf,
+        VerificationDefinition,
+        BTreeMap<String, serde_json::Value>,
+    )> = Vec::with_capacity(leaves.len());
+    for leaf in &leaves {
+        if let Err(errs) = validate(&leaf.definition) {
+            let plural = if errs.len() == 1 { "" } else { "s" };
+            eprintln!(
+                "{}: [schema v{}] {} validation error{plural}:",
+                leaf.path.display(),
+                duhem_schema::SCHEMA_VERSION,
+                errs.len()
+            );
+            for e in errs {
+                eprintln!("  - {e}");
+            }
+            return ExitCode::FAILURE;
+        }
+        let inputs = match resolve_inputs(&raw_inputs, &file_inputs, &leaf.definition.inputs) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("{}: {e}", leaf.path.display());
+                return ExitCode::FAILURE;
+            }
+        };
+        let name = leaf_name(&leaf.path);
+        resolved.push((name, leaf.path.clone(), leaf.definition.clone(), inputs));
+    }
+
     // `--dry-run` short-circuits before any browser launch: print the
-    // resolved `(criterion::check)` plan and exit 0. Distinguished from
-    // `duhem validate`: dry-run answers "what *would* this invocation
-    // execute", honoring `--filter`. No evidence is written.
+    // resolved `(criterion::check)` plan (qualified with the
+    // verification name on manifest runs) and exit 0.
     if dry_run {
         let mut stdout = std::io::stdout().lock();
         let mut wrote = false;
-        for criterion in &def.criteria {
-            for check in &criterion.checks {
-                let matched = match &check_filter {
-                    None => true,
-                    Some(f) => {
-                        use duhem_runtime::CheckFilter;
-                        f.matches(&criterion.id, &check.id)
+        for (name, _path, def, _inputs) in &resolved {
+            let leaf_filter = check_filter.as_ref().and_then(|f| f.for_verification(name));
+            // If a filter was passed and nothing scopes to this leaf,
+            // skip — no spurious "no checks matched" line per-leaf.
+            if check_filter.is_some() && leaf_filter.is_none() {
+                continue;
+            }
+            for criterion in &def.criteria {
+                for check in &criterion.checks {
+                    let matched = match &leaf_filter {
+                        None => true,
+                        Some(f) => {
+                            use duhem_runtime::CheckFilter;
+                            f.matches(&criterion.id, &check.id)
+                        }
+                    };
+                    if matched {
+                        let line = if is_manifest {
+                            format!("WOULD RUN: {}::{}::{}", name, criterion.id, check.id)
+                        } else {
+                            format!("WOULD RUN: {}::{}", criterion.id, check.id)
+                        };
+                        if let Err(e) = writeln!(stdout, "{line}") {
+                            eprintln!("dry-run: {e}");
+                            return ExitCode::FAILURE;
+                        }
+                        wrote = true;
                     }
-                };
-                if matched {
-                    if let Err(e) = writeln!(stdout, "WOULD RUN: {}::{}", criterion.id, check.id) {
-                        eprintln!("dry-run: {e}");
-                        return ExitCode::FAILURE;
-                    }
-                    wrote = true;
                 }
             }
         }
-        if !wrote {
-            // Authors who typo a filter into "matches nothing" deserve
-            // a clear signal — silence here would look identical to a
-            // Verification Definition with no checks.
-            if let Err(e) = writeln!(stdout, "WOULD RUN: (no checks matched filter)") {
-                eprintln!("dry-run: {e}");
-                return ExitCode::FAILURE;
-            }
+        if !wrote && let Err(e) = writeln!(stdout, "WOULD RUN: (no checks matched filter)") {
+            eprintln!("dry-run: {e}");
+            return ExitCode::FAILURE;
         }
         if let Err(e) = stdout.flush() {
             eprintln!("dry-run: {e}");
@@ -488,55 +524,196 @@ async fn run_command(args: RunArgs) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let browser = match RunBrowser::launch(headed).await {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("browser: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let mut leaf_outcomes: Vec<(String, RunOutcome)> = Vec::with_capacity(resolved.len());
+    for (name, leaf_path, def, inputs) in resolved {
+        // Per-leaf filter: every leaf is narrowed by name regardless
+        // of `is_manifest`, so a `<verification>::<criterion>::<check>`
+        // pattern behaves identically against a single leaf and a
+        // manifest leaf (Copilot PR #60 review). On a manifest, an
+        // empty post-narrow filter means "skip this leaf entirely";
+        // on a single leaf, it falls through to the engine as an
+        // empty filter so the run produces the same empty-aggregation
+        // signal a typo'd `--filter` would on any leaf — consistent
+        // with `--dry-run` which already prints
+        // `(no checks matched filter)` for the same case.
+        let leaf_filter = match check_filter.as_ref() {
+            Some(f) => {
+                let narrowed = f.for_verification(&name);
+                match (narrowed, is_manifest) {
+                    (Some(n), _) => Some(n),
+                    (None, true) => continue,
+                    (None, false) => Some(CliCheckFilter::matches_nothing()),
+                }
+            }
+            None => None,
+        };
 
-    let mut engine = Engine::new()
-        .with_browser(browser)
-        .with_definition_path(path.display().to_string())
-        .skip_env_up(no_env_up)
-        .keep_env(keep_env);
-    if let Some(dir) = evidence_dir {
-        engine = engine.with_evidence_root(dir);
-    }
-    if let Some(f) = check_filter {
-        engine = engine.with_filter(f);
-    }
-    if let Some(s) = seed {
-        engine = engine.with_seed(s);
-    }
-    let outcome = match engine.run_with_metadata(&def, inputs).await {
-        Ok(o) => o,
-        Err(e) => {
-            eprintln!("engine: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+        // One browser per leaf. Phase-0 leaves run serially (#49) and
+        // `RunBrowser` is non-`Clone`, so the cleanest model is a
+        // fresh launch per leaf — same per-leaf isolation we'd want
+        // even after we have a sharable handle.
+        let browser = match RunBrowser::launch(headed).await {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("browser: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
 
+        let mut engine = Engine::new()
+            .with_browser(browser)
+            .with_definition_path(leaf_path.display().to_string())
+            .skip_env_up(no_env_up)
+            .keep_env(keep_env);
+        let root = match (evidence_dir.as_ref(), is_manifest) {
+            (Some(dir), true) => dir.join(&name),
+            (Some(dir), false) => dir.clone(),
+            (None, true) => PathBuf::from(".duhem/runs").join(&name),
+            (None, false) => PathBuf::from(".duhem/runs"),
+        };
+        engine = engine.with_evidence_root(root);
+        if let Some(f) = leaf_filter {
+            engine = engine.with_filter(f);
+        }
+        if let Some(s) = seed {
+            engine = engine.with_seed(s);
+        }
+        let outcome = match engine.run_with_metadata(&def, inputs).await {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("engine ({}): {e}", leaf_path.display());
+                return ExitCode::FAILURE;
+            }
+        };
+        leaf_outcomes.push((name, outcome));
+    }
+
+    // Reporter rendering:
+    //
+    // - Single leaf: today's behavior — one `render(reporter, outcome)`
+    //   call.
+    // - Manifest: per-leaf invocation of the same reporter, plus a
+    //   top-level aggregated verdict via `render_set`. Plugin
+    //   reporters that don't yet understand `RunSetSummary` continue
+    //   to work as before because they see one `RunSummary` per leaf
+    //   (issue #49: "default no-op so existing reporters compile
+    //   unchanged"); the set-level summary is the CLI's own concern.
     let mut stdout = std::io::stdout().lock();
-    if let Err(e) = reporter::render(&reporter, &mut stdout, &outcome) {
+    if !is_manifest {
+        let (_, outcome) = &leaf_outcomes[0];
+        if let Err(e) = reporter::render(&reporter, &mut stdout, outcome) {
+            eprintln!("reporter: {e}");
+            return ExitCode::FAILURE;
+        }
+        if let Err(e) = stdout.flush() {
+            eprintln!("reporter: {e}");
+            return ExitCode::FAILURE;
+        }
+        return match outcome.verdict.state {
+            VerdictState::Pass => ExitCode::SUCCESS,
+            _ => ExitCode::FAILURE,
+        };
+    }
+
+    // Manifest path: aggregate verdicts and render the set.
+    let run_verdicts: Vec<RunVerdict> = leaf_outcomes
+        .iter()
+        .map(|(_, o)| o.verdict.clone())
+        .collect();
+    let set_verdict = aggregate_run_set(run_verdicts);
+    if let Err(e) = reporter::render_set(&reporter, &mut stdout, &leaf_outcomes, &set_verdict) {
         eprintln!("reporter: {e}");
         return ExitCode::FAILURE;
     }
-    // Propagate flush errors: when stdout is a closed pipe (a common
-    // CI shape), a silent drop would let the command claim success
-    // even though the summary never reached the consumer.
     if let Err(e) = stdout.flush() {
         eprintln!("reporter: {e}");
         return ExitCode::FAILURE;
     }
 
-    match outcome.verdict.state {
+    match set_verdict.state {
         VerdictState::Pass => ExitCode::SUCCESS,
-        // Both Fail and Inconclusive must gate downstream actions —
-        // exit non-zero so a CI step that ignores stdout still
-        // notices.
         _ => ExitCode::FAILURE,
+    }
+}
+
+/// Derive the canonical "verification name" of a leaf for evidence
+/// namespacing and `--filter` matching.
+///
+/// The leaf file's *name* drives the choice:
+///
+/// - `duhem.yml` (the §10.4 Pattern B / C layout) → the parent
+///   directory name. This is the case where the parent dir is the
+///   real feature identifier and the file is generic.
+/// - any other filename (e.g. `verifications/create-workspace.yml`)
+///   → the file stem. Falling through to the parent dir name here
+///   would collapse every sibling leaf to the same name and break
+///   per-leaf evidence isolation (Copilot PR #60 review).
+///
+/// Empty / `.` / `..` parent segments defeat the parent-dir signal,
+/// in which case we always fall back to the file stem.
+fn leaf_name(path: &std::path::Path) -> String {
+    let file_name = path.file_name().and_then(|n| n.to_str());
+    let is_duhem_yml = matches!(file_name, Some("duhem.yml") | Some("duhem.yaml"));
+    if is_duhem_yml
+        && let Some(parent) = path.parent()
+        && let Some(name) = parent.file_name().and_then(|n| n.to_str())
+        && !name.is_empty()
+        && name != "."
+        && name != ".."
+    {
+        return name.to_string();
+    }
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("leaf")
+        .to_string()
+}
+
+#[cfg(test)]
+mod leaf_name_tests {
+    use super::leaf_name;
+    use std::path::PathBuf;
+
+    #[test]
+    fn duhem_yml_uses_parent_dir_name() {
+        // Pattern B layout: every leaf is `duhem.yml` and the dir
+        // around it carries the feature identifier.
+        assert_eq!(leaf_name(&PathBuf::from("leaf-a/duhem.yml")), "leaf-a");
+        assert_eq!(
+            leaf_name(&PathBuf::from("verifications/login/duhem.yml")),
+            "login"
+        );
+        assert_eq!(leaf_name(&PathBuf::from("duhem.yaml")), "duhem");
+    }
+
+    #[test]
+    fn bare_yml_uses_file_stem() {
+        // Pattern C with named files: sibling leaves share a parent
+        // dir, so the file stem is the only thing that disambiguates
+        // them. Returning the parent dir name would collide.
+        assert_eq!(
+            leaf_name(&PathBuf::from("verifications/login.yml")),
+            "login"
+        );
+        assert_eq!(
+            leaf_name(&PathBuf::from("verifications/create-workspace.yml")),
+            "create-workspace"
+        );
+    }
+
+    #[test]
+    fn sibling_named_leaves_get_distinct_names() {
+        // Direct regression check for the bug Copilot flagged on the
+        // pre-fix heuristic: two sibling leaves under the same parent
+        // dir must not collapse to the same evidence namespace.
+        let a = leaf_name(&PathBuf::from("verifications/login.yml"));
+        let b = leaf_name(&PathBuf::from("verifications/signup.yml"));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn no_parent_dir_falls_back_to_stem() {
+        assert_eq!(leaf_name(&PathBuf::from("leaf.yml")), "leaf");
     }
 }
 

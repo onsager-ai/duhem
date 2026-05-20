@@ -450,6 +450,234 @@ fn unknown_reporter_name_exits_with_code_two() {
     );
 }
 
+// ---- #49: root manifest loader / multi-leaf `duhem run` -------------
+
+/// Lay down a two-leaf manifest tree under `dir/`. Returns the
+/// manifest path. Used by every #49 integration test.
+fn manifest_with_two_leaves(dir: &std::path::Path) -> PathBuf {
+    let leaf_a = dir.join("leaf-a");
+    let leaf_b = dir.join("leaf-b");
+    std::fs::create_dir_all(&leaf_a).unwrap();
+    std::fs::create_dir_all(&leaf_b).unwrap();
+    std::fs::write(
+        leaf_a.join("duhem.yml"),
+        r#"
+verification: leaf-a
+criteria:
+  - id: AC-1
+    description: passes
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        leaf_b.join("duhem.yml"),
+        r#"
+verification: leaf-b
+criteria:
+  - id: AC-1
+    description: passes
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#,
+    )
+    .unwrap();
+    let manifest = dir.join("duhem.yml");
+    std::fs::write(
+        &manifest,
+        r#"
+manifest_version: 1
+verifications:
+  - path: ./leaf-a/duhem.yml
+  - path: ./leaf-b/duhem.yml
+"#,
+    )
+    .unwrap();
+    manifest
+}
+
+#[test]
+fn dry_run_on_manifest_qualifies_pairs_with_verification_name() {
+    // Spec on #49 Test: a root manifest with two leaves dry-runs both
+    // leaves and qualifies each WOULD RUN line with the leaf name.
+    let tmp = tempfile::tempdir().unwrap();
+    let manifest = manifest_with_two_leaves(tmp.path());
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&manifest)
+        .arg("--dry-run")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("WOULD RUN: leaf-a::AC-1::AC-1.1"),
+        "stdout was {stdout:?}"
+    );
+    assert!(
+        stdout.contains("WOULD RUN: leaf-b::AC-1::AC-1.1"),
+        "stdout was {stdout:?}"
+    );
+}
+
+#[test]
+fn dry_run_on_directory_path_resolves_to_duhem_yml() {
+    // Spec on #49 § "CLI surface": directory paths resolve to
+    // `<dir>/duhem.yml`. Same dry-run output as passing the manifest
+    // file directly.
+    let tmp = tempfile::tempdir().unwrap();
+    let _manifest = manifest_with_two_leaves(tmp.path());
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(tmp.path())
+        .arg("--dry-run")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("leaf-a::AC-1::AC-1.1"), "got {stdout:?}");
+    assert!(stdout.contains("leaf-b::AC-1::AC-1.1"), "got {stdout:?}");
+}
+
+#[test]
+fn dry_run_three_part_filter_selects_within_named_leaf_only() {
+    // Spec on #49: `--filter foo::AC-1::AC-1.1` selects across the
+    // right leaf; other leaves drop out entirely.
+    let tmp = tempfile::tempdir().unwrap();
+    let manifest = manifest_with_two_leaves(tmp.path());
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&manifest)
+        .arg("--dry-run")
+        .arg("--filter")
+        .arg("leaf-b::AC-1::AC-1.1")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("leaf-b::AC-1::AC-1.1"),
+        "expected leaf-b match: {stdout:?}"
+    );
+    assert!(
+        !stdout.contains("leaf-a::"),
+        "leaf-a should be skipped: {stdout:?}"
+    );
+}
+
+#[test]
+fn dry_run_two_part_filter_applies_to_every_leaf() {
+    // Spec on #49: `--filter AC-1::AC-1.1` selects in every leaf.
+    let tmp = tempfile::tempdir().unwrap();
+    let manifest = manifest_with_two_leaves(tmp.path());
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&manifest)
+        .arg("--dry-run")
+        .arg("--filter")
+        .arg("AC-1::AC-1.1")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("leaf-a::AC-1::AC-1.1"),
+        "leaf-a should match: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("leaf-b::AC-1::AC-1.1"),
+        "leaf-b should match: {stdout:?}"
+    );
+}
+
+#[test]
+fn directory_without_manifest_errors_before_browser_launch() {
+    // Spec on #49 § "CLI surface": directory with no `duhem.yml` is a
+    // load-time error.
+    let tmp = tempfile::tempdir().unwrap();
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(tmp.path())
+        .arg("--dry-run")
+        .output()
+        .expect("spawn duhem");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("no `duhem.yml`") || stderr.contains("missing manifest"),
+        "stderr should name the failure: {stderr}"
+    );
+}
+
+#[test]
+#[ignore = "requires `npx playwright install chromium`; `duhem run` launches a browser per leaf"]
+fn manifest_runs_every_leaf_and_aggregates_verdicts() {
+    // Spec on #49 Test (integration): a manifest with two leaves runs
+    // both, produces two evidence dirs, aggregates correctly; CLI
+    // exit code reflects the aggregated verdict.
+    let tmp = tempfile::tempdir().unwrap();
+    let manifest = manifest_with_two_leaves(tmp.path());
+    let evidence = tmp.path().join("evidence");
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&manifest)
+        .arg("--evidence-dir")
+        .arg(&evidence)
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // Both leaves passed → run-set verdict is `pass`. Default
+    // reporter prints one `<name>: <verdict>` line per leaf, then the
+    // aggregated verdict on its own line.
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("leaf-a: pass"),
+        "expected per-leaf line: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("leaf-b: pass"),
+        "expected per-leaf line: {stdout:?}"
+    );
+    assert!(
+        stdout.lines().last().unwrap_or("").trim() == "pass",
+        "expected aggregated verdict on last line: {stdout:?}"
+    );
+    // Per-leaf evidence: `<evidence>/<leaf>/<run_id>/`.
+    let leaf_a_runs = evidence.join("leaf-a");
+    let leaf_b_runs = evidence.join("leaf-b");
+    assert!(leaf_a_runs.is_dir(), "leaf-a evidence dir missing");
+    assert!(leaf_b_runs.is_dir(), "leaf-b evidence dir missing");
+}
+
 #[test]
 fn invalid_filter_pattern_errors_before_browser_launch() {
     // Empty-criterion patterns are explicitly rejected (#23). They

@@ -53,16 +53,24 @@ pub fn run(_args: Vec<String>) -> Result<()> {
         return Ok(());
     }
 
-    let changelog_added = added_lines(&root, &base, CHANGELOG_PATH)?;
-    let unreleased_lines: Vec<&str> = changelog_added
+    let cl_path = root.join(CHANGELOG_PATH);
+    let src =
+        std::fs::read_to_string(&cl_path).with_context(|| format!("read {}", cl_path.display()))?;
+    let Some((unreleased_start, unreleased_end)) = unreleased_line_range(&src) else {
+        bail!("`## Unreleased` heading missing from {CHANGELOG_PATH}");
+    };
+
+    let cl_diff = changelog_diff(&root, &base)?;
+    let added = added_lines_with_positions(&cl_diff);
+    let entries: Vec<&AddedLine> = added
         .iter()
-        .filter(|l| !l.trim().is_empty())
-        .map(|s| s.as_str())
+        .filter(|a| a.line >= unreleased_start && a.line <= unreleased_end)
+        .filter(|a| is_entry_line(&a.content))
         .collect();
 
-    if !changelog_added_in_unreleased(&root, &base)? {
+    if entries.is_empty() {
         eprintln!(
-            "schema-changelog-check: schema files touched ({}) but no new lines added to `## Unreleased` in {CHANGELOG_PATH}",
+            "schema-changelog-check: schema files touched ({}) but no new entries added to `## Unreleased` in {CHANGELOG_PATH}",
             touched_schema.len()
         );
         for p in &touched_schema {
@@ -79,9 +87,9 @@ pub fn run(_args: Vec<String>) -> Result<()> {
     }
 
     eprintln!(
-        "schema-changelog-check: {} schema file(s) touched, {} new line(s) added to `## Unreleased`",
+        "schema-changelog-check: {} schema file(s) touched, {} new entry line(s) added to `## Unreleased`",
         touched_schema.len(),
-        unreleased_lines.len()
+        entries.len()
     );
     Ok(())
 }
@@ -114,55 +122,9 @@ fn changed_files(root: &Path, base: &str) -> Result<Vec<String>> {
         .collect())
 }
 
-/// Lines added (with leading `+` stripped) to a path between `base`
-/// and `HEAD`. Header lines (`+++ b/path`) are filtered out.
-fn added_lines(root: &Path, base: &str, path: &str) -> Result<Vec<String>> {
-    let out = Command::new("git")
-        .args([
-            "diff",
-            "--no-color",
-            "--unified=0",
-            &format!("{base}...HEAD"),
-            "--",
-            path,
-        ])
-        .current_dir(root)
-        .output()
-        .context("git diff for changelog failed")?;
-    if !out.status.success() {
-        bail!(
-            "git diff {base}...HEAD -- {path} failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
-    }
-    Ok(String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|l| {
-            if l.starts_with("+++") {
-                None
-            } else {
-                l.strip_prefix('+').map(|rest| rest.to_string())
-            }
-        })
-        .collect())
-}
-
-/// Walk the post-diff CHANGELOG line by line; for each `+`-added line,
-/// determine whether it falls inside the `## Unreleased` section in
-/// the *new* file (i.e. after the diff is applied).
-///
-/// Approach: read the current `CHANGELOG.md`, mark which line numbers
-/// fall under `## Unreleased`, then ask git for `--unified=0`
-/// hunk-header line numbers and check overlap.
-fn changelog_added_in_unreleased(root: &Path, base: &str) -> Result<bool> {
-    let cl_path = root.join(CHANGELOG_PATH);
-    let src =
-        std::fs::read_to_string(&cl_path).with_context(|| format!("read {}", cl_path.display()))?;
-    let unreleased = unreleased_line_range(&src);
-    let Some((start, end)) = unreleased else {
-        bail!("`## Unreleased` heading missing from {CHANGELOG_PATH}");
-    };
-
+/// Raw `git diff --unified=0 base...HEAD -- CHANGELOG.md` output. The
+/// caller parses positions out of it.
+fn changelog_diff(root: &Path, base: &str) -> Result<String> {
     let out = Command::new("git")
         .args([
             "diff",
@@ -181,13 +143,78 @@ fn changelog_added_in_unreleased(root: &Path, base: &str) -> Result<bool> {
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }
-    let diff = String::from_utf8_lossy(&out.stdout);
-    Ok(any_added_line_in_range(&diff, start, end))
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+#[derive(Debug)]
+struct AddedLine {
+    /// 1-based line number in the post-image (i.e. the file as it
+    /// stands at HEAD).
+    line: usize,
+    content: String,
+}
+
+/// Parse `git diff --unified=0` output and return every `+` line with
+/// the post-image line number it occupies. Skips diff header lines
+/// (`+++ b/path`) and hunk-header `@@` lines.
+fn added_lines_with_positions(diff: &str) -> Vec<AddedLine> {
+    let mut out: Vec<AddedLine> = Vec::new();
+    // Tracks the next post-image line number an `+`-prefixed body
+    // line will occupy. Reset by each `@@ -... +N,M @@` header.
+    let mut next_new_line: usize = 0;
+    for line in diff.lines() {
+        if line.starts_with("@@") {
+            if let Some((start, _count)) = parse_hunk_new_range(line) {
+                next_new_line = start;
+            }
+            continue;
+        }
+        if line.starts_with("+++") || line.starts_with("---") {
+            continue;
+        }
+        if let Some(body) = line.strip_prefix('+') {
+            out.push(AddedLine {
+                line: next_new_line,
+                content: body.to_string(),
+            });
+            next_new_line += 1;
+        }
+        // `-` and context lines don't advance the post-image counter
+        // under `--unified=0` (no context lines emitted; deletions
+        // come in their own hunks).
+    }
+    out
+}
+
+/// Parse the post-image `(start, count)` from a `@@ -... +S,C @@`
+/// header. `count` defaults to 1 when omitted.
+fn parse_hunk_new_range(header: &str) -> Option<(usize, usize)> {
+    let after_plus = header.split('+').nth(1)?;
+    let after_plus = after_plus.split_whitespace().next()?;
+    let (s, c) = match after_plus.split_once(',') {
+        Some((a, b)) => (a, b),
+        None => (after_plus, "1"),
+    };
+    Some((s.parse().ok()?, c.parse().ok()?))
+}
+
+/// Does this added line look like a real CHANGELOG entry? The gate
+/// cares about content additions, not whitespace or heading edits.
+/// Required shape per the policy: `- [breaking|additive|clarifying]
+/// ... (#N)`. We accept the looser `- [` prefix so reflows of an
+/// existing entry don't trip a strict-form regex.
+fn is_entry_line(content: &str) -> bool {
+    let trimmed = content.trim_start();
+    trimmed.starts_with("- [")
 }
 
 /// 1-based inclusive `[start, end]` line range covered by the
-/// `## Unreleased` heading in `src`. `end` is the line just before the
-/// next `## ` heading, or the file's last line.
+/// *body* of the `## Unreleased` section in `src`. `start` is the
+/// first line **after** the heading — not the heading itself —
+/// so a touch to the heading line alone (e.g. an editor reflow that
+/// rewrites it byte-for-byte but registers as a diff) doesn't count
+/// as adding an entry. `end` is the line just before the next `## `
+/// heading, or the file's last line.
 fn unreleased_line_range(src: &str) -> Option<(usize, usize)> {
     let lines: Vec<&str> = src.lines().collect();
     let mut start: Option<usize> = None;
@@ -195,7 +222,9 @@ fn unreleased_line_range(src: &str) -> Option<(usize, usize)> {
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
         if start.is_none() && (trimmed == "## Unreleased" || trimmed == "## [Unreleased]") {
-            start = Some(i + 1);
+            // `i` is 0-based; the heading itself is line `i + 1` and
+            // we want the line *after* the heading, so `i + 2`.
+            start = Some(i + 2);
             continue;
         }
         if start.is_some() && line.starts_with("## ") {
@@ -205,40 +234,7 @@ fn unreleased_line_range(src: &str) -> Option<(usize, usize)> {
     }
     let s = start?;
     let e = end.unwrap_or(lines.len());
-    Some((s, e))
-}
-
-/// Parse `git diff --unified=0` hunk headers and return true when any
-/// post-image hunk overlaps `[start, end]` (1-based inclusive).
-///
-/// Hunk header format: `@@ -<old>,<old_count> +<new>,<new_count> @@`,
-/// where `<new_count>` may be omitted (defaults to 1). A hunk with
-/// `<new_count> == 0` is a pure deletion — not an addition, so skip.
-fn any_added_line_in_range(diff: &str, start: usize, end: usize) -> bool {
-    for line in diff.lines() {
-        if !line.starts_with("@@") {
-            continue;
-        }
-        // Extract the `+<new>,<new_count>` token.
-        let Some(after_plus) = line.split('+').nth(1) else {
-            continue;
-        };
-        let after_plus = after_plus.split_whitespace().next().unwrap_or("");
-        let (new_start, new_count) = match after_plus.split_once(',') {
-            Some((a, b)) => (a, b),
-            None => (after_plus, "1"),
-        };
-        let new_start: usize = new_start.parse().unwrap_or(0);
-        let new_count: usize = new_count.parse().unwrap_or(1);
-        if new_count == 0 {
-            continue;
-        }
-        let hunk_end = new_start + new_count - 1;
-        if new_start <= end && hunk_end >= start {
-            return true;
-        }
-    }
-    false
+    if s > e { None } else { Some((s, e)) }
 }
 
 fn workspace_root() -> Result<PathBuf> {
@@ -255,12 +251,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unreleased_range_is_inclusive_to_next_heading() {
+    fn unreleased_range_skips_the_heading_line() {
         let src = "# CL\n\n## Unreleased\n\n- foo\n- bar\n\n## v0.1.0 — 2026-05-19\n- old\n";
         let (s, e) = unreleased_line_range(src).expect("range");
-        assert_eq!(s, 3);
-        // Section spans lines 3..=7 (inclusive of the blank line just
-        // before the next heading on line 8).
+        // Heading is line 3; the body starts at line 4 (the blank line
+        // right under the heading). `e` is the line just before the
+        // next `## ` heading on line 8.
+        assert_eq!(s, 4);
         assert_eq!(e, 7);
     }
 
@@ -268,8 +265,19 @@ mod tests {
     fn unreleased_range_handles_bracketed_heading() {
         let src = "## [Unreleased]\n- entry\n";
         let (s, e) = unreleased_line_range(src).expect("range");
-        assert_eq!(s, 1);
+        // Heading on line 1; body line is 2.
+        assert_eq!(s, 2);
         assert_eq!(e, 2);
+    }
+
+    #[test]
+    fn unreleased_range_with_empty_body_returns_none() {
+        // A `## Unreleased` heading immediately followed by the next
+        // version heading has no body lines to track. `unreleased_line_range`
+        // returns `None` so the gate falls through to "no entries
+        // added" and fails as intended.
+        let src = "## Unreleased\n## v0.1.0 — 2026-05-19\n- old\n";
+        assert!(unreleased_line_range(src).is_none());
     }
 
     #[test]
@@ -279,25 +287,71 @@ mod tests {
     }
 
     #[test]
-    fn hunk_header_overlap_detects_addition_in_range() {
-        // Addition lands at lines 4..=5 of the new file.
+    fn added_lines_track_post_image_positions() {
+        // Two lines added at post-image lines 4 and 5.
         let diff = "@@ -3,0 +4,2 @@\n+- new entry\n+- another\n";
-        assert!(any_added_line_in_range(diff, 3, 7));
-        assert!(!any_added_line_in_range(diff, 8, 12));
+        let added = added_lines_with_positions(diff);
+        assert_eq!(added.len(), 2);
+        assert_eq!(added[0].line, 4);
+        assert_eq!(added[0].content, "- new entry");
+        assert_eq!(added[1].line, 5);
+        assert_eq!(added[1].content, "- another");
     }
 
     #[test]
-    fn hunk_header_default_count_is_one() {
-        // `+4` with no `,count` defaults to 1 line.
+    fn added_lines_default_hunk_count_is_one() {
+        // `+4` with no `,count` is a single-line modification.
         let diff = "@@ -4 +4 @@\n-old\n+new\n";
-        assert!(any_added_line_in_range(diff, 4, 4));
-        assert!(!any_added_line_in_range(diff, 5, 10));
+        let added = added_lines_with_positions(diff);
+        assert_eq!(added.len(), 1);
+        assert_eq!(added[0].line, 4);
+        assert_eq!(added[0].content, "new");
     }
 
     #[test]
-    fn hunk_header_pure_deletion_doesnt_count_as_add() {
-        // `+4,0` means zero lines added at position 4.
+    fn added_lines_pure_deletion_yields_nothing() {
         let diff = "@@ -4,2 +4,0 @@\n-gone\n-also-gone\n";
-        assert!(!any_added_line_in_range(diff, 1, 100));
+        assert!(added_lines_with_positions(diff).is_empty());
+    }
+
+    #[test]
+    fn entry_shape_filter_accepts_real_entries_and_rejects_noise() {
+        assert!(is_entry_line("- [additive] new field. (#42)"));
+        assert!(is_entry_line("  - [breaking] renamed. (#7)"));
+        assert!(!is_entry_line(""));
+        assert!(!is_entry_line("- some prose line"));
+        assert!(!is_entry_line("## Unreleased"));
+        assert!(!is_entry_line("blank line addition"));
+    }
+
+    #[test]
+    fn heading_only_touch_does_not_satisfy_the_gate() {
+        // Mock: schema file is touched, and the only addition in the
+        // changelog is the `## Unreleased` heading itself (e.g. a
+        // reflow that registers as a diff). The position-based filter
+        // skips the heading line (start is the line *after* the
+        // heading), so the gate correctly reports zero entries.
+        let cl = "# CL\n\n## Unreleased\n- existing entry\n";
+        let (start, end) = unreleased_line_range(cl).expect("range");
+        let diff = "@@ -3,0 +3,1 @@\n+## Unreleased\n";
+        let added = added_lines_with_positions(diff);
+        let in_range: Vec<&AddedLine> = added
+            .iter()
+            .filter(|a| a.line >= start && a.line <= end && is_entry_line(&a.content))
+            .collect();
+        assert!(in_range.is_empty(), "heading edit should not count");
+    }
+
+    #[test]
+    fn real_entry_addition_satisfies_the_gate() {
+        let cl = "# CL\n\n## Unreleased\n- existing entry\n";
+        let (start, end) = unreleased_line_range(cl).expect("range");
+        let diff = "@@ -4,0 +4,1 @@\n+- [additive] new thing. (#9)\n";
+        let added = added_lines_with_positions(diff);
+        let in_range: Vec<&AddedLine> = added
+            .iter()
+            .filter(|a| a.line >= start && a.line <= end && is_entry_line(&a.content))
+            .collect();
+        assert_eq!(in_range.len(), 1);
     }
 }

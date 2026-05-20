@@ -146,17 +146,28 @@ fn extract_section_yaml(src: &str, section: &str) -> Vec<Block> {
 /// Verification Definition iff it carries a top-level `verification:`
 /// or `criteria:` key. Avoids running the VD validator on the §10.4
 /// root-manifest example (which has neither).
+///
+/// Uses a non-parsing line scan deliberately: if a §10 block looks
+/// like a VD but the YAML is malformed, we want `validate_vd` to
+/// surface the parse error as a CI failure, not silently skip.
+/// Parsing here would swallow the error and let broken examples
+/// through.
 fn looks_like_vd(body: &str) -> bool {
-    let parsed: serde_yml::Value = match serde_yml::from_str(body) {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
-    let map = match parsed {
-        serde_yml::Value::Mapping(m) => m,
-        _ => return false,
-    };
-    map.contains_key(serde_yml::Value::String("verification".into()))
-        || map.contains_key(serde_yml::Value::String("criteria".into()))
+    for raw in body.lines() {
+        // Strip trailing comments so a key embedded in a comment
+        // doesn't trip the scan; YAML escapes inside `#` are out of
+        // scope for spec examples.
+        let line = match raw.split_once('#') {
+            Some((before, _)) => before,
+            None => raw,
+        };
+        // Top-level keys sit at column 0; an indented `verification:`
+        // is some nested field, not the document's identity.
+        if line.starts_with("verification:") || line.starts_with("criteria:") {
+            return true;
+        }
+    }
+    false
 }
 
 fn validate_vd(body: &str) -> Result<()> {
@@ -235,6 +246,25 @@ criteria: []
     fn looks_like_vd_accepts_criteria_only() {
         let only_criteria = "criteria:\n  - id: AC-1\n    description: x\n    checks: []\n";
         assert!(looks_like_vd(only_criteria));
+    }
+
+    #[test]
+    fn looks_like_vd_ignores_indented_keys() {
+        // A nested `verification:` inside another structure must not
+        // be misread as the document's identity.
+        let nested = "version: \"1\"\nverifications:\n  - file.yml\nmeta:\n  verification: false\n";
+        assert!(!looks_like_vd(nested));
+    }
+
+    #[test]
+    fn looks_like_vd_routes_malformed_yaml_to_validator() {
+        // The scan must not swallow parse errors: a block that
+        // *looks* like a VD (top-level `verification:`) but has
+        // broken YAML body still classifies as VD, so the validator
+        // gets to surface the parse error as a CI failure.
+        let broken = "verification: x\ncriteria: [unterminated\n";
+        assert!(looks_like_vd(broken));
+        assert!(validate_vd(broken).is_err());
     }
 
     #[test]

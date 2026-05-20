@@ -19,6 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history (not the default shallow clone) so the
+          # schema-changelog-check xtask can resolve the merge-base
+          # against `origin/$GITHUB_BASE_REF` for any PR age. Small
+          # repo — the extra fetch is cheap.
+          fetch-depth: 0
 
       # rust-toolchain.toml pins the channel + components (rustfmt + clippy).
       - name: Show toolchain
@@ -55,11 +61,5 @@ jobs:
       - name: changelog touch check
         if: github.event_name == 'pull_request'
         env:
-          # The xtask compares against `origin/<GITHUB_BASE_REF>`; PR
-          # checkouts under actions/checkout@v4 default to a detached
-          # HEAD with no upstream, so we make sure the base branch is
-          # fetched before running.
           DUHEM_CHANGELOG_CLARIFYING: ${{ contains(github.event.pull_request.body, '<!-- schema:clarifying -->') && '1' || '' }}
-        run: |
-          git fetch --no-tags --depth=50 origin "${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
-          cargo run -p xtask --quiet -- schema-changelog-check
+        run: cargo run -p xtask --quiet -- schema-changelog-check

@@ -201,18 +201,28 @@ pub(crate) fn run_with_prompt(
             // we leave it alone (the loader spec owns the merge
             // semantics; clobbering blindly would be worse than the
             // current TODO state). If it doesn't, drop the stub.
+            //
+            // Both branches describe the per-feature VD using
+            // `<target-basename>/duhem.yml` — the *relative* path
+            // from the manifest's parent. Using `--name` here would
+            // be wrong whenever the caller's explicit `PATH` leaf
+            // differs from `--name` (e.g. `duhem init feat-a/v1
+            // --name feat-a`).
             let parent = target.parent().unwrap_or_else(|| Path::new("."));
             let manifest = parent.join("duhem.yml");
+            let leaf = target
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| name.clone());
             if manifest.exists() {
                 warnings.push(format!(
-                    "left existing root manifest {} unchanged; add `{}/duhem.yml` to its \
+                    "left existing root manifest {} unchanged; add `{leaf}/duhem.yml` to its \
                      verifications list when the root-manifest loader spec lands",
                     manifest.display(),
-                    name,
                 ));
             } else {
                 let stub = include_str!("../templates/init-pattern-b/manifest-stub.yml");
-                let rendered = stub.replace("{{NAME}}", &name);
+                let rendered = stub.replace("{{LEAF}}", &leaf);
                 fs::write(&manifest, rendered)
                     .map_err(|e| InitError::Io(format!("write {}: {e}", manifest.display())))?;
                 created.push(manifest.clone());
@@ -486,6 +496,44 @@ mod tests {
         assert!(
             body.contains("feature/duhem.yml"),
             "stub mentions per-feature path: {body}"
+        );
+    }
+
+    /// Regression for PR #58 review: when the caller's explicit
+    /// `PATH` leaf differs from `--name`, the stub manifest and
+    /// the warning text must point at the *real* per-feature
+    /// directory (the path basename), not the slug. Otherwise a
+    /// future root-manifest loader would resolve the stub against
+    /// a non-existent leaf.
+    #[test]
+    fn pattern_b_stub_uses_path_basename_when_different_from_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("feat-a").join("v1");
+        let outcome = run_with_prompt(
+            InitArgs {
+                path: Some(target.clone()),
+                pattern: Pattern::B,
+                name: Some("feat-a".into()),
+                force: false,
+            },
+            ok_prompt,
+        )
+        .expect("init ok");
+        let manifest = tmp.path().join("feat-a").join("duhem.yml");
+        assert!(manifest.is_file());
+        let body = std::fs::read_to_string(&manifest).unwrap();
+        assert!(
+            body.contains("v1/duhem.yml"),
+            "stub references path basename, not slug: {body}"
+        );
+        assert!(
+            !body.contains("feat-a/duhem.yml"),
+            "stub must not reference the slug when it differs from the leaf: {body}"
+        );
+        let warn = &outcome.warnings[0];
+        assert!(
+            warn.contains("v1/duhem.yml") || warn.contains(target.to_string_lossy().as_ref()),
+            "warning references the real per-feature path: {warn}"
         );
     }
 

@@ -17,4 +17,4 @@
 # rewrite. See `CHANGELOG.md` at that time for migration notes.
 
 # verifications:
-#   - {{NAME}}/duhem.yml
+#   - {{LEAF}}/duhem.yml

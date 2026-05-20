@@ -8,6 +8,7 @@
 //! `duhem-evidence` respectively; the engine is purely compositional.
 
 pub mod context;
+pub mod env;
 pub mod registry;
 pub mod runner;
 pub mod setup;

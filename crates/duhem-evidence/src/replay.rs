@@ -146,12 +146,18 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
             | EventPayload::SetupStepStarted { .. }
             | EventPayload::SetupStepObservation { .. }
             | EventPayload::SetupStepFinished { .. }
-            | EventPayload::SetupFinished { .. } => {
-                // Setup events don't produce per-criterion verdicts —
-                // they're a run-level boundary marker. The judge's
-                // fold sees only criterion verdicts, and `Engine::run`
-                // emits `RunFinished` directly on setup-abort (#20)
-                // so replay still has the recorded run verdict to
+            | EventPayload::SetupFinished { .. }
+            | EventPayload::EnvUpStarted { .. }
+            | EventPayload::EnvUpFinished { .. }
+            | EventPayload::EnvReady { .. }
+            | EventPayload::EnvDownStarted { .. }
+            | EventPayload::EnvDownFinished { .. } => {
+                // Setup / environment events don't produce
+                // per-criterion verdicts — they're run-level boundary
+                // markers. The judge's fold sees only criterion
+                // verdicts, and `Engine::run` emits `RunFinished`
+                // directly on setup-abort (#20) / env-abort (#50) so
+                // replay still has the recorded run verdict to
                 // compare against.
             }
         }

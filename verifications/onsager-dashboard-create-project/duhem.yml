@@ -16,14 +16,38 @@
 
 verification: Onsager dashboard — create project
 
+# Operator-supplied environment provisioning (spec on issue #50).
+# `./scripts/up.sh` is the same `npm run dev` + DB-seed sequence the
+# README has long documented as a manual prerequisite; making it
+# first-class lets a fresh contributor — or CI — boot the SUT and
+# run the verification with one command. Stays consistent with the
+# Holistic Verification Principle: Duhem invokes the operator's real
+# boot script, not a containerized facsimile.
+#
+# The readiness probe gates `setup:` on `/healthz` returning 200 so
+# the verification doesn't race the dev server's compile-on-first-
+# request warmup. `--no-env-up` skips this block when the operator
+# has already brought Onsager up out-of-band; `--keep-env` skips
+# teardown for triage.
+environment:
+  up: ./scripts/up.sh
+  down: ./scripts/down.sh
+  ready:
+    http:
+      url: $inputs.health_url
+      timeout: 90s
+
 inputs:
   # Absolute URLs are passed per-environment by the operator. The
   # defaults assume a local Onsager dev server on the conventional
   # Next.js port; staging passes the deployed hostname instead.
-  # Three explicit URL inputs (rather than one `base_url` plus
+  # Four explicit URL inputs (rather than one `base_url` plus
   # path-joining) because string interpolation isn't shipped yet
   # (`crates/duhem-runtime/src/engine/template.rs` is conservative
   # to whole-string substitution).
+  health_url:
+    type: string
+    default: http://localhost:3000/healthz
   login_url:
     type: string
     default: http://localhost:3000/login

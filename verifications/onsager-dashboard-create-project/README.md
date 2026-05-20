@@ -24,26 +24,36 @@ in the list.
 
 ### Local Onsager dev server
 
-```sh
-duhem run verifications/onsager-dashboard-create-project/duhem.yml \
-  --inputs login_url=http://localhost:3000/login \
-  --inputs new_project_url=http://localhost:3000/projects/new \
-  --inputs projects_url=http://localhost:3000/projects \
-  --inputs test_email="$DUHEM_FIXTURE_EMAIL" \
-  --inputs test_password="$DUHEM_FIXTURE_PASSWORD" \
-  --inputs project_name="duhem-fixture-$(uuidgen)"
-```
-
-Defaults for the three URL inputs point at the conventional
-local Onsager port (`http://localhost:3000`), so the local
-form collapses to:
+The VD's `environment:` block (issue #50) handles boot and
+teardown via `./scripts/up.sh` / `./scripts/down.sh`. Set
+`DUHEM_ONSAGER_REPO_DIR` to an `onsager-ai/onsager` checkout so
+`up.sh` knows where to run `npm run dev`:
 
 ```sh
+export DUHEM_ONSAGER_REPO_DIR=/path/to/onsager
 duhem run verifications/onsager-dashboard-create-project/duhem.yml \
   --inputs test_email="$DUHEM_FIXTURE_EMAIL" \
   --inputs test_password="$DUHEM_FIXTURE_PASSWORD" \
   --inputs project_name="duhem-fixture-$(uuidgen)"
 ```
+
+Duhem will boot Onsager, wait for `http://localhost:3000/healthz`
+to return 200, run the verification, then shut Onsager down. To
+skip the lifecycle (e.g. when iterating with the dev server
+already running):
+
+```sh
+duhem run verifications/onsager-dashboard-create-project/duhem.yml \
+  --no-env-up --keep-env \
+  --inputs test_email="$DUHEM_FIXTURE_EMAIL" \
+  --inputs test_password="$DUHEM_FIXTURE_PASSWORD" \
+  --inputs project_name="duhem-fixture-$(uuidgen)"
+```
+
+Defaults for the URL inputs (`health_url`, `login_url`,
+`new_project_url`, `projects_url`) point at the conventional
+local Onsager port; staging passes them explicitly (see
+below).
 
 ### Staging
 

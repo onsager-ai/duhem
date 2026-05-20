@@ -103,6 +103,42 @@ pub enum EventPayload {
         inputs: BTreeMap<String, serde_json::Value>,
         schema_version: String,
     },
+    EnvUpStarted {
+        command: String,
+    },
+    EnvUpFinished {
+        exit_code: i32,
+        duration_ms: u64,
+        /// Content-addressed reference into `blobs/` for the captured
+        /// stdout stream. `None` when the script produced no stdout
+        /// (or `--no-env-up` skipped the invocation).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stdout_blob_sha256: Option<String>,
+        /// Same shape as `stdout_blob_sha256` for stderr.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stderr_blob_sha256: Option<String>,
+    },
+    EnvReady {
+        /// Identifier of the probe kind that ran. v1 emits `"http"`;
+        /// future probe kinds widen the catalog without renaming this
+        /// field.
+        probe_kind: String,
+        /// `true` when the probe observed the readiness signal within
+        /// the configured timeout; `false` on timeout.
+        ok: bool,
+        elapsed_ms: u64,
+    },
+    EnvDownStarted {
+        command: String,
+    },
+    EnvDownFinished {
+        exit_code: i32,
+        duration_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stdout_blob_sha256: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stderr_blob_sha256: Option<String>,
+    },
     SetupStarted {
         step_count: u32,
     },
@@ -170,7 +206,9 @@ impl EventPayload {
     pub fn is_finished(&self) -> bool {
         matches!(
             self,
-            EventPayload::SetupStepFinished { .. }
+            EventPayload::EnvUpFinished { .. }
+                | EventPayload::EnvDownFinished { .. }
+                | EventPayload::SetupStepFinished { .. }
                 | EventPayload::SetupFinished { .. }
                 | EventPayload::StepFinished { .. }
                 | EventPayload::CheckFinished { .. }
@@ -308,6 +346,54 @@ mod tests {
             }
             .is_finished()
         );
+    }
+
+    #[test]
+    fn env_variants_round_trip_and_finished_variants_are_flagged() {
+        let cases: Vec<EventPayload> = vec![
+            EventPayload::EnvUpStarted {
+                command: "./scripts/up.sh".into(),
+            },
+            EventPayload::EnvUpFinished {
+                exit_code: 0,
+                duration_ms: 1234,
+                stdout_blob_sha256: Some("a".repeat(64)),
+                stderr_blob_sha256: None,
+            },
+            EventPayload::EnvReady {
+                probe_kind: "http".into(),
+                ok: true,
+                elapsed_ms: 250,
+            },
+            EventPayload::EnvDownStarted {
+                command: "./scripts/down.sh".into(),
+            },
+            EventPayload::EnvDownFinished {
+                exit_code: 0,
+                duration_ms: 50,
+                stdout_blob_sha256: None,
+                stderr_blob_sha256: None,
+            },
+        ];
+        for payload in cases {
+            let evt = Event {
+                seq: 1,
+                ts: ts(),
+                payload: payload.clone(),
+            };
+            let line = serde_json::to_string(&evt).unwrap();
+            let back: Event = serde_json::from_str(&line).unwrap();
+            assert_eq!(evt, back, "round-trip via {line}");
+            // `EnvUpFinished` / `EnvDownFinished` are *_finished; the
+            // started / ready variants are non-finishing.
+            let started = matches!(
+                payload,
+                EventPayload::EnvUpStarted { .. }
+                    | EventPayload::EnvDownStarted { .. }
+                    | EventPayload::EnvReady { .. }
+            );
+            assert_eq!(payload.is_finished(), !started, "for {line}");
+        }
     }
 
     #[test]

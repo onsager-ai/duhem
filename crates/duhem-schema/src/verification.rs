@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::criterion::Criterion;
+use crate::environment::Environment;
 use crate::step::Step;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -21,6 +22,15 @@ pub struct VerificationDefinition {
     /// Optional reference to an upstream spec / issue / URL.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spec_ref: Option<String>,
+
+    /// Optional operator-supplied environment lifecycle hooks. When
+    /// present, the runtime forks `environment.up:` before `setup:`,
+    /// polls `environment.ready:`, and forks `environment.down:`
+    /// (if declared) after the criteria loop. Absent → no behavior
+    /// change vs setup-only definitions; the wire shape for
+    /// `environment:`-less VDs is byte-identical to today.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Environment>,
 
     /// Declared inputs. Map keys are alphabetized on round-trip
     /// (BTreeMap); fixtures should be authored alphabetized.
@@ -172,6 +182,7 @@ criteria:
         let v = VerificationDefinition {
             verification: "x".into(),
             spec_ref: None,
+            environment: None,
             inputs,
             setup: vec![],
             criteria: vec![],
@@ -190,6 +201,48 @@ criteria:
             let decl = v.inputs.get("k").expect("input decl present");
             assert_eq!(decl.kind.as_str(), name);
         }
+    }
+
+    #[test]
+    fn parses_environment_block() {
+        let y = r#"
+verification: with-env
+environment:
+  up: ./scripts/up.sh
+  down: ./scripts/down.sh
+  ready:
+    http:
+      url: http://localhost:3000/healthz
+      timeout: 60s
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = VerificationDefinition::from_yaml_str(y).expect("parse");
+        let env = v.environment.expect("environment present");
+        assert_eq!(env.up.to_str(), Some("./scripts/up.sh"));
+        assert!(env.down.is_some());
+        assert!(env.ready.is_some());
+    }
+
+    #[test]
+    fn environment_without_up_is_a_parse_error() {
+        let y = r#"
+verification: with-env
+environment:
+  down: ./scripts/down.sh
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        // `up:` is required when `environment:` is present.
+        assert!(VerificationDefinition::from_yaml_str(y).is_err());
     }
 
     #[test]

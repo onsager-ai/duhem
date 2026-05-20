@@ -23,7 +23,8 @@ pub mod outcome;
 pub mod verdict;
 
 pub use aggregate::{
-    CheckVerdict, CriterionVerdict, RunVerdict, aggregate_check, aggregate_criterion, aggregate_run,
+    CheckVerdict, CriterionVerdict, RunSetVerdict, RunVerdict, aggregate_check,
+    aggregate_criterion, aggregate_run, aggregate_run_set,
 };
 pub use outcome::{AssertionOutcome, CheckOutcome};
 pub use verdict::{InconclusiveCause, VerdictState};

@@ -19,8 +19,9 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+use duhem_judge::RunSetVerdict;
 use duhem_runtime::RunOutcome;
-use duhem_summary::{CriterionSummary, RunSummary};
+use duhem_summary::{CriterionSummary, RunSetSummary, RunSummary};
 
 /// Selectable reporter. Built-ins are tagged variants; plugins carry
 /// the full argv they were discovered with so the dispatch is uniform.
@@ -118,6 +119,57 @@ pub fn render(
             Ok(())
         }
         Reporter::Plugin { name, argv } => render_plugin(name, argv, out, outcome),
+    }
+}
+
+/// Render a manifest's per-leaf outcomes plus the aggregated
+/// run-set verdict (spec on issue #49). Per-built-in behavior:
+///
+/// - `Default` — one `<name>: <verdict>` line per leaf, then the
+///   aggregated verdict on its own line.
+/// - `Quiet` — nothing.
+/// - `Json` — a single `RunSetSummary` JSON object on one line.
+/// - `Plugin` — fan out: one plugin invocation per leaf (each with
+///   the leaf's `RunSummary` on stdin), then the aggregated verdict
+///   on stdout from the CLI. The set-level summary is not yet shipped
+///   to plugins — issue #49 explicitly calls out `run_set_finished`
+///   as an optional, no-op-by-default extension.
+pub fn render_set(
+    reporter: &Reporter,
+    out: &mut dyn Write,
+    leaves: &[(String, RunOutcome)],
+    set_verdict: &RunSetVerdict,
+) -> Result<(), RenderError> {
+    match reporter {
+        Reporter::Default => {
+            for (name, outcome) in leaves {
+                writeln!(out, "{name}: {}", outcome.verdict.state)?;
+            }
+            writeln!(out, "{}", set_verdict.state)?;
+            Ok(())
+        }
+        Reporter::Quiet => Ok(()),
+        Reporter::Json => {
+            let runs: Vec<RunSummary> = leaves.iter().map(|(_, o)| build_summary(o)).collect();
+            let summary = RunSetSummary::new(set_verdict.state, runs);
+            serde_json::to_writer(&mut *out, &summary)
+                .map_err(|e| RenderError::Io(std::io::Error::other(e)))?;
+            writeln!(out)?;
+            Ok(())
+        }
+        Reporter::Plugin { name, argv } => {
+            for (_, outcome) in leaves {
+                render_plugin(name, argv, out, outcome)?;
+            }
+            // The CLI's own top-level verdict line: identical to the
+            // `Default` set-finalizer, written *after* the last
+            // plugin invocation so the aggregate is always the final
+            // line on stdout. This is the "fn run_set_finished
+            // default no-op" baseline behavior — plugins that want a
+            // structured set summary will get it via a later spec.
+            writeln!(out, "{}", set_verdict.state)?;
+            Ok(())
+        }
     }
 }
 
@@ -419,6 +471,64 @@ mod tests {
             }
             other => panic!("expected PluginExit, got {other}"),
         }
+    }
+
+    fn leaves_pair() -> (Vec<(String, RunOutcome)>, RunSetVerdict) {
+        let a = outcome(VerdictState::Pass);
+        let b = outcome(VerdictState::Fail);
+        let set = RunSetVerdict {
+            state: VerdictState::Fail,
+            runs: vec![a.verdict.clone(), b.verdict.clone()],
+        };
+        (
+            vec![("leaf-a".to_string(), a), ("leaf-b".to_string(), b)],
+            set,
+        )
+    }
+
+    fn capture_set(
+        reporter: &Reporter,
+        leaves: &[(String, RunOutcome)],
+        set: &RunSetVerdict,
+    ) -> String {
+        let mut buf = Vec::new();
+        render_set(reporter, &mut buf, leaves, set).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test]
+    fn render_set_default_prints_per_leaf_and_aggregate() {
+        // Spec on #49: default reporter on a manifest prints one
+        // `<name>: <verdict>` line per leaf, then the aggregated
+        // verdict on its own line as the final line of stdout.
+        let (leaves, set) = leaves_pair();
+        let s = capture_set(&Reporter::Default, &leaves, &set);
+        assert_eq!(s, "leaf-a: pass\nleaf-b: fail\nfail\n");
+    }
+
+    #[test]
+    fn render_set_quiet_writes_nothing() {
+        let (leaves, set) = leaves_pair();
+        let s = capture_set(&Reporter::Quiet, &leaves, &set);
+        assert_eq!(s, "");
+    }
+
+    #[test]
+    fn render_set_json_emits_run_set_summary() {
+        // Spec on #49: the JSON reporter on a manifest emits one
+        // `RunSetSummary` line — wraps the per-leaf `RunSummary`s
+        // and the aggregated verdict.
+        let (leaves, set) = leaves_pair();
+        let s = capture_set(&Reporter::Json, &leaves, &set);
+        let trimmed = s.trim_end_matches('\n');
+        assert!(!trimmed.contains('\n'), "single line: {s:?}");
+        let v: serde_json::Value = serde_json::from_str(trimmed).expect("valid JSON");
+        assert_eq!(v["schema_version"], "1");
+        assert_eq!(v["verdict"], "fail");
+        let runs = v["runs"].as_array().expect("runs array");
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0]["verdict"], "pass");
+        assert_eq!(runs[1]["verdict"], "fail");
     }
 
     #[test]

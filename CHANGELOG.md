@@ -11,6 +11,69 @@ their own minor bumps.
 
 ## v0.1.0 — unreleased
 
+### Root manifest schema and multi-leaf `duhem run` (#49)
+
+Patterns B and C from `docs/duhem-spec.md` §10.4 are now executable.
+`duhem run` accepts a leaf, a root manifest, or a directory; the loader
+dispatches by inspecting which discriminator key is present.
+
+#### Added
+
+- **`RootManifest` schema type** (`crates/duhem-schema/src/manifest.rs`).
+  Top-level wire shape:
+  - `manifest_version: u32` (1 today; future shape changes bump this).
+  - `verifications: Vec<ManifestEntry>` — each entry is either
+    `{ path: PathBuf }` (Pattern B) or `{ glob: String }` (Pattern C).
+  - `deny_unknown_fields` at both levels.
+- **`duhem_schema::load(path) -> Result<Loaded, LoadError>`** — the
+  single entry point that distinguishes a manifest from a leaf by key
+  presence:
+  - File with `verifications:` → `Loaded::Manifest` (entries pre-resolved).
+  - File with `criteria:` → `Loaded::Leaf` (today's behavior).
+  - Directory → resolved to `<dir>/duhem.yml`.
+  - Both keys present, or neither → load-time error.
+  - Self-referential `path:` or self-only glob → `LoadError::SelfReference`.
+  - Absolute paths and `..` escapes → load-time errors.
+  - Zero-match glob → non-fatal `warnings` entry on the loaded value.
+- **`aggregate_run_set`** + `RunSetVerdict` in `duhem-judge`. Same
+  three-state rule as `aggregate_run`: any `Fail` → `Fail`; else any
+  `Inconclusive` → `Inconclusive`; else `Pass`. First-inconclusive-cause
+  ordering matches every other level.
+- **`RunSetSummary`** in `duhem-summary` — wraps a `Vec<RunSummary>`
+  plus the aggregated verdict. `schema_version: "1"`.
+- **`--filter` grammar extension** — optional verification axis. The
+  three-part form `<verification>::<criterion>::<check>` selects in a
+  specific leaf; the two-part `<criterion>::<check>` form continues to
+  mean "all verifications, this criterion-check"; the one-part form is
+  unchanged.
+
+#### Changed
+
+- **`duhem run <path>` is polymorphic.** Directory → manifest; manifest
+  → expand and run each leaf serially; leaf → today's single-run
+  behavior. Per-leaf evidence lands under
+  `<evidence-root>/<leaf>/<run_id>/` on manifest runs (leaf-namespaced);
+  single-leaf runs keep the pre-#49 layout (`<evidence-root>/<run_id>/`).
+- **CLI default reporter on a manifest** prints one `<leaf>: <verdict>`
+  line per leaf, followed by the aggregated verdict on its own line as
+  the last line of stdout.
+- **JSON reporter on a manifest** emits a single-line `RunSetSummary`
+  rather than a `RunSummary`. Single-leaf JSON output is unchanged.
+- **`--dry-run`** prints `WOULD RUN: <leaf>::<criterion>::<check>` on a
+  manifest run (qualified with the leaf name) and continues to print
+  the two-part form on a single-leaf run.
+
+#### Schema impact
+
+Additive. `RunSummary`, `VerificationDefinition`, and the existing
+`--filter` grammar are unchanged. Manifest is opt-in by introducing a
+`verifications:` key. Existing `duhem run path/to/leaf.yml`
+invocations continue to work byte-identically on stdout. Plugin
+reporters that don't yet understand `RunSetSummary` continue to work:
+on a manifest run, each leaf still produces a `RunSummary` they
+receive; the set-level aggregated verdict is written by the CLI as a
+final stdout line.
+
 ### api/observe action — passive HTTP observation via Playwright network interception (#38)
 
 Lands the second `api/*` action — passive observation of requests the

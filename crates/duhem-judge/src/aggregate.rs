@@ -52,6 +52,18 @@ pub struct RunVerdict {
     pub criteria: Vec<CriterionVerdict>,
 }
 
+/// Aggregated verdict across all leaves of a root-manifest run. Same
+/// three-state rule as within a leaf (issue #49 § "Run semantics
+/// across leaves"): any `Fail` → `Fail`; else any `Inconclusive` →
+/// `Inconclusive`; else `Pass`. Carries the child `RunVerdict`s so the
+/// CLI / reporters can render per-leaf detail.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunSetVerdict {
+    pub state: VerdictState,
+    pub runs: Vec<RunVerdict>,
+}
+
 /// The single shared aggregation step. `Iterator` not `slice` so
 /// callers can fold without materializing intermediate vectors
 /// (e.g. mapping `CheckVerdict.state` directly).
@@ -121,6 +133,18 @@ pub fn aggregate_run(verdicts: Vec<CriterionVerdict>) -> RunVerdict {
     RunVerdict {
         state,
         criteria: verdicts,
+    }
+}
+
+/// Roll up the per-leaf `RunVerdict`s of a manifest run. Same
+/// three-state rule and same first-inconclusive-wins ordering as
+/// every other level — re-aggregation is identity-preserving across
+/// the nesting depth (issue #49).
+pub fn aggregate_run_set(verdicts: Vec<RunVerdict>) -> RunSetVerdict {
+    let state = fold_verdicts(verdicts.iter().map(|c| c.state));
+    RunSetVerdict {
+        state,
+        runs: verdicts,
     }
 }
 
@@ -298,6 +322,53 @@ mod tests {
         assert_eq!(
             aggregate_criterion(&[cv(VerdictState::Pass), cv(TIMEOUT)]),
             VerdictState::Inconclusive(InconclusiveCause::Timeout),
+        );
+    }
+
+    fn rv(state: VerdictState) -> RunVerdict {
+        RunVerdict {
+            state,
+            criteria: vec![],
+        }
+    }
+
+    #[test]
+    fn aggregate_run_set_three_state_truth_table() {
+        // Spec on #49: same rule as `aggregate_run`. Cover the three
+        // shapes that matter: all pass, any fail, any inconclusive-no-fail.
+        assert_eq!(
+            aggregate_run_set(vec![rv(VerdictState::Pass), rv(VerdictState::Pass)]).state,
+            VerdictState::Pass,
+        );
+        assert_eq!(
+            aggregate_run_set(vec![rv(VerdictState::Pass), rv(VerdictState::Fail)]).state,
+            VerdictState::Fail,
+        );
+        assert_eq!(
+            aggregate_run_set(vec![rv(VerdictState::Pass), rv(TIMEOUT)]).state,
+            VerdictState::Inconclusive(InconclusiveCause::Timeout),
+        );
+        assert_eq!(
+            aggregate_run_set(vec![rv(TIMEOUT), rv(VerdictState::Fail)]).state,
+            VerdictState::Fail,
+            "Fail dominates Inconclusive across leaves",
+        );
+    }
+
+    #[test]
+    fn aggregate_run_set_preserves_child_runs() {
+        let set = aggregate_run_set(vec![rv(VerdictState::Pass), rv(VerdictState::Fail)]);
+        assert_eq!(set.runs.len(), 2);
+        assert_eq!(set.runs[0].state, VerdictState::Pass);
+        assert_eq!(set.runs[1].state, VerdictState::Fail);
+    }
+
+    #[test]
+    fn aggregate_run_set_empty_is_empty_aggregation() {
+        let set = aggregate_run_set(vec![]);
+        assert_eq!(
+            set.state,
+            VerdictState::Inconclusive(InconclusiveCause::EmptyAggregation),
         );
     }
 

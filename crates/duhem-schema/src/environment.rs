@@ -75,9 +75,7 @@ impl<'de> Deserialize<'de> for ReadyProbe {
         let raw = Raw::deserialize(d)?;
         match raw.http {
             Some(p) => Ok(ReadyProbe::Http(p)),
-            None => Err(D::Error::custom(
-                "ready: expected exactly one of: `http`",
-            )),
+            None => Err(D::Error::custom("ready: expected exactly one of: `http`")),
         }
     }
 }
@@ -159,7 +157,9 @@ impl Serialize for DurationSpec {
         // though the raw text changes.
         let ms = self.0.as_millis();
         if ms > u64::MAX as u128 {
-            return Err(serde::ser::Error::custom("duration exceeds u64 milliseconds"));
+            return Err(serde::ser::Error::custom(
+                "duration exceeds u64 milliseconds",
+            ));
         }
         ser.serialize_u64(ms as u64)
     }

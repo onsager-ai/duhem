@@ -238,7 +238,9 @@ where
 {
     let exact: HashSet<&str> = ["PATH", "HOME", "TMPDIR", "LANG"].into_iter().collect();
     iter.into_iter()
-        .filter(|(k, _)| exact.contains(k.as_str()) || k.starts_with("LC_") || k.starts_with("DUHEM_"))
+        .filter(|(k, _)| {
+            exact.contains(k.as_str()) || k.starts_with("LC_") || k.starts_with("DUHEM_")
+        })
         .collect()
 }
 
@@ -327,7 +329,10 @@ mod tests {
             ("LD_PRELOAD".into(), "/evil.so".into()),
             ("RANDOM_OTHER".into(), "x".into()),
         ];
-        let out: Vec<_> = sanitized_env_vars(raw).into_iter().map(|(k, _)| k).collect();
+        let out: Vec<_> = sanitized_env_vars(raw)
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
         assert!(out.contains(&"PATH".to_string()));
         assert!(out.contains(&"HOME".to_string()));
         assert!(out.contains(&"LANG".to_string()));

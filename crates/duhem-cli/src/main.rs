@@ -928,14 +928,8 @@ mod tests {
             }
             _ => panic!("expected Run"),
         }
-        let opted = Cli::try_parse_from([
-            "duhem",
-            "run",
-            "v.yml",
-            "--no-env-up",
-            "--keep-env",
-        ])
-        .expect("parse");
+        let opted = Cli::try_parse_from(["duhem", "run", "v.yml", "--no-env-up", "--keep-env"])
+            .expect("parse");
         match opted.cmd {
             Some(Cmd::Run {
                 no_env_up,

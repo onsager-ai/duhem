@@ -1522,7 +1522,10 @@ criteria:
         let up_started = kinds.iter().position(|k| *k == "env_up_started").unwrap();
         let up_finished = kinds.iter().position(|k| *k == "env_up_finished").unwrap();
         let down_started = kinds.iter().position(|k| *k == "env_down_started").unwrap();
-        let down_finished = kinds.iter().position(|k| *k == "env_down_finished").unwrap();
+        let down_finished = kinds
+            .iter()
+            .position(|k| *k == "env_down_finished")
+            .unwrap();
         let run_finished = kinds.iter().position(|k| *k == "run_finished").unwrap();
         assert!(up_started < up_finished);
         assert!(up_finished < down_started);
@@ -1656,14 +1659,18 @@ criteria:
         let events = duhem_evidence::Trace::open(&outcome.run_dir)
             .unwrap()
             .into_events();
-        let saw_ready_fail = events.iter().any(|e| matches!(
-            &e.payload,
-            duhem_evidence::EventPayload::EnvReady { ok: false, .. }
-        ));
-        let saw_down = events.iter().any(|e| matches!(
-            &e.payload,
-            duhem_evidence::EventPayload::EnvDownFinished { .. }
-        ));
+        let saw_ready_fail = events.iter().any(|e| {
+            matches!(
+                &e.payload,
+                duhem_evidence::EventPayload::EnvReady { ok: false, .. }
+            )
+        });
+        let saw_down = events.iter().any(|e| {
+            matches!(
+                &e.payload,
+                duhem_evidence::EventPayload::EnvDownFinished { .. }
+            )
+        });
         assert!(saw_ready_fail, "expected EnvReady ok=false");
         assert!(saw_down, "down: should run after a ready timeout");
     }

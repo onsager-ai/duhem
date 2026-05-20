@@ -73,6 +73,11 @@ mechanically.
 ## Authoring loop
 
 ```
+0. Scaffold the skeleton: `duhem init --name <slug>` produces a
+   runnable Pattern A skeleton (or `--pattern B` for co-located)
+   under `./verifications/<slug>/`. The skeleton is a single
+   passing check against https://example.com — your known-good
+   baseline to mutate. Spec on issue #48.
 1. Lift criteria from the spec / acceptance test / PRD
 2. Validate criteria are stable, intent-bearing, scoped to one commitment
 3. Translate each criterion to one or more checks (steps + assertions)
@@ -82,6 +87,13 @@ mechanically.
 6. Save the file (any name; self-identifies via top-level `verification:`)
 7. Update duhem.yml (if Pattern B/C) to register the file
 ```
+
+Start every new Verification Definition with `duhem init`; don't
+copy-paste from `verifications/onsager-dashboard-create-project/`
+or hand-write a fresh tree from scratch. The skeleton bakes the
+criteria-vs-checks two-document discipline into the first commit
+and gives you a passing run to confirm your environment works
+before you've authored anything.
 
 ### 1. Lift criteria
 

@@ -7,13 +7,15 @@ that exercise the real delivery web (code + prompts + tools + data +
 runtime), and gates merge/deploy on the verdict.
 
 > **Status:** Phase 0 — Foundation. The Cargo workspace ships nine
-> crates (`duhem-cli`, `duhem-runtime`, `duhem-judge`,
+> product crates (`duhem-cli`, `duhem-runtime`, `duhem-judge`,
 > `duhem-schema`, `duhem-actions`, `duhem-evidence`, `duhem-summary`,
-> `duhem-reporter-pretty`, `duhem-reporter-junit`); the CLI exposes
-> `init` / `run` / `validate` / `--version`; the `ui/*` and
-> `api/observe` action families are implemented; environment
-> provisioning (`up:` / `down:` hooks) is wired into the runtime;
-> the first Onsager dogfood verification lives at
+> `duhem-reporter-pretty`, `duhem-reporter-junit`) plus an internal
+> `xtask` build helper; the CLI exposes `init` / `run` / `validate` /
+> `--version`; the `ui/*` and `api/*` action families are implemented
+> (`ui/navigate`, `ui/click`, `ui/type`, `ui/select`, `ui/assert-*`,
+> `api/call`, `api/observe`); environment provisioning (`up:` /
+> `down:` hooks) is wired into the runtime; the first Onsager
+> dogfood verification lives at
 > `verifications/onsager-dashboard-create-project/` and runs through
 > the `duhem/run` composite GitHub Action. Schema is still v0.x —
 > breaking changes are expected. See `docs/duhem-spec.md` §14 for

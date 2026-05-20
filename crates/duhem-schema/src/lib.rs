@@ -9,6 +9,7 @@
 pub mod assertion;
 pub mod criterion;
 pub mod expr;
+pub mod manifest;
 pub mod step;
 pub mod validate;
 pub mod verification;
@@ -16,6 +17,7 @@ pub mod verification;
 pub use assertion::{Assertion, TypeCheckKind};
 pub use criterion::{Check, Criterion};
 pub use expr::{BinOp, Expr, ExprStr, Literal, ParseError, Path, PathRoot, UnaryOp};
+pub use manifest::{LoadError, Loaded, LoadedLeaf, ManifestEntry, RootManifest, load};
 pub use step::Step;
 pub use validate::{ValidationError, validate};
 pub use verification::{InputDecl, InputType, SchemaError, VerificationDefinition};

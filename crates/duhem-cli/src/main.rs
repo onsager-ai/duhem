@@ -1,13 +1,16 @@
 //! `duhem` — the command-line entry point.
 //!
 //! Phase-0 skeleton. The free CLI binary (`docs/duhem-spec.md` §13)
-//! ultimately offers `init`, `validate`, and `run`; the `run`
-//! subcommand carries the full authoring-ergonomics surface
+//! offers `init`, `validate`, and `run`. `init` (issue #48)
+//! scaffolds a runnable Verification Definition skeleton; the `run`
+//! subcommand carries the authoring-ergonomics surface
 //! (`--filter`, `--headed`, `--evidence-dir`, `--reporter`) per the
-//! spec on issue #23. None of those flags are correctness gates —
-//! they make iteration on Verification Definitions practical.
+//! spec on issue #23. None of the `run` flags are correctness
+//! gates — they make iteration on Verification Definitions
+//! practical.
 
 mod filter;
+mod init;
 mod inputs;
 mod reporter;
 mod reporter_config;
@@ -29,14 +32,52 @@ use crate::reporter_config::PluginRegistry;
 
 /// Duhem — holistic verification for AI-delivered software.
 #[derive(Debug, Parser)]
-#[command(name = "duhem", version, about, long_about = None)]
+#[command(name = "duhem", version = VERSION_STRING, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,
 }
 
+/// `--version` output. Bakes the Verification Definition schema version
+/// in alongside the CLI version so authors can see at a glance which
+/// schema `duhem validate` / `duhem run` will parse against.
+const VERSION_STRING: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (schema v",
+    duhem_schema::schema_version!(),
+    ")"
+);
+
 #[derive(Debug, Subcommand)]
 enum Cmd {
+    /// Scaffold a runnable Verification Definition skeleton.
+    ///
+    /// Produces a minimal, schema-valid Verification Definition the
+    /// author can mutate toward their real workload. Deterministic
+    /// and offline — AI-assisted generation is the Phase 1
+    /// `duhem author` command (spec `docs/duhem-spec.md` §14), not
+    /// this one. Spec on issue #48.
+    Init {
+        /// Target directory. Defaults to `./verifications/<name>/`
+        /// when omitted.
+        path: Option<PathBuf>,
+        /// File-organization pattern from `docs/duhem-spec.md` §10.4.
+        /// `A` (default) emits a single-file VD; `B` co-locates the
+        /// VD under a sibling root manifest (stub until the manifest
+        /// loader spec lands).
+        #[arg(long = "pattern", value_name = "A|B", default_value = "A")]
+        pattern: String,
+        /// Verification slug, e.g. `dashboard-create-project`. Used
+        /// for the default target dir and the `verification:` field
+        /// in the generated YAML. Required on non-TTY stdin; prompted
+        /// otherwise.
+        #[arg(long = "name", value_name = "SLUG")]
+        name: Option<String>,
+        /// Overwrite a non-empty target. Without this, init exits 2
+        /// and names the conflicting paths.
+        #[arg(long = "force", default_value_t = false)]
+        force: bool,
+    },
     /// Parse and structurally validate a Verification Definition file.
     Validate {
         /// Path to a `.yml` Verification Definition.
@@ -116,6 +157,12 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.cmd {
         None => ExitCode::SUCCESS,
+        Some(Cmd::Init {
+            path,
+            pattern,
+            name,
+            force,
+        }) => run_init(path, &pattern, name, force),
         Some(Cmd::Validate { path }) => match run_validate(&path) {
             Ok(()) => {
                 println!("OK");
@@ -205,15 +252,101 @@ struct RunArgs {
     keep_env: bool,
 }
 
+/// `duhem init` dispatch. Wraps `init::run` with the CLI-level
+/// translation: parse `--pattern`, map outcomes to the three exit
+/// codes the spec defines (0 success / 2 conflict / 3 warning),
+/// and print post-init guidance.
+fn run_init(path: Option<PathBuf>, pattern: &str, name: Option<String>, force: bool) -> ExitCode {
+    let pattern: init::Pattern = match pattern.parse() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let args = init::InitArgs {
+        path,
+        pattern,
+        name,
+        force,
+    };
+    match init::run(args) {
+        Ok(outcome) => {
+            let mut stdout = std::io::stdout().lock();
+            let _ = writeln!(stdout, "Created:");
+            for p in &outcome.created {
+                let _ = writeln!(stdout, "  {}", p.display());
+            }
+            // The per-feature `duhem.yml` is always the first entry
+            // `init::run` pushes (Pattern A: only one; Pattern B:
+            // pushed before the parent root manifest). Use that as
+            // the next-command pointer.
+            let vd_path = outcome
+                .created
+                .first()
+                .cloned()
+                .unwrap_or_else(|| PathBuf::from("<verification>/duhem.yml"));
+            let _ = writeln!(stdout, "\nNext:");
+            let _ = writeln!(stdout, "  duhem validate {}", vd_path.display());
+            let _ = writeln!(stdout, "  duhem run      {}", vd_path.display());
+            let _ = writeln!(
+                stdout,
+                "\nAuthoring guide: .claude/skills/verification-authoring/SKILL.md"
+            );
+            let _ = stdout.flush();
+
+            if outcome.warnings.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                for w in &outcome.warnings {
+                    eprintln!("warning: {w}");
+                }
+                // Spec § Plan: "exit with a non-zero warning code
+                // (distinct from the error code)." Reserve 2 for the
+                // conflict-refusal error path; use 3 for warnings.
+                ExitCode::from(3)
+            }
+        }
+        Err(e @ init::InitError::ExistingNonEmpty { .. }) => {
+            eprintln!("{e}");
+            // Spec § Design: existing non-empty target without
+            // --force exits 2.
+            ExitCode::from(2)
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn run_validate(path: &std::path::Path) -> Result<(), String> {
     let src = std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
     let v = VerificationDefinition::from_yaml_str(&src).map_err(|e| match e.location() {
-        Some(loc) => format!("{}:{}:{}: {e}", path.display(), loc.line(), loc.column()),
-        None => format!("{}: {e}", path.display()),
+        Some(loc) => format!(
+            "{}:{}:{}: [schema v{}] {e}",
+            path.display(),
+            loc.line(),
+            loc.column(),
+            duhem_schema::SCHEMA_VERSION
+        ),
+        None => format!(
+            "{}: [schema v{}] {e}",
+            path.display(),
+            duhem_schema::SCHEMA_VERSION
+        ),
     })?;
     validate(&v).map_err(|errs| {
         let plural = if errs.len() == 1 { "" } else { "s" };
-        let mut s = format!("{} validation error{plural}:", errs.len());
+        // Preamble names the schema version the file was validated
+        // against — when authors hit a validation error, the next
+        // question is "which schema?", and a downstream VD that pinned
+        // a different version needs to see the mismatch.
+        let mut s = format!(
+            "[schema v{}] {} validation error{plural}:",
+            duhem_schema::SCHEMA_VERSION,
+            errs.len()
+        );
         for e in errs {
             s.push_str("\n  - ");
             s.push_str(&e.to_string());
@@ -247,7 +380,11 @@ async fn run_command(args: RunArgs) -> ExitCode {
     let def = match VerificationDefinition::from_yaml_str(&src) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("{}: {e}", path.display());
+            eprintln!(
+                "{}: [schema v{}] {e}",
+                path.display(),
+                duhem_schema::SCHEMA_VERSION
+            );
             return ExitCode::FAILURE;
         }
     };
@@ -260,8 +397,9 @@ async fn run_command(args: RunArgs) -> ExitCode {
     if let Err(errs) = validate(&def) {
         let plural = if errs.len() == 1 { "" } else { "s" };
         eprintln!(
-            "{}: {} validation error{plural}:",
+            "{}: [schema v{}] {} validation error{plural}:",
             path.display(),
+            duhem_schema::SCHEMA_VERSION,
             errs.len()
         );
         for e in errs {

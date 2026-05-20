@@ -115,9 +115,37 @@ focused. Commit messages should be imperative and under 72 chars.
 iteration (Phase 0 / Phase 1), every change to the Verification
 Definition format — fields added, renamed, removed, semantics
 shifted — must be flagged in the spec under a `## Schema impact`
-subsection. The CHANGELOG entry on merge calls it out. Once the
-schema is OSS'd in Phase 2, this hardens into a formal deprecation
-policy; until then the discipline is informal but tracked.
+section with these required keys:
+
+```markdown
+## Schema impact
+
+- **Category:** breaking | additive | clarifying
+- **Surfaces touched:** [VD schema, evidence schema, action-type
+  catalog, runtime expressions, manifest schema, judge contract]
+- **Fields added/renamed/removed:** [...]
+- **Migration:** none | manual (describe) | tool-supported (describe)
+- **CHANGELOG.md entry:** [exact line for the `## Unreleased` section]
+```
+
+The CHANGELOG entry uses the form
+`- [breaking|additive|clarifying] one-line summary. (#N)` and appends
+to `## Unreleased` on merge. A version-bump commit later renames
+`## Unreleased` to `## v0.x.y — YYYY-MM-DD` and advances
+`duhem_schema::SCHEMA_VERSION`. Under v0.x, **breaking → minor**;
+**additive → patch**; **clarifying → no bump**. Major (`1.0`) is
+reserved for the Phase-2 schema-OSS milestone.
+
+Category is mechanical, not aesthetic: a field rename is breaking
+regardless of whether the new name is "obviously better." When in
+doubt, the `cargo xtask schema-drift` and `cargo xtask
+schema-changelog-check` CI gates catch the cheap mistakes.
+
+A `clarifying` PR that touches `crates/duhem-schema/src/**` or
+`crates/duhem-evidence/src/**` bypasses the changelog-touch gate by
+setting `DUHEM_CHANGELOG_CLARIFYING=1` (CI sets it when the PR body
+carries an explicit `clarifying` annotation). Don't use the escape
+hatch to dodge tracking a real schema event.
 
 ### 4. Pre-push
 

@@ -22,6 +22,21 @@ The Rust runtime locates this directory via `CARGO_MANIFEST_DIR`
 (`crates/duhem-actions/sidecar`); override with `DUHEM_SIDECAR_DIR`, and
 the Node binary with `DUHEM_NODE`.
 
+## Type-checking
+
+`index.mjs` is plain ESM (Node runs it with no build step), but it is
+fully type-checked: `// @ts-check` at the top plus `jsconfig.json`
+(`checkJs`, `strict`) run TypeScript's checker over it against
+Playwright's bundled `.d.ts` and `@types/node` (a dev-only dependency).
+You get type errors and intellisense at authoring time with **zero build
+step and zero new runtime dependency** — the run path stays `node
+index.mjs`. To check it locally:
+
+```sh
+npm ci                  # installs @types/node (devDependency)
+npx tsc -p jsconfig.json # no emit; reports type errors only
+```
+
 ## Troubleshooting the Chromium download
 
 `npx playwright install chromium` fetches a ~170 MiB build from

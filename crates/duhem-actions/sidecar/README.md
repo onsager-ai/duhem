@@ -1,0 +1,41 @@
+# duhem-playwright-sidecar
+
+The Node sidecar that drives **official Playwright** for `duhem-actions`'
+`ui/*` actions (spec [#71](https://github.com/onsager-ai/duhem/issues/71)).
+It speaks newline-delimited JSON-RPC over stdio; the Rust client lives in
+`crates/duhem-actions/src/browser.rs`. See `index.mjs` for the protocol.
+
+## Setup (once per host)
+
+Requires **Node ≥ 20**.
+
+```sh
+npm ci                          # install deps from the committed lockfile
+npx playwright install chromium # install the matching Chromium
+```
+
+`npm ci` installs the exact `playwright` pinned in `package-lock.json`;
+the Chromium revision is therefore reproducible (this also covers the
+intent of issue #13). `node_modules/` is gitignored — never vendored.
+
+The Rust runtime locates this directory via `CARGO_MANIFEST_DIR`
+(`crates/duhem-actions/sidecar`); override with `DUHEM_SIDECAR_DIR`, and
+the Node binary with `DUHEM_NODE`.
+
+## Troubleshooting the Chromium download
+
+`npx playwright install chromium` fetches a ~170 MiB build from
+`cdn.playwright.dev`. On restricted networks this can stall:
+
+- **Behind an HTTP proxy** (e.g. a local `127.0.0.1:7890`): the large
+  CDN fetch may choke. Try **without** the proxy:
+  `env -u http_proxy -u https_proxy -u all_proxy npx playwright install chromium`.
+- **No direct CDN access:** the pinned Playwright version maps to a
+  fixed Chromium revision. If you already have that revision cached
+  (`~/Library/Caches/ms-playwright/chromium-<rev>` on macOS), no
+  download happens. To find the revision a version needs, check
+  `node_modules/playwright-core/browsers.json`.
+- A `PLAYWRIGHT_DOWNLOAD_HOST` mirror can help, but note that mirrors do
+  not always carry the newer "Chrome for Testing" builds.
+
+This friction is **local-dev only** — CI runners have no such proxy.

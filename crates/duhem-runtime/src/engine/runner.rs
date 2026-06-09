@@ -21,6 +21,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use duhem_actions::Page;
 use duhem_actions::{ActionError, Outcome, RunBrowser};
 use duhem_evidence::{
     EventPayload, EvidenceWriter, StepOutcome, VerdictState, WriterError, new_run_id, run_started,
@@ -30,7 +31,6 @@ use duhem_judge::{
     aggregate_check, aggregate_criterion, aggregate_run,
 };
 use duhem_schema::{Check, Criterion, VerificationDefinition};
-use playwright::api::Page;
 use thiserror::Error;
 use tracing::debug;
 

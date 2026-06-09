@@ -198,7 +198,7 @@ async fn marker_present(ctx: &ActionCtx<'_>, marker: &Marker) -> Result<bool, Ac
     match marker.kind {
         MarkerKind::Cookie => {
             let cookies =
-                ctx.page.context().cookies(&[]).await.map_err(|e| {
+                ctx.page.cookies().await.map_err(|e| {
                     ActionError::Playwright(format!("ui/assert-state: cookies: {e}"))
                 })?;
             Ok(cookies.iter().any(|c| c.name == marker.name))

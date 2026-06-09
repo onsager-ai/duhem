@@ -1,0 +1,14 @@
+{
+  "name": "duhem-playwright-sidecar",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Stdio JSON-RPC sidecar that drives official Playwright for duhem-actions. See onsager-ai/duhem#71.",
+  "main": "index.mjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "playwright": "1.58.0"
+  }
+}

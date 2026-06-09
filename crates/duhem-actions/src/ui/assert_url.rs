@@ -132,6 +132,7 @@ impl Action for AssertUrl {
             let last_url = ctx
                 .page
                 .url()
+                .await
                 .map_err(|e| ActionError::Playwright(format!("ui/assert-url: url: {e}")))?;
             if plan.matcher.check(&last_url) {
                 return Ok(ActionResult::ok()

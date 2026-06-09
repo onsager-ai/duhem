@@ -37,13 +37,8 @@ impl Action for Navigate {
             })?;
         let timeout: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
 
-        let goto = ctx
-            .page
-            .goto_builder(&with.url)
-            .timeout(timeout.as_millis() as f64)
-            .goto();
-        match goto.await {
-            Ok(_) => Ok(ActionResult::ok()),
+        match ctx.page.goto(&with.url, timeout.as_millis() as f64).await {
+            Ok(()) => Ok(ActionResult::ok()),
             Err(e) if super::is_timeout_message(&e.to_string()) => Ok(ActionResult::timeout()),
             Err(e) => Err(ActionError::Playwright(format!("ui/navigate: {e}"))),
         }

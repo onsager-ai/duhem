@@ -5,3 +5,6 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Local Duhem run evidence (written by `duhem run`)
+.duhem/runs/

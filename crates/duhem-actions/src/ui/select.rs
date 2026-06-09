@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 
 use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN};
+use crate::browser::SelectBy;
 use crate::error::ActionError;
 use crate::locator::Locator;
 use crate::playwright::to_selector;
@@ -77,18 +78,18 @@ impl Action for Select {
         let timeout: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
         let selector = to_selector(&with.locator);
 
-        let builder = ctx
-            .page
-            .select_option_builder(&selector)
-            .timeout(timeout.as_millis() as f64);
-        let builder = match with.by {
-            By::Value(v) => builder.add_value(v.value),
-            By::Label(v) => builder.add_label(v.label),
-            By::Index(v) => builder.add_index(v.index as usize),
+        let by = match with.by {
+            By::Value(v) => SelectBy::Value(v.value),
+            By::Label(v) => SelectBy::Label(v.label),
+            By::Index(v) => SelectBy::Index(v.index as usize),
         };
 
-        match builder.select_option().await {
-            Ok(_) => Ok(ActionResult::ok()),
+        match ctx
+            .page
+            .select_option(&selector, &by, timeout.as_millis() as f64)
+            .await
+        {
+            Ok(()) => Ok(ActionResult::ok()),
             Err(e) if super::is_timeout_message(&e.to_string()) => Ok(ActionResult::timeout()),
             Err(e) => Err(ActionError::Playwright(format!("ui/select: {e}"))),
         }

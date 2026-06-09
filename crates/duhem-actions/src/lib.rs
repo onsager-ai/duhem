@@ -2,15 +2,17 @@
 //!
 //! Houses the canonical action types — `ui/*`, `api/*`, `db/*`, etc.
 //! — that Verification Definitions reference. UI actions drive a real
-//! browser via the `playwright` crate directly from this crate; there
-//! is no Node sidecar (resolved on issue #5; detail in
-//! `spec(actions): ui/* action types v1`).
+//! browser through the official Playwright Node sidecar (see
+//! [`browser`]; spec #71), replacing the unmaintained octaltree
+//! `playwright` crate. The `Locator` → selector mapping ([`playwright`])
+//! stays pure and driver-independent.
 //!
 //! Authoring lives here; the executor (which sequences action
 //! invocations into a check) lives in `duhem-runtime`.
 
 pub mod action;
 pub mod api;
+pub mod browser;
 pub mod error;
 pub mod locator;
 pub mod playwright;
@@ -19,8 +21,9 @@ pub mod with;
 
 pub use action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN, Observation, Outcome};
 pub use api::{Call, Observe};
+pub use browser::{CheckBrowser, Cookie, ElementState, Page, PwError, RunBrowser, SelectBy};
 pub use error::ActionError;
 pub use locator::{ExistenceState, Locator};
-pub use playwright::{CheckBrowser, RunBrowser, to_selector};
+pub use playwright::to_selector;
 pub use ui::{AssertElement, AssertState, AssertUrl, Click, Navigate, Select, Type};
 pub use with::WithinSpec;

@@ -17,7 +17,6 @@ tokio.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
-playwright.workspace = true
 async-trait.workspace = true
 regex.workspace = true
 futures.workspace = true

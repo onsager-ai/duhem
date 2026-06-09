@@ -1,6 +1,6 @@
 //! End-to-end smoke for the `ui/*` catalog against an in-process
-//! `axum`-served fixture. Drives a real Chromium via the
-//! `playwright` crate.
+//! `axum`-served fixture. Drives a real Chromium via the official
+//! Playwright Node sidecar (`crate::browser`; #71).
 //!
 //! Ignored in CI by default — running these requires
 //! `npx playwright install chromium` (multi-hundred-MB download).
@@ -437,8 +437,6 @@ async fn assert_state_loaded_resolves_when_ready_state_is_complete() {
 #[tokio::test]
 #[ignore = "requires `npx playwright install chromium`"]
 async fn assert_state_authenticated_observes_cookie_marker_present_and_absent() {
-    use playwright::api::Cookie;
-
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
@@ -471,9 +469,14 @@ within: 200ms
         Some(false)
     );
 
-    // Add the cookie. Same name; auth observation now → true.
-    let cookie = Cookie::with_url("session", "deadbeef", &url(&fx));
-    check.context.add_cookies(&[cookie]).await.unwrap();
+    // Add the cookie via JS on the current origin (the sidecar Page
+    // exposes no direct cookie injection; `document.cookie` suffices
+    // for a non-HttpOnly marker, and `context.cookies()` then sees it).
+    let _: serde_json::Value = check
+        .page
+        .eval("document.cookie = 'session=deadbeef'")
+        .await
+        .unwrap();
 
     let r = AssertState
         .invoke(
@@ -550,9 +553,9 @@ within: 200ms
     );
 
     // Set the key — signed_out flips to false, authenticated true.
-    check
+    let _: serde_json::Value = check
         .page
-        .evaluate::<_, serde_json::Value>("() => { localStorage.setItem('auth_token', 'x'); }", ())
+        .eval("localStorage.setItem('auth_token', 'x')")
         .await
         .unwrap();
 

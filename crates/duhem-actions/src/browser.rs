@@ -29,6 +29,7 @@
 //! (overridable via `DUHEM_NODE`). [`RunBrowser::launch`] fails fast
 //! with a clear hint when either is missing.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -99,6 +100,45 @@ impl SelectBy {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Cookie {
     pub name: String,
+}
+
+/// One recorded HTTP response on a page, surfaced to `api/observe`
+/// (#72). The sidecar's per-page recorder (`page.on('response', …)`)
+/// materializes every field up front — including reading the body
+/// eagerly — so the Rust side has no fallible accessors to drive: the
+/// URL/method filter and body decode operate on plain data.
+///
+/// Bodies cross the wire base64-encoded (raw bytes survive JSON);
+/// `api/observe` owns UTF-8-lossy rendering and JSON parsing, exactly
+/// as the pre-#71 implementation did off the live Playwright objects.
+/// `body_error` carries a body-read failure verbatim; `api/observe`
+/// propagates it only for the matched event (collect-on-match), so an
+/// unrelated failed response never breaks an unrelated observe.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkEvent {
+    pub method: String,
+    pub url: String,
+    pub status: u16,
+    #[serde(default)]
+    pub request_headers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub request_body_base64: Option<String>,
+    #[serde(default)]
+    pub response_headers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub body_base64: Option<String>,
+    #[serde(default)]
+    pub body_error: Option<String>,
+}
+
+/// A `pollNetwork` batch: recorded events from the requested cursor
+/// onward, plus the new cursor (the recorder's buffer length) to pass
+/// on the next poll.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NetworkBatch {
+    pub events: Vec<NetworkEvent>,
+    pub cursor: u64,
 }
 
 #[derive(Deserialize)]
@@ -466,5 +506,15 @@ impl Page {
     pub async fn cookies(&self) -> Result<Vec<Cookie>, PwError> {
         let v = self.conn.request("cookies", self.p()).await?;
         serde_json::from_value(v).map_err(|e| PwError(format!("cookies decode: {e}")))
+    }
+
+    /// Drain recorded network responses from `cursor` onward. Returns
+    /// the batch plus the next cursor; `api/observe` polls this within
+    /// its `within:` window. See [`NetworkEvent`].
+    pub async fn poll_network(&self, cursor: u64) -> Result<NetworkBatch, PwError> {
+        let mut req = self.p();
+        req["cursor"] = json!(cursor);
+        let v = self.conn.request("pollNetwork", req).await?;
+        serde_json::from_value(v).map_err(|e| PwError(format!("pollNetwork decode: {e}")))
     }
 }

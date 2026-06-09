@@ -1,3 +1,4 @@
+// @ts-check
 // Duhem Playwright sidecar — onsager-ai/duhem#71.
 //
 // A thin, Duhem-owned bridge between the Rust `duhem-actions` crate
@@ -24,21 +25,99 @@
 import { chromium } from 'playwright'
 import readline from 'node:readline'
 
+/**
+ * @typedef {import('playwright').Browser} Browser
+ * @typedef {import('playwright').BrowserContext} BrowserContext
+ * @typedef {import('playwright').Page} Page
+ */
+
+/**
+ * One recorded response, mirrored into the Rust `NetworkEvent` struct
+ * in `browser.rs`. Bodies are base64 so raw bytes survive the JSON hop;
+ * `observe.rs` owns UTF-8-lossy text + JSON parsing.
+ *
+ * @typedef {Object} NetworkRecord
+ * @property {string} method
+ * @property {string} url
+ * @property {number} status
+ * @property {Record<string, string>} requestHeaders
+ * @property {string | null} requestBodyBase64
+ * @property {Record<string, string>} responseHeaders
+ * @property {string | null} bodyBase64
+ * @property {string | null} bodyError
+ */
+
+/** @type {Browser | null} */
 let browser = null
-const contexts = new Map() // id -> BrowserContext
-const pages = new Map() // id -> Page
+/** @type {Map<string, BrowserContext>} */
+const contexts = new Map()
+/** @type {Map<string, Page>} */
+const pages = new Map()
+/** @type {Map<string, NetworkRecord[]>} */
+const networkBuffers = new Map()
 let nextHandle = 1
 
+/** @param {unknown} e */
+function errMsg(e) {
+  return e instanceof Error ? e.message : String(e)
+}
+
+/** @param {{ id?: number, ok: boolean, result?: unknown, error?: string }} obj */
 function send(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n')
 }
 
+/**
+ * @param {{ pageId: string }} req
+ * @returns {Page}
+ */
 function page(req) {
   const p = pages.get(req.pageId)
   if (!p) throw new Error(`unknown pageId: ${req.pageId}`)
   return p
 }
 
+// Record every response on the page into `buf` for `api/observe`
+// (onsager-ai/duhem#72). Bodies are read eagerly and base64-encoded so
+// the Rust side gets the raw bytes (UTF-8-lossy text + JSON parse are
+// owned by `observe.rs`, byte-for-byte with the pre-#71 implementation).
+// A body read failure is captured as `bodyError` and only propagated by
+// Rust when the event is the matched one — mirroring the old
+// collect-on-match semantics, so unrelated failures (redirects, aborted
+// requests) never break an observe that matches a different response.
+/**
+ * @param {Page} p
+ * @param {NetworkRecord[]} buf
+ */
+function attachNetworkRecorder(p, buf) {
+  p.on('response', async (response) => {
+    const request = response.request()
+    /** @type {NetworkRecord} */
+    const rec = {
+      method: request.method(),
+      url: request.url(),
+      status: response.status(),
+      // Playwright lowercases header names already; `observe.rs`
+      // re-lowercases defensively, so either casing is safe here.
+      requestHeaders: request.headers(),
+      requestBodyBase64: null,
+      responseHeaders: response.headers(),
+      bodyBase64: null,
+      bodyError: null,
+    }
+    const pd = request.postDataBuffer()
+    if (pd) rec.requestBodyBase64 = pd.toString('base64')
+    try {
+      const body = await response.body()
+      rec.bodyBase64 = body.toString('base64')
+    } catch (e) {
+      rec.bodyError = errMsg(e)
+    }
+    buf.push(rec)
+  })
+}
+
+/** @param {any} req */
 async function dispatch(req) {
   switch (req.op) {
     case 'launch':
@@ -59,6 +138,10 @@ async function dispatch(req) {
       const p = await ctx.newPage()
       const id = 'p' + nextHandle++
       pages.set(id, p)
+      /** @type {NetworkRecord[]} */
+      const buf = []
+      networkBuffers.set(id, buf)
+      attachNetworkRecorder(p, buf)
       return { pageId: id }
     }
 
@@ -116,6 +199,17 @@ async function dispatch(req) {
     case 'cookies':
       return await page(req).context().cookies()
 
+    case 'pollNetwork': {
+      // Return recorded responses from `cursor` onward plus the new
+      // cursor (buffer length). `observe.rs` polls this within its
+      // `within:` window. The buffer is per-page and the page is
+      // per-check, so it only ever holds this check's own traffic.
+      const buf = networkBuffers.get(req.pageId)
+      if (!buf) throw new Error(`unknown pageId: ${req.pageId}`)
+      const from = req.cursor || 0
+      return { events: buf.slice(from), cursor: buf.length }
+    }
+
     case 'closeContext': {
       const ctx = contexts.get(req.contextId)
       if (ctx) {
@@ -150,7 +244,7 @@ rl.on('line', async (line) => {
     const result = await dispatch(req)
     send({ id: req.id, ok: true, result: result ?? null })
   } catch (e) {
-    send({ id: req.id, ok: false, error: e && e.message ? e.message : String(e) })
+    send({ id: req.id, ok: false, error: errMsg(e) })
   }
 })
 

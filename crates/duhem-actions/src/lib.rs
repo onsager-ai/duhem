@@ -21,7 +21,10 @@ pub mod with;
 
 pub use action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN, Observation, Outcome};
 pub use api::{Call, Observe};
-pub use browser::{CheckBrowser, Cookie, ElementState, Page, PwError, RunBrowser, SelectBy};
+pub use browser::{
+    CheckBrowser, Cookie, ElementState, NetworkBatch, NetworkEvent, Page, PwError, RunBrowser,
+    SelectBy,
+};
 pub use error::ActionError;
 pub use locator::{ExistenceState, Locator};
 pub use playwright::to_selector;

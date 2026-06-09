@@ -55,20 +55,12 @@ impl Action for Type {
         let timeout_ms = timeout.as_millis() as f64;
 
         let result = if with.clear {
-            ctx.page
-                .fill_builder(&selector, &with.text)
-                .timeout(timeout_ms)
-                .fill()
-                .await
+            // `clear: true` replaces the value via Playwright's `fill`.
+            ctx.page.fill(&selector, &with.text, timeout_ms).await
         } else {
-            // `type_builer` — sic. That's how the upstream `playwright`
-            // crate (0.0.20) names the builder; do not "fix" the typo
-            // here without bumping the crate.
-            ctx.page
-                .type_builer(&selector, &with.text)
-                .timeout(timeout_ms)
-                .r#type()
-                .await
+            // `clear: false` appends via `pressSequentially` (the
+            // sidecar's `type` op).
+            ctx.page.type_text(&selector, &with.text, timeout_ms).await
         };
 
         match result {

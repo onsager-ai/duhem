@@ -18,11 +18,11 @@
 //! `Inconclusive(EnvironmentError)` — the same cause family the
 //! per-check path uses for analogous infrastructure failures.
 
+use duhem_actions::Page;
 use duhem_actions::{Outcome, RunBrowser};
 use duhem_evidence::{EventPayload, EvidenceWriter};
 use duhem_judge::InconclusiveCause;
 use duhem_schema::Step;
-use playwright::api::Page;
 use tracing::debug;
 
 use crate::engine::context::{RunState, json_to_value};

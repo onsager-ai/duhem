@@ -16,11 +16,11 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use playwright::api::frame::FrameState;
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN};
+use crate::browser::ElementState;
 use crate::error::ActionError;
 use crate::locator::{ExistenceState, Locator};
 use crate::playwright::to_selector;
@@ -56,16 +56,16 @@ impl Action for AssertElement {
         let timeout: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
         let selector = to_selector(&with.locator);
 
-        let wait = ctx
+        let satisfied = match ctx
             .page
-            .wait_for_selector_builder(&selector)
-            .state(map_state(with.expected))
-            .timeout(timeout.as_millis() as f64)
-            .wait_for_selector();
-
-        let satisfied = match wait.await {
-            Ok(Some(_)) => true,
-            Ok(None) => true, // `state: Detached` returns Ok(None) on success.
+            .wait_for_selector(
+                &selector,
+                map_state(with.expected),
+                timeout.as_millis() as f64,
+            )
+            .await
+        {
+            Ok(()) => true,
             Err(e) if super::is_timeout_message(&e.to_string()) => false,
             Err(e) => return Err(ActionError::Playwright(format!("ui/assert-element: {e}"))),
         };
@@ -78,9 +78,8 @@ impl Action for AssertElement {
         // matched" with "we couldn't ask".
         let count = ctx
             .page
-            .query_selector_all(&selector)
+            .count(&selector)
             .await
-            .map(|v| v.len() as u32)
             .map_err(|e| ActionError::Playwright(format!("ui/assert-element: count: {e}")))?;
 
         Ok(ActionResult::ok()
@@ -89,12 +88,12 @@ impl Action for AssertElement {
     }
 }
 
-fn map_state(s: ExistenceState) -> FrameState {
+fn map_state(s: ExistenceState) -> ElementState {
     match s {
-        ExistenceState::Exists => FrameState::Attached,
-        ExistenceState::NotExists => FrameState::Detached,
-        ExistenceState::Visible => FrameState::Visible,
-        ExistenceState::Hidden => FrameState::Hidden,
+        ExistenceState::Exists => ElementState::Attached,
+        ExistenceState::NotExists => ElementState::Detached,
+        ExistenceState::Visible => ElementState::Visible,
+        ExistenceState::Hidden => ElementState::Hidden,
     }
 }
 

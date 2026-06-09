@@ -7,7 +7,7 @@
 //!   structured *observations*, not a verdict. The judge interprets
 //!   them.
 //! - **Holistic Verification Principle.** `ActionCtx` carries a real
-//!   Playwright `Page` (built in `playwright::CheckBrowser`); there
+//!   Playwright `Page` (built in `browser::CheckBrowser`); there
 //!   is no in-memory DOM mock injected for tests.
 //!
 //! The runtime spec wires `ActionCtx`'s expression evaluator and
@@ -17,8 +17,9 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use playwright::api::Page;
 use serde::Serialize;
+
+use crate::browser::Page;
 
 use crate::error::ActionError;
 
@@ -29,7 +30,7 @@ pub const DEFAULT_WITHIN: Duration = Duration::from_secs(5);
 /// Per-check execution context handed to every `Action::invoke`.
 ///
 /// A new `ActionCtx` is created per check (one Playwright `Page` per
-/// check; see `playwright::CheckBrowser`). The runtime spec extends
+/// check; see `browser::CheckBrowser`). The runtime spec extends
 /// this with the expression evaluator and evidence sink — both are
 /// out of scope here so we keep the struct narrow.
 pub struct ActionCtx<'a> {

@@ -24,11 +24,11 @@
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
+use duhem_actions::Page;
 use duhem_actions::{
     Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertState, AssertUrl, Call,
     Click, Navigate, Observe, Select, Type,
 };
-use playwright::api::Page;
 
 /// Engine-internal dispatcher. One implementor per registered action
 /// (`Step.uses`).

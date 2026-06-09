@@ -149,26 +149,23 @@ runs:
       working-directory: ${{ steps.src.outputs.src }}
       run: cargo build --release -p duhem-cli
 
-    # The Playwright driver ships inside the `playwright` Rust crate
-    # (driver `1.11.0-1620331022000`, bundled into the binary at
-    # build time — see
-    # `crates/duhem-actions/src/playwright.rs` module docs and the
-    # crate's `src/build.rs::DRIVER_VERSION`). The npm CLI here is
-    # just the *installer* for the Chromium browser binary; the
-    # runtime driver is whichever version the Cargo.lock'd
-    # `playwright` crate carries. Pinning a specific
-    # `playwright@x.y.z` npm version is therefore lower-leverage
-    # than it looks — Cargo.lock is already the source of truth for
-    # the bits that touch the browser at runtime — and an
-    # arbitrarily-chosen pin risks pointing at an npm version that
-    # downloads a Chromium revision the bundled driver can't drive.
-    # We match the project's existing dev posture (justfile:21) and
-    # keep the install command floating; the supply-chain hardening
-    # to do here is bumping the Rust `playwright` crate to a
-    # maintained version, not pinning the installer.
-    - name: Install Playwright Chromium
+    # The browser driver is the official Playwright Node package, run
+    # as a sidecar (`crates/duhem-actions/sidecar`; spec #71). Node 20
+    # LTS is the supported floor (18 is EOL). The sidecar's deps install
+    # from its committed lockfile, and Chromium installs via the
+    # sidecar's *own* pinned Playwright so the browser revision always
+    # matches the driver — no version-skew gamble.
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Playwright sidecar deps + Chromium
       shell: bash
-      run: npx --yes playwright install --with-deps chromium
+      working-directory: ${{ steps.src.outputs.src }}/crates/duhem-actions/sidecar
+      run: |
+        npm ci
+        npx --yes playwright install --with-deps chromium
 
     - name: Run verification
       id: run

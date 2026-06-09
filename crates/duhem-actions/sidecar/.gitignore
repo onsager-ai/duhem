@@ -1,0 +1,3 @@
+# Installed from the committed package-lock.json via `npm ci`; never
+# vendored into git (spec #71 — distribution decision).
+node_modules/

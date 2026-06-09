@@ -34,9 +34,14 @@ philosophy; `docs/duhem-brand.md` shows how the mark visualizes it.
 
 ## Quickstart
 
-Prerequisite for `duhem run`: Playwright's Chromium driver
-(`npx playwright install chromium`, once per host). `init` and
-`validate` don't need it.
+Prerequisites for `duhem run` (browser-backed `ui/*` checks): Node
+≥ 20, plus the Playwright sidecar's deps and Chromium — once per host:
+
+```sh
+(cd crates/duhem-actions/sidecar && npm ci && npx playwright install chromium)
+```
+
+`init` and `validate` don't need them.
 
 ```sh
 cargo build --workspace

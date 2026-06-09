@@ -16,8 +16,9 @@ dev:
 test:
     cargo test --workspace
 
-# Run the Playwright-backed UI smoke tests. Requires
-# `npx playwright install chromium` once on the host first.
+# Run the Playwright-backed UI smoke tests. Requires Node >= 20 and,
+# once on the host, the sidecar's deps + Chromium:
+#   (cd crates/duhem-actions/sidecar && npm ci && npx playwright install chromium)
 test-ui:
     cargo test -p duhem-actions --test ui_smoke -- --ignored
 

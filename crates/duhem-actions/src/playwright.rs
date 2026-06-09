@@ -11,7 +11,13 @@
 //!
 //! - Base: `role=<role>` with `[name="<name>"]` when `name` is set
 //!   (exact match — same as `getByRole({ name })`).
-//! - `text` becomes a `:has-text("...")` substring filter.
+//! - `text` becomes a chained `internal:has-text="..."i` filter step
+//!   (case-insensitive substring). It is a separate `>>` step, *not* a
+//!   pseudo appended to the role token: Playwright's role engine
+//!   rejects `role=alert:has-text(...)` (`#75`). `internal:has-text` is
+//!   Playwright's own `.filter({ hasText })` compilation target and
+//!   resolves to the matched role element (not an inner text node), so
+//!   existence/count semantics are on the role element.
 //! - `scope` becomes a `>>` chain: outer first, inner second.
 //!
 //! Examples:
@@ -20,13 +26,13 @@
 //! { role: button, name: Create }
 //!     → role=button[name="Create"]
 //! { role: alert, text: "Created" }
-//!     → role=alert:has-text("Created")
+//!     → role=alert >> internal:has-text="Created"i
 //! { role: button, name: Create, scope: { role: list, name: Workspaces } }
 //!     → role=list[name="Workspaces"] >> role=button[name="Create"]
 //! ```
 //!
 //! The selector string is handed to the sidecar's `page.locator(...)`,
-//! so Playwright's own role / accessible-name / `:has-text` engines
+//! so Playwright's own role / accessible-name / has-text engines
 //! resolve it — no behavior is reimplemented Rust-side.
 //!
 //! Quoting: `name`/`text` strings have `\`, `"` escaped before
@@ -52,10 +58,17 @@ fn collect(loc: &Locator, chain: &mut Vec<String>) {
     if let Some(name) = &loc.name {
         s.push_str(&format!("[name=\"{}\"]", escape_quotes(name)));
     }
-    if let Some(text) = &loc.text {
-        s.push_str(&format!(":has-text(\"{}\")", escape_quotes(text)));
-    }
     chain.push(s);
+    // `text` is a chained `internal:has-text` filter, not a pseudo
+    // appended to the role token — Playwright's role engine rejects the
+    // latter (`role=alert:has-text(...)` → InvalidSelectorError on
+    // Playwright 1.58; #75). The `i` suffix is case-insensitive
+    // substring, matching the prior `:has-text` semantics, and the step
+    // resolves to the role element (Playwright's `.filter({ hasText })`
+    // target) rather than an inner text node.
+    if let Some(text) = &loc.text {
+        chain.push(format!("internal:has-text=\"{}\"i", escape_quotes(text)));
+    }
 }
 
 fn escape_quotes(s: &str) -> String {
@@ -96,7 +109,46 @@ mod tests {
             text: Some("Created".into()),
             scope: None,
         };
-        assert_eq!(to_selector(&l), r#"role=alert:has-text("Created")"#);
+        // `text` is a chained `internal:has-text` step, not a pseudo on
+        // the role token — the role engine rejects the latter (#75).
+        assert_eq!(
+            to_selector(&l),
+            r#"role=alert >> internal:has-text="Created"i"#
+        );
+    }
+
+    #[test]
+    fn selector_role_with_name_and_text() {
+        let l = Locator {
+            role: "alert".into(),
+            name: Some("Status".into()),
+            text: Some("Created".into()),
+            scope: None,
+        };
+        assert_eq!(
+            to_selector(&l),
+            r#"role=alert[name="Status"] >> internal:has-text="Created"i"#
+        );
+    }
+
+    #[test]
+    fn selector_scope_with_text_on_inner() {
+        // text filter chains after the inner role, inside the scope.
+        let l = Locator {
+            role: "alert".into(),
+            name: None,
+            text: Some("Scoped Created".into()),
+            scope: Some(Box::new(Locator {
+                role: "list".into(),
+                name: Some("Workspaces".into()),
+                text: None,
+                scope: None,
+            })),
+        };
+        assert_eq!(
+            to_selector(&l),
+            r#"role=list[name="Workspaces"] >> role=alert >> internal:has-text="Scoped Created"i"#
+        );
     }
 
     #[test]

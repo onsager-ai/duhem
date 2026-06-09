@@ -63,3 +63,41 @@ jobs:
         env:
           DUHEM_CHANGELOG_CLARIFYING: ${{ contains(github.event.pull_request.body, '<!-- schema:clarifying -->') && '1' || '' }}
         run: cargo run -p xtask --quiet -- schema-changelog-check
+
+  # Browser-backed integration suites (`tests/ui_smoke.rs`,
+  # `tests/api_observe_smoke.rs`) are `#[ignore]`d because they need a
+  # real Chromium, so the `rust` job's `cargo test` skips them. Without
+  # this lane, selector-engine / sidecar-protocol breakage rides through
+  # CI green — exactly how the #75 `:has-text` regression shipped. Kept a
+  # distinct job so the ~4-min Chromium install doesn't slow the fast
+  # Rust gate and a browser flake reads as such. (spec #77)
+  ui-smoke:
+    name: ui-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          rustup show active-toolchain
+          cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Mirror the `duhem/run` composite action's driver setup: Node 20
+      # LTS + the sidecar's own pinned Playwright, so the Chromium
+      # revision always matches the driver.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright sidecar deps + Chromium
+        working-directory: crates/duhem-actions/sidecar
+        run: |
+          npm ci
+          npx --yes playwright install --with-deps chromium
+
+      # Both ignored suites in one invocation; mirrors `just test-ui`.
+      - name: cargo test (ignored browser suites)
+        run: cargo test -p duhem-actions --test ui_smoke --test api_observe_smoke -- --ignored

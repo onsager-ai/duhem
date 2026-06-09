@@ -16,11 +16,13 @@ dev:
 test:
     cargo test --workspace
 
-# Run the Playwright-backed UI smoke tests. Requires Node >= 20 and,
-# once on the host, the sidecar's deps + Chromium:
+# Run the Playwright-backed browser smoke suites (ui/* + api/observe).
+# Requires Node >= 20 and, once on the host, the sidecar's deps +
+# Chromium:
 #   (cd crates/duhem-actions/sidecar && npm ci && npx playwright install chromium)
+# CI runs the same suites in the `ui-smoke` lane (spec #77).
 test-ui:
-    cargo test -p duhem-actions --test ui_smoke -- --ignored
+    cargo test -p duhem-actions --test ui_smoke --test api_observe_smoke -- --ignored
 
 # Static checks. Mirrors what CI runs.
 lint:

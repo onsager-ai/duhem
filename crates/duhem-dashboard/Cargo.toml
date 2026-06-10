@@ -1,0 +1,31 @@
+[package]
+name = "duhem-dashboard"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+description = "Read-only web dashboard over Duhem run evidence (spec #53 / #85)"
+
+[[bin]]
+name = "duhem-dashboard"
+path = "src/main.rs"
+
+[dependencies]
+duhem-evidence = { path = "../duhem-evidence" }
+duhem-judge = { path = "../duhem-judge" }
+duhem-summary = { path = "../duhem-summary" }
+
+axum = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+futures = { workspace = true }
+rust-embed = { workspace = true }
+
+[dev-dependencies]
+tower = { workspace = true, features = ["util"] }
+tempfile = "3"
+http-body-util = "0.1"

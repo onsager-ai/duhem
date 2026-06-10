@@ -8,3 +8,8 @@
 
 # Local Duhem run evidence (written by `duhem run`)
 .duhem/runs/
+
+# Dashboard SPA toolchain output (built in CI; build.rs writes a
+# placeholder when absent)
+crates/duhem-dashboard/web/node_modules/
+crates/duhem-dashboard/web/dist/

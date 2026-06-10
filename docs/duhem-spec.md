@@ -303,9 +303,11 @@ duhem.yml                  # root manifest, aggregates all verifications
 The root `duhem.yml` manifest declares which files to aggregate and provides shared defaults. Tool execution:
 
 ```bash
-duhem run                  # runs all verifications declared in duhem.yml
-duhem run --filter login   # runs subset
+duhem run                     # runs all verifications declared in duhem.yml
+duhem run --filter login::*   # runs a subset
 ```
+
+`--filter` takes a three-axis selector `[<verification>::]<criterion>[::<check>]` (glob-aware) — see §10.4. A bare `login` is read as a *criterion* glob, not a feature name; to scope to the `login` verification use `login::*`.
 
 #### Pattern C: Centralized verification directory
 
@@ -468,7 +470,7 @@ If no root manifest is present, Duhem still works on individual Verification Def
 
 ### 10.5 Action types
 
-Verification Definitions invoke pre-defined action types via `uses:`. Action types are typed with input (`with:`) and named outputs.
+Verification Definitions invoke pre-defined action types via `uses:`. Each action defines a typed `with:` schema (its internal `With` struct) and named outputs; the dispatch boundary itself is untyped YAML that the action downcasts inside `invoke`.
 
 **UI actions** (Playwright primitives)
 
@@ -511,6 +513,8 @@ Assertions evaluate to `true`, `false`, or `inconclusive` (e.g., when timeouts h
 - **Existence**: `exists: $steps.X.outputs.Y`
 - **Cross-step consistency**: `equal: [$steps.A.outputs.X, $steps.B.outputs.X]`
 
+An `inconclusive` result always carries a cause, distinguishing "the check could not be evaluated" from a genuine `false`. The verdict-level catalog is closed at v1 and surfaces as `inconclusive:<cause>` (snake-case wire tokens): `timeout`, `missing_observation`, `environment_error`, `empty_aggregation`. The runtime evaluator tracks finer internal causes (missing input, missing env, type mismatch, invalid pattern, unknown runtime helper) that collapse into these when the judge aggregates the verdict (§7.6).
+
 ### 10.7 Runtime expressions
 
 Borrowed from Arazzo. References available in expressions:
@@ -522,14 +526,14 @@ Borrowed from Arazzo. References available in expressions:
 
 ### 10.8 Extensibility
 
-The Duhem schema supports user-defined action types. A custom action type is a published unit with:
+User-defined action types are a **Phase 2+ goal** (§14). The v0.1 action catalog is closed (`crates/duhem-actions`) and the dispatch registry is internal — external crates cannot register a new `uses:` today. The target design for a custom action type is a published unit with:
 
 - Name (`<scope>/<name>`, e.g., `acme/stripe-charge-observe`)
 - Input schema (JSON Schema for `with:` keys)
 - Output schema (named outputs the action produces)
 - Implementation (how Duhem invokes it)
 
-Custom actions follow a marketplace mental model similar to GitHub Actions’ `actions/*`.
+Custom actions are intended to follow a marketplace mental model similar to GitHub Actions’ `actions/*`. This anchors the design; none of it is authorable in Phase 1.
 
 ## 11. Architecture
 
@@ -578,9 +582,9 @@ This is enforced architecturally — the judge service has no LLM dependency. It
 
 Because Duhem is closed-source in Phase 1, additional measures are taken to make this commitment auditable:
 
-- **Documented judge logic**: The decision rules used by the judge are published as reference documentation, even though the implementation source is not. Customers can reason about how a verdict is computed without reading code.
+- **Documented judge logic**: The decision rules used by the judge are documented even though the implementation source is not — today they live in §10.6 (assertion forms), §10.7 (runtime expressions), and the `crates/duhem-judge` aggregation doc comments. Customers can reason about how a verdict is computed without reading the production source. (Extracting these into a single standalone "judge decision reference" is a Phase 2+ goal.)
 - **Reproducible runs**: Every run produces a complete evidence trace. Given identical environment state and a frozen check spec, replays must produce identical verdicts. Determinism is verifiable empirically by customers.
-- **Self-hosted judge for enterprise**: For customers requiring stronger guarantees, an enterprise license includes a self-hostable judge binary. The binary is closed-source but runs entirely within customer infrastructure, removing the cloud-trust dependency.
+- **Self-hosted judge for enterprise** (Phase 2+): For customers requiring stronger guarantees, an enterprise license will include a self-hostable judge binary. The binary is closed-source but runs entirely within customer infrastructure, removing the cloud-trust dependency. No standalone judge binary or enterprise tier ships in Phase 1 — `duhem-judge` is a library crate today.
 - **Future-state OSS judge**: When schema stabilizes (Phase 2), a reference judge implementation is open-sourced. This serves as the public standard against which the production judge is compliance-tested.
 
 ### 11.3 Source posture and opening strategy

@@ -66,26 +66,31 @@ seed_workflow() {
   curl -fsS -c "$COOKIES" -X POST "$PORTAL_URL/api/auth/dev-login" \
     >/dev/null 2>&1 || return 1
 
-  # Resolve the dev workspace id (slug `dev`).
+  # Resolve the dev workspace id (slug `dev`). Split the array into one
+  # line per workspace object (`tr '{' '\n'`), pick the line whose slug
+  # is `dev`, and read its `id`. The response shape (confirmed live) is
+  # `{"workspaces":[{...,"id":"<uuid>","name":...,"slug":"dev"}]}`.
   ws_json=$(curl -fsS -b "$COOKIES" "$PORTAL_URL/api/workspaces" 2>/dev/null) || return 1
-  ws_id=$(printf '%s' "$ws_json" \
-    | tr ',{}' '\n\n\n' \
-    | grep -A2 '"slug"[[:space:]]*:[[:space:]]*"dev"' \
-    | grep '"id"' | head -1 \
+  ws_id=$(printf '%s' "$ws_json" | tr '{' '\n' \
+    | grep '"slug"[[:space:]]*:[[:space:]]*"dev"' | head -1 \
     | sed -E 's/.*"id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
   # Fall back to the first id in the payload if the slug-scoped parse
-  # missed (shapes vary across Onsager versions).
+  # missed (e.g. a single-workspace env or a shape change).
   [ -n "$ws_id" ] || ws_id=$(printf '%s' "$ws_json" \
-    | sed -E 's/.*"id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' | head -1)
+    | grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 \
+    | sed -E 's/.*"([^"]+)"$/\1/')
   [ -n "$ws_id" ] || return 1
 
   # Register a minimal single-node (no-op executor) workflow for the
   # spec kind via the portal MCP `submit_workflow` tool. The executor
-  # `kind` discriminator is `noop` (onsager-substrate typetag). This
-  # payload shape is the thing to confirm against the live
-  # `submit_workflow` schema on first run.
-  body=$(printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"submit_workflow","arguments":{"workspace_id":"%s","spec_kind":"%s","workflow":{"nodes":[{"id":"n1","executor":{"kind":"noop"},"inputs":[],"outputs":[]}],"edges":[],"entry_specs":[],"output_specs":[]}}}}' \
-    "$ws_id" "$SPEC_KIND")
+  # `kind` discriminator is `noop` (onsager-substrate typetag); the
+  # node `id` must be a UUID (NodeId), not a free string. This payload
+  # was confirmed end-to-end against a live portal: `submit_workflow`
+  # registers it and `compile_dry_run` then returns `ok: true` for a
+  # one-spec plan of this kind — i.e. the dashboard's submit gate opens.
+  node_id=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null)
+  body=$(printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"submit_workflow","arguments":{"workspace_id":"%s","spec_kind":"%s","workflow":{"nodes":[{"id":"%s","executor":{"kind":"noop"},"inputs":[],"outputs":[]}],"edges":[],"entry_specs":[],"output_specs":[]}}}}' \
+    "$ws_id" "$SPEC_KIND" "$node_id")
   curl -fsS -b "$COOKIES" -X POST "$PORTAL_URL/mcp/messages" \
     -H 'content-type: application/json' \
     -H 'accept: application/json, text/event-stream' \

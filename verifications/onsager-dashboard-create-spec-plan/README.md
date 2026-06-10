@@ -90,11 +90,15 @@ workspace has none, so `up.sh` registers a minimal no-op workflow of
 kind `Issue` via the portal `submit_workflow` MCP tool after the
 portal is healthy.
 
-This seed is **best-effort and non-fatal**: the MCP `submit_workflow`
-payload shape (the `Workflow` JSON, including the `noop` executor
-discriminator) is the one thing not yet confirmed against a live
-stack. If `up.sh` logs `WARNING — could not seed a workflow`, register
-a workflow of kind `Issue` in the `dev` workspace manually — via the
+The seed payload was confirmed end-to-end against a live portal:
+`submit_workflow` registers the kind, and `compile_dry_run` then
+returns `ok: true` for a one-spec plan of that kind — i.e. the
+dashboard's submit gate opens. The one non-obvious requirement is that
+the workflow node `id` is a UUID (`NodeId`), not a free string.
+
+The seed stays **non-fatal**: if `up.sh` logs `WARNING — could not
+seed a workflow` (e.g. the portal MCP surface changed), register a
+workflow of kind `Issue` in the `dev` workspace manually — via the
 dashboard's workflow builder or chat — before re-running. Confirm a
 kind is present with the `list_workflows_v2` MCP tool; the kind name
 must match the VD's `spec_kind` input (default `Issue`).

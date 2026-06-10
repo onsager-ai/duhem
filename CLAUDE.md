@@ -16,7 +16,7 @@ runtime), and gates merge/deploy on the verdict.
 > `api/call`, `api/observe`); environment provisioning (`up:` /
 > `down:` hooks) is wired into the runtime; the first Onsager
 > dogfood verification lives at
-> `verifications/onsager-dashboard-create-project/` and runs through
+> `verifications/onsager-dashboard-create-spec-plan/` and runs through
 > the `duhem/run` composite GitHub Action. Schema is still v0.x —
 > breaking changes are expected. See `docs/duhem-spec.md` §14 for
 > the roadmap and `CHANGELOG.md` for the per-landing ledger.
@@ -67,7 +67,7 @@ Changes to those four bullets are spec-level changes to
    is the concrete answer to "what does §10 / §11 actually look like
    today?".
 4. **`verifications/`** — Verification Definitions in-tree. The
-   dogfood VD lives at `verifications/onsager-dashboard-create-project/`
+   dogfood VD lives at `verifications/onsager-dashboard-create-spec-plan/`
    and is the worked example for §10's VD shape.
 5. **`.claude/skills/`** — dev process under Claude Code. Start with
    `duhem-dev-process`; it delegates to the rest.

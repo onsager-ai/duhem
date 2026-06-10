@@ -9,7 +9,7 @@ Product context: `docs/duhem-spec.md` §12.1 (GitHub integration)
 and §11.2 (trust boundary).
 
 > **Phase 0 status.** This action is the wiring for the first
-> deployment — the Onsager dashboard create-project Verification
+> deployment — the Onsager dashboard create-spec-plan Verification
 > Definition. The action surface generalizes to additional VDs and
 > additional consumers as Phase 1 alpha customers adopt it
 > (`docs/duhem-spec.md` §14). Pre-`v1`, the action lives at
@@ -47,8 +47,8 @@ the PR, builds and serves Onsager locally, then calls the action
 pinned to a Duhem release tag:
 
 ```yaml
-# onsager-ai/onsager/.github/workflows/duhem-create-project.yml
-name: duhem / create-project
+# onsager-ai/onsager/.github/workflows/duhem-create-spec-plan.yml
+name: duhem / create-spec-plan
 
 on:
   pull_request:
@@ -61,23 +61,20 @@ jobs:
 
       - name: Build + serve Onsager
         run: |
-          # Onsager-side build steps that bring up the dashboard on
-          # http://localhost:3000 and provision a fixture user. The
-          # specifics live in the Onsager-side companion spec.
+          # Onsager-side build steps that bring the `just dev` stack up
+          # (dashboard on http://localhost:5173, portal on :3002) and
+          # seed a workflow so the Create Plan compile gate has a valid
+          # spec kind. The specifics live in the Onsager-side companion
+          # work.
           ./scripts/serve-for-duhem.sh &
 
-      - name: Verify create-project
+      - name: Verify create-spec-plan
         id: duhem
         uses: onsager-ai/duhem/.github/actions/run@v0.1
         with:
-          verification-path: verifications/onsager-dashboard-create-project/duhem.yml
+          verification-path: verifications/onsager-dashboard-create-spec-plan/duhem.yml
           inputs: |
-            login_url=http://localhost:3000/login
-            new_project_url=http://localhost:3000/projects/new
-            projects_url=http://localhost:3000/projects
-            test_email=${{ secrets.DUHEM_FIXTURE_EMAIL }}
-            test_password=${{ secrets.DUHEM_FIXTURE_PASSWORD }}
-            project_name=duhem-fixture-${{ github.run_id }}
+            plan_id=duhem-fixture-${{ github.run_id }}
 
       - name: Surface evidence on red
         if: failure()
@@ -88,7 +85,7 @@ jobs:
 ```
 
 Onsager-side branch protection on `main` then adds the
-`duhem / create-project` status check as required. An Onsager PR
+`duhem / create-spec-plan` status check as required. An Onsager PR
 cannot merge past a Duhem `fail`.
 
 ## Trust contract (§11.2)
@@ -211,5 +208,5 @@ minor version.
   §12.1 (GitHub integration), §14 Phase 1 milestones.
 - [`onsager-dogfood` skill](../../../.claude/skills/onsager-dogfood/SKILL.md) —
   the cross-repo seam Duhem and Onsager share.
-- [`verifications/onsager-dashboard-create-project/`](../../../verifications/onsager-dashboard-create-project) —
+- [`verifications/onsager-dashboard-create-spec-plan/`](../../../verifications/onsager-dashboard-create-spec-plan) —
   the first Verification Definition this action surfaces.

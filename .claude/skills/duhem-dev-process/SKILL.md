@@ -19,7 +19,7 @@ CLI exposes `init` / `run` / `validate` / `--version`; the `ui/*` and
 `ui/select`, `ui/assert-*`, `api/call`, `api/observe`) and the
 `up:` / `down:` environment hooks are wired in; and the first Onsager
 dogfood verification ships at
-`verifications/onsager-dashboard-create-project/`. The dev loop
+`verifications/onsager-dashboard-create-spec-plan/`. The dev loop
 below is intentionally lean — it mirrors the discipline used on
 `onsager-ai/onsager`, but does not inherit Onsager's seam rule, area
 taxonomy, or Rust toolchain checks beyond what `cargo`, `clippy`, and

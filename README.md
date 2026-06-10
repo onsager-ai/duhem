@@ -16,7 +16,7 @@ gates merge/deploy on the verdict.
 > `api/call`, `api/observe`); environment provisioning (`up:` /
 > `down:` hooks) is wired into the runtime; and the first Onsager
 > dogfood verification ships in-tree at
-> [`verifications/onsager-dashboard-create-project/`](verifications/onsager-dashboard-create-project/)
+> [`verifications/onsager-dashboard-create-spec-plan/`](verifications/onsager-dashboard-create-spec-plan/)
 > with a working `duhem/run` composite GitHub Action. Schema is still
 > v0.x — breaking changes are expected. See `docs/duhem-spec.md` §14
 > for the roadmap and `CHANGELOG.md` for the per-landing ledger.
@@ -54,7 +54,7 @@ cargo run -p duhem-cli -- run /tmp/sample/duhem.yml
 on first run against `https://example.com`. Mutate from that
 known-good baseline. For a real-world example — including the
 `up:` / `down:` environment hooks Duhem sequences around a check —
-see [`verifications/onsager-dashboard-create-project/`](verifications/onsager-dashboard-create-project/).
+see [`verifications/onsager-dashboard-create-spec-plan/`](verifications/onsager-dashboard-create-spec-plan/).
 
 ## Reading order
 

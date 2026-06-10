@@ -10,11 +10,12 @@ repo has actually had, plus a spec-link check that enforces the SDD
 loop locally.
 
 This is Duhem's analogue of Onsager's `onsager-pre-push` skill. The
-discipline is the same; the toolchain is different and intentionally
-thinner, because Duhem is in Phase 0 and there's not much to build
-yet. As the CLI, validator, runtime, and judge land, fold their
-checks into this checklist — don't let "we don't have a build yet"
-calcify into "we don't run a build before pushing."
+discipline is the same and so is the shape of the toolchain: the
+default pre-push gate is `just check` (`just lint` then `just test`),
+exactly what reviewers and CI run. Schema-, VD-, and UI-touching PRs
+add a gate apiece (see step 2). When a new product surface lands,
+fold its check in here — the checklist tracks the toolchain, it does
+not lag it.
 
 ## Why
 
@@ -59,11 +60,12 @@ If the merge aborts cleanly, skip to step 2.
 3. **Resolve**, then stage each resolved path with `git add <path>`.
    Re-run `git status` until no `U*` entries remain.
 
-4. **Verify before committing the merge.** Run whatever build /
-   validator tooling exists for this repo at the time. At Phase 0
-   the relevant checks are limited; once a CLI lands, this should
-   include `cargo build` (or equivalent), the schema validator on
-   any `.yml` Verification Definitions touched, and the test suite.
+4. **Verify before committing the merge.** Run `just check` (lint +
+   workspace tests) so a textually-clean merge that doesn't actually
+   compile is caught here, not in CI. If the merge touched any
+   `.yml` Verification Definitions, also run them through
+   `cargo run -p duhem-cli -- validate <path>`. The full adder list
+   is in step 2.
 
 5. Only then:
 
@@ -97,29 +99,55 @@ These are anticipated based on the product shape in
 - **`CHANGELOG.md`**: both branches added entries under the same
   next-version heading. Both entries should land — concatenate
   alphabetically by category.
-- **Schema fixtures (`tests/fixtures/**/*.yml` once these exist)**:
-  YAML key-order conflicts are usually false alarms; verify the
-  fixture still parses by running it through the validator.
-- **Action-type registry (when this exists)**: both branches added
-  a new action type. Both arms should land; check for name
+- **Schema fixtures** (`crates/duhem-schema/fixtures/**`,
+  `crates/duhem-actions/tests/fixtures/**`): YAML key-order
+  conflicts are usually false alarms; verify the fixture still
+  parses by running it through `duhem validate` or the owning
+  crate's tests.
+- **Action-type registry** (`crates/duhem-actions/`): both branches
+  added a new action type. Both arms should land; check for name
   collisions explicitly.
-- **`Cargo.lock` / `pnpm-lock.yaml` (once these exist)**: always
-  resolve by re-running the install / build, never hand-edit.
+- **`Cargo.lock` / `package-lock.json`**: always resolve by
+  re-running the install / build, never hand-edit.
 
 ### 2. Build / validate
 
-Run whatever build, lint, and test commands the repo has at the
-time. As of Phase 0, that's near-empty; treat the absence as a
-**known gap** to fix when the corresponding code lands, not as a
-permission to skip the step:
+**Default gate — every PR:**
 
-- If the repo has a `Cargo.toml`: `cargo build --workspace` and
-  `cargo test --workspace --lib`.
-- If the repo has a `package.json`: `pnpm install` and `pnpm test`.
-- If the repo has a schema validator binary: run it against any
-  `.yml` Verification Definitions touched in the diff.
-- If the repo has a CHANGELOG and this PR has `## Schema impact`:
-  confirm the CHANGELOG was updated.
+```bash
+just check        # = just lint (fmt-check + clippy -D warnings +
+                  #   xtask check-file-budget) then just test
+                  #   (cargo test --workspace)
+```
+
+This is exactly what CI and reviewers run. Run it on the merged tree
+from step 1, not the branch alone.
+
+Then add the gates the diff calls for:
+
+- **Schema-touching PRs** (anything under `crates/duhem-schema/**`,
+  `crates/duhem-evidence/**`, or that bumps `SCHEMA_VERSION`):
+
+  ```bash
+  cargo run -p xtask -- schema-drift            # docs §10 ↔ code
+  cargo run -p xtask -- schema-changelog-check  # CHANGELOG.md touch gate
+  ```
+
+  These fail loudly if `SCHEMA_VERSION` and `CHANGELOG.md` don't
+  agree with the diff.
+- **VD-touching PRs**: run each modified Verification Definition
+  through the validator —
+
+  ```bash
+  cargo run -p duhem-cli -- validate verifications/onsager-dashboard-create-spec-plan/duhem.yml
+  ```
+
+- **UI-touching PRs** (`crates/duhem-actions/**` `ui/*` or the
+  Playwright sidecar): `just test-ui` — the `ui/*` + `api/observe`
+  browser smoke suites. They're `#[ignore]`'d by default, so
+  `just check` skips them; run them explicitly when UI is in the
+  diff. Requires `npx playwright install chromium` once per host
+  (see the `test-ui` recipe header in the `justfile`).
 
 Treat **any** warning as a blocker. Do not `#[allow(dead_code)]` or
 `@ts-ignore` your way past it; fix the root cause.

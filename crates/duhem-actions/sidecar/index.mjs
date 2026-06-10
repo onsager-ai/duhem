@@ -120,9 +120,29 @@ function attachNetworkRecorder(p, buf) {
 /** @param {any} req */
 async function dispatch(req) {
   switch (req.op) {
-    case 'launch':
-      browser = await chromium.launch({ headless: req.headless !== false })
+    case 'launch': {
+      // By default Playwright launches its own bundled Chromium. On a
+      // host where that download is unavailable (e.g. an OS Playwright
+      // ships no prebuilt browser for), an operator can point the
+      // sidecar at a system browser via env — without these set, the
+      // behavior is unchanged:
+      //   DUHEM_BROWSER_EXECUTABLE — path to a Chromium/Chrome binary
+      //   DUHEM_BROWSER_CHANNEL    — a Playwright channel (e.g. "chrome")
+      //   DUHEM_BROWSER_ARGS       — extra launch args, space-separated
+      //     (e.g. "--no-sandbox" when running inside a container)
+      const executablePath = process.env.DUHEM_BROWSER_EXECUTABLE || undefined
+      const channel = process.env.DUHEM_BROWSER_CHANNEL || undefined
+      const extraArgs = (process.env.DUHEM_BROWSER_ARGS || '')
+        .split(/\s+/)
+        .filter(Boolean)
+      browser = await chromium.launch({
+        headless: req.headless !== false,
+        executablePath,
+        channel,
+        args: extraArgs,
+      })
       return null
+    }
 
     case 'newContext': {
       if (!browser) throw new Error('newContext before launch')

@@ -43,6 +43,11 @@ criteria) lives in the spec issue that introduced
   `onsager-dashboard-create-spec-plan`, targeting the workspace-scoped
   Create Plan flow. No schema surface touched — existing `ui/*`
   actions only. (#79)
+- [clarifying] Playwright sidecar honors `DUHEM_BROWSER_EXECUTABLE` /
+  `DUHEM_BROWSER_CHANNEL` / `DUHEM_BROWSER_ARGS` to launch a system
+  browser where Playwright ships no bundled Chromium. Additive and
+  off by default; no schema or action-contract change. Unblocked the
+  first live green run of the dogfood VD. (#82)
 
 ## v0.1.0 — unreleased
 

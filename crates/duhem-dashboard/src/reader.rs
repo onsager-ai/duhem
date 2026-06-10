@@ -321,7 +321,10 @@ fn read_subdirs(dir: &Path) -> Vec<PathBuf> {
 }
 
 fn sort_newest_first(entries: &mut [RunsListEntry]) {
-    entries.sort_by_key(|e| std::cmp::Reverse(e.started_at));
+    // Newest first; runs with no parseable start (empty trace) sink
+    // to the bottom — a bare `Reverse(Option)` would float them to
+    // the top instead, since `None < Some` pre-reversal.
+    entries.sort_by_key(|e| (e.started_at.is_none(), std::cmp::Reverse(e.started_at)));
 }
 
 fn leaf_entry(run: &RunEvidence, group: Option<&str>) -> RunsListEntry {
@@ -379,6 +382,11 @@ fn build_run_detail(run: &RunEvidence, group: Option<String>) -> RunDetail {
     // First-seen orderings from the trace itself.
     let mut criterion_order: Vec<String> = Vec::new();
     let mut checks_by_criterion: Vec<(String, Vec<CheckRef>)> = Vec::new();
+    // A check belongs to exactly one criterion (replay rejects
+    // conflicting mappings outright); first `step_started` wins here
+    // so a malformed trace can't smear one check's verdict across
+    // criteria.
+    let mut criterion_of_check: Vec<(String, String)> = Vec::new();
     let mut run_verdict = None;
 
     fn note_check(
@@ -417,17 +425,38 @@ fn build_run_detail(run: &RunEvidence, group: Option<String>) -> RunDetail {
                 criterion_id,
                 check_id,
                 ..
-            } => note_check(
-                &mut criterion_order,
-                &mut checks_by_criterion,
-                criterion_id,
-                check_id,
-            ),
+            } => {
+                let owner = criterion_of_check
+                    .iter()
+                    .find(|(k, _)| k == check_id)
+                    .map(|(_, c)| c.clone())
+                    .unwrap_or_else(|| {
+                        criterion_of_check.push((check_id.clone(), criterion_id.clone()));
+                        criterion_id.clone()
+                    });
+                // Only the owning criterion lists the check; a
+                // colliding `step_started` under another criterion is
+                // a malformed trace and must not duplicate the row.
+                if owner == *criterion_id {
+                    note_check(
+                        &mut criterion_order,
+                        &mut checks_by_criterion,
+                        criterion_id,
+                        check_id,
+                    );
+                }
+            }
             EventPayload::CheckFinished { check_id, verdict } => {
-                for (_, checks) in checks_by_criterion.iter_mut() {
-                    if let Some(c) = checks.iter_mut().find(|c| c.id == *check_id) {
-                        c.verdict = Some(*verdict);
-                    }
+                let owner = criterion_of_check
+                    .iter()
+                    .find(|(k, _)| k == check_id)
+                    .map(|(_, c)| c.clone());
+                if let Some(owner) = owner
+                    && let Some((_, checks)) =
+                        checks_by_criterion.iter_mut().find(|(c, _)| *c == owner)
+                    && let Some(check) = checks.iter_mut().find(|c| c.id == *check_id)
+                {
+                    check.verdict = Some(*verdict);
                 }
             }
             EventPayload::CriterionFinished { criterion_id, .. }
@@ -481,13 +510,29 @@ fn build_check_detail(
     criterion_id: &str,
     check_id: &str,
 ) -> Option<CheckDetail> {
+    // A check belongs to exactly one criterion — replay hard-errors
+    // on conflicting mappings; the view applies the same first-wins
+    // ownership so `assertion_evaluated` / `check_finished` (which
+    // carry only `check_id`) can't be attributed to a colliding
+    // criterion. No ownership record → no such pair.
+    let owner = run.events.iter().find_map(|e| match &e.payload {
+        EventPayload::StepStarted {
+            criterion_id: c,
+            check_id: k,
+            ..
+        } if k == check_id => Some(c.clone()),
+        _ => None,
+    });
+    if owner.as_deref() != Some(criterion_id) {
+        return None;
+    }
+
     let mut timeline: Vec<Event> = Vec::new();
     let mut verdict = None;
     // `step_observation` / `step_finished` carry only `step_index`;
     // attribution is positional — they belong to the pair iff the most
     // recent `step_started` opened it.
     let mut in_pair = false;
-    let mut seen = false;
 
     for evt in &run.events {
         match &evt.payload {
@@ -498,7 +543,6 @@ fn build_check_detail(
             } => {
                 in_pair = c == criterion_id && k == check_id;
                 if in_pair {
-                    seen = true;
                     timeline.push(evt.clone());
                 }
             }
@@ -506,23 +550,17 @@ fn build_check_detail(
                 timeline.push(evt.clone());
             }
             EventPayload::AssertionEvaluated { check_id: k, .. } if k == check_id => {
-                seen = true;
                 timeline.push(evt.clone());
             }
             EventPayload::CheckFinished {
                 check_id: k,
                 verdict: v,
             } if k == check_id => {
-                seen = true;
                 verdict = Some(*v);
                 timeline.push(evt.clone());
             }
             _ => {}
         }
-    }
-
-    if !seen {
-        return None;
     }
 
     let artifacts = timeline

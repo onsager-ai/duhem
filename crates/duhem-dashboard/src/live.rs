@@ -44,7 +44,9 @@ struct Follow {
 }
 
 impl Follow {
-    /// Pull newly-appended complete lines into `pending`.
+    /// Pull newly-appended complete lines into `pending`. Synchronous
+    /// file I/O — call via [`Self::read_new_lines_blocking`] from
+    /// async context.
     fn read_new_lines(&mut self) -> std::io::Result<()> {
         let mut f = std::fs::File::open(&self.path)?;
         f.seek(SeekFrom::Start(self.offset))?;
@@ -66,6 +68,17 @@ impl Follow {
         self.offset += (last_nl + 1) as u64;
         Ok(())
     }
+
+    /// Run [`Self::read_new_lines`] on the blocking pool so the file
+    /// I/O never stalls a Tokio worker (review note on PR #88).
+    async fn read_new_lines_blocking(mut self) -> (Self, std::io::Result<()>) {
+        tokio::task::spawn_blocking(move || {
+            let result = self.read_new_lines();
+            (self, result)
+        })
+        .await
+        .expect("trace follow-reader task panicked")
+    }
 }
 
 fn is_run_finished(line: &str) -> bool {
@@ -86,8 +99,8 @@ fn is_run_finished(line: &str) -> bool {
 /// becomes one `trace` SSE event whose data is the raw JSON line. The
 /// stream ends after `run_finished`, or with a `timeout` event at the
 /// lifetime cap. Dropping the consumer (client disconnect) drops the
-/// stream and the file handle with it — there is no detached task to
-/// leak.
+/// stream and the file handle with it — no long-lived task survives
+/// the connection (each poll's read is a one-shot `spawn_blocking`).
 pub fn live_stream(run_dir: PathBuf) -> impl Stream<Item = Result<SseEvent, Infallible>> {
     let follow = Follow {
         path: run_dir.join("trace.jsonl"),
@@ -108,7 +121,9 @@ pub fn live_stream(run_dir: PathBuf) -> impl Stream<Item = Result<SseEvent, Infa
             if follow.done {
                 return None;
             }
-            if let Err(e) = follow.read_new_lines() {
+            let (returned, result) = follow.read_new_lines_blocking().await;
+            follow = returned;
+            if let Err(e) = result {
                 let evt = SseEvent::default().event("error").data(e.to_string());
                 return Some((Ok(evt), None));
             }

@@ -310,6 +310,94 @@ async fn spa_index_is_served_at_root_and_as_deep_link_fallback() {
     assert_eq!(fallback, body);
 }
 
+/// PR #88 review: a run with no parseable `started_at` (empty trace)
+/// must sort to the bottom of the list, not float to the top.
+#[tokio::test]
+async fn runs_with_no_timestamp_sort_last() {
+    let tmp = tempfile::tempdir().unwrap();
+    let empty_dir = tmp.path().join("01J0000000000000000000000E");
+    std::fs::create_dir_all(&empty_dir).unwrap();
+    std::fs::write(empty_dir.join("trace.jsonl"), b"").unwrap();
+    common::write_passing_run(
+        &tmp.path().join("01J0000000000000000000000A"),
+        "verifications/x.yml",
+    );
+
+    let (_, json) = get_json(EvidenceReader::new(tmp.path()), "/api/runs").await;
+    let rows = json.as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["run_id"], "01J0000000000000000000000A");
+    assert_eq!(rows[1]["run_id"], "01J0000000000000000000000E");
+    assert_eq!(rows[1]["started_at"], Value::Null);
+}
+
+/// PR #88 review: when a malformed trace reuses one check id under
+/// two criteria, the first `step_started` owns it — the check is
+/// listed once, its verdict lands only there, and the colliding pair
+/// is not addressable.
+#[tokio::test]
+async fn colliding_check_ids_attribute_to_the_first_owner() {
+    use duhem_evidence::{EventPayload, EvidenceWriter, StepOutcome, VerdictState, run_started};
+    use std::collections::BTreeMap;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let run_dir = tmp.path().join("01J0000000000000000000000F");
+    let mut w = EvidenceWriter::new(&run_dir, "verifications/dup.yml").unwrap();
+    w.append(run_started("verifications/dup.yml", BTreeMap::new()))
+        .unwrap();
+    for criterion in ["AC-1", "AC-2"] {
+        w.append(EventPayload::StepStarted {
+            criterion_id: criterion.into(),
+            check_id: "DUP".into(),
+            step_index: 0,
+            uses: "api/call".into(),
+            with: BTreeMap::new(),
+        })
+        .unwrap();
+        w.append(EventPayload::StepFinished {
+            step_index: 0,
+            outcome: StepOutcome::Ok,
+        })
+        .unwrap();
+    }
+    w.append(EventPayload::CheckFinished {
+        check_id: "DUP".into(),
+        verdict: VerdictState::Pass,
+    })
+    .unwrap();
+    w.append(EventPayload::RunFinished {
+        verdict: VerdictState::Pass,
+    })
+    .unwrap();
+    w.finish().unwrap();
+
+    let reader = EvidenceReader::new(tmp.path());
+    let (_, detail) = get_json(reader.clone(), "/api/runs/01J0000000000000000000000F").await;
+    let criteria = detail["criteria"].as_array().unwrap();
+    let ac1 = criteria.iter().find(|c| c["id"] == "AC-1").unwrap();
+    assert_eq!(ac1["checks"][0]["id"], "DUP");
+    assert_eq!(ac1["checks"][0]["verdict"], "pass");
+    // The colliding second criterion does not list (or get the
+    // verdict of) the check it doesn't own.
+    if let Some(ac2) = criteria.iter().find(|c| c["id"] == "AC-2") {
+        assert!(ac2["checks"].as_array().unwrap().is_empty());
+    }
+
+    let (status, _) = get_json(
+        reader.clone(),
+        "/api/runs/01J0000000000000000000000F/checks/AC-2::DUP",
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, check) = get_json(
+        reader,
+        "/api/runs/01J0000000000000000000000F/checks/AC-1::DUP",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(check["verdict"], "pass");
+}
+
 /// #85 Test bullet: the verdict the reader surfaces is the verdict
 /// `duhem_evidence::replay` reconstructs — the dashboard shows the
 /// judge's verdict, never its own.

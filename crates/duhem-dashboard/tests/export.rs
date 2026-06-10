@@ -75,6 +75,62 @@ fn export_produces_a_self_contained_tree() {
     assert_eq!(check["artifacts"][0]["url"], artifact_rel);
 }
 
+/// A trace whose criterion / check ids carry path separators or `..`
+/// must not be able to write outside the export root (PR #88 review).
+#[test]
+fn export_refuses_traversal_shaped_ids() {
+    use duhem_evidence::{EventPayload, EvidenceWriter, StepOutcome, VerdictState, run_started};
+    use std::collections::BTreeMap;
+
+    let evidence = tempfile::tempdir().unwrap();
+    let run_dir = evidence.path().join("01J0000000000000000000000E");
+    let mut w = EvidenceWriter::new(&run_dir, "verifications/evil.yml").unwrap();
+    w.append(run_started("verifications/evil.yml", BTreeMap::new()))
+        .unwrap();
+    w.append(EventPayload::StepStarted {
+        criterion_id: "../../escape".into(),
+        check_id: "../pwn".into(),
+        step_index: 0,
+        uses: "api/call".into(),
+        with: BTreeMap::new(),
+    })
+    .unwrap();
+    w.append(EventPayload::StepFinished {
+        step_index: 0,
+        outcome: StepOutcome::Ok,
+    })
+    .unwrap();
+    w.append(EventPayload::CheckFinished {
+        check_id: "../pwn".into(),
+        verdict: VerdictState::Pass,
+    })
+    .unwrap();
+    w.append(EventPayload::CriterionFinished {
+        criterion_id: "../../escape".into(),
+        verdict: VerdictState::Pass,
+    })
+    .unwrap();
+    w.append(EventPayload::RunFinished {
+        verdict: VerdictState::Pass,
+    })
+    .unwrap();
+    w.finish().unwrap();
+
+    // Export into a subdirectory so an escape would land in a sibling
+    // we can observe.
+    let outer = tempfile::tempdir().unwrap();
+    let out = outer.path().join("site");
+    let result = export(&EvidenceReader::new(evidence.path()), &out);
+    assert!(result.is_err(), "traversal-shaped ids must fail the export");
+    let stray: Vec<_> = std::fs::read_dir(outer.path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .filter(|n| n != "site")
+        .collect();
+    assert!(stray.is_empty(), "files escaped the export root: {stray:?}");
+}
+
 /// #87 Test bullet: no absolute URLs anywhere in the exported JSON —
 /// the tree must work under any base path.
 #[test]

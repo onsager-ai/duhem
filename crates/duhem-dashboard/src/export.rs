@@ -40,7 +40,7 @@ pub fn export(reader: &EvidenceReader, out: &Path) -> anyhow::Result<ExportStats
     fs::create_dir_all(out).with_context(|| format!("create {}", out.display()))?;
 
     for (name, bytes) in spa_assets() {
-        write_file(&out.join(&name), &bytes)?;
+        write_file(out, &name, &bytes)?;
         stats.spa_files += 1;
     }
 
@@ -48,10 +48,7 @@ pub fn export(reader: &EvidenceReader, out: &Path) -> anyhow::Result<ExportStats
     for entry in &mut list {
         freeze_live(entry);
     }
-    write_file(
-        &out.join("api/runs.json"),
-        &serde_json::to_vec_pretty(&list)?,
-    )?;
+    write_file(out, "api/runs.json", &serde_json::to_vec_pretty(&list)?)?;
 
     for run_id in leaf_run_ids(&list) {
         export_run(reader, out, &run_id, &mut stats)?;
@@ -70,7 +67,8 @@ fn export_run(
     };
     detail.live = false;
     write_file(
-        &out.join(format!("api/runs/{run_id}.json")),
+        out,
+        &format!("api/runs/{run_id}.json"),
         &serde_json::to_vec_pretty(&detail)?,
     )?;
 
@@ -78,7 +76,7 @@ fn export_run(
         .locate_run(run_id)
         .context("run located a moment ago vanished")?;
     let trace = fs::read(run_dir.join("trace.jsonl"))?;
-    write_file(&out.join(format!("api/runs/{run_id}/trace.jsonl")), &trace)?;
+    write_file(out, &format!("api/runs/{run_id}/trace.jsonl"), &trace)?;
     stats.runs += 1;
 
     for criterion in &detail.criteria {
@@ -94,17 +92,18 @@ fn export_run(
                 let ext = extension_for(sniff_content_type(&bytes));
                 debug_assert_eq!(mime, sniff_content_type(&bytes));
                 let rel = format!("run/{run_id}/artifact/{}.{ext}", artifact.id);
-                write_file(&out.join(&rel), &bytes)?;
+                write_file(out, &rel, &bytes)?;
                 // Relative to the export root — the SPA fetches it
                 // relative to the document base.
                 artifact.url = rel;
                 stats.artifacts += 1;
             }
             write_file(
-                &out.join(format!(
+                out,
+                &format!(
                     "api/runs/{run_id}/checks/{}::{}.json",
                     criterion.id, check.id
-                )),
+                ),
                 &serde_json::to_vec_pretty(&check_detail)?,
             )?;
             stats.checks += 1;
@@ -133,10 +132,23 @@ fn freeze_live(entry: &mut RunsListEntry) {
     }
 }
 
-fn write_file(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+/// Write `rel` under `out`, refusing any path that could escape the
+/// export root. Several `rel` segments are evidence-derived strings
+/// (run dir names, criterion / check ids from the trace), so a
+/// malicious or corrupted trace must not be able to smuggle `..`,
+/// an absolute path, or a drive prefix into a write location.
+fn write_file(out: &Path, rel: &str, bytes: &[u8]) -> anyhow::Result<()> {
+    let rel_path = Path::new(rel);
+    let escapes = rel_path
+        .components()
+        .any(|c| !matches!(c, std::path::Component::Normal(_)));
+    if escapes || rel.is_empty() {
+        anyhow::bail!("refusing to export path {rel:?}: it would escape the output directory");
+    }
+    let path = out.join(rel_path);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, bytes).with_context(|| format!("write {}", path.display()))?;
+    fs::write(&path, bytes).with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }

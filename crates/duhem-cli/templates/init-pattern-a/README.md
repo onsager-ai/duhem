@@ -74,7 +74,7 @@ duhem run {{PATH}}/duhem.yml --filter AC-1
   `.claude/skills/verification-authoring/SKILL.md` in the Duhem
   repo).
 - Worked dogfood example:
-  `verifications/onsager-dashboard-create-project/`.
+  `verifications/onsager-dashboard-create-spec-plan/`.
 - Product spec: `docs/duhem-spec.md` §7 (Core Concepts), §8
   (Holistic Verification Principle), §10 (Verification
   Definition).

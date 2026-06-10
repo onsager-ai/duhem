@@ -89,7 +89,7 @@ mechanically.
 ```
 
 Start every new Verification Definition with `duhem init`; don't
-copy-paste from `verifications/onsager-dashboard-create-project/`
+copy-paste from `verifications/onsager-dashboard-create-spec-plan/`
 or hand-write a fresh tree from scratch. The skeleton bakes the
 criteria-vs-checks two-document discipline into the first commit
 and gives you a passing run to confirm your environment works

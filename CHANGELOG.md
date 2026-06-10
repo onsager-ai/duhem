@@ -37,6 +37,12 @@ criteria) lives in the spec issue that introduced
   sanitized child env. (#50)
 - [clarifying] Phase 0 status sync across README, CLAUDE.md,
   dev-process skill, justfile, spec §14, Appendix D. (#62)
+- [clarifying] Refreshed the Onsager dogfood VD: retired
+  `onsager-dashboard-create-project` (its target feature was removed
+  from Onsager) and replaced it with
+  `onsager-dashboard-create-spec-plan`, targeting the workspace-scoped
+  Create Plan flow. No schema surface touched — existing `ui/*`
+  actions only. (#79)
 
 ## v0.1.0 — unreleased
 

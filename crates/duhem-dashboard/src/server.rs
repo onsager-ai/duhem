@@ -1,0 +1,177 @@
+//! Axum router for the dashboard: the #53/#85 JSON API, the #84 live
+//! SSE endpoint, and a fallthrough that serves the embedded SPA
+//! bundle (#86).
+//!
+//! Every handler re-reads the evidence directory on each request —
+//! the MVP's hot-reload posture. The server owns no mutable state and
+//! never invokes the runtime or judge.
+
+use axum::Router;
+use axum::extract::{Path, State};
+use axum::http::{StatusCode, Uri, header};
+use axum::response::sse::{KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
+use rust_embed::RustEmbed;
+use serde_json::json;
+
+use crate::live::live_stream;
+use crate::reader::{EvidenceReader, ReaderError};
+
+/// The Vite SPA bundle (#86), embedded at compile time. `build.rs`
+/// guarantees the folder exists (placeholder index when the SPA
+/// hasn't been built).
+#[derive(RustEmbed)]
+#[folder = "web/dist"]
+struct Assets;
+
+pub fn router(reader: EvidenceReader) -> Router {
+    Router::new()
+        .route("/api/runs", get(list_runs))
+        .route("/api/runs.json", get(list_runs))
+        .route("/api/runs/{run_id}", get(run_detail))
+        .route("/api/runs/{run_id}/checks/{pair}", get(check_detail))
+        .route("/api/runs/{run_id}/trace.jsonl", get(raw_trace))
+        .route("/api/runs/{run_id}/artifact/{artifact_id}", get(artifact))
+        .route("/api/runs/{run_id}/live", get(live))
+        .fallback(get(static_asset))
+        .with_state(reader)
+}
+
+fn error_response(status: StatusCode, msg: impl Into<String>) -> Response {
+    (status, axum::Json(json!({ "error": msg.into() }))).into_response()
+}
+
+fn not_found(what: &str) -> Response {
+    error_response(StatusCode::NOT_FOUND, format!("{what} not found"))
+}
+
+impl IntoResponse for ReaderError {
+    fn into_response(self) -> Response {
+        let status = match self {
+            ReaderError::BadArtifactId(_) => StatusCode::BAD_REQUEST,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        error_response(status, self.to_string())
+    }
+}
+
+/// The SPA fetches `.json`-suffixed paths so one fetch layer works
+/// against both the live server and a static export (where `api/runs`
+/// must be a directory *and* a document — impossible on a plain file
+/// host). The server accepts both spellings; the suffix-less paths
+/// are the #53 contract, the `.json` twins are the static-export
+/// mirror.
+fn strip_json_suffix(s: &str) -> &str {
+    s.strip_suffix(".json").unwrap_or(s)
+}
+
+async fn list_runs(State(reader): State<EvidenceReader>) -> Response {
+    axum::Json(reader.list()).into_response()
+}
+
+async fn run_detail(State(reader): State<EvidenceReader>, Path(run_id): Path<String>) -> Response {
+    match reader.run_detail(strip_json_suffix(&run_id)) {
+        Ok(Some(detail)) => axum::Json(detail).into_response(),
+        Ok(None) => not_found("run"),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn check_detail(
+    State(reader): State<EvidenceReader>,
+    Path((run_id, pair)): Path<(String, String)>,
+) -> Response {
+    let pair = strip_json_suffix(&pair);
+    let Some((criterion_id, check_id)) = pair.split_once("::") else {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "expected <criterion-id>::<check-id>",
+        );
+    };
+    match reader.check_detail(&run_id, criterion_id, check_id) {
+        Ok(Some(detail)) => axum::Json(detail).into_response(),
+        Ok(None) => not_found("check"),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn raw_trace(State(reader): State<EvidenceReader>, Path(run_id): Path<String>) -> Response {
+    let Some(dir) = reader.locate_run(&run_id) else {
+        return not_found("run");
+    };
+    match std::fs::read(dir.join("trace.jsonl")) {
+        Ok(bytes) => ([(header::CONTENT_TYPE, "application/x-ndjson")], bytes).into_response(),
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+async fn artifact(
+    State(reader): State<EvidenceReader>,
+    Path((run_id, artifact_id)): Path<(String, String)>,
+) -> Response {
+    match reader.artifact(&run_id, &artifact_id) {
+        Ok(Some((bytes, mime))) => ([(header::CONTENT_TYPE, mime)], bytes).into_response(),
+        Ok(None) => not_found("artifact"),
+        Err(e) => e.into_response(),
+    }
+}
+
+/// `GET /api/runs/:run_id/live` (#84): replay-then-follow SSE over
+/// the run's trace. Available for finished runs too — the stream then
+/// replays to `run_finished` and closes immediately, which keeps the
+/// client logic mode-free.
+async fn live(State(reader): State<EvidenceReader>, Path(run_id): Path<String>) -> Response {
+    let Some(dir) = reader.locate_run(&run_id) else {
+        return not_found("run");
+    };
+    Sse::new(live_stream(dir))
+        .keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)))
+        .into_response()
+}
+
+/// Serve the embedded SPA. Unknown non-`/api` paths fall back to
+/// `index.html` so client-side routes deep-link cleanly.
+async fn static_asset(uri: Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    if path.starts_with("api/") {
+        return not_found("route");
+    }
+    let candidate = if path.is_empty() { "index.html" } else { path };
+    let (file, name) = match Assets::get(candidate) {
+        Some(f) => (f, candidate),
+        None => match Assets::get("index.html") {
+            Some(f) => (f, "index.html"),
+            None => return not_found("asset"),
+        },
+    };
+    (
+        [(header::CONTENT_TYPE, mime_for(name))],
+        file.data.into_owned(),
+    )
+        .into_response()
+}
+
+fn mime_for(path: &str) -> &'static str {
+    match path.rsplit_once('.').map(|(_, ext)| ext) {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "text/javascript",
+        Some("css") => "text/css",
+        Some("json") => "application/json",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("ico") => "image/x-icon",
+        Some("map") => "application/json",
+        Some("txt") => "text/plain; charset=utf-8",
+        Some("woff2") => "font/woff2",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Every embedded SPA asset, for the static exporter (#87). Returns
+/// `(relative path, bytes)` pairs.
+pub fn spa_assets() -> Vec<(String, Vec<u8>)> {
+    Assets::iter()
+        .filter_map(|name| Assets::get(&name).map(|f| (name.to_string(), f.data.into_owned())))
+        .collect()
+}

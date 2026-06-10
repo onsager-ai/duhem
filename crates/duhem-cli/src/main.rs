@@ -9,6 +9,7 @@
 //! gates — they make iteration on Verification Definitions
 //! practical.
 
+mod dashboard;
 mod filter;
 mod init;
 mod inputs;
@@ -154,6 +155,12 @@ enum Cmd {
         #[arg(long = "keep-env", default_value_t = false)]
         keep_env: bool,
     },
+    /// Browse run evidence in a read-only web dashboard.
+    ///
+    /// Shells out to the separate `duhem-dashboard` binary (specs
+    /// #53 / #87); `dashboard.rs` owns binary resolution and the
+    /// serve/export surface.
+    Dashboard(dashboard::DashboardOpts),
 }
 
 fn main() -> ExitCode {
@@ -176,6 +183,7 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Some(Cmd::Dashboard(opts)) => dashboard::run(&opts.into()),
         Some(Cmd::Run {
             path,
             inputs,

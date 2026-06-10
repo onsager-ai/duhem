@@ -1,0 +1,68 @@
+# Dashboard lane (specs #85/#86/#87): builds the Vite SPA, runs its
+# component tests, then re-runs the duhem-dashboard crate tests with
+# the *real* bundle embedded (the fast `rust` lane in ci.yml covers
+# the same tests against the build.rs placeholder), and finishes with
+# the `duhem dashboard` end-to-end that boots the actual server.
+#
+# Kept as a separate workflow with a paths filter so the Node
+# toolchain only spins up when the dashboard actually changed
+# (per the #86 plan).
+
+name: dashboard
+
+on:
+  pull_request:
+    paths:
+      - 'crates/duhem-dashboard/**'
+      - 'crates/duhem-cli/src/dashboard.rs'
+      - 'crates/duhem-cli/tests/dashboard_cmd.rs'
+      - '.github/workflows/dashboard.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/duhem-dashboard/**'
+      - 'crates/duhem-cli/src/dashboard.rs'
+      - 'crates/duhem-cli/tests/dashboard_cmd.rs'
+      - '.github/workflows/dashboard.yml'
+
+concurrency:
+  group: dashboard-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  dashboard:
+    name: dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: crates/duhem-dashboard/web/package-lock.json
+
+      - name: SPA install + component tests
+        working-directory: crates/duhem-dashboard/web
+        run: |
+          npm ci
+          npm test
+
+      - name: SPA build
+        working-directory: crates/duhem-dashboard/web
+        run: npm run build
+
+      - name: crate tests (real bundle embedded)
+        run: cargo test -p duhem-dashboard
+
+      - name: duhem dashboard end-to-end
+        run: |
+          cargo build -p duhem-dashboard -p duhem-cli
+          cargo test -p duhem-cli --test dashboard_cmd -- --ignored

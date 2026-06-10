@@ -8,6 +8,7 @@ members = [
     "crates/duhem-evidence",
     "crates/duhem-summary",
     "crates/duhem-cli",
+    "crates/duhem-dashboard",
     "crates/duhem-reporter-pretty",
     "crates/duhem-reporter-junit",
     "xtask",
@@ -41,3 +42,4 @@ base64 = "0.22"
 regex = "1"
 toml = "0.8"
 futures = "0.3"
+rust-embed = "8"

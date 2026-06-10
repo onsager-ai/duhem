@@ -6,11 +6,12 @@ acceptance criteria, translates them into mechanically-judged checks
 that exercise the real delivery web (code + prompts + tools + data +
 runtime), and gates merge/deploy on the verdict.
 
-> **Status:** Phase 0 — Foundation. The Cargo workspace ships nine
+> **Status:** Phase 0 — Foundation. The Cargo workspace ships ten
 > product crates (`duhem-cli`, `duhem-runtime`, `duhem-judge`,
 > `duhem-schema`, `duhem-actions`, `duhem-evidence`, `duhem-summary`,
-> `duhem-reporter-pretty`, `duhem-reporter-junit`) plus an internal
-> `xtask` build helper; the CLI exposes `init` / `run` / `validate` /
+> `duhem-dashboard`, `duhem-reporter-pretty`, `duhem-reporter-junit`)
+> plus an internal `xtask` build helper; the CLI exposes `init` /
+> `run` / `validate` / `dashboard` (serve + static export; live SSE) /
 > `--version`; the `ui/*` and `api/*` action families are implemented
 > (`ui/navigate`, `ui/click`, `ui/type`, `ui/select`, `ui/assert-*`,
 > `api/call`, `api/observe`); environment provisioning (`up:` /
@@ -62,8 +63,9 @@ Changes to those four bullets are spec-level changes to
    sister-product relationship.
 3. **`crates/`** — the shipped implementation. `duhem-schema`,
    `duhem-cli`, `duhem-runtime`, `duhem-judge`, `duhem-actions`,
-   `duhem-evidence`, `duhem-summary`, `duhem-reporter-pretty`,
-   `duhem-reporter-junit`. Each crate's `src/lib.rs` (or `main.rs`)
+   `duhem-evidence`, `duhem-summary`, `duhem-dashboard`,
+   `duhem-reporter-pretty`, `duhem-reporter-junit`. Each crate's
+   `src/lib.rs` (or `main.rs`)
    is the concrete answer to "what does §10 / §11 actually look like
    today?".
 4. **`verifications/`** — Verification Definitions in-tree. The

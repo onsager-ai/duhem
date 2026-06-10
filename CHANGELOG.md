@@ -20,6 +20,12 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [clarifying] Added `duhem dashboard` (serve + `export`) — the
+  `duhem-dashboard` crate: a read-only viewer over `.duhem/runs/`
+  evidence (JSON API + Vite/React SPA + static export + SSE live
+  streaming of in-progress runs). Consumes the existing evidence (#10)
+  and `RunSummary` (#34) shapes as-is; no VD / trace / judge schema
+  change. (#53, #84, #85, #86, #87)
 - [additive] Root manifest schema (`manifest_version: 1`) and multi-leaf
   `duhem run`; `duhem_schema::load` polymorphic on leaf vs manifest vs
   directory; `aggregate_run_set` / `RunSetVerdict` / `RunSetSummary`;

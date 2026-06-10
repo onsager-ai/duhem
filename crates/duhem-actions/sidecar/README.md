@@ -22,6 +22,29 @@ The Rust runtime locates this directory via `CARGO_MANIFEST_DIR`
 (`crates/duhem-actions/sidecar`); override with `DUHEM_SIDECAR_DIR`, and
 the Node binary with `DUHEM_NODE`.
 
+## Using a system browser (when the bundled Chromium is unavailable)
+
+By default the sidecar launches Playwright's own bundled Chromium. On a
+host Playwright ships no prebuilt browser for, `npx playwright install
+chromium` hard-refuses (e.g. `Playwright does not support chromium on
+<os>`). Point the sidecar at a browser already on the host instead, via
+env read at launch (spec [#82](https://github.com/onsager-ai/duhem/issues/82)):
+
+- `DUHEM_BROWSER_EXECUTABLE` — absolute path to a Chromium/Chrome binary.
+- `DUHEM_BROWSER_CHANNEL` — a Playwright channel (e.g. `chrome`).
+- `DUHEM_BROWSER_ARGS` — extra launch args, space-separated (e.g.
+  `--no-sandbox` inside a container).
+
+Unset → unchanged behavior. The sidecar inherits the `duhem` process
+env, so export these before `duhem run`. Example (snap Chromium in a
+container):
+
+```sh
+export DUHEM_BROWSER_EXECUTABLE=/snap/bin/chromium
+export DUHEM_BROWSER_ARGS="--no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage"
+duhem run <verification>.yml
+```
+
 ## Type-checking
 
 `index.mjs` is plain ESM (Node runs it with no build step), but it is

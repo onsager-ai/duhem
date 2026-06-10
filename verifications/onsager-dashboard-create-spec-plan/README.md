@@ -103,13 +103,28 @@ dashboard's workflow builder or chat — before re-running. Confirm a
 kind is present with the `list_workflows_v2` MCP tool; the kind name
 must match the VD's `spec_kind` input (default `Issue`).
 
-> First-run checklist (the spec's Test §, #79): on the first live
-> run, confirm three selectors that were mined from Onsager's smoke
-> test rather than a running browser — the kind-combobox **option**
-> role (`role: option`), the **Spec Plans list** item markup
-> (`role: listitem` + plan-id text), and the **dialog**-scoped confirm
-> button. Adjust the locators in `duhem.yml` if the live DOM differs;
-> the criteria in `criteria.md` do not change.
+All three checks were confirmed green on a live run against the real
+`just dev` stack — AC-1/AC-2/AC-3 `pass`, with two fixture plans
+persisted and read back. That run also confirmed the three selectors
+that had been mined from Onsager's smoke test rather than a running
+browser: the kind-combobox **option** role (`role: option`), the **Spec
+Plans list** item markup (`role: listitem` + plan-id text), and the
+**dialog**-scoped confirm button. If Onsager later restructures the DOM,
+adjust the locators in `duhem.yml`; the criteria in `criteria.md` do
+not change.
+
+### Running on a host without Playwright's bundled Chromium
+
+The `ui/*` checks drive a browser through the Playwright sidecar. Where
+Playwright ships no prebuilt browser (e.g. a very new OS), point the
+sidecar at a system browser (spec #82) — unset, behavior is unchanged:
+
+```sh
+export DUHEM_BROWSER_EXECUTABLE=/snap/bin/chromium
+export DUHEM_BROWSER_ARGS="--no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage"
+duhem run verifications/onsager-dashboard-create-spec-plan/duhem.yml \
+  --inputs plan_id="duhem-fixture-$(uuidgen)"
+```
 
 ## Cross-repo seam
 

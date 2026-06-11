@@ -20,6 +20,15 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [clarifying] §10–§11 audit (#63) clarifying bundle: trued six spec
+  prose claims to the shipped code — §10.1 `--filter` example
+  (`login::*` + three-axis grammar note, D-1), §10.5 `with:` typing
+  (per-action `With` struct, untyped dispatch boundary, D-14), §10.6
+  closed inconclusive-cause catalog (D-16), §10.8 extensibility as a
+  Phase-2+ goal with a closed v0.1 catalog (D-20), §11.2 judge-logic
+  documentation pointer (§10.6/§10.7 + crate comments, D-23) and the
+  enterprise self-hosted judge as Phase-2+ (D-24). Docs only; no
+  schema change. Breaking/additive drift tracked in #90–#95. (#63)
 - [clarifying] Pre-push skill sync: replaced the stale "Phase 0 is
   near-empty / toolchain intentionally thinner" framing in
   `.claude/skills/duhem-pre-push/SKILL.md` with the recipes Duhem

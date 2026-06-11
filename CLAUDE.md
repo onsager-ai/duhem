@@ -111,8 +111,8 @@ just points at them.
 | Decide what to build           | `.claude/skills/duhem-dev-process`       |
 | Write the spec                 | `issue-spec` (global, from `onsager-ai/dev-skills`) |
 | Author Verification Definitions| `.claude/skills/verification-authoring`  |
-| Pre-push checks                | `.claude/skills/duhem-pre-push`          |
-| PR triage / review / merge     | `.claude/skills/duhem-pr-lifecycle`      |
+| Pre-push checks                | `pre-push` (global, from `onsager-ai/dev-skills`); Duhem gate/collision overlay in `duhem-dev-process` |
+| PR triage / review / merge     | `pr-lifecycle` (global); CI-failure table in `duhem-dev-process`, taxonomy from `ci-triage` |
 | Dogfood on Onsager             | `.claude/skills/onsager-dogfood`         |
 
 Hard rule: **no spec, no PR**, unless the PR is labeled `trivial`

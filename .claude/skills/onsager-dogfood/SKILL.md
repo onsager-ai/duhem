@@ -39,7 +39,7 @@ discipline. They are **parallel, not shared**.
 | Duhem schema, CLI, runtime, judge, dashboard, integrations    | `onsager-ai/duhem`        | All Duhem-side skills (`duhem-*`, `issue-spec`, `verification-authoring`) |
 | Verification Definitions that exercise Onsager features       | `onsager-ai/duhem`        | `verification-authoring` (`area:dogfood`)                          |
 | Onsager features themselves (forge, stiglab, synodic, dashboard, etc.) | `onsager-ai/onsager` | Onsager's `onsager-dev-process`, `issue-spec`, `dashboard-ui`, etc. |
-| The GitHub Action / webhook that surfaces Duhem verdicts on Onsager PRs | `onsager-ai/onsager` (consumer side) + `onsager-ai/duhem` (publisher side) | Onsager-side: `onsager-pr-lifecycle`. Duhem-side: `duhem-pr-lifecycle` + this skill. |
+| The GitHub Action / webhook that surfaces Duhem verdicts on Onsager PRs | `onsager-ai/onsager` (consumer side) + `onsager-ai/duhem` (publisher side) | Both sides use the global `pr-lifecycle` skill (with each repo's overlay); Duhem-side also this skill. |
 | Spec for "Duhem ought to be able to verify behavior X on Onsager" | `onsager-ai/duhem`     | `issue-spec` here, label `area:dogfood`                            |
 | Spec for "Onsager exposes hook Y so Duhem can observe it"     | `onsager-ai/onsager`      | Onsager's `issue-spec`                                             |
 
@@ -178,8 +178,8 @@ the work needs to migrate.
 | [`duhem-dev-process`](../duhem-dev-process/SKILL.md)                                   | Top-level SDD loop on Duhem; this skill is invoked from its delegation map.         |
 | [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) | Files dogfood specs (`area:dogfood`). Installed globally from `onsager-ai/dev-skills`.       |
 | [`verification-authoring`](../verification-authoring/SKILL.md)                         | Writes the Verification Definitions this skill registers.                           |
-| [`duhem-pr-lifecycle`](../duhem-pr-lifecycle/SKILL.md)                                 | Manages the Duhem-side PR for a dogfood change.                                     |
-| Onsager's `onsager-dev-process`, `issue-spec`, `onsager-pr-lifecycle` (other repo)     | Manage the Onsager-side change when work spans the seam. Don't invoke from here — the Onsager session has its own loaded skills. |
+| [`pr-lifecycle`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pr-lifecycle/SKILL.md) (global) | Manages the Duhem-side PR for a dogfood change.                                     |
+| Onsager's `onsager-dev-process`, `issue-spec`, global `pr-lifecycle` (other repo)      | Manage the Onsager-side change when work spans the seam. Don't invoke from here — the Onsager session has its own loaded skills. |
 
 ## References
 

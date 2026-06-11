@@ -1,6 +1,6 @@
 ---
 name: duhem-dev-process
-description: The end-to-end spec-issue-driven dev loop for Duhem — spec → branch → implement → PR → merge → closure. Use when asked "how do I start work", "what's the process", "SDD loop", "spec-driven development", "how do we ship a change on Duhem", "from scratch what do I do", or when you're about to begin a non-trivial change on the Duhem repo and haven't yet decided how to split spec/PR. Delegates to `issue-spec` (spec writing), `duhem-pre-push` (pre-push checks), `duhem-pr-lifecycle` (post-push), `verification-authoring` (authoring Verification Definitions for the platform itself), and `onsager-dogfood` (running Duhem against the Onsager repo).
+description: The end-to-end spec-issue-driven dev loop for Duhem — spec → branch → implement → PR → merge → closure. Use when asked "how do I start work", "what's the process", "SDD loop", "spec-driven development", "how do we ship a change on Duhem", "from scratch what do I do", or when you're about to begin a non-trivial change on the Duhem repo and haven't yet decided how to split spec/PR. Delegates to `issue-spec` (spec writing), the global `pre-push` (pre-push checks) and `pr-lifecycle` (post-push) skills, `verification-authoring` (authoring Verification Definitions for the platform itself), and `onsager-dogfood` (running Duhem against the Onsager repo). This skill carries Duhem's overlay for `pre-push` / `pr-lifecycle` — the check gate, merge-collision patterns, and CI-failure table.
 ---
 
 # duhem-dev-process
@@ -38,13 +38,13 @@ the `xtask` gates already enforce.
      │   branch + implement                                            │
      │        │                                                        │
      │        ↓                                                        │
-     │   duhem-pre-push skill  ← merge preview, build/test (when wired)│
+     │   pre-push skill        ← merge preview, build/test (when wired)│
      │        │                                                        │
      │        ↓                                                        │
      │   git push → open PR (body: "Closes #N" or "Part of #N")        │
      │        │                                                        │
      │        ↓                                                        │
-     │   duhem-pr-lifecycle skill  ← CI triage, review, iterate        │
+     │   pr-lifecycle skill    ← CI triage, review, iterate            │
      │        │                                                        │
      │        ↓                                                        │
      │   merge                                                         │
@@ -70,7 +70,7 @@ on `onsager-ai/duhem` with:
 
 - `## Overview`, `## Design`, `## Plan`, `## Test`, `## Alignment`, `## Notes`
 - Open questions live under `## Alignment` as a `### Open questions`
-  subsection (omit if none) — `duhem-pre-push` blocks on unresolved
+  subsection (omit if none) — `pre-push` blocks on unresolved
   items there.
 - Labels: `spec`, one type (`feat` / `fix` / `refactor` / `perf`),
   one or more `area:*`, one `priority:*`. The full area taxonomy
@@ -148,17 +148,11 @@ hatch to dodge tracking a real schema event.
 
 ### 4. Pre-push
 
-Trigger `duhem-pre-push` (or say "ready to push"). At Phase 0 the
-checklist is short:
-
-1. Sync `origin/main` into the branch (CI tests a merge preview, not
-   the branch alone). Resolve conflicts locally, never on the PR
-   web editor.
-2. Run whatever build/test exists in the repo at the time. If
-   nothing is wired yet, the step is a no-op — it grows as the CLI,
-   schema validator, and judge land.
-3. Verify a spec issue is linked, or that the PR will be labeled
-   `trivial`.
+Trigger the global `pre-push` skill (or say "ready to push"). It owns
+the generic flow — sync the merge preview, the conflict walkthrough,
+the spec-link check, the push. Duhem's overlay (the check gate, the
+collision patterns it should watch for) is in the "Pre-push & PR
+overlay" section at the bottom of this skill; `pre-push` reads it.
 
 Don't paper over warnings with `--no-verify`. If a hook fails,
 investigate.
@@ -176,7 +170,7 @@ PR body must begin with a linking line:
 
 Under `## Delivers`, list the Plan items this PR ticks (exact text
 from the spec's Plan). After merge, tick those checkboxes manually
-on the parent spec — see `duhem-pr-lifecycle`.
+on the parent spec — see `pr-lifecycle`.
 
 If the PR is genuinely trivial (typo, doc-only, one-line obvious
 fix), apply the `trivial` label and skip the spec-linking
@@ -191,12 +185,13 @@ ask.
 
 ### 6. During review
 
-Trigger `duhem-pr-lifecycle` (or say "triage PR" / "CI is failing"
-/ respond to a webhook). It covers:
+Trigger the global `pr-lifecycle` skill (or say "triage PR" / "CI is
+failing" / respond to a webhook). It covers:
 
-- CI triage: build / test / schema-validation failures.
+- CI triage: build / test / schema-validation failures (the Duhem
+  failure table is in the overlay section below).
 - Review-comment discipline: fix the code, don't reply per comment.
-- Webhook subscription to stream CI + review events.
+- Webhook subscription + the post-push CI sweep.
 
 ### 7. Merge
 
@@ -204,7 +199,7 @@ Trigger `duhem-pr-lifecycle` (or say "triage PR" / "CI is failing"
 - `Part of #N` / `Refs #N` PRs leave the spec open; tick the
   delivered Plan items manually on the parent spec, and if all
   sub-issues of a parent are closed, ping the parent. See
-  `duhem-pr-lifecycle`.
+  `pr-lifecycle`.
 - For schema-impacting PRs, also append the change to `CHANGELOG.md`
   under the next-version heading.
 
@@ -242,7 +237,7 @@ actually complete; use `Part of #N` for partial slices that leave
 items behind, then tick the delivered checkboxes manually on merge.
 If a multi-PR spec finishes via `Part of` PRs only, a human closes
 the parent once the last Plan item ticks. Plan-item ticks on merge
-are manual; `duhem-pr-lifecycle` covers the mechanics.
+are manual; `pr-lifecycle` covers the mechanics.
 
 ## Anti-patterns (don't)
 
@@ -256,7 +251,7 @@ are manual; `duhem-pr-lifecycle` covers the mechanics.
 - **Schema change without `## Schema impact` callout.** The pre-1.0
   schema's breaking-change rate is what determines when we OSS the
   spec; mis-tracking a change skews that signal.
-- **Skipping `duhem-pre-push`.** Even a thin checklist catches the
+- **Skipping `pre-push`.** Even a thin checklist catches the
   cheap mistakes.
 - **Shipping a CLI / schema feature without a worked example.** A
   feature that has no Verification Definition demonstrating it is
@@ -268,9 +263,9 @@ are manual; `duhem-pr-lifecycle` covers the mechanics.
 | Stage                                       | Skill / workflow                                                |
 |---------------------------------------------|-----------------------------------------------------------------|
 | Write the spec                              | [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) (installed globally from `onsager-ai/dev-skills`) |
-| Pre-push checks                             | [`duhem-pre-push`](../duhem-pre-push/SKILL.md)                  |
-| CI triage, review, iterate                  | [`duhem-pr-lifecycle`](../duhem-pr-lifecycle/SKILL.md)          |
-| On PR merge → tick Plan items               | [`duhem-pr-lifecycle`](../duhem-pr-lifecycle/SKILL.md) (manual) |
+| Pre-push checks                             | [`pre-push`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pre-push/SKILL.md) (global) + the overlay below |
+| CI triage, review, iterate                  | [`pr-lifecycle`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pr-lifecycle/SKILL.md) (global) + the overlay below |
+| On PR merge → tick Plan items               | [`pr-lifecycle`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pr-lifecycle/SKILL.md) (global, manual) |
 | Author Verification Definitions             | [`verification-authoring`](../verification-authoring/SKILL.md)  |
 | Run Duhem against the Onsager repo (dogfood)| [`onsager-dogfood`](../onsager-dogfood/SKILL.md)                |
 
@@ -283,3 +278,70 @@ the Onsager repo. The two only meet at the dogfood seam — see
 `onsager-dogfood` for what that means in practice (Duhem's
 verifications run against Onsager PRs; Onsager's PRs surface
 Duhem verdicts as a check).
+
+## Pre-push & PR overlay (for the global `pre-push` / `pr-lifecycle` skills)
+
+The global `pre-push` and `pr-lifecycle` skills carry the generic
+methodology. This is Duhem's repo-specific overlay — the gate command,
+the collision patterns to watch, and the CI-failure table they reference.
+
+### Check gate
+
+The default pre-push gate (exactly what reviewers and CI run) is:
+
+```bash
+just check        # = just lint (fmt-check + clippy -D warnings +
+                  #   xtask check-file-budget) then just test
+                  #   (cargo test --workspace)
+```
+
+Run it on the merged tree (after `pre-push` step 1), not the branch
+alone. Then add the gates the diff calls for:
+
+- **Schema-touching** (`crates/duhem-schema/**`, `crates/duhem-evidence/**`,
+  or a `SCHEMA_VERSION` bump):
+
+  ```bash
+  cargo run -p xtask -- schema-drift            # docs §10 ↔ code
+  cargo run -p xtask -- schema-changelog-check  # CHANGELOG.md touch gate
+  ```
+
+- **VD-touching**: run each modified Verification Definition through
+  `cargo run -p duhem-cli -- validate <path>`.
+- **UI-touching** (`crates/duhem-actions/**` `ui/*` or the Playwright
+  sidecar): `just test-ui` (the `#[ignore]`'d browser smoke suites;
+  `just check` skips them). Requires `npx playwright install chromium`
+  once per host.
+
+Treat any warning as a blocker; don't `#[allow(dead_code)]` / `@ts-ignore`
+past it.
+
+### Merge-collision patterns to watch
+
+- **`docs/duhem-spec.md`**: merge by section / by intent, not line-by-line.
+- **`CHANGELOG.md`**: both branches' entries land under the same
+  next-version heading — concatenate, don't pick one.
+- **Schema fixtures** (`crates/duhem-schema/fixtures/**`,
+  `crates/duhem-actions/tests/fixtures/**`): YAML key-order conflicts are
+  usually false alarms; re-validate via `duhem validate` or the owning
+  crate's tests.
+- **Action-type registry** (`crates/duhem-actions/`): both arms land;
+  check for name collisions explicitly.
+- **`Cargo.lock` / `package-lock.json`**: regenerate by re-running the
+  install / build, never hand-edit.
+
+### CI-failure table
+
+| Symptom | Usual cause |
+|---------|-------------|
+| Build fails on CI, passes locally | CI built the merge preview; main drifted. `git fetch origin main && git merge origin/main`. |
+| Schema validator rejects a VD fixture | Fixture authored against an older schema. Update it or document a migration. |
+| `CHANGELOG.md` lint fails | Schema-impact PR with no CHANGELOG entry. Add one before re-running. |
+| Doc-link check fails | A relative `docs/` link points outside the repo. Resolve to a full URL or fix the path. |
+
+### Schema-impact in the PR body
+
+If the linked spec is labeled `schema-impact`, the PR body must include a
+`## Schema impact` subsection (copy the spec's verbatim), and a breaking
+change must touch `CHANGELOG.md`. See the schema-stability discipline in
+§3 above.

@@ -20,6 +20,14 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [clarifying] Pre-push skill sync: replaced the stale "Phase 0 is
+  near-empty / toolchain intentionally thinner" framing in
+  `.claude/skills/duhem-pre-push/SKILL.md` with the recipes Duhem
+  actually runs — `just check` as the default gate, plus
+  `cargo xtask schema-drift` / `schema-changelog-check` (schema PRs),
+  `duhem validate` (VD PRs), and `just test-ui` (UI PRs); refreshed
+  the merge-collision patterns that referenced not-yet-existing
+  surfaces. Docs only; no schema change. (#70)
 - [clarifying] Added `duhem dashboard` (serve + `export`) — the
   `duhem-dashboard` crate: a read-only viewer over `.duhem/runs/`
   evidence (JSON API + Vite/React SPA + static export + SSE live

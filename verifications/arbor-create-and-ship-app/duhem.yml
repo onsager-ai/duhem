@@ -1,0 +1,182 @@
+# Arbor — create an app from a description, and ship it (dogfood)
+#
+# Duhem's second dogfood Verification Definition, against a real
+# Arbor feature end-to-end. Criteria prose: `./criteria.md`. Operator
+# setup: `./README.md`.
+#
+# Arbor (onsager-ai/arbor) is an "app factory": describe an app in
+# plain language and it generates, verifies, deploys, and ships a
+# working app. This VD verifies the golden path — describe → build →
+# ship — through the real Vite-built dashboard against the real
+# orchestrator and factory pipeline.
+#
+# Holistic posture (`docs/duhem-spec.md` §8): every check drives the
+# real dashboard against the real API and runs the real pipeline. The
+# only thing dialed down is cost/nondeterminism, not fidelity: Arbor's
+# DEFAULT mode is FakeAgent (no live LLM) + dry-run deploy drivers,
+# and the dry-run deploy stands up a REAL local preview server and
+# returns a clickable live URL (../arbor packages/factory/src/drivers/
+# dry-run.ts). So "the app shipped" is verified against a real
+# reachable deployment, not a mock.
+#
+# Selector / shape provenance (all from ../arbor source, not guessed):
+#   - composer textbox + "Build it" submit:
+#       packages/web/src/components/Composer.tsx
+#   - run-detail route `/runs/:runId` + live-preview link:
+#       packages/web/src/pages/RunPage.tsx,
+#       packages/web/src/components/run/PreviewPanel.tsx
+#   - POST /api/apps -> 201:
+#       packages/server/src/http/server.ts
+#   - default FakeAgent + dry-run, loopback no-auth:
+#       packages/factory/src/agent.ts, drivers/resolve.ts,
+#       packages/server/src/http/server.ts (LOCAL_ADMIN)
+# Confirmed against a live Arbor single-port server on the first run
+# (see ./README.md):
+#   - `role: textbox` alone addresses the composer (the only textbox on
+#     `/new`); `button "Build it"` is exact among the example chips.
+#   - the terminal-success signal is the live-preview link, whose text
+#     is the proxied relative path `/preview/live/` in single-port mode
+#     (the registrar rewrites the dry-run server URL to a relative
+#     proxy path). It is environment-coupled: a non-registrar / cloud
+#     `cli` deploy advertises an absolute host instead, so this locator
+#     text changes per environment.
+#
+# Default port is 4180, NOT Arbor's own default 4100: on the dev
+# machine Onsager (Duhem's first dogfood) runs on 4100 + 5173, and
+# Onsager's `/api/health` also returns 200 — so targeting 4100 would
+# silently drive Onsager and pass the readiness probe against the
+# wrong app. 4180 keeps the two dogfoods side by side.
+
+verification: Arbor — create an app from a description, and ship it
+
+# Operator-supplied environment provisioning (mechanism from
+# duhem-spec.md §9 stage 3 / the v1 environment block). `./scripts/
+# up.sh` builds Arbor's web bundle and boots the single-port server
+# (UI + API on :4100) in its default deterministic mode; `./scripts/
+# down.sh` tears it down. The readiness probe gates checks on Arbor's
+# public `/api/health` returning 200. The first-run `pnpm build` is
+# slow, hence the generous timeout. `--no-env-up` skips this block
+# when Arbor is already up; `--keep-env` skips teardown for triage.
+environment:
+  up: ./scripts/up.sh
+  down: ./scripts/down.sh
+  ready:
+    http:
+      url: $inputs.health_url
+      timeout: 180s
+
+inputs:
+  # Absolute URLs are passed whole, not composed — string
+  # interpolation isn't shipped (the runtime substitutes whole-string
+  # inputs only). Defaults assume the local single-port server on
+  # :4100 that `./scripts/up.sh` brings up.
+  health_url:
+    type: string
+    default: http://127.0.0.1:4180/api/health
+  new_app_url:
+    type: string
+    default: http://127.0.0.1:4180/new
+  create_api_url:
+    type: string
+    default: http://127.0.0.1:4180/api/apps
+  app_description:
+    type: string
+    default: A task tracker for my team with due dates and owners
+
+criteria:
+  - id: AC-1
+    description: |
+      A person can describe an app in plain language on the dashboard
+      and start building it. Submitting the description begins a build
+      run and takes the person to that run's page so they can watch it
+      progress. No errors are shown.
+    checks:
+      - id: AC-1.1
+        description: |
+          On the new-app page, type a plain-language description into
+          the composer and submit it. Confirm the real create request
+          is accepted (POST /api/apps -> 201) and that the dashboard
+          routes to the run-detail page (/runs/<id>) — one slice
+          spanning UI input, the API, and client routing.
+        steps:
+          - uses: ui/navigate
+            with:
+              url: $inputs.new_app_url
+          - uses: ui/type
+            with:
+              # The composer is the only textbox on `/new`; it carries
+              # no accessible name (placeholder only), so role alone is
+              # the stable address.
+              locator: { role: textbox }
+              text: $inputs.app_description
+          - uses: ui/click
+            with: { role: button, name: Build it }
+          - id: create_call
+            uses: api/observe
+            with:
+              # observe scans the page's recorded traffic at this
+              # step, so it catches the POST the click above fired.
+              method: POST
+              url_pattern: $inputs.create_api_url
+              within: 15s
+            outputs:
+              status: status
+          - id: on_run_page
+            uses: ui/assert-url
+            with:
+              # Arbor navigates to `/runs/<runId>` on submit. Match the
+              # segment without pinning the dynamic id.
+              matches: "/runs/"
+              within: 15s
+            outputs:
+              satisfied: satisfied
+        assertions:
+          - $steps.create_call.outputs.status == 201
+          - $steps.on_run_page.outputs.satisfied == true
+
+  - id: AC-2
+    description: |
+      A build run started from a description runs the full factory
+      pipeline — understand, plan, generate, verify, deploy — and
+      finishes by shipping a live, reachable app. The run's page
+      surfaces the shipped app's live link once it is ready.
+    checks:
+      - id: AC-2.1
+        description: |
+          Start a fresh build from the composer and stay on the
+          run-detail page until the pipeline ships. The terminal-
+          success signal is the live-preview link the run page renders
+          only once the deploy is promoted (the dry-run driver stands
+          up a real local preview server and advertises its
+          `127.0.0.1` URL). Its appearance within the window is the
+          mechanical proof the run shipped end to end.
+        steps:
+          - uses: ui/navigate
+            with:
+              url: $inputs.new_app_url
+          - uses: ui/type
+            with:
+              locator: { role: textbox }
+              text: $inputs.app_description
+          - uses: ui/click
+            with: { role: button, name: Build it }
+          - id: shipped
+            uses: ui/assert-element
+            with:
+              # The live-preview link only renders on terminal success
+              # (PreviewPanel returns null while `liveUrl` is unset).
+              # In single-port mode its text is the proxied relative
+              # path `/preview/live/`; matching that substring excludes
+              # both the nav links and the in-flight `/preview/dpl-…/`
+              # preview link, so it fires only once the deploy is
+              # promoted. Generous window: FakeAgent is instant but the
+              # verify/deploy floor (tsc + a real preview server +
+              # smoke) takes real wall-clock — observed ~4s, 180s is
+              # ample headroom.
+              locator: { role: link, text: "/preview/live/" }
+              expected: visible
+              within: 180s
+            outputs:
+              satisfied: satisfied
+        assertions:
+          - $steps.shipped.outputs.satisfied == true

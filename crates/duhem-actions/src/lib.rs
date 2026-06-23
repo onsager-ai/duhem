@@ -14,6 +14,7 @@ pub mod action;
 pub mod api;
 pub mod browser;
 pub mod cli;
+pub mod db;
 pub mod error;
 pub mod locator;
 pub mod playwright;
@@ -27,6 +28,7 @@ pub use browser::{
     SelectBy,
 };
 pub use cli::Invoke;
+pub use db::{Query, Seed};
 pub use error::ActionError;
 pub use locator::{ExistenceState, Locator};
 pub use playwright::to_selector;

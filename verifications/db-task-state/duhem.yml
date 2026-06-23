@@ -1,0 +1,74 @@
+# db/* worked example — a finished task's terminal status (dogfood)
+#
+# Worked example for `db/query` + `db/seed` (#101). Criteria prose:
+# `./criteria.md`. Operator setup: `./README.md`.
+#
+# Shaped like the Crawlab dogfood these actions exist for — assert a
+# distributed task's lifecycle landed in the database — but runnable
+# against any SQL database. The committed default is a real SQLite file
+# so the example is reproducible; `--inputs db_url=postgres://…` points
+# it at Crawlab's real Postgres for the live dogfood.
+#
+# Holistic posture (`docs/duhem-spec.md` §8): `db/seed` and `db/query`
+# both run against the REAL database engine — SQLite here is a real
+# database, not a mock of one. The seed establishes the precondition;
+# the query reads back what actually landed.
+#
+# Nested navigation (#104): the assertion reaches a column on a specific
+# row as `$steps.read.outputs.rows[0].status`.
+#
+# Note: `db/*`, like `api/call`, reports `requires_page = true` today,
+# so the runtime opens a browser for the check even though no step
+# touches it (stripping the browser for non-UI checks is a deferred
+# optimization; see #105). A Playwright Chromium must be available.
+
+verification: A finished task records a terminal status in the database
+
+inputs:
+  # Full database URL. Default: a real SQLite file under /tmp (created
+  # on first use). Override for the live Crawlab dogfood, e.g.
+  # `--inputs db_url=postgres://user:pass@localhost:5432/crawlab`.
+  db_url:
+    type: string
+    default: "sqlite:///tmp/duhem-db-state-dogfood.sqlite?mode=rwc"
+
+setup:
+  # Establish the precondition against the real database: a tasks table
+  # holding one finished task. Idempotent across runs (drop + recreate).
+  - id: seed_task
+    uses: db/seed
+    with:
+      connection: $inputs.db_url
+      sql: |
+        drop table if exists tasks;
+        create table tasks (id integer primary key, status text not null);
+        insert into tasks (id, status) values (1, 'finished');
+    outputs:
+      rows_affected: rows_affected
+
+criteria:
+  - id: AC-1
+    description: |
+      After a task has finished, querying the tasks store returns
+      exactly that task, and its recorded status is the terminal value
+      `finished`.
+    checks:
+      - id: AC-1.1
+        description: |
+          Read the seeded task back from the real database and confirm
+          exactly one row, with the expected id and terminal status —
+          proving the lifecycle state persisted.
+        steps:
+          - id: read
+            uses: db/query
+            with:
+              connection: $inputs.db_url
+              sql: "select id, status from tasks where id = ?"
+              params: [1]
+            outputs:
+              rows: rows
+              row_count: row_count
+        assertions:
+          - $steps.read.outputs.row_count == 1
+          - $steps.read.outputs.rows[0].id == 1
+          - $steps.read.outputs.rows[0].status == "finished"

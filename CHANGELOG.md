@@ -31,6 +31,18 @@ criteria) lives in the spec issue that introduced
   spawn / I/O failure → the new `ActionError::Process`. Worked example:
   `verifications/arbor-factory-cli/` drives Arbor's `pnpm factory` CLI,
   green end-to-end. (#102)
+- [additive] `db/query` + `db/seed` actions (#101): read and seed a
+  **real** SQL database over `sqlx`'s multi-backend `Any` driver
+  (Postgres / MySQL / SQLite, by URL scheme). `db/query` runs a query
+  (`?` placeholders bind from `params`) and outputs `rows` (array of
+  column→value objects) + `row_count`; `db/seed` runs a multi-statement
+  script (DDL + inserts) and outputs `rows_affected`. `connection:` is a
+  whole-string URL (`$inputs.db_url` / `$env.DATABASE_URL`); a named-
+  `environments:` registry is deferred (#68). New `ActionError::Db`. No
+  mock of the store (§8) — SQLite is a real engine, not a double. Pairs
+  with #104 so an assertion reaches a column as
+  `$steps.q.outputs.rows[0].status`. Worked example:
+  `verifications/db-task-state/`, green end-to-end. (#101)
 - [additive] Nested navigation into structured values (#104): path
   references may now reach past the bound output into a JSON `object` /
   `array` — `$steps.api.outputs.body.app.id`, `…body.items[0].id` —

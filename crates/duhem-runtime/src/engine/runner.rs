@@ -605,9 +605,11 @@ fn map_eval_cause(c: &EvalCause) -> InconclusiveCause {
         EvalCause::MissingObservation { .. }
         | EvalCause::MissingSetupObservation { .. }
         | EvalCause::MissingInput(_)
-        | EvalCause::MissingEnv(_) => InconclusiveCause::MissingObservation,
+        | EvalCause::MissingEnv(_)
+        | EvalCause::MissingField(_) => InconclusiveCause::MissingObservation,
         EvalCause::UnknownRuntimeHelper(_)
         | EvalCause::TypeMismatch { .. }
+        | EvalCause::NotNavigable { .. }
         | EvalCause::InvalidPattern(_) => InconclusiveCause::EnvironmentError,
     }
 }
@@ -634,6 +636,10 @@ fn eval_cause_detail(c: &EvalCause) -> String {
             format!("type_mismatch({}, {})", shape_wire(*lhs), shape_wire(*rhs))
         }
         EvalCause::InvalidPattern(msg) => format!("invalid_pattern({msg})"),
+        EvalCause::MissingField(path) => format!("missing_field({path})"),
+        EvalCause::NotNavigable { shape, segment } => {
+            format!("not_navigable({}, {segment})", shape_wire(*shape))
+        }
     }
 }
 

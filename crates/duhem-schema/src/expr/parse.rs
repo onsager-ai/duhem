@@ -91,7 +91,20 @@ fn expr_parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
                     )),
                 });
 
-        let segments = just('.').ignore_then(ident).repeated().collect::<Vec<_>>();
+        // A path segment is either a dotted key (`.name`) or a bracketed
+        // array index (`[N]`). The index is lowered to its decimal-string
+        // form and stored alongside keys in `segments`; the runtime
+        // evaluator disambiguates key-vs-index by the value's shape. This
+        // is what lets assertions reach into a structured output, e.g.
+        // `$steps.api.outputs.body.items[0].id`.
+        let key_seg = just('.').ignore_then(ident);
+        let index_seg = text::int(10)
+            .to_slice()
+            .map(|s: &str| s.to_string())
+            .delimited_by(just('['), just(']'));
+        let segments = choice((key_seg, index_seg))
+            .repeated()
+            .collect::<Vec<_>>();
 
         let path = root
             .then(segments)
@@ -230,6 +243,38 @@ mod tests {
             Expr::Path(Path {
                 root: PathRoot::Inputs,
                 segments: vec!["workspace_name".into()],
+            })
+        );
+    }
+
+    #[test]
+    fn parses_nested_navigation_keys_and_index() {
+        assert_eq!(
+            p("$steps.api.outputs.body.app.id"),
+            Expr::Path(Path {
+                root: PathRoot::Steps,
+                segments: vec![
+                    "api".into(),
+                    "outputs".into(),
+                    "body".into(),
+                    "app".into(),
+                    "id".into(),
+                ],
+            })
+        );
+        // `[N]` lowers to a decimal-string segment alongside keys.
+        assert_eq!(
+            p("$steps.api.outputs.body.items[0].id"),
+            Expr::Path(Path {
+                root: PathRoot::Steps,
+                segments: vec![
+                    "api".into(),
+                    "outputs".into(),
+                    "body".into(),
+                    "items".into(),
+                    "0".into(),
+                    "id".into(),
+                ],
             })
         );
     }

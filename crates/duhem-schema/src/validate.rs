@@ -349,10 +349,11 @@ fn check_path(scope: &PathScope<'_>, path: &Path, raw: &str, errs: &mut Vec<Vali
     match path.root {
         PathRoot::Steps => {
             let segs = path.segments();
-            // Exactly `$steps.<step_id>.outputs.<output>` — no trailing
-            // segments. Deeper navigation into a structured output is
-            // the runtime evaluator's job, not the schema's.
-            if segs.len() != 3 || segs[1] != "outputs" {
+            // Leading `$steps.<step_id>.outputs.<output>`; any segments
+            // past index 2 navigate into a structured output and are the
+            // runtime evaluator's job to resolve, not the schema's (the
+            // schema can't know the runtime JSON shape).
+            if segs.len() < 3 || segs[1] != "outputs" {
                 errs.push(ValidationError::MalformedStepRef {
                     criterion: c.id.clone(),
                     check: ch.id.clone(),
@@ -384,9 +385,9 @@ fn check_path(scope: &PathScope<'_>, path: &Path, raw: &str, errs: &mut Vec<Vali
         }
         PathRoot::Setup => {
             let segs = path.segments();
-            // `$setup.<step_id>.outputs.<output>` — same shape as
-            // `$steps`, resolved against the run-level setup block.
-            if segs.len() != 3 || segs[1] != "outputs" {
+            // Leading `$setup.<step_id>.outputs.<output>` — same shape as
+            // `$steps`; deeper segments navigate the value at runtime.
+            if segs.len() < 3 || segs[1] != "outputs" {
                 errs.push(ValidationError::MalformedSetupRef {
                     criterion: c.id.clone(),
                     check: ch.id.clone(),
@@ -418,9 +419,9 @@ fn check_path(scope: &PathScope<'_>, path: &Path, raw: &str, errs: &mut Vec<Vali
         }
         PathRoot::Inputs => {
             let segs = path.segments();
-            // Exactly `$inputs.<name>` — no trailing segments. Same
-            // reasoning as the `$steps` rule above.
-            if segs.len() != 1 {
+            // Leading `$inputs.<name>`; deeper segments navigate into a
+            // declared `object` / `array` input at runtime.
+            if segs.is_empty() {
                 errs.push(ValidationError::MalformedInputRef {
                     criterion: c.id.clone(),
                     check: ch.id.clone(),
@@ -625,7 +626,10 @@ criteria:
     }
 
     #[test]
-    fn step_ref_with_extra_segments_fails() {
+    fn step_ref_with_nav_segments_validates() {
+        // Deeper navigation into a declared output (#104) — the schema
+        // resolves the `$steps.api.outputs.body` address and leaves
+        // `.extra` / `[0]` for the runtime evaluator.
         let y = r#"
 verification: x
 criteria:
@@ -640,37 +644,58 @@ criteria:
             outputs:
               body: response.body
         assertions:
-          - exists: $steps.api.outputs.body.extra
+          - exists: $steps.api.outputs.body.app.id
+          - exists: $steps.api.outputs.body.items[0]
+"#;
+        let v = parse(y);
+        assert!(validate(&v).is_ok());
+    }
+
+    #[test]
+    fn step_ref_unknown_output_still_fails_under_nav() {
+        // The leading address is still validated: an undeclared output
+        // is an error even when followed by navigation segments.
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: api
+            uses: api/observe
+            with: {}
+            outputs:
+              body: response.body
+        assertions:
+          - exists: $steps.api.outputs.nope.app
 "#;
         let v = parse(y);
         let errs = validate(&v).unwrap_err();
         assert!(
             errs.iter()
-                .any(|e| matches!(e, ValidationError::MalformedStepRef { .. }))
+                .any(|e| matches!(e, ValidationError::UnresolvedStepOutput { .. }))
         );
     }
 
     #[test]
-    fn input_ref_with_extra_segments_fails() {
+    fn input_ref_with_nav_segments_validates() {
         let y = r#"
 verification: x
 inputs:
-  name:
-    type: string
+  cfg:
+    type: object
 criteria:
   - id: AC-1
     description: a
     checks:
       - id: AC-1.1
         assertions:
-          - exists: $inputs.name.extra
+          - exists: $inputs.cfg.db.host
 "#;
         let v = parse(y);
-        let errs = validate(&v).unwrap_err();
-        assert!(
-            errs.iter()
-                .any(|e| matches!(e, ValidationError::MalformedInputRef { .. }))
-        );
+        assert!(validate(&v).is_ok());
     }
 
     #[test]

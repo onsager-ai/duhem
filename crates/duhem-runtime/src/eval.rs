@@ -48,6 +48,18 @@ pub enum InconclusiveCause {
     /// message so evidence `detail` can guide the author back to the
     /// offending pattern.
     InvalidPattern(String),
+    /// Navigation into a structured value (`$steps.x.outputs.body.id`,
+    /// `…body.items[0]`) reached a key that isn't present in the object
+    /// or an index past the end of the array. Carries the dotted path
+    /// of the navigation that missed (e.g. `body.items[3]`) so evidence
+    /// `detail` points at the exact field. The base output existed; the
+    /// sub-path did not resolve.
+    MissingField(String),
+    /// Navigation tried to descend into a scalar (`Bool`/`Int`/`Float`/
+    /// `Str`/`Null`) — e.g. `$steps.x.outputs.status.foo` where `status`
+    /// is an integer. The path is well-formed but the data shape can't
+    /// be navigated. Carries the value shape and the offending segment.
+    NotNavigable { shape: ValueShape, segment: String },
 }
 
 /// Runtime-side value. Distinct from `duhem_schema::Literal` because
@@ -183,42 +195,52 @@ fn literal_to_value(l: &Literal) -> Value {
 fn eval_path(p: &Path, ctx: &dyn EvalContext) -> EvalRes {
     match p.root {
         PathRoot::Inputs => {
-            // Schema validator guarantees a single segment for
-            // well-formed `$inputs.<name>` references.
+            // `$inputs.<name>`; deeper segments navigate into a declared
+            // `object` / `array` input value.
             let name = p.segments.first().map(String::as_str).unwrap_or("");
-            ctx.input(name)
+            let base = ctx
+                .input(name)
                 .cloned()
-                .ok_or_else(|| InconclusiveCause::MissingInput(name.to_string()))
+                .ok_or_else(|| InconclusiveCause::MissingInput(name.to_string()))?;
+            navigate(base, name, &p.segments[1.min(p.segments.len())..])
         }
         PathRoot::Steps => {
-            // Schema validator guarantees the
-            // `$steps.<step_id>.outputs.<output>` shape.
+            // Schema validator guarantees the leading
+            // `$steps.<step_id>.outputs.<output>` shape; any segments
+            // past index 2 navigate into the (structured) output value.
             let step = p.segments.first().map(String::as_str).unwrap_or("");
             let output = p.segments.get(2).map(String::as_str).unwrap_or("");
-            ctx.output(step, output)
-                .cloned()
-                .ok_or_else(|| InconclusiveCause::MissingObservation {
+            let base = ctx.output(step, output).cloned().ok_or_else(|| {
+                InconclusiveCause::MissingObservation {
                     step: step.to_string(),
                     output: output.to_string(),
-                })
+                }
+            })?;
+            navigate(base, output, &p.segments[3.min(p.segments.len())..])
         }
         PathRoot::Setup => {
             // `$setup.<step_id>.outputs.<output>` — same shape as
-            // `$steps`, resolved against the run-level setup map.
+            // `$steps`, resolved against the run-level setup map; deeper
+            // segments navigate into the value.
             let step = p.segments.first().map(String::as_str).unwrap_or("");
             let output = p.segments.get(2).map(String::as_str).unwrap_or("");
-            ctx.setup_output(step, output).cloned().ok_or_else(|| {
+            let base = ctx.setup_output(step, output).cloned().ok_or_else(|| {
                 InconclusiveCause::MissingSetupObservation {
                     step: step.to_string(),
                     output: output.to_string(),
                 }
-            })
+            })?;
+            navigate(base, output, &p.segments[3.min(p.segments.len())..])
         }
         PathRoot::Env => {
+            // `$env.<name>` is always a string; deeper segments would be
+            // navigating into a scalar and `navigate` reports that.
             let name = p.segments.first().map(String::as_str).unwrap_or("");
-            ctx.env(name)
+            let base = ctx
+                .env(name)
                 .map(|s| Value::Str(s.to_string()))
-                .ok_or_else(|| InconclusiveCause::MissingEnv(name.to_string()))
+                .ok_or_else(|| InconclusiveCause::MissingEnv(name.to_string()))?;
+            navigate(base, name, &p.segments[1.min(p.segments.len())..])
         }
         PathRoot::Runtime => {
             // Bare `$runtime.<name>` (no call): helpers must be called.
@@ -226,6 +248,63 @@ fn eval_path(p: &Path, ctx: &dyn EvalContext) -> EvalRes {
             Err(InconclusiveCause::UnknownRuntimeHelper(name))
         }
     }
+}
+
+/// Walk navigation segments into a resolved value. Each segment is a
+/// key into an `Object` or — when the current value is an `Array` — a
+/// decimal index (the parser lowers `[N]` to the digit-string `"N"`).
+/// Key-vs-index is disambiguated by the value's shape, so a JSON object
+/// key that happens to be all digits still resolves as a key. A missing
+/// key / out-of-range index is `MissingField`; descending into a scalar
+/// is `NotNavigable`. An empty `segs` returns the value unchanged, so
+/// today's flat `$steps.x.outputs.y` references are unaffected. `head`
+/// is the bound output / input / env name, used only to root the
+/// `MissingField` detail path (e.g. `body.app.email`).
+fn navigate(mut value: Value, head: &str, segs: &[String]) -> EvalRes {
+    for (i, seg) in segs.iter().enumerate() {
+        value = match value {
+            Value::Object(mut map) => map
+                .remove(seg)
+                .ok_or_else(|| InconclusiveCause::MissingField(nav_path(head, segs, i)))?,
+            Value::Array(arr) => {
+                let idx: usize = seg.parse().map_err(|_| {
+                    // An Array addressed by a non-numeric segment is a
+                    // miss at this position, not a type error.
+                    InconclusiveCause::MissingField(nav_path(head, segs, i))
+                })?;
+                arr.into_iter()
+                    .nth(idx)
+                    .ok_or_else(|| InconclusiveCause::MissingField(nav_path(head, segs, i)))?
+            }
+            scalar => {
+                return Err(InconclusiveCause::NotNavigable {
+                    shape: scalar.shape(),
+                    segment: seg.clone(),
+                });
+            }
+        };
+    }
+    Ok(value)
+}
+
+/// Render the navigation path up to and including segment `i`, rooted at
+/// `head`, for the `MissingField` detail — `head="body"`,
+/// `["app","email"]` at i=1 → `body.app.email`; `["items","3"]` at i=1
+/// → `body.items[3]`. Purely numeric segments render as `[N]` (array
+/// index), the rest as `.key`.
+fn nav_path(head: &str, segs: &[String], i: usize) -> String {
+    let mut out = String::from(head);
+    for s in segs.iter().take(i + 1) {
+        if s.bytes().all(|b| b.is_ascii_digit()) {
+            out.push('[');
+            out.push_str(s);
+            out.push(']');
+        } else {
+            out.push('.');
+            out.push_str(s);
+        }
+    }
+    out
 }
 
 fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
@@ -812,6 +891,81 @@ mod tests {
         let ctx = TestCtx::new().with_env("DATABASE_URL", "postgres://x");
         assert_eq!(
             run("$env.DATABASE_URL == \"postgres://x\"", &ctx),
+            EvalResult::True
+        );
+    }
+
+    // ---- nested navigation (#104) ----
+
+    fn obj(pairs: Vec<(&str, Value)>) -> Value {
+        Value::Object(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+    }
+
+    /// `body = { app: { id: "u-1" } }`
+    fn body_with_app() -> Value {
+        obj(vec![("app", obj(vec![("id", Value::Str("u-1".into()))]))])
+    }
+
+    #[test]
+    fn navigates_object_keys() {
+        let ctx = TestCtx::new().with_output("api", "body", body_with_app());
+        assert_eq!(
+            run("$steps.api.outputs.body.app.id == \"u-1\"", &ctx),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn navigates_array_index() {
+        // body = { items: [ { id: 7 }, { id: 9 } ] }
+        let items = Value::Array(vec![
+            obj(vec![("id", Value::Int(7))]),
+            obj(vec![("id", Value::Int(9))]),
+        ]);
+        let ctx = TestCtx::new().with_output("api", "body", obj(vec![("items", items)]));
+        assert_eq!(
+            run("$steps.api.outputs.body.items[1].id == 9", &ctx),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn missing_key_is_missing_field() {
+        let ctx = TestCtx::new().with_output("api", "body", body_with_app());
+        assert_eq!(
+            run("$steps.api.outputs.body.app.email == \"x\"", &ctx),
+            EvalResult::Inconclusive(InconclusiveCause::MissingField("body.app.email".into()))
+        );
+    }
+
+    #[test]
+    fn index_out_of_range_is_missing_field() {
+        let items = Value::Array(vec![obj(vec![("id", Value::Int(7))])]);
+        let ctx = TestCtx::new().with_output("api", "body", obj(vec![("items", items)]));
+        assert_eq!(
+            run("$steps.api.outputs.body.items[5].id == 1", &ctx),
+            EvalResult::Inconclusive(InconclusiveCause::MissingField("body.items[5]".into()))
+        );
+    }
+
+    #[test]
+    fn descending_into_scalar_is_not_navigable() {
+        let ctx = TestCtx::new().with_output("api", "status", Value::Int(200));
+        assert_eq!(
+            run("$steps.api.outputs.status.foo == 1", &ctx),
+            EvalResult::Inconclusive(InconclusiveCause::NotNavigable {
+                shape: ValueShape::Int,
+                segment: "foo".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn flat_output_path_is_unchanged_by_navigation() {
+        // Regression: a zero-navigation path resolves exactly as before.
+        let ctx = TestCtx::new().with_output("api", "status", Value::Int(201));
+        assert_eq!(
+            run("$steps.api.outputs.status == 201", &ctx),
             EvalResult::True
         );
     }

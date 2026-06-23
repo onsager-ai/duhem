@@ -32,4 +32,14 @@ pub enum ActionError {
     /// engine maps to `Outcome::Error`.
     #[error("http transport error: {0}")]
     Http(String),
+
+    /// `cli/invoke` could not spawn the command or failed mid-stream
+    /// (binary not on `PATH`, permission denied, broken pipe writing
+    /// stdin, I/O error reading output). A non-zero *exit code* is
+    /// **not** an error — it surfaces as `Outcome::Ok` with the code in
+    /// the `exit_code` output, the same way a `500` is data for
+    /// `api/call`. Only the process never producing an exit code lands
+    /// here. The engine maps it to `Outcome::Error`.
+    #[error("cli process error: {0}")]
+    Process(String),
 }

@@ -13,6 +13,7 @@
 pub mod action;
 pub mod api;
 pub mod browser;
+pub mod cli;
 pub mod error;
 pub mod locator;
 pub mod playwright;
@@ -25,6 +26,7 @@ pub use browser::{
     CheckBrowser, Cookie, ElementState, NetworkBatch, NetworkEvent, Page, PwError, RunBrowser,
     SelectBy,
 };
+pub use cli::Invoke;
 pub use error::ActionError;
 pub use locator::{ExistenceState, Locator};
 pub use playwright::to_selector;

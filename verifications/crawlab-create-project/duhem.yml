@@ -1,0 +1,169 @@
+# Crawlab — create a project and read it back (dogfood)
+#
+# Duhem's third dogfood Verification Definition, against a real Crawlab
+# Pro feature end-to-end. Criteria prose: `./criteria.md`. Operator
+# setup: `./README.md`.
+#
+# Crawlab Pro (crawlab-team/crawlab-pro) is a distributed crawler
+# management platform: a Go REST API + gRPC cluster over MongoDB, with a
+# Vue dashboard. This VD verifies the golden REST flow — log in, create a
+# project, read the project list back — exercising auth, a Mongo write,
+# and an authenticated read in one slice.
+#
+# Holistic posture (`docs/duhem-spec.md` §8): every step drives the real
+# Crawlab REST API against a real MongoDB. No mocks at the web boundary.
+# Auth is real: AC-1/AC-2 log in for a real JWT and send it on the
+# create/list calls (Crawlab accepts a bare `Authorization: <token>`,
+# which whole-string template substitution can supply).
+#
+# Shape provenance (all from crawlab-pro source, not guessed):
+#   - POST /login -> {data: <token>}: core/controllers/login.go,
+#     core/controllers/utils.go (Response[T] = {status,message,data})
+#   - Authorization: <token> (Bearer optional): core/utils/token.go
+#   - /projects CRUD under the auth group: core/controllers/router.go
+#   - project {_id,name,description}; _id is a 24-hex ObjectID:
+#     core/models/models/project.go, core/models/models/base.go
+#   - GET /projects -> {status,total,data:[...]}: ListResponse[T]
+#   - default admin/admin seeded on first boot:
+#     core/constants/user.go, core/user/service.go
+#   - GET /health -> 200 "ok": core/controllers/health.go
+#
+# Default port 8090, NOT Crawlab's own 8080: the dev machine runs a
+# Traefik dev-proxy on 8080. The VD's compose maps the master to 8090.
+
+verification: Crawlab — create a project and read it back
+
+# Operator-supplied environment provisioning. `./scripts/up.sh` brings
+# up a minimal Crawlab stack (Mongo + master node) via the VD's
+# `scripts/docker-compose.yml`, pinning the master to a free host port;
+# `./scripts/down.sh` tears it down. The readiness probe gates checks on
+# Crawlab's public `/health` returning 200. `--no-env-up` skips this when
+# Crawlab is already up; `--keep-env` skips teardown for triage.
+environment:
+  up: ./scripts/up.sh
+  down: ./scripts/down.sh
+  ready:
+    http:
+      url: $inputs.health_url
+      timeout: 120s
+
+inputs:
+  # Absolute URLs, passed whole (string interpolation isn't shipped).
+  # Defaults assume the VD's local stack on :8090.
+  health_url:
+    type: string
+    default: http://127.0.0.1:8090/health
+  login_url:
+    type: string
+    default: http://127.0.0.1:8090/login
+  projects_url:
+    type: string
+    default: http://127.0.0.1:8090/projects
+  username:
+    type: string
+    default: admin
+  password:
+    type: string
+    default: admin
+  project_name:
+    type: string
+    default: duhem-dogfood-project
+
+criteria:
+  - id: AC-1
+    description: |
+      Logging in with valid credentials and submitting a new project
+      persists it: the API accepts the request and returns the created
+      project with a well-formed identifier and the name supplied.
+    checks:
+      - id: AC-1.1
+        description: |
+          Log in for a real token, then POST a new project with that
+          token. Confirm the create is accepted and the response echoes
+          the project — a well-formed Mongo `_id` and the supplied name —
+          one slice spanning auth, the API, and a real database write.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: create
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.projects_url
+              headers:
+                Content-Type: application/json
+                # Bare token — Crawlab strips an optional `Bearer ` prefix
+                # but also accepts the raw token (core/utils/token.go).
+                Authorization: $steps.login.outputs.body.data
+              # Crawlab's generic create wraps the model under `data`
+              # (controllers/base.go PostParams{Data T `json:"data"`}); a
+              # bare `{name,...}` body persists an empty record.
+              body:
+                data:
+                  name: $inputs.project_name
+                  description: Created by the Duhem Crawlab dogfood
+              within: 15s
+            outputs:
+              status: status
+              body: body
+        assertions:
+          - $steps.login.outputs.status == 200
+          - $steps.create.outputs.status == 200
+          # Nested-JSON navigation (#104): the created project's id is a
+          # well-formed Mongo ObjectID, and its name round-tripped.
+          - matches:
+              value: $steps.create.outputs.body.data._id
+              pattern: "^[a-f0-9]{24}$"
+          - $steps.create.outputs.body.data.name == $inputs.project_name
+
+  - id: AC-2
+    description: |
+      An authenticated request for the project list returns a well-formed
+      listing — the create above is reflected by a non-empty, correctly
+      shaped response from the real database.
+    checks:
+      - id: AC-2.1
+        description: |
+          Log in, then GET the project list with the token. Confirm a
+          well-formed, non-empty paginated response — the authenticated
+          read path against real Mongo, with the project created in AC-1
+          reflected in the count.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: list
+            uses: api/call
+            with:
+              method: GET
+              url: $inputs.projects_url
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+              body: body
+        assertions:
+          - $steps.list.outputs.status == 200
+          - $steps.list.outputs.body.status == "ok"
+          - $steps.list.outputs.body.total >= 1

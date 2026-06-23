@@ -219,7 +219,21 @@ fn resolve_script_path(path: &Path, vd_dir: Option<&Path>) -> PathBuf {
 /// from `$0` / `argv[0]`.
 async fn run_script(script: &Path, vd_dir: Option<&Path>) -> (i32, Duration, Vec<u8>, Vec<u8>) {
     let started = Instant::now();
-    let mut cmd = Command::new(script);
+    // Resolve the program to an absolute path before spawning. The child
+    // runs with `current_dir(vd_dir)` below, and on Unix a *relative*
+    // program path is re-resolved against the child's new cwd — so a
+    // path like `<vd_dir>/./scripts/up.sh` would double to
+    // `<vd_dir>/<vd_dir>/scripts/up.sh` and fail with ENOENT. Anchoring
+    // the program absolutely (against the process cwd) keeps it found
+    // while the script still *runs* with cwd = the VD directory.
+    let program = if script.is_absolute() {
+        script.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(script))
+            .unwrap_or_else(|_| script.to_path_buf())
+    };
+    let mut cmd = Command::new(&program);
     cmd.env_clear();
     for (k, v) in sanitized_env_vars(std::env::vars()) {
         cmd.env(k, v);
@@ -369,6 +383,43 @@ mod tests {
     fn absolute_script_path_passes_through() {
         let resolved = resolve_script_path(Path::new("/opt/up.sh"), Some(Path::new("/tmp/vd")));
         assert_eq!(resolved, PathBuf::from("/opt/up.sh"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn run_script_spawns_with_vd_join_path_and_anchors_cwd() {
+        // Regression: `run_script` sets `current_dir(vd_dir)`, and on Unix
+        // a *relative* program path is re-resolved against the child's new
+        // cwd — so a `<vd_dir>/./scripts/up.sh` program would double to
+        // `<vd_dir>/<vd_dir>/...` and spawn-fail with ENOENT (exit -2).
+        // The fix anchors the program absolutely while the script still
+        // runs with cwd = the VD directory. We assert both: it ran (exit
+        // 0, not -2) and `$PWD` inside the script was the VD directory.
+        use std::os::unix::fs::PermissionsExt;
+
+        let base = std::env::temp_dir().join(format!("duhem-runscript-{}", std::process::id()));
+        let scripts = base.join("scripts");
+        std::fs::create_dir_all(&scripts).unwrap();
+        let script = scripts.join("up.sh");
+        // Exit 0 only if the script's cwd is the VD directory.
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\n[ \"$PWD\" = \"{}\" ]\n", base.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // The `vd_dir.join("./scripts/up.sh")` shape the engine produces.
+        let resolved = resolve_script_path(Path::new("./scripts/up.sh"), Some(&base));
+        let (exit_code, _dur, _out, err) = run_script(&resolved, Some(&base)).await;
+
+        std::fs::remove_dir_all(&base).ok();
+        assert_eq!(
+            exit_code,
+            0,
+            "spawn/cwd failed; stderr: {}",
+            String::from_utf8_lossy(&err)
+        );
     }
 
     #[test]

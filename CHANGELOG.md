@@ -20,6 +20,15 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [clarifying] Fixed `environment.up:` / `down:` script spawn on a
+  relative VD path (#110): `run_script` set `current_dir(vd_dir)` and
+  passed the program as `vd_dir.join("./scripts/up.sh")` — a relative
+  path that Unix re-resolves against the child's new cwd, doubling to
+  `<vd_dir>/<vd_dir>/…` → ENOENT (`env_up exit_code: -2`). Now the
+  program is anchored absolutely before spawn while the script still
+  runs with cwd = the VD directory. Unblocks all script-based
+  provisioning (e.g. `duhem run verifications/<vd>/duhem.yml`). No
+  schema or action-contract change. (#110)
 - [additive] `cli/invoke` action (#102): run a command-line program in
   the SUT environment and capture `exit_code` / `stdout` / `stderr` for
   assertions. `command` accepts a shell string (run via `sh -c`) or an

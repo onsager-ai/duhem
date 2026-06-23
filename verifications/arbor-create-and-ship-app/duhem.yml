@@ -121,6 +121,10 @@ criteria:
               within: 15s
             outputs:
               status: status
+              # Capture the parsed JSON response body so the assertions
+              # can reach into it. The create response is
+              # `{ app: AppSummary, run: RunSummary }`.
+              body: body
           - id: on_run_page
             uses: ui/assert-url
             with:
@@ -133,6 +137,12 @@ criteria:
         assertions:
           - $steps.create_call.outputs.status == 201
           - $steps.on_run_page.outputs.satisfied == true
+          # Nested-JSON navigation (#104): verify the created run's
+          # identity from the real response body, not just the status
+          # code — the run id Arbor minted is well-formed (`run_<uuid>`).
+          - matches:
+              value: $steps.create_call.outputs.body.run.id
+              pattern: "^run_"
 
   - id: AC-2
     description: |

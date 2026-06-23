@@ -20,6 +20,20 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [additive] Nested navigation into structured values (#104): path
+  references may now reach past the bound output into a JSON `object` /
+  `array` — `$steps.api.outputs.body.app.id`, `…body.items[0].id` —
+  via dotted keys and `[N]` array indices. The grammar gains the
+  bracket-index segment; the validator accepts segments past the
+  `$steps/$setup.<id>.outputs.<output>` and `$inputs.<name>` address;
+  the evaluator walks them, disambiguating key-vs-index by the value's
+  shape. Two new evaluator inconclusive causes — `missing_field(path)`
+  (absent key / out-of-range index) and `not_navigable(shape, segment)`
+  (descending into a scalar) — surfaced in evidence `detail` and folded
+  into the judge's coarse `missing_observation` / `environment_error`
+  buckets. Backward compatible: every previously-valid path resolves
+  identically; previously these deeper paths were a parse/validation
+  error. (#104)
 - [clarifying] §10–§11 audit (#63) clarifying bundle: trued six spec
   prose claims to the shipped code — §10.1 `--filter` example
   (`login::*` + three-axis grammar note, D-1), §10.5 `with:` typing

@@ -24,6 +24,74 @@
 
 import { chromium } from 'playwright'
 import readline from 'node:readline'
+import { existsSync, readdirSync } from 'node:fs'
+import { execSync } from 'node:child_process'
+import { join } from 'node:path'
+import os from 'node:os'
+
+/**
+ * Best-effort discovery of an already-installed Chromium/Chrome, used
+ * when Playwright's own bundled-browser launch fails (e.g. on an OS
+ * Playwright ships no prebuilt browser for, or where the cached browser
+ * revision doesn't match this Playwright). Mirrors what an operator
+ * would otherwise pass via DUHEM_BROWSER_EXECUTABLE — checked here so
+ * the common case needs no manual configuration. Returns an absolute
+ * path or undefined.
+ * @returns {string | undefined}
+ */
+function discoverChromium() {
+  // 1. Any Chromium revision in a Playwright browser cache. Prefer the
+  //    full `chromium-<rev>` build, and the highest revision available.
+  const cacheDirs = [
+    process.env.PLAYWRIGHT_BROWSERS_PATH,
+    join(os.homedir(), '.cache', 'ms-playwright'), // linux
+    join(os.homedir(), 'Library', 'Caches', 'ms-playwright'), // macOS
+    join(os.homedir(), 'AppData', 'Local', 'ms-playwright'), // windows
+  ].filter(Boolean)
+  const subpaths = [
+    ['chrome-linux64', 'chrome'],
+    ['chrome-linux', 'chrome'],
+    ['chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'],
+    ['chrome-win', 'chrome.exe'],
+  ]
+  for (const dir of cacheDirs) {
+    if (!dir || !existsSync(dir)) continue
+    let entries = []
+    try {
+      entries = readdirSync(dir)
+    } catch {
+      continue
+    }
+    const revs = entries
+      .filter((e) => e.startsWith('chromium-'))
+      .sort()
+      .reverse()
+    for (const rev of revs) {
+      for (const sp of subpaths) {
+        const p = join(dir, rev, ...sp)
+        if (existsSync(p)) return p
+      }
+    }
+  }
+  // 2. A system browser on PATH.
+  for (const name of [
+    'google-chrome',
+    'google-chrome-stable',
+    'chromium',
+    'chromium-browser',
+    'microsoft-edge',
+  ]) {
+    try {
+      const p = execSync(`command -v ${name} 2>/dev/null`, { shell: '/bin/sh' })
+        .toString()
+        .trim()
+      if (p && existsSync(p)) return p
+    } catch {
+      // not on PATH; try the next candidate
+    }
+  }
+  return undefined
+}
 
 /**
  * @typedef {import('playwright').Browser} Browser
@@ -135,12 +203,34 @@ async function dispatch(req) {
       const extraArgs = (process.env.DUHEM_BROWSER_ARGS || '')
         .split(/\s+/)
         .filter(Boolean)
-      browser = await chromium.launch({
+      const baseOpts = {
         headless: req.headless !== false,
         executablePath,
         channel,
         args: extraArgs,
-      })
+      }
+      try {
+        browser = await chromium.launch(baseOpts)
+      } catch (e) {
+        // The bundled-browser launch failed. If the operator didn't
+        // pin an executable/channel, try an already-installed Chromium
+        // before giving up — this is what unblocks a host where
+        // `playwright install` can't fetch a browser (unsupported OS,
+        // or a cached revision that doesn't match this Playwright).
+        if (executablePath || channel) throw e
+        const discovered = discoverChromium()
+        if (!discovered) {
+          throw new Error(
+            `${errMsg(e)} — and no existing Chromium was found to fall back to. ` +
+              `Install one (e.g. \`npx playwright install chromium\`) or set ` +
+              `DUHEM_BROWSER_EXECUTABLE=/path/to/chrome to use an existing browser.`,
+          )
+        }
+        process.stderr.write(
+          `[duhem-sidecar] bundled browser launch failed; falling back to discovered Chromium at ${discovered}\n`,
+        )
+        browser = await chromium.launch({ ...baseOpts, executablePath: discovered })
+      }
       return null
     }
 

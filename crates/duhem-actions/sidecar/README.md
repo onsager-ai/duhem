@@ -45,6 +45,27 @@ export DUHEM_BROWSER_ARGS="--no-sandbox --disable-setuid-sandbox --disable-dev-s
 duhem run <verification>.yml
 ```
 
+### Auto-discovery fallback (spec [#105](https://github.com/onsager-ai/duhem/issues/105))
+
+If `DUHEM_BROWSER_EXECUTABLE` / `DUHEM_BROWSER_CHANNEL` are **unset** and
+the bundled-browser launch fails, the sidecar tries to find an
+already-installed Chromium before giving up — so a fresh `duhem run`
+works with no manual configuration on a host where `playwright install`
+can't fetch a browser (unsupported OS, or a cached browser revision that
+doesn't match this Playwright). It searches, in order:
+
+1. any `chromium-<rev>` build in a Playwright browser cache
+   (`PLAYWRIGHT_BROWSERS_PATH`, then the per-OS `ms-playwright` cache),
+   preferring the highest revision;
+2. a system browser on `PATH` (`google-chrome`, `chromium`,
+   `chromium-browser`, `microsoft-edge`).
+
+It logs the chosen binary to stderr (`falling back to discovered
+Chromium at …`). Setting `DUHEM_BROWSER_EXECUTABLE` skips discovery and
+pins your choice. If nothing is found, the launch error names both
+`npx playwright install chromium` and the `DUHEM_BROWSER_EXECUTABLE`
+override.
+
 ## Type-checking
 
 `index.mjs` is plain ESM (Node runs it with no build step), but it is

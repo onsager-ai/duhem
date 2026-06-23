@@ -43,6 +43,17 @@ criteria) lives in the spec issue that introduced
   with #104 so an assertion reaches a column as
   `$steps.q.outputs.rows[0].status`. Worked example:
   `verifications/db-task-state/`, green end-to-end. (#101)
+- [clarifying] Playwright sidecar auto-discovers an installed Chromium
+  (#105): when `DUHEM_BROWSER_EXECUTABLE` / `DUHEM_BROWSER_CHANNEL` are
+  unset and the bundled-browser launch fails, the sidecar finds an
+  existing browser — a `chromium-<rev>` build in a Playwright cache, or
+  a system Chrome/Chromium on `PATH` — and falls back to it, so a fresh
+  `duhem run` drives the UI with no manual config on a host where
+  `playwright install` can't fetch a browser (unsupported OS, or a
+  cached revision mismatched to this Playwright). If nothing is found,
+  the launch error now names both `npx playwright install chromium` and
+  the `DUHEM_BROWSER_EXECUTABLE` override. Off the critical path when a
+  browser is available; no schema or action-contract change. (#105)
 - [additive] Nested navigation into structured values (#104): path
   references may now reach past the bound output into a JSON `object` /
   `array` — `$steps.api.outputs.body.app.id`, `…body.items[0].id` —

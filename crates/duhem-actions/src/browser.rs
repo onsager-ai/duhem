@@ -268,7 +268,7 @@ pub(crate) fn humanize_launch_error(raw: &str) -> String {
         || lower.contains("looks like playwright")
     {
         format!(
-            "chromium binary not installed. Run `npx playwright install chromium` once and retry. (driver said: {raw})"
+            "chromium binary not installed, and no existing browser was found to fall back to. Run `npx playwright install chromium` once, or set `DUHEM_BROWSER_EXECUTABLE=/path/to/chrome` to use a browser already on this machine, and retry. (driver said: {raw})"
         )
     } else if lower.contains("cannot find package 'playwright'")
         || lower.contains("err_module_not_found")
@@ -516,5 +516,35 @@ impl Page {
         req["cursor"] = json!(cursor);
         let v = self.conn.request("pollNetwork", req).await?;
         serde_json::from_value(v).map_err(|e| PwError(format!("pollNetwork decode: {e}")))
+    }
+}
+
+#[cfg(test)]
+mod humanize_tests {
+    use super::humanize_launch_error;
+
+    #[test]
+    fn missing_browser_names_both_remediations() {
+        // The sidecar's discovered-browser fallback (#105) runs first;
+        // this message is the floor when no browser exists anywhere, so
+        // it must point at both `playwright install` and the
+        // DUHEM_BROWSER_EXECUTABLE override.
+        let msg = humanize_launch_error(
+            "browserType.launch: Executable doesn't exist at /…/chrome-headless-shell",
+        );
+        assert!(msg.contains("DUHEM_BROWSER_EXECUTABLE"), "got: {msg}");
+        assert!(msg.contains("playwright install chromium"), "got: {msg}");
+    }
+
+    #[test]
+    fn missing_sidecar_deps_message_unchanged() {
+        let msg = humanize_launch_error("Cannot find package 'playwright' imported from …");
+        assert!(msg.contains("npm ci"), "got: {msg}");
+    }
+
+    #[test]
+    fn unrelated_error_passes_through() {
+        let msg = humanize_launch_error("some other failure");
+        assert_eq!(msg, "some other failure");
     }
 }

@@ -20,6 +20,17 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [additive] `cli/invoke` action (#102): run a command-line program in
+  the SUT environment and capture `exit_code` / `stdout` / `stderr` for
+  assertions. `command` accepts a shell string (run via `sh -c`) or an
+  argv array (exec'd directly); optional `cwd`, `env`, `stdin`,
+  `within`. Runs the real binary in a sanitized environment (the
+  provisioning-script whitelist) — no shimmed shell. A completed
+  process is `Outcome::Ok` regardless of exit code (the code is data,
+  judged by an assertion); `within:` exceeded → `Outcome::Timeout`; a
+  spawn / I/O failure → the new `ActionError::Process`. Worked example:
+  `verifications/arbor-factory-cli/` drives Arbor's `pnpm factory` CLI,
+  green end-to-end. (#102)
 - [additive] Nested navigation into structured values (#104): path
   references may now reach past the bound output into a JSON `object` /
   `array` — `$steps.api.outputs.body.app.id`, `…body.items[0].id` —

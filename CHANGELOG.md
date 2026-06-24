@@ -20,6 +20,19 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [additive] `$runtime.format(fmt, args...)` pure helper (#117): `{}`
+  placeholders in `fmt` are filled, in order, by the remaining scalar
+  args (coerced to string). The sanctioned, identity-preserving way to
+  compose a value — notably a dynamic URL from a prior step's output,
+  `$runtime.format("{}/{}", $inputs.base, $steps.create.outputs.body.data._id)`
+  — without scripting. Pure and deterministic (no I/O / clock /
+  randomness), so the mechanical-judgment and reproducible-run
+  commitments hold (§11.2); helpers compute values, the closed assertion
+  set still decides. The grammar already parsed `$runtime.fn(args)`;
+  this implements `format`. New evaluator cause `bad_format` (placeholder
+  vs arg-count mismatch; non-scalar args are `type_mismatch`). Worked
+  example: `verifications/crawlab-create-project/` AC-4 fetches a created
+  project by id at a composed `/projects/<id>` URL. (#117)
 - [additive] `api/poll` action (#115): hit an endpoint repeatedly until
   a response condition holds or a timeout elapses — the HTTP analogue of
   `ui/assert-element`, for verifying asynchronous outcomes without a

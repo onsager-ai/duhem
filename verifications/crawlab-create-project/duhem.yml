@@ -8,7 +8,10 @@
 # management platform: a Go REST API + gRPC cluster over MongoDB, with a
 # Vue dashboard. This VD verifies the golden REST flow — log in, create a
 # project, read the project list back — exercising auth, a Mongo write,
-# and an authenticated read in one slice.
+# and an authenticated read in one slice. AC-5 then reads the `projects`
+# collection in Mongo directly with `db/query` (#121) to confirm the
+# project actually persisted — the deep DB-state slice REST echoes can't
+# prove.
 #
 # Holistic posture (`docs/duhem-spec.md` §8): every step drives the real
 # Crawlab REST API against a real MongoDB. No mocks at the web boundary.
@@ -23,6 +26,9 @@
 #   - /projects CRUD under the auth group: core/controllers/router.go
 #   - project {_id,name,description}; _id is a 24-hex ObjectID:
 #     core/models/models/project.go, core/models/models/base.go
+#   - Mongo collection `projects`: tag `collection:"projects"` on the
+#     Project struct (core/models/models/project.go); `_id`/`name` from
+#     the inlined BaseModel — what AC-5's db/query `find:` reads.
 #   - GET /projects -> {status,total,data:[...]}: ListResponse[T]
 #   - default admin/admin seeded on first boot:
 #     core/constants/user.go, core/user/service.go
@@ -68,6 +74,14 @@ inputs:
   project_name:
     type: string
     default: duhem-dogfood-project
+  # The throwaway Mongo `up.sh` publishes (host port 27018, db `crawlab`).
+  # Whole-string template input; `db/query` routes mongodb:// URLs to its
+  # `find:` path. The project lands in the `projects` collection — tag
+  # `collection:"projects"` on core/models/models/project.go, with `_id`
+  # / `name` from the inlined BaseModel.
+  mongo_url:
+    type: string
+    default: mongodb://127.0.0.1:27018/crawlab
 
 criteria:
   - id: AC-1
@@ -285,3 +299,70 @@ criteria:
           - $steps.fetch.outputs.body.data.name == $inputs.project_name
           # The fetched project is the one we created.
           - $steps.fetch.outputs.body.data._id == $steps.create.outputs.body.data._id
+
+  - id: AC-5
+    description: |
+      A created project is actually persisted in the database, not merely
+      echoed by the API: the project exists as a document in Crawlab's
+      real Mongo store, with the same identifier the API returned.
+    checks:
+      - id: AC-5.1
+        description: |
+          Log in and create a project over REST, then read the `projects`
+          collection in Crawlab's real MongoDB directly with `db/query`
+          and confirm the document is there — same `_id`, same name. This
+          is the deep DB-state slice the REST-only criteria above can't
+          reach: it asserts what landed in the database, not what the
+          handler chose to return. `db/query` routes the `mongodb://` URL
+          to its `find:` path; the persisted ObjectID surfaces as a
+          24-hex string, comparable to the one the create returned.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: create
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.projects_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  name: $inputs.project_name
+                  description: Created by the Duhem Crawlab dogfood
+              within: 15s
+            outputs:
+              body: body
+          - id: persisted
+            uses: db/query
+            with:
+              connection: $inputs.mongo_url
+              find:
+                collection: projects
+                filter:
+                  name: $inputs.project_name
+                sort:
+                  _id: -1
+                limit: 1
+              within: 15s
+            outputs:
+              rows: rows
+              row_count: row_count
+        assertions:
+          # The document is really in Mongo (read straight from the store).
+          - $steps.persisted.outputs.row_count >= 1
+          - $steps.persisted.outputs.rows[0].name == $inputs.project_name
+          # And it's the very project the API created — the persisted
+          # ObjectID matches the id the create returned.
+          - $steps.persisted.outputs.rows[0]._id == $steps.create.outputs.body.data._id

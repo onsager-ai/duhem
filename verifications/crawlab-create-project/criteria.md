@@ -14,10 +14,12 @@ the web boundary (`docs/duhem-spec.md` §8). The flow exercises auth
 (login → token), a write to Mongo, and an authenticated read back, in
 one holistic slice.
 
-Scope note: this v1 dogfood targets Crawlab's REST + Mongo surface.
-Crawlab's distributed task lifecycle and multi-DB ORM live in MongoDB
-metadata and worker gRPC, which Duhem's `db/*` (SQL-only) and action
-catalog don't reach yet — those are a later, deeper VD.
+Scope note: this dogfood targets Crawlab's REST + Mongo surface. AC-5
+reads the project store directly with `db/query` (#121 added a MongoDB
+read path), so the verdict no longer rests only on what the REST handler
+echoes back. Crawlab's distributed task lifecycle and worker gRPC are
+still out of reach for the action catalog — those are a later, deeper
+VD that builds on this Mongo read path.
 
 ## AC-1
 
@@ -41,3 +43,12 @@ the check having to guess a fixed delay.
 
 A created project is individually retrievable by its identifier —
 fetching it by id returns exactly that project.
+
+## AC-5
+
+A created project is actually persisted in the database, not merely
+echoed by the API: the project exists as a document in Crawlab's real
+MongoDB store, with the same identifier the API returned. This is the
+deep DB-state slice the REST-only criteria above can't reach — it
+asserts what landed in the database, read straight from the store, not
+what the handler chose to return.

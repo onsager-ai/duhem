@@ -1,12 +1,16 @@
-//! `db/*` actions — read and seed a **real** SQL database.
+//! `db/*` actions — read and seed a **real** database.
 //!
 //! Two actions ship: [`Query`] (`db/query`, read rows for assertions)
-//! and [`Seed`] (`db/seed`, prepare rows as a precondition). Both run
-//! against the real database over `sqlx`'s multi-backend `Any` driver —
-//! Postgres, MySQL, and SQLite are selected by the connection URL
-//! scheme (`postgres://`, `mysql://`, `sqlite:`). No stub, no in-memory
-//! double of the application's store (`docs/duhem-spec.md` §8): the
-//! whole point is to confirm what actually landed in the database.
+//! and [`Seed`] (`db/seed`, prepare rows as a precondition). The SQL
+//! path runs against the real database over `sqlx`'s multi-backend
+//! `Any` driver — Postgres, MySQL, and SQLite are selected by the
+//! connection URL scheme (`postgres://`, `mysql://`, `sqlite:`).
+//! `db/query` additionally reads MongoDB (`mongodb://`,
+//! `mongodb+srv://`) via a `find:` block, sharing the same `rows` /
+//! `row_count` output contract (see [`query`]); `db/seed` is SQL-only.
+//! No stub, no in-memory double of the application's store
+//! (`docs/duhem-spec.md` §8): the whole point is to confirm what
+//! actually landed in the database.
 //!
 //! These exist for the Crawlab dogfood (#99/#101) — distributed task
 //! lifecycle and multi-DB ORM correctness live in database state the

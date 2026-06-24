@@ -82,6 +82,22 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
             id_w = id_w
         )?;
     }
+    // Failure detail (v2): under the table, list each non-passing
+    // check and the assertions that explain it, so `fail` is legible
+    // without opening `trace.jsonl`.
+    if !s.failures.is_empty() {
+        writeln!(out)?;
+        writeln!(out, "FAILURES")?;
+        for f in &s.failures {
+            writeln!(out, "  {}::{}", f.criterion_id, f.check_id)?;
+            for a in &f.assertions {
+                writeln!(out, "    {}  {}", verdict_label(&a.verdict), a.expr)?;
+                if let Some(d) = &a.detail {
+                    writeln!(out, "        ({d})")?;
+                }
+            }
+        }
+    }
     writeln!(out, "evidence: {}", s.evidence_dir.display())?;
     Ok(())
 }

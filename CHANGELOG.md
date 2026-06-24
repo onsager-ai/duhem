@@ -20,6 +20,19 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+### Reporter contract — v2: failure detail (#125)
+
+- [additive] `RunSummary` gains a `failures` list (`schema_version`
+  bumped `1` → `2`): each non-passing check with its failing
+  assertions (the authored `expr`, the `verdict`, and any cause
+  `detail`). Lets the `default` and `pretty` reporters show *which*
+  assertion failed under a `fail`/`inconclusive` line instead of a
+  bare verdict, without the author hand-reading `trace.jsonl`. The
+  field is `#[serde(default)]`, so a v1-shaped line still
+  deserializes; the version bump follows the contract's "refuse a
+  newer shape rather than misrender" rule for external plugins. The
+  built-in `default`, `json`, and `pretty` reporters all render it.
+
 - [additive] `db/query` reads MongoDB via a `find:` block on
   `mongodb://` / `mongodb+srv://` connections (#121). The connection-URL
   scheme selects the path: SQL URLs keep `sql:` + `params:`; a Mongo URL

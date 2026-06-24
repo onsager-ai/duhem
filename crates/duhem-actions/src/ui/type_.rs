@@ -56,11 +56,15 @@ impl Action for Type {
 
         let result = if with.clear {
             // `clear: true` replaces the value via Playwright's `fill`.
-            ctx.page.fill(&selector, &with.text, timeout_ms).await
+            ctx.require_page()
+                .fill(&selector, &with.text, timeout_ms)
+                .await
         } else {
             // `clear: false` appends via `pressSequentially` (the
             // sidecar's `type` op).
-            ctx.page.type_text(&selector, &with.text, timeout_ms).await
+            ctx.require_page()
+                .type_text(&selector, &with.text, timeout_ms)
+                .await
         };
 
         match result {

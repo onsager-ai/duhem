@@ -173,7 +173,7 @@ fn main() -> ExitCode {
             pattern,
             name,
             force,
-        }) => run_init(path, &pattern, name, force),
+        }) => init::run_init(path, &pattern, name, force),
         Some(Cmd::Validate { path }) => match validate_cmd::run_validate(&path) {
             Ok(()) => {
                 println!("OK");
@@ -262,74 +262,6 @@ struct RunArgs {
     seed: Option<u64>,
     no_env_up: bool,
     keep_env: bool,
-}
-
-/// `duhem init` dispatch. Wraps `init::run` with the CLI-level
-/// translation: parse `--pattern`, map outcomes to the three exit
-/// codes the spec defines (0 success / 2 conflict / 3 warning),
-/// and print post-init guidance.
-fn run_init(path: Option<PathBuf>, pattern: &str, name: Option<String>, force: bool) -> ExitCode {
-    let pattern: init::Pattern = match pattern.parse() {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let args = init::InitArgs {
-        path,
-        pattern,
-        name,
-        force,
-    };
-    match init::run(args) {
-        Ok(outcome) => {
-            let mut stdout = std::io::stdout().lock();
-            let _ = writeln!(stdout, "Created:");
-            for p in &outcome.created {
-                let _ = writeln!(stdout, "  {}", p.display());
-            }
-            // The per-feature `duhem.yml` is always the first entry
-            // `init::run` pushes (Pattern A: only one; Pattern B:
-            // pushed before the parent root manifest). Use that as
-            // the next-command pointer.
-            let vd_path = outcome
-                .created
-                .first()
-                .cloned()
-                .unwrap_or_else(|| PathBuf::from("<verification>/duhem.yml"));
-            let _ = writeln!(stdout, "\nNext:");
-            let _ = writeln!(stdout, "  duhem validate {}", vd_path.display());
-            let _ = writeln!(stdout, "  duhem run      {}", vd_path.display());
-            let _ = writeln!(
-                stdout,
-                "\nAuthoring guide: .claude/skills/verification-authoring/SKILL.md"
-            );
-            let _ = stdout.flush();
-
-            if outcome.warnings.is_empty() {
-                ExitCode::SUCCESS
-            } else {
-                for w in &outcome.warnings {
-                    eprintln!("warning: {w}");
-                }
-                // Spec § Plan: "exit with a non-zero warning code
-                // (distinct from the error code)." Reserve 2 for the
-                // conflict-refusal error path; use 3 for warnings.
-                ExitCode::from(3)
-            }
-        }
-        Err(e @ init::InitError::ExistingNonEmpty { .. }) => {
-            eprintln!("{e}");
-            // Spec § Design: existing non-empty target without
-            // --force exits 2.
-            ExitCode::from(2)
-        }
-        Err(e) => {
-            eprintln!("{e}");
-            ExitCode::FAILURE
-        }
-    }
 }
 
 async fn run_command(args: RunArgs) -> ExitCode {
@@ -522,23 +454,41 @@ async fn run_command(args: RunArgs) -> ExitCode {
             None => None,
         };
 
-        // One browser per leaf. Phase-0 leaves run serially (#49) and
-        // `RunBrowser` is non-`Clone`, so the cleanest model is a
-        // fresh launch per leaf — same per-leaf isolation we'd want
-        // even after we have a sharable handle.
-        let browser = match RunBrowser::launch(headed).await {
-            Ok(b) => b,
-            Err(e) => {
-                eprintln!("browser: {e}");
-                return ExitCode::FAILURE;
+        // Only launch the Playwright sidecar when the leaf actually
+        // drives a page. A pure `api/*` + `db/*` + `cli/*` verification
+        // needs no browser, so we skip the launch (and its Chromium
+        // dependency + startup cost) entirely. `uses_requires_page` is
+        // the same classifier the engine uses to gate the per-check
+        // browser, so this never starves a UI step of a page.
+        let needs_browser = def
+            .criteria
+            .iter()
+            .flat_map(|c| &c.checks)
+            .flat_map(|ch| &ch.steps)
+            .any(|s| duhem_actions::uses_requires_page(&s.uses));
+
+        // One browser per leaf when needed. Phase-0 leaves run serially
+        // (#49) and `RunBrowser` is non-`Clone`, so a fresh launch per
+        // leaf is the cleanest model.
+        let browser = if needs_browser {
+            match RunBrowser::launch(headed).await {
+                Ok(b) => Some(b),
+                Err(e) => {
+                    eprintln!("browser: {e}");
+                    return ExitCode::FAILURE;
+                }
             }
+        } else {
+            None
         };
 
         let mut engine = Engine::new()
-            .with_browser(browser)
             .with_definition_path(leaf_path.display().to_string())
             .skip_env_up(no_env_up)
             .keep_env(keep_env);
+        if let Some(b) = browser {
+            engine = engine.with_browser(b);
+        }
         let root = match (evidence_dir.as_ref(), is_manifest) {
             (Some(dir), true) => dir.join(&name),
             (Some(dir), false) => dir.clone(),

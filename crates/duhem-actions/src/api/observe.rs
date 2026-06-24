@@ -166,7 +166,7 @@ impl Action for Observe {
         let outcome = timeout(timeout_dur, async {
             let mut cursor: u64 = 0;
             loop {
-                let batch = match ctx.page.poll_network(cursor).await {
+                let batch = match ctx.require_page().poll_network(cursor).await {
                     Ok(b) => b,
                     Err(e) => {
                         return Some(Err(ActionError::Playwright(format!(

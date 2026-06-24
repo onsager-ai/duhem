@@ -130,7 +130,7 @@ impl Action for AssertUrl {
         let started = Instant::now();
         loop {
             let last_url = ctx
-                .page
+                .require_page()
                 .url()
                 .await
                 .map_err(|e| ActionError::Playwright(format!("ui/assert-url: url: {e}")))?;

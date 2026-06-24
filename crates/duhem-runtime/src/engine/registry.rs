@@ -73,18 +73,27 @@ impl Dispatch for ConcreteAction {
         self.uses
     }
 
+    /// Delegate to the wrapped action's real page-need so the engine
+    /// opens a per-check browser only when a step actually drives a
+    /// page (`ui/*`, `api/observe`) rather than for every action.
+    fn requires_page(&self) -> bool {
+        self.action.requires_page()
+    }
+
     async fn invoke(
         &self,
         page: Option<&Page>,
         step_index: usize,
         with: &serde_yml::Value,
     ) -> Result<ActionResult, ActionError> {
-        let page = page.ok_or_else(|| {
-            ActionError::Playwright(format!(
+        // A page-requiring action without a page is a dispatch-layer
+        // failure (the engine should have refused the check upstream).
+        if self.action.requires_page() && page.is_none() {
+            return Err(ActionError::Playwright(format!(
                 "action `{}` requires a browser page but none was provisioned",
                 self.uses
-            ))
-        })?;
+            )));
+        }
         let ctx = ActionCtx { page, step_index };
         self.action.invoke(&ctx, with).await
     }

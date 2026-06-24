@@ -21,7 +21,9 @@ pub mod playwright;
 pub mod ui;
 pub mod with;
 
-pub use action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN, Observation, Outcome};
+pub use action::{
+    Action, ActionCtx, ActionResult, DEFAULT_WITHIN, Observation, Outcome, uses_requires_page,
+};
 pub use api::{Call, Observe, Poll};
 pub use browser::{
     CheckBrowser, Cookie, ElementState, NetworkBatch, NetworkEvent, Page, PwError, RunBrowser,

@@ -32,6 +32,7 @@
 use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 
 /// Pattern A (single-file VD) vs. Pattern B (co-located + root
 /// manifest). Pattern C (centralized) is out of scope per #48.
@@ -347,6 +348,78 @@ fn display_path_for_commands(target: &Path) -> String {
     match abs.strip_prefix(&cwd) {
         Ok(rel) => rel.display().to_string(),
         Err(_) => abs.display().to_string(),
+    }
+}
+
+/// CLI glue for `duhem init`: parse the pattern, run [`run`], print the
+/// created files + next-step pointers, and map the outcome to an exit
+/// code (0 ok, 3 warnings, 2 conflict-refusal, 1 other error).
+pub fn run_init(
+    path: Option<PathBuf>,
+    pattern: &str,
+    name: Option<String>,
+    force: bool,
+) -> ExitCode {
+    let pattern: Pattern = match pattern.parse() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let args = InitArgs {
+        path,
+        pattern,
+        name,
+        force,
+    };
+    match run(args) {
+        Ok(outcome) => {
+            let mut stdout = io::stdout().lock();
+            let _ = writeln!(stdout, "Created:");
+            for p in &outcome.created {
+                let _ = writeln!(stdout, "  {}", p.display());
+            }
+            // The per-feature `duhem.yml` is always the first entry
+            // `run` pushes (Pattern A: only one; Pattern B: pushed
+            // before the parent root manifest). Use that as the
+            // next-command pointer.
+            let vd_path = outcome
+                .created
+                .first()
+                .cloned()
+                .unwrap_or_else(|| PathBuf::from("<verification>/duhem.yml"));
+            let _ = writeln!(stdout, "\nNext:");
+            let _ = writeln!(stdout, "  duhem validate {}", vd_path.display());
+            let _ = writeln!(stdout, "  duhem run      {}", vd_path.display());
+            let _ = writeln!(
+                stdout,
+                "\nAuthoring guide: .claude/skills/verification-authoring/SKILL.md"
+            );
+            let _ = stdout.flush();
+
+            if outcome.warnings.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                for w in &outcome.warnings {
+                    eprintln!("warning: {w}");
+                }
+                // Spec § Plan: "exit with a non-zero warning code
+                // (distinct from the error code)." Reserve 2 for the
+                // conflict-refusal error path; use 3 for warnings.
+                ExitCode::from(3)
+            }
+        }
+        Err(e @ InitError::ExistingNonEmpty { .. }) => {
+            eprintln!("{e}");
+            // Spec § Design: existing non-empty target without --force
+            // exits 2.
+            ExitCode::from(2)
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
     }
 }
 

@@ -20,6 +20,20 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [additive] `db/query` reads MongoDB via a `find:` block on
+  `mongodb://` / `mongodb+srv://` connections (#121). The connection-URL
+  scheme selects the path: SQL URLs keep `sql:` + `params:`; a Mongo URL
+  takes `find:` (`collection` plus optional `filter` / `projection` /
+  `sort` / `limit`, written as YAML mappings). The `rows` / `row_count`
+  output contract is unchanged, so assertions and #104 nested navigation
+  are identical across backends; BSON maps to judge-comparable JSON (an
+  `ObjectId` → its 24-hex string, a `DateTime` → RFC3339). `sql`/`find`
+  are mutually exclusive per scheme; the wrong pairing is an
+  `Outcome::Error`. `db/seed` stays SQL-only. Worked example:
+  `verifications/crawlab-create-project/` AC-5 reads Crawlab's real Mongo
+  `projects` collection and asserts the REST-created project actually
+  persisted (same `_id` the API returned) — the deep DB-state slice the
+  REST-only criteria can't reach.
 - [additive] More pure `$runtime` helpers (#119): `concat(args...)`
   (join string forms), `len(x)` (array/object element count or string
   char count), `lower`/`upper`/`trim(s)` (case + whitespace

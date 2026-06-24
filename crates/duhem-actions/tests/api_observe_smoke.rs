@@ -110,7 +110,7 @@ async fn observe_captures_fetch_triggered_by_click() {
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
     let ctx = ActionCtx {
-        page: &check.page,
+        page: Some(&check.page),
         step_index: 0,
     };
     Navigate
@@ -180,7 +180,7 @@ async fn observe_json_parse_failure_emits_observation() {
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
     let ctx = ActionCtx {
-        page: &check.page,
+        page: Some(&check.page),
         step_index: 0,
     };
     Navigate
@@ -226,7 +226,7 @@ async fn observe_times_out_when_no_event_matches() {
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
     let ctx = ActionCtx {
-        page: &check.page,
+        page: Some(&check.page),
         step_index: 0,
     };
     Navigate

@@ -149,7 +149,7 @@ async fn check_state(
 
 async fn check_loaded(ctx: &ActionCtx<'_>) -> Result<bool, ActionError> {
     let ready: String = ctx
-        .page
+        .require_page()
         .eval("document.readyState")
         .await
         .map_err(|e| ActionError::Playwright(format!("ui/assert-state: readyState: {e}")))?;
@@ -166,7 +166,7 @@ async fn check_loaded(ctx: &ActionCtx<'_>) -> Result<bool, ActionError> {
 /// `within:` is shorter than `NETWORK_IDLE_QUIET` (e.g. 200 ms).
 async fn check_network_idle(ctx: &ActionCtx<'_>, deadline: Instant) -> Result<bool, ActionError> {
     let initial: u64 = ctx
-        .page
+        .require_page()
         .eval("performance.getEntriesByType('resource').length")
         .await
         .map_err(|e| ActionError::Playwright(format!("ui/assert-state: resources: {e}")))?;
@@ -184,7 +184,7 @@ async fn check_network_idle(ctx: &ActionCtx<'_>, deadline: Instant) -> Result<bo
         }
         sleep(POLL_INTERVAL).await;
         let now_count: u64 = ctx
-            .page
+            .require_page()
             .eval("performance.getEntriesByType('resource').length")
             .await
             .map_err(|e| ActionError::Playwright(format!("ui/assert-state: resources: {e}")))?;
@@ -198,14 +198,14 @@ async fn marker_present(ctx: &ActionCtx<'_>, marker: &Marker) -> Result<bool, Ac
     match marker.kind {
         MarkerKind::Cookie => {
             let cookies =
-                ctx.page.cookies().await.map_err(|e| {
+                ctx.require_page().cookies().await.map_err(|e| {
                     ActionError::Playwright(format!("ui/assert-state: cookies: {e}"))
                 })?;
             Ok(cookies.iter().any(|c| c.name == marker.name))
         }
         MarkerKind::LocalStorage => {
             let expr = format!("localStorage.getItem({}) !== null", json!(marker.name));
-            let present: bool = ctx.page.eval(&expr).await.map_err(|e| {
+            let present: bool = ctx.require_page().eval(&expr).await.map_err(|e| {
                 ActionError::Playwright(format!("ui/assert-state: localStorage: {e}"))
             })?;
             Ok(present)

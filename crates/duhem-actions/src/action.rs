@@ -7,8 +7,9 @@
 //!   structured *observations*, not a verdict. The judge interprets
 //!   them.
 //! - **Holistic Verification Principle.** `ActionCtx` carries a real
-//!   Playwright `Page` (built in `browser::CheckBrowser`); there
-//!   is no in-memory DOM mock injected for tests.
+//!   Playwright `Page` (built in `browser::CheckBrowser`) for actions
+//!   that drive one; there is no in-memory DOM mock injected for
+//!   tests. Page-free actions (`api/call`, `db/*`, …) carry `None`.
 //!
 //! The runtime spec wires `ActionCtx`'s expression evaluator and
 //! step-index threading; here we keep the trait shape minimal.
@@ -34,11 +35,25 @@ pub const DEFAULT_WITHIN: Duration = Duration::from_secs(5);
 /// this with the expression evaluator and evidence sink — both are
 /// out of scope here so we keep the struct narrow.
 pub struct ActionCtx<'a> {
-    /// Browser page bound to this check.
-    pub page: &'a Page,
+    /// Browser page bound to this check, or `None` for a page-free
+    /// step. The engine attaches a page only when the check contains a
+    /// step that needs one (`uses_requires_page`); `api/call`,
+    /// `api/poll`, `db/*`, and `cli/*` run with `None`.
+    pub page: Option<&'a Page>,
     /// Zero-based index of the currently-executing step within its
     /// check. Carried for evidence threading downstream.
     pub step_index: usize,
+}
+
+impl<'a> ActionCtx<'a> {
+    /// The browser page, for actions whose `requires_page()` is `true`.
+    /// The dispatch layer guarantees a page is attached before invoking
+    /// such an action, so this never returns `None` in practice — a
+    /// `None` here is a dispatch-invariant violation, not author error.
+    pub fn require_page(&self) -> &'a Page {
+        self.page
+            .expect("requires_page action dispatched without a browser page (dispatch invariant)")
+    }
 }
 
 /// Per-action lifecycle outcome. Maps onto
@@ -102,6 +117,17 @@ impl ActionResult {
     }
 }
 
+/// Whether an action identified by its `Step.uses` string needs a
+/// Playwright `Page`. UI actions (`ui/*`) drive a page directly, and
+/// `api/observe` reads the page's network recorder. `api/call`,
+/// `api/poll`, `db/*`, and `cli/*` never touch a page. Single source
+/// of truth for two consumers: the engine opens a per-check browser
+/// only when a step needs it, and the CLI skips launching the
+/// Playwright sidecar entirely for page-free verifications.
+pub fn uses_requires_page(uses: &str) -> bool {
+    uses.starts_with("ui/") || uses == "api/observe"
+}
+
 /// One built-in action type. Implementors live under `ui/`, `api/`,
 /// `db/`, etc.
 ///
@@ -113,6 +139,15 @@ pub trait Action: Send + Sync {
     /// `"ui/click"`).
     fn uses(&self) -> &'static str;
 
+    /// Whether this action needs a Playwright `Page`. Defaults to the
+    /// family classification from [`uses_requires_page`] (`ui/*` →
+    /// `true`), so a new action gets the right answer from its `uses`
+    /// string alone. The runtime uses it to skip the browser for
+    /// page-free checks.
+    fn requires_page(&self) -> bool {
+        uses_requires_page(self.uses())
+    }
+
     /// Run the action against the per-check context. `with` is the
     /// raw deserialized `Step.with`; the implementation downcasts
     /// to its typed `With` struct via `serde_yml`.
@@ -121,4 +156,31 @@ pub trait Action: Send + Sync {
         ctx: &ActionCtx<'_>,
         with: &serde_yml::Value,
     ) -> Result<ActionResult, ActionError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::uses_requires_page;
+
+    #[test]
+    fn page_need_by_action_family() {
+        // UI actions drive a page.
+        for u in [
+            "ui/navigate",
+            "ui/click",
+            "ui/type",
+            "ui/select",
+            "ui/assert-element",
+            "ui/assert-url",
+            "ui/assert-state",
+        ] {
+            assert!(uses_requires_page(u), "{u} should need a page");
+        }
+        // api/observe reads the page's network recorder.
+        assert!(uses_requires_page("api/observe"));
+        // Everything else is page-free.
+        for u in ["api/call", "api/poll", "db/query", "db/seed", "cli/invoke"] {
+            assert!(!uses_requires_page(u), "{u} should be page-free");
+        }
+    }
 }

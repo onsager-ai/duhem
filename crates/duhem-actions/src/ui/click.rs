@@ -61,7 +61,11 @@ impl Action for Click {
         let (locator, timeout) = with.into_locator();
         let selector = to_selector(&locator);
 
-        match ctx.page.click(&selector, timeout.as_millis() as f64).await {
+        match ctx
+            .require_page()
+            .click(&selector, timeout.as_millis() as f64)
+            .await
+        {
             Ok(()) => Ok(ActionResult::ok()),
             Err(e) if super::is_timeout_message(&e.to_string()) => Ok(ActionResult::timeout()),
             Err(e) => Err(ActionError::Playwright(format!("ui/click: {e}"))),

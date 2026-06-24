@@ -57,7 +57,7 @@ impl Action for AssertElement {
         let selector = to_selector(&with.locator);
 
         let satisfied = match ctx
-            .page
+            .require_page()
             .wait_for_selector(
                 &selector,
                 map_state(with.expected),
@@ -77,7 +77,7 @@ impl Action for AssertElement {
         // reported as `count = 0` — that would conflate "nothing
         // matched" with "we couldn't ask".
         let count = ctx
-            .page
+            .require_page()
             .count(&selector)
             .await
             .map_err(|e| ActionError::Playwright(format!("ui/assert-element: count: {e}")))?;

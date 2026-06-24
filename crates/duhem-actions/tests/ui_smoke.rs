@@ -117,7 +117,7 @@ async fn navigate_succeeds_against_fixture() {
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
     let ctx = ActionCtx {
-        page: &check.page,
+        page: Some(&check.page),
         step_index: 0,
     };
     let r = Navigate
@@ -134,7 +134,7 @@ async fn click_present_button_succeeds() {
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
     let ctx = ActionCtx {
-        page: &check.page,
+        page: Some(&check.page),
         step_index: 0,
     };
     Navigate
@@ -155,7 +155,7 @@ async fn assert_element_visible_present_satisfies() {
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
     let ctx = ActionCtx {
-        page: &check.page,
+        page: Some(&check.page),
         step_index: 0,
     };
     Navigate
@@ -193,7 +193,7 @@ async fn assert_element_not_exists_with_present_alert_returns_false() {
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
     let ctx = ActionCtx {
-        page: &check.page,
+        page: Some(&check.page),
         step_index: 0,
     };
     Navigate
@@ -231,7 +231,7 @@ async fn assert_element_timeout_returns_satisfied_false_quickly() {
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
     let ctx = ActionCtx {
-        page: &check.page,
+        page: Some(&check.page),
         step_index: 0,
     };
     Navigate
@@ -275,7 +275,7 @@ async fn type_fills_input_then_assert_element_reads_it_back() {
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
     let ctx = ActionCtx {
-        page: &check.page,
+        page: Some(&check.page),
         step_index: 0,
     };
     Navigate
@@ -319,7 +319,7 @@ async fn select_by_value_label_index_dispatches_to_playwright() {
     ] {
         let check = run.open_check().await.unwrap();
         let ctx = ActionCtx {
-            page: &check.page,
+            page: Some(&check.page),
             step_index: 0,
         };
         Navigate
@@ -346,7 +346,7 @@ async fn assert_url_passes_on_navigation_and_times_out_on_stale_url() {
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
     let ctx = ActionCtx {
-        page: &check.page,
+        page: Some(&check.page),
         step_index: 0,
     };
     Navigate
@@ -416,7 +416,7 @@ async fn assert_state_loaded_resolves_when_ready_state_is_complete() {
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
     let ctx = ActionCtx {
-        page: &check.page,
+        page: Some(&check.page),
         step_index: 0,
     };
     Navigate
@@ -441,7 +441,7 @@ async fn assert_state_authenticated_observes_cookie_marker_present_and_absent() 
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
     let ctx = ActionCtx {
-        page: &check.page,
+        page: Some(&check.page),
         step_index: 0,
     };
     Navigate
@@ -524,7 +524,7 @@ async fn assert_state_signed_out_observes_local_storage_marker_present_and_absen
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
     let ctx = ActionCtx {
-        page: &check.page,
+        page: Some(&check.page),
         step_index: 0,
     };
     Navigate

@@ -85,7 +85,7 @@ impl Action for Select {
         };
 
         match ctx
-            .page
+            .require_page()
             .select_option(&selector, &by, timeout.as_millis() as f64)
             .await
         {

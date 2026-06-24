@@ -20,6 +20,19 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [additive] `api/poll` action (#115): hit an endpoint repeatedly until
+  a response condition holds or a timeout elapses — the HTTP analogue of
+  `ui/assert-element`, for verifying asynchronous outcomes without a
+  flaky fixed `sleep`. `with: { method, url, headers, body, within,
+  interval, until }`; `until` is a closed predicate — `{ status: <int> }`
+  or `{ path: <json-path>, equals|matches|exists|gte: … }` over the JSON
+  body (dotted/bracket path, mirroring #104). Outputs `satisfied` (did
+  the condition hold in time), `status`, `body`, `body_text`. Like
+  `ui/assert-*`, a completed poll is `Outcome::Ok` with `satisfied`
+  true/false (the verdict stays in the judge); a transient request error
+  counts as "not yet" so a still-starting service is tolerated. Worked
+  example: `verifications/crawlab-create-project/` AC-3 polls the real
+  Crawlab project list until the created project appears. (#115)
 - [clarifying] Fixed `environment.up:` / `down:` script spawn on a
   relative VD path (#110): `run_script` set `current_dir(vd_dir)` and
   passed the program as `vd_dir.join("./scripts/up.sh")` — a relative

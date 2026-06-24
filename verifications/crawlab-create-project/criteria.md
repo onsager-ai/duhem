@@ -30,3 +30,9 @@ well-formed identifier and the name that was supplied.
 An authenticated request for the project list returns a well-formed
 listing — the create above is reflected by a non-empty, correctly
 shaped response from the real database.
+
+## AC-3
+
+After a project is created, it becomes visible in the project listing
+within a bounded window — the write propagates to the read path without
+the check having to guess a fixed delay.

@@ -20,6 +20,19 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [additive] More pure `$runtime` helpers (#119): `concat(args...)`
+  (join string forms), `len(x)` (array/object element count or string
+  char count), `lower`/`upper`/`trim(s)` (case + whitespace
+  normalization), `replace(s, from, to)` (literal substring replace),
+  `default(value, fallback)` (fallback when `value` is a missing
+  reference — absent output/input/env/nested field). All pure and
+  deterministic (no I/O / clock / randomness), so §11.2's
+  mechanical-judgment and reproducible-run commitments hold; helpers
+  compute values, the closed assertion set still decides. `len(x)` over
+  a scalar (and `default`'s non-missing errors) surface as
+  `type_mismatch`. Spec §10.7 updated. Worked example:
+  `verifications/crawlab-create-project/` AC-2 asserts
+  `$runtime.len(body.data) >= 1` over the real project array. (#119)
 - [additive] `$runtime.format(fmt, args...)` pure helper (#117): `{}`
   placeholders in `fmt` are filled, in order, by the remaining scalar
   args (coerced to string). The sanctioned, identity-preserving way to

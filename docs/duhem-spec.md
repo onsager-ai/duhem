@@ -528,11 +528,23 @@ Borrowed from Arazzo. References available in expressions:
   scalar args (coerced to their string form). The sanctioned way to
   compose a value — e.g. a dynamic URL `$runtime.format("{}/{}",
   $inputs.base, $steps.create.outputs.body.data._id)` — without
-  scripting. Deterministic and reproducible: it is a pure function of
-  its arguments (no I/O, clock, or randomness), so it preserves the
-  mechanical-judgment and reproducible-run commitments (§11.2). Helpers
-  may compute and compose values; they never *are* the verdict, which
-  remains the closed assertion set of §10.6.
+  scripting.
+- `$runtime.concat(args...)` — join the args' string forms (`format`
+  without a template).
+- `$runtime.len(x)` — element count of an array / object, or character
+  count of a string (`$runtime.len($steps.api.outputs.body.data) == 3`).
+- `$runtime.lower(s)` / `$runtime.upper(s)` / `$runtime.trim(s)` — case
+  and whitespace normalization for robust string comparisons.
+- `$runtime.replace(s, from, to)` — literal substring replace.
+- `$runtime.default(value, fallback)` — `fallback` when `value` is a
+  *missing* reference (absent output / input / env / nested field), for
+  optional fields.
+
+All `$runtime` helpers are **pure** functions of their arguments — no
+I/O, clock, or randomness — so they preserve the mechanical-judgment and
+reproducible-run commitments (§11.2). Helpers may compute and compose
+values; they never *are* the verdict, which remains the closed assertion
+set of §10.6.
 
 ### 10.8 Extensibility
 

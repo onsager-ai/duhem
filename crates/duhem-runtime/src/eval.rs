@@ -401,6 +401,67 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
             }
             apply_format(&fmt, &parts).map(Value::Str)
         }
+        // `concat(args...)`: join the args' string forms. `format`
+        // without a template — `$runtime.concat($inputs.base, "/", id)`.
+        ("concat", _) => {
+            let mut out = String::new();
+            for a in args {
+                out.push_str(&scalar_to_string(eval_value(a, ctx)?)?);
+            }
+            Ok(Value::Str(out))
+        }
+        // `len(x)`: element count of a collection or character count of a
+        // string — `$runtime.len($steps.api.outputs.body.data) == 3`.
+        // Scalars have no length and surface as `TypeMismatch`.
+        ("len", 1) => {
+            let v = eval_value(&args[0], ctx)?;
+            let n = match &v {
+                Value::Str(s) => s.chars().count() as i64,
+                Value::Array(a) => a.len() as i64,
+                Value::Object(o) => o.len() as i64,
+                _ => {
+                    return Err(InconclusiveCause::TypeMismatch {
+                        lhs: v.shape(),
+                        rhs: ValueShape::Array,
+                    });
+                }
+            };
+            Ok(Value::Int(n))
+        }
+        // Case / whitespace normalization, for robust string comparisons.
+        ("lower", 1) => Ok(Value::Str(
+            scalar_to_string(eval_value(&args[0], ctx)?)?.to_lowercase(),
+        )),
+        ("upper", 1) => Ok(Value::Str(
+            scalar_to_string(eval_value(&args[0], ctx)?)?.to_uppercase(),
+        )),
+        ("trim", 1) => Ok(Value::Str(
+            scalar_to_string(eval_value(&args[0], ctx)?)?
+                .trim()
+                .to_string(),
+        )),
+        // `replace(s, from, to)`: literal (non-regex) substring replace.
+        ("replace", 3) => {
+            let s = scalar_to_string(eval_value(&args[0], ctx)?)?;
+            let from = scalar_to_string(eval_value(&args[1], ctx)?)?;
+            let to = scalar_to_string(eval_value(&args[2], ctx)?)?;
+            Ok(Value::Str(s.replace(&from, &to)))
+        }
+        // `default(value, fallback)`: yield `fallback` when `value` is a
+        // *missing* reference (absent output / input / env / nested
+        // field), else `value`. For optional fields — mirrors `exists`'s
+        // missing-cause handling. A genuine type/format error propagates.
+        ("default", 2) => match eval_value(&args[0], ctx) {
+            Ok(v) => Ok(v),
+            Err(
+                InconclusiveCause::MissingObservation { .. }
+                | InconclusiveCause::MissingSetupObservation { .. }
+                | InconclusiveCause::MissingInput(_)
+                | InconclusiveCause::MissingEnv(_)
+                | InconclusiveCause::MissingField(_),
+            ) => eval_value(&args[1], ctx),
+            Err(c) => Err(c),
+        },
         _ => Err(InconclusiveCause::UnknownRuntimeHelper(helper.to_string())),
     }
 }
@@ -1102,5 +1163,86 @@ mod tests {
             run(r#"$runtime.format("{}", $inputs.obj)"#, &ctx),
             EvalResult::Inconclusive(InconclusiveCause::TypeMismatch { .. })
         ));
+    }
+
+    // ---- more $runtime pure helpers ----
+
+    #[test]
+    fn concat_joins_scalar_args() {
+        let ctx = TestCtx::new().with_input("id", Value::Int(7));
+        assert_eq!(
+            run(r#"$runtime.concat($inputs.id, "/x") == "7/x""#, &ctx),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn len_counts_array_string_object() {
+        let arr = Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+        let ctx = TestCtx::new()
+            .with_output("api", "data", arr)
+            .with_input("s", Value::Str("abcd".into()));
+        assert_eq!(
+            run("$runtime.len($steps.api.outputs.data) == 3", &ctx),
+            EvalResult::True
+        );
+        assert_eq!(run("$runtime.len($inputs.s) == 4", &ctx), EvalResult::True);
+    }
+
+    #[test]
+    fn len_of_scalar_is_type_mismatch() {
+        let ctx = TestCtx::new().with_input("n", Value::Int(5));
+        assert!(matches!(
+            run("$runtime.len($inputs.n) == 1", &ctx),
+            EvalResult::Inconclusive(InconclusiveCause::TypeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn case_and_trim_normalize() {
+        let ctx = TestCtx::new().with_input("v", Value::Str("  AbC  ".into()));
+        assert_eq!(
+            run(r#"$runtime.lower($runtime.trim($inputs.v)) == "abc""#, &ctx),
+            EvalResult::True
+        );
+        assert_eq!(
+            run(r#"$runtime.upper("abc") == "ABC""#, &ctx),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn replace_substitutes_substring() {
+        let ctx = TestCtx::new();
+        assert_eq!(
+            run(r#"$runtime.replace("a-b-c", "-", "/") == "a/b/c""#, &ctx),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn default_falls_back_on_missing_field() {
+        // body has no `email`; default supplies the fallback.
+        let body = Value::Object(
+            [("name".to_string(), Value::Str("p".into()))]
+                .into_iter()
+                .collect(),
+        );
+        let ctx = TestCtx::new().with_output("api", "body", body);
+        assert_eq!(
+            run(
+                r#"$runtime.default($steps.api.outputs.body.email, "none") == "none""#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+        // present field is returned as-is, not the fallback
+        assert_eq!(
+            run(
+                r#"$runtime.default($steps.api.outputs.body.name, "none") == "p""#,
+                &ctx
+            ),
+            EvalResult::True
+        );
     }
 }

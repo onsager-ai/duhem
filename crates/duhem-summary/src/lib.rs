@@ -8,9 +8,12 @@
 //! `### Reporter contract` heading in the current `v0.x — unreleased`
 //! section, plus a bump of [`RunSummary::SCHEMA_VERSION`].
 //!
-//! Phase-0 scope: criterion-level verdicts only. Per-check verdicts
-//! stay in `trace.jsonl` (the trace is the trace; the summary is the
-//! summary).
+//! Scope: criterion-level verdicts, plus a `failures` list (v2) that
+//! carries the *non-passing* checks and their failing assertions so a
+//! reporter can explain a `fail` without re-reading `trace.jsonl`. The
+//! full per-check / per-step trace still lives in `trace.jsonl` (the
+//! trace is the trace; the summary carries only what a verdict line
+//! needs to be legible).
 //!
 //! The crate has exactly one dependency on `duhem-judge` (`VerdictState`)
 //! so consumers — including reference plugins — can deserialize without
@@ -26,9 +29,9 @@ use serde::{Deserialize, Serialize};
 /// contract; field renames / removals are schema-impacting.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSummary {
-    /// Always `"1"` at v1. Authored explicitly so a plugin written
-    /// against today's contract can refuse to parse a future shape
-    /// rather than silently misrender it.
+    /// `"2"` as of the failure-detail addition. Authored explicitly so
+    /// a plugin written against an older contract can refuse to parse a
+    /// newer shape rather than silently misrender it.
     pub schema_version: String,
     /// Run identifier (the ULID created by `Engine::run_with_metadata`).
     pub run_id: String,
@@ -38,6 +41,12 @@ pub struct RunSummary {
     pub criteria: Vec<CriterionSummary>,
     /// On-disk evidence directory for the run.
     pub evidence_dir: PathBuf,
+    /// Non-passing checks and the assertions that explain their verdict
+    /// (v2). Lets a reporter show *which* assertion failed without the
+    /// author hand-reading `trace.jsonl`. Empty on a passing run;
+    /// `#[serde(default)]` so a v1 line still deserializes.
+    #[serde(default)]
+    pub failures: Vec<CheckFailureSummary>,
 }
 
 impl RunSummary {
@@ -45,9 +54,10 @@ impl RunSummary {
     /// requires a `CHANGELOG.md` entry under the
     /// `### Reporter contract` heading in the current
     /// `## v0.x — unreleased` section.
-    pub const SCHEMA_VERSION: &'static str = "1";
+    pub const SCHEMA_VERSION: &'static str = "2";
 
-    /// Construct a summary at the current schema version.
+    /// Construct a summary at the current schema version. `failures`
+    /// defaults empty; populate it with [`RunSummary::with_failures`].
     pub fn new(
         run_id: impl Into<String>,
         verdict: VerdictState,
@@ -60,7 +70,14 @@ impl RunSummary {
             verdict,
             criteria,
             evidence_dir,
+            failures: Vec::new(),
         }
+    }
+
+    /// Attach the non-passing-check failure detail (builder style).
+    pub fn with_failures(mut self, failures: Vec<CheckFailureSummary>) -> Self {
+        self.failures = failures;
+        self
     }
 }
 
@@ -69,6 +86,26 @@ impl RunSummary {
 pub struct CriterionSummary {
     pub id: String,
     pub verdict: VerdictState,
+}
+
+/// One non-passing check and the assertions that explain its verdict.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CheckFailureSummary {
+    pub criterion_id: String,
+    pub check_id: String,
+    pub assertions: Vec<FailedAssertionSummary>,
+}
+
+/// One non-passing assertion: the authored expression, its state, and
+/// any evidence-bound cause detail.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FailedAssertionSummary {
+    /// The human-authored assertion line (e.g.
+    /// `$steps.q.outputs.status == 200`).
+    pub expr: String,
+    pub verdict: VerdictState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 /// Aggregated summary across all leaves of a root-manifest run (spec
@@ -127,13 +164,39 @@ mod tests {
         assert_eq!(back, s);
         // Sanity: the contract is versioned on the wire, not just in
         // memory — a plugin sees `schema_version` as a field.
-        assert!(line.contains("\"schema_version\":\"1\""), "got: {line}");
+        assert!(line.contains("\"schema_version\":\"2\""), "got: {line}");
     }
 
     #[test]
     fn schema_version_constant_matches_runtime() {
         let s = RunSummary::new("x", VerdictState::Pass, vec![], PathBuf::from("."));
         assert_eq!(s.schema_version, RunSummary::SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn failures_round_trip_and_default_empty() {
+        // A v1-shaped line (no `failures`) still deserializes — the
+        // field is `#[serde(default)]`.
+        let v1 = r#"{"schema_version":"1","run_id":"r","verdict":"pass","criteria":[],"evidence_dir":"."}"#;
+        let back: RunSummary = serde_json::from_str(v1).unwrap();
+        assert!(back.failures.is_empty());
+
+        // A populated failures list round-trips.
+        let s = RunSummary::new("r", VerdictState::Fail, vec![], PathBuf::from(".")).with_failures(
+            vec![CheckFailureSummary {
+                criterion_id: "AC-1".into(),
+                check_id: "AC-1.1".into(),
+                assertions: vec![FailedAssertionSummary {
+                    expr: "$steps.q.outputs.status == \"finished\"".into(),
+                    verdict: VerdictState::Fail,
+                    detail: None,
+                }],
+            }],
+        );
+        let line = serde_json::to_string(&s).unwrap();
+        let back: RunSummary = serde_json::from_str(&line).unwrap();
+        assert_eq!(back, s);
+        assert_eq!(back.failures[0].assertions[0].verdict, VerdictState::Fail);
     }
 
     #[test]

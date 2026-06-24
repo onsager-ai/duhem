@@ -20,8 +20,11 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 use duhem_judge::RunSetVerdict;
+use duhem_runtime::CheckFailure;
 use duhem_runtime::RunOutcome;
-use duhem_summary::{CriterionSummary, RunSetSummary, RunSummary};
+use duhem_summary::{
+    CheckFailureSummary, CriterionSummary, FailedAssertionSummary, RunSetSummary, RunSummary,
+};
 
 /// Selectable reporter. Built-ins are tagged variants; plugins carry
 /// the full argv they were discovered with so the dispatch is uniform.
@@ -106,6 +109,7 @@ pub fn render(
     match reporter {
         Reporter::Default => {
             writeln!(out, "{}", outcome.verdict.state)?;
+            write_failures(out, &outcome.failures)?;
             Ok(())
         }
         Reporter::Quiet => Ok(()),
@@ -215,7 +219,42 @@ impl Write for NewlineTracker<'_> {
     }
 }
 
+/// Append per-failing-check assertion detail under a `fail` /
+/// `inconclusive` verdict line, so an author sees *which* assertion
+/// failed (and any cause) without opening `trace.jsonl`. Nothing is
+/// written for a passing run (`failures` is empty). ASCII-only and
+/// ANSI-free, matching the built-in reporters' plain posture.
+fn write_failures(out: &mut dyn Write, failures: &[CheckFailure]) -> Result<(), RenderError> {
+    for f in failures {
+        writeln!(out, "  {}::{}:", f.criterion_id, f.check_id)?;
+        for a in &f.assertions {
+            writeln!(out, "    {}  {}", a.state, a.expr)?;
+            if let Some(d) = &a.detail {
+                writeln!(out, "        ({d})")?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn build_summary(o: &RunOutcome) -> RunSummary {
+    let failures = o
+        .failures
+        .iter()
+        .map(|f| CheckFailureSummary {
+            criterion_id: f.criterion_id.clone(),
+            check_id: f.check_id.clone(),
+            assertions: f
+                .assertions
+                .iter()
+                .map(|a| FailedAssertionSummary {
+                    expr: a.expr.clone(),
+                    verdict: a.state,
+                    detail: a.detail.clone(),
+                })
+                .collect(),
+        })
+        .collect();
     RunSummary::new(
         o.run_id.clone(),
         o.verdict.state,
@@ -229,6 +268,7 @@ fn build_summary(o: &RunOutcome) -> RunSummary {
             .collect(),
         o.run_dir.clone(),
     )
+    .with_failures(failures)
 }
 
 /// Spawn a plugin subprocess, write the `RunSummary` JSON line to its
@@ -377,6 +417,7 @@ mod tests {
             },
             run_id: "01J000000000000000000RUN".into(),
             run_dir: PathBuf::from(".duhem/runs/01J000000000000000000RUN"),
+            failures: Vec::new(),
         }
     }
 
@@ -419,7 +460,8 @@ mod tests {
         assert_eq!(v["criteria"][0]["verdict"], "pass");
         assert_eq!(v["evidence_dir"], ".duhem/runs/01J000000000000000000RUN");
         // Spec on #34: the contract surfaces schema_version on the wire.
-        assert_eq!(v["schema_version"], "1");
+        // Bumped to "2" with the failure-detail addition (#125).
+        assert_eq!(v["schema_version"], "2");
     }
 
     #[test]

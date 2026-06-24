@@ -63,6 +63,40 @@ pub enum TypeCheckKind {
 }
 
 impl Assertion {
+    /// A compact, human-readable one-line rendering of the authored
+    /// assertion, for reporters that surface *which* assertion failed.
+    /// A bare expression is its raw text; structured forms render as
+    /// `<op>(<operands>)` mirroring the YAML the author wrote.
+    pub fn display(&self) -> String {
+        match self {
+            Assertion::Expr(e) => e.raw.clone(),
+            Assertion::Exists { value } => format!("exists({})", value.raw),
+            Assertion::TypeCheck { value, is } => {
+                let kind = match is {
+                    TypeCheckKind::Uuid => "uuid",
+                    TypeCheckKind::String => "string",
+                    TypeCheckKind::Integer => "integer",
+                    TypeCheckKind::Float => "float",
+                    TypeCheckKind::Boolean => "boolean",
+                    TypeCheckKind::Object => "object",
+                    TypeCheckKind::Array => "array",
+                    TypeCheckKind::Null => "null",
+                };
+                format!("type_check({} is {kind})", value.raw)
+            }
+            Assertion::Matches { value, pattern } => {
+                format!("matches({}, /{pattern}/)", value.raw)
+            }
+            Assertion::In { value, set } => {
+                format!("in({}, {} values)", value.raw, set.len())
+            }
+            Assertion::Equal { values } => {
+                let parts: Vec<&str> = values.iter().map(|v| v.raw.as_str()).collect();
+                format!("equal({})", parts.join(", "))
+            }
+        }
+    }
+
     /// Walk every `ExprStr` this assertion holds. Used by the validator
     /// to resolve all `$steps.*` and `$inputs.*` references.
     pub fn walk_exprs<F: FnMut(&ExprStr)>(&self, mut visit: F) {

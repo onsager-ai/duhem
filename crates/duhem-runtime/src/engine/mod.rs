@@ -16,4 +16,4 @@ pub mod shim;
 pub mod template;
 
 pub use context::{RunContext, RunState};
-pub use runner::{CheckFilter, Engine, EngineError, RunOutcome};
+pub use runner::{CheckFailure, CheckFilter, Engine, EngineError, FailedAssertion, RunOutcome};

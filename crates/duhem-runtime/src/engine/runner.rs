@@ -88,6 +88,34 @@ pub struct RunOutcome {
     pub verdict: RunVerdict,
     pub run_id: String,
     pub run_dir: PathBuf,
+    /// Checks that did not pass, each with its failing assertions.
+    /// Carried out of the run so reporters can show *which* assertion
+    /// failed (and any cause detail) without the author hand-reading
+    /// `trace.jsonl`. Empty on a fully-passing run.
+    pub failures: Vec<CheckFailure>,
+}
+
+/// One assertion that failed or was inconclusive within a check.
+#[derive(Debug, Clone)]
+pub struct FailedAssertion {
+    /// The human-authored assertion line, reconstructed from the schema
+    /// (`assertion_to_expr`) — e.g. `$steps.q.outputs.status == 200`.
+    pub expr: String,
+    /// `Fail` or `Inconclusive(..)`; never `Pass` (passing assertions
+    /// are not collected).
+    pub state: VerdictState,
+    /// Evidence-bound cause detail when present (e.g. a missing
+    /// observation or type mismatch). `None` for a plain comparison
+    /// that evaluated false — the expression itself localizes it.
+    pub detail: Option<String>,
+}
+
+/// One non-passing check and the assertions that explain its verdict.
+#[derive(Debug, Clone)]
+pub struct CheckFailure {
+    pub criterion_id: String,
+    pub check_id: String,
+    pub assertions: Vec<FailedAssertion>,
 }
 
 /// The minimal step executor.
@@ -306,6 +334,9 @@ impl Engine {
                     verdict,
                     run_id,
                     run_dir,
+                    // The run aborted before any criterion executed, so
+                    // there are no per-assertion failures to surface.
+                    failures: Vec::new(),
                 });
             }
         }
@@ -350,14 +381,18 @@ impl Engine {
                     verdict,
                     run_id,
                     run_dir,
+                    // The run aborted before any criterion executed, so
+                    // there are no per-assertion failures to surface.
+                    failures: Vec::new(),
                 });
             }
         }
 
         let mut criterion_verdicts: Vec<CriterionVerdict> = Vec::new();
+        let mut failures: Vec<CheckFailure> = Vec::new();
         for criterion in &def.criteria {
             let cv = self
-                .run_criterion(&mut writer, &run_state, criterion)
+                .run_criterion(&mut writer, &run_state, criterion, &mut failures)
                 .await?;
             writer.append(EventPayload::CriterionFinished {
                 criterion_id: criterion.id.clone(),
@@ -386,6 +421,7 @@ impl Engine {
             verdict: run_verdict,
             run_id,
             run_dir,
+            failures,
         })
     }
 
@@ -394,6 +430,7 @@ impl Engine {
         writer: &mut EvidenceWriter,
         run: &RunState,
         criterion: &Criterion,
+        failures: &mut Vec<CheckFailure>,
     ) -> Result<CriterionVerdict, EngineError> {
         let mut check_verdicts: Vec<CheckVerdict> = Vec::new();
         for check in &criterion.checks {
@@ -406,7 +443,9 @@ impl Engine {
             {
                 continue;
             }
-            let cv = self.run_check(writer, run, &criterion.id, check).await?;
+            let cv = self
+                .run_check(writer, run, &criterion.id, check, failures)
+                .await?;
             writer.append(EventPayload::CheckFinished {
                 check_id: check.id.clone(),
                 verdict: cv.state,
@@ -427,6 +466,7 @@ impl Engine {
         run: &RunState,
         criterion_id: &str,
         check: &Check,
+        failures: &mut Vec<CheckFailure>,
     ) -> Result<CheckVerdict, EngineError> {
         let mut ctx = RunContext::new(run);
 
@@ -536,6 +576,9 @@ impl Engine {
         }
 
         let mut assertion_outcomes: Vec<AssertionOutcome> = Vec::new();
+        // Non-passing assertions, collected for the reporter so a failing
+        // run shows *which* assertion failed without trace-reading.
+        let mut failed: Vec<FailedAssertion> = Vec::new();
         for (i, assertion) in check.assertions.iter().enumerate() {
             let expr = assertion_to_expr(assertion);
             let (state, detail) = if any_unknown {
@@ -567,6 +610,13 @@ impl Engine {
                 state,
                 detail: detail.clone(),
             })?;
+            if !matches!(state, VerdictState::Pass) {
+                failed.push(FailedAssertion {
+                    expr: assertion.display(),
+                    state,
+                    detail: detail.clone(),
+                });
+            }
             assertion_outcomes.push(AssertionOutcome {
                 assertion_index: i,
                 state,
@@ -582,7 +632,18 @@ impl Engine {
             check_id: check.id.clone(),
             assertions: assertion_outcomes,
         };
-        Ok(aggregate_check(&outcome))
+        let verdict = aggregate_check(&outcome);
+        // Surface this check's failing assertions only when the check
+        // itself didn't pass (a check can pass with some inconclusive
+        // assertions aggregated away; we don't cry wolf on those).
+        if !matches!(verdict.state, VerdictState::Pass) && !failed.is_empty() {
+            failures.push(CheckFailure {
+                criterion_id: criterion_id.to_string(),
+                check_id: check.id.clone(),
+                assertions: failed,
+            });
+        }
+        Ok(verdict)
     }
 }
 

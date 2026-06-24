@@ -167,6 +167,9 @@ criteria:
           - $steps.list.outputs.status == 200
           - $steps.list.outputs.body.status == "ok"
           - $steps.list.outputs.body.total >= 1
+          # The reported `total` and the actual data array agree
+          # (`$runtime.len` over a real collection).
+          - $runtime.len($steps.list.outputs.body.data) >= 1
 
   - id: AC-3
     description: |

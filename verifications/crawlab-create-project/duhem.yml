@@ -223,3 +223,62 @@ criteria:
               satisfied: satisfied
         assertions:
           - $steps.listed.outputs.satisfied == true
+
+  - id: AC-4
+    description: |
+      A created project is individually retrievable by its identifier —
+      fetching it by id returns exactly that project.
+    checks:
+      - id: AC-4.1
+        description: |
+          Log in, create a project, then fetch it back by its own id at
+          `/projects/<id>` — the URL composed from the list endpoint and
+          the id the create returned. Confirms the project is addressable
+          and round-trips. Exercises `$runtime.format` composing a
+          dynamic URL from a prior step's output (#117).
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: create
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.projects_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  name: $inputs.project_name
+                  description: Created by the Duhem Crawlab dogfood
+              within: 15s
+            outputs:
+              body: body
+          - id: fetch
+            uses: api/call
+            with:
+              method: GET
+              # Dynamic URL: `<projects>/<created id>`, composed with the
+              # pure `$runtime.format` helper from a prior step's output.
+              url: $runtime.format("{}/{}", $inputs.projects_url, $steps.create.outputs.body.data._id)
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+              body: body
+        assertions:
+          - $steps.fetch.outputs.status == 200
+          - $steps.fetch.outputs.body.data.name == $inputs.project_name
+          # The fetched project is the one we created.
+          - $steps.fetch.outputs.body.data._id == $steps.create.outputs.body.data._id

@@ -523,6 +523,16 @@ Borrowed from Arazzo. References available in expressions:
 - `$steps.<id>.outputs.<name>` — outputs from a prior step
 - `$env.<name>` — environment variables (whitelisted)
 - `$runtime.uuid()` / `$runtime.now()` — common helpers
+- `$runtime.format(fmt, args...)` — **pure** string composition: the
+  `{}` placeholders in `fmt` are filled, in order, by the remaining
+  scalar args (coerced to their string form). The sanctioned way to
+  compose a value — e.g. a dynamic URL `$runtime.format("{}/{}",
+  $inputs.base, $steps.create.outputs.body.data._id)` — without
+  scripting. Deterministic and reproducible: it is a pure function of
+  its arguments (no I/O, clock, or randomness), so it preserves the
+  mechanical-judgment and reproducible-run commitments (§11.2). Helpers
+  may compute and compose values; they never *are* the verdict, which
+  remains the closed assertion set of §10.6.
 
 ### 10.8 Extensibility
 

@@ -610,6 +610,7 @@ fn map_eval_cause(c: &EvalCause) -> InconclusiveCause {
         EvalCause::UnknownRuntimeHelper(_)
         | EvalCause::TypeMismatch { .. }
         | EvalCause::NotNavigable { .. }
+        | EvalCause::BadFormat(_)
         | EvalCause::InvalidPattern(_) => InconclusiveCause::EnvironmentError,
     }
 }
@@ -640,6 +641,7 @@ fn eval_cause_detail(c: &EvalCause) -> String {
         EvalCause::NotNavigable { shape, segment } => {
             format!("not_navigable({}, {segment})", shape_wire(*shape))
         }
+        EvalCause::BadFormat(msg) => format!("bad_format({msg})"),
     }
 }
 

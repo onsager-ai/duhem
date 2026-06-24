@@ -60,6 +60,11 @@ pub enum InconclusiveCause {
     /// is an integer. The path is well-formed but the data shape can't
     /// be navigated. Carries the value shape and the offending segment.
     NotNavigable { shape: ValueShape, segment: String },
+    /// A `$runtime.format(...)` call was malformed — the number of `{}`
+    /// placeholders didn't match the number of substitution arguments.
+    /// Carries a human-readable detail. (Non-scalar / `null` arguments
+    /// surface as `TypeMismatch` instead, like the comparison ops.)
+    BadFormat(String),
 }
 
 /// Runtime-side value. Distinct from `duhem_schema::Literal` because
@@ -374,8 +379,71 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
             };
             Ok(Value::Bool(matches_type(&v, &kind)))
         }
+        // `format(fmt, args...)`: pure string composition. The first
+        // arg is a format string whose `{}` placeholders are filled, in
+        // order, by the remaining args coerced to their string form.
+        // Pure and deterministic — the sanctioned way to compose a value
+        // (e.g. a URL from a base + an id) without scripting:
+        // `$runtime.format("{}/tasks/{}", $inputs.base, $steps.c.outputs.body.id)`.
+        ("format", n) if n >= 1 => {
+            let fmt = match eval_value(&args[0], ctx)? {
+                Value::Str(s) => s,
+                other => {
+                    return Err(InconclusiveCause::TypeMismatch {
+                        lhs: other.shape(),
+                        rhs: ValueShape::Str,
+                    });
+                }
+            };
+            let mut parts: Vec<String> = Vec::with_capacity(args.len().saturating_sub(1));
+            for a in &args[1..] {
+                parts.push(scalar_to_string(eval_value(a, ctx)?)?);
+            }
+            apply_format(&fmt, &parts).map(Value::Str)
+        }
         _ => Err(InconclusiveCause::UnknownRuntimeHelper(helper.to_string())),
     }
+}
+
+/// Coerce a scalar runtime value to its string form for `format`.
+/// Collections and `null` are not formattable (a null id in a URL is a
+/// bug, not an empty string) and surface as `TypeMismatch`.
+fn scalar_to_string(v: Value) -> Result<String, InconclusiveCause> {
+    match v {
+        Value::Str(s) => Ok(s),
+        Value::Int(i) => Ok(i.to_string()),
+        Value::Float(f) => Ok(f.to_string()),
+        Value::Bool(b) => Ok(b.to_string()),
+        other => Err(InconclusiveCause::TypeMismatch {
+            lhs: other.shape(),
+            rhs: ValueShape::Str,
+        }),
+    }
+}
+
+/// Replace each `{}` placeholder in `fmt`, left to right, with the
+/// corresponding `parts` entry. The placeholder count must equal the
+/// argument count — a mismatch is a `BadFormat` (an authoring error).
+/// `{}` is the only placeholder; there is no escaping in v1 (URLs and
+/// the like don't contain `{}`).
+fn apply_format(fmt: &str, parts: &[String]) -> Result<String, InconclusiveCause> {
+    let placeholders = fmt.matches("{}").count();
+    if placeholders != parts.len() {
+        return Err(InconclusiveCause::BadFormat(format!(
+            "format string has {placeholders} `{{}}` placeholder(s) but {} argument(s) were given",
+            parts.len()
+        )));
+    }
+    let mut out = String::with_capacity(fmt.len());
+    let mut rest = fmt;
+    for part in parts {
+        let idx = rest.find("{}").expect("placeholder count checked above");
+        out.push_str(&rest[..idx]);
+        out.push_str(part);
+        rest = &rest[idx + 2..];
+    }
+    out.push_str(rest);
+    Ok(out)
 }
 
 fn matches_type(v: &Value, kind: &str) -> bool {
@@ -968,5 +1036,71 @@ mod tests {
             run("$steps.api.outputs.status == 201", &ctx),
             EvalResult::True
         );
+    }
+
+    // ---- $runtime.format pure helper ----
+
+    #[test]
+    fn format_composes_string_literals() {
+        let ctx = TestCtx::new();
+        assert_eq!(
+            run(r#"$runtime.format("{}/{}", "a", "b") == "a/b""#, &ctx),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn format_coerces_int_arg() {
+        let ctx = TestCtx::new().with_input("id", Value::Int(7));
+        assert_eq!(
+            run(r#"$runtime.format("x/{}", $inputs.id) == "x/7""#, &ctx),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn format_composes_dynamic_url_from_nested_output() {
+        // The motivating case: a URL from a base input + a created
+        // resource's id reached via #104 nested navigation.
+        let body = Value::Object(
+            [(
+                "data".to_string(),
+                Value::Object(
+                    [("_id".to_string(), Value::Str("abc123".into()))]
+                        .into_iter()
+                        .collect(),
+                ),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let ctx = TestCtx::new()
+            .with_input("base", Value::Str("http://h/projects".into()))
+            .with_output("create", "body", body);
+        assert_eq!(
+            run(
+                r#"$runtime.format("{}/{}", $inputs.base, $steps.create.outputs.body.data._id) == "http://h/projects/abc123""#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn format_placeholder_arg_mismatch_is_bad_format() {
+        let ctx = TestCtx::new();
+        assert!(matches!(
+            run(r#"$runtime.format("{}/{}", "a")"#, &ctx),
+            EvalResult::Inconclusive(InconclusiveCause::BadFormat(_))
+        ));
+    }
+
+    #[test]
+    fn format_non_scalar_arg_is_type_mismatch() {
+        let ctx = TestCtx::new().with_input("obj", Value::Object(Default::default()));
+        assert!(matches!(
+            run(r#"$runtime.format("{}", $inputs.obj)"#, &ctx),
+            EvalResult::Inconclusive(InconclusiveCause::TypeMismatch { .. })
+        ));
     }
 }

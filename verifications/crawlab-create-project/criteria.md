@@ -36,3 +36,8 @@ shaped response from the real database.
 After a project is created, it becomes visible in the project listing
 within a bounded window — the write propagates to the read path without
 the check having to guess a fixed delay.
+
+## AC-4
+
+A created project is individually retrievable by its identifier —
+fetching it by id returns exactly that project.

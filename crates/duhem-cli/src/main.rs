@@ -15,6 +15,7 @@ mod init;
 mod inputs;
 mod reporter;
 mod reporter_config;
+mod validate_cmd;
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -173,7 +174,7 @@ fn main() -> ExitCode {
             name,
             force,
         }) => run_init(path, &pattern, name, force),
-        Some(Cmd::Validate { path }) => match run_validate(&path) {
+        Some(Cmd::Validate { path }) => match validate_cmd::run_validate(&path) {
             Ok(()) => {
                 println!("OK");
                 ExitCode::SUCCESS
@@ -329,41 +330,6 @@ fn run_init(path: Option<PathBuf>, pattern: &str, name: Option<String>, force: b
             ExitCode::FAILURE
         }
     }
-}
-
-fn run_validate(path: &std::path::Path) -> Result<(), String> {
-    let src = std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    let v = VerificationDefinition::from_yaml_str(&src).map_err(|e| match e.location() {
-        Some(loc) => format!(
-            "{}:{}:{}: [schema v{}] {e}",
-            path.display(),
-            loc.line(),
-            loc.column(),
-            duhem_schema::SCHEMA_VERSION
-        ),
-        None => format!(
-            "{}: [schema v{}] {e}",
-            path.display(),
-            duhem_schema::SCHEMA_VERSION
-        ),
-    })?;
-    validate(&v).map_err(|errs| {
-        let plural = if errs.len() == 1 { "" } else { "s" };
-        // Preamble names the schema version the file was validated
-        // against — when authors hit a validation error, the next
-        // question is "which schema?", and a downstream VD that pinned
-        // a different version needs to see the mismatch.
-        let mut s = format!(
-            "[schema v{}] {} validation error{plural}:",
-            duhem_schema::SCHEMA_VERSION,
-            errs.len()
-        );
-        for e in errs {
-            s.push_str("\n  - ");
-            s.push_str(&e.to_string());
-        }
-        s
-    })
 }
 
 async fn run_command(args: RunArgs) -> ExitCode {

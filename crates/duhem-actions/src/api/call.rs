@@ -220,7 +220,7 @@ pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
 /// Non-string mapping keys are rejected explicitly: JSON requires
 /// string keys, and silently coercing or dropping them would produce
 /// a body that differs from what the author wrote.
-fn yml_to_json(v: &serde_yml::Value) -> Result<serde_json::Value, ActionError> {
+pub(crate) fn yml_to_json(v: &serde_yml::Value) -> Result<serde_json::Value, ActionError> {
     use serde_yml::Value as Y;
     Ok(match v {
         Y::Null => serde_json::Value::Null,

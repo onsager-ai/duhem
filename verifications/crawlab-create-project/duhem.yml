@@ -167,3 +167,59 @@ criteria:
           - $steps.list.outputs.status == 200
           - $steps.list.outputs.body.status == "ok"
           - $steps.list.outputs.body.total >= 1
+
+  - id: AC-3
+    description: |
+      After a project is created, it becomes visible in the project
+      listing — the write propagates to the read path within a bounded
+      window.
+    checks:
+      - id: AC-3.1
+        description: |
+          Log in, create a fresh project, then poll the project list
+          until it reports at least one project. Exercises the async
+          write-then-visible path with `api/poll` (the HTTP analogue of
+          a UI wait), so a slow read replica or eventual consistency
+          wouldn't flake the check.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - uses: api/call
+            with:
+              method: POST
+              url: $inputs.projects_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  name: $inputs.project_name
+                  description: Created by the Duhem Crawlab dogfood
+              within: 15s
+          - id: listed
+            uses: api/poll
+            with:
+              method: GET
+              url: $inputs.projects_url
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 30s
+              interval: 1s
+              # Poll the real list endpoint until it reports the project.
+              until:
+                path: total
+                gte: 1
+            outputs:
+              satisfied: satisfied
+        assertions:
+          - $steps.listed.outputs.satisfied == true

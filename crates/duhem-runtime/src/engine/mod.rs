@@ -16,4 +16,5 @@ pub mod shim;
 pub mod template;
 
 pub use context::{RunContext, RunState};
+pub use env::SuiteEnvironment;
 pub use runner::{CheckFailure, CheckFilter, Engine, EngineError, FailedAssertion, RunOutcome};

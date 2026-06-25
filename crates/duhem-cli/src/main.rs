@@ -19,13 +19,13 @@ mod validate_cmd;
 
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use duhem_actions::RunBrowser;
 use duhem_judge::{RunVerdict, VerdictState, aggregate_run_set};
-use duhem_runtime::{Engine, RunOutcome};
+use duhem_runtime::{Engine, RunOutcome, SuiteEnvironment};
 use duhem_schema::{
     InputDecl, InputType, Loaded, LoadedLeaf, VerificationDefinition, load as load_definition,
     validate,
@@ -330,17 +330,37 @@ async fn run_command(args: RunArgs) -> ExitCode {
     // manifest namespaces per-leaf (`<root>/<leaf>/<run_id>/`).
     enum Scope {
         SingleLeaf,
-        Manifest { warnings: Vec<String> },
+        Manifest {
+            warnings: Vec<String>,
+            /// Shared environment provisioned once for the whole suite
+            /// (spec #131), with the manifest's parent dir for anchoring
+            /// its `up:` / `down:` scripts.
+            environment: Option<duhem_schema::Environment>,
+            manifest_dir: Option<PathBuf>,
+        },
     }
     let (leaves, scope): (Vec<LoadedLeaf>, Scope) = match loaded {
         Loaded::Leaf { path, definition } => {
             (vec![LoadedLeaf { path, definition }], Scope::SingleLeaf)
         }
         Loaded::Manifest {
-            leaves, warnings, ..
-        } => (leaves, Scope::Manifest { warnings }),
+            manifest_path,
+            manifest,
+            leaves,
+            warnings,
+        } => {
+            let manifest_dir = manifest_path.parent().map(Path::to_path_buf);
+            (
+                leaves,
+                Scope::Manifest {
+                    warnings,
+                    environment: manifest.environment,
+                    manifest_dir,
+                },
+            )
+        }
     };
-    if let Scope::Manifest { warnings } = &scope {
+    if let Scope::Manifest { warnings, .. } = &scope {
         for w in warnings {
             eprintln!("warning: {w}");
         }
@@ -430,6 +450,39 @@ async fn run_command(args: RunArgs) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    // Manifest-level shared environment (spec #131): provision the whole
+    // suite's stack once, here, instead of each leaf standing up its own.
+    // While it's up, leaves run with per-leaf provisioning suppressed
+    // (`suite_managed`) and target the shared stack.
+    let mut suite_env: Option<SuiteEnvironment> = None;
+    if let Scope::Manifest {
+        environment: Some(env),
+        manifest_dir,
+        ..
+    } = &scope
+    {
+        let suite_dir = evidence_dir
+            .clone()
+            .unwrap_or_else(|| PathBuf::from(".duhem/runs"))
+            .join("_suite");
+        match SuiteEnvironment::provision(env, manifest_dir.as_deref(), &suite_dir, no_env_up).await
+        {
+            Ok(session) => {
+                if let Some(cause) = session.aborted_cause() {
+                    eprintln!("suite environment did not come up: {cause:?}");
+                    let _ = session.tear_down(keep_env).await;
+                    return ExitCode::FAILURE;
+                }
+                suite_env = Some(session);
+            }
+            Err(e) => {
+                eprintln!("suite environment: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let suite_managed = suite_env.is_some();
+
     let mut leaf_outcomes: Vec<(String, RunOutcome)> = Vec::with_capacity(resolved.len());
     for (name, leaf_path, def, inputs) in resolved {
         // Per-leaf filter: every leaf is narrowed by name regardless
@@ -475,6 +528,9 @@ async fn run_command(args: RunArgs) -> ExitCode {
                 Ok(b) => Some(b),
                 Err(e) => {
                     eprintln!("browser: {e}");
+                    if let Some(s) = suite_env.take() {
+                        let _ = s.tear_down(keep_env).await;
+                    }
                     return ExitCode::FAILURE;
                 }
             }
@@ -482,10 +538,12 @@ async fn run_command(args: RunArgs) -> ExitCode {
             None
         };
 
+        // Under a manifest's shared environment, the leaf must not stand
+        // up or tear down its own — the suite owns the stack.
         let mut engine = Engine::new()
             .with_definition_path(leaf_path.display().to_string())
-            .skip_env_up(no_env_up)
-            .keep_env(keep_env);
+            .skip_env_up(no_env_up || suite_managed)
+            .keep_env(keep_env || suite_managed);
         if let Some(b) = browser {
             engine = engine.with_browser(b);
         }
@@ -506,10 +564,21 @@ async fn run_command(args: RunArgs) -> ExitCode {
             Ok(o) => o,
             Err(e) => {
                 eprintln!("engine ({}): {e}", leaf_path.display());
+                if let Some(s) = suite_env.take() {
+                    let _ = s.tear_down(keep_env).await;
+                }
                 return ExitCode::FAILURE;
             }
         };
         leaf_outcomes.push((name, outcome));
+    }
+
+    // Tear the shared suite stack down once, after the last leaf
+    // (best-effort; `--keep-env` leaves it up for triage).
+    if let Some(session) = suite_env.take()
+        && let Err(e) = session.tear_down(keep_env).await
+    {
+        eprintln!("suite teardown: {e}");
     }
 
     // Reporter rendering:

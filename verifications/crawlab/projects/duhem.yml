@@ -1,0 +1,100 @@
+# Crawlab suite leaf — project persisted in Mongo
+#
+# A suite leaf (no own `environment:`): it runs against the shared stack
+# the parent manifest (`../duhem.yml`) provisions. A focused slice of the
+# standalone create-project VD — create a project over REST, then read
+# the `projects` collection in Mongo directly with `db/query` to confirm
+# it actually persisted (not just echoed by the handler).
+#
+# Shape provenance (crawlab-pro source, not guessed):
+#   - POST /login -> {data:<token>}; Authorization: <token> (bare):
+#     core/controllers/login.go, core/utils/token.go
+#   - generic create wraps the model under `data` (controllers/base.go);
+#     project {_id,name,description}, collection `projects`:
+#     core/models/models/project.go
+
+verification: Crawlab — project persisted in Mongo
+
+inputs:
+  login_url:
+    type: string
+    default: http://127.0.0.1:8090/login
+  projects_url:
+    type: string
+    default: http://127.0.0.1:8090/projects
+  mongo_url:
+    type: string
+    default: mongodb://127.0.0.1:27018/crawlab
+  username:
+    type: string
+    default: admin
+  password:
+    type: string
+    default: admin
+  project_name:
+    type: string
+    default: duhem-suite-project
+
+criteria:
+  - id: AC-1
+    description: |
+      A project created over REST is actually persisted in the database:
+      it exists as a document in Crawlab's Mongo `projects` collection,
+      with the same identifier the API returned — read straight from the
+      store, not echoed by the handler.
+    checks:
+      - id: AC-1.1
+        description: |
+          Log in, POST a project, then read the `projects` collection in
+          Mongo with `db/query`. Confirm the document is there with the
+          created `_id` and name — REST write verified at the database
+          layer.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: create
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.projects_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  name: $inputs.project_name
+                  description: Created by the Duhem Crawlab suite
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: persisted
+            uses: db/query
+            with:
+              connection: $inputs.mongo_url
+              find:
+                collection: projects
+                filter:
+                  name: $inputs.project_name
+                sort:
+                  _id: -1
+                limit: 1
+              within: 15s
+            outputs:
+              rows: rows
+              row_count: row_count
+        assertions:
+          - $steps.create.outputs.status == 200
+          - $steps.persisted.outputs.row_count >= 1
+          - $steps.persisted.outputs.rows[0].name == $inputs.project_name
+          - $steps.persisted.outputs.rows[0]._id == $steps.create.outputs.body.data._id

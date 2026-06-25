@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::environment::Environment;
 use crate::verification::{SchemaError, VerificationDefinition};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -21,6 +22,15 @@ pub struct RootManifest {
     /// a manifest written against today's loader refuses to silently
     /// reinterpret a future shape.
     pub manifest_version: u32,
+    /// Optional environment shared by the whole suite. When present, the
+    /// runtime provisions it **once** (`up:` + `ready:`) before any leaf
+    /// runs and tears it down **once** after the last leaf — instead of
+    /// each leaf standing up its own. Leaves keep their own
+    /// `environment:` so they stay runnable standalone; a manifest run
+    /// suppresses per-leaf provisioning and points every leaf at this
+    /// shared stack. Additive: a manifest without it behaves as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Environment>,
     /// Entries that resolve to leaf Verification Definitions. Order
     /// determines execution order across leaves.
     pub verifications: Vec<ManifestEntry>,

@@ -20,6 +20,17 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [additive] Root manifests may declare a shared `environment:`
+  provisioned once for the whole suite (#131): the runtime forks the
+  manifest's `up:` (and polls `ready:`) before any leaf runs and forks
+  `down:` once after the last leaf, instead of each leaf standing up its
+  own stack. Leaf `environment:` blocks are suppressed under a manifest
+  environment (the suite owns the stack); `--no-env-up` / `--keep-env`
+  apply at the manifest level. Additive: `RootManifest.environment` is
+  optional, so manifests without it behave exactly as before. Worked
+  example: `verifications/crawlab/` runs N Crawlab VDs against one
+  shared stack.
+
 ### Reporter contract: failure detail (#125, #129)
 
 - [additive] `RunSummary` gains a `failures` list: each non-passing

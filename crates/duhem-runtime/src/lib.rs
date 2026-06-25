@@ -15,7 +15,7 @@ pub mod eval;
 
 pub use engine::{
     CheckFailure, CheckFilter, Engine, EngineError, FailedAssertion, RunContext, RunOutcome,
-    RunState,
+    RunState, SuiteEnvironment,
 };
 pub use eval::{EvalContext, EvalResult, InconclusiveCause, Value, ValueShape, eval};
 

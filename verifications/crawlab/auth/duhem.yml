@@ -1,0 +1,100 @@
+# Crawlab suite leaf — authentication
+#
+# A suite leaf (no own `environment:`): it runs against the shared stack
+# the parent manifest (`../duhem.yml`) provisions. Standalone, run it
+# with `--no-env-up` against an already-up Crawlab.
+#
+# Verifies the auth boundary both ways: a valid login issues a token
+# that authenticates a gated endpoint, and the same endpoint rejects an
+# unauthenticated request. The negative half proves the gate is real —
+# the positive check alone can't tell an open endpoint from a guarded
+# one.
+#
+# Shape provenance (crawlab-pro source, not guessed):
+#   - POST /login -> {data:<jwt token>}: core/controllers/login.go
+#   - /projects under the auth group: core/controllers/router.go
+#   - missing/invalid token -> 401 Unauthorized:
+#     core/middlewares/auth.go, core/utils/http.go (HandleErrorUnauthorized)
+#   - default admin/admin seeded on first boot: core/user/service.go
+
+verification: Crawlab — authentication boundary
+
+inputs:
+  login_url:
+    type: string
+    default: http://127.0.0.1:8090/login
+  projects_url:
+    type: string
+    default: http://127.0.0.1:8090/projects
+  username:
+    type: string
+    default: admin
+  password:
+    type: string
+    default: admin
+
+criteria:
+  - id: AC-1
+    description: |
+      Logging in with valid credentials returns a usable token, and that
+      token authenticates a gated endpoint: an authenticated
+      `GET /projects` is accepted. Auth works end to end, not just at the
+      login call.
+    checks:
+      - id: AC-1.1
+        description: |
+          Log in for a token, then call a gated endpoint with it. Confirm
+          login is accepted with a non-empty token and the authenticated
+          read returns 200.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: read
+            uses: api/call
+            with:
+              method: GET
+              url: $inputs.projects_url
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+        assertions:
+          - $steps.login.outputs.status == 200
+          # A real token came back (a JWT is comfortably longer than 20).
+          - $runtime.len($steps.login.outputs.body.data) > 20
+          # The token authenticates a gated read.
+          - $steps.read.outputs.status == 200
+
+  - id: AC-2
+    description: |
+      The gated endpoint actually rejects an unauthenticated request —
+      the auth boundary is enforced, not nominal. Without this, AC-1
+      could pass against an endpoint that never checks the token.
+    checks:
+      - id: AC-2.1
+        description: |
+          Request the gated endpoint with no `Authorization` header and
+          confirm it is refused with 401 Unauthorized.
+        steps:
+          - id: unauth
+            uses: api/call
+            with:
+              method: GET
+              url: $inputs.projects_url
+              within: 15s
+            outputs:
+              status: status
+        assertions:
+          - $steps.unauth.outputs.status == 401

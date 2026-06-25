@@ -1,0 +1,37 @@
+# Crawlab — verification suite (shared-environment manifest)
+#
+# A root manifest (spec #131) that runs several Crawlab Verification
+# Definitions against ONE shared stack: `environment:` here provisions a
+# single Crawlab master + MongoDB once, every leaf runs against it, and
+# it's torn down once. This is the "1→N" infrastructure: adding a leaf
+# costs an entry below, not another stack bring-up.
+#
+# License-free by design: `scripts/up.sh` runs Crawlab's OSS core (the
+# `crawlab/` submodule) from source, the same recipe the standalone
+# create-project VD uses. Leaves here cover the REST + Mongo surface;
+# the deeper Pro-cluster execution lifecycle stays in its own VD
+# (`../crawlab-spider-task-lifecycle/`) because it needs a licensed
+# master+worker, not this shared OSS master.
+#
+# Operator setup (same as the standalone VDs):
+#   DUHEM_CRAWLAB_REPO_DIR  a crawlab-team/crawlab-pro checkout
+# Run the whole suite:        duhem run verifications/crawlab
+# Iterate against a live stack: ... --no-env-up --keep-env
+
+manifest_version: 1
+
+# Shared stack: one OSS master on :8090 + a throwaway Mongo on :27018,
+# provisioned once before the first leaf and torn down after the last.
+# The readiness probe gates the leaves on Crawlab's `/health` (a literal
+# URL — the suite environment resolves it without per-leaf inputs).
+environment:
+  up: ./scripts/up.sh
+  down: ./scripts/down.sh
+  ready:
+    http:
+      url: http://127.0.0.1:8090/health
+      timeout: 120s
+
+verifications:
+  - path: auth/duhem.yml
+  - path: projects/duhem.yml

@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use duhem_evidence::{EventPayload, EvidenceWriter};
+use duhem_evidence::{EventPayload, EvidenceWriter, new_run_id};
 use duhem_judge::InconclusiveCause;
 use duhem_schema::{Environment, HttpReadyProbe, ReadyProbe};
 use tokio::process::Command;
@@ -185,6 +185,75 @@ pub(crate) async fn tear_environment_down(
         stderr_blob_sha256: stderr_blob,
     })?;
     Ok(())
+}
+
+/// A manifest's shared environment, provisioned **once** for the whole
+/// suite (spec #131). The CLI provisions before any leaf runs and tears
+/// down after the last leaf, instead of each leaf standing up its own
+/// stack. Suite-level `up:` / `ready:` / `down:` evidence is written to
+/// its own trace directory, distinct from each leaf's run dir.
+pub struct SuiteEnvironment {
+    env: Environment,
+    dir: Option<PathBuf>,
+    writer: EvidenceWriter,
+    run: RunState,
+    should_tear_down: bool,
+    aborted: Option<EnvAbortReason>,
+}
+
+impl SuiteEnvironment {
+    /// Provision the shared environment. `manifest_dir` anchors relative
+    /// `up:` / `down:` script paths; `evidence_dir` is the suite-level
+    /// trace directory. `skip_env_up` is the manifest-level `--no-env-up`.
+    pub async fn provision(
+        env: &Environment,
+        manifest_dir: Option<&Path>,
+        evidence_root: &Path,
+        skip_env_up: bool,
+    ) -> Result<Self, EngineError> {
+        let run = RunState::new(std::collections::BTreeMap::new());
+        // Fresh per-run trace dir so repeated suite runs don't collide
+        // on `<root>/_suite/trace.jsonl`.
+        let dir = evidence_root.join(new_run_id());
+        let mut writer = EvidenceWriter::new(&dir, "<suite>")?;
+        let up = bring_environment_up(&mut writer, env, manifest_dir, &run, skip_env_up).await?;
+        Ok(Self {
+            env: env.clone(),
+            dir: manifest_dir.map(Path::to_path_buf),
+            writer,
+            run,
+            should_tear_down: up.should_tear_down,
+            aborted: up.aborted,
+        })
+    }
+
+    /// Why provisioning aborted (failed `up:` → `EnvironmentError`,
+    /// readiness `Timeout`), if it did. `None` means the suite is up.
+    pub fn aborted_cause(&self) -> Option<InconclusiveCause> {
+        self.aborted.map(EnvAbortReason::cause)
+    }
+
+    /// Tear the shared environment down (best-effort) and close the
+    /// suite trace. `keep_env` is the manifest-level `--keep-env`.
+    pub async fn tear_down(mut self, keep_env: bool) -> Result<(), EngineError> {
+        tear_environment_down(
+            &mut self.writer,
+            &self.env,
+            self.dir.as_deref(),
+            keep_env,
+            self.should_tear_down,
+        )
+        .await?;
+        self.writer.finish()?;
+        Ok(())
+    }
+
+    // Keep `run` reachable for a future manifest-input-resolving probe;
+    // today the readiness URL is resolved against an empty input set.
+    #[allow(dead_code)]
+    fn run(&self) -> &RunState {
+        &self.run
+    }
 }
 
 /// Resolve a script path. Relative paths anchor at the VD directory
@@ -439,5 +508,46 @@ mod tests {
         let run = RunState::new(std::collections::BTreeMap::new());
         let resolved = resolve_url("http://localhost:3000/health", &run);
         assert_eq!(resolved, "http://localhost:3000/health");
+    }
+
+    #[tokio::test]
+    async fn suite_environment_provisions_and_tears_down_once() {
+        use std::io::Write;
+        let base = std::env::temp_dir().join(format!("duhem-suite-env-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let marker = base.join("marker");
+
+        let write_script = |name: &str, word: &str| {
+            let p = base.join(name);
+            let mut f = std::fs::File::create(&p).unwrap();
+            writeln!(f, "#!/bin/sh\necho {word} >> {}", marker.display()).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        };
+        write_script("up.sh", "up");
+        write_script("down.sh", "down");
+
+        let env = Environment {
+            up: PathBuf::from("up.sh"),
+            down: Some(PathBuf::from("down.sh")),
+            ready: None,
+        };
+        let evidence_root = base.join("evidence");
+
+        let session = SuiteEnvironment::provision(&env, Some(&base), &evidence_root, false)
+            .await
+            .expect("provision");
+        assert!(session.aborted_cause().is_none(), "suite should be up");
+        session.tear_down(false).await.expect("tear down");
+
+        let log = std::fs::read_to_string(&marker).unwrap();
+        assert_eq!(log.matches("up").count(), 1, "up ran once: {log:?}");
+        assert_eq!(log.matches("down").count(), 1, "down ran once: {log:?}");
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

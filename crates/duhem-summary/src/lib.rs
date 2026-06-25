@@ -3,12 +3,16 @@
 //!
 //! Reporter plugins are subprocesses: the CLI writes one line of JSON
 //! to the plugin's stdin and captures its stdout. The shape of that
-//! line is `RunSummary` and it is **frozen**. Changes are
-//! schema-impacting and require a `CHANGELOG.md` entry under the
-//! `### Reporter contract` heading in the current `v0.x — unreleased`
-//! section, plus a bump of [`RunSummary::SCHEMA_VERSION`].
+//! line is `RunSummary`. Every change needs a `CHANGELOG.md` entry
+//! under the `### Reporter contract` heading in the current
+//! `v0.x — unreleased` section. **Additive** changes (a new optional,
+//! `#[serde(default)]` field) keep [`RunSummary::SCHEMA_VERSION`] — a
+//! consumer must tolerate unknown fields and an older plugin ignores
+//! the addition. Only a **breaking** change (renamed/removed field,
+//! changed meaning) bumps the version; that bump is what a plugin's
+//! version check refuses, so it fails loudly instead of misrendering.
 //!
-//! Scope: criterion-level verdicts, plus a `failures` list (v2) that
+//! Scope: criterion-level verdicts, plus a `failures` list that
 //! carries the *non-passing* checks and their failing assertions so a
 //! reporter can explain a `fail` without re-reading `trace.jsonl`. The
 //! full per-check / per-step trace still lives in `trace.jsonl` (the
@@ -29,9 +33,10 @@ use serde::{Deserialize, Serialize};
 /// contract; field renames / removals are schema-impacting.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSummary {
-    /// `"2"` as of the failure-detail addition. Authored explicitly so
-    /// a plugin written against an older contract can refuse to parse a
-    /// newer shape rather than silently misrender it.
+    /// Contract version. Bumped only on a **breaking** change; additive
+    /// fields (like `failures`) keep the version. Authored explicitly so
+    /// a plugin can refuse to parse a *breaking* future shape rather
+    /// than silently misrender it.
     pub schema_version: String,
     /// Run identifier (the ULID created by `Engine::run_with_metadata`).
     pub run_id: String,
@@ -41,20 +46,25 @@ pub struct RunSummary {
     pub criteria: Vec<CriterionSummary>,
     /// On-disk evidence directory for the run.
     pub evidence_dir: PathBuf,
-    /// Non-passing checks and the assertions that explain their verdict
-    /// (v2). Lets a reporter show *which* assertion failed without the
-    /// author hand-reading `trace.jsonl`. Empty on a passing run;
-    /// `#[serde(default)]` so a v1 line still deserializes.
+    /// Non-passing checks and the assertions that explain their verdict.
+    /// Lets a reporter show *which* assertion failed (and the observed
+    /// values) without the author hand-reading `trace.jsonl`. Empty on a
+    /// passing run; `#[serde(default)]`, so a summary written before this
+    /// field existed still deserializes.
     #[serde(default)]
     pub failures: Vec<CheckFailureSummary>,
 }
 
 impl RunSummary {
-    /// Current contract version. Bumping this is schema-impacting and
-    /// requires a `CHANGELOG.md` entry under the
-    /// `### Reporter contract` heading in the current
+    /// Current contract version. **Additive** changes (a new optional,
+    /// `#[serde(default)]` field) keep this string — consumers must
+    /// tolerate unknown fields, and an older plugin simply ignores the
+    /// addition. Only a **breaking** change (renamed/removed field,
+    /// changed meaning) bumps it; that bump is what a plugin's
+    /// version check refuses. Either kind needs a `CHANGELOG.md` entry
+    /// under the `### Reporter contract` heading in the current
     /// `## v0.x — unreleased` section.
-    pub const SCHEMA_VERSION: &'static str = "2";
+    pub const SCHEMA_VERSION: &'static str = "1";
 
     /// Construct a summary at the current schema version. `failures`
     /// defaults empty; populate it with [`RunSummary::with_failures`].
@@ -164,7 +174,7 @@ mod tests {
         assert_eq!(back, s);
         // Sanity: the contract is versioned on the wire, not just in
         // memory — a plugin sees `schema_version` as a field.
-        assert!(line.contains("\"schema_version\":\"2\""), "got: {line}");
+        assert!(line.contains("\"schema_version\":\"1\""), "got: {line}");
     }
 
     #[test]

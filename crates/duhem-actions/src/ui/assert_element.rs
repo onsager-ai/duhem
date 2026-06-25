@@ -48,6 +48,7 @@ impl Action for AssertElement {
         ctx: &ActionCtx<'_>,
         with: &serde_yml::Value,
     ) -> Result<ActionResult, ActionError> {
+        let page = ctx.require_page()?;
         let with: With =
             serde_yml::from_value(with.clone()).map_err(|e| ActionError::InvalidWith {
                 action: "ui/assert-element",
@@ -56,8 +57,7 @@ impl Action for AssertElement {
         let timeout: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
         let selector = to_selector(&with.locator);
 
-        let satisfied = match ctx
-            .require_page()
+        let satisfied = match page
             .wait_for_selector(
                 &selector,
                 map_state(with.expected),
@@ -76,8 +76,7 @@ impl Action for AssertElement {
         // closed, browser crashed) is propagated rather than silently
         // reported as `count = 0` — that would conflate "nothing
         // matched" with "we couldn't ask".
-        let count = ctx
-            .require_page()
+        let count = page
             .count(&selector)
             .await
             .map_err(|e| ActionError::Playwright(format!("ui/assert-element: count: {e}")))?;

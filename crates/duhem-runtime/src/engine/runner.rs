@@ -38,7 +38,7 @@ use crate::engine::context::{RunContext, RunState, json_to_value};
 use crate::engine::registry::{ActionRegistry, default_registry};
 use crate::engine::shim::assertion_to_expr;
 use crate::engine::template::substitute_with;
-use crate::eval::{EvalResult, InconclusiveCause as EvalCause, Value, eval};
+use crate::eval::{EvalResult, InconclusiveCause as EvalCause, Value, describe_comparison, eval};
 
 /// Surfaces only "the runtime itself failed" cases. A failing
 /// artifact yields `RunVerdict::Fail`, not `Err`.
@@ -600,7 +600,11 @@ impl Engine {
                 let state = eval_to_state(&r);
                 let detail = match &r {
                     EvalResult::Inconclusive(c) => Some(eval_cause_detail(c)),
-                    _ => None,
+                    // A failed comparison gets its observed operands —
+                    // "actual <lhs>, expected <rhs>" — so the reporter
+                    // shows the values, not just the expression.
+                    EvalResult::False => describe_comparison(&expr, &ctx),
+                    EvalResult::True => None,
                 };
                 (state, detail)
             };

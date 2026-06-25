@@ -152,6 +152,46 @@ pub fn eval(expr: &Expr, ctx: &dyn EvalContext) -> EvalResult {
     }
 }
 
+/// For a comparison assertion that evaluated **false**, render the two
+/// operands' observed values — the "actual vs expected" detail an author
+/// wants under a failing assertion. Re-evaluates each side (pure, and
+/// only on the failure path) so no operand state has to be threaded
+/// through the boolean `eval`. Returns `None` for non-comparison
+/// expressions (`and`/`or` compounds, helper calls) where the
+/// expression text already localizes the failure; by convention the
+/// left operand is the observed value and the right the expected one.
+pub fn describe_comparison(expr: &Expr, ctx: &dyn EvalContext) -> Option<String> {
+    let Expr::BinOp { op, lhs, rhs } = expr else {
+        return None;
+    };
+    if matches!(op, BinOp::And | BinOp::Or) {
+        return None;
+    }
+    let l = eval_value(lhs, ctx).ok()?;
+    let r = eval_value(rhs, ctx).ok()?;
+    Some(format!(
+        "actual {}, expected {}",
+        display_value(&l),
+        display_value(&r)
+    ))
+}
+
+/// Compact, single-line rendering of an observed value for failure
+/// detail. Strings are quoted so `""` / whitespace are visible; the
+/// collection arms are unreachable on a `false` comparison (collections
+/// compare as `Inconclusive(TypeMismatch)`) but are handled for safety.
+fn display_value(v: &Value) -> String {
+    match v {
+        Value::Bool(b) => b.to_string(),
+        Value::Int(i) => i.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::Str(s) => format!("{s:?}"),
+        Value::Null => "null".to_string(),
+        Value::Array(_) => "<array>".to_string(),
+        Value::Object(_) => "<object>".to_string(),
+    }
+}
+
 /// Evaluate an expression to its raw scalar `Value`. Crate-internal
 /// wrapper over the value evaluator so the engine's `Step.with`
 /// template substitution can resolve `$inputs.X` / `$runtime.X()`
@@ -687,6 +727,29 @@ mod tests {
     fn run(src: &str, ctx: &dyn EvalContext) -> EvalResult {
         let e = parse(src).expect("parse");
         eval(&e, ctx)
+    }
+
+    fn describe(src: &str, ctx: &dyn EvalContext) -> Option<String> {
+        super::describe_comparison(&parse(src).expect("parse"), ctx)
+    }
+
+    #[test]
+    fn describe_comparison_shows_observed_operands() {
+        let ctx = TestCtx::new().with_input("status", Value::Str("error".into()));
+        // A failed comparison renders both observed values, quoted.
+        assert_eq!(
+            describe("$inputs.status == \"finished\"", &ctx).as_deref(),
+            Some("actual \"error\", expected \"finished\"")
+        );
+        // Numeric operands are unquoted.
+        assert_eq!(
+            describe("3 >= 10", &ctx).as_deref(),
+            Some("actual 3, expected 10")
+        );
+        // Non-comparisons (logical compound, helper call) get no operand
+        // detail — the expression text already localizes them.
+        assert!(describe("true && false", &ctx).is_none());
+        assert!(describe("$runtime.exists($inputs.status)", &ctx).is_none());
     }
 
     // ---- truth table over literals --------------------------------

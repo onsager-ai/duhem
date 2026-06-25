@@ -45,6 +45,7 @@ impl Action for Type {
         ctx: &ActionCtx<'_>,
         with: &serde_yml::Value,
     ) -> Result<ActionResult, ActionError> {
+        let page = ctx.require_page()?;
         let with: With =
             serde_yml::from_value(with.clone()).map_err(|e| ActionError::InvalidWith {
                 action: "ui/type",
@@ -56,15 +57,11 @@ impl Action for Type {
 
         let result = if with.clear {
             // `clear: true` replaces the value via Playwright's `fill`.
-            ctx.require_page()
-                .fill(&selector, &with.text, timeout_ms)
-                .await
+            page.fill(&selector, &with.text, timeout_ms).await
         } else {
             // `clear: false` appends via `pressSequentially` (the
             // sidecar's `type` op).
-            ctx.require_page()
-                .type_text(&selector, &with.text, timeout_ms)
-                .await
+            page.type_text(&selector, &with.text, timeout_ms).await
         };
 
         match result {

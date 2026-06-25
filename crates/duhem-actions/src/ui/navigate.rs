@@ -30,6 +30,7 @@ impl Action for Navigate {
         ctx: &ActionCtx<'_>,
         with: &serde_yml::Value,
     ) -> Result<ActionResult, ActionError> {
+        let page = ctx.require_page()?;
         let with: With =
             serde_yml::from_value(with.clone()).map_err(|e| ActionError::InvalidWith {
                 action: "ui/navigate",
@@ -37,11 +38,7 @@ impl Action for Navigate {
             })?;
         let timeout: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
 
-        match ctx
-            .require_page()
-            .goto(&with.url, timeout.as_millis() as f64)
-            .await
-        {
+        match page.goto(&with.url, timeout.as_millis() as f64).await {
             Ok(()) => Ok(ActionResult::ok()),
             Err(e) if super::is_timeout_message(&e.to_string()) => Ok(ActionResult::timeout()),
             Err(e) => Err(ActionError::Playwright(format!("ui/navigate: {e}"))),

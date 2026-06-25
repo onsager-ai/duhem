@@ -145,6 +145,7 @@ impl Action for Observe {
         ctx: &ActionCtx<'_>,
         with: &serde_yml::Value,
     ) -> Result<ActionResult, ActionError> {
+        let page = ctx.require_page()?;
         let with: With =
             serde_yml::from_value(with.clone()).map_err(|e| ActionError::InvalidWith {
                 action: "api/observe",
@@ -166,7 +167,7 @@ impl Action for Observe {
         let outcome = timeout(timeout_dur, async {
             let mut cursor: u64 = 0;
             loop {
-                let batch = match ctx.require_page().poll_network(cursor).await {
+                let batch = match page.poll_network(cursor).await {
                     Ok(b) => b,
                     Err(e) => {
                         return Some(Err(ActionError::Playwright(format!(

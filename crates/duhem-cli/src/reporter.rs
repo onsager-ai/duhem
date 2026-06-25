@@ -460,8 +460,9 @@ mod tests {
         assert_eq!(v["criteria"][0]["verdict"], "pass");
         assert_eq!(v["evidence_dir"], ".duhem/runs/01J000000000000000000RUN");
         // Spec on #34: the contract surfaces schema_version on the wire.
-        // Bumped to "2" with the failure-detail addition (#125).
-        assert_eq!(v["schema_version"], "2");
+        // The `failures` addition (#125) is additive, so the version
+        // stays "1" — see RunSummary::SCHEMA_VERSION (#129).
+        assert_eq!(v["schema_version"], "1");
     }
 
     #[test]

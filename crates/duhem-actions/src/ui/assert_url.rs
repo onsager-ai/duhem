@@ -120,6 +120,7 @@ impl Action for AssertUrl {
         ctx: &ActionCtx<'_>,
         with: &serde_yml::Value,
     ) -> Result<ActionResult, ActionError> {
+        let page = ctx.require_page()?;
         let with: With =
             serde_yml::from_value(with.clone()).map_err(|e| ActionError::InvalidWith {
                 action: "ui/assert-url",
@@ -129,8 +130,7 @@ impl Action for AssertUrl {
 
         let started = Instant::now();
         loop {
-            let last_url = ctx
-                .require_page()
+            let last_url = page
                 .url()
                 .await
                 .map_err(|e| ActionError::Playwright(format!("ui/assert-url: url: {e}")))?;

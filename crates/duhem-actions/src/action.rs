@@ -47,12 +47,16 @@ pub struct ActionCtx<'a> {
 
 impl<'a> ActionCtx<'a> {
     /// The browser page, for actions whose `requires_page()` is `true`.
-    /// The dispatch layer guarantees a page is attached before invoking
-    /// such an action, so this never returns `None` in practice — a
-    /// `None` here is a dispatch-invariant violation, not author error.
-    pub fn require_page(&self) -> &'a Page {
-        self.page
-            .expect("requires_page action dispatched without a browser page (dispatch invariant)")
+    /// The dispatch layer attaches a page before invoking such an action
+    /// (and refuses the check otherwise), so the `Err` arm is unreachable
+    /// in practice — returning a typed error rather than panicking keeps
+    /// a future regression a clean `Inconclusive`, not a crash.
+    pub fn require_page(&self) -> Result<&'a Page, ActionError> {
+        self.page.ok_or_else(|| {
+            ActionError::Playwright(
+                "action requires a browser page but none was provisioned".to_string(),
+            )
+        })
     }
 }
 
@@ -160,7 +164,20 @@ pub trait Action: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::uses_requires_page;
+    use super::{ActionCtx, uses_requires_page};
+
+    #[test]
+    fn require_page_on_page_free_ctx_is_a_typed_error_not_a_panic() {
+        // A page-free context (what the engine hands `api/*`, `db/*`,
+        // `cli/*`) yields an `ActionError`, never a panic — the dispatch
+        // layer guarantees a page for `requires_page` actions, so this
+        // arm is unreachable in practice but stays a clean error.
+        let ctx = ActionCtx {
+            page: None,
+            step_index: 0,
+        };
+        assert!(ctx.require_page().is_err());
+    }
 
     #[test]
     fn page_need_by_action_family() {

@@ -70,6 +70,7 @@ impl Action for Select {
         ctx: &ActionCtx<'_>,
         with: &serde_yml::Value,
     ) -> Result<ActionResult, ActionError> {
+        let page = ctx.require_page()?;
         let with: With =
             serde_yml::from_value(with.clone()).map_err(|e| ActionError::InvalidWith {
                 action: "ui/select",
@@ -84,8 +85,7 @@ impl Action for Select {
             By::Index(v) => SelectBy::Index(v.index as usize),
         };
 
-        match ctx
-            .require_page()
+        match page
             .select_option(&selector, &by, timeout.as_millis() as f64)
             .await
         {

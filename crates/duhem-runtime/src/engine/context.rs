@@ -227,6 +227,28 @@ mod tests {
     }
 
     #[test]
+    fn env_whitelist_resolves_after_seeding() {
+        // Spec #68: a selected environment's string-valued keys seed
+        // the `$env.<key>` whitelist. With the map populated,
+        // `EvalContext::env` resolves; an unseeded key stays `None`.
+        let mut env = BTreeMap::new();
+        env.insert("base_url".to_string(), "https://staging".to_string());
+        let run = RunState::new(BTreeMap::new()).with_env(env);
+        let ctx = RunContext::new(&run);
+        assert_eq!(ctx.env("base_url"), Some("https://staging"));
+        assert_eq!(ctx.env("missing"), None);
+    }
+
+    #[test]
+    fn empty_env_whitelist_resolves_nothing() {
+        // Regression: without a selected environment the whitelist is
+        // empty and `$env.<key>` resolves to nothing (today's default).
+        let run = RunState::new(BTreeMap::new());
+        let ctx = RunContext::new(&run);
+        assert_eq!(ctx.env("base_url"), None);
+    }
+
+    #[test]
     fn output_lookup_after_record() {
         let run = RunState::new(BTreeMap::new());
         let mut ctx = RunContext::new(&run);

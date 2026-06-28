@@ -1,0 +1,41 @@
+# Named environments — worked example (spec #68)
+#
+# A root manifest whose `environments:` block declares two named
+# environment configs. Selecting one (CLI `--environment <name>`, or
+# auto-select when exactly one is declared) does two things for that
+# run:
+#
+#   1. Feeds the leaf input-resolution chain. The selected env's key
+#      `base_url` populates the leaf's declared `base_url` input when no
+#      higher-precedence source (`--inputs`, `--inputs-file`) supplies
+#      it. Precedence, highest first:
+#         --inputs k=v  >  --inputs-file  >  selected env  >  VD default
+#
+#   2. Seeds the `$env.<key>` whitelist. The env's string-valued keys
+#      become reachable via `$env.<key>` in assertions for that run.
+#
+# This manifest declares TWO environments, so a run must name one:
+#   duhem run verifications/environments-example --environment staging
+#   duhem run verifications/environments-example --environment prod
+# Omitting `--environment` here is an error (multiple declared); a
+# manifest with exactly one environment auto-selects it.
+#
+# There is no live SUT behind these URLs — this example exists to
+# exercise the environment-selection + resolution plumbing and to
+# validate structurally (`duhem validate`). The leaf
+# (`reads-env/duhem.yml`) is a page-free, assertion-only Verification
+# Definition: it asserts that the env reached both surfaces (the
+# declared input and `$env.<key>`).
+
+manifest_version: 1
+
+environments:
+  staging:
+    base_url: https://staging.example.com
+    region: us-west
+  prod:
+    base_url: https://example.com
+    region: us-east
+
+verifications:
+  - path: reads-env/duhem.yml

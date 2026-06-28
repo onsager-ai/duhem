@@ -8,6 +8,7 @@
 //!
 //! Spec on issue #49.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -32,9 +33,48 @@ pub struct RootManifest {
     /// shared stack. Additive: a manifest without it behaves as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<Environment>,
+    /// Named environment configs (`docs/duhem-spec.md` §10.4, spec
+    /// #68). Each key under `environments:` is an environment name
+    /// (e.g. `staging`, `prod`) whose value is a free-form
+    /// `key: value` map — typed by convention, not by schema.
+    ///
+    /// When an environment is selected for a run (CLI `--environment`,
+    /// or auto-selected when exactly one is declared) its keys feed
+    /// the leaf input-resolution chain (an env key `base_url`
+    /// populates a declared input `base_url` when no higher-precedence
+    /// source supplies it) and its string-valued keys are whitelisted
+    /// for `$env.<key>`. Additive: a manifest without `environments:`
+    /// behaves byte-identically to before.
+    ///
+    /// `serde_yml::Value` has no `JsonSchema` impl, so the field is
+    /// described to schemars via a `serde_json::Value`-shaped stand-in
+    /// (same wire surface) purely so the JSON-schema artifact
+    /// generates.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(
+        with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
+    )]
+    pub environments: BTreeMap<String, BTreeMap<String, serde_yml::Value>>,
     /// Entries that resolve to leaf Verification Definitions. Order
     /// determines execution order across leaves.
     pub verifications: Vec<ManifestEntry>,
+}
+
+/// A well-formed environment name is lowercase ASCII letters, digits,
+/// and dashes, beginning and ending with an alphanumeric. This keeps
+/// names addressable on the CLI (`--environment <name>`) and stable
+/// across the `$env` whitelist surface.
+fn env_name_well_formed(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let bytes = name.as_bytes();
+    let edge_ok = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+    if !edge_ok(bytes[0]) || !edge_ok(bytes[bytes.len() - 1]) {
+        return false;
+    }
+    name.bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
 /// One entry in `verifications:`. An author writes either `path:` for
@@ -162,6 +202,17 @@ pub enum LoadError {
     },
     #[error("directory `{path}` has no `duhem.yml`")]
     DirectoryMissingManifest { path: PathBuf },
+    /// An `environments:` key is not a well-formed environment name
+    /// (lowercase letters, digits, dashes; alphanumeric at both ends).
+    #[error(
+        "{manifest}: environment name `{name}` is not well-formed (use lowercase letters, digits, and dashes)"
+    )]
+    MalformedEnvironmentName { manifest: PathBuf, name: String },
+    /// An `environments:` entry declares an empty key map. A named
+    /// environment with no keys supplies nothing and is almost
+    /// certainly an authoring mistake.
+    #[error("{manifest}: environment `{name}` declares no keys")]
+    EmptyEnvironment { manifest: PathBuf, name: String },
 }
 
 /// Currently-supported `manifest_version` value. Bumping this is
@@ -262,6 +313,23 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
             found: manifest.manifest_version,
             supported: SUPPORTED_MANIFEST_VERSION,
         });
+    }
+    // Named-environments discipline (spec #68): well-formed names,
+    // non-empty key maps. Cheap structural checks at load time, the
+    // same place the manifest-version and path checks live.
+    for (name, keys) in &manifest.environments {
+        if !env_name_well_formed(name) {
+            return Err(LoadError::MalformedEnvironmentName {
+                manifest: manifest_path.to_path_buf(),
+                name: name.clone(),
+            });
+        }
+        if keys.is_empty() {
+            return Err(LoadError::EmptyEnvironment {
+                manifest: manifest_path.to_path_buf(),
+                name: name.clone(),
+            });
+        }
     }
     let parent = manifest_path.parent().unwrap_or_else(|| Path::new("."));
     let manifest_canonical = canonical_or_self(manifest_path);
@@ -842,6 +910,113 @@ verifications:
             matches!(err, LoadError::UnconstrainedGlob { .. }),
             "expected UnconstrainedGlob, got {err:?}"
         );
+    }
+
+    #[test]
+    fn environments_round_trip_preserves_nested_maps() {
+        let y = r#"
+manifest_version: 1
+environments:
+  staging:
+    base_url: https://staging.example.com
+    db_url: postgres://staging-db
+    workers: 3
+  prod:
+    base_url: https://example.com
+verifications: []
+"#;
+        let m = RootManifest::from_yaml_str(y).expect("parse");
+        assert_eq!(m.environments.len(), 2);
+        let staging = &m.environments["staging"];
+        assert_eq!(
+            staging["base_url"],
+            serde_yml::Value::String("https://staging.example.com".into())
+        );
+        assert_eq!(staging["db_url"].as_str(), Some("postgres://staging-db"));
+        assert_eq!(staging["workers"].as_u64(), Some(3));
+        assert_eq!(
+            m.environments["prod"]["base_url"].as_str(),
+            Some("https://example.com")
+        );
+        // deny_unknown_fields still holds alongside the new field.
+        let bad = "manifest_version: 1\nenvironments: {}\nverifications: []\nfoo: bar\n";
+        assert!(RootManifest::from_yaml_str(bad).is_err());
+    }
+
+    #[test]
+    fn absent_environments_default_to_empty() {
+        let y = "manifest_version: 1\nverifications: []\n";
+        let m = RootManifest::from_yaml_str(y).expect("parse");
+        assert!(m.environments.is_empty());
+        // Round-trips back out without an `environments:` key.
+        let out = serde_yml::to_string(&m).unwrap();
+        assert!(!out.contains("environments"), "got: {out}");
+    }
+
+    #[test]
+    fn malformed_environment_name_is_load_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+environments:
+  Prod:
+    base_url: https://example.com
+verifications: []
+"#,
+        );
+        let err = load(&tmp.path().join("duhem.yml")).unwrap_err();
+        assert!(
+            matches!(err, LoadError::MalformedEnvironmentName { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn empty_environment_key_map_is_load_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+environments:
+  staging: {}
+verifications: []
+"#,
+        );
+        let err = load(&tmp.path().join("duhem.yml")).unwrap_err();
+        assert!(
+            matches!(err, LoadError::EmptyEnvironment { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn well_formed_environment_loads() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "a/duhem.yml", LEAF_A);
+        write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+environments:
+  staging:
+    base_url: https://staging.example.com
+verifications:
+  - path: ./a/duhem.yml
+"#,
+        );
+        let loaded = load(&tmp.path().join("duhem.yml")).unwrap();
+        match loaded {
+            Loaded::Manifest { manifest, .. } => {
+                assert!(manifest.environments.contains_key("staging"));
+            }
+            _ => panic!("expected Manifest"),
+        }
     }
 
     #[test]

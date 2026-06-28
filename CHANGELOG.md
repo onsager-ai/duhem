@@ -20,6 +20,8 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [additive] Root manifest gains an environments: block (named env configs) injected into leaf input resolution (precedence: --inputs > --inputs-file > selected env > VD default) and the $env whitelist; CLI --environment selects, single env auto-selects. (#68)
+
 - [clarifying] Publish a JSON Schema for VD + manifest YAML (schemars);
   committed at `schema/duhem.schema.json`, `$schema` header emitted by
   `duhem init` and added to one worked-example VD. Purely additive

@@ -1,0 +1,36 @@
+# Inherited inputs — worked example (spec #135, rides on #68)
+#
+# A root manifest whose `environments:` block declares the suite's
+# shared values once. A leaf under it (`reads-inherited/duhem.yml`)
+# does NOT redeclare those inputs — it lists their names under
+# `inherits:` and reads them as `$inputs.<name>`. The manifest is the
+# DI container that provides the values; the leaf declares what it
+# needs. One level deep, names only, no leaf-overrides-leaf.
+#
+# Exactly ONE environment is declared, so it auto-selects — no
+# `--environment` flag required:
+#
+#   duhem run verifications/inherits-example
+#
+# That run binds `base_url` / `region` from the environment chain
+# (#68) into the leaf's `$inputs.*`, end-to-end through the suite.
+#
+# Running the leaf standalone (no manifest) with no `--inputs` for the
+# inherited names fails LOUDLY and SPECIFICALLY — the inherited input
+# is named and the remedy (run the suite, or pass `--inputs`) is given:
+#
+#   duhem run verifications/inherits-example/reads-inherited/duhem.yml
+#
+# There is no live SUT behind these values — this example is page-free
+# and exercises the inheritance plumbing; `duhem validate` confirms
+# the structure.
+
+manifest_version: 1
+
+environments:
+  default:
+    base_url: https://inherits.example.com
+    region: us-west
+
+verifications:
+  - path: reads-inherited/duhem.yml

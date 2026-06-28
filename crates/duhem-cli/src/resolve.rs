@@ -50,15 +50,21 @@ pub(crate) fn resolve_inputs(
     file: &BTreeMap<String, serde_json::Value>,
     env: &BTreeMap<String, serde_json::Value>,
     decls: &BTreeMap<String, InputDecl>,
+    inherits: &[String],
 ) -> Result<BTreeMap<String, serde_json::Value>, String> {
     let provided = parse_inputs(raw)?;
+    // An `--inputs` / `--inputs-file` key is "known" if it names a
+    // declared input *or* an inherited name (spec #135) — an inherited
+    // name has no local `InputDecl`, but the leaf still accepts a value
+    // for it on the precedence chain.
+    let is_known = |name: &str| decls.contains_key(name) || inherits.iter().any(|n| n == name);
     for name in provided.keys() {
-        if !decls.contains_key(name) {
+        if !is_known(name) {
             return Err(format!("unknown input: `{name}`"));
         }
     }
     for name in file.keys() {
-        if !decls.contains_key(name) {
+        if !is_known(name) {
             return Err(format!("unknown input (from --inputs-file): `{name}`"));
         }
     }
@@ -79,6 +85,30 @@ pub(crate) fn resolve_inputs(
             out.insert(name.clone(), value);
         } else {
             return Err(format!("missing required input: `{name}`"));
+        }
+    }
+    // Inherited names (spec #135): no local `InputDecl`, so no
+    // `InputType` to coerce/validate against — bind the raw value from
+    // the precedence chain (`--inputs` > `--inputs-file` > selected
+    // environment), skipping any local `default:` layer (there is
+    // none). A name that resolves to nothing is left UNBOUND here; it
+    // is not an error at resolution time — a referenced-but-unbound
+    // inherited input fails loudly at run time with the suite/--inputs
+    // remedy (the runtime's `UnresolvedInheritedInput`). A name already
+    // bound as a declared input (the `inputs ∩ inherits` overlap that
+    // the validator rejects) is not overwritten.
+    for name in inherits {
+        if out.contains_key(name) {
+            continue;
+        }
+        if let Some(raw_value) = provided.get(name) {
+            // `--inputs k=v` arrives as a raw string; an inherited name
+            // has no type to coerce to, so bind the string as-is.
+            out.insert(name.clone(), serde_json::Value::String(raw_value.clone()));
+        } else if let Some(file_value) = file.get(name) {
+            out.insert(name.clone(), file_value.clone());
+        } else if let Some(env_value) = env.get(name) {
+            out.insert(name.clone(), env_value.clone());
         }
     }
     Ok(out)

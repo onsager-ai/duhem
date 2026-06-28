@@ -449,6 +449,7 @@ async fn run_command(args: RunArgs) -> ExitCode {
             &file_inputs,
             &env_inputs,
             &leaf.definition.inputs,
+            &leaf.definition.inherits,
         ) {
             Ok(m) => m,
             Err(e) => {
@@ -602,7 +603,8 @@ async fn run_command(args: RunArgs) -> ExitCode {
             .with_definition_path(leaf_path.display().to_string())
             .skip_env_up(no_env_up || suite_managed)
             .keep_env(keep_env || suite_managed)
-            .with_env(env_whitelist.clone());
+            .with_env(env_whitelist.clone())
+            .with_inherited(def.inherits.clone());
         if let Some(b) = browser {
             engine = engine.with_browser(b);
         }
@@ -856,7 +858,7 @@ mod tests {
         decls: &BTreeMap<String, InputDecl>,
     ) -> Result<BTreeMap<String, serde_json::Value>, String> {
         let empty = BTreeMap::new();
-        resolve_inputs(cli, &empty, &empty, decls)
+        resolve_inputs(cli, &empty, &empty, decls, &[])
     }
 
     #[test]
@@ -1004,8 +1006,14 @@ mod tests {
         let d = decls("  base_url: { type: string }");
         let mut file = BTreeMap::new();
         file.insert("base_url".into(), serde_json::json!("from-file"));
-        let out =
-            resolve_inputs(&raw(&["base_url=from-flag"]), &file, &BTreeMap::new(), &d).unwrap();
+        let out = resolve_inputs(
+            &raw(&["base_url=from-flag"]),
+            &file,
+            &BTreeMap::new(),
+            &d,
+            &[],
+        )
+        .unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-flag"));
     }
 
@@ -1014,7 +1022,7 @@ mod tests {
         let d = decls("  count: { type: integer }");
         let mut file = BTreeMap::new();
         file.insert("count".into(), serde_json::json!(7));
-        let out = resolve_inputs(&raw(&[]), &file, &BTreeMap::new(), &d).unwrap();
+        let out = resolve_inputs(&raw(&[]), &file, &BTreeMap::new(), &d, &[]).unwrap();
         assert_eq!(out["count"], serde_json::json!(7));
     }
 
@@ -1027,7 +1035,7 @@ mod tests {
         let d = decls("  count: { type: integer }");
         let mut file = BTreeMap::new();
         file.insert("count".into(), serde_json::json!("not a number"));
-        let err = resolve_inputs(&raw(&[]), &file, &BTreeMap::new(), &d).unwrap_err();
+        let err = resolve_inputs(&raw(&[]), &file, &BTreeMap::new(), &d, &[]).unwrap_err();
         assert!(
             err.contains("count") && err.contains("integer"),
             "got: {err}"
@@ -1040,7 +1048,7 @@ mod tests {
         let mut file = BTreeMap::new();
         file.insert("bogus".into(), serde_json::json!(1));
         file.insert("count".into(), serde_json::json!(1));
-        let err = resolve_inputs(&raw(&[]), &file, &BTreeMap::new(), &d).unwrap_err();
+        let err = resolve_inputs(&raw(&[]), &file, &BTreeMap::new(), &d, &[]).unwrap_err();
         assert!(
             err.contains("--inputs-file") && err.contains("bogus"),
             "got: {err}"
@@ -1055,7 +1063,8 @@ mod tests {
         let d = decls("  name: { type: string, default: ws-default }");
         let mut file = BTreeMap::new();
         file.insert("name".into(), serde_json::json!("from-file"));
-        let out = resolve_inputs(&raw(&["name=from-flag"]), &file, &BTreeMap::new(), &d).unwrap();
+        let out =
+            resolve_inputs(&raw(&["name=from-flag"]), &file, &BTreeMap::new(), &d, &[]).unwrap();
         assert_eq!(out["name"], serde_json::json!("from-flag"));
     }
 
@@ -1067,7 +1076,7 @@ mod tests {
         let d = decls("  base_url: { type: string }");
         let mut env = BTreeMap::new();
         env.insert("base_url".into(), serde_json::json!("https://staging"));
-        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d).unwrap();
+        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d, &[]).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("https://staging"));
     }
 
@@ -1076,8 +1085,14 @@ mod tests {
         let d = decls("  base_url: { type: string }");
         let mut env = BTreeMap::new();
         env.insert("base_url".into(), serde_json::json!("https://staging"));
-        let out =
-            resolve_inputs(&raw(&["base_url=from-flag"]), &BTreeMap::new(), &env, &d).unwrap();
+        let out = resolve_inputs(
+            &raw(&["base_url=from-flag"]),
+            &BTreeMap::new(),
+            &env,
+            &d,
+            &[],
+        )
+        .unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-flag"));
     }
 
@@ -1089,10 +1104,10 @@ mod tests {
         let mut file = BTreeMap::new();
         file.insert("base_url".into(), serde_json::json!("from-file"));
         // file beats env
-        let out = resolve_inputs(&raw(&[]), &file, &env, &d).unwrap();
+        let out = resolve_inputs(&raw(&[]), &file, &env, &d, &[]).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-file"));
         // flag beats both
-        let out = resolve_inputs(&raw(&["base_url=from-flag"]), &file, &env, &d).unwrap();
+        let out = resolve_inputs(&raw(&["base_url=from-flag"]), &file, &env, &d, &[]).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-flag"));
     }
 
@@ -1102,10 +1117,10 @@ mod tests {
         // env supplies → env wins over the default
         let mut env = BTreeMap::new();
         env.insert("base_url".into(), serde_json::json!("from-env"));
-        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d).unwrap();
+        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d, &[]).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-env"));
         // env absent → default is the floor
-        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &BTreeMap::new(), &d).unwrap();
+        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &BTreeMap::new(), &d, &[]).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-default"));
     }
 
@@ -1117,7 +1132,7 @@ mod tests {
         let mut env = BTreeMap::new();
         env.insert("base_url".into(), serde_json::json!("https://staging"));
         env.insert("db_url".into(), serde_json::json!("postgres://x"));
-        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d).unwrap();
+        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d, &[]).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("https://staging"));
         assert!(!out.contains_key("db_url"));
     }
@@ -1127,7 +1142,7 @@ mod tests {
         let d = decls("  count: { type: integer }");
         let mut env = BTreeMap::new();
         env.insert("count".into(), serde_json::json!("not a number"));
-        let err = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d).unwrap_err();
+        let err = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d, &[]).unwrap_err();
         assert!(
             err.contains("count") && err.contains("environment"),
             "got: {err}"

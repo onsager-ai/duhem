@@ -15,25 +15,25 @@
 
 verification: Crawlab — project persisted in Mongo
 
+# Only this leaf's OWN inputs are declared locally: the Mongo URL it
+# reads back through (stack-specific to this leaf) and the project name
+# it creates. The shared login/projects URLs + credentials are inherited
+# from the parent manifest (spec #135), declared once in `../duhem.yml`.
 inputs:
-  login_url:
-    type: string
-    default: http://127.0.0.1:8090/login
-  projects_url:
-    type: string
-    default: http://127.0.0.1:8090/projects
   mongo_url:
     type: string
     default: mongodb://127.0.0.1:27018/crawlab
-  username:
-    type: string
-    default: admin
-  password:
-    type: string
-    default: admin
   project_name:
     type: string
     default: duhem-suite-project
+
+# Inherited from the parent manifest's `environments:` block. Run under
+# the suite so they bind; standalone, pass them with `--inputs`.
+inherits:
+  - login_url
+  - password
+  - projects_url
+  - username
 
 criteria:
   - id: AC-1

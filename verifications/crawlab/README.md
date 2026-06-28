@@ -25,6 +25,12 @@ Each leaf has **no** `environment:` of its own — it targets the shared
 stack (`8090` REST, `27018` Mongo). Run a leaf standalone by pointing it
 at an already-up Crawlab and passing `--no-env-up`.
 
+The leaves' shared inputs (`login_url`, `projects_url`, `username`,
+`password`) are **inherited** from the manifest's `environments:` block
+(spec #135) — declared once, not redeclared per leaf. A leaf run under
+the suite binds them automatically; a standalone leaf run must supply
+them with `--inputs` (e.g. `--inputs login_url=http://127.0.0.1:8090/login --inputs username=admin ...`), or the run fails loudly naming the missing inherited input.
+
 ## Provisioning
 
 `scripts/up.sh` / `scripts/down.sh` bring up Crawlab's **open-source

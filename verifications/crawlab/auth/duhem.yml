@@ -20,19 +20,17 @@
 
 verification: Crawlab — authentication boundary
 
-inputs:
-  login_url:
-    type: string
-    default: http://127.0.0.1:8090/login
-  projects_url:
-    type: string
-    default: http://127.0.0.1:8090/projects
-  username:
-    type: string
-    default: admin
-  password:
-    type: string
-    default: admin
+# Inherited from the parent manifest's `environments:` block (spec
+# #135). The stack's identity — its login/projects URLs and seeded
+# credentials — is declared once in `../duhem.yml`; this leaf says only
+# which of those it uses. Run under the suite (`duhem run
+# verifications/crawlab`) so they bind; standalone, pass them with
+# `--inputs login_url=... projects_url=... username=... password=...`.
+inherits:
+  - login_url
+  - password
+  - projects_url
+  - username
 
 criteria:
   - id: AC-1

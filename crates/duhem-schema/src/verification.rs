@@ -38,6 +38,17 @@ pub struct VerificationDefinition {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, InputDecl>,
 
+    /// Inherited input names (spec #135). A leaf under a manifest may
+    /// list input names it pulls from the parent manifest's resolution
+    /// chain (#68: selected `environments:` keys, `--inputs`,
+    /// `--inputs-file`) instead of redeclaring them under `inputs:`.
+    /// This is dependency injection — the manifest provides, the leaf
+    /// declares what it needs — not class inheritance: one level deep,
+    /// names only, no local `default:`. An inherited name resolves and
+    /// reads as `$inputs.<name>` exactly like a locally-declared input.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inherits: Vec<String>,
+
     /// Optional setup steps run once before the criteria.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub setup: Vec<Step>,
@@ -186,11 +197,37 @@ criteria:
             spec_ref: None,
             environment: None,
             inputs,
+            inherits: vec![],
             setup: vec![],
             criteria: vec![],
         };
         let y = v.to_yaml_string().unwrap();
         let back = VerificationDefinition::from_yaml_str(&y).unwrap();
+        assert_eq!(v, back);
+    }
+
+    #[test]
+    fn round_trip_preserves_inherits() {
+        let y = r#"
+verification: leaf
+inherits:
+  - base_url
+  - region
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.base_url == "x"
+"#;
+        let v = VerificationDefinition::from_yaml_str(y).expect("parse");
+        assert_eq!(
+            v.inherits,
+            vec!["base_url".to_string(), "region".to_string()]
+        );
+        assert!(v.inputs.is_empty());
+        let back = VerificationDefinition::from_yaml_str(&v.to_yaml_string().unwrap()).unwrap();
         assert_eq!(v, back);
     }
 

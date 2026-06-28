@@ -65,6 +65,16 @@ pub enum EngineError {
     /// the failure points at the VD, not at a phantom broken SUT.
     #[error("step `{step}`: unresolved reference `{reference}` in `with:`")]
     UnresolvedReference { reference: String, step: String },
+    /// A `$inputs.<name>` reference names an input the leaf declared
+    /// under `inherits:` (spec #135), but nothing on the resolution
+    /// chain bound it — no manifest environment was selected and no
+    /// `--inputs` supplied it. Distinct from the generic
+    /// `UnresolvedReference` so the remedy (run the suite, or pass
+    /// `--inputs`) is named instead of a deep network failure.
+    #[error(
+        "input `{name}` is declared `inherits:` but no environment or --inputs provides it; run the suite (e.g. `duhem run verifications/<suite>`) or pass `--inputs {name}=...`"
+    )]
+    UnresolvedInheritedInput { name: String },
 }
 
 impl From<ActionError> for EngineError {
@@ -173,6 +183,12 @@ pub struct Engine {
     /// default — env access from assertions is opt-in. The CLI seeds
     /// this from the selected named environment's string-valued keys.
     env: BTreeMap<String, String>,
+    /// Names the leaf declared under `inherits:` (spec #135). Used to
+    /// turn a generic unresolved `$inputs.<name>` into the loud,
+    /// specific "declared `inherits:` but nothing provides it" error
+    /// with the suite/--inputs remedy. Empty for a leaf with no
+    /// `inherits:` block, so non-inheriting runs keep today's behavior.
+    inherited: std::collections::HashSet<String>,
 }
 
 impl Engine {
@@ -189,6 +205,7 @@ impl Engine {
             skip_env_up: false,
             keep_env: false,
             env: BTreeMap::new(),
+            inherited: std::collections::HashSet::new(),
         }
     }
 
@@ -258,6 +275,16 @@ impl Engine {
         self
     }
 
+    /// Declare the leaf's inherited input names (spec #135). When a
+    /// referenced `$inputs.<name>` for one of these names resolves to
+    /// nothing, the run fails with a loud, specific error naming it as
+    /// inherited and pointing at the suite / `--inputs` remedy, instead
+    /// of a generic deep failure. The CLI threads `def.inherits` here.
+    pub fn with_inherited(mut self, names: impl IntoIterator<Item = String>) -> Self {
+        self.inherited = names.into_iter().collect();
+        self
+    }
+
     /// Register a test-only dispatcher under a `Step.uses` key. The
     /// real catalog is closed at v1 (per the spec); this hook exists
     /// so the runner can be exercised in unit tests without booting
@@ -296,6 +323,18 @@ impl Engine {
             let val = json_to_value(v)
                 .ok_or_else(|| EngineError::InputUnrepresentable { name: k.clone() })?;
             input_values.insert(k.clone(), val);
+        }
+        // Loud, specific guard for unresolved inherited inputs (spec
+        // #135): an `inherits:` name that the chain bound nothing for
+        // (no manifest environment, no `--inputs`) fails here — before
+        // any browser launch or network call — naming the input as
+        // inherited and giving the suite / `--inputs` remedy, instead
+        // of surfacing later as a generic deep failure.
+        if !self.inherited.is_empty()
+            && let Some(name) =
+                crate::engine::inherit::first_unbound_inherited(def, &self.inherited, &input_values)
+        {
+            return Err(EngineError::UnresolvedInheritedInput { name });
         }
         let mut run_state = match self.seed {
             Some(s) => RunState::new_with_seed(input_values, s),
@@ -881,6 +920,7 @@ mod tests {
             skip_env_up: false,
             keep_env: false,
             env: BTreeMap::new(),
+            inherited: std::collections::HashSet::new(),
         };
         // Clear default registry so each test composes its own.
         e.registry.clear();
@@ -2001,5 +2041,89 @@ criteria:
         let (mut bare, _tmp2) = engine_for_test();
         let bare_outcome = bare.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
         assert_ne!(bare_outcome.verdict.state, VerdictState::Pass);
+    }
+
+    /// Spec #135: a leaf referencing an `inherits:` name that nothing
+    /// bound fails LOUDLY with the specific remedy — not a generic deep
+    /// failure — before any check runs.
+    #[tokio::test]
+    async fn unbound_inherited_input_errors_loudly() {
+        let v = def(r#"
+verification: leaf
+inherits:
+  - login_url
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.login_url == "x"
+"#);
+        let (engine, _tmp) = engine_for_test();
+        let mut engine = engine.with_inherited(v.inherits.clone());
+        let err = engine
+            .run_with_metadata(&v, BTreeMap::new())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, EngineError::UnresolvedInheritedInput { name } if name == "login_url"),
+            "got: {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(msg.contains("login_url"), "{msg}");
+        assert!(msg.contains("inherits:"), "{msg}");
+        assert!(msg.contains("--inputs"), "{msg}");
+    }
+
+    /// Spec #135: when the inherited name IS bound (here via the
+    /// resolved input map the CLI would have populated from the
+    /// manifest's environment chain), the guard passes and the
+    /// assertion sees the value.
+    #[tokio::test]
+    async fn bound_inherited_input_passes() {
+        let v = def(r#"
+verification: leaf
+inherits:
+  - login_url
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.login_url == "https://example.test/login"
+"#);
+        let (engine, _tmp) = engine_for_test();
+        let mut engine = engine.with_inherited(v.inherits.clone());
+        let mut inputs = BTreeMap::new();
+        inputs.insert(
+            "login_url".to_string(),
+            serde_json::json!("https://example.test/login"),
+        );
+        let outcome = engine.run_with_metadata(&v, inputs).await.unwrap();
+        assert_eq!(outcome.verdict.state, VerdictState::Pass);
+    }
+
+    /// Spec #135: an inherited name used only inside `$runtime.default`'s
+    /// first argument is missing-tolerant — the guard must not fire.
+    #[tokio::test]
+    async fn inherited_under_default_carveout_does_not_trip_guard() {
+        let v = def(r#"
+verification: leaf
+inherits:
+  - maybe
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $runtime.default($inputs.maybe, "x") == "x"
+"#);
+        let (engine, _tmp) = engine_for_test();
+        let mut engine = engine.with_inherited(v.inherits.clone());
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(outcome.verdict.state, VerdictState::Pass);
     }
 }

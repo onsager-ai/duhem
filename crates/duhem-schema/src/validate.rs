@@ -153,6 +153,14 @@ pub enum ValidationError {
         declared: InputType,
         actual: String,
     },
+
+    #[error(
+        "inherited input `{name}` is also declared locally under `inputs:` — list it in one place, not both"
+    )]
+    InheritedInputAlsoDeclared { name: String },
+
+    #[error("`inherits:` entry #{index} is empty — list input names, e.g. `inherits: [base_url]`")]
+    EmptyInheritedName { index: usize },
 }
 
 /// Run every structural rule. Always reports as many errors as
@@ -197,12 +205,29 @@ pub fn validate(v: &VerificationDefinition) -> Result<(), Vec<ValidationError>> 
         }
     }
 
+    // Inherited input names (spec #135). They satisfy `$inputs.<name>`
+    // references just like a locally-declared input, so they join the
+    // resolvable-name set below. Two well-formedness rules first: a name
+    // may not appear in both `inputs:` and `inherits:` (declare it once),
+    // and an inherited name may not be empty.
+    let mut inherited: HashSet<&str> = HashSet::new();
+    for (index, name) in v.inherits.iter().enumerate() {
+        if name.is_empty() {
+            errs.push(ValidationError::EmptyInheritedName { index });
+            continue;
+        }
+        if v.inputs.contains_key(name) {
+            errs.push(ValidationError::InheritedInputAlsoDeclared { name: name.clone() });
+        }
+        inherited.insert(name.as_str());
+    }
+
     let mut seen_criteria: HashSet<&str> = HashSet::new();
     for c in &v.criteria {
         if !seen_criteria.insert(c.id.as_str()) {
             errs.push(ValidationError::DuplicateCriterionId { id: c.id.clone() });
         }
-        validate_criterion(c, &v.inputs, &setup_outputs, &mut errs);
+        validate_criterion(c, &v.inputs, &inherited, &setup_outputs, &mut errs);
     }
 
     if errs.is_empty() { Ok(()) } else { Err(errs) }
@@ -302,6 +327,7 @@ fn matches_with_promotion(declared: InputType, actual: InputType) -> bool {
 fn validate_criterion(
     c: &Criterion,
     inputs: &BTreeMap<String, InputDecl>,
+    inherited: &HashSet<&str>,
     setup_outputs: &HashMap<&str, &BTreeMap<String, String>>,
     errs: &mut Vec<ValidationError>,
 ) {
@@ -313,7 +339,7 @@ fn validate_criterion(
                 id: ch.id.clone(),
             });
         }
-        validate_check(c, ch, inputs, setup_outputs, errs);
+        validate_check(c, ch, inputs, inherited, setup_outputs, errs);
     }
 }
 
@@ -325,12 +351,17 @@ struct PathScope<'a> {
     step_outputs: &'a HashMap<&'a str, &'a BTreeMap<String, String>>,
     setup_outputs: &'a HashMap<&'a str, &'a BTreeMap<String, String>>,
     inputs: &'a BTreeMap<String, InputDecl>,
+    /// Inherited input names (spec #135). An `$inputs.<name>` for a
+    /// name in here resolves like a declared input — the manifest's
+    /// chain binds it at run time.
+    inherited: &'a HashSet<&'a str>,
 }
 
 fn validate_check(
     c: &Criterion,
     ch: &Check,
     inputs: &BTreeMap<String, InputDecl>,
+    inherited: &HashSet<&str>,
     setup_outputs: &HashMap<&str, &BTreeMap<String, String>>,
     errs: &mut Vec<ValidationError>,
 ) {
@@ -356,6 +387,7 @@ fn validate_check(
         step_outputs: &step_outputs,
         setup_outputs,
         inputs,
+        inherited,
     };
     for assertion in &ch.assertions {
         assertion.walk_exprs(|expr_str| {
@@ -471,6 +503,7 @@ fn check_path(
         step_outputs,
         setup_outputs,
         inputs,
+        inherited,
     } = *scope;
     match path.root {
         PathRoot::Steps => {
@@ -563,7 +596,10 @@ fn check_path(
                 return;
             }
             let name = segs[0].as_str();
-            if !inputs.contains_key(name) {
+            // `$inputs.<name>` resolves against `inputs:` ∪ `inherits:`
+            // (spec #135): an inherited name is bound by the parent
+            // manifest's chain at run time, so it is not a typo here.
+            if !inputs.contains_key(name) && !inherited.contains(name) {
                 errs.push(ValidationError::UnresolvedInputRef {
                     criterion: c.id.clone(),
                     check: ch.id.clone(),
@@ -1282,6 +1318,102 @@ criteria:
             errs.iter().any(|e| matches!(
                 e,
                 ValidationError::UnresolvedInputRef { input, .. } if input == "also_missing"
+            )),
+            "got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn inherited_input_ref_resolves() {
+        // `$inputs.base_url` with `base_url` listed under `inherits:`
+        // (and no local `inputs:` for it) is not a typo (spec #135).
+        let y = r#"
+verification: leaf
+inherits:
+  - base_url
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.base_url == "x"
+"#;
+        let v = parse(y);
+        validate(&v).expect("inherited input ref resolves");
+    }
+
+    #[test]
+    fn inherited_input_also_declared_fails() {
+        let y = r#"
+verification: leaf
+inputs:
+  base_url: { type: string }
+inherits:
+  - base_url
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.base_url == "x"
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::InheritedInputAlsoDeclared { name } if name == "base_url"
+            )),
+            "got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn empty_inherited_name_fails() {
+        let y = r#"
+verification: leaf
+inherits:
+  - ""
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter()
+                .any(|e| matches!(e, ValidationError::EmptyInheritedName { .. })),
+            "got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn bare_input_ref_not_inherited_still_typo() {
+        // A `$inputs.x` neither in `inputs:` nor `inherits:` is still a
+        // typo error (#134), distinct from the inherited case.
+        let y = r#"
+verification: leaf
+inherits:
+  - base_url
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.typo == 1
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::UnresolvedInputRef { input, .. } if input == "typo"
             )),
             "got: {errs:?}"
         );

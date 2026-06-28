@@ -298,6 +298,13 @@
           ],
           "description": "Optional operator-supplied environment lifecycle hooks. When present, the runtime forks `environment.up:` before `setup:`, polls `environment.ready:`, and forks `environment.down:` (if declared) after the criteria loop. Absent → no behavior change vs setup-only definitions; the wire shape for `environment:`-less VDs is byte-identical to today."
         },
+        "inherits": {
+          "description": "Inherited input names (spec #135). A leaf under a manifest may list input names it pulls from the parent manifest's resolution chain (#68: selected `environments:` keys, `--inputs`, `--inputs-file`) instead of redeclaring them under `inputs:`. This is dependency injection — the manifest provides, the leaf declares what it needs — not class inheritance: one level deep, names only, no local `default:`. An inherited name resolves and reads as `$inputs.<name>` exactly like a locally-declared input.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "inputs": {
           "additionalProperties": {
             "$ref": "#/definitions/InputDecl"

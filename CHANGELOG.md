@@ -20,6 +20,8 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [additive] VD leaves may declare inherits: [name, ...] to pull shared inputs from the parent manifest's environment chain instead of redeclaring them; $inputs.<name> resolves against inputs ∪ inherits, an inherited name also declared under inputs: is an error, and an unresolved inherited input fails loudly with the suite/--inputs remedy. (#135)
+
 - [additive] Root manifest gains an environments: block (named env configs) injected into leaf input resolution (precedence: --inputs > --inputs-file > selected env > VD default) and the $env whitelist; CLI --environment selects, single env auto-selects. (#68)
 
 - [clarifying] Publish a JSON Schema for VD + manifest YAML (schemars);

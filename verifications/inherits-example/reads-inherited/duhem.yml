@@ -1,0 +1,47 @@
+# Worked-example leaf that INHERITS its inputs (spec #135).
+#
+# This leaf declares NO local `inputs:` for the shared values. Instead
+# it lists their names under `inherits:` and reads them as
+# `$inputs.<name>` — the parent manifest's `environments:` chain (#68)
+# binds them at run time. Adding a leaf to a suite now costs a path
+# entry and an `inherits:` line, not a redeclared input block.
+#
+# Page-free, assertion-only: it confirms the inherited values reached
+# the leaf on both surfaces —
+#
+#   - `$inputs.base_url` is the inherited input the selected
+#     environment's `base_url` key bound (resolution precedence:
+#     --inputs > --inputs-file > selected env). There is no local
+#     `default:` floor — an inherited name has no local declaration.
+#   - `$env.base_url` / `$env.region` are the same env's string-valued
+#     keys, auto-whitelisted for this run.
+#
+# Run it under the suite so the manifest provides the values:
+#   duhem run verifications/inherits-example
+#
+# Run it STANDALONE with no `--inputs` and the inherited names resolve
+# to nothing — a hard, specific error fires before any check:
+#   input `base_url` is declared `inherits:` but no environment or
+#   --inputs provides it; run the suite (...) or pass `--inputs base_url=...`
+
+verification: reads inputs inherited from the parent manifest
+
+inherits:
+  - base_url
+  - region
+
+criteria:
+  - id: AC-1
+    description: |
+      The inherited inputs reach the leaf through the manifest's
+      environment chain: `$inputs.base_url` agrees with `$env.base_url`
+      (same env key, two surfaces) and the inherited `region` is a
+      non-empty string.
+    checks:
+      - id: AC-1.1
+        description: |
+          `$inputs.base_url` (inherited) equals `$env.base_url`, and the
+          inherited `region` is present.
+        assertions:
+          - $inputs.base_url == $env.base_url
+          - $runtime.len($inputs.region) > 0

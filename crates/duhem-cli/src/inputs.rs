@@ -85,7 +85,7 @@ fn json_shape_name(v: &serde_json::Value) -> &'static str {
 /// mapping keys are rejected explicitly — JSON requires string keys
 /// and silently dropping such entries would mutate the author's
 /// inputs file.
-fn yml_to_json(v: &serde_yml::Value) -> Result<serde_json::Value, String> {
+pub(crate) fn yml_to_json(v: &serde_yml::Value) -> Result<serde_json::Value, String> {
     use serde_yml::Value as Y;
     Ok(match v {
         Y::Null => serde_json::Value::Null,

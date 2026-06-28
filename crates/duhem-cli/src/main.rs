@@ -10,11 +10,13 @@
 //! practical.
 
 mod dashboard;
+mod environment;
 mod filter;
 mod init;
 mod inputs;
 mod reporter;
 mod reporter_config;
+mod resolve;
 mod validate_cmd;
 
 use std::collections::BTreeMap;
@@ -26,14 +28,12 @@ use clap::{Parser, Subcommand};
 use duhem_actions::RunBrowser;
 use duhem_judge::{RunVerdict, VerdictState, aggregate_run_set};
 use duhem_runtime::{Engine, RunOutcome, SuiteEnvironment};
-use duhem_schema::{
-    InputDecl, InputType, Loaded, LoadedLeaf, VerificationDefinition, load as load_definition,
-    validate,
-};
+use duhem_schema::{Loaded, LoadedLeaf, VerificationDefinition, load as load_definition, validate};
 
 use crate::filter::CliCheckFilter;
 use crate::reporter::Reporter;
 use crate::reporter_config::PluginRegistry;
+use crate::resolve::resolve_inputs;
 
 /// Duhem — holistic verification for AI-delivered software.
 #[derive(Debug, Parser)]
@@ -128,6 +128,16 @@ enum Cmd {
         /// on the same key (spec on issue #33).
         #[arg(long = "inputs-file", value_name = "PATH")]
         inputs_file: Option<PathBuf>,
+        /// Select a named environment from the manifest's
+        /// `environments:` block (spec #68). The selected environment's
+        /// keys feed input resolution (below `--inputs` and
+        /// `--inputs-file`, above the VD `default:`) and its
+        /// string-valued keys are reachable via `$env.<key>`. When the
+        /// manifest declares exactly one environment it auto-selects;
+        /// with two or more, this flag is required. Inert on a
+        /// single-leaf run (no manifest).
+        #[arg(long = "environment", value_name = "NAME")]
+        environment: Option<String>,
         /// Parse + validate the definition, resolve the filter, print
         /// the `(criterion::check)` pairs that *would* run, and exit
         /// 0 without launching the browser or writing evidence. Use
@@ -193,6 +203,7 @@ fn main() -> ExitCode {
             evidence_dir,
             reporter,
             inputs_file,
+            environment,
             dry_run,
             seed,
             no_env_up,
@@ -239,6 +250,7 @@ fn main() -> ExitCode {
                 evidence_dir,
                 reporter: resolved_reporter,
                 inputs_file,
+                environment,
                 dry_run,
                 seed,
                 no_env_up,
@@ -258,6 +270,7 @@ struct RunArgs {
     evidence_dir: Option<PathBuf>,
     reporter: Reporter,
     inputs_file: Option<PathBuf>,
+    environment: Option<String>,
     dry_run: bool,
     seed: Option<u64>,
     no_env_up: bool,
@@ -273,6 +286,7 @@ async fn run_command(args: RunArgs) -> ExitCode {
         evidence_dir,
         reporter,
         inputs_file,
+        environment: requested_environment,
         dry_run,
         seed,
         no_env_up,
@@ -339,8 +353,20 @@ async fn run_command(args: RunArgs) -> ExitCode {
             manifest_dir: Option<PathBuf>,
         },
     }
+    // Named-environment selection (spec #68). On a manifest we pick the
+    // run's environment from the manifest's `environments:` block and
+    // the `--environment` flag; the projection feeds both input
+    // resolution and the `$env.<key>` whitelist. On a single leaf there
+    // is no manifest, so nothing is selected; a `--environment` passed
+    // there is inert (warned below).
+    let mut selected_env: Option<environment::SelectedEnvironment> = None;
     let (leaves, scope): (Vec<LoadedLeaf>, Scope) = match loaded {
         Loaded::Leaf { path, definition } => {
+            if requested_environment.is_some() {
+                eprintln!(
+                    "warning: --environment has no effect on a single-leaf run (no manifest with an `environments:` block)"
+                );
+            }
             (vec![LoadedLeaf { path, definition }], Scope::SingleLeaf)
         }
         Loaded::Manifest {
@@ -349,6 +375,21 @@ async fn run_command(args: RunArgs) -> ExitCode {
             leaves,
             warnings,
         } => {
+            match environment::select_environment(
+                &manifest.environments,
+                requested_environment.as_deref(),
+            ) {
+                Ok(sel) => {
+                    if let Some(s) = &sel {
+                        eprintln!("environment: {}", s.name);
+                    }
+                    selected_env = sel;
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    return ExitCode::FAILURE;
+                }
+            }
             let manifest_dir = manifest_path.parent().map(Path::to_path_buf);
             (
                 leaves,
@@ -360,6 +401,18 @@ async fn run_command(args: RunArgs) -> ExitCode {
             )
         }
     };
+    // Input-resolution view of the selected environment (precedence
+    // layer 3); empty when nothing is selected so the resolution chain
+    // is unchanged on environment-free runs.
+    let env_inputs: BTreeMap<String, serde_json::Value> = selected_env
+        .as_ref()
+        .map(|s| s.inputs.clone())
+        .unwrap_or_default();
+    // `$env.<key>` whitelist seed (string-valued keys only).
+    let env_whitelist: BTreeMap<String, String> = selected_env
+        .as_ref()
+        .map(|s| s.env.clone())
+        .unwrap_or_default();
     if let Scope::Manifest { warnings, .. } = &scope {
         for w in warnings {
             eprintln!("warning: {w}");
@@ -391,7 +444,12 @@ async fn run_command(args: RunArgs) -> ExitCode {
             }
             return ExitCode::FAILURE;
         }
-        let inputs = match resolve_inputs(&raw_inputs, &file_inputs, &leaf.definition.inputs) {
+        let inputs = match resolve_inputs(
+            &raw_inputs,
+            &file_inputs,
+            &env_inputs,
+            &leaf.definition.inputs,
+        ) {
             Ok(m) => m,
             Err(e) => {
                 eprintln!("{}: {e}", leaf.path.display());
@@ -543,7 +601,8 @@ async fn run_command(args: RunArgs) -> ExitCode {
         let mut engine = Engine::new()
             .with_definition_path(leaf_path.display().to_string())
             .skip_env_up(no_env_up || suite_managed)
-            .keep_env(keep_env || suite_managed);
+            .keep_env(keep_env || suite_managed)
+            .with_env(env_whitelist.clone());
         if let Some(b) = browser {
             engine = engine.with_browser(b);
         }
@@ -710,204 +769,11 @@ mod leaf_name_tests {
     }
 }
 
-/// Parse the raw `--inputs k=v` flags into a `(name, raw)` map.
-fn parse_inputs(raw: &[String]) -> Result<BTreeMap<String, String>, String> {
-    let mut out = BTreeMap::new();
-    for s in raw {
-        let (k, v) = s
-            .split_once('=')
-            .ok_or_else(|| format!("--inputs `{s}`: expected `key=value`"))?;
-        if k.is_empty() {
-            return Err(format!("--inputs `{s}`: empty key"));
-        }
-        out.insert(k.to_string(), v.to_string());
-    }
-    Ok(out)
-}
-
-/// Resolve `--inputs k=v` flags + an optional `--inputs-file` map
-/// against the Verification Definition's `inputs:` block. Per the
-/// typed-input-catalog spec plus #33:
-///
-/// - Unknown input (in either source) → error.
-/// - Explicit `--inputs k=v` value → coerced per declared `InputType`.
-///   Always wins over a same-key file value.
-/// - File value → validated against declared `InputType` (the file's
-///   parser already produced typed JSON; we only need to confirm shape).
-/// - Not provided in either source + default present → default carried
-///   through as-is (the schema validator type-checked it at parse time).
-/// - Not provided in either source + no default → error.
-fn resolve_inputs(
-    raw: &[String],
-    file: &BTreeMap<String, serde_json::Value>,
-    decls: &BTreeMap<String, InputDecl>,
-) -> Result<BTreeMap<String, serde_json::Value>, String> {
-    let provided = parse_inputs(raw)?;
-    for name in provided.keys() {
-        if !decls.contains_key(name) {
-            return Err(format!("unknown input: `{name}`"));
-        }
-    }
-    for name in file.keys() {
-        if !decls.contains_key(name) {
-            return Err(format!("unknown input (from --inputs-file): `{name}`"));
-        }
-    }
-    let mut out = BTreeMap::new();
-    for (name, decl) in decls {
-        if let Some(raw_value) = provided.get(name) {
-            let coerced = coerce_input(name, decl.kind, raw_value)?;
-            out.insert(name.clone(), coerced);
-        } else if let Some(file_value) = file.get(name) {
-            validate_file_value(name, decl.kind, file_value)?;
-            out.insert(name.clone(), file_value.clone());
-        } else if let Some(default) = &decl.default {
-            let value =
-                yml_to_json(default).map_err(|e| format!("input `{name}`: default: {e}"))?;
-            out.insert(name.clone(), value);
-        } else {
-            return Err(format!("missing required input: `{name}`"));
-        }
-    }
-    Ok(out)
-}
-
-/// Type-check a value loaded from `--inputs-file` against its declared
-/// `InputType`. The file's parser already gave us a typed JSON value,
-/// so this is a shape check, not a string coercion. Mirrors the
-/// promotion rule used by the schema validator: an `integer` is a
-/// valid `number`, but not vice versa.
-fn validate_file_value(name: &str, kind: InputType, v: &serde_json::Value) -> Result<(), String> {
-    let actual = json_shape_name(v);
-    let ok = match kind {
-        InputType::String => matches!(v, serde_json::Value::String(_)),
-        InputType::Integer => v.as_i64().is_some(),
-        InputType::Number => v.is_number(),
-        InputType::Boolean => matches!(v, serde_json::Value::Bool(_)),
-        InputType::Array => matches!(v, serde_json::Value::Array(_)),
-        InputType::Object => matches!(v, serde_json::Value::Object(_)),
-    };
-    if ok {
-        Ok(())
-    } else {
-        Err(format!(
-            "input `{name}` (from --inputs-file): expected {kind}, got {actual}"
-        ))
-    }
-}
-
-/// Coerce a `--inputs k=v` value to its declared `InputType`. Failure
-/// surfaces as a CLI-friendly error naming the input and the expected
-/// type.
-fn coerce_input(name: &str, kind: InputType, v: &str) -> Result<serde_json::Value, String> {
-    match kind {
-        InputType::String => Ok(serde_json::Value::String(v.to_string())),
-        InputType::Integer => v
-            .parse::<i64>()
-            .map(|n| serde_json::Value::Number(n.into()))
-            .map_err(|_| format!("--inputs `{name}={v}`: expected integer, got `{v}`")),
-        InputType::Number => {
-            // Accept integer literals as `number`; serde_json picks the
-            // narrowest representation. Fractional values stay
-            // fractional.
-            if let Ok(i) = v.parse::<i64>() {
-                Ok(serde_json::Value::Number(i.into()))
-            } else if let Ok(f) = v.parse::<f64>() {
-                serde_json::Number::from_f64(f)
-                    .map(serde_json::Value::Number)
-                    .ok_or_else(|| {
-                        format!("--inputs `{name}={v}`: number not representable as f64")
-                    })
-            } else {
-                Err(format!("--inputs `{name}={v}`: expected number, got `{v}`"))
-            }
-        }
-        InputType::Boolean => match v {
-            // Strict per Alignment §"Boolean strictness at the CLI":
-            // only the canonical `true` / `false` literals.
-            "true" => Ok(serde_json::Value::Bool(true)),
-            "false" => Ok(serde_json::Value::Bool(false)),
-            _ => Err(format!(
-                "--inputs `{name}={v}`: expected boolean (`true` or `false`), got `{v}`"
-            )),
-        },
-        InputType::Array => {
-            let parsed: serde_json::Value = serde_json::from_str(v).map_err(|e| {
-                format!("--inputs `{name}={v}`: expected JSON array, parse error: {e}")
-            })?;
-            if !parsed.is_array() {
-                return Err(format!(
-                    "--inputs `{name}={v}`: expected JSON array, got {}",
-                    json_shape_name(&parsed)
-                ));
-            }
-            Ok(parsed)
-        }
-        InputType::Object => {
-            let parsed: serde_json::Value = serde_json::from_str(v).map_err(|e| {
-                format!("--inputs `{name}={v}`: expected JSON object, parse error: {e}")
-            })?;
-            if !parsed.is_object() {
-                return Err(format!(
-                    "--inputs `{name}={v}`: expected JSON object, got {}",
-                    json_shape_name(&parsed)
-                ));
-            }
-            Ok(parsed)
-        }
-    }
-}
-
-fn json_shape_name(v: &serde_json::Value) -> &'static str {
-    match v {
-        serde_json::Value::Null => "null",
-        serde_json::Value::Bool(_) => "boolean",
-        serde_json::Value::Number(_) => "number",
-        serde_json::Value::String(_) => "string",
-        serde_json::Value::Array(_) => "array",
-        serde_json::Value::Object(_) => "object",
-    }
-}
-
-/// Convert a YAML default value into JSON for engine consumption.
-///
-/// Fallible because YAML permits non-string mapping keys (e.g.
-/// `default: { 1: "x" }`); JSON does not. Silently dropping such
-/// entries would mutate the author's default; we surface them as a
-/// user-facing error instead.
-fn yml_to_json(v: &serde_yml::Value) -> Result<serde_json::Value, String> {
-    use serde_yml::Value as Y;
-    Ok(match v {
-        Y::Null => serde_json::Value::Null,
-        Y::Bool(b) => serde_json::Value::Bool(*b),
-        Y::Number(n) => serde_json::to_value(n).unwrap_or(serde_json::Value::Null),
-        Y::String(s) => serde_json::Value::String(s.clone()),
-        Y::Sequence(seq) => {
-            let mut out = Vec::with_capacity(seq.len());
-            for item in seq {
-                out.push(yml_to_json(item)?);
-            }
-            serde_json::Value::Array(out)
-        }
-        Y::Mapping(m) => {
-            let mut out = serde_json::Map::with_capacity(m.len());
-            for (k, v) in m {
-                let key = k.as_str().ok_or_else(|| {
-                    "object default has a non-string mapping key (not representable as JSON)"
-                        .to_string()
-                })?;
-                out.insert(key.to_string(), yml_to_json(v)?);
-            }
-            serde_json::Value::Object(out)
-        }
-        Y::Tagged(t) => yml_to_json(&t.value)?,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::Parser;
+    use duhem_schema::InputDecl;
 
     /// Spec on #23 § Alignment "Headless default": `--headed` opts
     /// into a visible window; default stays headless. The runtime
@@ -982,14 +848,15 @@ mod tests {
         args.iter().map(|s| s.to_string()).collect()
     }
 
-    /// Test-only shorthand: resolve with no `--inputs-file` source.
-    /// The file-merge code path is exercised separately below.
+    /// Test-only shorthand: resolve with no `--inputs-file` and no
+    /// selected-environment source. Those code paths are exercised
+    /// separately below.
     fn resolve(
         cli: &[String],
         decls: &BTreeMap<String, InputDecl>,
     ) -> Result<BTreeMap<String, serde_json::Value>, String> {
         let empty = BTreeMap::new();
-        resolve_inputs(cli, &empty, decls)
+        resolve_inputs(cli, &empty, &empty, decls)
     }
 
     #[test]
@@ -1137,7 +1004,8 @@ mod tests {
         let d = decls("  base_url: { type: string }");
         let mut file = BTreeMap::new();
         file.insert("base_url".into(), serde_json::json!("from-file"));
-        let out = resolve_inputs(&raw(&["base_url=from-flag"]), &file, &d).unwrap();
+        let out =
+            resolve_inputs(&raw(&["base_url=from-flag"]), &file, &BTreeMap::new(), &d).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-flag"));
     }
 
@@ -1146,7 +1014,7 @@ mod tests {
         let d = decls("  count: { type: integer }");
         let mut file = BTreeMap::new();
         file.insert("count".into(), serde_json::json!(7));
-        let out = resolve_inputs(&raw(&[]), &file, &d).unwrap();
+        let out = resolve_inputs(&raw(&[]), &file, &BTreeMap::new(), &d).unwrap();
         assert_eq!(out["count"], serde_json::json!(7));
     }
 
@@ -1159,7 +1027,7 @@ mod tests {
         let d = decls("  count: { type: integer }");
         let mut file = BTreeMap::new();
         file.insert("count".into(), serde_json::json!("not a number"));
-        let err = resolve_inputs(&raw(&[]), &file, &d).unwrap_err();
+        let err = resolve_inputs(&raw(&[]), &file, &BTreeMap::new(), &d).unwrap_err();
         assert!(
             err.contains("count") && err.contains("integer"),
             "got: {err}"
@@ -1172,7 +1040,7 @@ mod tests {
         let mut file = BTreeMap::new();
         file.insert("bogus".into(), serde_json::json!(1));
         file.insert("count".into(), serde_json::json!(1));
-        let err = resolve_inputs(&raw(&[]), &file, &d).unwrap_err();
+        let err = resolve_inputs(&raw(&[]), &file, &BTreeMap::new(), &d).unwrap_err();
         assert!(
             err.contains("--inputs-file") && err.contains("bogus"),
             "got: {err}"
@@ -1187,8 +1055,95 @@ mod tests {
         let d = decls("  name: { type: string, default: ws-default }");
         let mut file = BTreeMap::new();
         file.insert("name".into(), serde_json::json!("from-file"));
-        let out = resolve_inputs(&raw(&["name=from-flag"]), &file, &d).unwrap();
+        let out = resolve_inputs(&raw(&["name=from-flag"]), &file, &BTreeMap::new(), &d).unwrap();
         assert_eq!(out["name"], serde_json::json!("from-flag"));
+    }
+
+    // ---- #68: selected-environment input resolution (precedence
+    // layer 3: --inputs > --inputs-file > selected env > VD default) ----
+
+    #[test]
+    fn env_supplies_input_when_nothing_higher_does() {
+        let d = decls("  base_url: { type: string }");
+        let mut env = BTreeMap::new();
+        env.insert("base_url".into(), serde_json::json!("https://staging"));
+        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d).unwrap();
+        assert_eq!(out["base_url"], serde_json::json!("https://staging"));
+    }
+
+    #[test]
+    fn explicit_inputs_override_env() {
+        let d = decls("  base_url: { type: string }");
+        let mut env = BTreeMap::new();
+        env.insert("base_url".into(), serde_json::json!("https://staging"));
+        let out =
+            resolve_inputs(&raw(&["base_url=from-flag"]), &BTreeMap::new(), &env, &d).unwrap();
+        assert_eq!(out["base_url"], serde_json::json!("from-flag"));
+    }
+
+    #[test]
+    fn inputs_file_overrides_env_but_loses_to_inputs() {
+        let d = decls("  base_url: { type: string }");
+        let mut env = BTreeMap::new();
+        env.insert("base_url".into(), serde_json::json!("from-env"));
+        let mut file = BTreeMap::new();
+        file.insert("base_url".into(), serde_json::json!("from-file"));
+        // file beats env
+        let out = resolve_inputs(&raw(&[]), &file, &env, &d).unwrap();
+        assert_eq!(out["base_url"], serde_json::json!("from-file"));
+        // flag beats both
+        let out = resolve_inputs(&raw(&["base_url=from-flag"]), &file, &env, &d).unwrap();
+        assert_eq!(out["base_url"], serde_json::json!("from-flag"));
+    }
+
+    #[test]
+    fn vd_default_is_the_floor_below_env() {
+        let d = decls("  base_url: { type: string, default: from-default }");
+        // env supplies → env wins over the default
+        let mut env = BTreeMap::new();
+        env.insert("base_url".into(), serde_json::json!("from-env"));
+        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d).unwrap();
+        assert_eq!(out["base_url"], serde_json::json!("from-env"));
+        // env absent → default is the floor
+        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &BTreeMap::new(), &d).unwrap();
+        assert_eq!(out["base_url"], serde_json::json!("from-default"));
+    }
+
+    #[test]
+    fn env_key_with_no_declared_input_is_ignored() {
+        // An environment may carry keys consumed only via `$env.<key>`;
+        // such a key matching no declared input must not error.
+        let d = decls("  base_url: { type: string }");
+        let mut env = BTreeMap::new();
+        env.insert("base_url".into(), serde_json::json!("https://staging"));
+        env.insert("db_url".into(), serde_json::json!("postgres://x"));
+        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d).unwrap();
+        assert_eq!(out["base_url"], serde_json::json!("https://staging"));
+        assert!(!out.contains_key("db_url"));
+    }
+
+    #[test]
+    fn env_value_type_mismatch_is_an_error() {
+        let d = decls("  count: { type: integer }");
+        let mut env = BTreeMap::new();
+        env.insert("count".into(), serde_json::json!("not a number"));
+        let err = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d).unwrap_err();
+        assert!(
+            err.contains("count") && err.contains("environment"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn environment_flag_parses() {
+        let parsed =
+            Cli::try_parse_from(["duhem", "run", "v.yml", "--environment", "prod"]).expect("parse");
+        match parsed.cmd {
+            Some(Cmd::Run { environment, .. }) => {
+                assert_eq!(environment, Some("prod".to_string()));
+            }
+            _ => panic!("expected Run"),
+        }
     }
 
     #[test]

@@ -169,6 +169,10 @@ pub struct Engine {
     /// issue #50). Useful when an author wants the SUT to outlive the
     /// run for triage.
     keep_env: bool,
+    /// `$env.<key>` whitelist seed for this run (spec #68). Empty by
+    /// default — env access from assertions is opt-in. The CLI seeds
+    /// this from the selected named environment's string-valued keys.
+    env: BTreeMap<String, String>,
 }
 
 impl Engine {
@@ -184,6 +188,7 @@ impl Engine {
             seed: None,
             skip_env_up: false,
             keep_env: false,
+            env: BTreeMap::new(),
         }
     }
 
@@ -243,6 +248,16 @@ impl Engine {
         self
     }
 
+    /// Seed the `$env.<key>` whitelist for this run (spec #68). The CLI
+    /// passes the selected named environment's string-valued keys here;
+    /// `$env.<key>` resolves against this map. Empty by default, so
+    /// runs without a selected environment keep today's behavior (no
+    /// `$env` access).
+    pub fn with_env(mut self, env: BTreeMap<String, String>) -> Self {
+        self.env = env;
+        self
+    }
+
     /// Register a test-only dispatcher under a `Step.uses` key. The
     /// real catalog is closed at v1 (per the spec); this hook exists
     /// so the runner can be exercised in unit tests without booting
@@ -286,6 +301,13 @@ impl Engine {
             Some(s) => RunState::new_with_seed(input_values, s),
             None => RunState::new(input_values),
         };
+        // Seed the `$env.<key>` whitelist from the selected named
+        // environment (spec #68). Empty unless the CLI set it, so
+        // environment-free runs keep today's "no `$env` access"
+        // behavior.
+        if !self.env.is_empty() {
+            run_state = run_state.with_env(self.env.clone());
+        }
 
         let run_id = new_run_id();
         let run_dir = self.evidence_root.join(&run_id);
@@ -858,6 +880,7 @@ mod tests {
             seed: None,
             skip_env_up: false,
             keep_env: false,
+            env: BTreeMap::new(),
         };
         // Clear default registry so each test composes its own.
         e.registry.clear();
@@ -1943,5 +1966,40 @@ criteria:
             )
         });
         assert!(!saw_env, "VDs without `environment:` emit no Env* events");
+    }
+
+    /// Spec #68: a seeded `$env` whitelist (`Engine::with_env`) is
+    /// reachable from an assertion. The same definition with no seeded
+    /// env leaves `$env.base_url` unwhitelisted, so the assertion is
+    /// inconclusive rather than a pass — proving the whitelist, not a
+    /// process-env leak, is what makes `$env` resolve.
+    #[tokio::test]
+    async fn seeded_env_whitelist_is_reachable_from_assertion() {
+        let v = def(r#"
+verification: env-reach
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $env.base_url == "https://staging.example.com"
+"#);
+        // With the env seeded, the assertion passes.
+        let (engine, _tmp) = engine_for_test();
+        let mut env = BTreeMap::new();
+        env.insert(
+            "base_url".to_string(),
+            "https://staging.example.com".to_string(),
+        );
+        let mut engine = engine.with_env(env);
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(outcome.verdict.state, VerdictState::Pass);
+
+        // With no env seeded, `$env.base_url` is not whitelisted: the
+        // verdict is not a pass.
+        let (mut bare, _tmp2) = engine_for_test();
+        let bare_outcome = bare.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_ne!(bare_outcome.verdict.state, VerdictState::Pass);
     }
 }

@@ -1,0 +1,41 @@
+# Worked-example leaf for the named-environments manifest (spec #68).
+#
+# Page-free, assertion-only: it reads the selected environment on BOTH
+# surfaces and asserts they agree —
+#
+#   - `$inputs.base_url` is the declared input the selected env's
+#     `base_url` key populates (resolution precedence layer 3, below
+#     --inputs / --inputs-file, above the `default:` floor).
+#   - `$env.base_url` and `$env.region` are the same env's
+#     string-valued keys, auto-whitelisted for this run.
+#
+# Standalone-runnable: with no manifest the env surfaces are empty, so
+# `$inputs.base_url` falls back to the `default:` below. The assertions
+# comparing `$env.*` are only meaningful under a manifest run that
+# selected an environment; `duhem validate` confirms the structure
+# regardless.
+
+verification: reads the selected environment on both surfaces
+
+inputs:
+  base_url:
+    type: string
+    # Floor of the resolution chain. A manifest run that selects an
+    # environment overrides this with the env's `base_url`.
+    default: https://unset.example.com
+
+criteria:
+  - id: AC-1
+    description: |
+      The selected named environment reaches the leaf on both surfaces:
+      the declared `base_url` input is populated from the env, and the
+      env's string-valued keys are reachable via `$env.<key>`.
+    checks:
+      - id: AC-1.1
+        description: |
+          The declared `base_url` input agrees with `$env.base_url`
+          (same env key, two surfaces), and `$env.region` is one of the
+          declared regions.
+        assertions:
+          - $inputs.base_url == $env.base_url
+          - $env.region == "us-west" || $env.region == "us-east"

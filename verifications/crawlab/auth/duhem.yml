@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../../schema/duhem.schema.json
 # Crawlab suite leaf — authentication
 #
 # A suite leaf (no own `environment:`): it runs against the shared stack

@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -13,7 +14,7 @@ use crate::criterion::Criterion;
 use crate::environment::Environment;
 use crate::step::Step;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VerificationDefinition {
     /// Human-readable name of the verification.
@@ -46,7 +47,7 @@ pub struct VerificationDefinition {
     pub criteria: Vec<Criterion>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InputDecl {
     /// The declared type from the v1 catalog. Unknown names parse-fail
@@ -55,13 +56,14 @@ pub struct InputDecl {
     pub kind: InputType,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<serde_json::Value>")]
     pub default: Option<serde_yml::Value>,
 }
 
 /// The closed catalog of declared input types per the type-catalog
 /// spec. Wire form is snake_case. Unknown type names parse-fail at
 /// `VerificationDefinition::from_yaml_str`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum InputType {
     String,

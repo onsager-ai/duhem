@@ -250,11 +250,46 @@ fn write_template(
 ) -> Result<(), InitError> {
     let rendered = template
         .replace("{{NAME}}", name)
-        .replace("{{PATH}}", path_in_commands);
+        .replace("{{PATH}}", path_in_commands)
+        .replace("{{SCHEMA}}", &schema_ref_for(path));
     fs::write(path, rendered)
         .map_err(|e| InitError::Io(format!("write {}: {e}", path.display())))?;
     created.push(path.to_path_buf());
     Ok(())
+}
+
+/// Relative path from the generated `duhem.yml` (at `yaml_path`) up to
+/// the committed `schema/duhem.schema.json` artifact, used in the
+/// `# yaml-language-server: $schema=...` header so editors load it for
+/// live key/enum autocomplete (#133).
+///
+/// Walks up from the file's directory looking for a `schema/
+/// duhem.schema.json` (the repo's committed artifact) and emits a
+/// `../`-prefixed relative path to it. Falls back to the convention
+/// for a `verifications/<name>/duhem.yml` placement
+/// (`../../schema/duhem.schema.json`) when the artifact can't be
+/// located on disk — e.g. scaffolding outside a Duhem checkout.
+fn schema_ref_for(yaml_path: &Path) -> String {
+    const FALLBACK: &str = "../../schema/duhem.schema.json";
+    let Some(dir) = yaml_path.parent() else {
+        return FALLBACK.to_string();
+    };
+    let abs_dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    let mut prefix = String::new();
+    let mut cursor: &Path = &abs_dir;
+    // Bounded walk: stop at the filesystem root.
+    loop {
+        if cursor.join("schema/duhem.schema.json").is_file() {
+            return format!("{prefix}schema/duhem.schema.json");
+        }
+        match cursor.parent() {
+            Some(p) => {
+                cursor = p;
+                prefix.push_str("../");
+            }
+            None => return FALLBACK.to_string(),
+        }
+    }
 }
 
 /// Slug rule for `--name`: lowercase ASCII, digits, hyphens.

@@ -1,0 +1,336 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Assertion": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object"
+        }
+      ]
+    },
+    "Check": {
+      "additionalProperties": false,
+      "properties": {
+        "assertions": {
+          "description": "Mechanically-judgable claims about what the steps must produce.",
+          "items": {
+            "$ref": "#/definitions/Assertion"
+          },
+          "type": "array"
+        },
+        "description": {
+          "description": "Optional human-readable summary.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Authored stable identifier (e.g. `AC-1.1`).",
+          "type": "string"
+        },
+        "steps": {
+          "description": "Ordered sequence of action invocations.",
+          "items": {
+            "$ref": "#/definitions/Step"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "assertions",
+        "id"
+      ],
+      "type": "object"
+    },
+    "Criterion": {
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "description": "One or more checks that, taken together, verify this criterion. The judge's per-criterion verdict is an aggregation of the per-check verdicts.",
+          "items": {
+            "$ref": "#/definitions/Check"
+          },
+          "type": "array"
+        },
+        "description": {
+          "description": "Free-form prose. Opaque to the schema layer.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Authored stable identifier (e.g. `AC-1`). Required and authored — auto-generation hides intent and breaks evidence-trace stability across runs.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "checks",
+        "description",
+        "id"
+      ],
+      "type": "object"
+    },
+    "DurationSpec": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        }
+      ]
+    },
+    "Environment": {
+      "additionalProperties": false,
+      "description": "Operator-supplied lifecycle hooks for the system-under-test.\n\n`up:` runs once before `setup:`; `down:` (if declared) runs once after the last criterion, regardless of verdict. `ready:` is a readiness probe the runtime polls between `up:` exiting zero and `setup:` starting.",
+      "properties": {
+        "down": {
+          "description": "Optional path to an executable that tears the SUT down. Runs after the criteria loop regardless of verdict. Teardown failures are evidence, not verdict-altering.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ready": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReadyProbe"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional readiness probe. Polled after `up:` exits zero and before `setup:` starts."
+        },
+        "up": {
+          "description": "Path to an executable that brings the SUT up. Relative paths are resolved against the directory containing the Verification Definition.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "up"
+      ],
+      "type": "object"
+    },
+    "HttpReadyProbe": {
+      "additionalProperties": false,
+      "description": "HTTP readiness probe. `url:` is templated at runtime (the runtime resolves `$inputs.<name>` references); the schema layer treats it as an opaque string so probes that don't need substitution stay portable.",
+      "properties": {
+        "expect_status": {
+          "default": 200,
+          "description": "Status code that signals readiness. Defaults to 200.",
+          "format": "uint16",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "timeout": {
+          "$ref": "#/definitions/DurationSpec",
+          "description": "Total time to keep polling before giving up. The runtime maps timeout to `Outcome::Timeout` → run verdict `Inconclusive`."
+        },
+        "url": {
+          "description": "URL to GET. May contain a single whole-string `$inputs.<name>` reference, resolved by the runtime before the first poll.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "timeout",
+        "url"
+      ],
+      "type": "object"
+    },
+    "InputDecl": {
+      "additionalProperties": false,
+      "properties": {
+        "default": true,
+        "type": {
+          "$ref": "#/definitions/InputType",
+          "description": "The declared type from the v1 catalog. Unknown names parse-fail at `from_yaml_str` per the type-catalog spec."
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "InputType": {
+      "description": "The closed catalog of declared input types per the type-catalog spec. Wire form is snake_case. Unknown type names parse-fail at `VerificationDefinition::from_yaml_str`.",
+      "enum": [
+        "string",
+        "integer",
+        "number",
+        "boolean",
+        "array",
+        "object"
+      ],
+      "type": "string"
+    },
+    "ManifestEntry": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "description": "Path relative to the manifest's parent directory. Absolute paths and `..` segments are rejected at load time.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "glob": {
+              "description": "Shell-style glob (`**`, `*`, `?`) expanded against the manifest's parent directory.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "glob"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "One entry in `verifications:`. An author writes either `path:` for an explicit leaf (Pattern B) or `glob:` for a globbed expansion (Pattern C). The two are mutually exclusive at the YAML level (untagged enum), which keeps the wire shape unambiguous."
+    },
+    "ReadyProbe": {
+      "properties": {
+        "http": {
+          "$ref": "#/definitions/HttpReadyProbe"
+        }
+      },
+      "type": "object"
+    },
+    "RootManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Environment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional environment shared by the whole suite. When present, the runtime provisions it **once** (`up:` + `ready:`) before any leaf runs and tears it down **once** after the last leaf — instead of each leaf standing up its own. Leaves keep their own `environment:` so they stay runnable standalone; a manifest run suppresses per-leaf provisioning and points every leaf at this shared stack. Additive: a manifest without it behaves as before."
+        },
+        "manifest_version": {
+          "description": "Document version. v1 today; future schema changes bump this so a manifest written against today's loader refuses to silently reinterpret a future shape.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "verifications": {
+          "description": "Entries that resolve to leaf Verification Definitions. Order determines execution order across leaves.",
+          "items": {
+            "$ref": "#/definitions/ManifestEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "manifest_version",
+        "verifications"
+      ],
+      "type": "object"
+    },
+    "Step": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Optional — required only when another assertion or step references this step via `$steps.<id>.outputs.*`. The validator enforces that an unreferenced step may omit `id`, while a referenced step must declare one and that the id is unique within its check.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outputs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Map of output name → extraction expression. Extraction expressions are opaque strings here (e.g. `response.status`); the runtime evaluator binds them to live values during execution.",
+          "type": "object"
+        },
+        "uses": {
+          "description": "Action type identifier (e.g. `ui/click`). At v0.1 this is any non-empty string; the catalog spec types it later.",
+          "type": "string"
+        },
+        "with": {
+          "description": "Action-specific arguments. Untyped at the schema layer; the per-action `with:` schema lives with the action implementation."
+        }
+      },
+      "required": [
+        "uses"
+      ],
+      "type": "object"
+    },
+    "VerificationDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "criteria": {
+          "description": "At least one criterion is required (enforced by the validator, not the type system, so we can produce a friendly error).",
+          "items": {
+            "$ref": "#/definitions/Criterion"
+          },
+          "type": "array"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Environment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional operator-supplied environment lifecycle hooks. When present, the runtime forks `environment.up:` before `setup:`, polls `environment.ready:`, and forks `environment.down:` (if declared) after the criteria loop. Absent → no behavior change vs setup-only definitions; the wire shape for `environment:`-less VDs is byte-identical to today."
+        },
+        "inputs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/InputDecl"
+          },
+          "description": "Declared inputs. Map keys are alphabetized on round-trip (BTreeMap); fixtures should be authored alphabetized.",
+          "type": "object"
+        },
+        "setup": {
+          "description": "Optional setup steps run once before the criteria.",
+          "items": {
+            "$ref": "#/definitions/Step"
+          },
+          "type": "array"
+        },
+        "spec_ref": {
+          "description": "Optional reference to an upstream spec / issue / URL.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verification": {
+          "description": "Human-readable name of the verification.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "criteria",
+        "verification"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "A leaf Verification Definition (has `verification:` / `criteria:`) or a root manifest (has `manifest_version:` / `verifications:`).",
+  "oneOf": [
+    {
+      "$ref": "#/definitions/VerificationDefinition"
+    },
+    {
+      "$ref": "#/definitions/RootManifest"
+    }
+  ],
+  "title": "Duhem Verification Definition / Root Manifest"
+}

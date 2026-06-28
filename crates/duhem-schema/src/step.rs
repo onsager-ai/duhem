@@ -10,9 +10,10 @@
 
 use std::collections::BTreeMap;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Step {
     /// Optional — required only when another assertion or step
@@ -30,6 +31,7 @@ pub struct Step {
     /// Action-specific arguments. Untyped at the schema layer; the
     /// per-action `with:` schema lives with the action implementation.
     #[serde(default, skip_serializing_if = "is_null")]
+    #[schemars(with = "serde_json::Value")]
     pub with: serde_yml::Value,
 
     /// Map of output name → extraction expression. Extraction

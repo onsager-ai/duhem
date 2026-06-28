@@ -16,6 +16,7 @@
 //! - equal:  [$a, $b]
 //! ```
 
+use schemars::JsonSchema;
 use serde::de::{Deserializer, Error as DeError};
 use serde::ser::{SerializeMap, Serializer};
 use serde::{Deserialize, Serialize};
@@ -49,7 +50,7 @@ pub enum Assertion {
 /// The closed set of structural type names recognized by `type_check`.
 /// Extending this is a v0.x breaking change and goes through the
 /// schema-impact gate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TypeCheckKind {
     Uuid,

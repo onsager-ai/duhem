@@ -10,12 +10,13 @@
 
 use std::path::{Path, PathBuf};
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::environment::Environment;
 use crate::verification::{SchemaError, VerificationDefinition};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RootManifest {
     /// Document version. v1 today; future schema changes bump this so
@@ -40,7 +41,7 @@ pub struct RootManifest {
 /// an explicit leaf (Pattern B) or `glob:` for a globbed expansion
 /// (Pattern C). The two are mutually exclusive at the YAML level
 /// (untagged enum), which keeps the wire shape unambiguous.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum ManifestEntry {
     Path {

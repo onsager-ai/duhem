@@ -20,6 +20,12 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [clarifying] Publish a JSON Schema for VD + manifest YAML (schemars);
+  committed at `schema/duhem.schema.json`, `$schema` header emitted by
+  `duhem init` and added to one worked-example VD. Purely additive
+  tooling: `JsonSchema` derives do not change serialization, so
+  `SCHEMA_VERSION` is unchanged. (#133)
+
 - [additive] Root manifests may declare a shared `environment:`
   provisioned once for the whole suite (#131): the runtime forks the
   manifest's `up:` (and polls `ready:`) before any leaf runs and forks

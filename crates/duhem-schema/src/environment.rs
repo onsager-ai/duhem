@@ -10,6 +10,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Operator-supplied lifecycle hooks for the system-under-test.
@@ -18,7 +19,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// after the last criterion, regardless of verdict. `ready:` is a
 /// readiness probe the runtime polls between `up:` exiting zero and
 /// `setup:` starting.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Environment {
     /// Path to an executable that brings the SUT up. Relative paths
@@ -97,7 +98,7 @@ impl Serialize for ReadyProbe {
 /// resolves `$inputs.<name>` references); the schema layer treats it
 /// as an opaque string so probes that don't need substitution stay
 /// portable.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HttpReadyProbe {
     /// URL to GET. May contain a single whole-string `$inputs.<name>`

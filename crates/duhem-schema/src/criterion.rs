@@ -10,12 +10,13 @@
 //! regenerated as the implementation evolves; round-tripping authored
 //! YAML order keeps regeneration diffs reviewable.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::assertion::Assertion;
 use crate::step::Step;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Criterion {
     /// Authored stable identifier (e.g. `AC-1`). Required and authored
@@ -32,7 +33,7 @@ pub struct Criterion {
     pub checks: Vec<Check>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Check {
     /// Authored stable identifier (e.g. `AC-1.1`).

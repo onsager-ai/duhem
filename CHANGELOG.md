@@ -25,6 +25,7 @@ criteria) lives in the spec issue that introduced
   `duhem init` and added to one worked-example VD. Purely additive
   tooling: `JsonSchema` derives do not change serialization, so
   `SCHEMA_VERSION` is unchanged. (#133)
+- [clarifying] validate now scans step with: payloads for unresolved $refs; a bare missing reference is a hard error at validate time and at runtime (default() escape hatch preserved). (#134)
 
 - [additive] Root manifests may declare a shared `environment:`
   provisioned once for the whole suite (#131): the runtime forks the

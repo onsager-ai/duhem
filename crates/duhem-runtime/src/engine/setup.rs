@@ -27,7 +27,7 @@ use tracing::debug;
 
 use crate::engine::context::{RunState, json_to_value};
 use crate::engine::registry::{ActionRegistry, Dispatch};
-use crate::engine::runner::{EngineError, outcome_to_evidence, with_to_evidence_map};
+use crate::engine::runner::{EngineError, outcome_to_evidence, step_label, with_to_evidence_map};
 use crate::engine::template::substitute_with;
 
 /// Why a setup block aborted. Distinct from a generic `aborted: bool`
@@ -129,7 +129,12 @@ pub(crate) async fn run_setup(
         // template substitution.
         let ctx = crate::engine::context::RunContext::new(run);
         let mut resolved_with = step.with.clone();
-        substitute_with(&mut resolved_with, &ctx);
+        if let Err(reference) = substitute_with(&mut resolved_with, &ctx) {
+            return Err(EngineError::UnresolvedReference {
+                reference,
+                step: step_label(step, idx),
+            });
+        }
 
         writer.append(EventPayload::SetupStepStarted {
             step_index: idx as u32,

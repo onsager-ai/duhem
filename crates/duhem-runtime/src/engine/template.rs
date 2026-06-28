@@ -19,49 +19,82 @@ use duhem_schema::Expr;
 use crate::engine::context::value_to_yml;
 use crate::eval::{EvalContext, eval_to_value};
 
+/// Outcome of resolving one `with:` string slot.
+enum Resolution {
+    /// The string was a `$`-leading substitutable expr that evaluated
+    /// to a scalar — splice it in.
+    Replace(serde_yml::Value),
+    /// The string was not a substitutable reference (no leading `$`,
+    /// or parses as an assertion-shaped expr) — pass through unchanged.
+    Passthrough,
+    /// The string WAS a bare `$...` reference but evaluation failed —
+    /// a hard error. No action input may carry a literal `$...`
+    /// string, so we surface the unresolved reference (#134). A
+    /// `default(...)` call evaluates successfully (yields its
+    /// fallback) and so never reaches here.
+    Unresolved,
+}
+
 /// Recursively walk `with`, substituting any string value that parses
 /// as an `Expr` whose evaluation produces a scalar `Value`. Mutates
-/// in place.
-pub fn substitute_with(with: &mut serde_yml::Value, ctx: &dyn EvalContext) {
+/// in place. A bare `$...` reference that fails to evaluate is a hard
+/// error: `Err(raw)` carries the offending reference's source so the
+/// caller can name it alongside the step (#134).
+pub fn substitute_with(with: &mut serde_yml::Value, ctx: &dyn EvalContext) -> Result<(), String> {
     match with {
-        serde_yml::Value::String(s) => {
-            if let Some(replacement) = try_resolve(s, ctx) {
+        serde_yml::Value::String(s) => match try_resolve(s, ctx) {
+            Resolution::Replace(replacement) => {
                 *with = replacement;
+                Ok(())
             }
-        }
+            Resolution::Passthrough => Ok(()),
+            Resolution::Unresolved => Err(s.clone()),
+        },
         serde_yml::Value::Sequence(seq) => {
             for v in seq.iter_mut() {
-                substitute_with(v, ctx);
+                substitute_with(v, ctx)?;
             }
+            Ok(())
         }
         serde_yml::Value::Mapping(map) => {
             for (_k, v) in map.iter_mut() {
-                substitute_with(v, ctx);
+                substitute_with(v, ctx)?;
             }
+            Ok(())
         }
-        _ => {}
+        _ => Ok(()),
     }
 }
 
-fn try_resolve(s: &str, ctx: &dyn EvalContext) -> Option<serde_yml::Value> {
+fn try_resolve(s: &str, ctx: &dyn EvalContext) -> Resolution {
     // Only consider strings whose first non-whitespace character is
     // `$`. Otherwise we'd accidentally evaluate plain integer-shaped
     // strings (`"200"`) as Expr literals and substitute them into a
     // String slot. The author intent for `$inputs.X` / `$steps.X` /
     // `$runtime.X()` is unambiguous; everything else stays a string.
     if !s.trim_start().starts_with('$') {
-        return None;
+        return Resolution::Passthrough;
     }
-    let expr = duhem_schema::expr::parse(s).ok()?;
+    let Ok(expr) = duhem_schema::expr::parse(s) else {
+        return Resolution::Passthrough;
+    };
     // Allow only path / runtime-call expressions — anything else
     // (boolean ops, comparisons) was clearly authored as an
     // assertion, not as a value to splice in. Authors don't write
     // `(1 == 1)` inside `with:`; if they do, we leave it alone.
     if !is_substitutable_expr(&expr) {
-        return None;
+        return Resolution::Passthrough;
     }
-    let value = eval_to_value(&expr, ctx).ok()?;
-    Some(value_to_yml(&value))
+    // A bare `$...` reference that fails to evaluate is a hard error,
+    // never a pass-through (#134): no action may receive a literal
+    // `$...` string. `$runtime.default(value, fallback)` evaluates
+    // successfully even when `value` is missing — it yields the
+    // fallback — so the carve-out is automatic; we don't special-case
+    // it here.
+    match eval_to_value(&expr, ctx) {
+        Ok(value) => Resolution::Replace(value_to_yml(&value)),
+        Err(_) => Resolution::Unresolved,
+    }
 }
 
 fn is_substitutable_expr(e: &Expr) -> bool {
@@ -88,7 +121,7 @@ mod tests {
         let run = run_with(&[("url", Value::Str("http://x".into()))]);
         let ctx = RunContext::new(&run);
         let mut with: serde_yml::Value = serde_yml::from_str("url: $inputs.url").unwrap();
-        substitute_with(&mut with, &ctx);
+        substitute_with(&mut with, &ctx).expect("resolves");
         let map = with.as_mapping().unwrap();
         let url = map.get(serde_yml::Value::String("url".into())).unwrap();
         assert_eq!(url.as_str(), Some("http://x"));
@@ -101,24 +134,37 @@ mod tests {
         let mut with: serde_yml::Value =
             serde_yml::from_str("{ role: button, name: Create }").unwrap();
         let before = with.clone();
-        substitute_with(&mut with, &ctx);
+        substitute_with(&mut with, &ctx).expect("no refs to resolve");
         assert_eq!(with, before);
     }
 
     #[test]
-    fn leaves_missing_input_string_alone() {
+    fn bare_missing_ref_is_an_error() {
+        // #134: a bare `$...` reference that resolves to nothing is a
+        // hard error — never a pass-through. The error carries the
+        // offending reference's raw source so the caller can name it.
         let run = run_with(&[]);
         let ctx = RunContext::new(&run);
         let mut with: serde_yml::Value = serde_yml::from_str("{ url: $inputs.unset }").unwrap();
-        substitute_with(&mut with, &ctx);
-        // Substitution skipped — the action will see the raw string
-        // and most likely fail its `With` schema, which is the
-        // observable signal an author needs.
+        let err = substitute_with(&mut with, &ctx).unwrap_err();
+        assert_eq!(err, "$inputs.unset");
+    }
+
+    #[test]
+    fn default_with_missing_input_resolves_to_fallback() {
+        // The carve-out: `default($inputs.unset, "fallback")` evaluates
+        // successfully (yields the fallback), so it is NOT an error.
+        let run = run_with(&[]);
+        let ctx = RunContext::new(&run);
+        let mut with: serde_yml::Value =
+            serde_yml::from_str(r#"{ url: '$runtime.default($inputs.unset, "fallback")' }"#)
+                .unwrap();
+        substitute_with(&mut with, &ctx).expect("default() yields fallback, not an error");
         let map = with.as_mapping().unwrap();
         assert_eq!(
             map.get(serde_yml::Value::String("url".into()))
                 .and_then(|v| v.as_str()),
-            Some("$inputs.unset")
+            Some("fallback")
         );
     }
 }

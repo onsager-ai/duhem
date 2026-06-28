@@ -58,12 +58,29 @@ pub enum EngineError {
     /// confusing `Inconclusive(MissingInput)`).
     #[error("input `{name}`: value is not representable as a runtime value")]
     InputUnrepresentable { name: String },
+    /// A `$...` reference inside a step's `with:` payload resolved to
+    /// nothing at runtime. We refuse to hand an action a literal
+    /// `$...` string (#134): the reference is either undeclared or its
+    /// upstream value is absent. Names the reference and the step so
+    /// the failure points at the VD, not at a phantom broken SUT.
+    #[error("step `{step}`: unresolved reference `{reference}` in `with:`")]
+    UnresolvedReference { reference: String, step: String },
 }
 
 impl From<ActionError> for EngineError {
     fn from(e: ActionError) -> Self {
         EngineError::Browser(e.to_string())
     }
+}
+
+/// A step's diagnostic label: its `id` when declared, else
+/// `<uses> #<index>`. Used to name a step in an
+/// [`EngineError::UnresolvedReference`] so the author can locate the
+/// offending `with:` reference even in an anonymous step.
+pub(crate) fn step_label(step: &duhem_schema::Step, idx: usize) -> String {
+    step.id
+        .clone()
+        .unwrap_or_else(|| format!("{} #{idx}", step.uses))
 }
 
 /// Predicate that decides whether the engine should execute a given
@@ -522,7 +539,12 @@ impl Engine {
             // context we have. Cheap and same-shape for every code
             // path, so we don't bifurcate evidence on it.
             let mut resolved_with = step.with.clone();
-            substitute_with(&mut resolved_with, &ctx);
+            if let Err(reference) = substitute_with(&mut resolved_with, &ctx) {
+                return Err(EngineError::UnresolvedReference {
+                    reference,
+                    step: step_label(step, idx),
+                });
+            }
 
             writer.append(EventPayload::StepStarted {
                 criterion_id: criterion_id.to_string(),

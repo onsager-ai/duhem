@@ -12,9 +12,30 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use thiserror::Error;
 
 use crate::criterion::{Check, Criterion};
-use crate::expr::{Path, PathRoot};
+use crate::expr::{Expr, Path, PathRoot};
 use crate::step::Step;
 use crate::verification::{InputDecl, InputType, VerificationDefinition};
+
+/// Where a `$...` reference was authored. Renders into a
+/// [`ValidationError`] message so a `with:` ref names its step rather
+/// than masquerading as an assertion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RefSite {
+    /// Inside a check's `assertions:` list.
+    Assertion,
+    /// Inside a step's `with:` payload. Carries the step's label —
+    /// its `id` when declared, else `step <index>`.
+    StepWith { step: String },
+}
+
+impl std::fmt::Display for RefSite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RefSite::Assertion => write!(f, "assertion"),
+            RefSite::StepWith { step } => write!(f, "step `{step}` with:"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ValidationError {
@@ -35,17 +56,18 @@ pub enum ValidationError {
     },
 
     #[error(
-        "criterion `{criterion}` / check `{check}`: assertion `{raw}` references undeclared step `{step}`"
+        "criterion `{criterion}` / check `{check}`: {site} `{raw}` references undeclared step `{step}`"
     )]
     UnresolvedStepRef {
         criterion: String,
         check: String,
         step: String,
         raw: String,
+        site: RefSite,
     },
 
     #[error(
-        "criterion `{criterion}` / check `{check}`: assertion `{raw}` references undeclared output `{output}` on step `{step}`"
+        "criterion `{criterion}` / check `{check}`: {site} `{raw}` references undeclared output `{output}` on step `{step}`"
     )]
     UnresolvedStepOutput {
         criterion: String,
@@ -53,51 +75,56 @@ pub enum ValidationError {
         step: String,
         output: String,
         raw: String,
+        site: RefSite,
     },
 
     #[error(
-        "criterion `{criterion}` / check `{check}`: assertion `{raw}` references undeclared input `{input}`"
+        "criterion `{criterion}` / check `{check}`: {site} `{raw}` references undeclared input `{input}`"
     )]
     UnresolvedInputRef {
         criterion: String,
         check: String,
         input: String,
         raw: String,
+        site: RefSite,
     },
 
     #[error(
-        "criterion `{criterion}` / check `{check}`: malformed `$steps` reference `{raw}` (expected `$steps.<step_id>.outputs.<output>`)"
+        "criterion `{criterion}` / check `{check}`: {site} `{raw}`: malformed `$steps` reference (expected `$steps.<step_id>.outputs.<output>`)"
     )]
     MalformedStepRef {
         criterion: String,
         check: String,
         raw: String,
+        site: RefSite,
     },
 
     #[error(
-        "criterion `{criterion}` / check `{check}`: malformed `$inputs` reference `{raw}` (expected `$inputs.<name>`)"
+        "criterion `{criterion}` / check `{check}`: {site} `{raw}`: malformed `$inputs` reference (expected `$inputs.<name>`)"
     )]
     MalformedInputRef {
         criterion: String,
         check: String,
         raw: String,
+        site: RefSite,
     },
 
     #[error("setup: duplicate step id `{id}`")]
     DuplicateSetupStepId { id: String },
 
     #[error(
-        "criterion `{criterion}` / check `{check}`: assertion `{raw}` references undeclared setup step `{step}`"
+        "criterion `{criterion}` / check `{check}`: {site} `{raw}` references undeclared setup step `{step}`"
     )]
     UnresolvedSetupStepRef {
         criterion: String,
         check: String,
         step: String,
         raw: String,
+        site: RefSite,
     },
 
     #[error(
-        "criterion `{criterion}` / check `{check}`: assertion `{raw}` references undeclared output `{output}` on setup step `{step}`"
+        "criterion `{criterion}` / check `{check}`: {site} `{raw}` references undeclared output `{output}` on setup step `{step}`"
     )]
     UnresolvedSetupStepOutput {
         criterion: String,
@@ -105,15 +132,17 @@ pub enum ValidationError {
         step: String,
         output: String,
         raw: String,
+        site: RefSite,
     },
 
     #[error(
-        "criterion `{criterion}` / check `{check}`: malformed `$setup` reference `{raw}` (expected `$setup.<step_id>.outputs.<output>`)"
+        "criterion `{criterion}` / check `{check}`: {site} `{raw}`: malformed `$setup` reference (expected `$setup.<step_id>.outputs.<output>`)"
     )]
     MalformedSetupRef {
         criterion: String,
         check: String,
         raw: String,
+        site: RefSite,
     },
 
     #[error(
@@ -331,14 +360,111 @@ fn validate_check(
     for assertion in &ch.assertions {
         assertion.walk_exprs(|expr_str| {
             let raw = expr_str.raw.as_str();
-            expr_str.parsed.walk_paths(|p| {
-                check_path(&scope, p, raw, errs);
+            walk_checkable_paths(&expr_str.parsed, &mut |p| {
+                check_path(&scope, p, raw, &RefSite::Assertion, errs);
+            });
+        });
+    }
+
+    // Beyond assertions, a `$...` reference inside a step's `with:`
+    // payload is the most common place an author writes one — and was
+    // historically unscanned, so a typo'd or undeclared ref reached
+    // the action as a literal `$...` string (#134). Walk every string
+    // scalar in the (untyped) `with:` tree and resolve its references
+    // against the same scope.
+    for (idx, s) in ch.steps.iter().enumerate() {
+        let site = RefSite::StepWith {
+            step: step_label(s, idx),
+        };
+        walk_with_refs(&s.with, &mut |expr, raw| {
+            walk_checkable_paths(expr, &mut |p| {
+                check_path(&scope, p, raw, &site, errs);
             });
         });
     }
 }
 
-fn check_path(scope: &PathScope<'_>, path: &Path, raw: &str, errs: &mut Vec<ValidationError>) {
+/// A step's human label for diagnostics: its `id` when declared, else
+/// `step <index>` so a ref inside an anonymous step is still locatable.
+fn step_label(s: &Step, idx: usize) -> String {
+    s.id.clone().unwrap_or_else(|| format!("step {idx}"))
+}
+
+/// Walk a step's untyped `with:` tree, invoking `visit(expr, raw)` for
+/// every string scalar that parses as a *substitutable* expression
+/// (`Expr::Path | Expr::Call`) — matching the runtime's
+/// `is_substitutable_expr`. Strings that don't lead with `$`, don't
+/// parse, or are non-substitutable (comparisons, literals) are not
+/// cross-references and are skipped — conservatively, so we never
+/// reject a value the runtime would pass through untouched.
+fn walk_with_refs<F: FnMut(&Expr, &str)>(with: &serde_yml::Value, visit: &mut F) {
+    match with {
+        serde_yml::Value::String(s) => {
+            if !s.trim_start().starts_with('$') {
+                return;
+            }
+            if let Ok(expr) = crate::expr::parse(s)
+                && matches!(expr, Expr::Path(_) | Expr::Call { .. })
+            {
+                visit(&expr, s);
+            }
+        }
+        serde_yml::Value::Sequence(seq) => {
+            for v in seq {
+                walk_with_refs(v, visit);
+            }
+        }
+        serde_yml::Value::Mapping(map) => {
+            for (_k, v) in map {
+                walk_with_refs(v, visit);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Walk every checkable `Path` in `expr`, with the `default()`
+/// carve-out: the first argument of a `$runtime.default(value,
+/// fallback)` call is the author's explicit "may be absent" escape
+/// hatch (see `eval.rs`'s `default` builtin), so its paths are NOT
+/// visited — a missing ref there is the feature, not an error. Every
+/// other position is walked normally. Used for both assertions and
+/// `with:` so the carve-out is consistent across sites.
+fn walk_checkable_paths<F: FnMut(&Path)>(expr: &Expr, visit: &mut F) {
+    match expr {
+        Expr::Lit(_) => {}
+        Expr::Path(p) => visit(p),
+        Expr::Call { path, args } => {
+            visit(path);
+            let skip_first = is_default_call(path);
+            for (i, a) in args.iter().enumerate() {
+                if skip_first && i == 0 {
+                    continue;
+                }
+                walk_checkable_paths(a, visit);
+            }
+        }
+        Expr::BinOp { lhs, rhs, .. } => {
+            walk_checkable_paths(lhs, visit);
+            walk_checkable_paths(rhs, visit);
+        }
+        Expr::UnaryOp { expr, .. } => walk_checkable_paths(expr, visit),
+    }
+}
+
+/// `$runtime.default(...)` — the one builtin whose first argument
+/// tolerates a missing reference.
+fn is_default_call(path: &Path) -> bool {
+    path.root == PathRoot::Runtime && path.segments().len() == 1 && path.segments()[0] == "default"
+}
+
+fn check_path(
+    scope: &PathScope<'_>,
+    path: &Path,
+    raw: &str,
+    site: &RefSite,
+    errs: &mut Vec<ValidationError>,
+) {
     let PathScope {
         c,
         ch,
@@ -358,6 +484,7 @@ fn check_path(scope: &PathScope<'_>, path: &Path, raw: &str, errs: &mut Vec<Vali
                     criterion: c.id.clone(),
                     check: ch.id.clone(),
                     raw: raw.to_string(),
+                    site: site.clone(),
                 });
                 return;
             }
@@ -369,6 +496,7 @@ fn check_path(scope: &PathScope<'_>, path: &Path, raw: &str, errs: &mut Vec<Vali
                     check: ch.id.clone(),
                     step: step_id.to_string(),
                     raw: raw.to_string(),
+                    site: site.clone(),
                 }),
                 Some(outputs) => {
                     if !outputs.contains_key(output_name) {
@@ -378,6 +506,7 @@ fn check_path(scope: &PathScope<'_>, path: &Path, raw: &str, errs: &mut Vec<Vali
                             step: step_id.to_string(),
                             output: output_name.to_string(),
                             raw: raw.to_string(),
+                            site: site.clone(),
                         });
                     }
                 }
@@ -392,6 +521,7 @@ fn check_path(scope: &PathScope<'_>, path: &Path, raw: &str, errs: &mut Vec<Vali
                     criterion: c.id.clone(),
                     check: ch.id.clone(),
                     raw: raw.to_string(),
+                    site: site.clone(),
                 });
                 return;
             }
@@ -403,6 +533,7 @@ fn check_path(scope: &PathScope<'_>, path: &Path, raw: &str, errs: &mut Vec<Vali
                     check: ch.id.clone(),
                     step: step_id.to_string(),
                     raw: raw.to_string(),
+                    site: site.clone(),
                 }),
                 Some(outputs) => {
                     if !outputs.contains_key(output_name) {
@@ -412,6 +543,7 @@ fn check_path(scope: &PathScope<'_>, path: &Path, raw: &str, errs: &mut Vec<Vali
                             step: step_id.to_string(),
                             output: output_name.to_string(),
                             raw: raw.to_string(),
+                            site: site.clone(),
                         });
                     }
                 }
@@ -426,6 +558,7 @@ fn check_path(scope: &PathScope<'_>, path: &Path, raw: &str, errs: &mut Vec<Vali
                     criterion: c.id.clone(),
                     check: ch.id.clone(),
                     raw: raw.to_string(),
+                    site: site.clone(),
                 });
                 return;
             }
@@ -436,6 +569,7 @@ fn check_path(scope: &PathScope<'_>, path: &Path, raw: &str, errs: &mut Vec<Vali
                     check: ch.id.clone(),
                     input: name.to_string(),
                     raw: raw.to_string(),
+                    site: site.clone(),
                 });
             }
         }
@@ -972,6 +1106,184 @@ criteria:
                 ValidationError::InputDefaultTypeMismatch { input, .. } if input == "count"
             )),
             "expected mismatch on `count`, got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn with_ref_to_undeclared_input_fails() {
+        // A step `with: { url: $inputs.undeclared }` — historically
+        // unscanned (#134) — now resolves against `inputs:` and fails.
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: api/call
+            with:
+              url: $inputs.undeclared
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::UnresolvedInputRef { input, site, .. }
+                    if input == "undeclared"
+                        && matches!(site, RefSite::StepWith { .. })
+            )),
+            "got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn with_ref_names_the_step_in_the_message() {
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              url: $inputs.undeclared
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        let msg = errs
+            .iter()
+            .find(|e| matches!(e, ValidationError::UnresolvedInputRef { .. }))
+            .map(|e| e.to_string())
+            .unwrap();
+        assert!(msg.contains("step `login` with:"), "got: {msg}");
+    }
+
+    #[test]
+    fn with_ref_to_earlier_step_output_passes() {
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: login
+            uses: api/observe
+            with: {}
+            outputs:
+              token: response.body.token
+          - uses: api/call
+            with:
+              auth: $steps.login.outputs.token
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        validate(&v).expect("earlier-step output ref in with: resolves");
+    }
+
+    #[test]
+    fn with_ref_typo_output_fails_with_step_output() {
+        // The worked example: a typo'd output name inside `with:`.
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: login
+            uses: api/observe
+            with: {}
+            outputs:
+              token: response.body.token
+          - uses: api/call
+            with:
+              auth: $steps.login.outputs.toekn
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::UnresolvedStepOutput { output, step, .. }
+                    if output == "toekn" && step == "login"
+            )),
+            "got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn with_default_carveout_allows_missing_input() {
+        // `$runtime.default($inputs.maybe, "x")` inside with: — the
+        // first arg may be absent; validate must not flag it.
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: api/call
+            with:
+              url: $runtime.default($inputs.maybe, "fallback")
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        validate(&v).expect("default()'s first arg is missing-tolerant in with:");
+    }
+
+    #[test]
+    fn assertion_default_carveout_allows_missing_input() {
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $runtime.default($inputs.maybe, "x") == "x"
+"#;
+        let v = parse(y);
+        validate(&v).expect("default()'s first arg is missing-tolerant in assertions");
+    }
+
+    #[test]
+    fn default_second_arg_still_strict() {
+        // Only the FIRST arg is carved out; a missing ref in the
+        // fallback position is still an error.
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: api/call
+            with:
+              url: $runtime.default("x", $inputs.also_missing)
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::UnresolvedInputRef { input, .. } if input == "also_missing"
+            )),
+            "got: {errs:?}"
         );
     }
 

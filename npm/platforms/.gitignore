@@ -1,0 +1,5 @@
+# Prebuilt binaries are copied into each platform package at release time
+# (release.yml → scripts/prepare-platforms.mjs) and published to npm. They
+# are never committed.
+cli-*/duhem
+cli-*/duhem.exe

@@ -1,0 +1,68 @@
+# compute-version — composite action.
+#
+# Resolve the release version and whether this run should actually publish.
+# Tag-driven (rust-node-ci compute-version pattern, specialized for Duhem's
+# tag = version + Cargo-assertion contract):
+#
+#   push  refs/tags/vX.Y.Z  -> version = X.Y.Z, is-release = true
+#                              (asserts X.Y.Z == [workspace.package] version)
+#   workflow_dispatch        -> version = Cargo version, is-release = false
+#                              (dry-run: build + package, never publish)
+name: compute-version
+description: Resolve the release version from the tag and assert it matches Cargo.
+
+inputs:
+  event-name:
+    description: github.event_name.
+    required: true
+  ref:
+    description: github.ref (e.g. refs/tags/v0.1.0).
+    required: true
+
+outputs:
+  version:
+    description: Effective version (no leading v).
+    value: ${{ steps.compute.outputs.version }}
+  is-release:
+    description: '"true" only for a real tag push (gates publishing).'
+    value: ${{ steps.compute.outputs.is_release }}
+  npm-tag:
+    description: npm dist-tag (latest for releases, dry for dispatch).
+    value: ${{ steps.compute.outputs.npm_tag }}
+
+runs:
+  using: composite
+  steps:
+    - id: compute
+      shell: bash
+      run: |
+        set -euo pipefail
+        CARGO_VERSION="$(
+          awk '/^\[workspace\.package\]/{f=1;next} /^\[/{f=0} f && /^version[[:space:]]*=/{gsub(/[" ]/,"",$3); print $3; exit}' Cargo.toml
+        )"
+        # Fallback: grab the first quoted value after the version key.
+        if [ -z "${CARGO_VERSION}" ]; then
+          CARGO_VERSION="$(grep -A3 '^\[workspace.package\]' Cargo.toml | grep -m1 '^version' | sed -E 's/.*"([^"]+)".*/\1/')"
+        fi
+        echo "Cargo workspace version: ${CARGO_VERSION}"
+
+        EVENT="${{ inputs.event-name }}"
+        REF="${{ inputs.ref }}"
+
+        if [ "$EVENT" = "push" ] && [[ "$REF" == refs/tags/v* ]]; then
+          TAG_VERSION="${REF#refs/tags/v}"
+          echo "Tag version: ${TAG_VERSION}"
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::Tag v${TAG_VERSION} does not match Cargo [workspace.package] version ${CARGO_VERSION}. Bump Cargo.toml (and run npm/scripts/sync-versions.mjs) or retag."
+            exit 1
+          fi
+          echo "version=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "is_release=true" >> "$GITHUB_OUTPUT"
+          echo "npm_tag=latest" >> "$GITHUB_OUTPUT"
+          echo "Release ${TAG_VERSION} (publish enabled if NPM_TOKEN present)"
+        else
+          echo "version=${CARGO_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "is_release=false" >> "$GITHUB_OUTPUT"
+          echo "npm_tag=dry" >> "$GITHUB_OUTPUT"
+          echo "Dry-run ${CARGO_VERSION} (build + package only, no publish)"
+        fi

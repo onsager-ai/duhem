@@ -84,10 +84,20 @@ enum Cmd {
         #[arg(long = "force", default_value_t = false)]
         force: bool,
     },
-    /// Parse and structurally validate a Verification Definition file.
+    /// Parse and structurally validate a Verification Definition, or a
+    /// manifest and every leaf it expands to.
+    ///
+    /// Routes through the same `discover` + `load` pipeline as `run`
+    /// (issue #150): a leaf file validates the leaf; a manifest file —
+    /// or a directory resolving to one — validates the manifest
+    /// structurally and each resolved leaf. Omit the path to
+    /// auto-discover a manifest from the cwd and its ancestors, like
+    /// `duhem run` (issue #69).
     Validate {
-        /// Path to a `.yml` Verification Definition.
-        path: PathBuf,
+        /// Path to a `.yml` Verification Definition, or a directory /
+        /// manifest. Omit to auto-discover a manifest from the current
+        /// directory and its ancestors.
+        path: Option<PathBuf>,
     },
     /// Execute a Verification Definition end-to-end.
     ///
@@ -187,9 +197,9 @@ fn main() -> ExitCode {
             name,
             force,
         }) => init::run_init(path, &pattern, name, force),
-        Some(Cmd::Validate { path }) => match validate_cmd::run_validate(&path) {
-            Ok(()) => {
-                println!("OK");
+        Some(Cmd::Validate { path }) => match validate_cmd::run_validate(path.as_deref()) {
+            Ok(msg) => {
+                println!("{msg}");
                 ExitCode::SUCCESS
             }
             Err(msg) => {

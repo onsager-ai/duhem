@@ -65,7 +65,7 @@ Duhem is opinionated about three things:
 
 - **The verification layer your AI coding agent doesn’t have.**
 - Holistic, spec-driven, mechanical-judgment, evidence-grounded verification of AI delivery.
-- Closed source today, with a free CLI and free hosted tier. Schema and reference judge open-sourced once they stabilize (see Section 11.3).
+- Open source (Apache-2.0) with a free CLI and a free hosted tier. The engine — schema, CLI, runtime, judge, dashboard — ships open; the hosted cloud is the commercial layer (see Section 11.3).
 
 ### What Duhem is not
 
@@ -901,8 +901,8 @@ This phase is contingent on Onsager’s own roadmap. It is not blocking for Duhe
 |Failure attribution     |Post-hoc, evidence-supported, human-led   |Localizing holistic failure cannot be automated honestly                   |
 |Judge implementation    |Deterministic, no LLM                     |Trust requires AI not be the verifier of AI                                |
 |UI testing scope (MVP)  |DOM-level + behavioral                    |Covers most user-visible failure modes; visual-baseline post-MVP           |
-|Source posture (Phase 1)|Closed source, free CLI binary            |Schema iteration freedom; solo founder bandwidth; commercial optionality   |
-|Schema OSS (Phase 2)    |Open under permissive license once stable |Ecosystem benefits exceed proprietary IP value once schema is stable       |
+|Source posture          |Open source (Apache-2.0), open-core       |Adoption via the open engine; commercial moat is the hosted cloud, not source|
+|Schema/engine OSS       |Open (Apache-2.0) from v0.1.0             |Pulled forward from the old Phase-2 gate; ecosystem adoption beats proprietary IP|
 |First customer          |Onsager (dogfood)                         |Real complexity, real urgency, continuous use, free testimonial            |
 |Pricing anchor          |$30/seat/month                            |Validated by adjacent products (Qodo, CodeRabbit)                          |
 |Build approach          |Solo founder + Claude Code                |Realistic given Sydney migration and parallel Onsager work                 |

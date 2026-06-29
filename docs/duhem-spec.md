@@ -486,6 +486,8 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 
 - `api/call` — make an HTTP request actively
 - `api/observe` — passively observe an HTTP request the UI triggers (network sniffing)
+- `api/poll` — re-hit an endpoint until a response condition holds or a timeout elapses
+- `api/stream` — follow an open-ended SSE / `text/event-stream` from an in-progress source, collecting ordered events until a terminal condition (`until_event` / `max_events` / server close) or the `within:` budget; outputs `events` / `event_count` / `last_event` for mechanical assertion
 
 **Database actions**
 

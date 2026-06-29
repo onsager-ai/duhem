@@ -38,7 +38,7 @@ pub struct ActionCtx<'a> {
     /// Browser page bound to this check, or `None` for a page-free
     /// step. The engine attaches a page only when the check contains a
     /// step that needs one (`uses_requires_page`); `api/call`,
-    /// `api/poll`, `db/*`, and `cli/*` run with `None`.
+    /// `api/poll`, `api/stream`, `db/*`, and `cli/*` run with `None`.
     pub page: Option<&'a Page>,
     /// Zero-based index of the currently-executing step within its
     /// check. Carried for evidence threading downstream.
@@ -124,7 +124,8 @@ impl ActionResult {
 /// Whether an action identified by its `Step.uses` string needs a
 /// Playwright `Page`. UI actions (`ui/*`) drive a page directly, and
 /// `api/observe` reads the page's network recorder. `api/call`,
-/// `api/poll`, `db/*`, and `cli/*` never touch a page. Single source
+/// `api/poll`, `api/stream`, `db/*`, and `cli/*` never touch a page.
+/// Single source
 /// of truth for two consumers: the engine opens a per-check browser
 /// only when a step needs it, and the CLI skips launching the
 /// Playwright sidecar entirely for page-free verifications.
@@ -196,7 +197,14 @@ mod tests {
         // api/observe reads the page's network recorder.
         assert!(uses_requires_page("api/observe"));
         // Everything else is page-free.
-        for u in ["api/call", "api/poll", "db/query", "db/seed", "cli/invoke"] {
+        for u in [
+            "api/call",
+            "api/poll",
+            "api/stream",
+            "db/query",
+            "db/seed",
+            "cli/invoke",
+        ] {
             assert!(!uses_requires_page(u), "{u} should be page-free");
         }
     }

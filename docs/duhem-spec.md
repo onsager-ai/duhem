@@ -1,7 +1,7 @@
 # Duhem — Product Specification
 
 > **Status**: Draft v0.3
-> **Last updated**: 2026-05-07
+> **Last updated**: 2026-06-29
 
 -----
 
@@ -602,66 +602,45 @@ The critical architectural commitment: **the judge is structurally independent o
 
 This is enforced architecturally — the judge service has no LLM dependency. It can run fully air-gapped from AI infrastructure.
 
-Because Duhem is closed-source in Phase 1, additional measures are taken to make this commitment auditable:
+Because Duhem is open-source (Apache-2.0), this commitment is directly auditable — anyone can read the judge's source and confirm it has no LLM dependency. Several reinforcing measures keep that auditability concrete:
 
-- **Documented judge logic**: The decision rules used by the judge are documented even though the implementation source is not — today they live in §10.6 (assertion forms), §10.7 (runtime expressions), and the `crates/duhem-judge` aggregation doc comments. Customers can reason about how a verdict is computed without reading the production source. (Extracting these into a single standalone "judge decision reference" is a Phase 2+ goal.)
+- **Open judge source**: `crates/duhem-judge` is open-source. The verdict-computation path can be read end to end; the absence of an LLM in the loop is a fact of the code, not a promise in prose.
+- **Documented judge logic**: The decision rules used by the judge are also documented in §10.6 (assertion forms), §10.7 (runtime expressions), and the `crates/duhem-judge` aggregation doc comments, so a verdict can be reasoned about without reading the full source. (Extracting these into a single standalone "judge decision reference" remains a goal.)
 - **Reproducible runs**: Every run produces a complete evidence trace. Given identical environment state and a frozen check spec, replays must produce identical verdicts. Determinism is verifiable empirically by customers.
-- **Self-hosted judge for enterprise** (Phase 2+): For customers requiring stronger guarantees, an enterprise license will include a self-hostable judge binary. The binary is closed-source but runs entirely within customer infrastructure, removing the cloud-trust dependency. No standalone judge binary or enterprise tier ships in Phase 1 — `duhem-judge` is a library crate today.
-- **Future-state OSS judge**: When schema stabilizes (Phase 2), a reference judge implementation is open-sourced. This serves as the public standard against which the production judge is compliance-tested.
+- **Self-hostable judge**: Because the judge is open-source, customers requiring infrastructure isolation can build and run it entirely within their own infrastructure, removing any cloud-trust dependency. `duhem-judge` is a library crate today; a standalone judge binary remains a future packaging step.
 
 ### 11.3 Source posture and opening strategy
 
-Duhem follows a **closed-source-first, phased-opening** strategy. The phases reflect product maturity, not ideological position.
+> **Alignment note (2026-06-29, maintainer decision).** This section was rewritten from a closed-source-first posture to an open-source one. The original plan ("Everything is closed source"; schema OSS deferred to a Phase 2 maturity gate) is superseded: Duhem is now open-source under **Apache-2.0** from its first public release (v0.1.0). The reference implementation — schema, CLI, runtime, judge, dashboard — ships open. The open-core boundary moves to the hosted cloud service (generation, evidence storage, hosted infrastructure, enterprise features) rather than the engine. This is a deliberate strategy change, not a drift; the four "What makes Duhem Duhem" identity commitments are unaffected (closed-source was never one of them). Tracked under epic #143.
 
-#### Phase 1 — Closed (months 0–12)
+Duhem follows an **open-source core, hosted-commercial** strategy (open-core). The engine is open; the managed cloud service is where commercial value is captured.
 
-Everything is closed source. This includes the runtime, judge, generation service, dashboard, evidence storage, CLI, and schema definition. The CLI binary is freely distributed; nothing is self-hostable except for paid enterprise customers.
+#### Open source (Apache-2.0)
 
-Rationale:
-
-- The schema is in active iteration. Premature OSS would lock in design decisions that are not yet correct.
-- There is no external community at the scale that benefits from OSS yet.
-- Solo founder bandwidth cannot absorb community management overhead.
-- Closed source preserves all options for commercialization while we discover product-market fit.
-
-Public surfaces during Phase 1:
-
-- Schema specification published as **documentation**, not as a formally licensed standard. Free to read and reference; not formally OSS.
-- Action type catalog documented in reference docs.
-- CLI binary distributed freely (closed source, free to use).
-- Examples and tutorials published openly.
-
-#### Phase 2 — Schema OSS (months 12–24)
-
-When the schema has stabilized — measured by breaking-change rate dropping below threshold, and at least one full enterprise customer in production — the schema specification is moved under a permissive open-source license (Apache 2.0 or MIT). A reference judge implementation is released alongside.
+The reference implementation is open-source under Apache-2.0 from v0.1.0 onward. This includes the schema definition, the CLI, the runtime, the judge, the dashboard, and the in-tree Verification Definitions. Anyone can read, build, run, fork, and self-host the engine without a license key.
 
 Rationale:
 
-- A stable schema is more valuable as an open standard than as proprietary IP. It encourages ecosystem tooling, third-party action types, and external auditing.
-- A reference judge codifies the trust commitment and lets enterprise customers verify production judge compliance.
-- Schema-as-spec mirrors successful precedents: OpenAPI, GraphQL, JSON Schema.
+- The verifier of AI claims earns trust by being readable. An open judge makes the "no LLM in the loop" commitment auditable in the code rather than asserted in prose.
+- A stable, open schema is more valuable as an open standard than as proprietary IP — it encourages ecosystem tooling, third-party action types, and external auditing. Schema-as-open-spec mirrors successful precedents: OpenAPI, GraphQL, JSON Schema.
+- Low-friction adoption: `npx duhem` / `npm i -g duhem` and a GitHub-Releases binary, no signup required.
 
-What stays closed in Phase 2:
+Public surfaces:
 
-- Production runtime (optimized for hosted service)
-- Production judge (optimized; reference judge is the public spec)
-- Generation service (proprietary AI-powered authoring)
-- Dashboard, evidence storage, hosted infrastructure
-- Enterprise features (SSO, audit, compliance)
+- The full engine source (schema, CLI, runtime, judge, dashboard) under Apache-2.0.
+- Schema specification and action-type catalog documented in reference docs.
+- Examples, tutorials, and worked Verification Definitions published openly.
 
-#### Phase 3 — Selective deeper opening (months 24+)
+#### Hosted cloud (commercial)
 
-Once commercial traction is established and core revenue does not depend on closed CLI source:
+The managed service layered on top of the open engine remains a commercial offering. This is where Duhem captures revenue, and it is what funds continued open-source development:
 
-- CLI source may be open-sourced (it has minimal commercial value)
-- Action type SDK opened to allow community-contributed actions
-- Selected non-critical action types open-sourced for transparency
+- Generation service (AI-powered criteria → checks authoring)
+- Hosted dashboard, evidence storage, and run history with retention
+- Enterprise features (SSO, audit, compliance, longer retention)
+- Hosted infrastructure and support
 
-Core commercial value (production runtime, generation service, hosted infrastructure) remains closed indefinitely. This is the open-core model, with the open-core boundary drawn around the schema and reference implementation rather than the runtime.
-
-#### What is never open-sourced
-
-The hosted service infrastructure, the production-grade generation models and prompts, customer evidence data, and proprietary action types remain closed indefinitely. These are the surfaces where Duhem captures commercial value.
+Customers who prefer to self-host can run the open engine — including the judge — entirely within their own infrastructure. The hosted tier is a convenience and a richer feature set, not a gate on the core verification capability.
 
 ## 12. Integration Surface
 
@@ -688,7 +667,7 @@ Duhem exposes an MCP server. AI coding agents (Claude Code, Cursor, etc.) can:
 
 ## 13. Pricing Model (Initial)
 
-Pricing reflects the closed-source-first posture. There is no self-hosted OSS option in Phase 1; instead, a generous hosted free tier provides the same low-friction adoption path that OSS would have given.
+Pricing reflects the open-core posture: the engine is open-source (Apache-2.0) and self-hostable for free; the hosted tiers below price the managed cloud service (generation, evidence storage, retention, enterprise features) layered on top. The open CLI and a generous hosted free tier together provide the low-friction adoption path.
 
 **Hosted Cloud**: per-seat-per-month, anchored at $30 (validated by Qodo $30, CodeRabbit $24).
 
@@ -696,9 +675,9 @@ Pricing reflects the closed-source-first posture. There is no self-hosted OSS op
 
 - **Free**: 1 user, 100 verifications/month, public repos. Goal: zero-friction adoption for individual developers and OSS projects. Free tier is permanent, not a trial.
 - **Team**: $30/seat/month, unlimited verifications, private repos, generation service, evidence storage 90 days.
-- **Enterprise**: custom pricing. SSO, longer retention, audit features, and self-hostable judge binary (closed-source enterprise license) for customers requiring infrastructure isolation.
+- **Enterprise**: custom pricing. SSO, longer retention, audit features, and support. Customers requiring infrastructure isolation can self-host the open-source (Apache-2.0) engine, including the judge, at no license cost.
 
-The CLI binary is free to download and use across all tiers. It is not formally open-source but is freely distributable and does not require a license key for offline use against a customer-controlled judge endpoint.
+The CLI binary is free to download and use across all tiers. It is open-source (Apache-2.0), freely distributable, and requires no license key for offline use against a customer-controlled judge endpoint.
 
 ## 14. Roadmap
 
@@ -713,6 +692,7 @@ The roadmap reflects a solo founder building with Claude Code as the primary dev
 - Built-in action library: minimum useful subset (UI click/type/assert, API call/observe, basic assertions). ✅ shipped (`ui/*` slice via #14, #41; `api/observe` via #44; `api/call` v1 via #25; full catalog under `duhem-actions`).
 - First Onsager feature verified using Duhem (manually-authored checks, no AI generation yet). ✅ shipped (#46, #47; refreshed to the spec-plan flow via #79; in-tree at [`verifications/onsager-dashboard-create-spec-plan/`](../verifications/onsager-dashboard-create-spec-plan/); environment `up:` / `down:` hooks via #61).
 - Parallel: 5–10 customer interviews with AI-coding-agent power users (Cursor, Claude Code, Devin) to validate market hypothesis beyond Onsager. ⏳ outstanding.
+- **Open-source release (pulled forward from Phase 2/4):** relicense to Apache-2.0 and ship the engine — schema, CLI, runtime, judge, dashboard — as open source in the first public release (v0.1.0). ⏳ in progress (epic #143). Originally planned as a Phase 2 maturity gate; brought forward as a deliberate strategy change (see §11.3 Alignment note).
 
 **Onsager dependency**: Onsager has at least one feature in active development to verify against. If Onsager is not at this stage yet, Phase 0 starts with a smaller toy app instead.
 
@@ -736,7 +716,7 @@ The roadmap reflects a solo founder building with Claude Code as the primary dev
 - VS Code extension.
 - MCP server for AI coding agents.
 - Public alpha: open signup, generous free tier.
-- Schema specification opened under permissive OSS license. Reference judge implementation released.
+- ~~Schema specification opened under permissive OSS license. Reference judge implementation released.~~ ✅ pulled forward to v0.1.0 (Phase 0): the whole engine — schema, CLI, runtime, and judge — ships open-source under Apache-2.0 from the first public release (epic #143).
 - Hosted commercial tier launches (Team plan).
 
 **Onsager dependency**: Duhem is mature enough that Onsager development would be slower without it.
@@ -780,19 +760,19 @@ This phase is contingent on Onsager’s own roadmap. It is not blocking for Duhe
 
 - **Bandwidth dilution between Onsager and Duhem.** As a solo builder, simultaneous active development of two complex products risks shallow progress on both. Mitigation: explicit weekly designation of which project is “lead”; time-box Duhem MVP build (12 weeks); accept that Onsager’s pace and Duhem’s pace will not be balanced — one will drag the other in alternating windows.
 - **Onsager dogfooding scope mismatch.** Onsager’s verification needs may not represent the broader market. Risk: Duhem optimizes for Onsager’s idiosyncrasies. Mitigation: parallel customer interviews from Phase 0 ensure external signal; resist Onsager-specific features that don’t generalize.
-- **Closed source signaling problem.** AI dev tool community partly expects OSS. Closed-source-first may slow community traction. Mitigation: free CLI binary, generous free tier, public schema documentation, and explicit roadmap commitment to schema OSS in Phase 2.
+- **Open-source sustainability.** Open-sourcing the engine (Apache-2.0) removes the closed-source signaling problem but raises the inverse risk: a competitor or hyperscaler could run the open engine as a hosted service without contributing back. Mitigation: the commercial moat is the hosted cloud (generation service, evidence storage, retention, enterprise features) and operational excellence, not the engine source; the open-core boundary is drawn so that the engine's openness drives adoption while the managed service captures value.
 - **Holistic verification is expensive.** Real environments cost more than mocks. Mitigation: cost is acknowledged and framed (production incident is more expensive); environment-share architecture amortizes setup; long-term, environment caching reduces per-run cost.
 - **Generation quality.** AI-generated checks may miss edge cases. Mitigation: human review is mandatory; checks are frozen, not regenerated each run.
 - **Maintenance burden.** Checks need updating when implementation changes intentionally. Mitigation: tight criteria-to-check coupling means impact is predictable; UI-snapshot churn handled by role-based locators.
 - **Market category formation.** “Verification” as a distinct category from “testing” must be communicated. Mitigation: positioning around AI delivery is sharp; market formation already underway (Qodo, Antithesis raising at scale).
-- **Schema lock-in before maturity.** If schema is committed too early to OSS license, future breaking changes carry community cost. Mitigation: keep schema closed (as documentation) through Phase 1; only open-source it after breaking-change rate drops below threshold.
+- **Schema lock-in before maturity.** The schema is open-source (Apache-2.0) while still at v0.x, so future breaking changes carry community cost. Mitigation: the schema is explicitly versioned (`duhem_schema::SCHEMA_VERSION`) and flagged v0.x with breaking changes expected; the `CHANGELOG.md` ledger and `## Schema impact` discipline make every breaking change deliberate and visible; v1.0 carries a deprecation policy. An open license does not freeze the schema — it makes its evolution auditable.
 
 ### Open Questions
 
-- **Schema OSS trigger.** What measurable criteria signal that schema is stable enough to OSS? Candidates: breaking-change rate < 1 per quarter; first paying enterprise customer in production; N external users at given scale. Decision needed before Phase 2.
-- **Schema OSS license.** Apache 2.0 (permissive, like OpenAPI) vs. MIT (most permissive). Decision deferrable to Phase 2.
-- **CLI source disposition.** When (if ever) is CLI source itself open-sourced? Probably Phase 3+; commercial value is low, but signaling value of opening it is real.
-- **Self-hosted judge license terms.** Enterprise customers requiring self-hosting need a license. Source-available with restrictive terms (BSL-style) or pure proprietary binary distribution? Decision needed when first enterprise customer requires self-host.
+- ~~**Schema OSS trigger.**~~ Resolved: the schema (and the whole engine) is open-source from v0.1.0; no maturity gate was used.
+- ~~**Schema OSS license.**~~ Resolved (2026-06-29): **Apache-2.0**.
+- ~~**CLI source disposition.**~~ Resolved: the CLI source is open-source (Apache-2.0) from v0.1.0.
+- ~~**Self-hosted judge license terms.**~~ Resolved: the judge is open-source (Apache-2.0); self-hosting needs no separate license.
 - **L3 visual assertion scope.** When do we add visual-baseline checks? What’s the cost of running a visual diff infrastructure?
 - **Inconclusive escalation policy defaults.** Block on inconclusive (safe) or pass with warning (fast)? Probably a per-criterion configurable, but defaults matter.
 - **Action marketplace governance.** Who reviews community-contributed action types? What’s the review bar?

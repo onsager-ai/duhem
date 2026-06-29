@@ -1,0 +1,8 @@
+# Deliberately malformed Verification Definition — a NEGATIVE fixture.
+#
+# `criteria` must be a sequence; here it is a bare string. `duhem
+# validate` must reject this with a non-zero exit and a stderr message
+# that names the offending key. AC-3 asserts exactly that. Do not
+# "fix" this file — a green AC-3 depends on it staying broken.
+verification: intentionally-broken
+criteria: this-should-be-a-list-not-a-string

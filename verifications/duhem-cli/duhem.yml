@@ -1,0 +1,250 @@
+# ============================================================================
+# Duhem-on-Duhem — the `duhem` CLI contract (REGRESSION coverage, part of #148)
+# ============================================================================
+#
+# SELF-REFERENCE CAVEAT — READ BEFORE TRUSTING A GREEN RUN.
+#
+# This Verification Definition drives the REAL `duhem` binary via the
+# `cli/invoke` action and mechanically asserts its command-line
+# contract. It is doubly self-referential: `duhem run` invokes `duhem`
+# (AC-5 even runs `duhem run` *inside* a `duhem run`).
+#
+# That is FINE for a regression safety net and explicitly NOT FINE as a
+# trust anchor. Per the Asymmetric-trust identity commitment
+# (`docs/duhem-spec.md` §11.2), the verifier of AI claims must be
+# structurally independent of the AI making them. Duhem verifying Duhem
+# is correlated failure: a judge defect that wrongly PASSES could
+# equally wrongly pass its own self-test. So:
+#
+#   - In scope:  catch regressions in the CLI's user-facing contract
+#                ("did we break `--version` / `validate` / `init` /
+#                `run`?"). This complements the white-box cargo tests in
+#                `crates/duhem-cli/tests/` with black-box coverage.
+#   - Not a goal: treating a green run here as independent attestation.
+#                The asymmetric Onsager seam holds that role
+#                (`.claude/skills/onsager-dogfood/SKILL.md`).
+#
+# HOLISTIC POSTURE (`docs/duhem-spec.md` §8): every check runs the real
+# binary in the real environment — no shimmed shell, no fake exit code.
+# `cli/invoke` returns `Ok` regardless of exit status; the exit code is
+# DATA judged by an assertion (mirrors `api/call`'s treatment of HTTP
+# status). No mocks anywhere; all assertions are mechanical.
+#
+# Page-free: every step uses `cli/invoke`, which never needs a browser
+# (`duhem_actions::uses_requires_page`), so this VD runs with no
+# Playwright Chromium. The inner `duhem run` in AC-5 targets the
+# offline `defaults-example` (its sole step is a page-free
+# `noop/unobservable`), so the whole suite runs green fully offline.
+#
+# Run it (from the repo root, against a locally built binary):
+#   cargo build -p duhem-cli
+#   duhem run verifications/duhem-cli \
+#     --inputs duhem_bin=$PWD/target/debug/duhem
+# Or against an installed `duhem` (default `duhem_bin=duhem`):
+#   duhem run verifications/duhem-cli
+
+verification: Duhem — the `duhem` CLI contract (self-regression)
+spec_ref: https://github.com/onsager-ai/duhem/issues/148
+
+inputs:
+  # Binary under test. Default assumes `duhem` is on PATH; CI and local
+  # iteration override it with the freshly built binary
+  # (`--inputs duhem_bin=$PWD/target/debug/duhem`). Making the binary an
+  # input is what lets this VD regression-test EITHER an installed
+  # `duhem` or a locally built one.
+  duhem_bin:
+    type: string
+    default: duhem
+  # Working directory for every invocation. `cli/invoke` resolves a
+  # relative `cwd` against the `duhem` process's working directory
+  # (where `duhem run` was invoked), NOT this VD's directory — so `.`
+  # means "the repo root, assuming you run from there". The literal VD
+  # paths below (`verifications/defaults-example`, the fixtures) resolve
+  # against this cwd. Override with `--inputs repo_dir=/abs/path`.
+  repo_dir:
+    type: string
+    default: .
+  # Scratch directory for the AC-4 `init` scaffold. Under `target/`
+  # (gitignored) so a run leaves no working-tree residue; `init --force`
+  # makes re-runs idempotent.
+  scaffold_dir:
+    type: string
+    default: target/duhem-cli-regression-scaffold
+
+criteria:
+  - id: AC-1
+    description: |
+      Asking the CLI for its version reports both the product version
+      and the schema version it speaks, so an operator can tell at a
+      glance which `duhem` and which Verification-Definition schema they
+      are on.
+    checks:
+      - id: AC-1.1
+        description: |
+          `duhem --version` exits cleanly and prints a line carrying a
+          semver-shaped product version and the `schema v…` tag (the
+          `duhem_schema::SCHEMA_VERSION` surfaced per CLAUDE.md).
+        steps:
+          - id: version
+            uses: cli/invoke
+            with:
+              command: [$inputs.duhem_bin, --version]
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+              stdout: stdout
+        assertions:
+          - $steps.version.outputs.exit_code == 0
+          - matches:
+              value: $steps.version.outputs.stdout
+              pattern: 'schema v'
+          - matches:
+              value: $steps.version.outputs.stdout
+              pattern: '\d+\.\d+\.\d+'
+
+  - id: AC-2
+    description: |
+      Validating a well-formed Verification Definition succeeds — the
+      structural validator accepts a definition that is in fact valid,
+      so authors get a clean signal and CI does not false-fail.
+    checks:
+      - id: AC-2.1
+        description: |
+          `duhem validate` against the committed, offline
+          `defaults-example` leaf exits 0 and prints `OK`.
+        steps:
+          - id: validate_good
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - validate
+                - verifications/defaults-example/checks/duhem.yml
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+              stdout: stdout
+        assertions:
+          - $steps.validate_good.outputs.exit_code == 0
+          - matches:
+              value: $steps.validate_good.outputs.stdout
+              pattern: 'OK'
+
+  - id: AC-3
+    description: |
+      Validating a malformed Verification Definition fails loudly — the
+      validator rejects it with a non-zero exit and an error that names
+      the offending part, so a broken definition cannot slip through as
+      if it were valid.
+    checks:
+      - id: AC-3.1
+        description: |
+          `duhem validate` against the negative fixture
+          (`fixtures/bad.yml`, whose `criteria` is a string instead of a
+          sequence) exits non-zero and writes a diagnostic to stderr
+          that names `criteria` and explains the type problem.
+        steps:
+          - id: validate_bad
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - validate
+                - verifications/duhem-cli/fixtures/bad.yml
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+              stderr: stderr
+        assertions:
+          - $steps.validate_bad.outputs.exit_code != 0
+          - matches:
+              value: $steps.validate_bad.outputs.stderr
+              pattern: 'criteria'
+          - matches:
+              value: $steps.validate_bad.outputs.stderr
+              pattern: 'expected a sequence'
+
+  - id: AC-4
+    description: |
+      Scaffolding a new Verification Definition produces one that is
+      itself valid — `duhem init` emits a definition that `duhem
+      validate` accepts, so an author's very first run is green before
+      they have written anything.
+    checks:
+      - id: AC-4.1
+        description: |
+          One holistic slice: `duhem init` scaffolds into a scratch dir
+          (exit 0, reports `Created`), then `duhem validate` on that
+          same scaffold exits 0 with `OK`. `--force` keeps the check
+          idempotent across re-runs.
+        steps:
+          - id: scaffold
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - init
+                - $inputs.scaffold_dir
+                - --name
+                - duhem-cli-scaffold-smoke
+                - --force
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+              stdout: stdout
+          - id: validate_scaffold
+            uses: cli/invoke
+            with:
+              command: [$inputs.duhem_bin, validate, $inputs.scaffold_dir]
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+              stdout: stdout
+        assertions:
+          - $steps.scaffold.outputs.exit_code == 0
+          - matches:
+              value: $steps.scaffold.outputs.stdout
+              pattern: 'Created'
+          - $steps.validate_scaffold.outputs.exit_code == 0
+          - matches:
+              value: $steps.validate_scaffold.outputs.stdout
+              pattern: 'OK'
+
+  - id: AC-5
+    description: |
+      Running an offline example end-to-end reaches a pass verdict — the
+      full `duhem run` pipeline (load → validate → execute → judge →
+      report) works on a known-green definition without any external
+      dependency. This is the doubly-self-referential check: `duhem`
+      running `duhem`, which is fine for regression (see header caveat).
+    checks:
+      - id: AC-5.1
+        description: |
+          `duhem run verifications/defaults-example --reporter json`
+          exits 0 and emits a one-line run summary whose top-level
+          verdict is `pass`.
+        steps:
+          - id: run_example
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - run
+                - verifications/defaults-example
+                - --reporter
+                - json
+              cwd: $inputs.repo_dir
+              within: 120s
+            outputs:
+              exit_code: exit_code
+              stdout: stdout
+        assertions:
+          - $steps.run_example.outputs.exit_code == 0
+          - matches:
+              value: $steps.run_example.outputs.stdout
+              pattern: '"verdict":"pass"'

@@ -1,20 +1,28 @@
 # Self-verify — Duhem-on-Duhem regression coverage (epic #148).
 #
-# Drives the REAL `duhem` binary through the `verifications/duhem-cli`
-# Verification Definition (which uses `cli/invoke`) and gates on the
-# verdict. This is black-box regression coverage of the CLI contract
-# (`--version` / `validate` / `init` / `run`), complementing the
-# white-box cargo tests in `crates/duhem-cli/tests/`.
+# Drives the REAL `duhem` binary through the in-tree self-verification
+# Definitions and gates on the verdict. Two independent lanes:
 #
-# NOT the Onsager dogfood. This job is intentionally separate from
+#   - cli-regression: the `verifications/duhem-cli` VD (`cli/invoke`) —
+#     the CLI contract (`--version` / `validate` / `init` / `run`).
+#     Fully offline + page-free, so no Node / Playwright.
+#   - dashboard-regression: the `verifications/duhem-dashboard` VD
+#     (`api/call` + `ui/*`) — the served dashboard's JSON API, SPA
+#     render, and SSE stream. Needs the SPA bundle embedded in the
+#     binary AND a real Chromium for the `ui/*` browser checks.
+#
+# Black-box coverage that complements the white-box cargo tests in
+# `crates/duhem-cli/tests/` and `crates/duhem-dashboard/tests/`.
+#
+# NOT the Onsager dogfood. This workflow is intentionally separate from
 # `dogfood.yml`: per the Asymmetric-trust commitment
 # (`docs/duhem-spec.md` §11.2), Duhem verifying Duhem is a regression
 # safety net, not an independent trust anchor — the Onsager seam holds
-# that role. See the caveat header in `verifications/duhem-cli/duhem.yml`.
+# that role. See the caveat headers in the VDs' `duhem.yml`.
 #
-# Scoped to PRs that touch the CLI or this VD so it stays a fast,
-# targeted gate. Fully offline + page-free (every step is `cli/invoke`,
-# which needs no browser), so no Node / Playwright setup is required.
+# A `changes` job scopes each lane to its own paths so a CLI-only PR
+# never pays the dashboard lane's SPA-build + Chromium-install cost, and
+# vice versa.
 
 name: self-verify
 
@@ -22,14 +30,18 @@ on:
   pull_request:
     paths:
       - 'crates/duhem-cli/**'
+      - 'crates/duhem-dashboard/**'
       - 'verifications/duhem-cli/**'
+      - 'verifications/duhem-dashboard/**'
       - 'verifications/defaults-example/**'
       - '.github/workflows/self-verify.yml'
   push:
     branches: [main]
     paths:
       - 'crates/duhem-cli/**'
+      - 'crates/duhem-dashboard/**'
       - 'verifications/duhem-cli/**'
+      - 'verifications/duhem-dashboard/**'
       - 'verifications/defaults-example/**'
       - '.github/workflows/self-verify.yml'
 
@@ -41,8 +53,35 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Per-lane path scoping. Workflow-level `on.paths` only decides
+  # whether the workflow runs at all; this filter decides which lane(s)
+  # actually execute, so each lane stays a fast, targeted gate.
+  changes:
+    name: detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      cli: ${{ steps.filter.outputs.cli }}
+      dashboard: ${{ steps.filter.outputs.dashboard }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            cli:
+              - 'crates/duhem-cli/**'
+              - 'verifications/duhem-cli/**'
+              - 'verifications/defaults-example/**'
+              - '.github/workflows/self-verify.yml'
+            dashboard:
+              - 'crates/duhem-dashboard/**'
+              - 'verifications/duhem-dashboard/**'
+              - '.github/workflows/self-verify.yml'
+
   cli-regression:
     name: cli regression
+    needs: changes
+    if: ${{ needs.changes.outputs.cli == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,3 +104,55 @@ jobs:
         run: |
           ./target/release/duhem run verifications/duhem-cli \
             --inputs duhem_bin="$PWD/target/release/duhem"
+
+  dashboard-regression:
+    name: dashboard regression
+    needs: changes
+    if: ${{ needs.changes.outputs.dashboard == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          rustup show active-toolchain
+          cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Mirror the `duhem/run` composite action's driver setup: Node 20
+      # LTS so the SPA build + the Playwright sidecar's pinned Chromium
+      # revision both match the driver.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # build.rs embeds web/dist at compile time, so the SPA MUST be
+      # built before the dashboard binary — otherwise the binary serves
+      # the placeholder index and AC-2's SPA-render assertions fail.
+      - name: Build dashboard SPA bundle
+        working-directory: crates/duhem-dashboard/web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build duhem + duhem-dashboard
+        run: cargo build --release -p duhem-cli -p duhem-dashboard
+
+      # AC-2 drives the real SPA in a real browser, so install Chromium
+      # the same way the `ui-smoke` lane does — the sidecar's own pinned
+      # Playwright, so the Chromium revision matches the driver.
+      - name: Install Playwright sidecar deps + Chromium
+        working-directory: crates/duhem-actions/sidecar
+        run: |
+          npm ci
+          npx --yes playwright install --with-deps chromium
+
+      # `scripts/up.sh` reads DUHEM_BIN to produce the fixture run and to
+      # launch `duhem dashboard` (which resolves the sibling
+      # `duhem-dashboard`). A non-pass verdict exits non-zero.
+      - name: Run duhem-dashboard regression VD
+        env:
+          DUHEM_BIN: ${{ github.workspace }}/target/release/duhem
+        run: ./target/release/duhem run verifications/duhem-dashboard

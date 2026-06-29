@@ -22,6 +22,8 @@ criteria) lives in the spec issue that introduced
 
 - [clarifying] CLI manifest discovery: ancestor walk, .duhem.yml alias, -f override. (#69)
 
+- [additive] root manifest: defaults: block (environment, timeout, inconclusive_policy, retry) — sub-keys fall back to today's behavior (timeout→5s, inconclusive_policy→block, retry.max→0); retry is per-check, retrying only Inconclusive(Timeout|EnvironmentError). (#66)
+
 - [additive] VD leaves may declare inherits: [name, ...] to pull shared inputs from the parent manifest's environment chain instead of redeclaring them; $inputs.<name> resolves against inputs ∪ inherits, an inherited name also declared under inputs: is an error, and an unresolved inherited input fails loudly with the suite/--inputs remedy. (#135)
 
 - [additive] Root manifest gains an environments: block (named env configs) injected into leaf input resolution (precedence: --inputs > --inputs-file > selected env > VD default) and the $env whitelist; CLI --environment selects, single env auto-selects. (#68)
@@ -43,6 +45,10 @@ criteria) lives in the spec issue that introduced
   optional, so manifests without it behave exactly as before. Worked
   example: `verifications/crawlab/` runs N Crawlab VDs against one
   shared stack.
+
+### Reporter contract: defaults warnings (#66)
+
+- [additive] `RunSummary` gains a `warnings` list of non-fatal run notices — currently the `inconclusive_policy: warn` messages (a criterion that aggregated to `inconclusive` but was treated as a pass by the manifest default). Empty by default and `skip_serializing_if` empty, so a warning-free summary serializes byte-for-byte as before; the change is **additive**, `schema_version` stays `"1"`, and an older plugin ignores it. (#66)
 
 ### Reporter contract: failure detail (#125, #129)
 

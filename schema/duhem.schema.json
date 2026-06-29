@@ -140,6 +140,32 @@
       ],
       "type": "object"
     },
+    "InconclusivePolicy": {
+      "description": "How a criterion-level `inconclusive` verdict is treated at run aggregation (spec #66). Closed enum.",
+      "oneOf": [
+        {
+          "description": "Today's behavior: `inconclusive` stays `inconclusive` and does not pass.",
+          "enum": [
+            "block"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Treat a criterion-level `inconclusive` as a pass, but surface a warning in the run summary so it's not silent.",
+          "enum": [
+            "warn"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Silently treat a criterion-level `inconclusive` as a pass.",
+          "enum": [
+            "pass"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "InputDecl": {
       "additionalProperties": false,
       "properties": {
@@ -165,6 +191,53 @@
         "object"
       ],
       "type": "string"
+    },
+    "ManifestDefaults": {
+      "additionalProperties": false,
+      "description": "Suite-wide defaults declared once on the root manifest (spec #66). Every sub-key is optional; an absent sub-key falls back to today's behavior (`timeout` → the engine's 5s default, `inconclusive_policy` → `block`, `retry.max` → `0`).",
+      "properties": {
+        "environment": {
+          "description": "Name of an environment under the sibling `environments:` block to use for the suite. Accepted as any string here; the lookup against `environments:` happens at engine-time (spec #66 Out-of-scope), so an unknown name is not a parse error.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "inconclusive_policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InconclusivePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How a criterion-level `inconclusive` verdict is treated at run aggregation. Absent → `block` (today's behavior)."
+        },
+        "retry": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RetryPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Check-level retry posture. Absent → no retries (`max` is `0`)."
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DurationSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-step `within:` fallback for every leaf. A step's own `within:` always wins; this only fills in when a step omits it. Same duration wire shape as `environment.ready.http.timeout` (integer milliseconds or a suffixed string like `30s` / `2m`). Absent → the engine's built-in 5s default still applies."
+        }
+      },
+      "type": "object"
     },
     "ManifestEntry": {
       "anyOf": [
@@ -205,9 +278,58 @@
       },
       "type": "object"
     },
+    "RetryBackoff": {
+      "description": "Backoff schedule between check retries (spec #66). Closed enum.",
+      "oneOf": [
+        {
+          "description": "Delay doubles each retry (`base`, `2·base`, `4·base`, …).",
+          "enum": [
+            "exponential"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Delay grows linearly each retry (`base`, `2·base`, `3·base`, …).",
+          "enum": [
+            "linear"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "RetryPolicy": {
+      "additionalProperties": false,
+      "description": "Check-level retry posture (spec #66). A whole check re-runs from step 0 when it returns `inconclusive` for a retry-eligible cause (timeout or environment error), matching #54's action-level retry classification. A `fail` never retries.",
+      "properties": {
+        "backoff": {
+          "$ref": "#/definitions/RetryBackoff",
+          "default": "exponential",
+          "description": "Backoff schedule between retries. Defaults to `exponential`."
+        },
+        "max": {
+          "default": 0,
+          "description": "Maximum number of retries after the first attempt. `0` (the default when omitted) means no retries — today's behavior.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "RootManifest": {
       "additionalProperties": false,
       "properties": {
+        "defaults": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ManifestDefaults"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Suite-wide defaults (`docs/duhem-spec.md` §10.4, spec #66). A single `defaults:` block that every leaf the manifest expands to inherits — so an author sets the timeout budget, the inconclusive-handling policy, and the retry posture once for the whole suite instead of per leaf.\n\nEach sub-key is optional and, when absent, reproduces today's behavior exactly:\n\n- `timeout:` is the per-step `within:` fallback. A step that declares its own `within:` wins; a step that doesn't picks up this default; with neither, the engine's built-in 5s last resort applies. - `inconclusive_policy:` decides how a criterion-level `inconclusive` is treated at run aggregation — `block` (today's behavior; inconclusive ≠ pass), `warn` (criterion passes but a warning is surfaced in the run summary), or `pass` (silent pass). Per-assertion evaluation is unchanged. - `retry:` re-runs a whole check from step 0 when it comes back `inconclusive` for a *retry-eligible* cause (timeout or an environment error); a `fail` never retries. - `environment:` names a key under the sibling `environments:` block. Cross-key validation is deferred to engine-time lookup (spec #66 Out-of-scope), so any string is accepted here.\n\nAdditive: a manifest without `defaults:` round-trips and behaves byte-for-byte as before."
+        },
         "environment": {
           "anyOf": [
             {

@@ -21,7 +21,10 @@ pub use criterion::{Check, Criterion};
 pub use environment::{DurationSpec, Environment, HttpReadyProbe, ReadyProbe};
 pub use expr::{BinOp, Expr, ExprStr, Literal, ParseError, Path, PathRoot, UnaryOp};
 pub use jsonschema::json_schema;
-pub use manifest::{LoadError, Loaded, LoadedLeaf, ManifestEntry, RootManifest, discover, load};
+pub use manifest::{
+    InconclusivePolicy, LoadError, Loaded, LoadedLeaf, ManifestDefaults, ManifestEntry,
+    RetryBackoff, RetryPolicy, RootManifest, discover, load,
+};
 pub use step::Step;
 pub use validate::{ValidationError, validate};
 pub use verification::{InputDecl, InputType, SchemaError, VerificationDefinition};

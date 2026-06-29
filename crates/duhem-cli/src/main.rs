@@ -395,6 +395,10 @@ async fn run_command(args: RunArgs) -> ExitCode {
             /// its `up:` / `down:` scripts.
             environment: Option<duhem_schema::Environment>,
             manifest_dir: Option<PathBuf>,
+            /// Suite-wide `defaults:` block (spec #66) applied to every
+            /// leaf's engine: per-step `within:` fallback, inconclusive
+            /// policy, retry posture. `None` on a defaults-less manifest.
+            defaults: Option<duhem_schema::ManifestDefaults>,
         },
     }
     // Named-environment selection (spec #68). On a manifest we pick the
@@ -441,6 +445,7 @@ async fn run_command(args: RunArgs) -> ExitCode {
                     warnings,
                     environment: manifest.environment,
                     manifest_dir,
+                    defaults: manifest.defaults,
                 },
             )
         }
@@ -463,6 +468,13 @@ async fn run_command(args: RunArgs) -> ExitCode {
         }
     }
     let is_manifest = matches!(scope, Scope::Manifest { .. });
+    // Suite-wide `defaults:` (spec #66) applied to every leaf's engine.
+    // A single-leaf run has no manifest, so defaults are inert there —
+    // Pattern A authors pay no cost.
+    let manifest_defaults: Option<duhem_schema::ManifestDefaults> = match &scope {
+        Scope::Manifest { defaults, .. } => defaults.clone(),
+        Scope::SingleLeaf => None,
+    };
 
     // Validate + resolve inputs for every leaf up front, before any
     // browser launch. A malformed leaf in a manifest should not
@@ -649,6 +661,9 @@ async fn run_command(args: RunArgs) -> ExitCode {
             .keep_env(keep_env || suite_managed)
             .with_env(env_whitelist.clone())
             .with_inherited(def.inherits.clone());
+        if let Some(d) = manifest_defaults.as_ref() {
+            engine = engine.with_defaults(d);
+        }
         if let Some(b) = browser {
             engine = engine.with_browser(b);
         }

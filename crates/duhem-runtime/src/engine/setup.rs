@@ -27,8 +27,9 @@ use tracing::debug;
 
 use crate::engine::context::{RunState, json_to_value};
 use crate::engine::registry::{ActionRegistry, Dispatch};
-use crate::engine::runner::{EngineError, outcome_to_evidence, step_label, with_to_evidence_map};
+use crate::engine::runner::{EngineError, step_label};
 use crate::engine::template::substitute_with;
+use crate::engine::translate::{outcome_to_evidence, with_to_evidence_map};
 
 /// Why a setup block aborted. Distinct from a generic `aborted: bool`
 /// so the engine can map the trigger to the right

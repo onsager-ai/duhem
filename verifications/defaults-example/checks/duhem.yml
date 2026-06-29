@@ -1,0 +1,43 @@
+# Worked-example leaf for the `defaults:` manifest (spec #66).
+#
+# Two criteria, both green under the manifest's `inconclusive_policy:
+# warn` default:
+#
+#   - AC-1 is an ordinary assertion-only criterion — it passes outright,
+#     showing the defaults are inert when nothing needs them.
+#   - AC-2's check uses an action the runtime can't observe, so on its
+#     own it would aggregate to `inconclusive` (missing_observation).
+#     The manifest's `warn` policy lifts that criterion to a pass and
+#     emits a warning in the run summary. (`retry` is configured but
+#     does not fire here: a missing_observation is the VD's own shape,
+#     not flaky infra, so it is not retry-eligible.)
+#
+# Standalone (`duhem validate verifications/defaults-example/checks`)
+# this validates structurally. Under a suite run, the manifest defaults
+# decide AC-2's fate.
+
+verification: defaults-example leaf
+
+criteria:
+  - id: AC-1
+    description: An ordinary criterion that passes outright.
+    checks:
+      - id: AC-1.1
+        description: A literal assertion that holds.
+        assertions:
+          - "true"
+
+  - id: AC-2
+    description: |
+      A criterion the runtime cannot observe on its own — it aggregates
+      to `inconclusive`, which the manifest's `inconclusive_policy:
+      warn` default treats as a criterion-level pass with a warning.
+    checks:
+      - id: AC-2.1
+        description: |
+          The step uses an action with no runtime observation, so every
+          assertion here is `inconclusive(missing_observation)`.
+        steps:
+          - uses: noop/unobservable
+        assertions:
+          - "true"

@@ -73,7 +73,7 @@ environment:
 inputs:
   # The dashboard's default loopback host:port. Whole-string URL inputs
   # (no string concatenation in templates yet — same constraint the
-  # arbor/onsager VDs work around), one per endpoint the VD touches. The
+  # chreode/onsager VDs work around), one per endpoint the VD touches. The
   # fixed run id `dashboard-fixture-run` is set by `scripts/up.sh`, which
   # renames the produced run directory to it.
   runs_url:

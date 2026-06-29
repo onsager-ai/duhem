@@ -1,7 +1,7 @@
-# Arbor — create an app from a description, and ship it
+# Chreode — create an app from a description, and ship it
 
-Acceptance criteria for Arbor's core promise: a person describes an
-app in plain language and Arbor builds and ships a working app for
+Acceptance criteria for Chreode's core promise: a person describes an
+app in plain language and Chreode builds and ships a working app for
 them. These criteria are the stable human commitment; the checks in
 `duhem.yml` are the derivative mechanism (`docs/duhem-spec.md`
 §7.2 / §7.3).
@@ -29,7 +29,7 @@ app's live link once it is ready.
 
 ## Identity-commitment notes
 
-- **Holistic.** Every check drives the real Arbor dashboard against
+- **Holistic.** Every check drives the real Chreode dashboard against
   the real orchestrator, the real factory pipeline, and a real
   (dry-run) deploy that stands up an actual preview server. The
   default FakeAgent/dry-run mode keeps the run deterministic and
@@ -37,8 +37,8 @@ app's live link once it is ready.
 - **Mechanical judgment.** Assertions are structural — equality on an
   observed HTTP status, role-based locators reaching a DOM state. No
   LLM interprets the verdict (`docs/duhem-spec.md` §11.2).
-- **Asymmetric trust.** Duhem authors these checks against Arbor;
-  Arbor never authors its own Duhem checks. The live link appearing
-  is a fact about the real run, not a claim Arbor makes about itself.
+- **Asymmetric trust.** Duhem authors these checks against Chreode;
+  Chreode never authors its own Duhem checks. The live link appearing
+  is a fact about the real run, not a claim Chreode makes about itself.
 - **Two-document discipline.** This file is the human commitment;
   `duhem.yml` is its mechanical translation. Keep them separate.

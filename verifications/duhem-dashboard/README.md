@@ -81,7 +81,7 @@ So unlike the `duhem-cli` VD — whose `duhem_bin` is consumed directly by
 The VD `inputs` (`runs_url`, `run_detail_url`, `live_url`,
 `run_page_url`) are the whole-string URLs the steps and the readiness
 probe hit. (Whole-string because template substitution does no string
-concatenation yet — same constraint the arbor/onsager VDs work around.)
+concatenation yet — same constraint the chreode/onsager VDs work around.)
 
 ## Running
 

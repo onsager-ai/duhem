@@ -1,16 +1,16 @@
-# Arbor — the factory CLI builds and ships an app (dogfood)
+# Chreode — the factory CLI builds and ships an app (dogfood)
 #
 # Worked example for `cli/invoke` (#102). Criteria prose:
 # `./criteria.md`. Operator setup: `./README.md`.
 #
-# Arbor's `pnpm factory "<description>"` is its headless entry point —
+# Chreode's `pnpm factory "<description>"` is its headless entry point —
 # the whole factory pipeline (understand → plan → generate → verify →
 # deploy → promote) with no server and no dashboard. This VD drives the
 # REAL CLI via `cli/invoke` and judges its exit code and output.
 #
 # Holistic posture (`docs/duhem-spec.md` §8): `cli/invoke` runs the real
 # binary in the real environment — no shimmed shell, no fake exit code.
-# Determinism without mocking comes from Arbor's default mode: FakeAgent
+# Determinism without mocking comes from Chreode's default mode: FakeAgent
 # (no live LLM, `ARBOR_AGENT` unset) + dry-run drivers (`ARBOR_DRIVERS`
 # unset), where the dry-run deploy stands up a real local preview server
 # and the CLI prints `shipped → <url>` on success.
@@ -21,7 +21,7 @@
 # is a deferred optimization). So a Playwright Chromium must be
 # available (see ./README.md and #105).
 
-verification: Arbor — the factory CLI builds and ships an app
+verification: Chreode — the factory CLI builds and ships an app
 
 inputs:
   # Path to an onsager-ai/arbor checkout, used as the CLI's working
@@ -29,8 +29,8 @@ inputs:
   # `duhem` process working directory (where `duhem run` is invoked),
   # NOT this VD's directory — the default below assumes you run from the
   # duhem repo root, where `../arbor` is a sibling checkout. Override
-  # with `--inputs arbor_repo_dir=/abs/path` for any other layout.
-  arbor_repo_dir:
+  # with `--inputs chreode_repo_dir=/abs/path` for any other layout.
+  chreode_repo_dir:
     type: string
     default: ../arbor
   app_description:
@@ -46,7 +46,7 @@ criteria:
     checks:
       - id: AC-1.1
         description: |
-          Run `pnpm factory "<description>"` in the Arbor checkout and
+          Run `pnpm factory "<description>"` in the Chreode checkout and
           judge the real process: a clean exit (code 0) and a final
           `shipped → <url>` line prove the whole pipeline ran and
           promoted a live app through the CLI.
@@ -55,10 +55,10 @@ criteria:
             uses: cli/invoke
             with:
               # argv form (no shell) — the description is one argument,
-              # no quoting hazard. Runs in the Arbor checkout so pnpm
+              # no quoting hazard. Runs in the Chreode checkout so pnpm
               # resolves the workspace.
               command: [pnpm, factory, $inputs.app_description]
-              cwd: $inputs.arbor_repo_dir
+              cwd: $inputs.chreode_repo_dir
               within: 180s
             outputs:
               exit_code: exit_code

@@ -584,3 +584,46 @@ criteria:
           - matches:
               value: $steps.file_value_wins.outputs.stdout
               pattern: 'RESOLVED INPUT: count = 7'
+
+  # ==========================================================================
+  # #150 — `duhem validate` understands manifests. Before #150, `validate
+  # <dir>` resolved a directory to `<dir>/duhem.yml` and parsed it as a LEAF,
+  # so a directory whose `duhem.yml` is a root manifest failed with `unknown
+  # field manifest_version` — even though `duhem run <dir>` loaded it fine.
+  # #150 routes `validate` through the same `discover` + `load` path as `run`,
+  # so a manifest (and each leaf it expands to) validates. This is the exact
+  # case that errored before; AC-2 (a good leaf file) and AC-3 (a bad leaf)
+  # continue to pin the leaf path. Page-free under `cli/invoke`.
+  # ==========================================================================
+  - id: AC-11
+    description: |
+      Validating a directory whose `duhem.yml` is a root manifest
+      succeeds — `validate` loads it as a manifest (and its leaves)
+      rather than mis-parsing the manifest as a leaf. This is the
+      regression #150 fixed: the same path errored with `unknown field
+      manifest_version` before.
+    checks:
+      - id: AC-11.1
+        description: |
+          `duhem validate verifications/defaults-example` (a manifest
+          directory) exits 0 and prints `OK` — the manifest plus its one
+          leaf both validate. Before #150 this exited non-zero naming
+          `manifest_version`.
+        steps:
+          - id: validate_manifest_dir
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - validate
+                - verifications/defaults-example
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+              stdout: stdout
+        assertions:
+          - $steps.validate_manifest_dir.outputs.exit_code == 0
+          - matches:
+              value: $steps.validate_manifest_dir.outputs.stdout
+              pattern: 'OK'

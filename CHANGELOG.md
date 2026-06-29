@@ -22,6 +22,8 @@ criteria) lives in the spec issue that introduced
 
 - [additive] api/stream action: follow an open-ended SSE/chunked stream until a terminal event or within: timeout; outputs events/event_count/last_event for mechanical assertion. Worked example: verifications/duhem-dashboard /live. (#153)
 
+- [clarifying] duhem validate now understands manifests — a manifest file or directory is loaded via the same leaf/manifest/discovery path as run and validated (manifest + its leaves), instead of being mis-parsed as a leaf. (#150)
+
 - [clarifying] duhem run --dry-run now prints a RESOLVED INPUTS block (name = value, post-precedence), enabling value-level input assertions in black-box VDs. (#155)
 
 - [breaking] CLI: removed run flags --seed and --headed (use DUHEM_HEADED=1), and folded --inputs-file into --inputs @file.yml (repeatable, mixable with k=v, last-wins). No VD-schema change; SCHEMA_VERSION unchanged. Breaking CLI surface → next release is a product minor (0.2.0). (#151)

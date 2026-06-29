@@ -1,0 +1,9 @@
+# Team-shared manifest fragment, composed by ./duhem.yml via includes:.
+#
+# A partial manifest: every field is optional and `manifest_version:`
+# is NOT allowed here (the root manifest owns the version). It fills
+# keys the root leaves absent, and its `verifications:` (none here)
+# would concatenate onto the root's.
+environments:
+  staging:
+    base_url: https://staging.example.com

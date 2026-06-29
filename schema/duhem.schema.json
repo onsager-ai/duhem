@@ -349,6 +349,13 @@
           "description": "Named environment configs (`docs/duhem-spec.md` §10.4, spec #68). Each key under `environments:` is an environment name (e.g. `staging`, `prod`) whose value is a free-form `key: value` map — typed by convention, not by schema.\n\nWhen an environment is selected for a run (CLI `--environment`, or auto-selected when exactly one is declared) its keys feed the leaf input-resolution chain (an env key `base_url` populates a declared input `base_url` when no higher-precedence source supplies it) and its string-valued keys are whitelisted for `$env.<key>`. Additive: a manifest without `environments:` behaves byte-identically to before.\n\n`serde_yml::Value` has no `JsonSchema` impl, so the field is described to schemars via a `serde_json::Value`-shaped stand-in (same wire surface) purely so the JSON-schema artifact generates.",
           "type": "object"
         },
+        "includes": {
+          "description": "Other manifest files whose config this one composes in (`docs/duhem-spec.md` §10.4, spec #67). Each path is relative to *this* manifest's parent directory and resolves to a **partial** manifest (every field optional, no `manifest_version:`) — see [`PartialRootManifest`]. Same path discipline as `verifications:` entries: no absolute paths, no `..` escape.\n\nComposition is **root-wins**: an include fills only the keys this manifest leaves absent (for nested maps like `environments:`, key-by-key, still root-wins per leaf key). `verifications:` (and `includes:` themselves) are *concatenated* rather than overlaid — the root's entries first, then each include's, in declared order. Nested includes are resolved depth-first up to depth 3; cycles are a hard error. The typical shape is a team-shared `.duhem.shared.yml` plus a gitignored per-developer `.duhem.local.yml`. Additive: a manifest without `includes:` behaves byte-identically to before.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "manifest_version": {
           "description": "Document version. v1 today; future schema changes bump this so a manifest written against today's loader refuses to silently reinterpret a future shape.",
           "format": "uint32",

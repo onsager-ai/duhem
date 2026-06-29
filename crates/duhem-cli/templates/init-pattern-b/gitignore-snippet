@@ -1,0 +1,3 @@
+# Per-developer Duhem manifest overrides (composed via `includes:`).
+# Convention only — keep local config out of version control.
+.duhem.local.yml

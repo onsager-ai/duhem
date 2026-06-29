@@ -24,6 +24,26 @@ pub struct RootManifest {
     /// a manifest written against today's loader refuses to silently
     /// reinterpret a future shape.
     pub manifest_version: u32,
+    /// Other manifest files whose config this one composes in
+    /// (`docs/duhem-spec.md` §10.4, spec #67). Each path is relative
+    /// to *this* manifest's parent directory and resolves to a
+    /// **partial** manifest (every field optional, no
+    /// `manifest_version:`) — see [`PartialRootManifest`]. Same path
+    /// discipline as `verifications:` entries: no absolute paths, no
+    /// `..` escape.
+    ///
+    /// Composition is **root-wins**: an include fills only the keys
+    /// this manifest leaves absent (for nested maps like
+    /// `environments:`, key-by-key, still root-wins per leaf key).
+    /// `verifications:` (and `includes:` themselves) are *concatenated*
+    /// rather than overlaid — the root's entries first, then each
+    /// include's, in declared order. Nested includes are resolved
+    /// depth-first up to depth 3; cycles are a hard error. The typical
+    /// shape is a team-shared `.duhem.shared.yml` plus a gitignored
+    /// per-developer `.duhem.local.yml`. Additive: a manifest without
+    /// `includes:` behaves byte-identically to before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub includes: Vec<PathBuf>,
     /// Optional environment shared by the whole suite. When present, the
     /// runtime provisions it **once** (`up:` + `ready:`) before any leaf
     /// runs and tears it down **once** after the last leaf — instead of
@@ -320,6 +340,21 @@ pub enum LoadError {
     /// certainly an authoring mistake.
     #[error("{manifest}: environment `{name}` declares no keys")]
     EmptyEnvironment { manifest: PathBuf, name: String },
+    /// An `includes:` chain re-enters a file already on the chain —
+    /// resolving it would loop forever. Both ends are named: the file
+    /// that declared the offending include and the include target it
+    /// points back to.
+    #[error("{manifest}: include `{target}` forms a cycle (already in the include chain)")]
+    IncludeCycle { manifest: PathBuf, target: PathBuf },
+    /// An `includes:` chain nests deeper than the supported maximum
+    /// ([`MAX_INCLUDE_DEPTH`]). Guards against pathological fan-out and
+    /// keeps the merge bounded.
+    #[error("{manifest}: include `{target}` exceeds the maximum include depth of {max}")]
+    IncludeDepthExceeded {
+        manifest: PathBuf,
+        target: PathBuf,
+        max: usize,
+    },
 }
 
 /// Currently-supported `manifest_version` value. Bumping this is
@@ -487,7 +522,7 @@ fn load_leaf(path: &Path, src: &str) -> Result<VerificationDefinition, LoadError
 }
 
 fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
-    let manifest = RootManifest::from_yaml_str(src).map_err(|e| LoadError::Yaml {
+    let mut manifest = RootManifest::from_yaml_str(src).map_err(|e| LoadError::Yaml {
         path: manifest_path.to_path_buf(),
         source: e,
     })?;
@@ -498,6 +533,22 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
             supported: SUPPORTED_MANIFEST_VERSION,
         });
     }
+    // Compose `includes:` (spec #67) before any structural checks so
+    // the rest of this function operates on the *effective* manifest —
+    // root values plus include-supplied fills. Root-wins: an include
+    // only fills keys the root left absent. `manifest` is mutated in
+    // place into the merged result.
+    let manifest_parent = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    let root_includes = manifest.includes.clone();
+    let mut chain = vec![canonical_or_self(manifest_path)];
+    crate::includes::resolve_includes(
+        manifest_path,
+        manifest_parent,
+        &root_includes,
+        &mut manifest,
+        &mut chain,
+        0,
+    )?;
     // Named-environments discipline (spec #68): well-formed names,
     // non-empty key maps. Cheap structural checks at load time, the
     // same place the manifest-version and path checks live.
@@ -673,7 +724,7 @@ fn is_under(root: &Path, candidate: &Path) -> bool {
     c.starts_with(root)
 }
 
-fn validate_entry_path(manifest: &Path, entry: &Path) -> Result<(), LoadError> {
+pub(crate) fn validate_entry_path(manifest: &Path, entry: &Path) -> Result<(), LoadError> {
     if entry.is_absolute() {
         return Err(LoadError::AbsolutePath {
             manifest: manifest.to_path_buf(),
@@ -698,7 +749,7 @@ fn validate_entry_path(manifest: &Path, entry: &Path) -> Result<(), LoadError> {
 /// file doesn't yet exist (e.g. unit tests using temp paths that may
 /// or may not have been created). Identity comparison is "same
 /// canonical path or, failing that, same lexical path."
-fn canonical_or_self(path: &Path) -> PathBuf {
+pub(crate) fn canonical_or_self(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 

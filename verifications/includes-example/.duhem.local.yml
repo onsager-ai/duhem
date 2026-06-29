@@ -1,0 +1,12 @@
+# Per-developer manifest fragment, gitignored by convention (see the
+# .gitignore in this directory). Composed by ./duhem.yml via includes:.
+#
+# This fills the `staging.base_url` only if neither the root manifest
+# nor an earlier include already set it. Here .duhem.shared.yml sets it
+# first, so under root-wins / first-include-wins the shared value
+# stands; this `base_url` adds nothing. The `workers` key is unique to
+# this fragment, so it composes in cleanly.
+environments:
+  staging:
+    base_url: http://localhost:3000
+    workers: 1

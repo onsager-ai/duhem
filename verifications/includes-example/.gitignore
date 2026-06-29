@@ -1,0 +1,3 @@
+# Per-developer manifest overrides — composed via `includes:` but never
+# committed. Convention only; the loader does not enforce this.
+.duhem.local.yml

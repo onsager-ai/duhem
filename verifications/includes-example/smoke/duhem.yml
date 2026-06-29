@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../schema/duhem.schema.json
+# A trivial leaf for the includes: worked example (spec #67). The point
+# of the example is the manifest composition, not this check — it just
+# has to be a valid Verification Definition the manifest can resolve.
+verification: includes-example-smoke
+
+criteria:
+  - id: AC-1
+    description: |
+      A placeholder criterion so the manifest has a leaf to resolve.
+      The includes: composition demonstrated by the parent manifest is
+      the subject under test, not this assertion.
+    checks:
+      - id: AC-1.1
+        assertions:
+          - "true"

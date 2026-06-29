@@ -1,0 +1,194 @@
+# Release — cross-build the `duhem` CLI, attach binaries to a GitHub Release,
+# and publish the npm packages (platform packages first, then the main
+# `duhem` wrapper). Architecture: rust-node-ci + rust-npm-publish skills.
+#
+# Triggers:
+#   push tag v*        — real release: build, attach to GitHub Release, and
+#                        publish to npm IFF secrets.NPM_TOKEN is configured.
+#   workflow_dispatch  — dry-run: build + package + `npm publish --dry-run`,
+#                        but NEVER publish and NEVER cut a Release. Lets the
+#                        whole pipeline be verified before NPM_TOKEN exists.
+#
+# Publish guard: the `meta` job folds is-release (real tag) AND token-present
+# into a single `publish` output. A dry-run, or a tag pushed before the token
+# is added, packages everything but uploads nothing.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  meta:
+    name: Resolve version + publish gate
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is-release: ${{ steps.version.outputs.is-release }}
+      npm-tag: ${{ steps.version.outputs.npm-tag }}
+      publish: ${{ steps.gate.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: version
+        uses: ./.github/actions/compute-version
+        with:
+          event-name: ${{ github.event_name }}
+          ref: ${{ github.ref }}
+
+      # secrets.* is not available in job/step `if:` — read it into an env var
+      # here and fold token-presence + is-release into one boolean output that
+      # downstream publish steps gate on.
+      - id: gate
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ "${{ steps.version.outputs.is-release }}" = "true" ] && [ -n "$NPM_TOKEN" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "Publish ENABLED (real tag + NPM_TOKEN present)."
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Publish DISABLED (dry-run, or NPM_TOKEN not configured). Build + package only."
+          fi
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: meta
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  platform: linux-x64,     binary: duhem }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, platform: linux-arm64,   binary: duhem }
+          - { os: macos-15-intel,   target: x86_64-apple-darwin,       platform: darwin-x64,    binary: duhem }
+          - { os: macos-14,         target: aarch64-apple-darwin,      platform: darwin-arm64,  binary: duhem }
+          - { os: windows-latest,   target: x86_64-pc-windows-msvc,    platform: windows-x64,   binary: duhem.exe }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-cross-build
+        with:
+          target: ${{ matrix.target }}
+          package: duhem-cli
+          binary: ${{ matrix.binary }}
+          platform: ${{ matrix.platform }}
+
+  github-release:
+    name: GitHub Release
+    needs: [meta, build]
+    if: needs.meta.outputs.is-release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: artifacts/
+
+      - name: Assemble release archives
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          # platform -> binary filename (windows ships .exe)
+          declare -A BIN=(
+            [linux-x64]=duhem [linux-arm64]=duhem
+            [darwin-x64]=duhem [darwin-arm64]=duhem
+            [windows-x64]=duhem.exe
+          )
+          for plat in "${!BIN[@]}"; do
+            bin="${BIN[$plat]}"
+            src="artifacts/binary-${plat}/${bin}"
+            if [ ! -f "$src" ]; then echo "::error::missing $src"; exit 1; fi
+            stage="duhem-${VERSION}-${plat}"
+            mkdir -p "$stage"
+            cp "$src" "$stage/$bin"
+            cp LICENSE "$stage/LICENSE" 2>/dev/null || true
+            cp README.md "$stage/README.md" 2>/dev/null || true
+            if [ "$plat" = "windows-x64" ]; then
+              (cd "$stage" && zip -qr "../release/${stage}.zip" .)
+            else
+              chmod +x "$stage/$bin"
+              tar -czf "release/${stage}.tar.gz" -C "$stage" .
+            fi
+          done
+          (cd release && sha256sum * > SHA256SUMS.txt)
+          ls -la release
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: duhem ${{ needs.meta.outputs.version }}
+          generate_release_notes: true
+          files: release/*
+
+  publish-platforms:
+    name: Publish platform packages
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: artifacts/
+
+      - name: Sync versions to ${{ needs.meta.outputs.version }}
+        run: node npm/scripts/sync-versions.mjs --version "${{ needs.meta.outputs.version }}"
+
+      - name: Stage + validate platform binaries
+        run: node npm/scripts/prepare-platforms.mjs --artifacts artifacts
+
+      - name: Pack (dry-run validation)
+        run: node npm/scripts/publish.mjs --target platforms --tag ${{ needs.meta.outputs.npm-tag }} --dry-run
+
+      - name: Publish platform packages
+        if: needs.meta.outputs.publish == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node npm/scripts/publish.mjs --target platforms --tag ${{ needs.meta.outputs.npm-tag }}
+
+  publish-main:
+    name: Publish main package
+    needs: [meta, build, publish-platforms]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Sync versions to ${{ needs.meta.outputs.version }}
+        run: node npm/scripts/sync-versions.mjs --version "${{ needs.meta.outputs.version }}"
+
+      - name: Pack (dry-run validation)
+        run: node npm/scripts/publish.mjs --target main --tag ${{ needs.meta.outputs.npm-tag }} --dry-run
+
+      # Give the registry a moment to make the just-published platform
+      # packages resolvable before the main package references them.
+      - name: Wait for platform-package propagation
+        if: needs.meta.outputs.publish == 'true'
+        run: sleep 30
+
+      - name: Publish main package
+        if: needs.meta.outputs.publish == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node npm/scripts/publish.mjs --target main --tag ${{ needs.meta.outputs.npm-tag }}

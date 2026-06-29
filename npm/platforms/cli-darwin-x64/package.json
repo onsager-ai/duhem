@@ -1,0 +1,24 @@
+{
+  "name": "@duhem/cli-darwin-x64",
+  "version": "0.1.0",
+  "description": "Prebuilt `duhem` binary for darwin-x64.",
+  "license": "Apache-2.0",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "duhem",
+  "files": [
+    "duhem",
+    "postinstall.js"
+  ],
+  "scripts": {
+    "postinstall": "node postinstall.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/onsager-ai/duhem.git"
+  }
+}

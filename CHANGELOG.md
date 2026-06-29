@@ -24,6 +24,8 @@ criteria) lives in the spec issue that introduced
 
 - [clarifying] Project relicensed to Apache-2.0; open-source posture (spec §12/§13/§14). (#143)
 
+- [clarifying] npm + GitHub Releases distribution pipeline for the duhem CLI (release.yml, platform packages). (#143)
+
 - [clarifying] CLI manifest discovery: ancestor walk, .duhem.yml alias, -f override. (#69)
 
 - [additive] root manifest: defaults: block (environment, timeout, inconclusive_policy, retry) — sub-keys fall back to today's behavior (timeout→5s, inconclusive_policy→block, retry.max→0); retry is per-check, retrying only Inconclusive(Timeout|EnvironmentError). (#66)

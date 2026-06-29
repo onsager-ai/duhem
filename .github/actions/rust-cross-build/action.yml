@@ -1,0 +1,54 @@
+# rust-cross-build — composite action.
+#
+# Build one Cargo package for a target triple in release mode and upload just
+# the resulting binary as a `binary-<platform>` artifact for the publish job
+# to copy into its npm platform package. rust-node-ci skill pattern, trimmed
+# to a single binary + single-file upload (the matrix builds natively per
+# runner, so no cross-linker setup is needed).
+name: rust-cross-build
+description: Build a Rust binary for a target platform and upload it as an artifact.
+
+inputs:
+  target:
+    description: Rust target triple (e.g. aarch64-apple-darwin).
+    required: true
+  package:
+    description: Cargo package to build (e.g. duhem-cli).
+    required: true
+  binary:
+    description: Binary filename, including any extension (e.g. duhem or duhem.exe).
+    required: true
+  platform:
+    description: Platform key for artifact naming (e.g. darwin-arm64).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ inputs.target }}
+
+    - name: Cache cargo build
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: release-${{ inputs.platform }}
+
+    - name: Build ${{ inputs.package }} (${{ inputs.target }})
+      shell: bash
+      run: cargo build --release --locked --package "${{ inputs.package }}" --target "${{ inputs.target }}"
+
+    - name: Stage binary
+      shell: bash
+      run: |
+        mkdir -p "dist/${{ inputs.platform }}"
+        cp "target/${{ inputs.target }}/release/${{ inputs.binary }}" "dist/${{ inputs.platform }}/${{ inputs.binary }}"
+
+    - name: Upload binary artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: binary-${{ inputs.platform }}
+        path: dist/${{ inputs.platform }}/${{ inputs.binary }}
+        if-no-files-found: error
+        retention-days: 3

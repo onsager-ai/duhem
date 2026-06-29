@@ -452,6 +452,110 @@ fn inputs_last_token_wins_across_mixed_tokens() {
     );
 }
 
+/// Spec on #155: `--dry-run` prints a `RESOLVED INPUT: <name> = <value>`
+/// line per input with the *post-precedence* value (`--inputs` last-wins,
+/// then env, then default). This is the value-level assertion that was
+/// only reachable indirectly before (via a type-coercion lever): the
+/// winning value is now visible directly on stdout.
+#[test]
+fn dry_run_prints_resolved_input_values_post_precedence() {
+    let tmp = tempfile::tempdir().unwrap();
+    let v = fixture(&tmp, COUNT_VD);
+    let file = tmp.path().join("count.yml");
+    std::fs::write(&file, "count: 7\n").unwrap();
+    let file_tok = format!("@{}", file.display());
+
+    // `@file(count=7)` then `count=42` → the flag is last, so 42 wins.
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&v)
+        .arg("--dry-run")
+        .arg("--inputs")
+        .arg(&file_tok)
+        .arg("--inputs")
+        .arg("count=42")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    // Integer rendered as the coerced value (no quotes); `name` falls
+    // back to its `default: anon`.
+    assert!(
+        stdout.contains("RESOLVED INPUT: count = 42"),
+        "stdout was {stdout:?}"
+    );
+    assert!(
+        stdout.contains("RESOLVED INPUT: name = anon"),
+        "default should resolve; stdout was {stdout:?}"
+    );
+    // The losing token's value is not the resolved one.
+    assert!(
+        !stdout.contains("RESOLVED INPUT: count = 7"),
+        "losing value leaked: {stdout:?}"
+    );
+
+    // Reversed order → the `@file` value (7) is last, so 7 wins.
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&v)
+        .arg("--dry-run")
+        .arg("--inputs")
+        .arg("count=42")
+        .arg("--inputs")
+        .arg(&file_tok)
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("RESOLVED INPUT: count = 7"),
+        "file token should win; stdout was {stdout:?}"
+    );
+}
+
+/// Spec on #155: a `string` input renders bare (no surrounding quotes)
+/// so a VD substring-asserts the value cleanly, and a `--inputs` flag
+/// beats the declared `default:`.
+#[test]
+fn dry_run_resolved_input_renders_string_bare_over_default() {
+    let tmp = tempfile::tempdir().unwrap();
+    let v = fixture(&tmp, COUNT_VD);
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&v)
+        .arg("--dry-run")
+        .arg("--inputs")
+        .arg("count=1")
+        .arg("--inputs")
+        .arg("name=hello world")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    // Bare string (no quotes); the flag beat the `anon` default.
+    assert!(
+        stdout.contains("RESOLVED INPUT: name = hello world"),
+        "stdout was {stdout:?}"
+    );
+    assert!(
+        !stdout.contains("name = anon"),
+        "the flag should override the default: {stdout:?}"
+    );
+}
+
 /// Spec on #151: `key=@literal` keeps `@literal` as a literal value; the
 /// `@` only triggers file-loading as a bare leading token. We prove the
 /// distinction by contrast: the same `@nope.yml` string is a literal
@@ -665,6 +769,37 @@ fn dry_run_on_manifest_qualifies_pairs_with_verification_name() {
     );
     assert!(
         stdout.contains("WOULD RUN: leaf-b::AC-1::AC-1.1"),
+        "stdout was {stdout:?}"
+    );
+}
+
+#[test]
+fn dry_run_resolved_inputs_qualified_by_verification_name_on_manifest() {
+    // Spec on #155: on a manifest run the `RESOLVED INPUT` lines are
+    // qualified with the leaf name, mirroring the `WOULD RUN` lines. Both
+    // leaves declare no inputs, so each emits a qualified `(none)` line —
+    // exercising both the qualification and the empty-input rendering.
+    let tmp = tempfile::tempdir().unwrap();
+    let manifest = manifest_with_two_leaves(tmp.path());
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&manifest)
+        .arg("--dry-run")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("RESOLVED INPUT: leaf-a:: (none)"),
+        "stdout was {stdout:?}"
+    );
+    assert!(
+        stdout.contains("RESOLVED INPUT: leaf-b:: (none)"),
         "stdout was {stdout:?}"
     );
 }

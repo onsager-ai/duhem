@@ -34,7 +34,7 @@ use duhem_schema::{Loaded, LoadedLeaf, VerificationDefinition, load as load_defi
 use crate::filter::CliCheckFilter;
 use crate::reporter::Reporter;
 use crate::reporter_config::PluginRegistry;
-use crate::resolve::resolve_inputs;
+use crate::resolve::{render_input_value, resolve_inputs};
 
 /// Duhem — holistic verification for AI-delivered software.
 #[derive(Debug, Parser)]
@@ -539,6 +539,44 @@ async fn run_command(args: RunArgs) -> ExitCode {
         if !wrote && let Err(e) = writeln!(stdout, "WOULD RUN: (no checks matched filter)") {
             eprintln!("dry-run: {e}");
             return ExitCode::FAILURE;
+        }
+        // RESOLVED INPUTS (spec #155): the post-precedence input map
+        // (`--inputs` last-wins > selected environment > VD `default:`),
+        // one `name = value` per line so a black-box VD can assert the
+        // winning value directly off stdout — the value-level assertion
+        // that was only reachable indirectly before (via type levers).
+        // Qualified by verification name on manifest runs, mirroring the
+        // `WOULD RUN` lines. Values render deterministically (strings
+        // bare, other types as compact JSON of the coerced value).
+        for (name, _path, _def, inputs) in &resolved {
+            let leaf_filter = check_filter.as_ref().and_then(|f| f.for_verification(name));
+            if check_filter.is_some() && leaf_filter.is_none() {
+                continue;
+            }
+            if inputs.is_empty() {
+                let line = if is_manifest {
+                    format!("RESOLVED INPUT: {name}:: (none)")
+                } else {
+                    "RESOLVED INPUT: (none)".to_string()
+                };
+                if let Err(e) = writeln!(stdout, "{line}") {
+                    eprintln!("dry-run: {e}");
+                    return ExitCode::FAILURE;
+                }
+                continue;
+            }
+            for (key, value) in inputs {
+                let rendered = render_input_value(value);
+                let line = if is_manifest {
+                    format!("RESOLVED INPUT: {name}::{key} = {rendered}")
+                } else {
+                    format!("RESOLVED INPUT: {key} = {rendered}")
+                };
+                if let Err(e) = writeln!(stdout, "{line}") {
+                    eprintln!("dry-run: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
         }
         if let Err(e) = stdout.flush() {
             eprintln!("dry-run: {e}");

@@ -20,6 +20,8 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [clarifying] duhem run --dry-run now prints a RESOLVED INPUTS block (name = value, post-precedence), enabling value-level input assertions in black-box VDs. (#155)
+
 - [breaking] CLI: removed run flags --seed and --headed (use DUHEM_HEADED=1), and folded --inputs-file into --inputs @file.yml (repeatable, mixable with k=v, last-wins). No VD-schema change; SCHEMA_VERSION unchanged. Breaking CLI surface → next release is a product minor (0.2.0). (#151)
 
 - [clarifying] Duhem-on-Duhem dashboard regression VD (verifications/duhem-dashboard/). (#148)

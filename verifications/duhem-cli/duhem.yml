@@ -256,8 +256,8 @@ criteria:
   # it drives the offline `fixtures/inputs-fixture.yml` leaf with `--dry-run`,
   # so loading / precedence / rejection are observable via exit code + stdout/
   # stderr with no browser. Behaviors are asserted through type-validation and
-  # required-input levers (the resolved value itself is not printed by
-  # `--dry-run`; see the PR's DX note).
+  # required-input levers — and, since #155, directly off the `RESOLVED
+  # INPUT` block that `--dry-run` prints (the post-precedence value map).
   # ==========================================================================
   - id: AC-6
     description: |
@@ -506,3 +506,81 @@ criteria:
           - matches:
               value: $steps.rejected_inputs_file.outputs.stderr
               pattern: 'unexpected argument'
+
+  # ==========================================================================
+  # #155 — `--dry-run` prints the resolved input map. Before #155, `--dry-run`
+  # printed only the `WOULD RUN` plan, so a black-box VD could assert input
+  # last-wins only INDIRECTLY (via the `integer` type lever in AC-7: position a
+  # non-integer token to flip success/failure). #155 adds a `RESOLVED INPUT:
+  # <name> = <value>` block carrying the post-precedence value, so the winning
+  # value is asserted DIRECTLY off stdout — the one low-fidelity point the #151
+  # DX comparison (epic #148) flagged. Both checks reuse the offline
+  # `fixtures/count.yml` (`count: 7`) and stay page-free under `--dry-run`.
+  # ==========================================================================
+  - id: AC-10
+    description: |
+      `--dry-run` prints a `RESOLVED INPUT: <name> = <value>` line per
+      input, carrying the post-precedence value (`--inputs` last-wins >
+      env > default). The last-wins winner is now observable on the value
+      itself, not only via a downstream type effect.
+    checks:
+      - id: AC-10.1
+        description: |
+          `--inputs @count.yml --inputs count=99` — the raw flag is last,
+          so `count = 99` wins; `name` (unset) shows its `default: anon`.
+          Both are asserted directly off the `RESOLVED INPUT` block.
+        steps:
+          - id: flag_value_wins
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - run
+                - verifications/duhem-cli/fixtures/inputs-fixture.yml
+                - --dry-run
+                - --inputs
+                - '@verifications/duhem-cli/fixtures/count.yml'
+                - --inputs
+                - count=99
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+              stdout: stdout
+        assertions:
+          - $steps.flag_value_wins.outputs.exit_code == 0
+          - matches:
+              value: $steps.flag_value_wins.outputs.stdout
+              pattern: 'RESOLVED INPUT: count = 99'
+          - matches:
+              value: $steps.flag_value_wins.outputs.stdout
+              pattern: 'RESOLVED INPUT: name = anon'
+      - id: AC-10.2
+        description: |
+          Reversed order — `--inputs count=99 --inputs @count.yml` — the
+          `@file` value is last, so `count = 7` (the file's value) wins.
+          Asserting the resolved value flips with token order proves
+          last-wins on the value directly, no type lever needed.
+        steps:
+          - id: file_value_wins
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - run
+                - verifications/duhem-cli/fixtures/inputs-fixture.yml
+                - --dry-run
+                - --inputs
+                - count=99
+                - --inputs
+                - '@verifications/duhem-cli/fixtures/count.yml'
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+              stdout: stdout
+        assertions:
+          - $steps.file_value_wins.outputs.exit_code == 0
+          - matches:
+              value: $steps.file_value_wins.outputs.stdout
+              pattern: 'RESOLVED INPUT: count = 7'

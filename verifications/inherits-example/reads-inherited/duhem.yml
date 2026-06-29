@@ -11,7 +11,7 @@
 #
 #   - `$inputs.base_url` is the inherited input the selected
 #     environment's `base_url` key bound (resolution precedence:
-#     --inputs > --inputs-file > selected env). There is no local
+#     --inputs [KEY=VALUE / @file] > selected env). There is no local
 #     `default:` floor — an inherited name has no local declaration.
 #   - `$env.base_url` / `$env.region` are the same env's string-valued
 #     keys, auto-whitelisted for this run.

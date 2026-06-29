@@ -1,0 +1,20 @@
+# Fixture VD for the #151 `--inputs` AC group in ../duhem.yml. A single
+# required integer input (`count`) makes "did the file load?" observable
+# (a missing value fails resolution) and is the type lever for last-wins
+# (the losing string `count=notanumber` would fail integer coercion).
+# `name` is an optional string used by the `key=@literal` check. The sole
+# check is a trivial `true` assertion, so the fixture is page-free and
+# every AC reaches a verdict via `--dry-run` (no browser, fully offline).
+verification: inputs-fixture
+inputs:
+  count:
+    type: integer
+  name:
+    type: string
+    default: anon
+criteria:
+  - id: AC-1
+    description: trivially passing
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]

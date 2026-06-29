@@ -5,7 +5,7 @@
 #
 #   - `$inputs.base_url` is the declared input the selected env's
 #     `base_url` key populates (resolution precedence layer 3, below
-#     --inputs / --inputs-file, above the `default:` floor).
+#     --inputs [KEY=VALUE / @file], above the `default:` floor).
 #   - `$env.base_url` and `$env.region` are the same env's
 #     string-valued keys, auto-whitelisted for this run.
 #

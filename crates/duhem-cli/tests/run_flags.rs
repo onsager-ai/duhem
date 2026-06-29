@@ -350,38 +350,41 @@ fn dry_run_with_filter_that_matches_nothing_emits_explicit_signal() {
     );
 }
 
-/// Spec on #33: `--inputs-file` supplies inputs; explicit `--inputs`
-/// wins on the same key. Verifying via `--dry-run` so this test stays
-/// browser-free.
-#[test]
-fn inputs_file_loads_yaml_and_dry_run_succeeds() {
-    let tmp = tempfile::tempdir().unwrap();
-    let v = tmp.path().join("v.yml");
-    std::fs::write(
-        &v,
-        r#"
+/// A VD with one required integer input and one optional string input.
+/// Used by the #151 `--inputs @file` tests: the required `count` makes
+/// "did the file load?" observable (a missing value fails resolution),
+/// and its `integer` type is the lever for asserting last-wins (the
+/// losing string `count=notanumber` would fail coercion).
+const COUNT_VD: &str = r#"
 verification: smoke
 inputs:
-  base_url: { type: string }
   count: { type: integer }
+  name: { type: string, default: anon }
 criteria:
   - id: AC-1
     description: x
     checks:
       - id: AC-1.1
         assertions: ["true"]
-"#,
-    )
-    .unwrap();
+"#;
+
+/// Spec on #151: `--inputs @file` loads a YAML/JSON mapping; verifying
+/// via `--dry-run` so this test stays browser-free. The control case
+/// (no `--inputs`) fails resolution on the required `count`, proving the
+/// `@file` is what supplied it.
+#[test]
+fn inputs_at_file_loads_yaml_and_dry_run_succeeds() {
+    let tmp = tempfile::tempdir().unwrap();
+    let v = fixture(&tmp, COUNT_VD);
     let inputs_file = tmp.path().join("inputs.yml");
-    std::fs::write(&inputs_file, "base_url: http://staging\ncount: 5\n").unwrap();
+    std::fs::write(&inputs_file, "count: 5\n").unwrap();
 
     let out = Command::new(bin())
         .arg("run")
         .arg(&v)
         .arg("--dry-run")
-        .arg("--inputs-file")
-        .arg(&inputs_file)
+        .arg("--inputs")
+        .arg(format!("@{}", inputs_file.display()))
         .output()
         .expect("spawn duhem");
     assert!(
@@ -389,18 +392,124 @@ criteria:
         "stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
+
+    // Control: without the `@file`, the required `count` is unresolved.
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&v)
+        .arg("--dry-run")
+        .output()
+        .expect("spawn duhem");
+    assert!(!out.status.success(), "missing required input should fail");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("missing required input") && stderr.contains("count"),
+        "stderr should name the missing input: {stderr}"
+    );
+}
+
+/// Spec on #151: `--inputs` tokens are last-wins in declared order. We
+/// observe which value is in effect via the `integer` type lever — the
+/// losing token never gets coerced, so order flips success/failure.
+#[test]
+fn inputs_last_token_wins_across_mixed_tokens() {
+    let tmp = tempfile::tempdir().unwrap();
+    let v = fixture(&tmp, COUNT_VD);
+    let good = tmp.path().join("count.yml");
+    std::fs::write(&good, "count: 7\n").unwrap();
+    let good_tok = format!("@{}", good.display());
+
+    // `@file` then a non-integer flag → the flag wins → coercion fails.
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&v)
+        .arg("--dry-run")
+        .arg("--inputs")
+        .arg(&good_tok)
+        .arg("--inputs")
+        .arg("count=notanumber")
+        .output()
+        .expect("spawn duhem");
+    assert!(!out.status.success(), "raw token should win and fail");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("integer"), "stderr: {stderr}");
+
+    // Reversed order → the valid `@file` value wins → success.
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&v)
+        .arg("--dry-run")
+        .arg("--inputs")
+        .arg("count=notanumber")
+        .arg("--inputs")
+        .arg(&good_tok)
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "file token should win; stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// Spec on #151: `key=@literal` keeps `@literal` as a literal value; the
+/// `@` only triggers file-loading as a bare leading token. We prove the
+/// distinction by contrast: the same `@nope.yml` string is a literal
+/// after `=` (succeeds) but a missing-file ref as a bare token (fails).
+#[test]
+fn key_at_literal_is_not_treated_as_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let v = fixture(&tmp, COUNT_VD);
+    let good = tmp.path().join("count.yml");
+    std::fs::write(&good, "count: 7\n").unwrap();
+    let good_tok = format!("@{}", good.display());
+
+    // `name=@nope.yml` → literal string value, no file load → success.
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&v)
+        .arg("--dry-run")
+        .arg("--inputs")
+        .arg(&good_tok)
+        .arg("--inputs")
+        .arg("name=@nope.yml")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "key=@literal must not load a file; stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // The same string as a bare leading token IS a file ref → missing.
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&v)
+        .arg("--dry-run")
+        .arg("--inputs")
+        .arg(&good_tok)
+        .arg("--inputs")
+        .arg("@nope.yml")
+        .output()
+        .expect("spawn duhem");
+    assert!(!out.status.success(), "bare @file should load and fail");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("nope.yml"),
+        "stderr should name file: {stderr}"
+    );
 }
 
 #[test]
-fn inputs_file_missing_file_errors_before_browser_launch() {
+fn inputs_missing_at_file_errors_before_browser_launch() {
     let tmp = tempfile::tempdir().unwrap();
     let path = fixture(&tmp, ONE_CRITERION);
 
     let out = Command::new(bin())
         .arg("run")
         .arg(&path)
-        .arg("--inputs-file")
-        .arg("/no/such/file.yml")
+        .arg("--inputs")
+        .arg("@/no/such/file.yml")
         .output()
         .expect("spawn duhem");
     assert!(!out.status.success());
@@ -409,6 +518,38 @@ fn inputs_file_missing_file_errors_before_browser_launch() {
         stderr.contains("/no/such/file.yml"),
         "stderr should name the path: {stderr}"
     );
+}
+
+/// Spec on #151: the pruned flags `--seed`, `--headed`, `--inputs-file`
+/// are now unknown to clap — each fails fast with a non-zero exit and an
+/// "unexpected argument" diagnostic, before any browser launch.
+#[test]
+fn removed_flags_are_rejected_as_unknown() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ONE_CRITERION);
+
+    for args in [
+        vec!["--seed", "1"],
+        vec!["--headed"],
+        vec!["--inputs-file", "x.yml"],
+    ] {
+        let out = Command::new(bin())
+            .arg("run")
+            .arg(&path)
+            .args(&args)
+            .output()
+            .expect("spawn duhem");
+        assert!(
+            !out.status.success(),
+            "`{args:?}` should be rejected as unknown"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("unexpected argument") || stderr.contains(args[0]),
+            "stderr should flag the unknown arg `{}`: {stderr}",
+            args[0]
+        );
+    }
 }
 
 /// Spec on #34 Test § "Error: unknown name yields exit 2 with

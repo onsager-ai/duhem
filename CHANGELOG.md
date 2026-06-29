@@ -20,6 +20,8 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [breaking] CLI: removed run flags --seed and --headed (use DUHEM_HEADED=1), and folded --inputs-file into --inputs @file.yml (repeatable, mixable with k=v, last-wins). No VD-schema change; SCHEMA_VERSION unchanged. Breaking CLI surface → next release is a product minor (0.2.0). (#151)
+
 - [clarifying] Duhem-on-Duhem dashboard regression VD (verifications/duhem-dashboard/). (#148)
 
 - [clarifying] Duhem-on-Duhem CLI regression VD (verifications/duhem-cli/) — black-box coverage of the `--version` / `validate` / `init` / `run` contract via cli/invoke; self-verify CI lane. (#148)

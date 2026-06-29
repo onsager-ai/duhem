@@ -1,0 +1,45 @@
+# Fixture run source for the duhem-dashboard regression VD (part of #148).
+#
+# This is NOT the dashboard VD itself — it is the tiny, offline,
+# page-free Verification Definition that `scripts/up.sh` executes to
+# PRODUCE a real run for the dashboard to serve. Running it through the
+# real `duhem run` pipeline writes a genuine `trace.jsonl` in the
+# production evidence format (the same `EvidenceWriter` output the
+# dashboard reads in anger), so the dashboard VD exercises a real run's
+# evidence — no hand-written trace, no mock.
+#
+# It must stay:
+#   - page-free  — one `cli/invoke` step (no browser), so producing the
+#                  fixture needs no Playwright.
+#   - offline    — `echo` only; no network, no SUT.
+#   - green      — verdict `pass`, one criterion (AC-1) holding one
+#                  check (AC-1.1), so the dashboard renders a verdict +
+#                  a criteria/check table the VD can assert against.
+#
+# `up.sh` renames the produced run directory to the fixed run id
+# `dashboard-fixture-run` so the dashboard VD's URLs are deterministic.
+
+verification: duhem-dashboard fixture run
+
+criteria:
+  - id: AC-1
+    description: |
+      A passing criterion that produces a rendered check in the
+      dashboard — one real step plus one mechanical assertion, so the
+      served run has a verdict and a criterion/check row to display.
+    checks:
+      - id: AC-1.1
+        description: |
+          Invoke a trivial offline command and assert it exits cleanly.
+          The `cli/invoke` step emits a real `step_started` so the
+          dashboard lists the check under its criterion.
+        steps:
+          - id: ok
+            uses: cli/invoke
+            with:
+              command: [echo, duhem-dashboard-fixture]
+              within: 15s
+            outputs:
+              exit_code: exit_code
+        assertions:
+          - $steps.ok.outputs.exit_code == 0

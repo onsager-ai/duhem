@@ -20,6 +20,8 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [clarifying] Duhem-on-Duhem dashboard regression VD (verifications/duhem-dashboard/). (#148)
+
 - [clarifying] Duhem-on-Duhem CLI regression VD (verifications/duhem-cli/) — black-box coverage of the `--version` / `validate` / `init` / `run` contract via cli/invoke; self-verify CI lane. (#148)
 
 ## v0.1.0 — 2026-06-29

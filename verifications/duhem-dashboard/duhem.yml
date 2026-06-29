@@ -1,0 +1,240 @@
+# ============================================================================
+# Duhem-on-Duhem — the `duhem dashboard` web surface (REGRESSION coverage,
+# part of #148)
+# ============================================================================
+#
+# SELF-REFERENCE CAVEAT — READ BEFORE TRUSTING A GREEN RUN.
+#
+# This Verification Definition drives the REAL `duhem dashboard` — its
+# real embedded React/Vite SPA, its real JSON API, and its real live
+# SSE stream — over a REAL run's evidence, and mechanically asserts the
+# contract a dashboard operator depends on. It is self-referential:
+# Duhem is verifying a Duhem product surface.
+#
+# That is FINE for a regression safety net and explicitly NOT FINE as a
+# trust anchor. Per the Asymmetric-trust identity commitment
+# (`docs/duhem-spec.md` §11.2), the verifier of AI claims must be
+# structurally independent of the AI making them. Duhem verifying Duhem
+# is correlated failure: a judge defect that wrongly PASSES could
+# equally wrongly pass its own self-test. So:
+#
+#   - In scope:  catch regressions in the dashboard's user-facing
+#                surfaces ("did we break the JSON API / the SPA render /
+#                the SSE stream?"). Complements the white-box tests in
+#                `crates/duhem-dashboard/tests/` with black-box,
+#                whole-binary coverage of the served product.
+#   - Not a goal: treating a green run here as independent attestation.
+#                The asymmetric Onsager seam holds that role
+#                (`.claude/skills/onsager-dogfood/SKILL.md`).
+#
+# HOLISTIC POSTURE (`docs/duhem-spec.md` §8): no mocks. `environment.up`
+# produces a REAL run by executing the offline `fixture/` VD through the
+# real `duhem run` pipeline (writing a genuine `trace.jsonl` in the
+# production evidence format), then launches the real `duhem dashboard`
+# binary serving that evidence. AC-1 hits the live JSON API, AC-2 drives
+# the real embedded SPA in a real browser, AC-3 reads the real SSE
+# stream. The SPA only renders a verdict because the API actually served
+# it; the API only serves a verdict because the judge actually recorded
+# it.
+#
+# Run it (from the repo root, against a locally built binary):
+#   just dashboard-build            # SPA bundle embedded into the binary
+#   cargo build -p duhem-cli
+#   cd crates/duhem-actions/sidecar && npm ci && npx playwright install chromium && cd -
+#   DUHEM_BIN="$PWD/target/debug/duhem" \
+#     ./target/debug/duhem run verifications/duhem-dashboard
+# (DUHEM_BIN is read by scripts/up.sh; `duhem dashboard` resolves the
+# sibling `duhem-dashboard` binary next to it.)
+
+verification: Duhem — the dashboard web surface (self-regression)
+spec_ref: https://github.com/onsager-ai/duhem/issues/148
+
+# Operator-supplied environment provisioning (mechanism from #50).
+# `./scripts/up.sh` produces a fixture run and launches the dashboard;
+# `./scripts/down.sh` stops it. The readiness probe gates the checks on
+# the dashboard's JSON list endpoint returning 200 — that one URL
+# confirms the server bound the port and can read the evidence dir.
+#
+# NOTE: the `up:`/`down:` child runs with a sanitized env and does NOT
+# receive these `inputs` (only PATH/HOME/TMPDIR/LANG/LC_*/DUHEM_*
+# survive — see `crates/duhem-runtime/src/engine/env.rs`). The binary
+# under test and the port are therefore script-side DUHEM_* env vars
+# (DUHEM_BIN, DUHEM_DASHBOARD_PORT), not VD inputs. The inputs below are
+# the URLs the *steps* and the readiness probe hit; their `:7878` MUST
+# match DUHEM_DASHBOARD_PORT. See `./README.md`.
+environment:
+  up: ./scripts/up.sh
+  down: ./scripts/down.sh
+  ready:
+    http:
+      url: $inputs.runs_url
+      timeout: 60s
+
+inputs:
+  # The dashboard's default loopback host:port. Whole-string URL inputs
+  # (no string concatenation in templates yet — same constraint the
+  # arbor/onsager VDs work around), one per endpoint the VD touches. The
+  # fixed run id `dashboard-fixture-run` is set by `scripts/up.sh`, which
+  # renames the produced run directory to it.
+  runs_url:
+    type: string
+    default: http://127.0.0.1:7878/api/runs
+  run_detail_url:
+    type: string
+    default: http://127.0.0.1:7878/api/runs/dashboard-fixture-run
+  live_url:
+    type: string
+    default: http://127.0.0.1:7878/api/runs/dashboard-fixture-run/live
+  # Hash-routed SPA deep link to the run detail page (#86 uses hash
+  # routing so a static export deep-links on a dumb file host).
+  run_page_url:
+    type: string
+    default: http://127.0.0.1:7878/#/run/dashboard-fixture-run
+
+criteria:
+  - id: AC-1
+    description: |
+      The dashboard's JSON API serves the run's recorded verdict and its
+      criteria/check breakdown in the documented shape, so any client
+      (the SPA, a static export, an operator's curl) reads the judge's
+      verdict straight from the evidence — never a re-judged one.
+    checks:
+      - id: AC-1.1
+        description: |
+          One holistic slice of the read API: the runs list
+          (`GET /api/runs`) carries the leaf run with its verdict, and
+          the run detail (`GET /api/runs/<id>`) carries the same verdict
+          plus the criterion → check tree, each node shaped and valued
+          as recorded.
+        steps:
+          - id: list
+            uses: api/call
+            with:
+              method: GET
+              url: $inputs.runs_url
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: detail
+            uses: api/call
+            with:
+              method: GET
+              url: $inputs.run_detail_url
+              within: 15s
+            outputs:
+              status: status
+              body: body
+        assertions:
+          # The list endpoint answers and carries the fixture leaf run.
+          - $steps.list.outputs.status == 200
+          - $steps.list.outputs.body[0].run_id == "dashboard-fixture-run"
+          - $steps.list.outputs.body[0].verdict == "pass"
+          - $steps.list.outputs.body[0].kind == "leaf"
+          - exists: $steps.list.outputs.body[0].verification
+          # The detail endpoint answers with the same verdict and the
+          # full criterion/check tree, valued as the judge recorded it.
+          - $steps.detail.outputs.status == 200
+          - $steps.detail.outputs.body.run_id == "dashboard-fixture-run"
+          - $steps.detail.outputs.body.verdict == "pass"
+          - $steps.detail.outputs.body.criteria[0].id == "AC-1"
+          - $steps.detail.outputs.body.criteria[0].verdict == "pass"
+          - $steps.detail.outputs.body.criteria[0].checks[0].id == "AC-1.1"
+          - $steps.detail.outputs.body.criteria[0].checks[0].verdict == "pass"
+
+  - id: AC-2
+    description: |
+      An operator opening a run in the dashboard sees the run rendered:
+      the app shell loads, the run's verdict is shown, and the run's
+      criteria and checks are listed. The browser actually executes the
+      shipped SPA bundle against the live API — not a placeholder page.
+    checks:
+      - id: AC-2.1
+        description: |
+          Navigate a real browser to the run detail deep link and
+          observe the rendered DOM: the `Duhem` app-shell heading, the
+          run header showing the `pass` verdict, and the criterion's
+          check (`AC-1.1`) listed as a link into the check page.
+        steps:
+          - uses: ui/navigate
+            with:
+              url: $inputs.run_page_url
+          - id: shell
+            uses: ui/assert-element
+            with:
+              # The real SPA shell renders `<h1>Duhem</h1>`; the build.rs
+              # placeholder index does not. Its presence is evidence the
+              # embedded bundle (not the fallback) is being served.
+              locator: { role: heading, name: Duhem }
+              expected: visible
+              within: 15s
+            outputs:
+              satisfied: satisfied
+          - id: verdict_rendered
+            uses: ui/assert-element
+            with:
+              # The run header is `{verification} · {run_id} <verdict>`;
+              # a heading containing `pass` is the verdict badge rendered
+              # into the run summary from the fetched detail.
+              locator: { role: heading, text: pass }
+              expected: visible
+              within: 15s
+            outputs:
+              satisfied: satisfied
+          - id: check_listed
+            uses: ui/assert-element
+            with:
+              # Each check renders as a link to its check page. The
+              # `AC-1.1` link existing proves the criterion → check table
+              # was built from the live run detail.
+              locator: { role: link, name: AC-1.1 }
+              expected: visible
+              within: 15s
+            outputs:
+              satisfied: satisfied
+        assertions:
+          - $steps.shell.outputs.satisfied == true
+          - $steps.verdict_rendered.outputs.satisfied == true
+          - $steps.check_listed.outputs.satisfied == true
+
+  - id: AC-3
+    description: |
+      The dashboard's live stream replays a run's evidence to a
+      connecting client over Server-Sent Events, ending the stream once
+      the run has finished — so an operator watching a run receives the
+      trace events and the final recorded verdict, in the documented SSE
+      shape.
+    checks:
+      - id: AC-3.1
+        description: |
+          Open the live SSE endpoint for the finished fixture run. By the
+          replay-then-follow contract a finished run replays its whole
+          trace and closes, so a single read returns the full
+          `text/event-stream` body. Assert it answers 200 and the stream
+          carries `trace` events through the recorded `run_finished`
+          verdict.
+        steps:
+          - id: sse
+            uses: api/call
+            with:
+              method: GET
+              url: $inputs.live_url
+              within: 20s
+            outputs:
+              status: status
+              body_text: body_text
+        assertions:
+          - $steps.sse.outputs.status == 200
+          # Replay-then-follow: each trace line is one `trace` SSE event.
+          - matches:
+              value: $steps.sse.outputs.body_text
+              pattern: 'event: trace'
+          # The stream reaches the run's terminal event...
+          - matches:
+              value: $steps.sse.outputs.body_text
+              pattern: 'run_finished'
+          # ...carrying the verdict the judge recorded (ties the live
+          # stream to the same `pass` the API and SPA surface).
+          - matches:
+              value: $steps.sse.outputs.body_text
+              pattern: '"verdict":"pass"'

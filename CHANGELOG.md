@@ -24,6 +24,8 @@ criteria) lives in the spec issue that introduced
 
 - [additive] root manifest: defaults: block (environment, timeout, inconclusive_policy, retry) — sub-keys fall back to today's behavior (timeout→5s, inconclusive_policy→block, retry.max→0); retry is per-check, retrying only Inconclusive(Timeout|EnvironmentError). (#66)
 
+- [additive] root manifest: includes: block for shared + local config composition — root-wins merge (includes fill only absent keys), verifications concatenated, depth ≤ 3, cycle-detected; PartialRootManifest type added. (#67)
+
 - [additive] VD leaves may declare inherits: [name, ...] to pull shared inputs from the parent manifest's environment chain instead of redeclaring them; $inputs.<name> resolves against inputs ∪ inherits, an inherited name also declared under inputs: is an error, and an unresolved inherited input fails loudly with the suite/--inputs remedy. (#135)
 
 - [additive] Root manifest gains an environments: block (named env configs) injected into leaf input resolution (precedence: --inputs > --inputs-file > selected env > VD default) and the $env whitelist; CLI --environment selects, single env auto-selects. (#68)

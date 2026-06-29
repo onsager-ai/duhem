@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../schema/duhem.schema.json
+#
+# Worked example for `includes:` composition (spec #67).
+#
+# This root manifest is team-shared and committed. It composes two
+# include fragments under the root-wins rule (an include fills only the
+# keys this manifest leaves absent; `verifications:` are concatenated):
+#
+#   - .duhem.shared.yml  — team-shared defaults (committed)
+#   - .duhem.local.yml   — per-developer overrides (gitignore by
+#                          convention; see .gitignore in this dir)
+#
+# Run it with:
+#   cargo run -p duhem-cli -- run verifications/includes-example/
+manifest_version: 1
+includes:
+  - ./.duhem.shared.yml
+  - ./.duhem.local.yml
+environments:
+  staging:
+    # Declared by the root → root wins even though .duhem.local.yml
+    # also sets it. Edit the include, not this line, for a local
+    # override.
+    region: us-east-1
+verifications:
+  - path: ./smoke/duhem.yml

@@ -234,6 +234,24 @@ pub(crate) fn run_with_prompt(
                     manifest.display(),
                     target.display(),
                 ));
+
+                // Per-developer override fragment (spec #67 `includes:`):
+                // a gitignored `.duhem.local.yml` alongside the root
+                // manifest, plus a `.gitignore` snippet so it stays out
+                // of version control. Convention only — the loader does
+                // not check git. Both are scaffolded only when we just
+                // created the root manifest (Pattern B), and never
+                // clobber a pre-existing file.
+                let local = parent.join(".duhem.local.yml");
+                if !local.exists() {
+                    fs::write(
+                        &local,
+                        include_str!("../templates/init-pattern-b/duhem.local.yml"),
+                    )
+                    .map_err(|e| InitError::Io(format!("write {}: {e}", local.display())))?;
+                    created.push(local.clone());
+                }
+                append_gitignore_snippet(parent, &mut created, &mut warnings)?;
             }
         }
     }
@@ -255,6 +273,46 @@ fn write_template(
     fs::write(path, rendered)
         .map_err(|e| InitError::Io(format!("write {}: {e}", path.display())))?;
     created.push(path.to_path_buf());
+    Ok(())
+}
+
+/// Ensure `<dir>/.gitignore` carries the `.duhem.local.yml` ignore rule
+/// (spec #67). The per-developer include is gitignored by convention,
+/// not by the loader, so the scaffold writes the rule for the author.
+/// Creates the file if absent, appends the rule if the file exists but
+/// doesn't already mention `.duhem.local.yml`, and otherwise leaves it
+/// untouched (idempotent re-scaffold).
+fn append_gitignore_snippet(
+    dir: &Path,
+    created: &mut Vec<PathBuf>,
+    warnings: &mut Vec<String>,
+) -> Result<(), InitError> {
+    const RULE: &str = ".duhem.local.yml";
+    let snippet = include_str!("../templates/init-pattern-b/gitignore-snippet");
+    let gitignore = dir.join(".gitignore");
+    if gitignore.exists() {
+        let existing = fs::read_to_string(&gitignore)
+            .map_err(|e| InitError::Io(format!("read {}: {e}", gitignore.display())))?;
+        if existing.lines().any(|l| l.trim() == RULE) {
+            return Ok(());
+        }
+        let mut next = existing;
+        if !next.is_empty() && !next.ends_with('\n') {
+            next.push('\n');
+        }
+        next.push('\n');
+        next.push_str(snippet);
+        fs::write(&gitignore, next)
+            .map_err(|e| InitError::Io(format!("write {}: {e}", gitignore.display())))?;
+        warnings.push(format!(
+            "appended `.duhem.local.yml` ignore rule to {}",
+            gitignore.display(),
+        ));
+    } else {
+        fs::write(&gitignore, snippet)
+            .map_err(|e| InitError::Io(format!("write {}: {e}", gitignore.display())))?;
+        created.push(gitignore);
+    }
     Ok(())
 }
 
@@ -593,8 +651,10 @@ mod tests {
             ok_prompt,
         )
         .expect("init ok");
-        // duhem.yml + criteria.md + README.md + ../duhem.yml
-        assert_eq!(outcome.created.len(), 4, "created: {:?}", outcome.created);
+        // duhem.yml + criteria.md + README.md + ../duhem.yml +
+        // ../.duhem.local.yml + ../.gitignore (spec #67 includes:
+        // scaffolding).
+        assert_eq!(outcome.created.len(), 6, "created: {:?}", outcome.created);
         assert_eq!(outcome.warnings.len(), 1);
         let warn = &outcome.warnings[0];
         assert!(warn.contains("TODO-stub"), "warning text: {warn}");
@@ -604,6 +664,63 @@ mod tests {
         assert!(
             body.contains("feature/duhem.yml"),
             "stub mentions per-feature path: {body}"
+        );
+    }
+
+    #[test]
+    fn pattern_b_scaffolds_local_override_and_gitignore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("feature");
+        run_with_prompt(
+            InitArgs {
+                path: Some(target.clone()),
+                pattern: Pattern::B,
+                name: Some("feature".into()),
+                force: false,
+            },
+            ok_prompt,
+        )
+        .expect("init ok");
+        // The gitignored per-developer fragment lands next to the
+        // root manifest, and a `.gitignore` ignores it.
+        let local = tmp.path().join(".duhem.local.yml");
+        assert!(local.is_file(), "local override scaffolded");
+        let gitignore = tmp.path().join(".gitignore");
+        assert!(gitignore.is_file(), ".gitignore scaffolded");
+        let ignore_body = std::fs::read_to_string(&gitignore).unwrap();
+        assert!(
+            ignore_body.lines().any(|l| l.trim() == ".duhem.local.yml"),
+            ".gitignore carries the rule: {ignore_body}"
+        );
+        // The fragment is a valid partial manifest (no manifest_version).
+        let local_body = std::fs::read_to_string(&local).unwrap();
+        duhem_schema::PartialRootManifest::from_yaml_str(&local_body)
+            .expect("local override parses as a partial manifest");
+    }
+
+    #[test]
+    fn pattern_b_appends_to_existing_gitignore_without_duplicating() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(".gitignore"), "target/\n").unwrap();
+        let target = tmp.path().join("feature");
+        run_with_prompt(
+            InitArgs {
+                path: Some(target),
+                pattern: Pattern::B,
+                name: Some("feature".into()),
+                force: false,
+            },
+            ok_prompt,
+        )
+        .expect("init ok");
+        let body = std::fs::read_to_string(tmp.path().join(".gitignore")).unwrap();
+        assert!(body.contains("target/"), "preserved existing rule: {body}");
+        assert_eq!(
+            body.lines()
+                .filter(|l| l.trim() == ".duhem.local.yml")
+                .count(),
+            1,
+            "rule added exactly once: {body}"
         );
     }
 

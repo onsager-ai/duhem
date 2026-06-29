@@ -10,6 +10,7 @@ pub mod assertion;
 pub mod criterion;
 pub mod environment;
 pub mod expr;
+pub mod includes;
 pub mod jsonschema;
 pub mod manifest;
 pub mod step;
@@ -20,6 +21,7 @@ pub use assertion::{Assertion, TypeCheckKind};
 pub use criterion::{Check, Criterion};
 pub use environment::{DurationSpec, Environment, HttpReadyProbe, ReadyProbe};
 pub use expr::{BinOp, Expr, ExprStr, Literal, ParseError, Path, PathRoot, UnaryOp};
+pub use includes::PartialRootManifest;
 pub use jsonschema::json_schema;
 pub use manifest::{
     InconclusivePolicy, LoadError, Loaded, LoadedLeaf, ManifestDefaults, ManifestEntry,

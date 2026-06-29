@@ -1,0 +1,13 @@
+# Per-developer manifest overrides — composed into the sibling
+# `duhem.yml` via its `includes:` block (spec #67). Gitignored by
+# convention (see `.gitignore`); never committed.
+#
+# A partial manifest: every field is optional and `manifest_version:`
+# is NOT allowed here (the root manifest owns the version). Composition
+# is root-wins — anything you set here fills only the keys the root
+# manifest leaves absent. Uncomment and edit as needed:
+#
+# environments:
+#   local:
+#     base_url: http://localhost:3000
+{}

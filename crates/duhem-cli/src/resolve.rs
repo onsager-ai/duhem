@@ -212,6 +212,19 @@ fn coerce_input(name: &str, kind: InputType, v: &str) -> Result<serde_json::Valu
     }
 }
 
+/// Render a resolved input value for the `--dry-run` `RESOLVED INPUT`
+/// block (spec #155). A string renders bare — no surrounding quotes —
+/// so a black-box VD can assert the winning value directly off stdout;
+/// every other JSON type renders as compact JSON, a deterministic and
+/// parseable form for the *coerced* value (e.g. an `integer` input
+/// shows `3`, a `boolean` shows `true`, an `object` shows `{"k":1}`).
+pub(crate) fn render_input_value(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
 fn json_shape_name(v: &serde_json::Value) -> &'static str {
     match v {
         serde_json::Value::Null => "null",

@@ -1,0 +1,67 @@
+# Self-verify — Duhem-on-Duhem regression coverage (epic #148).
+#
+# Drives the REAL `duhem` binary through the `verifications/duhem-cli`
+# Verification Definition (which uses `cli/invoke`) and gates on the
+# verdict. This is black-box regression coverage of the CLI contract
+# (`--version` / `validate` / `init` / `run`), complementing the
+# white-box cargo tests in `crates/duhem-cli/tests/`.
+#
+# NOT the Onsager dogfood. This job is intentionally separate from
+# `dogfood.yml`: per the Asymmetric-trust commitment
+# (`docs/duhem-spec.md` §11.2), Duhem verifying Duhem is a regression
+# safety net, not an independent trust anchor — the Onsager seam holds
+# that role. See the caveat header in `verifications/duhem-cli/duhem.yml`.
+#
+# Scoped to PRs that touch the CLI or this VD so it stays a fast,
+# targeted gate. Fully offline + page-free (every step is `cli/invoke`,
+# which needs no browser), so no Node / Playwright setup is required.
+
+name: self-verify
+
+on:
+  pull_request:
+    paths:
+      - 'crates/duhem-cli/**'
+      - 'verifications/duhem-cli/**'
+      - 'verifications/defaults-example/**'
+      - '.github/workflows/self-verify.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/duhem-cli/**'
+      - 'verifications/duhem-cli/**'
+      - 'verifications/defaults-example/**'
+      - '.github/workflows/self-verify.yml'
+
+concurrency:
+  group: self-verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cli-regression:
+    name: cli regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          rustup show active-toolchain
+          cargo --version
+          rustc --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build duhem CLI
+        run: cargo build --release -p duhem-cli
+
+      # The VD runs the binary under test, so point `duhem_bin` at the
+      # freshly built artifact rather than whatever is on PATH. A
+      # non-pass verdict exits non-zero and fails the job.
+      - name: Run duhem-cli regression VD
+        run: |
+          ./target/release/duhem run verifications/duhem-cli \
+            --inputs duhem_bin="$PWD/target/release/duhem"

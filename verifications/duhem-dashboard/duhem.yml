@@ -199,42 +199,62 @@ criteria:
 
   - id: AC-3
     description: |
-      The dashboard's live stream replays a run's evidence to a
-      connecting client over Server-Sent Events, ending the stream once
-      the run has finished — so an operator watching a run receives the
-      trace events and the final recorded verdict, in the documented SSE
-      shape.
+      The dashboard's live stream delivers a run's evidence to a
+      connecting client over Server-Sent Events as an ORDERED sequence of
+      events, ending the stream once the run has finished — so an
+      operator watching a run receives the trace events in arrival order
+      and the final recorded verdict, in the documented SSE shape.
     checks:
       - id: AC-3.1
         description: |
-          Open the live SSE endpoint for the finished fixture run. By the
-          replay-then-follow contract a finished run replays its whole
-          trace and closes, so a single read returns the full
-          `text/event-stream` body. Assert it answers 200 and the stream
-          carries `trace` events through the recorded `run_finished`
-          verdict.
+          Live-FOLLOW the SSE endpoint for the fixture run with the
+          `api/stream` action: subscribe to the `text/event-stream`,
+          parse the SSE framing (`event:` / `data:` / `\n\n`) as bytes
+          arrive, and collect events in arrival order until the server
+          closes the stream. By the replay-then-follow contract a
+          finished run replays its whole trace and then the server CLOSES
+          the connection at `run_finished` — so collection ends with
+          `stopped_reason == "stream_end"` (the server's terminal, not
+          our `within:` cut-off), proving we consumed the stream as a
+          stream rather than reading one finished body. Assert the
+          subscription answered 200, events arrived in order, and the
+          terminal event carries the recorded `run_finished` / `pass`
+          verdict — read straight from the new action's structured
+          outputs (`event_count`, `events[..]`, `last_event.data.*`), not
+          a substring scrape of a flat body.
         steps:
           - id: sse
-            uses: api/call
+            uses: api/stream
             with:
               method: GET
               url: $inputs.live_url
+              # Wall-clock cap. The server closes the stream at
+              # `run_finished` well before this; if it ever did NOT, the
+              # budget would end collection (Ok), and the `stream_end`
+              # assertion below would fail loudly rather than hang.
               within: 20s
             outputs:
               status: status
-              body_text: body_text
+              event_count: event_count
+              stopped_reason: stopped_reason
+              events: events
+              last_event: last_event
         assertions:
+          # The subscription itself was accepted.
           - $steps.sse.outputs.status == 200
-          # Replay-then-follow: each trace line is one `trace` SSE event.
-          - matches:
-              value: $steps.sse.outputs.body_text
-              pattern: 'event: trace'
-          # The stream reaches the run's terminal event...
-          - matches:
-              value: $steps.sse.outputs.body_text
-              pattern: 'run_finished'
+          # Events actually arrived over the stream...
+          - $steps.sse.outputs.event_count >= 1
+          # ...and collection ended because the SERVER closed the stream
+          # at the finished run's terminal — true live-follow, not a
+          # timeout cut-off.
+          - $steps.sse.outputs.stopped_reason == "stream_end"
+          # Ordered: the first event the dashboard emits is a `trace`
+          # event (each evidence line is one `event: trace`).
+          - $steps.sse.outputs.events[0].event == "trace"
+          # The terminal event is the run's `run_finished` record...
+          - $steps.sse.outputs.last_event.event == "trace"
+          - $steps.sse.outputs.last_event.data.kind == "run_finished"
           # ...carrying the verdict the judge recorded (ties the live
-          # stream to the same `pass` the API and SPA surface).
-          - matches:
-              value: $steps.sse.outputs.body_text
-              pattern: '"verdict":"pass"'
+          # stream to the same `pass` the API and SPA surface), read via
+          # nested navigation into the parsed event data (#104).
+          - $steps.sse.outputs.last_event.data.verdict == "pass"

@@ -20,6 +20,12 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+## v0.1.0 — 2026-06-29
+
+The first public release: Duhem open-sourced under Apache-2.0 and
+distributed as the `duhem` CLI (npm + GitHub Releases). Entries are
+one bullet per landing; per-feature detail sections follow the summary.
+
 - [clarifying] Public README + CONTRIBUTING for the open-source release. (#143)
 
 - [clarifying] Project relicensed to Apache-2.0; open-source posture (spec §12/§13/§14). (#143)
@@ -233,14 +239,6 @@ criteria) lives in the spec issue that introduced
   browser where Playwright ships no bundled Chromium. Additive and
   off by default; no schema or action-contract change. Unblocked the
   first live green run of the dogfood VD. (#82)
-
-## v0.1.0 — unreleased
-
-The cumulative pre-release line. Entries below are summarized one bullet
-per landing; the per-feature sections following the summary preserve the
-original detail. The first version-bump commit will rename this heading
-to `## v0.1.0 — YYYY-MM-DD` and start a fresh `## Unreleased` section
-above.
 
 - [additive] Root manifest schema (`manifest_version: 1`) and multi-leaf
   `duhem run`; `duhem_schema::load` polymorphic on leaf vs manifest vs

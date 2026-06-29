@@ -20,6 +20,8 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [clarifying] Crawlab regression suite P0: licensed master+worker cluster shared-environment + API-002 auth/token leaf (verifications/crawlab-regression/). Authored; green run in product env. (#160)
+
 - [clarifying] Chreode VDs: rebrand internal literals to chreode (repo onsager-ai/chreode, CHREODE_* env, ~/.chreode, pnpm chreode) per the full Arbor→Chreode product rename. (#163)
 
 - [clarifying] Renamed product Arbor → Chreode across verifications + docs (verifications/chreode-*). (#163)

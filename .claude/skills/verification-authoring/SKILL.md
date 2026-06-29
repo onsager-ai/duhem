@@ -276,6 +276,12 @@ If the project uses Pattern B/C with a root `duhem.yml` manifest,
 add the file to `verifications:` (§10.4). If it's a standalone
 file run via `duhem run <file>`, no manifest update needed.
 
+`duhem run` discovers the manifest by walking the current directory
+and its ancestors (capped at the enclosing `.git`), so `cd
+anywhere-in-the-repo && duhem run` finds the repo-root `duhem.yml`
+(or `.duhem.yml`) without a path argument (#69). `-f path/to/manifest.yml`
+overrides discovery for an out-of-tree manifest.
+
 ## Worked example template
 
 Use this as the skeleton for any spec that needs a worked example:

@@ -94,8 +94,22 @@ enum Cmd {
     /// authoring-ergonomics flags from the spec on issue #23; none
     /// change the verdict on a non-filtered run.
     Run {
-        /// Path to a `.yml` Verification Definition.
-        path: PathBuf,
+        /// Path to a `.yml` Verification Definition, or a directory
+        /// containing a manifest. Omit entirely to auto-discover a
+        /// manifest from the current directory and its ancestors —
+        /// `cd anywhere-in-the-repo && duhem run` (issue #69).
+        path: Option<PathBuf>,
+        /// Explicit manifest path. Bypasses discovery (no directory
+        /// probe, no ancestor walk) and uses the path as-is — the
+        /// escape hatch for an out-of-tree manifest like `ops/duhem.yml`.
+        /// Mutually exclusive with the positional `path`.
+        #[arg(
+            short = 'f',
+            long = "file",
+            value_name = "PATH",
+            conflicts_with = "path"
+        )]
+        file: Option<PathBuf>,
         /// `key=value` inputs, repeatable.
         #[arg(long = "inputs", value_name = "KEY=VALUE")]
         inputs: Vec<String>,
@@ -197,6 +211,7 @@ fn main() -> ExitCode {
         Some(Cmd::Dashboard(opts)) => dashboard::run(&opts.into()),
         Some(Cmd::Run {
             path,
+            file,
             inputs,
             filter,
             headed,
@@ -244,6 +259,7 @@ fn main() -> ExitCode {
                 .expect("tokio runtime");
             rt.block_on(run_command(RunArgs {
                 path,
+                file,
                 inputs,
                 filter,
                 headed,
@@ -263,7 +279,8 @@ fn main() -> ExitCode {
 /// Resolved `duhem run` arguments. Kept as a struct so the dispatch
 /// function's signature doesn't grow unbounded as new flags land.
 struct RunArgs {
-    path: PathBuf,
+    path: Option<PathBuf>,
+    file: Option<PathBuf>,
     inputs: Vec<String>,
     filter: Vec<String>,
     headed: bool,
@@ -280,6 +297,7 @@ struct RunArgs {
 async fn run_command(args: RunArgs) -> ExitCode {
     let RunArgs {
         path,
+        file,
         inputs: raw_inputs,
         filter: raw_filter,
         headed,
@@ -293,13 +311,39 @@ async fn run_command(args: RunArgs) -> ExitCode {
         keep_env,
     } = args;
 
-    // Polymorphic load: directory → `<dir>/duhem.yml`; manifest →
+    // Resolve which manifest/leaf to load (issue #69). `-f`/`--file` is
+    // the explicit override — used as-is, no discovery. Otherwise
+    // `discover` resolves the positional `path` (a file verbatim, a
+    // directory probed for a manifest) or, when no path is given, walks
+    // the cwd and its ancestors so `cd anywhere-in-the-repo && duhem
+    // run` finds the repo-root manifest (capped at a `.git` boundary).
+    let target = match file {
+        Some(f) => f,
+        None => {
+            let cwd = match std::env::current_dir() {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("cannot determine current directory: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match duhem_schema::discover(path.as_deref(), &cwd) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("[schema v{}] {e}", duhem_schema::SCHEMA_VERSION);
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+    };
+
+    // Polymorphic load: directory → first manifest candidate; manifest →
     // expand leaves; leaf → single Verification Definition (today's
     // behavior). Spec on issue #49. The loader annotates YAML / shape
     // failures with the offending path; we prefix the schema version
     // so authors see at a glance which schema the loader parsed
     // against (spec on #51).
-    let loaded = match load_definition(&path) {
+    let loaded = match load_definition(&target) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("[schema v{}] {e}", duhem_schema::SCHEMA_VERSION);
@@ -1219,6 +1263,46 @@ mod tests {
             }
             _ => panic!("expected Run"),
         }
+    }
+
+    // ---- #69: manifest discovery (`-f`/`--file`, optional path) ----
+
+    #[test]
+    fn file_override_parses_and_path_is_optional() {
+        // `-f` supplies the manifest path and the positional `path` may
+        // be omitted entirely (discovery handles the bare invocation).
+        let with_file =
+            Cli::try_parse_from(["duhem", "run", "-f", "ops/duhem.yml"]).expect("parse");
+        match with_file.cmd {
+            Some(Cmd::Run { path, file, .. }) => {
+                assert!(path.is_none(), "positional path absent");
+                assert_eq!(file, Some(PathBuf::from("ops/duhem.yml")));
+            }
+            _ => panic!("expected Run"),
+        }
+        // Long form `--file` is the documented alias for `-f`.
+        let long = Cli::try_parse_from(["duhem", "run", "--file", "ops/duhem.yml"]).expect("parse");
+        match long.cmd {
+            Some(Cmd::Run { file, .. }) => assert_eq!(file, Some(PathBuf::from("ops/duhem.yml"))),
+            _ => panic!("expected Run"),
+        }
+        // Bare `duhem run` (no path, no `-f`) parses — discovery runs.
+        let bare = Cli::try_parse_from(["duhem", "run"]).expect("parse");
+        match bare.cmd {
+            Some(Cmd::Run { path, file, .. }) => {
+                assert!(path.is_none());
+                assert!(file.is_none());
+            }
+            _ => panic!("expected Run"),
+        }
+    }
+
+    #[test]
+    fn file_flag_conflicts_with_positional_path() {
+        // `-f` and a positional `path` are mutually exclusive at the
+        // clap level (issue #69 §Design).
+        let err = Cli::try_parse_from(["duhem", "run", "v.yml", "-f", "ops/duhem.yml"]);
+        assert!(err.is_err(), "positional path + -f must conflict");
     }
 
     #[test]

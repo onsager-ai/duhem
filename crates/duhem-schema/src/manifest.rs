@@ -202,6 +202,13 @@ pub enum LoadError {
     },
     #[error("directory `{path}` has no `duhem.yml`")]
     DirectoryMissingManifest { path: PathBuf },
+    /// Discovery (issue #69) walked the current directory and its
+    /// ancestors (capped at a `.git` repository boundary) without
+    /// finding any of the manifest candidate filenames. The `searched`
+    /// list names every path probed so the author can see where Duhem
+    /// looked.
+    #[error("no manifest found in the current directory or its ancestors; searched {searched:?}")]
+    ManifestNotFound { searched: Vec<PathBuf> },
     /// An `environments:` key is not a well-formed environment name
     /// (lowercase letters, digits, dashes; alphanumeric at both ends).
     #[error(
@@ -219,11 +226,87 @@ pub enum LoadError {
 /// schema-impacting and requires a `CHANGELOG.md` entry.
 pub const SUPPORTED_MANIFEST_VERSION: u32 = 1;
 
+/// Manifest filenames probed when resolving a directory or discovering
+/// from the cwd (issue #69), in priority order. The plain `duhem.yml`
+/// is the canonical name; `duhem.yaml` is the long-extension variant;
+/// the leading-dot `.duhem.*` aliases let a manifest hide like
+/// `.gitignore` / `.editorconfig`. Earlier entries win when several
+/// exist in the same directory.
+const MANIFEST_CANDIDATES: [&str; 4] = ["duhem.yml", "duhem.yaml", ".duhem.yml", ".duhem.yaml"];
+
+/// The first existing manifest candidate directly under `dir`, in
+/// [`MANIFEST_CANDIDATES`] priority order, or `None` when the
+/// directory holds none of them.
+fn manifest_in_dir(dir: &Path) -> Option<PathBuf> {
+    MANIFEST_CANDIDATES
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+/// Resolve the manifest a `duhem run [path]` invocation targets,
+/// without the `-f`/`--file` override (which bypasses discovery and is
+/// the caller's concern). `explicit` is the positional `path` argument
+/// (`None` when omitted); `cwd` is the directory the walk starts from.
+///
+/// Resolution order (issue #69 §Design):
+///
+/// 1. An explicit *file* is used verbatim — Pattern A (a single leaf
+///    passed directly) is preserved byte-for-byte.
+/// 2. An explicit *directory* is probed for a manifest candidate; a
+///    directory with none keeps today's `DirectoryMissingManifest`
+///    error. Explicit args behave identically to before this spec —
+///    the ancestor walk only activates when no path is given.
+/// 3. An explicit path that is neither file nor directory (e.g. a
+///    path that does not exist) is handed back verbatim so [`load`]
+///    surfaces the same I/O error against the offending path.
+/// 4. With no path: probe the cwd, then each ancestor, in
+///    [`MANIFEST_CANDIDATES`] priority order. First hit wins. The walk
+///    is capped at any `.git` directory (a repository boundary) so a
+///    sibling repo's manifest is never picked up by accident.
+/// 5. Exhausting the walk yields [`LoadError::ManifestNotFound`]
+///    listing every path probed.
+pub fn discover(explicit: Option<&Path>, cwd: &Path) -> Result<PathBuf, LoadError> {
+    if let Some(path) = explicit {
+        if path.is_file() {
+            return Ok(path.to_path_buf());
+        }
+        if path.is_dir() {
+            return manifest_in_dir(path).ok_or_else(|| LoadError::DirectoryMissingManifest {
+                path: path.to_path_buf(),
+            });
+        }
+        // Neither file nor directory: defer to `load` for the I/O
+        // error, preserving today's diagnostic on a bad explicit path.
+        return Ok(path.to_path_buf());
+    }
+
+    let mut searched: Vec<PathBuf> = Vec::new();
+    let mut dir = Some(cwd);
+    while let Some(current) = dir {
+        if let Some(hit) = manifest_in_dir(current) {
+            return Ok(hit);
+        }
+        for name in MANIFEST_CANDIDATES {
+            searched.push(current.join(name));
+        }
+        // Repo-boundary cap: a `.git` entry stops the walk *after* the
+        // boundary directory itself is probed (matching git's own
+        // discovery — the repo root often holds the manifest).
+        if current.join(".git").exists() {
+            break;
+        }
+        dir = current.parent();
+    }
+    Err(LoadError::ManifestNotFound { searched })
+}
+
 /// Resolve a CLI `path` argument to a [`Loaded`].
 ///
 /// Dispatch rules (issue #49 § "CLI surface"):
 ///
-/// - Directory → look for `<dir>/duhem.yml`.
+/// - Directory → look for the first [`MANIFEST_CANDIDATES`] entry it
+///   contains (`duhem.yml`, `duhem.yaml`, `.duhem.yml`, `.duhem.yaml`).
 /// - File with `verifications:` → root manifest; expand entries.
 /// - File with `criteria:` → single leaf (today's behavior).
 /// - File with both / neither → load-time error.
@@ -233,13 +316,14 @@ pub const SUPPORTED_MANIFEST_VERSION: u32 = 1;
 /// the offending file.
 pub fn load(path: &Path) -> Result<Loaded, LoadError> {
     let path = if path.is_dir() {
-        let candidate = path.join("duhem.yml");
-        if !candidate.is_file() {
-            return Err(LoadError::DirectoryMissingManifest {
-                path: path.to_path_buf(),
-            });
+        match manifest_in_dir(path) {
+            Some(candidate) => candidate,
+            None => {
+                return Err(LoadError::DirectoryMissingManifest {
+                    path: path.to_path_buf(),
+                });
+            }
         }
-        candidate
     } else {
         path.to_path_buf()
     };
@@ -1017,6 +1101,115 @@ verifications:
             }
             _ => panic!("expected Manifest"),
         }
+    }
+
+    // ---- #69: manifest discovery (ancestor walk, candidate names) ----
+
+    #[test]
+    fn discover_explicit_file_returned_as_is() {
+        let tmp = tempfile::tempdir().unwrap();
+        let leaf = write(tmp.path(), "verification.yml", LEAF_A);
+        // An explicit file path is used verbatim — Pattern A preserved.
+        let resolved = discover(Some(&leaf), tmp.path()).unwrap();
+        assert_eq!(resolved, leaf);
+    }
+
+    #[test]
+    fn discover_cwd_directly_contains_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest = write(
+            tmp.path(),
+            "duhem.yml",
+            "manifest_version: 1\nverifications: []\n",
+        );
+        let resolved = discover(None, tmp.path()).unwrap();
+        assert_eq!(resolved, manifest);
+    }
+
+    #[test]
+    fn discover_walks_to_parent_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest = write(
+            tmp.path(),
+            "duhem.yml",
+            "manifest_version: 1\nverifications: []\n",
+        );
+        let sub = tmp.path().join("verifications").join("login");
+        std::fs::create_dir_all(&sub).unwrap();
+        // The cwd holds no manifest; the parent does → parent wins.
+        let resolved = discover(None, &sub).unwrap();
+        assert_eq!(resolved, manifest);
+    }
+
+    #[test]
+    fn discover_closer_manifest_beats_ancestor() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "duhem.yml",
+            "manifest_version: 1\nverifications: []\n",
+        );
+        let sub = tmp.path().join("sub");
+        let closer = write(
+            &sub,
+            ".duhem.yml",
+            "manifest_version: 1\nverifications: []\n",
+        );
+        // The cwd's `.duhem.yml` is closer than the parent's `duhem.yml`.
+        let resolved = discover(None, &sub).unwrap();
+        assert_eq!(resolved, closer);
+    }
+
+    #[test]
+    fn discover_caps_at_git_boundary() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A `.git` directory at the repo root, no manifest anywhere.
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let sub = tmp.path().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        let err = discover(None, &sub).unwrap_err();
+        match err {
+            LoadError::ManifestNotFound { searched } => {
+                // Probed the cwd and the `.git` root, then stopped — the
+                // four candidate names in each of the two directories.
+                assert_eq!(searched.len(), 8, "got {searched:?}");
+                assert!(
+                    searched.iter().all(|p| p.starts_with(tmp.path())),
+                    "walk should not escape the repo boundary: {searched:?}"
+                );
+            }
+            other => panic!("expected ManifestNotFound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn discover_priority_prefers_dotless_yml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let canonical = write(
+            tmp.path(),
+            "duhem.yml",
+            "manifest_version: 1\nverifications: []\n",
+        );
+        write(
+            tmp.path(),
+            ".duhem.yml",
+            "manifest_version: 1\nverifications: []\n",
+        );
+        // Both present in the same dir → `duhem.yml` wins on priority.
+        let resolved = discover(None, tmp.path()).unwrap();
+        assert_eq!(resolved, canonical);
+    }
+
+    #[test]
+    fn discover_explicit_dir_without_manifest_keeps_directory_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Explicit directory with no manifest → today's error, not the
+        // ancestor walk (explicit args behave identically to before).
+        let err = discover(Some(tmp.path()), tmp.path()).unwrap_err();
+        assert!(
+            matches!(err, LoadError::DirectoryMissingManifest { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]

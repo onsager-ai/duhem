@@ -678,6 +678,95 @@ fn manifest_runs_every_leaf_and_aggregates_verdicts() {
     assert!(leaf_b_runs.is_dir(), "leaf-b evidence dir missing");
 }
 
+// ---- #69: manifest discovery (ancestor walk, `-f` override) --------
+
+#[test]
+fn discovery_from_subdir_finds_repo_root_manifest() {
+    // Spec on #69 Test (integration): `duhem run` from a sub-directory
+    // of a Pattern-B repo discovers the repo-root manifest by walking
+    // ancestors — no path argument. Browser-free via `--dry-run`.
+    let tmp = tempfile::tempdir().unwrap();
+    let _manifest = manifest_with_two_leaves(tmp.path());
+    // A `.git` at the repo root marks the boundary the walk caps at;
+    // it also keeps the walk from escaping the tempdir into the host.
+    std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+    // A manifest-less nested directory: the walk has to climb past it
+    // to the repo-root `duhem.yml`.
+    let subdir = tmp.path().join("nested").join("deep");
+    std::fs::create_dir_all(&subdir).unwrap();
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg("--dry-run")
+        .current_dir(&subdir)
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    // Resolved the root manifest → both leaves planned.
+    assert!(
+        stdout.contains("leaf-a::AC-1::AC-1.1"),
+        "stdout was {stdout:?}"
+    );
+    assert!(
+        stdout.contains("leaf-b::AC-1::AC-1.1"),
+        "stdout was {stdout:?}"
+    );
+}
+
+#[test]
+fn file_override_resolves_out_of_tree_manifest() {
+    // Spec on #69: `-f <path>` is the explicit override — used as-is,
+    // bypassing discovery. Run from an unrelated cwd to prove the flag
+    // (not the cwd) drives resolution. Browser-free via `--dry-run`.
+    let tmp = tempfile::tempdir().unwrap();
+    let manifest = manifest_with_two_leaves(tmp.path());
+    let elsewhere = tempfile::tempdir().unwrap();
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg("-f")
+        .arg(&manifest)
+        .arg("--dry-run")
+        .current_dir(elsewhere.path())
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("leaf-a::AC-1::AC-1.1"), "got {stdout:?}");
+}
+
+#[test]
+fn discovery_with_no_manifest_anywhere_errors() {
+    // Spec on #69: exhausting the walk (capped at `.git`) without a
+    // manifest surfaces a clear "no manifest found" error.
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+    let subdir = tmp.path().join("sub");
+    std::fs::create_dir_all(&subdir).unwrap();
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg("--dry-run")
+        .current_dir(&subdir)
+        .output()
+        .expect("spawn duhem");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("no manifest found"),
+        "stderr should name the failure: {stderr}"
+    );
+}
+
 #[test]
 fn invalid_filter_pattern_errors_before_browser_launch() {
     // Empty-criterion patterns are explicitly rejected (#23). They

@@ -20,17 +20,19 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use duhem_actions::Page;
 use duhem_actions::{ActionError, Outcome, RunBrowser};
 use duhem_evidence::{
-    EventPayload, EvidenceWriter, StepOutcome, VerdictState, WriterError, new_run_id, run_started,
+    EventPayload, EvidenceWriter, VerdictState, WriterError, new_run_id, run_started,
 };
 use duhem_judge::{
-    AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusiveCause, RunVerdict,
-    aggregate_check, aggregate_criterion, aggregate_run,
+    AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusiveCause,
+    InconclusivePolicy, RunVerdict, aggregate_check, aggregate_criterion, aggregate_run,
+    apply_inconclusive_policy,
 };
-use duhem_schema::{Check, Criterion, VerificationDefinition};
+use duhem_schema::{Check, Criterion, RetryBackoff, RetryPolicy, VerificationDefinition};
 use thiserror::Error;
 use tracing::debug;
 
@@ -38,7 +40,11 @@ use crate::engine::context::{RunContext, RunState, json_to_value};
 use crate::engine::registry::{ActionRegistry, default_registry};
 use crate::engine::shim::assertion_to_expr;
 use crate::engine::template::substitute_with;
-use crate::eval::{EvalResult, InconclusiveCause as EvalCause, Value, describe_comparison, eval};
+use crate::engine::translate::{
+    RETRY_BACKOFF_BASE, apply_default_within, check_is_retryable, eval_cause_detail, eval_to_state,
+    outcome_to_evidence, retry_delay, with_to_evidence_map,
+};
+use crate::eval::{EvalResult, Value, describe_comparison, eval};
 
 /// Surfaces only "the runtime itself failed" cases. A failing
 /// artifact yields `RunVerdict::Fail`, not `Err`.
@@ -120,6 +126,12 @@ pub struct RunOutcome {
     /// failed (and any cause detail) without the author hand-reading
     /// `trace.jsonl`. Empty on a fully-passing run.
     pub failures: Vec<CheckFailure>,
+    /// Non-fatal warnings produced during the run — currently the
+    /// `inconclusive_policy: warn` notices (spec #66): a criterion that
+    /// aggregated to `inconclusive` but was treated as a pass by the
+    /// manifest default. Empty unless `warn` softened something. The
+    /// reporter surfaces these in the run summary.
+    pub warnings: Vec<String>,
 }
 
 /// One assertion that failed or was inconclusive within a check.
@@ -189,6 +201,19 @@ pub struct Engine {
     /// with the suite/--inputs remedy. Empty for a leaf with no
     /// `inherits:` block, so non-inheriting runs keep today's behavior.
     inherited: std::collections::HashSet<String>,
+    /// Manifest `defaults.timeout` (spec #66): per-step `within:`
+    /// fallback. A step's own `within:` wins; absent here, the action's
+    /// built-in `DEFAULT_WITHIN` (5s) applies. `None` keeps today's
+    /// behavior.
+    default_within: Option<Duration>,
+    /// Manifest `defaults.inconclusive_policy` (spec #66). `Block`
+    /// (today's behavior) is the default.
+    inconclusive_policy: InconclusivePolicy,
+    /// Manifest `defaults.retry` (spec #66). `None` = no retries.
+    retry: Option<RetryPolicy>,
+    /// Retry backoff base; tests drop it to zero. Production:
+    /// [`RETRY_BACKOFF_BASE`].
+    retry_backoff_base: Duration,
 }
 
 impl Engine {
@@ -206,7 +231,27 @@ impl Engine {
             keep_env: false,
             env: BTreeMap::new(),
             inherited: std::collections::HashSet::new(),
+            default_within: None,
+            inconclusive_policy: InconclusivePolicy::Block,
+            retry: None,
+            retry_backoff_base: RETRY_BACKOFF_BASE,
         }
+    }
+
+    /// Apply a manifest's `defaults:` block (spec #66): the per-step
+    /// `within:` fallback (`timeout`), the inconclusive policy, and the
+    /// retry posture. `defaults.environment` is not consumed here (its
+    /// `environments:` lookup is out of scope). Absent sub-keys leave
+    /// today's behavior in place.
+    pub fn with_defaults(mut self, defaults: &duhem_schema::ManifestDefaults) -> Self {
+        self.default_within = defaults.timeout.map(Duration::from);
+        self.retry = defaults.retry;
+        self.inconclusive_policy = match defaults.inconclusive_policy {
+            Some(duhem_schema::InconclusivePolicy::Block) | None => InconclusivePolicy::Block,
+            Some(duhem_schema::InconclusivePolicy::Warn) => InconclusivePolicy::Warn,
+            Some(duhem_schema::InconclusivePolicy::Pass) => InconclusivePolicy::Pass,
+        };
+        self
     }
 
     /// Override the evidence root. Each run still lands in a fresh
@@ -413,8 +458,10 @@ impl Engine {
                     run_id,
                     run_dir,
                     // The run aborted before any criterion executed, so
-                    // there are no per-assertion failures to surface.
+                    // there are no per-assertion failures or warnings
+                    // to surface.
                     failures: Vec::new(),
+                    warnings: Vec::new(),
                 });
             }
         }
@@ -460,17 +507,26 @@ impl Engine {
                     run_id,
                     run_dir,
                     // The run aborted before any criterion executed, so
-                    // there are no per-assertion failures to surface.
+                    // there are no per-assertion failures or warnings
+                    // to surface.
                     failures: Vec::new(),
+                    warnings: Vec::new(),
                 });
             }
         }
 
         let mut criterion_verdicts: Vec<CriterionVerdict> = Vec::new();
         let mut failures: Vec<CheckFailure> = Vec::new();
+        let mut warnings: Vec<String> = Vec::new();
         for criterion in &def.criteria {
             let cv = self
-                .run_criterion(&mut writer, &run_state, criterion, &mut failures)
+                .run_criterion(
+                    &mut writer,
+                    &run_state,
+                    criterion,
+                    &mut failures,
+                    &mut warnings,
+                )
                 .await?;
             writer.append(EventPayload::CriterionFinished {
                 criterion_id: criterion.id.clone(),
@@ -500,6 +556,7 @@ impl Engine {
             run_id,
             run_dir,
             failures,
+            warnings,
         })
     }
 
@@ -509,6 +566,7 @@ impl Engine {
         run: &RunState,
         criterion: &Criterion,
         failures: &mut Vec<CheckFailure>,
+        warnings: &mut Vec<String>,
     ) -> Result<CriterionVerdict, EngineError> {
         let mut check_verdicts: Vec<CheckVerdict> = Vec::new();
         for check in &criterion.checks {
@@ -522,7 +580,7 @@ impl Engine {
                 continue;
             }
             let cv = self
-                .run_check(writer, run, &criterion.id, check, failures)
+                .run_check_with_retry(writer, run, &criterion.id, check, failures)
                 .await?;
             writer.append(EventPayload::CheckFinished {
                 check_id: check.id.clone(),
@@ -530,12 +588,62 @@ impl Engine {
             })?;
             check_verdicts.push(cv);
         }
-        let state = aggregate_criterion(&check_verdicts);
+        // Criterion-level aggregation, then the manifest's
+        // `inconclusive_policy` lens (spec #66). `block` (the default)
+        // leaves the verdict untouched; `warn`/`pass` soften a
+        // criterion-level `inconclusive` to `pass`, with `warn` also
+        // recording a run-summary warning. Per-check verdicts (and the
+        // CheckFinished events above) keep their raw `inconclusive`.
+        let raw_state = aggregate_criterion(&check_verdicts);
+        let (state, warning) =
+            apply_inconclusive_policy(&criterion.id, raw_state, self.inconclusive_policy);
+        if let Some(w) = warning {
+            warnings.push(w);
+        }
         Ok(CriterionVerdict {
             criterion_id: criterion.id.clone(),
             state,
             checks: check_verdicts,
         })
+    }
+
+    /// Run one check, re-running it from step 0 when `defaults.retry`
+    /// is set and the verdict is retry-eligible (spec #66; see
+    /// [`check_is_retryable`]). Each attempt re-emits the check's
+    /// step / assertion events; only the final attempt's failing
+    /// assertions stay in `failures`.
+    async fn run_check_with_retry(
+        &mut self,
+        writer: &mut EvidenceWriter,
+        run: &RunState,
+        criterion_id: &str,
+        check: &Check,
+        failures: &mut Vec<CheckFailure>,
+    ) -> Result<CheckVerdict, EngineError> {
+        let max = self.retry.map(|r| r.max).unwrap_or(0);
+        let backoff = self
+            .retry
+            .map(|r| r.backoff)
+            .unwrap_or(RetryBackoff::Exponential);
+        let mut attempt: u32 = 0;
+        loop {
+            // Discard any failures a prior (retried) attempt left behind
+            // so only the final attempt's detail reaches the reporter.
+            let failures_mark = failures.len();
+            let cv = self
+                .run_check(writer, run, criterion_id, check, failures)
+                .await?;
+            if attempt < max && check_is_retryable(cv.state) {
+                failures.truncate(failures_mark);
+                attempt += 1;
+                let delay = retry_delay(self.retry_backoff_base, backoff, attempt);
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
+                continue;
+            }
+            return Ok(cv);
+        }
     }
 
     async fn run_check(
@@ -605,6 +713,14 @@ impl Engine {
                     reference,
                     step: step_label(step, idx),
                 });
+            }
+            // Manifest `defaults.timeout` (spec #66): fill the step's
+            // `within:` when it doesn't declare its own. A per-step
+            // `within:` already in the payload wins; this only fills the
+            // gap. With no manifest default, the action's built-in
+            // `DEFAULT_WITHIN` (5s) remains the last resort.
+            if let Some(default) = self.default_within {
+                apply_default_within(&mut resolved_with, default);
             }
 
             writer.append(EventPayload::StepStarted {
@@ -740,114 +856,6 @@ impl Default for Engine {
     }
 }
 
-fn eval_to_state(r: &EvalResult) -> VerdictState {
-    match r {
-        EvalResult::True => VerdictState::Pass,
-        EvalResult::False => VerdictState::Fail,
-        EvalResult::Inconclusive(cause) => VerdictState::Inconclusive(map_eval_cause(cause)),
-    }
-}
-
-fn map_eval_cause(c: &EvalCause) -> InconclusiveCause {
-    match c {
-        EvalCause::MissingObservation { .. }
-        | EvalCause::MissingSetupObservation { .. }
-        | EvalCause::MissingInput(_)
-        | EvalCause::MissingEnv(_)
-        | EvalCause::MissingField(_) => InconclusiveCause::MissingObservation,
-        EvalCause::UnknownRuntimeHelper(_)
-        | EvalCause::TypeMismatch { .. }
-        | EvalCause::NotNavigable { .. }
-        | EvalCause::BadFormat(_)
-        | EvalCause::InvalidPattern(_) => InconclusiveCause::EnvironmentError,
-    }
-}
-
-/// Format an evaluator-level `InconclusiveCause` for the
-/// evidence-side `detail` field. The judge's `VerdictState` cause set
-/// is intentionally coarse (`MissingObservation` /
-/// `EnvironmentError` / etc.); the evidence-side string preserves the
-/// specific reason so a reader can distinguish `missing_input(x)`
-/// from `missing_observation(api.body)`, or
-/// `invalid_pattern(...)` from `type_mismatch(str,int)`.
-fn eval_cause_detail(c: &EvalCause) -> String {
-    match c {
-        EvalCause::MissingObservation { step, output } => {
-            format!("missing_observation({step}.{output})")
-        }
-        EvalCause::MissingSetupObservation { step, output } => {
-            format!("missing_setup_observation({step}.{output})")
-        }
-        EvalCause::MissingInput(n) => format!("missing_input({n})"),
-        EvalCause::MissingEnv(n) => format!("missing_env({n})"),
-        EvalCause::UnknownRuntimeHelper(n) => format!("unknown_runtime_helper({n})"),
-        EvalCause::TypeMismatch { lhs, rhs } => {
-            format!("type_mismatch({}, {})", shape_wire(*lhs), shape_wire(*rhs))
-        }
-        EvalCause::InvalidPattern(msg) => format!("invalid_pattern({msg})"),
-        EvalCause::MissingField(path) => format!("missing_field({path})"),
-        EvalCause::NotNavigable { shape, segment } => {
-            format!("not_navigable({}, {segment})", shape_wire(*shape))
-        }
-        EvalCause::BadFormat(msg) => format!("bad_format({msg})"),
-    }
-}
-
-fn shape_wire(s: crate::eval::ValueShape) -> &'static str {
-    use crate::eval::ValueShape;
-    match s {
-        ValueShape::Bool => "bool",
-        ValueShape::Int => "int",
-        ValueShape::Float => "float",
-        ValueShape::Str => "str",
-        ValueShape::Null => "null",
-        ValueShape::Array => "array",
-        ValueShape::Object => "object",
-    }
-}
-
-pub(super) fn outcome_to_evidence(o: &Outcome) -> StepOutcome {
-    match o {
-        Outcome::Ok => StepOutcome::Ok,
-        Outcome::Error => StepOutcome::Error,
-        Outcome::Timeout => StepOutcome::Timeout,
-    }
-}
-
-pub(super) fn with_to_evidence_map(v: &serde_yml::Value) -> BTreeMap<String, serde_json::Value> {
-    match v {
-        serde_yml::Value::Mapping(m) => m
-            .iter()
-            .filter_map(|(k, v)| {
-                let key = k.as_str()?.to_string();
-                let val = yml_to_json(v);
-                Some((key, val))
-            })
-            .collect(),
-        _ => BTreeMap::new(),
-    }
-}
-
-fn yml_to_json(v: &serde_yml::Value) -> serde_json::Value {
-    use serde_yml::Value as Y;
-    match v {
-        Y::Null => serde_json::Value::Null,
-        Y::Bool(b) => serde_json::Value::Bool(*b),
-        Y::Number(n) => serde_json::to_value(n).unwrap_or(serde_json::Value::Null),
-        Y::String(s) => serde_json::Value::String(s.clone()),
-        Y::Sequence(seq) => serde_json::Value::Array(seq.iter().map(yml_to_json).collect()),
-        Y::Mapping(m) => serde_json::Value::Object(
-            m.iter()
-                .filter_map(|(k, v)| {
-                    let key = k.as_str()?.to_string();
-                    Some((key, yml_to_json(v)))
-                })
-                .collect(),
-        ),
-        Y::Tagged(t) => yml_to_json(&t.value),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -855,7 +863,7 @@ mod tests {
     use async_trait::async_trait;
     use duhem_actions::{ActionResult, Outcome};
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
     /// In-memory stub that ignores `page` and returns a configurable
     /// result. Test-only — kept under `#[cfg(test)]` per the spec.
@@ -921,6 +929,11 @@ mod tests {
             keep_env: false,
             env: BTreeMap::new(),
             inherited: std::collections::HashSet::new(),
+            default_within: None,
+            inconclusive_policy: InconclusivePolicy::Block,
+            retry: None,
+            // Zero backoff so retry-loop tests run instantly.
+            retry_backoff_base: Duration::ZERO,
         };
         // Clear default registry so each test composes its own.
         e.registry.clear();
@@ -2125,5 +2138,243 @@ criteria:
         let mut engine = engine.with_inherited(v.inherits.clone());
         let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
         assert_eq!(outcome.verdict.state, VerdictState::Pass);
+    }
+
+    // -- manifest defaults: timeout / retry / inconclusive_policy (#66) ------
+
+    /// Stub that records the `within` (integer ms) it was handed in its
+    /// `with:` payload — `u64::MAX` when the payload omits it. Lets the
+    /// timeout-threading tests observe what the engine injected.
+    struct WithinCapture {
+        uses: &'static str,
+        seen: Arc<AtomicU64>,
+    }
+
+    #[async_trait]
+    impl Dispatch for WithinCapture {
+        fn uses(&self) -> &'static str {
+            self.uses
+        }
+        fn requires_page(&self) -> bool {
+            false
+        }
+        async fn invoke(
+            &self,
+            _page: Option<&Page>,
+            _step_index: usize,
+            with: &serde_yml::Value,
+        ) -> Result<ActionResult, ActionError> {
+            let ms = with
+                .get(serde_yml::Value::String("within".to_string()))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(u64::MAX);
+            self.seen.store(ms, Ordering::SeqCst);
+            Ok(ActionResult::ok())
+        }
+    }
+
+    #[tokio::test]
+    async fn default_timeout_fills_within_when_step_omits_it() {
+        let (mut engine, _tmp) = engine_for_test();
+        engine.default_within = Some(Duration::from_secs(7));
+        let seen = Arc::new(AtomicU64::new(0));
+        engine.register_test_action(Box::new(WithinCapture {
+            uses: "fake/cap",
+            seen: seen.clone(),
+        }));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/cap
+            with: {}
+        assertions:
+          - "true"
+"#);
+        engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            seen.load(Ordering::SeqCst),
+            7_000,
+            "default timeout fills within"
+        );
+    }
+
+    #[tokio::test]
+    async fn per_step_within_wins_over_default_timeout() {
+        let (mut engine, _tmp) = engine_for_test();
+        engine.default_within = Some(Duration::from_secs(7));
+        let seen = Arc::new(AtomicU64::new(0));
+        engine.register_test_action(Box::new(WithinCapture {
+            uses: "fake/cap",
+            seen: seen.clone(),
+        }));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/cap
+            with: { within: 2000 }
+        assertions:
+          - "true"
+"#);
+        engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(seen.load(Ordering::SeqCst), 2_000, "per-step within wins");
+    }
+
+    #[tokio::test]
+    async fn retryable_inconclusive_retries_up_to_max() {
+        // An Inconclusive(EnvironmentError) check (here via an invalid
+        // regex pattern) re-runs from step 0 up to `max` times: 1
+        // initial attempt + 2 retries = 3 step invocations.
+        let (mut engine, _tmp) = engine_for_test();
+        engine.retry = Some(RetryPolicy {
+            max: 2,
+            backoff: RetryBackoff::Exponential,
+        });
+        let stub = StubAction::new("fake/count", Outcome::Ok);
+        let calls = stub.invocations.clone();
+        engine.register_test_action(Box::new(stub));
+        let v = def(r#"
+verification: t
+inputs:
+  x: { type: string }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/count
+        assertions:
+          - matches: { value: $inputs.x, pattern: "[" }
+"#);
+        let mut inputs = BTreeMap::new();
+        inputs.insert("x".to_string(), serde_json::Value::String("ok".to_string()));
+        let verdict = engine.run(&v, inputs).await.unwrap();
+        assert!(matches!(
+            verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::EnvironmentError)
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 3, "1 initial + 2 retries");
+    }
+
+    #[tokio::test]
+    async fn fail_never_retries() {
+        let (mut engine, _tmp) = engine_for_test();
+        engine.retry = Some(RetryPolicy {
+            max: 3,
+            backoff: RetryBackoff::Linear,
+        });
+        let stub = StubAction::new("fake/count", Outcome::Ok);
+        let calls = stub.invocations.clone();
+        engine.register_test_action(Box::new(stub));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/count
+        assertions:
+          - "false"
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Fail);
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "fail must not retry");
+    }
+
+    #[tokio::test]
+    async fn missing_observation_inconclusive_not_retried() {
+        let (mut engine, _tmp) = engine_for_test();
+        engine.retry = Some(RetryPolicy {
+            max: 3,
+            backoff: RetryBackoff::Exponential,
+        });
+        let stub = StubAction::new("fake/count", Outcome::Ok);
+        let calls = stub.invocations.clone();
+        engine.register_test_action(Box::new(stub));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: s1
+            uses: fake/count
+        assertions:
+          - $steps.s1.outputs.missing == 1
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert!(matches!(
+            verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation)
+        ));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "missing_observation must not retry"
+        );
+    }
+
+    const UNKNOWN_ACTION_VD: &str = r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: nope/unknown
+        assertions:
+          - "true"
+"#;
+
+    #[tokio::test]
+    async fn inconclusive_policy_warn_softens_to_pass_with_warning() {
+        let (mut engine, _tmp) = engine_for_test();
+        engine.inconclusive_policy = InconclusivePolicy::Warn;
+        let v = def(UNKNOWN_ACTION_VD);
+        let o = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        // The criterion aggregated to Inconclusive but `warn` lifts it
+        // to a criterion-level pass → the run passes, with a warning.
+        assert_eq!(o.verdict.state, VerdictState::Pass);
+        assert_eq!(o.verdict.criteria[0].state, VerdictState::Pass);
+        assert_eq!(o.warnings.len(), 1, "one warning surfaced");
+        assert!(o.warnings[0].contains("AC-1"), "{:?}", o.warnings);
+    }
+
+    #[tokio::test]
+    async fn inconclusive_policy_pass_softens_silently() {
+        let (mut engine, _tmp) = engine_for_test();
+        engine.inconclusive_policy = InconclusivePolicy::Pass;
+        let v = def(UNKNOWN_ACTION_VD);
+        let o = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(o.verdict.state, VerdictState::Pass);
+        assert!(o.warnings.is_empty(), "pass policy is silent");
+    }
+
+    #[tokio::test]
+    async fn inconclusive_policy_block_preserves_todays_behavior() {
+        let (mut engine, _tmp) = engine_for_test();
+        // default policy is Block.
+        let v = def(UNKNOWN_ACTION_VD);
+        let o = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert!(matches!(
+            o.verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation)
+        ));
+        assert!(o.warnings.is_empty());
     }
 }

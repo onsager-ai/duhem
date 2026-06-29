@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::environment::Environment;
+use crate::environment::{DurationSpec, Environment};
 use crate::verification::{SchemaError, VerificationDefinition};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -55,9 +55,109 @@ pub struct RootManifest {
         with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
     )]
     pub environments: BTreeMap<String, BTreeMap<String, serde_yml::Value>>,
+    /// Suite-wide defaults (`docs/duhem-spec.md` §10.4, spec #66).
+    /// A single `defaults:` block that every leaf the manifest expands
+    /// to inherits — so an author sets the timeout budget, the
+    /// inconclusive-handling policy, and the retry posture once for the
+    /// whole suite instead of per leaf.
+    ///
+    /// Each sub-key is optional and, when absent, reproduces today's
+    /// behavior exactly:
+    ///
+    /// - `timeout:` is the per-step `within:` fallback. A step that
+    ///   declares its own `within:` wins; a step that doesn't picks up
+    ///   this default; with neither, the engine's built-in 5s last
+    ///   resort applies.
+    /// - `inconclusive_policy:` decides how a criterion-level
+    ///   `inconclusive` is treated at run aggregation — `block`
+    ///   (today's behavior; inconclusive ≠ pass), `warn` (criterion
+    ///   passes but a warning is surfaced in the run summary), or
+    ///   `pass` (silent pass). Per-assertion evaluation is unchanged.
+    /// - `retry:` re-runs a whole check from step 0 when it comes back
+    ///   `inconclusive` for a *retry-eligible* cause (timeout or an
+    ///   environment error); a `fail` never retries.
+    /// - `environment:` names a key under the sibling `environments:`
+    ///   block. Cross-key validation is deferred to engine-time lookup
+    ///   (spec #66 Out-of-scope), so any string is accepted here.
+    ///
+    /// Additive: a manifest without `defaults:` round-trips and behaves
+    /// byte-for-byte as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defaults: Option<ManifestDefaults>,
     /// Entries that resolve to leaf Verification Definitions. Order
     /// determines execution order across leaves.
     pub verifications: Vec<ManifestEntry>,
+}
+
+/// Suite-wide defaults declared once on the root manifest (spec #66).
+/// Every sub-key is optional; an absent sub-key falls back to today's
+/// behavior (`timeout` → the engine's 5s default, `inconclusive_policy`
+/// → `block`, `retry.max` → `0`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ManifestDefaults {
+    /// Name of an environment under the sibling `environments:` block
+    /// to use for the suite. Accepted as any string here; the lookup
+    /// against `environments:` happens at engine-time (spec #66
+    /// Out-of-scope), so an unknown name is not a parse error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    /// Per-step `within:` fallback for every leaf. A step's own
+    /// `within:` always wins; this only fills in when a step omits it.
+    /// Same duration wire shape as `environment.ready.http.timeout`
+    /// (integer milliseconds or a suffixed string like `30s` / `2m`).
+    /// Absent → the engine's built-in 5s default still applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<DurationSpec>,
+    /// How a criterion-level `inconclusive` verdict is treated at run
+    /// aggregation. Absent → `block` (today's behavior).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inconclusive_policy: Option<InconclusivePolicy>,
+    /// Check-level retry posture. Absent → no retries (`max` is `0`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry: Option<RetryPolicy>,
+}
+
+/// How a criterion-level `inconclusive` verdict is treated at run
+/// aggregation (spec #66). Closed enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InconclusivePolicy {
+    /// Today's behavior: `inconclusive` stays `inconclusive` and does
+    /// not pass.
+    Block,
+    /// Treat a criterion-level `inconclusive` as a pass, but surface a
+    /// warning in the run summary so it's not silent.
+    Warn,
+    /// Silently treat a criterion-level `inconclusive` as a pass.
+    Pass,
+}
+
+/// Check-level retry posture (spec #66). A whole check re-runs from
+/// step 0 when it returns `inconclusive` for a retry-eligible cause
+/// (timeout or environment error), matching #54's action-level retry
+/// classification. A `fail` never retries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RetryPolicy {
+    /// Maximum number of retries after the first attempt. `0` (the
+    /// default when omitted) means no retries — today's behavior.
+    #[serde(default)]
+    pub max: u32,
+    /// Backoff schedule between retries. Defaults to `exponential`.
+    #[serde(default)]
+    pub backoff: RetryBackoff,
+}
+
+/// Backoff schedule between check retries (spec #66). Closed enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RetryBackoff {
+    /// Delay doubles each retry (`base`, `2·base`, `4·base`, …).
+    #[default]
+    Exponential,
+    /// Delay grows linearly each retry (`base`, `2·base`, `3·base`, …).
+    Linear,
 }
 
 /// A well-formed environment name is lowercase ASCII letters, digits,
@@ -1210,6 +1310,142 @@ verifications:
             matches!(err, LoadError::DirectoryMissingManifest { .. }),
             "got {err:?}"
         );
+    }
+
+    #[test]
+    fn defaults_block_round_trips_every_sub_key() {
+        let y = r#"
+manifest_version: 1
+defaults:
+  environment: staging
+  timeout: 30s
+  inconclusive_policy: warn
+  retry:
+    max: 2
+    backoff: exponential
+verifications: []
+"#;
+        let m = RootManifest::from_yaml_str(y).expect("parse");
+        let d = m.defaults.as_ref().expect("defaults present");
+        assert_eq!(d.environment.as_deref(), Some("staging"));
+        assert_eq!(
+            std::time::Duration::from(d.timeout.unwrap()),
+            std::time::Duration::from_secs(30)
+        );
+        assert_eq!(d.inconclusive_policy, Some(InconclusivePolicy::Warn));
+        let r = d.retry.as_ref().expect("retry present");
+        assert_eq!(r.max, 2);
+        assert_eq!(r.backoff, RetryBackoff::Exponential);
+    }
+
+    #[test]
+    fn defaults_sub_keys_are_each_optional() {
+        // A `defaults:` block may declare any subset of its sub-keys;
+        // the absent ones deserialize to `None` (engine applies the
+        // documented fallbacks).
+        let y = r#"
+manifest_version: 1
+defaults:
+  timeout: 10s
+verifications: []
+"#;
+        let m = RootManifest::from_yaml_str(y).expect("parse");
+        let d = m.defaults.unwrap();
+        assert!(d.environment.is_none());
+        assert!(d.inconclusive_policy.is_none());
+        assert!(d.retry.is_none());
+        assert!(d.timeout.is_some());
+    }
+
+    #[test]
+    fn retry_max_defaults_to_zero_and_backoff_to_exponential() {
+        let y = r#"
+manifest_version: 1
+defaults:
+  retry: {}
+verifications: []
+"#;
+        let m = RootManifest::from_yaml_str(y).expect("parse");
+        let r = m.defaults.unwrap().retry.unwrap();
+        assert_eq!(r.max, 0);
+        assert_eq!(r.backoff, RetryBackoff::Exponential);
+    }
+
+    #[test]
+    fn defaults_rejects_unknown_sub_key() {
+        let y = r#"
+manifest_version: 1
+defaults:
+  timeout: 30s
+  bogus: 1
+verifications: []
+"#;
+        assert!(RootManifest::from_yaml_str(y).is_err());
+    }
+
+    #[test]
+    fn inconclusive_policy_rejects_unknown_variant() {
+        let y = r#"
+manifest_version: 1
+defaults:
+  inconclusive_policy: maybe
+verifications: []
+"#;
+        assert!(RootManifest::from_yaml_str(y).is_err());
+    }
+
+    #[test]
+    fn retry_backoff_rejects_unknown_variant() {
+        let y = r#"
+manifest_version: 1
+defaults:
+  retry:
+    max: 1
+    backoff: fibonacci
+verifications: []
+"#;
+        assert!(RootManifest::from_yaml_str(y).is_err());
+    }
+
+    #[test]
+    fn absent_defaults_round_trips_without_a_defaults_key() {
+        // Additive guarantee: a manifest with no `defaults:` block must
+        // serialize byte-for-byte as before — no `defaults` key leaks.
+        let y = "manifest_version: 1\nverifications: []\n";
+        let m = RootManifest::from_yaml_str(y).expect("parse");
+        assert!(m.defaults.is_none());
+        let out = serde_yml::to_string(&m).unwrap();
+        assert!(!out.contains("defaults"), "got: {out}");
+    }
+
+    #[test]
+    fn manifest_with_defaults_loads_through_load_pipeline() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "a/duhem.yml", LEAF_A);
+        write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+defaults:
+  timeout: 15s
+  inconclusive_policy: block
+  retry:
+    max: 1
+    backoff: linear
+verifications:
+  - path: ./a/duhem.yml
+"#,
+        );
+        let loaded = load(&tmp.path().join("duhem.yml")).unwrap();
+        match loaded {
+            Loaded::Manifest { manifest, .. } => {
+                let d = manifest.defaults.expect("defaults present");
+                assert_eq!(d.inconclusive_policy, Some(InconclusivePolicy::Block));
+                assert_eq!(d.retry.unwrap().backoff, RetryBackoff::Linear);
+            }
+            _ => panic!("expected Manifest"),
+        }
     }
 
     #[test]

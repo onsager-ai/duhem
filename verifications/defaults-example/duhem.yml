@@ -1,0 +1,45 @@
+# Root-manifest `defaults:` block — worked example (spec #66)
+#
+# A root manifest whose `defaults:` block sets the suite-wide posture
+# ONCE, instead of per leaf:
+#
+#   - timeout:             the per-step `within:` fallback. A step that
+#                          declares its own `within:` wins; one that
+#                          doesn't picks up 30s here; with neither, the
+#                          engine's built-in 5s last resort applies.
+#   - inconclusive_policy: how a criterion-level `inconclusive` is
+#                          treated at run aggregation. `warn` lifts it
+#                          to a criterion-level pass and surfaces a
+#                          warning in the run summary (`block` is the
+#                          default; `pass` softens silently).
+#   - retry:               re-runs a whole check from step 0 when it
+#                          comes back `inconclusive` for a recoverable
+#                          cause (timeout / environment error). A
+#                          `fail` never retries; a `missing_observation`
+#                          (the VD's own shape) doesn't either.
+#
+# Every sub-key is optional; an absent one reproduces today's behavior.
+#
+# There is no live SUT behind this example — it exists to exercise the
+# defaults plumbing and to run green offline. The single leaf
+# (`checks/duhem.yml`) has one ordinary passing criterion plus one that
+# is structurally `inconclusive` (an unknown action it can't observe);
+# the `inconclusive_policy: warn` default turns that second criterion
+# into a pass-with-warning, so the suite is green and the warning shows
+# how `warn` surfaces.
+#
+# Run the suite:                duhem run verifications/defaults-example
+# Preview what would run:       duhem run verifications/defaults-example --dry-run
+# Validate the leaf structure:  duhem validate verifications/defaults-example/checks
+
+manifest_version: 1
+
+defaults:
+  timeout: 30s
+  inconclusive_policy: warn
+  retry:
+    max: 1
+    backoff: exponential
+
+verifications:
+  - path: checks/duhem.yml

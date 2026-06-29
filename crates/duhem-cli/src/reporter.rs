@@ -110,6 +110,7 @@ pub fn render(
         Reporter::Default => {
             writeln!(out, "{}", outcome.verdict.state)?;
             write_failures(out, &outcome.failures)?;
+            write_warnings(out, &outcome.warnings)?;
             Ok(())
         }
         Reporter::Quiet => Ok(()),
@@ -237,6 +238,16 @@ fn write_failures(out: &mut dyn Write, failures: &[CheckFailure]) -> Result<(), 
     Ok(())
 }
 
+/// Print run warnings under the verdict line (spec #66) — the
+/// `inconclusive_policy: warn` notices. Nothing is written when there
+/// are none. Plain, ANSI-free, matching the built-in posture.
+fn write_warnings(out: &mut dyn Write, warnings: &[String]) -> Result<(), RenderError> {
+    for w in warnings {
+        writeln!(out, "  warning: {w}")?;
+    }
+    Ok(())
+}
+
 fn build_summary(o: &RunOutcome) -> RunSummary {
     let failures = o
         .failures
@@ -269,6 +280,7 @@ fn build_summary(o: &RunOutcome) -> RunSummary {
         o.run_dir.clone(),
     )
     .with_failures(failures)
+    .with_warnings(o.warnings.clone())
 }
 
 /// Spawn a plugin subprocess, write the `RunSummary` JSON line to its
@@ -418,6 +430,7 @@ mod tests {
             run_id: "01J000000000000000000RUN".into(),
             run_dir: PathBuf::from(".duhem/runs/01J000000000000000000RUN"),
             failures: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 

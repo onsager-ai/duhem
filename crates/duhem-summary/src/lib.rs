@@ -53,6 +53,15 @@ pub struct RunSummary {
     /// field existed still deserializes.
     #[serde(default)]
     pub failures: Vec<CheckFailureSummary>,
+    /// Non-fatal run warnings (spec #66) — currently the
+    /// `inconclusive_policy: warn` notices: a criterion that aggregated
+    /// to `inconclusive` but was treated as a pass by the manifest
+    /// default. Empty when nothing warned; `#[serde(default)]` +
+    /// `skip_serializing_if`, so a summary with no warnings serializes
+    /// byte-for-byte as before and an older plugin simply ignores the
+    /// addition. Additive — `SCHEMA_VERSION` is unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 impl RunSummary {
@@ -81,12 +90,19 @@ impl RunSummary {
             criteria,
             evidence_dir,
             failures: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 
     /// Attach the non-passing-check failure detail (builder style).
     pub fn with_failures(mut self, failures: Vec<CheckFailureSummary>) -> Self {
         self.failures = failures;
+        self
+    }
+
+    /// Attach run warnings (builder style). Empty by default.
+    pub fn with_warnings(mut self, warnings: Vec<String>) -> Self {
+        self.warnings = warnings;
         self
     }
 }
@@ -207,6 +223,26 @@ mod tests {
         let back: RunSummary = serde_json::from_str(&line).unwrap();
         assert_eq!(back, s);
         assert_eq!(back.failures[0].assertions[0].verdict, VerdictState::Fail);
+    }
+
+    #[test]
+    fn warnings_round_trip_and_omit_when_empty() {
+        // Empty warnings must not appear on the wire (additive
+        // guarantee: a warning-free summary serializes as before).
+        let s = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from("."));
+        let line = serde_json::to_string(&s).unwrap();
+        assert!(!line.contains("warnings"), "empty warnings omitted: {line}");
+
+        // A populated warnings list round-trips.
+        let s = s.with_warnings(vec!["criterion AC-1: inconclusive (timeout) ...".into()]);
+        let line = serde_json::to_string(&s).unwrap();
+        assert!(line.contains("warnings"), "got: {line}");
+        let back: RunSummary = serde_json::from_str(&line).unwrap();
+        assert_eq!(back, s);
+        // A summary written before this field still deserializes.
+        let v1 = r#"{"schema_version":"1","run_id":"r","verdict":"pass","criteria":[],"evidence_dir":"."}"#;
+        let back: RunSummary = serde_json::from_str(v1).unwrap();
+        assert!(back.warnings.is_empty());
     }
 
     #[test]

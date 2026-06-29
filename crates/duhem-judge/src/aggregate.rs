@@ -136,6 +136,60 @@ pub fn aggregate_run(verdicts: Vec<CriterionVerdict>) -> RunVerdict {
     }
 }
 
+/// How a criterion-level `inconclusive` verdict is treated at run
+/// aggregation (manifest `defaults.inconclusive_policy`, spec #66).
+///
+/// The judge owns the *meaning* of the policy; the schema owns its
+/// wire shape (`duhem_schema::InconclusivePolicy`). The runtime maps
+/// one to the other so this crate stays free of a schema dependency —
+/// the mechanical-judgment firewall (§11.2) keeps the verdict logic
+/// shippable on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InconclusivePolicy {
+    /// Today's behavior: a criterion-level `inconclusive` stays
+    /// `inconclusive` and does not pass.
+    #[default]
+    Block,
+    /// Treat a criterion-level `inconclusive` as a pass, but emit a
+    /// warning so the run summary can surface it.
+    Warn,
+    /// Silently treat a criterion-level `inconclusive` as a pass.
+    Pass,
+}
+
+/// Apply `policy` to a single criterion's aggregated verdict.
+///
+/// Returns the (possibly softened) state and an optional warning. Only
+/// `Inconclusive` is ever softened, and only under `warn` / `pass`:
+///
+/// - `block` — pass-through; `inconclusive` stays `inconclusive`
+///   (today's behavior). No warning.
+/// - `warn` — `inconclusive` → `Pass`, with a warning naming the
+///   criterion and the cause so the run summary surfaces it.
+/// - `pass` — `inconclusive` → `Pass`, silently (no warning).
+///
+/// `Pass` and `Fail` are never touched — the policy governs only the
+/// "we couldn't tell" verdict, never a real defect. Per-assertion
+/// evaluation upstream is unchanged; this is a criterion-level lens.
+pub fn apply_inconclusive_policy(
+    criterion_id: &str,
+    state: VerdictState,
+    policy: InconclusivePolicy,
+) -> (VerdictState, Option<String>) {
+    match (state, policy) {
+        (VerdictState::Inconclusive(cause), InconclusivePolicy::Warn) => (
+            VerdictState::Pass,
+            Some(format!(
+                "criterion {criterion_id}: inconclusive ({cause}) treated as pass by inconclusive_policy: warn"
+            )),
+        ),
+        (VerdictState::Inconclusive(_), InconclusivePolicy::Pass) => (VerdictState::Pass, None),
+        // `block` (any state) and `warn`/`pass` over a non-inconclusive
+        // state pass through untouched.
+        (other, _) => (other, None),
+    }
+}
+
 /// Roll up the per-leaf `RunVerdict`s of a manifest run. Same
 /// three-state rule and same first-inconclusive-wins ordering as
 /// every other level — re-aggregation is identity-preserving across
@@ -410,6 +464,68 @@ mod tests {
             let nested = fold_verdicts([head, tail]);
             assert_eq!(flat, nested, "for {xs:?}");
         }
+    }
+
+    // -- inconclusive policy (spec #66) --------------------------------------
+
+    #[test]
+    fn policy_block_is_todays_behavior() {
+        // `block` never softens — an inconclusive criterion stays
+        // inconclusive, and nothing else moves either.
+        for state in [
+            VerdictState::Pass,
+            VerdictState::Fail,
+            VerdictState::Inconclusive(InconclusiveCause::Timeout),
+            VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+        ] {
+            let (out, warn) = apply_inconclusive_policy("AC-1", state, InconclusivePolicy::Block);
+            assert_eq!(out, state, "block must pass through {state:?}");
+            assert!(warn.is_none(), "block never warns");
+        }
+    }
+
+    #[test]
+    fn policy_warn_softens_inconclusive_to_pass_with_a_warning() {
+        let (out, warn) = apply_inconclusive_policy(
+            "AC-1",
+            VerdictState::Inconclusive(InconclusiveCause::Timeout),
+            InconclusivePolicy::Warn,
+        );
+        assert_eq!(out, VerdictState::Pass);
+        let w = warn.expect("warn policy surfaces a warning");
+        assert!(w.contains("AC-1"), "warning names the criterion: {w}");
+        assert!(w.contains("timeout"), "warning names the cause: {w}");
+    }
+
+    #[test]
+    fn policy_pass_softens_inconclusive_silently() {
+        let (out, warn) = apply_inconclusive_policy(
+            "AC-1",
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+            InconclusivePolicy::Pass,
+        );
+        assert_eq!(out, VerdictState::Pass);
+        assert!(warn.is_none(), "pass policy is silent");
+    }
+
+    #[test]
+    fn policy_never_softens_fail() {
+        // A real defect (`fail`) survives every policy — the policy
+        // governs only "we couldn't tell", never a defect.
+        for policy in [
+            InconclusivePolicy::Block,
+            InconclusivePolicy::Warn,
+            InconclusivePolicy::Pass,
+        ] {
+            let (out, warn) = apply_inconclusive_policy("AC-1", VerdictState::Fail, policy);
+            assert_eq!(out, VerdictState::Fail, "fail must survive {policy:?}");
+            assert!(warn.is_none());
+        }
+    }
+
+    #[test]
+    fn policy_default_is_block() {
+        assert_eq!(InconclusivePolicy::default(), InconclusivePolicy::Block);
     }
 
     // -- JSON round-trip ------------------------------------------------------

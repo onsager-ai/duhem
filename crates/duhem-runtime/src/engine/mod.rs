@@ -15,6 +15,7 @@ pub mod runner;
 pub mod setup;
 pub mod shim;
 pub mod template;
+pub mod translate;
 
 pub use context::{RunContext, RunState};
 pub use env::SuiteEnvironment;

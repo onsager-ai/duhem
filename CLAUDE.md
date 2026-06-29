@@ -18,9 +18,11 @@ runtime), and gates merge/deploy on the verdict.
 > `down:` hooks) is wired into the runtime; the first Onsager
 > dogfood verification lives at
 > `verifications/onsager-dashboard-create-spec-plan/` and runs through
-> the `duhem/run` composite GitHub Action. Schema is still v0.x —
-> breaking changes are expected. See `docs/duhem-spec.md` §14 for
-> the roadmap and `CHANGELOG.md` for the per-landing ledger.
+> the `duhem/run` composite GitHub Action. The project is open-source
+> under **Apache-2.0** (relicensed for the first public v0.1.0 release;
+> see `docs/duhem-spec.md` §11.3). Schema is still v0.x — breaking
+> changes are expected. See `docs/duhem-spec.md` §14 for the roadmap
+> and `CHANGELOG.md` for the per-landing ledger.
 
 ## What makes Duhem Duhem
 

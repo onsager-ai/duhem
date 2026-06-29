@@ -3,7 +3,7 @@
 # Worked example for `cli/invoke` (#102). Criteria prose:
 # `./criteria.md`. Operator setup: `./README.md`.
 #
-# Chreode's `pnpm factory "<description>"` is its headless entry point —
+# Chreode's `pnpm chreode "<description>"` is its headless entry point —
 # the whole factory pipeline (understand → plan → generate → verify →
 # deploy → promote) with no server and no dashboard. This VD drives the
 # REAL CLI via `cli/invoke` and judges its exit code and output.
@@ -11,7 +11,7 @@
 # Holistic posture (`docs/duhem-spec.md` §8): `cli/invoke` runs the real
 # binary in the real environment — no shimmed shell, no fake exit code.
 # Determinism without mocking comes from Chreode's default mode: FakeAgent
-# (no live LLM, `ARBOR_AGENT` unset) + dry-run drivers (`ARBOR_DRIVERS`
+# (no live LLM, `CHREODE_AGENT` unset) + dry-run drivers (`CHREODE_DRIVERS`
 # unset), where the dry-run deploy stands up a real local preview server
 # and the CLI prints `shipped → <url>` on success.
 #
@@ -24,15 +24,15 @@
 verification: Chreode — the factory CLI builds and ships an app
 
 inputs:
-  # Path to an onsager-ai/arbor checkout, used as the CLI's working
+  # Path to an onsager-ai/chreode checkout, used as the CLI's working
   # directory. `cli/invoke` resolves a relative `cwd` against the
   # `duhem` process working directory (where `duhem run` is invoked),
   # NOT this VD's directory — the default below assumes you run from the
-  # duhem repo root, where `../arbor` is a sibling checkout. Override
+  # duhem repo root, where `../chreode` is a sibling checkout. Override
   # with `--inputs chreode_repo_dir=/abs/path` for any other layout.
   chreode_repo_dir:
     type: string
-    default: ../arbor
+    default: ../chreode
   app_description:
     type: string
     default: A reading list with progress tracking
@@ -46,7 +46,7 @@ criteria:
     checks:
       - id: AC-1.1
         description: |
-          Run `pnpm factory "<description>"` in the Chreode checkout and
+          Run `pnpm chreode "<description>"` in the Chreode checkout and
           judge the real process: a clean exit (code 0) and a final
           `shipped → <url>` line prove the whole pipeline ran and
           promoted a live app through the CLI.

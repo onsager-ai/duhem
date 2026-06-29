@@ -7,7 +7,7 @@
 # Duhem control via the v1 environment-provisioning mechanism.
 #
 # Inherits a sanitized env (PATH, HOME, TMPDIR, LANG, LC_*, DUHEM_*).
-# DUHEM_CHREODE_REPO_DIR (path to an `onsager-ai/arbor` checkout) is the
+# DUHEM_CHREODE_REPO_DIR (path to an `onsager-ai/chreode` checkout) is the
 # operator-side configuration point; see ../README.md.
 #
 # Single-port mode: `pnpm build` then `pnpm start` serves the built
@@ -19,38 +19,38 @@
 
 set -eu
 
-CHREODE_REPO="${DUHEM_CHREODE_REPO_DIR:-../../../arbor}"
+CHREODE_REPO="${DUHEM_CHREODE_REPO_DIR:-../../../chreode}"
 if [ ! -d "$CHREODE_REPO" ]; then
   echo "up.sh: cannot find Chreode checkout at $CHREODE_REPO" >&2
-  echo "up.sh: set DUHEM_CHREODE_REPO_DIR to an onsager-ai/arbor clone" >&2
+  echo "up.sh: set DUHEM_CHREODE_REPO_DIR to an onsager-ai/chreode clone" >&2
   exit 2
 fi
 
 # Default 4180, not Chreode's own 4100: Onsager (Duhem's first dogfood)
 # commonly runs on 4100 + 5173 on the dev machine, and its
 # `/api/health` also returns 200 — so 4100 risks driving the wrong app.
-ARBOR_PORT="${ARBOR_PORT:-4180}"
-HEALTH_URL="http://127.0.0.1:${ARBOR_PORT}/api/health"
+CHREODE_PORT="${CHREODE_PORT:-4180}"
+HEALTH_URL="http://127.0.0.1:${CHREODE_PORT}/api/health"
 LOG="${TMPDIR:-/tmp}/chreode-dev.log"
 PID_FILE="${TMPDIR:-/tmp}/chreode-dev.pid"
 
 # Build the web bundle (slow on a cold install) then start the
-# single-port server. ARBOR_WEB_DIST flips the server into single-port
-# mode (UI + API on one port). We explicitly DO NOT set ARBOR_AGENT or
-# ARBOR_DRIVERS: unset = FakeAgent + dry-run, which is what keeps this
-# deterministic and free (../arbor packages/factory/src/drivers/
-# resolve.ts, packages/factory/src/agent.ts). Loopback bind (the
-# default ARBOR_HOST=127.0.0.1) means no auth gate.
+# single-port server. CHREODE_WEB_DIST flips the server into single-port
+# mode (UI + API on one port). We explicitly DO NOT set CHREODE_AGENT or
+# CHREODE_DRIVERS: unset = FakeAgent + dry-run, which is what keeps this
+# deterministic and free (../chreode packages/chreode/src/drivers/
+# resolve.ts, packages/chreode/src/agent.ts). Loopback bind (the
+# default CHREODE_HOST=127.0.0.1) means no auth gate.
 echo "up.sh: installing + building chreode (this is slow on a cold cache)"
 ( cd "$CHREODE_REPO" && pnpm install --frozen-lockfile && pnpm build ) >"$LOG" 2>&1 || {
   echo "up.sh: chreode install/build failed; see $LOG" >&2
   exit 1
 }
 
-echo "up.sh: starting chreode single-port server on :${ARBOR_PORT}"
+echo "up.sh: starting chreode single-port server on :${CHREODE_PORT}"
 (
   cd "$CHREODE_REPO" \
-    && ARBOR_WEB_DIST="$PWD/packages/web/dist" ARBOR_PORT="$ARBOR_PORT" \
+    && CHREODE_WEB_DIST="$PWD/packages/web/dist" CHREODE_PORT="$CHREODE_PORT" \
        exec pnpm start >>"$LOG" 2>&1
 ) &
 echo $! > "$PID_FILE"

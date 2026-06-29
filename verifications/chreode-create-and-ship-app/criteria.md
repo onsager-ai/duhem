@@ -6,7 +6,7 @@ them. These criteria are the stable human commitment; the checks in
 `duhem.yml` are the derivative mechanism (`docs/duhem-spec.md`
 §7.2 / §7.3).
 
-Target: `onsager-ai/arbor` (Duhem dogfood customer #2). Verified
+Target: `onsager-ai/chreode` (Duhem dogfood customer #2). Verified
 against the real factory pipeline running locally in its default
 deterministic mode — FakeAgent (no live LLM) plus the dry-run deploy
 drivers, which provision a **real** local preview server and return a

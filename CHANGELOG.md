@@ -20,6 +20,8 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [clarifying] Chreode VDs: rebrand internal literals to chreode (repo onsager-ai/chreode, CHREODE_* env, ~/.chreode, pnpm chreode) per the full Arbor→Chreode product rename. (#163)
+
 - [clarifying] Renamed product Arbor → Chreode across verifications + docs (verifications/chreode-*). (#163)
 
 - [clarifying] Spec §10.2/§10.3/§10.5/§10.6/§10.7/§11.1 trued to shipped code (audit #63 drift D-2..D-22). (#90,#91,#92,#93,#94,#95)

@@ -2,7 +2,7 @@
 
 Worked example for Duhem's [`cli/invoke`](../../docs/duhem-spec.md)
 action (#102): it drives Chreode's headless entry point —
-`pnpm factory "<description>"` — and judges the real process.
+`pnpm chreode "<description>"` — and judges the real process.
 
 - Criterion prose: [`criteria.md`](criteria.md)
 - Verification Definition: [`duhem.yml`](duhem.yml)
@@ -11,7 +11,7 @@ action (#102): it drives Chreode's headless entry point —
 
 | Criterion | Commitment |
 | --------- | ---------- |
-| **AC-1**  | `pnpm factory "<description>"` runs the full factory pipeline with no server, exits 0, and prints `shipped → <url>`. |
+| **AC-1**  | `pnpm chreode "<description>"` runs the full factory pipeline with no server, exits 0, and prints `shipped → <url>`. |
 
 `cli/invoke` runs the **real** binary — no shimmed shell, no fake exit
 code (`docs/duhem-spec.md` §8). Determinism without mocking comes from
@@ -20,7 +20,7 @@ local preview server.
 
 ## Operator setup
 
-1. An `onsager-ai/arbor` checkout with deps installed (`pnpm install`)
+1. An `onsager-ai/chreode` checkout with deps installed (`pnpm install`)
    and `pnpm` + Node on `PATH`.
 2. A Playwright Chromium for Duhem's browser. The check has **no UI
    step**, but `cli/invoke` (like `api/call`) still reports
@@ -36,7 +36,7 @@ local preview server.
 
 Run **from the duhem repo root** — `cli/invoke` resolves a relative
 `cwd` against the `duhem` process working directory, and the default
-`chreode_repo_dir` is `../arbor`:
+`chreode_repo_dir` is `../chreode`:
 
 ```sh
 duhem run verifications/chreode-factory-cli/duhem.yml
@@ -46,7 +46,7 @@ Point at a Chreode checkout elsewhere:
 
 ```sh
 duhem run verifications/chreode-factory-cli/duhem.yml \
-  --inputs chreode_repo_dir=/abs/path/to/arbor
+  --inputs chreode_repo_dir=/abs/path/to/chreode
 ```
 
 ## Status

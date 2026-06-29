@@ -4,7 +4,7 @@
 # Chreode feature end-to-end. Criteria prose: `./criteria.md`. Operator
 # setup: `./README.md`.
 #
-# Chreode (onsager-ai/arbor) is an "app factory": describe an app in
+# Chreode (onsager-ai/chreode) is an "app factory": describe an app in
 # plain language and it generates, verifies, deploys, and ships a
 # working app. This VD verifies the golden path — describe → build →
 # ship — through the real Vite-built dashboard against the real
@@ -15,11 +15,11 @@
 # only thing dialed down is cost/nondeterminism, not fidelity: Chreode's
 # DEFAULT mode is FakeAgent (no live LLM) + dry-run deploy drivers,
 # and the dry-run deploy stands up a REAL local preview server and
-# returns a clickable live URL (../arbor packages/factory/src/drivers/
+# returns a clickable live URL (../chreode packages/chreode/src/drivers/
 # dry-run.ts). So "the app shipped" is verified against a real
 # reachable deployment, not a mock.
 #
-# Selector / shape provenance (all from ../arbor source, not guessed):
+# Selector / shape provenance (all from ../chreode source, not guessed):
 #   - composer textbox + "Build it" submit:
 #       packages/web/src/components/Composer.tsx
 #   - run-detail route `/runs/:runId` + live-preview link:
@@ -28,7 +28,7 @@
 #   - POST /api/apps -> 201:
 #       packages/server/src/http/server.ts
 #   - default FakeAgent + dry-run, loopback no-auth:
-#       packages/factory/src/agent.ts, drivers/resolve.ts,
+#       packages/chreode/src/agent.ts, drivers/resolve.ts,
 #       packages/server/src/http/server.ts (LOCAL_ADMIN)
 # Confirmed against a live Chreode single-port server on the first run
 # (see ./README.md):

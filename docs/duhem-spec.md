@@ -281,7 +281,7 @@ Suitable for small projects or quick verification. One YAML file contains the fu
 duhem run create-workspace.yml
 ```
 
-No root manifest needed. The file’s content self-identifies as a Verification Definition (by presence of top-level `verification:` and/or `criteria:` fields).
+No root manifest needed. The file’s content self-identifies as a Verification Definition by the presence of a top-level `criteria:` field (`verification:` is the human-readable name, not the discriminator — see §10.2).
 
 #### Pattern B: Co-located per-feature, with root manifest
 
@@ -327,11 +327,19 @@ Same root manifest pattern as B, just different file layout.
 
 ### 10.2 Self-identification
 
-Any `.yml` or `.yaml` file containing a top-level `verification:` field (or `criteria:` field) is recognized as a Verification Definition. Files lacking these fields are ignored even if they happen to be in a glob pattern’s path.
+Duhem loads a `.yml`/`.yaml` file by sniffing its top-level keys, not its filename:
 
-This means Duhem coexists with other YAML in the repo (CI configs, Helm charts, etc.) without filename conflicts.
+- A **leaf** Verification Definition is identified by a top-level `criteria:` field.
+- A **root manifest** (§10.4) is identified by a top-level `verifications:` field.
+- `verification:` is the human-readable *name* of a definition, not a discriminator. A file carrying only `verification:` and no `criteria:` does **not** load as a Verification Definition.
+
+The two discriminators are mutually exclusive. A file with **both** `criteria:` and `verifications:` is ambiguous and fails to load; a file with **neither** is not silently skipped — it is a hard load error that names both expected keys. A glob (§10.4) that matches a wrong-shape file (or a nested manifest) fails the whole load rather than quietly dropping it, so a typo surfaces instead of silently shrinking the run. (A glob that matches *zero* files is a non-fatal warning, not an error.)
+
+This content-based identification lets Duhem coexist with other YAML in the repo (CI configs, Helm charts, etc.) without filename conflicts — but every file a manifest *points at* must resolve to a leaf or manifest shape.
 
 ### 10.3 Verification Definition structure
+
+Values like `$inputs.workspace_name` below are **runtime expressions** (§10.7). Substitution is whole-string only: a `with:` value that is *exactly* a bare `$…` reference (or a `$runtime.<fn>(…)` call) is resolved to its evaluated scalar; everything else passes through literally. There is no embedded `{{…}}` interpolation — to compose a value, use `$runtime.format(…)` / `$runtime.concat(…)` (§10.7), not string templating. Input `default:` values are taken literally and are never evaluated as expressions.
 
 ```yaml
 # Any filename. Self-identifies by top-level fields.
@@ -341,7 +349,7 @@ spec_ref: docs/features/create-workspace.md  # link to feature spec (optional)
 inputs:
   workspace_name:
     type: string
-    default: "test-ws-{{uuid}}"
+    default: "test-workspace"             # input defaults are literal — not templated (§10.7)
 
 setup:                                  # runs once before all criteria
   - uses: ui/navigate
@@ -406,7 +414,7 @@ criteria:
           - uses: ui/assert-url
             id: nav_check
             with:
-              matches: "/workspaces/{{$steps.api_call.outputs.workspace_id}}"
+              matches: "^/workspaces/[0-9a-f-]+$"   # regex; step outputs are check-scoped, so match the route shape
               within: 3s
             outputs:
               satisfied: satisfied
@@ -429,13 +437,48 @@ criteria:
 
 Notice that AC-1.1 alone exercises five different layers: UI input capture, UI button activation, network observation, API response shape, and ID semantics. That is intentional. The check verifies a slice of the holistic web.
 
+#### 10.3.1 Environment provisioning (`environment:`)
+
+A Verification Definition may declare an optional top-level `environment:` block of operator-supplied lifecycle hooks for the system-under-test (§9 Stage 3). When present, the runtime forks `up:` once before `setup:`, polls the optional `ready:` probe before the first criterion, and forks the optional `down:` after the criteria loop completes — regardless of verdict.
+
+```yaml
+verification: Create workspace with a provisioned environment
+environment:
+  up: ./scripts/up.sh            # required — brings the SUT up; runs once before setup:
+  down: ./scripts/down.sh        # optional — torn down after the criteria loop, regardless of verdict
+  ready:                         # optional readiness probe, polled after up: exits 0
+    http:
+      url: http://localhost:3000/healthz
+      expect_status: 200         # defaults to 200
+      timeout: 60s               # total time to keep polling before giving up
+criteria:
+  - id: AC-1
+    description: The dashboard is reachable once the environment is up.
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: api/call
+            id: health
+            with:
+              method: GET
+              url: http://localhost:3000/healthz
+            outputs:
+              status: response.status
+        assertions:
+          - $steps.health.outputs.status == 200
+```
+
+Failure policy is **inconclusive, never false**: a non-zero `up:` exit (or an unrunnable script) yields a run verdict of `Inconclusive(environment_error)`; a `ready:` probe that exhausts its `timeout:` yields `Inconclusive(timeout)`. A failed `up:` skips teardown (nothing came up to tear down); `down:` failures are recorded as evidence but never alter the verdict. Relative script paths resolve against the Verification Definition's directory. `up:`/`down:` scripts run under the runtime's sanitized subprocess environment (§9 Stage 3, §11.1 Runtime). The `ready:` catalog is closed at `http:` for v1.
+
+A manifest can also provision **one shared environment for the whole suite** rather than per-leaf — see the manifest `environment:` block in §10.4.
+
 ### 10.4 Root manifest (`duhem.yml`)
 
 The root manifest is a single canonical file at the project root that aggregates Verification Definitions and provides shared configuration.
 
 ```yaml
 # duhem.yml at project root
-version: "1"
+manifest_version: 1
 
 defaults:
   environment: staging        # default environment for runs
@@ -444,6 +487,14 @@ defaults:
   retry:
     max: 1
     backoff: exponential
+
+environment:                  # optional — one shared environment for the whole suite (§10.3.1)
+  up: ./scripts/up.sh         #   provisioned once before the first leaf, torn down after the last
+  down: ./scripts/down.sh
+  ready:
+    http:
+      url: http://localhost:3000/healthz
+      timeout: 60s
 
 verifications:
   - features/create-workspace/verification.yml
@@ -470,7 +521,9 @@ If no root manifest is present, Duhem still works on individual Verification Def
 
 ### 10.5 Action types
 
-Verification Definitions invoke pre-defined action types via `uses:`. Each action defines a typed `with:` schema (its internal `With` struct) and named outputs; the dispatch boundary itself is untyped YAML that the action downcasts inside `invoke`.
+Verification Definitions invoke pre-defined action types via `uses:`. Each action defines a typed `with:` schema (its internal `With` struct) and named outputs; the dispatch boundary itself is untyped YAML that the action downcasts inside `invoke`. The v1 catalog is **closed** (`crates/duhem-actions`); a `uses:` that names an unregistered action is a runtime "unknown action" error, not a silent skip.
+
+#### Implemented (v1)
 
 **UI actions** (Playwright primitives)
 
@@ -494,22 +547,26 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 - `db/query` — execute a read query, capture rows
 - `db/seed` — seed data for setup
 
-**Event actions**
+**CLI actions**
+
+- `cli/invoke` — run a subprocess command and capture its exit code, stdout, and stderr for assertion
+
+#### Planned (Phase 2+ — §14)
+
+Roadmap surfaces that are **not** registered today; a `uses:` naming one errors at runtime. They are listed here so authors can see the intended direction, not author against them yet.
 
 - `event/wait` — wait for an event on a topic, capture payload
 - `event/publish` — publish an event for setup
-
-**Generic**
-
 - `wait` — wait for a duration
-- `assert` — top-level assertion (when not tied to a specific step’s observable)
+
+There is intentionally no standalone `assert` action: a top-level assertion not tied to a step is expressed through the §10.6 assertion forms attached to a check, not a dedicated action type.
 
 ### 10.6 Assertion forms
 
 Assertions evaluate to `true`, `false`, or `inconclusive` (e.g., when timeouts hit or referenced state is missing).
 
 - **Boolean expression**: `$steps.X.outputs.Y == 200`
-- **Type check**: `type_check: {value: ..., is: uuid|email|datetime|...}`
+- **Type check**: `type_check: {value: ..., is: <kind>}` — the `is:` catalog is closed at v1: `uuid | string | integer | float | boolean | object | array | null`. (Extending it, e.g. with `email` or `datetime`, is a schema-impacting change.)
 - **Pattern match**: `matches: {value: ..., pattern: ...}`
 - **Set membership**: `in: {value: ..., set: [...]}`
 - **Existence**: `exists: $steps.X.outputs.Y`
@@ -522,9 +579,10 @@ An `inconclusive` result always carries a cause, distinguishing "the check could
 Borrowed from Arazzo. References available in expressions:
 
 - `$inputs.<name>` — inputs to the verification run
-- `$steps.<id>.outputs.<name>` — outputs from a prior step
-- `$env.<name>` — environment variables (whitelisted)
-- `$runtime.uuid()` / `$runtime.now()` — common helpers
+- `$steps.<id>.outputs.<name>` — outputs from a prior step (scoped to the declaring check)
+- `$setup.<id>.outputs.<name>` — outputs from a run-level `setup:` step (§10.3), read-only from inside any check
+- `$env.<name>` — a value from the selected named environment. The `$env` whitelist is **empty by default**. An author opts a key in by declaring it (with a string value) under a manifest `environments:` entry (§10.4) and selecting that environment with `--environment <name>` (auto-selected when the manifest declares exactly one); the selected entry's string-valued keys seed the whitelist for that run. There is no process-environment passthrough and no `--env` CLI flag. A reference to a key that isn't whitelisted evaluates to `inconclusive` (it carries a missing-env cause, §10.6), never a parse error.
+- `$runtime.uuid()` — a stable per-run UUID / `$runtime.now()` — the run's current time as epoch milliseconds
 - `$runtime.format(fmt, args...)` — **pure** string composition: the
   `{}` placeholders in `fmt` are filled, in order, by the remaining
   scalar args (coerced to their string form). The sanctioned way to
@@ -542,11 +600,19 @@ Borrowed from Arazzo. References available in expressions:
   *missing* reference (absent output / input / env / nested field), for
   optional fields.
 
+The `$runtime` helper catalog is **closed** at v1: the authored helpers
+are exactly `uuid`, `now`, `format`, `concat`, `len`, `lower`, `upper`,
+`trim`, `replace`, and `default`. The evaluator additionally recognizes
+`exists`, `matches`, and `type_check` as internal desugaring shims behind
+the §10.6 assertion forms (`exists:`, `matches:`, `type_check:`); these
+are not part of the authored `$runtime.<fn>(…)` surface.
+
 All `$runtime` helpers are **pure** functions of their arguments — no
 I/O, clock, or randomness — so they preserve the mechanical-judgment and
-reproducible-run commitments (§11.2). Helpers may compute and compose
-values; they never *are* the verdict, which remains the closed assertion
-set of §10.6.
+reproducible-run commitments (§11.2). (`uuid()` and `now()` are fixed per
+run, so re-evaluation within a run is stable.) Helpers may compute and
+compose values; they never *are* the verdict, which remains the closed
+assertion set of §10.6.
 
 ### 10.8 Extensibility
 
@@ -563,40 +629,59 @@ Custom actions are intended to follow a marketplace mental model similar to GitH
 
 ### 11.1 Components
 
+The shipped workspace is named in parentheses below (`crates/*`). Components without a crate (the VS Code extension, the Generation Service, and the broader Delivery Layer integrations) are roadmap surfaces, not yet built.
+
 **Authoring Surface**
 
-- CLI for local authoring (`duhem init`, `duhem validate`, `duhem run`)
-- VS Code extension for inline criterion editing and check preview
-- Web UI for browsing past runs, evidence, and verdicts
+- CLI for local authoring (`duhem-cli` — `duhem init`, `duhem validate`, `duhem run`, `duhem dashboard`)
+- Web UI for browsing past runs, evidence, and verdicts (`duhem-dashboard` — serve + static export, live SSE)
+- VS Code extension for inline criterion editing and check preview (roadmap)
 
-**Generation Service**
+**Schema** (`duhem-schema`)
+
+- The Verification Definition wire shape, the expression AST + parser, and the structural validator
+- The root manifest (`duhem.yml`) loader and leaf/manifest discrimination (§10.2)
+- Cross-cutting dependency of the CLI, runtime, and judge; owns `duhem_schema::SCHEMA_VERSION`
+
+**Action Catalog** (`duhem-actions`)
+
+- The built-in `ui/*`, `api/*`, `db/*`, and `cli/*` actions (§10.5) and the `Action` trait they implement
+- Closed at v1; the dispatch registry is internal (§10.8)
+
+**Generation Service** (roadmap)
 
 - AI-powered translation of criteria into checks
 - Uses Duhem’s structured action-type catalog as constraints
 - Outputs YAML, never invoked at run time
 
-**Runtime**
+**Runtime** (`duhem-runtime`)
 
 - Executes checks against an environment
+- **Provisions the environment**: owns the `environment.up:`/`down:` lifecycle, the `ready:` readiness probe, and the sanitized subprocess env under which operator-supplied scripts run (§9 Stage 3, §10.3.1)
 - Produces evidence
 - Stateless except for run records
 
-**Judge**
+**Judge** (`duhem-judge`)
 
 - Pure deterministic evaluator of assertions over observed state
 - No LLM in the loop
 - Open source, auditable
 
-**Evidence Store**
+**Evidence Store** (`duhem-evidence`)
 
 - Append-only structured log + binary blobs (screenshots, videos, HAR)
 - Queryable via dashboard
 
+**Run Summary & Reporters** (`duhem-summary`, `duhem-reporter-pretty`, `duhem-reporter-junit`)
+
+- `duhem-summary` defines the run-summary types the CLI emits
+- The reporters render those summaries for humans (pretty) and CI (JUnit XML); they consume judge output and never produce a verdict, so they sit on the delivery side of the trust boundary (§11.2)
+
 **Delivery Layer**
 
-- GitHub Action / GitLab CI integration
-- Slack / Linear / email notifications
-- Webhooks for custom integrations
+- GitHub Action integration — the `duhem/run` composite action ships today; GitLab CI is roadmap
+- Slack / Linear / email notifications (roadmap)
+- Webhooks for custom integrations (roadmap)
 
 ### 11.2 Trust Boundary
 

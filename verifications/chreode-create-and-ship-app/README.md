@@ -1,9 +1,9 @@
-# `arbor-create-and-ship-app`
+# `chreode-create-and-ship-app`
 
 Duhem's second dogfood Verification Definition: it drives the real
-[Arbor](https://github.com/onsager-ai/arbor) dashboard end-to-end and
+[Chreode](https://github.com/onsager-ai/arbor) dashboard end-to-end and
 verifies the product's core promise — describe an app in plain
-language, and Arbor builds and **ships** a working app.
+language, and Chreode builds and **ships** a working app.
 
 - Criteria prose: [`criteria.md`](criteria.md)
 - Verification Definition: [`duhem.yml`](duhem.yml)
@@ -12,7 +12,7 @@ language, and Arbor builds and **ships** a working app.
 
 It is the worked example that proves Duhem's `ui/*` + `api/*` surface
 is enough to dogfood a second, independent web product (per the
-re-prioritization toward Arbor + Crawlab).
+re-prioritization toward Chreode + Crawlab).
 
 ## What it verifies
 
@@ -23,7 +23,7 @@ re-prioritization toward Arbor + Crawlab).
 
 ## Why it stays deterministic without mocking the web
 
-Arbor's **default** mode needs no opt-in env vars to be cheap and
+Chreode's **default** mode needs no opt-in env vars to be cheap and
 repeatable:
 
 - **FakeAgent** — with `ARBOR_AGENT` unset there is no live LLM call
@@ -40,12 +40,12 @@ repeatable:
 
 ## Operator setup
 
-1. Clone Arbor next to this repo, or point at it:
+1. Clone Chreode next to this repo, or point at it:
    ```sh
-   export DUHEM_ARBOR_REPO_DIR=/path/to/onsager-ai/arbor
+   export DUHEM_CHREODE_REPO_DIR=/path/to/onsager-ai/arbor
    ```
    `up.sh` defaults to `../../../arbor` relative to this directory.
-2. Toolchain on `PATH`: `pnpm` + Node (Arbor targets Node 20+) and
+2. Toolchain on `PATH`: `pnpm` + Node (Chreode targets Node 20+) and
    Playwright Chromium for Duhem's browser actions:
    ```sh
    npx playwright install chromium
@@ -56,17 +56,17 @@ repeatable:
 ## Running
 
 ```sh
-# Full run: provisions Arbor, verifies, tears down.
-duhem run verifications/arbor-create-and-ship-app/duhem.yml
+# Full run: provisions Chreode, verifies, tears down.
+duhem run verifications/chreode-create-and-ship-app/duhem.yml
 
-# Arbor already running on :4100 — skip provisioning.
-duhem run verifications/arbor-create-and-ship-app/duhem.yml --no-env-up
+# Chreode already running on :4100 — skip provisioning.
+duhem run verifications/chreode-create-and-ship-app/duhem.yml --no-env-up
 
-# Leave Arbor up afterward for triage.
-duhem run verifications/arbor-create-and-ship-app/duhem.yml --keep-env
+# Leave Chreode up afterward for triage.
+duhem run verifications/chreode-create-and-ship-app/duhem.yml --keep-env
 
 # Iterate on one criterion.
-duhem run verifications/arbor-create-and-ship-app/duhem.yml --filter AC-1
+duhem run verifications/chreode-create-and-ship-app/duhem.yml --filter AC-1
 ```
 
 Override any URL input for a non-default port or a staging host, e.g.
@@ -77,7 +77,7 @@ forwards `/api` to `:4100`, so a single origin still works.
 ## Confirmed live; what's environment-coupled
 
 This VD has run green end-to-end (`verdict: pass`, both criteria)
-against a real single-port Arbor on `:4180` in default FakeAgent +
+against a real single-port Chreode on `:4180` in default FakeAgent +
 dry-run mode — the pipeline ships in ~4s. Two notes for other
 environments:
 
@@ -91,7 +91,7 @@ environments:
    out, first confirm a run actually reaches `outcome: shipped`
    (`GET /api/runs/<id>` → `status: "succeeded"`), then confirm the
    link's rendered text.
-2. **Port 4180, not 4100.** Arbor's own default is `:4100`, but
+2. **Port 4180, not 4100.** Chreode's own default is `:4100`, but
    Onsager (Duhem's first dogfood) commonly runs on `:4100` + `:5173`
    on the dev machine — and Onsager's `/api/health` *also* returns
    200, so a 4100 target would silently drive Onsager and still pass

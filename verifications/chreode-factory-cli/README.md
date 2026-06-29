@@ -1,7 +1,7 @@
-# `arbor-factory-cli`
+# `chreode-factory-cli`
 
 Worked example for Duhem's [`cli/invoke`](../../docs/duhem-spec.md)
-action (#102): it drives Arbor's headless entry point —
+action (#102): it drives Chreode's headless entry point —
 `pnpm factory "<description>"` — and judges the real process.
 
 - Criterion prose: [`criteria.md`](criteria.md)
@@ -15,7 +15,7 @@ action (#102): it drives Arbor's headless entry point —
 
 `cli/invoke` runs the **real** binary — no shimmed shell, no fake exit
 code (`docs/duhem-spec.md` §8). Determinism without mocking comes from
-Arbor's default FakeAgent + dry-run mode, which still stands up a real
+Chreode's default FakeAgent + dry-run mode, which still stands up a real
 local preview server.
 
 ## Operator setup
@@ -36,21 +36,21 @@ local preview server.
 
 Run **from the duhem repo root** — `cli/invoke` resolves a relative
 `cwd` against the `duhem` process working directory, and the default
-`arbor_repo_dir` is `../arbor`:
+`chreode_repo_dir` is `../arbor`:
 
 ```sh
-duhem run verifications/arbor-factory-cli/duhem.yml
+duhem run verifications/chreode-factory-cli/duhem.yml
 ```
 
-Point at an Arbor checkout elsewhere:
+Point at a Chreode checkout elsewhere:
 
 ```sh
-duhem run verifications/arbor-factory-cli/duhem.yml \
-  --inputs arbor_repo_dir=/abs/path/to/arbor
+duhem run verifications/chreode-factory-cli/duhem.yml \
+  --inputs chreode_repo_dir=/abs/path/to/arbor
 ```
 
 ## Status
 
-Proven green end-to-end against a real Arbor checkout: `verdict: pass`,
+Proven green end-to-end against a real Chreode checkout: `verdict: pass`,
 `exit_code == 0`, stdout matched `shipped`. The factory pipeline ships
 in a few seconds in FakeAgent + dry-run mode.

@@ -1,6 +1,6 @@
-# Arbor — the factory CLI builds and ships an app
+# Chreode — the factory CLI builds and ships an app
 
-Acceptance criterion for Arbor's headless entry point: `pnpm factory
+Acceptance criterion for Chreode's headless entry point: `pnpm factory
 "<description>"` runs the full factory pipeline with no server and no
 dashboard, and ships a working app. This is the worked example for
 Duhem's `cli/invoke` action (#102) — the criterion is the stable human

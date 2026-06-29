@@ -20,6 +20,8 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [clarifying] Renamed product Arbor → Chreode across verifications + docs (verifications/chreode-*). (#163)
+
 - [clarifying] Spec §10.2/§10.3/§10.5/§10.6/§10.7/§11.1 trued to shipped code (audit #63 drift D-2..D-22). (#90,#91,#92,#93,#94,#95)
 
 - [additive] api/stream action: follow an open-ended SSE/chunked stream until a terminal event or within: timeout; outputs events/event_count/last_event for mechanical assertion. Worked example: verifications/duhem-dashboard /live. (#153)

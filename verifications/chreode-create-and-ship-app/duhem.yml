@@ -1,10 +1,10 @@
-# Arbor — create an app from a description, and ship it (dogfood)
+# Chreode — create an app from a description, and ship it (dogfood)
 #
 # Duhem's second dogfood Verification Definition, against a real
-# Arbor feature end-to-end. Criteria prose: `./criteria.md`. Operator
+# Chreode feature end-to-end. Criteria prose: `./criteria.md`. Operator
 # setup: `./README.md`.
 #
-# Arbor (onsager-ai/arbor) is an "app factory": describe an app in
+# Chreode (onsager-ai/arbor) is an "app factory": describe an app in
 # plain language and it generates, verifies, deploys, and ships a
 # working app. This VD verifies the golden path — describe → build →
 # ship — through the real Vite-built dashboard against the real
@@ -12,7 +12,7 @@
 #
 # Holistic posture (`docs/duhem-spec.md` §8): every check drives the
 # real dashboard against the real API and runs the real pipeline. The
-# only thing dialed down is cost/nondeterminism, not fidelity: Arbor's
+# only thing dialed down is cost/nondeterminism, not fidelity: Chreode's
 # DEFAULT mode is FakeAgent (no live LLM) + dry-run deploy drivers,
 # and the dry-run deploy stands up a REAL local preview server and
 # returns a clickable live URL (../arbor packages/factory/src/drivers/
@@ -30,7 +30,7 @@
 #   - default FakeAgent + dry-run, loopback no-auth:
 #       packages/factory/src/agent.ts, drivers/resolve.ts,
 #       packages/server/src/http/server.ts (LOCAL_ADMIN)
-# Confirmed against a live Arbor single-port server on the first run
+# Confirmed against a live Chreode single-port server on the first run
 # (see ./README.md):
 #   - `role: textbox` alone addresses the composer (the only textbox on
 #     `/new`); `button "Build it"` is exact among the example chips.
@@ -41,22 +41,22 @@
 #     `cli` deploy advertises an absolute host instead, so this locator
 #     text changes per environment.
 #
-# Default port is 4180, NOT Arbor's own default 4100: on the dev
+# Default port is 4180, NOT Chreode's own default 4100: on the dev
 # machine Onsager (Duhem's first dogfood) runs on 4100 + 5173, and
 # Onsager's `/api/health` also returns 200 — so targeting 4100 would
 # silently drive Onsager and pass the readiness probe against the
 # wrong app. 4180 keeps the two dogfoods side by side.
 
-verification: Arbor — create an app from a description, and ship it
+verification: Chreode — create an app from a description, and ship it
 
 # Operator-supplied environment provisioning (mechanism from
 # duhem-spec.md §9 stage 3 / the v1 environment block). `./scripts/
-# up.sh` builds Arbor's web bundle and boots the single-port server
+# up.sh` builds Chreode's web bundle and boots the single-port server
 # (UI + API on :4100) in its default deterministic mode; `./scripts/
-# down.sh` tears it down. The readiness probe gates checks on Arbor's
+# down.sh` tears it down. The readiness probe gates checks on Chreode's
 # public `/api/health` returning 200. The first-run `pnpm build` is
 # slow, hence the generous timeout. `--no-env-up` skips this block
-# when Arbor is already up; `--keep-env` skips teardown for triage.
+# when Chreode is already up; `--keep-env` skips teardown for triage.
 environment:
   up: ./scripts/up.sh
   down: ./scripts/down.sh
@@ -128,7 +128,7 @@ criteria:
           - id: on_run_page
             uses: ui/assert-url
             with:
-              # Arbor navigates to `/runs/<runId>` on submit. Match the
+              # Chreode navigates to `/runs/<runId>` on submit. Match the
               # segment without pinning the dynamic id.
               matches: "/runs/"
               within: 15s
@@ -139,7 +139,7 @@ criteria:
           - $steps.on_run_page.outputs.satisfied == true
           # Nested-JSON navigation (#104): verify the created run's
           # identity from the real response body, not just the status
-          # code — the run id Arbor minted is well-formed (`run_<uuid>`).
+          # code — the run id Chreode minted is well-formed (`run_<uuid>`).
           - matches:
               value: $steps.create_call.outputs.body.run.id
               pattern: "^run_"

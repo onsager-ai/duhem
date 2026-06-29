@@ -20,6 +20,8 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [clarifying] Public README + CONTRIBUTING for the open-source release. (#143)
+
 - [clarifying] Project relicensed to Apache-2.0; open-source posture (spec §12/§13/§14). (#143)
 
 - [clarifying] CLI manifest discovery: ancestor walk, .duhem.yml alias, -f override. (#69)

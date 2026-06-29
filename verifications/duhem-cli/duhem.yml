@@ -248,3 +248,261 @@ criteria:
           - matches:
               value: $steps.run_example.outputs.stdout
               pattern: '"verdict":"pass"'
+
+  # ==========================================================================
+  # #151 — `duhem run` flag prune. The breaking CLI surface change ships with
+  # its worked Duhem example (per CLAUDE.md): `--seed` / `--headed` removed,
+  # `--inputs-file` folded into `--inputs @file`. Every check is page-free —
+  # it drives the offline `fixtures/inputs-fixture.yml` leaf with `--dry-run`,
+  # so loading / precedence / rejection are observable via exit code + stdout/
+  # stderr with no browser. Behaviors are asserted through type-validation and
+  # required-input levers (the resolved value itself is not printed by
+  # `--dry-run`; see the PR's DX note).
+  # ==========================================================================
+  - id: AC-6
+    description: |
+      `--inputs @file` loads inputs from a YAML/JSON mapping. The
+      fixture's `count` input is required, so a clean dry-run proves the
+      `@file` is what supplied it — and omitting it fails loudly, naming
+      the missing input.
+    checks:
+      - id: AC-6.1
+        description: |
+          `duhem run <fixture> --dry-run --inputs @count.yml` exits 0 and
+          prints the resolved plan — the `@file` satisfied the required
+          `count`.
+        steps:
+          - id: at_file_loads
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - run
+                - verifications/duhem-cli/fixtures/inputs-fixture.yml
+                - --dry-run
+                - --inputs
+                - '@verifications/duhem-cli/fixtures/count.yml'
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+              stdout: stdout
+        assertions:
+          - $steps.at_file_loads.outputs.exit_code == 0
+          - matches:
+              value: $steps.at_file_loads.outputs.stdout
+              pattern: 'WOULD RUN'
+      - id: AC-6.2
+        description: |
+          Control: the same run with no `--inputs` exits non-zero and
+          names the unresolved required input `count` on stderr — so the
+          AC-6.1 success is attributable to the loaded file.
+        steps:
+          - id: missing_required
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - run
+                - verifications/duhem-cli/fixtures/inputs-fixture.yml
+                - --dry-run
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+              stderr: stderr
+        assertions:
+          - $steps.missing_required.outputs.exit_code != 0
+          - matches:
+              value: $steps.missing_required.outputs.stderr
+              pattern: 'missing required input'
+          - matches:
+              value: $steps.missing_required.outputs.stderr
+              pattern: 'count'
+
+  - id: AC-7
+    description: |
+      `--inputs` tokens resolve last-wins in declared order. Observed via
+      the `integer` type lever: whichever token wins is the one coerced,
+      so a non-integer flag's position flips the run between success and a
+      coercion error.
+    checks:
+      - id: AC-7.1
+        description: |
+          `--inputs @count.yml --inputs count=notanumber` — the raw flag
+          is last, so it wins and fails integer coercion (exit non-zero,
+          stderr names `integer`).
+        steps:
+          - id: raw_last_wins
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - run
+                - verifications/duhem-cli/fixtures/inputs-fixture.yml
+                - --dry-run
+                - --inputs
+                - '@verifications/duhem-cli/fixtures/count.yml'
+                - --inputs
+                - count=notanumber
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+              stderr: stderr
+        assertions:
+          - $steps.raw_last_wins.outputs.exit_code != 0
+          - matches:
+              value: $steps.raw_last_wins.outputs.stderr
+              pattern: 'integer'
+      - id: AC-7.2
+        description: |
+          Reversed order — `--inputs count=notanumber --inputs
+          @count.yml` — the valid `@file` value is last, so it wins and
+          the run dry-runs cleanly (exit 0).
+        steps:
+          - id: file_last_wins
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - run
+                - verifications/duhem-cli/fixtures/inputs-fixture.yml
+                - --dry-run
+                - --inputs
+                - count=notanumber
+                - --inputs
+                - '@verifications/duhem-cli/fixtures/count.yml'
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+        assertions:
+          - $steps.file_last_wins.outputs.exit_code == 0
+
+  - id: AC-8
+    description: |
+      The `@` triggers file-loading only as a bare leading token;
+      `key=@literal` keeps `@literal` as a literal value. Proven by
+      contrast: the same `@nope.yml` string is an inert literal after `=`
+      but a (missing) file ref as a bare token.
+    checks:
+      - id: AC-8.1
+        description: |
+          `--inputs name=@nope.yml` binds the literal string `@nope.yml`
+          to `name` — no file load — so the run dry-runs cleanly (exit 0).
+        steps:
+          - id: key_at_literal
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - run
+                - verifications/duhem-cli/fixtures/inputs-fixture.yml
+                - --dry-run
+                - --inputs
+                - '@verifications/duhem-cli/fixtures/count.yml'
+                - --inputs
+                - name=@nope.yml
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+        assertions:
+          - $steps.key_at_literal.outputs.exit_code == 0
+      - id: AC-8.2
+        description: |
+          The same string as a bare leading token IS a file ref — `--inputs
+          @nope.yml` tries to load a missing file and fails, naming it on
+          stderr. This is the negative control for AC-8.1.
+        steps:
+          - id: bare_at_missing
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - run
+                - verifications/duhem-cli/fixtures/inputs-fixture.yml
+                - --dry-run
+                - --inputs
+                - '@verifications/duhem-cli/fixtures/count.yml'
+                - --inputs
+                - '@nope.yml'
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+              stderr: stderr
+        assertions:
+          - $steps.bare_at_missing.outputs.exit_code != 0
+          - matches:
+              value: $steps.bare_at_missing.outputs.stderr
+              pattern: 'nope.yml'
+
+  - id: AC-9
+    description: |
+      The pruned flags `--seed`, `--headed`, and `--inputs-file` are gone
+      from the `run` surface — clap rejects each as an unexpected argument
+      with a non-zero exit, before any work happens. This is the
+      user-visible breaking change.
+    checks:
+      - id: AC-9.1
+        description: |
+          Each removed flag fails fast: `--seed 1`, `--headed`, and
+          `--inputs-file x.yml` all exit non-zero with an "unexpected
+          argument" diagnostic on stderr.
+        steps:
+          - id: rejected_seed
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - run
+                - verifications/duhem-cli/fixtures/inputs-fixture.yml
+                - --seed
+                - '1'
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+              stderr: stderr
+          - id: rejected_headed
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - run
+                - verifications/duhem-cli/fixtures/inputs-fixture.yml
+                - --headed
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+              stderr: stderr
+          - id: rejected_inputs_file
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - run
+                - verifications/duhem-cli/fixtures/inputs-fixture.yml
+                - --inputs-file
+                - x.yml
+              cwd: $inputs.repo_dir
+              within: 30s
+            outputs:
+              exit_code: exit_code
+              stderr: stderr
+        assertions:
+          - $steps.rejected_seed.outputs.exit_code != 0
+          - matches:
+              value: $steps.rejected_seed.outputs.stderr
+              pattern: 'unexpected argument'
+          - $steps.rejected_headed.outputs.exit_code != 0
+          - matches:
+              value: $steps.rejected_headed.outputs.stderr
+              pattern: 'unexpected argument'
+          - $steps.rejected_inputs_file.outputs.exit_code != 0
+          - matches:
+              value: $steps.rejected_inputs_file.outputs.stderr
+              pattern: 'unexpected argument'

@@ -1,0 +1,4 @@
+# Fixture inputs file loaded via `--inputs @…` by the #151 ACs in
+# ../duhem.yml. A single key matching the `inputs-fixture.yml` required
+# `count` input.
+count: 7

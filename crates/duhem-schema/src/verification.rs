@@ -40,8 +40,8 @@ pub struct VerificationDefinition {
 
     /// Inherited input names (spec #135). A leaf under a manifest may
     /// list input names it pulls from the parent manifest's resolution
-    /// chain (#68: selected `environments:` keys, `--inputs`,
-    /// `--inputs-file`) instead of redeclaring them under `inputs:`.
+    /// chain (#68: selected `environments:` keys, `--inputs`
+    /// `KEY=VALUE` / `@file`) instead of redeclaring them under `inputs:`.
     /// This is dependency injection — the manifest provides, the leaf
     /// declares what it needs — not class inheritance: one level deep,
     /// names only, no local `default:`. An inherited name resolves and

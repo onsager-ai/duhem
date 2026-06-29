@@ -1,9 +1,10 @@
-//! Input resolution for `duhem run`: combine `--inputs k=v` flags, an
-//! `--inputs-file` map, a selected named environment, and the VD's
-//! per-input `default:` into the engine's typed input map.
+//! Input resolution for `duhem run`: combine the merged `--inputs`
+//! tokens (`KEY=VALUE` + `@file`, last-wins — see `inputs::merge_inputs`),
+//! a selected named environment, and the VD's per-input `default:` into
+//! the engine's typed input map.
 //!
-//! Precedence, highest first (spec #68):
-//!   --inputs k=v  >  --inputs-file  >  selected environment  >  default
+//! Precedence, highest first (spec #68 / #151):
+//!   --inputs (last-wins merge)  >  selected environment  >  default
 //!
 //! Lives in its own module so `main.rs` stays under the per-file token
 //! budget.
@@ -12,70 +13,55 @@ use std::collections::BTreeMap;
 
 use duhem_schema::{InputDecl, InputType};
 
-/// Parse the raw `--inputs k=v` flags into a `(name, raw)` map.
-fn parse_inputs(raw: &[String]) -> Result<BTreeMap<String, String>, String> {
-    let mut out = BTreeMap::new();
-    for s in raw {
-        let (k, v) = s
-            .split_once('=')
-            .ok_or_else(|| format!("--inputs `{s}`: expected `key=value`"))?;
-        if k.is_empty() {
-            return Err(format!("--inputs `{s}`: empty key"));
-        }
-        out.insert(k.to_string(), v.to_string());
-    }
-    Ok(out)
-}
+use crate::inputs::InputValue;
 
-/// Resolve `--inputs k=v` flags + an optional `--inputs-file` map +
-/// an optional selected-environment key map against the Verification
-/// Definition's `inputs:` block. Precedence, highest first (spec #68):
+/// Resolve the merged `--inputs` map (spec #151) + an optional
+/// selected-environment key map against the Verification Definition's
+/// `inputs:` block. Precedence, highest first (spec #68 / #151):
 ///
-/// 1. Explicit `--inputs k=v` → coerced per declared `InputType`.
-/// 2. `--inputs-file` value → validated against the declared `InputType`.
-/// 3. Selected environment's key `k` (spec #68) → validated against
+/// 1. `--inputs` (the last-wins merge of `KEY=VALUE` + `@file` tokens):
+///    a [`InputValue::Raw`] string is coerced per the declared
+///    `InputType`; a [`InputValue::Typed`] value (from an `@file`) is
+///    shape-validated against it.
+/// 2. Selected environment's key `k` (spec #68) → validated against
 ///    the declared `InputType`. An environment key that matches no
 ///    declared input is *not* an error here (the environment may carry
 ///    keys that are only consumed via `$env.<key>`, not as inputs); it
 ///    simply doesn't feed input resolution.
-/// 4. The VD's per-input `default:` (schema validator type-checked it
+/// 3. The VD's per-input `default:` (schema validator type-checked it
 ///    at parse time).
-/// 5. None of the above + no default → error.
+/// 4. None of the above + no default → error.
 ///
-/// Unknown inputs from `--inputs` / `--inputs-file` remain hard errors
-/// (those name an input explicitly); the environment map is consulted
-/// only for keys that *are* declared inputs.
+/// Unknown inputs from `--inputs` remain hard errors (those name an
+/// input explicitly); the environment map is consulted only for keys
+/// that *are* declared inputs.
 pub(crate) fn resolve_inputs(
-    raw: &[String],
-    file: &BTreeMap<String, serde_json::Value>,
+    merged: &BTreeMap<String, InputValue>,
     env: &BTreeMap<String, serde_json::Value>,
     decls: &BTreeMap<String, InputDecl>,
     inherits: &[String],
 ) -> Result<BTreeMap<String, serde_json::Value>, String> {
-    let provided = parse_inputs(raw)?;
-    // An `--inputs` / `--inputs-file` key is "known" if it names a
-    // declared input *or* an inherited name (spec #135) — an inherited
-    // name has no local `InputDecl`, but the leaf still accepts a value
-    // for it on the precedence chain.
+    // An `--inputs` key is "known" if it names a declared input *or* an
+    // inherited name (spec #135) — an inherited name has no local
+    // `InputDecl`, but the leaf still accepts a value for it on the
+    // precedence chain.
     let is_known = |name: &str| decls.contains_key(name) || inherits.iter().any(|n| n == name);
-    for name in provided.keys() {
+    for name in merged.keys() {
         if !is_known(name) {
             return Err(format!("unknown input: `{name}`"));
         }
     }
-    for name in file.keys() {
-        if !is_known(name) {
-            return Err(format!("unknown input (from --inputs-file): `{name}`"));
-        }
-    }
     let mut out = BTreeMap::new();
     for (name, decl) in decls {
-        if let Some(raw_value) = provided.get(name) {
-            let coerced = coerce_input(name, decl.kind, raw_value)?;
-            out.insert(name.clone(), coerced);
-        } else if let Some(file_value) = file.get(name) {
-            validate_file_value(name, decl.kind, file_value)?;
-            out.insert(name.clone(), file_value.clone());
+        if let Some(value) = merged.get(name) {
+            let resolved = match value {
+                InputValue::Raw(raw_value) => coerce_input(name, decl.kind, raw_value)?,
+                InputValue::Typed(typed) => {
+                    validate_file_value(name, decl.kind, typed)?;
+                    typed.clone()
+                }
+            };
+            out.insert(name.clone(), resolved);
         } else if let Some(env_value) = env.get(name) {
             validate_env_value(name, decl.kind, env_value)?;
             out.insert(name.clone(), env_value.clone());
@@ -88,25 +74,28 @@ pub(crate) fn resolve_inputs(
         }
     }
     // Inherited names (spec #135): no local `InputDecl`, so no
-    // `InputType` to coerce/validate against — bind the raw value from
-    // the precedence chain (`--inputs` > `--inputs-file` > selected
-    // environment), skipping any local `default:` layer (there is
-    // none). A name that resolves to nothing is left UNBOUND here; it
-    // is not an error at resolution time — a referenced-but-unbound
-    // inherited input fails loudly at run time with the suite/--inputs
-    // remedy (the runtime's `UnresolvedInheritedInput`). A name already
-    // bound as a declared input (the `inputs ∩ inherits` overlap that
-    // the validator rejects) is not overwritten.
+    // `InputType` to coerce/validate against — bind the value from the
+    // precedence chain (`--inputs` > selected environment), skipping any
+    // local `default:` layer (there is none). A name that resolves to
+    // nothing is left UNBOUND here; it is not an error at resolution
+    // time — a referenced-but-unbound inherited input fails loudly at
+    // run time with the suite/--inputs remedy (the runtime's
+    // `UnresolvedInheritedInput`). A name already bound as a declared
+    // input (the `inputs ∩ inherits` overlap that the validator rejects)
+    // is not overwritten.
     for name in inherits {
         if out.contains_key(name) {
             continue;
         }
-        if let Some(raw_value) = provided.get(name) {
-            // `--inputs k=v` arrives as a raw string; an inherited name
-            // has no type to coerce to, so bind the string as-is.
-            out.insert(name.clone(), serde_json::Value::String(raw_value.clone()));
-        } else if let Some(file_value) = file.get(name) {
-            out.insert(name.clone(), file_value.clone());
+        if let Some(value) = merged.get(name) {
+            // An inherited name has no type to coerce to: a `KEY=VALUE`
+            // token binds its raw string as-is; an `@file` value binds
+            // its typed JSON.
+            let v = match value {
+                InputValue::Raw(raw_value) => serde_json::Value::String(raw_value.clone()),
+                InputValue::Typed(typed) => typed.clone(),
+            };
+            out.insert(name.clone(), v);
         } else if let Some(env_value) = env.get(name) {
             out.insert(name.clone(), env_value.clone());
         }
@@ -115,7 +104,7 @@ pub(crate) fn resolve_inputs(
 }
 
 /// Type-check a value supplied by the selected environment against its
-/// declared `InputType` — same shape rule as a `--inputs-file` value,
+/// declared `InputType` — same shape rule as an `--inputs @file` value,
 /// with an error string that points at the environment as the source.
 fn validate_env_value(name: &str, kind: InputType, v: &serde_json::Value) -> Result<(), String> {
     let actual = json_shape_name(v);
@@ -136,8 +125,9 @@ fn validate_env_value(name: &str, kind: InputType, v: &serde_json::Value) -> Res
     }
 }
 
-/// Type-check a value loaded from `--inputs-file` against its declared
-/// `InputType`. The file's parser already gave us a typed JSON value,
+/// Type-check a value loaded from an `--inputs @file` against its
+/// declared `InputType`. The file's parser already gave us a typed
+/// JSON value,
 /// so this is a shape check, not a string coercion. Mirrors the
 /// promotion rule used by the schema validator: an `integer` is a
 /// valid `number`, but not vice versa.
@@ -155,7 +145,7 @@ fn validate_file_value(name: &str, kind: InputType, v: &serde_json::Value) -> Re
         Ok(())
     } else {
         Err(format!(
-            "input `{name}` (from --inputs-file): expected {kind}, got {actual}"
+            "input `{name}` (from --inputs @file): expected {kind}, got {actual}"
         ))
     }
 }

@@ -14,8 +14,8 @@
 //! - One `BrowserContext` + one `Page` per check (held by
 //!   [`CheckBrowser`]). Cookies and storage are isolated per check —
 //!   the "fresh user" intuition.
-//! - Headless by default; `--headed` on `duhem run` flips
-//!   [`RunBrowser::launch`]'s `headed` argument.
+//! - Headless by default; `DUHEM_HEADED=1` on `duhem run` flips
+//!   [`RunBrowser::launch`]'s `headed` argument (spec #151).
 //!
 //! ## Protocol & concurrency
 //!

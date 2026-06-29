@@ -4,10 +4,11 @@
 //! offers `init`, `validate`, and `run`. `init` (issue #48)
 //! scaffolds a runnable Verification Definition skeleton; the `run`
 //! subcommand carries the authoring-ergonomics surface
-//! (`--filter`, `--headed`, `--evidence-dir`, `--reporter`) per the
+//! (`--filter`, `--evidence-dir`, `--reporter`) per the
 //! spec on issue #23. None of the `run` flags are correctness
 //! gates — they make iteration on Verification Definitions
-//! practical.
+//! practical. The headed-browser debug toggle is the `DUHEM_HEADED`
+//! env var (spec #151), not a flag.
 
 mod dashboard;
 mod environment;
@@ -90,7 +91,7 @@ enum Cmd {
     },
     /// Execute a Verification Definition end-to-end.
     ///
-    /// `--filter`, `--headed`, `--evidence-dir`, `--reporter` are
+    /// `--filter`, `--evidence-dir`, `--reporter` are
     /// authoring-ergonomics flags from the spec on issue #23; none
     /// change the verdict on a non-filtered run.
     Run {
@@ -110,8 +111,14 @@ enum Cmd {
             conflicts_with = "path"
         )]
         file: Option<PathBuf>,
-        /// `key=value` inputs, repeatable.
-        #[arg(long = "inputs", value_name = "KEY=VALUE")]
+        /// Inputs, repeatable and mixable: `KEY=VALUE` for a single
+        /// input, or `@FILE` to load a YAML/JSON mapping (`.yml` /
+        /// `.yaml` / `.json`). Tokens are applied left-to-right and the
+        /// last mention of a key wins, e.g. `--inputs @base.yml
+        /// --inputs k=v --inputs @override.yml`. `@` only loads a file
+        /// as a bare leading token; `key=@literal` keeps `@literal` as a
+        /// literal value (spec #151).
+        #[arg(long = "inputs", value_name = "KEY=VALUE|@FILE")]
         inputs: Vec<String>,
         /// Limit the run to a subset of `(criterion, check)` pairs.
         ///
@@ -120,10 +127,6 @@ enum Cmd {
         /// the flag to OR patterns: `--filter AC-1 --filter AC-2`.
         #[arg(long = "filter", value_name = "PATTERN")]
         filter: Vec<String>,
-        /// Launch the browser with a visible window. Default is
-        /// headless. Has no effect on `api/*` actions.
-        #[arg(long = "headed", default_value_t = false)]
-        headed: bool,
         /// Directory under which `EvidenceWriter` creates the per-run
         /// trace. Falls back to the engine default (`.duhem/runs`)
         /// when absent; created if missing.
@@ -137,15 +140,10 @@ enum Cmd {
         /// always win over a same-named plugin entry.
         #[arg(long = "reporter", value_name = "NAME", default_value = "default")]
         reporter: String,
-        /// YAML or JSON file of `key: value` input pairs. Merged with
-        /// any `--inputs k=v` flags; explicit `--inputs` always wins
-        /// on the same key (spec on issue #33).
-        #[arg(long = "inputs-file", value_name = "PATH")]
-        inputs_file: Option<PathBuf>,
         /// Select a named environment from the manifest's
         /// `environments:` block (spec #68). The selected environment's
-        /// keys feed input resolution (below `--inputs` and
-        /// `--inputs-file`, above the VD `default:`) and its
+        /// keys feed input resolution (below `--inputs`, above the VD
+        /// `default:`) and its
         /// string-valued keys are reachable via `$env.<key>`. When the
         /// manifest declares exactly one environment it auto-selects;
         /// with two or more, this flag is required. Inert on a
@@ -159,15 +157,6 @@ enum Cmd {
         /// `--filter` resolves to the pairs you expect (spec on #33).
         #[arg(long = "dry-run", default_value_t = false)]
         dry_run: bool,
-        /// Seed for the runtime's entropy source. With a seed set,
-        /// `$runtime.uuid()` is derived deterministically from the
-        /// seed (two runs with the same seed see the same uuid
-        /// string). Run IDs and event timestamps are not seeded, so
-        /// `trace.jsonl` is not byte-identical across runs; the
-        /// guarantee is over evaluator-visible entropy. Spec on
-        /// issue #33.
-        #[arg(long = "seed", value_name = "U64")]
-        seed: Option<u64>,
         /// Skip `environment.up:` and readiness probing. Use when the
         /// operator brought the SUT up out-of-band. Teardown still
         /// runs unless `--keep-env` is also passed. Has no effect on
@@ -214,13 +203,10 @@ fn main() -> ExitCode {
             file,
             inputs,
             filter,
-            headed,
             evidence_dir,
             reporter,
-            inputs_file,
             environment,
             dry_run,
-            seed,
             no_env_up,
             keep_env,
         }) => {
@@ -262,13 +248,10 @@ fn main() -> ExitCode {
                 file,
                 inputs,
                 filter,
-                headed,
                 evidence_dir,
                 reporter: resolved_reporter,
-                inputs_file,
                 environment,
                 dry_run,
-                seed,
                 no_env_up,
                 keep_env,
             }))
@@ -283,13 +266,10 @@ struct RunArgs {
     file: Option<PathBuf>,
     inputs: Vec<String>,
     filter: Vec<String>,
-    headed: bool,
     evidence_dir: Option<PathBuf>,
     reporter: Reporter,
-    inputs_file: Option<PathBuf>,
     environment: Option<String>,
     dry_run: bool,
-    seed: Option<u64>,
     no_env_up: bool,
     keep_env: bool,
 }
@@ -300,16 +280,19 @@ async fn run_command(args: RunArgs) -> ExitCode {
         file,
         inputs: raw_inputs,
         filter: raw_filter,
-        headed,
         evidence_dir,
         reporter,
-        inputs_file,
         environment: requested_environment,
         dry_run,
-        seed,
         no_env_up,
         keep_env,
     } = args;
+
+    // The headed-browser debug toggle is the `DUHEM_HEADED` env var
+    // (spec #151): truthy `1` / `true` (case-insensitive) launches a
+    // visible window; anything else (or unset) stays headless. It has no
+    // effect on `api/*` / page-free runs that never launch a browser.
+    let headed = env_headed();
 
     // Resolve which manifest/leaf to load (issue #69). `-f`/`--file` is
     // the explicit override — used as-is, no discovery. Otherwise
@@ -351,19 +334,19 @@ async fn run_command(args: RunArgs) -> ExitCode {
         }
     };
 
-    // Load `--inputs-file` before resolving so file values participate
-    // in the same required/unknown/typed checks as explicit flags.
-    // Inputs apply to every leaf the manifest expands to — per the
-    // issue, the manifest does not remap inputs per leaf in v1.
-    let file_inputs = match inputs_file.as_deref() {
-        Some(p) => match inputs::load_inputs_file(p) {
-            Ok(m) => m,
-            Err(e) => {
-                eprintln!("{e}");
-                return ExitCode::FAILURE;
-            }
-        },
-        None => BTreeMap::new(),
+    // Fold the `--inputs` tokens (`KEY=VALUE` + `@file`, last-wins) into
+    // one merged map before resolving, so any `@file` load (and a
+    // missing/malformed file) fails fast — before a browser launch —
+    // and the file values participate in the same required/unknown/typed
+    // checks as `KEY=VALUE` tokens. Inputs apply to every leaf the
+    // manifest expands to — per the issue, the manifest does not remap
+    // inputs per leaf in v1.
+    let merged_inputs = match inputs::merge_inputs(&raw_inputs) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
     };
 
     // Filter parse failures must surface before we boot a browser —
@@ -501,8 +484,7 @@ async fn run_command(args: RunArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
         let inputs = match resolve_inputs(
-            &raw_inputs,
-            &file_inputs,
+            &merged_inputs,
             &env_inputs,
             &leaf.definition.inputs,
             &leaf.definition.inherits,
@@ -677,9 +659,6 @@ async fn run_command(args: RunArgs) -> ExitCode {
         if let Some(f) = leaf_filter {
             engine = engine.with_filter(f);
         }
-        if let Some(s) = seed {
-            engine = engine.with_seed(s);
-        }
         let outcome = match engine.run_with_metadata(&def, inputs).await {
             Ok(o) => o,
             Err(e) => {
@@ -747,6 +726,22 @@ async fn run_command(args: RunArgs) -> ExitCode {
         VerdictState::Pass => ExitCode::SUCCESS,
         _ => ExitCode::FAILURE,
     }
+}
+
+/// Read the `DUHEM_HEADED` env var and decide whether to launch a
+/// visible browser (spec #151). Truthy is `1` / `true`, case-
+/// insensitive and whitespace-trimmed; everything else (including an
+/// unset var) is headless — the default.
+fn env_headed() -> bool {
+    std::env::var("DUHEM_HEADED")
+        .ok()
+        .is_some_and(|v| parse_truthy(&v))
+}
+
+/// The truthiness rule for `DUHEM_HEADED`. Pure (no env access) so it
+/// is unit-testable without mutating process-global state.
+fn parse_truthy(value: &str) -> bool {
+    matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true")
 }
 
 /// Derive the canonical "verification name" of a leaf for evidence
@@ -836,22 +831,18 @@ mod tests {
     use clap::Parser;
     use duhem_schema::InputDecl;
 
-    /// Spec on #23 § Alignment "Headless default": `--headed` opts
-    /// into a visible window; default stays headless. The runtime
-    /// `RunBrowser::launch(headed: bool)` is keyed off this exact
-    /// boolean, so the CLI → launch-arg translation is the smallest
-    /// thing we can validate without booting Playwright.
+    /// Spec on #151: the headed-browser toggle moved from `--headed` to
+    /// the `DUHEM_HEADED` env var. `--headed` is gone from the CLI
+    /// surface (clap rejects it — see `run_flags.rs`); here we pin the
+    /// truthiness rule `env_headed` reads, without mutating
+    /// process-global env state.
     #[test]
-    fn headed_flag_defaults_to_false_and_opts_in() {
-        let default = Cli::try_parse_from(["duhem", "run", "v.yml"]).expect("parse");
-        match default.cmd {
-            Some(Cmd::Run { headed, .. }) => assert!(!headed, "default is headless"),
-            other => panic!("expected Run, got {other:?}"),
+    fn parse_truthy_accepts_1_and_true_case_insensitively() {
+        for truthy in ["1", "true", "TRUE", "True", " true ", "tRuE"] {
+            assert!(parse_truthy(truthy), "`{truthy}` should be truthy");
         }
-        let opted = Cli::try_parse_from(["duhem", "run", "v.yml", "--headed"]).expect("parse");
-        match opted.cmd {
-            Some(Cmd::Run { headed, .. }) => assert!(headed, "--headed opts in"),
-            other => panic!("expected Run, got {other:?}"),
+        for falsy in ["", "0", "false", "no", "yes", "2", "on", "headed"] {
+            assert!(!parse_truthy(falsy), "`{falsy}` should be falsy");
         }
     }
 
@@ -909,15 +900,31 @@ mod tests {
         args.iter().map(|s| s.to_string()).collect()
     }
 
-    /// Test-only shorthand: resolve with no `--inputs-file` and no
-    /// selected-environment source. Those code paths are exercised
-    /// separately below.
+    /// Build a merged `--inputs` map from `KEY=VALUE` / `@file` tokens,
+    /// the same fold the CLI does (`inputs::merge_inputs`).
+    fn merged(tokens: &[&str]) -> BTreeMap<String, inputs::InputValue> {
+        inputs::merge_inputs(&raw(tokens)).expect("merge tokens")
+    }
+
+    /// A merged map of already-typed values, standing in for what an
+    /// `--inputs @file` token contributes (each key an `InputValue::Typed`).
+    fn typed(pairs: &[(&str, serde_json::Value)]) -> BTreeMap<String, inputs::InputValue> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), inputs::InputValue::Typed(v.clone())))
+            .collect()
+    }
+
+    /// Test-only shorthand: resolve `KEY=VALUE` tokens with no `@file`,
+    /// no environment, no inherited names. The `@file` / environment /
+    /// inherited code paths are exercised separately below.
     fn resolve(
         cli: &[String],
         decls: &BTreeMap<String, InputDecl>,
     ) -> Result<BTreeMap<String, serde_json::Value>, String> {
         let empty = BTreeMap::new();
-        resolve_inputs(cli, &empty, &empty, decls, &[])
+        let merged = inputs::merge_inputs(cli).expect("merge tokens");
+        resolve_inputs(&merged, &empty, decls, &[])
     }
 
     #[test]
@@ -1055,46 +1062,39 @@ mod tests {
         );
     }
 
-    // ---- #33: --inputs-file merge / --dry-run / --seed CLI parsing ----
+    // ---- #151: `--inputs` merged-token resolution (`@file` typed
+    // values + `KEY=VALUE` raw values; last-wins handled in
+    // `inputs::merge_inputs`) ----
 
-    /// Spec on #33 § Alignment "Conflict semantics between `--inputs`
-    /// and `--inputs-file`": explicit `--inputs k=v` wins over a file
-    /// value on the same key.
     #[test]
-    fn explicit_inputs_override_inputs_file_on_same_key() {
-        let d = decls("  base_url: { type: string }");
-        let mut file = BTreeMap::new();
-        file.insert("base_url".into(), serde_json::json!("from-file"));
+    fn at_file_typed_value_supplies_input_when_no_flag() {
+        // An `@file` contributes already-typed JSON; it resolves when no
+        // `KEY=VALUE` token mentions the key.
+        let d = decls("  count: { type: integer }");
         let out = resolve_inputs(
-            &raw(&["base_url=from-flag"]),
-            &file,
+            &typed(&[("count", serde_json::json!(7))]),
             &BTreeMap::new(),
             &d,
             &[],
         )
         .unwrap();
-        assert_eq!(out["base_url"], serde_json::json!("from-flag"));
-    }
-
-    #[test]
-    fn inputs_file_supplies_value_when_flag_absent() {
-        let d = decls("  count: { type: integer }");
-        let mut file = BTreeMap::new();
-        file.insert("count".into(), serde_json::json!(7));
-        let out = resolve_inputs(&raw(&[]), &file, &BTreeMap::new(), &d, &[]).unwrap();
         assert_eq!(out["count"], serde_json::json!(7));
     }
 
     #[test]
-    fn inputs_file_typed_value_validates_against_declared_type() {
+    fn at_file_typed_value_validates_against_declared_type() {
         // A file value whose JSON shape doesn't match the declared
         // `InputType` is a real authoring error — surface it as a
         // CLI-side failure, not as a confusing runtime
         // `Inconclusive(TypeMismatch)` later.
         let d = decls("  count: { type: integer }");
-        let mut file = BTreeMap::new();
-        file.insert("count".into(), serde_json::json!("not a number"));
-        let err = resolve_inputs(&raw(&[]), &file, &BTreeMap::new(), &d, &[]).unwrap_err();
+        let err = resolve_inputs(
+            &typed(&[("count", serde_json::json!("not a number"))]),
+            &BTreeMap::new(),
+            &d,
+            &[],
+        )
+        .unwrap_err();
         assert!(
             err.contains("count") && err.contains("integer"),
             "got: {err}"
@@ -1102,40 +1102,55 @@ mod tests {
     }
 
     #[test]
-    fn unknown_input_in_file_is_an_error() {
+    fn unknown_input_from_at_file_is_an_error() {
         let d = decls("  count: { type: integer }");
-        let mut file = BTreeMap::new();
-        file.insert("bogus".into(), serde_json::json!(1));
-        file.insert("count".into(), serde_json::json!(1));
-        let err = resolve_inputs(&raw(&[]), &file, &BTreeMap::new(), &d, &[]).unwrap_err();
+        let err = resolve_inputs(
+            &typed(&[
+                ("bogus", serde_json::json!(1)),
+                ("count", serde_json::json!(1)),
+            ]),
+            &BTreeMap::new(),
+            &d,
+            &[],
+        )
+        .unwrap_err();
         assert!(
-            err.contains("--inputs-file") && err.contains("bogus"),
+            err.contains("unknown input") && err.contains("bogus"),
             "got: {err}"
         );
     }
 
     #[test]
-    fn explicit_input_still_overrides_default_even_with_file() {
-        // Resolution order: explicit `--inputs` > `--inputs-file` >
-        // declared default > error. Confirm the precedence with all
-        // three present.
+    fn flag_value_overrides_default() {
+        // Resolution order: `--inputs` (raw or typed) > declared default
+        // > error.
         let d = decls("  name: { type: string, default: ws-default }");
-        let mut file = BTreeMap::new();
-        file.insert("name".into(), serde_json::json!("from-file"));
-        let out =
-            resolve_inputs(&raw(&["name=from-flag"]), &file, &BTreeMap::new(), &d, &[]).unwrap();
+        let out = resolve(&raw(&["name=from-flag"]), &d).unwrap();
         assert_eq!(out["name"], serde_json::json!("from-flag"));
     }
 
-    // ---- #68: selected-environment input resolution (precedence
-    // layer 3: --inputs > --inputs-file > selected env > VD default) ----
+    #[test]
+    fn at_file_value_overrides_default() {
+        let d = decls("  name: { type: string, default: ws-default }");
+        let out = resolve_inputs(
+            &typed(&[("name", serde_json::json!("from-file"))]),
+            &BTreeMap::new(),
+            &d,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(out["name"], serde_json::json!("from-file"));
+    }
+
+    // ---- #68: selected-environment input resolution (precedence:
+    // --inputs (last-wins) > selected env > VD default) ----
 
     #[test]
     fn env_supplies_input_when_nothing_higher_does() {
         let d = decls("  base_url: { type: string }");
         let mut env = BTreeMap::new();
         env.insert("base_url".into(), serde_json::json!("https://staging"));
-        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d, &[]).unwrap();
+        let out = resolve_inputs(&merged(&[]), &env, &d, &[]).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("https://staging"));
     }
 
@@ -1144,29 +1159,26 @@ mod tests {
         let d = decls("  base_url: { type: string }");
         let mut env = BTreeMap::new();
         env.insert("base_url".into(), serde_json::json!("https://staging"));
+        let out = resolve_inputs(&merged(&["base_url=from-flag"]), &env, &d, &[]).unwrap();
+        assert_eq!(out["base_url"], serde_json::json!("from-flag"));
+    }
+
+    #[test]
+    fn at_file_and_flag_both_override_env() {
+        let d = decls("  base_url: { type: string }");
+        let mut env = BTreeMap::new();
+        env.insert("base_url".into(), serde_json::json!("from-env"));
+        // an `@file` typed value beats env
         let out = resolve_inputs(
-            &raw(&["base_url=from-flag"]),
-            &BTreeMap::new(),
+            &typed(&[("base_url", serde_json::json!("from-file"))]),
             &env,
             &d,
             &[],
         )
         .unwrap();
-        assert_eq!(out["base_url"], serde_json::json!("from-flag"));
-    }
-
-    #[test]
-    fn inputs_file_overrides_env_but_loses_to_inputs() {
-        let d = decls("  base_url: { type: string }");
-        let mut env = BTreeMap::new();
-        env.insert("base_url".into(), serde_json::json!("from-env"));
-        let mut file = BTreeMap::new();
-        file.insert("base_url".into(), serde_json::json!("from-file"));
-        // file beats env
-        let out = resolve_inputs(&raw(&[]), &file, &env, &d, &[]).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-file"));
-        // flag beats both
-        let out = resolve_inputs(&raw(&["base_url=from-flag"]), &file, &env, &d, &[]).unwrap();
+        // a `KEY=VALUE` raw value beats env
+        let out = resolve_inputs(&merged(&["base_url=from-flag"]), &env, &d, &[]).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-flag"));
     }
 
@@ -1176,10 +1188,10 @@ mod tests {
         // env supplies → env wins over the default
         let mut env = BTreeMap::new();
         env.insert("base_url".into(), serde_json::json!("from-env"));
-        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d, &[]).unwrap();
+        let out = resolve_inputs(&merged(&[]), &env, &d, &[]).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-env"));
         // env absent → default is the floor
-        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &BTreeMap::new(), &d, &[]).unwrap();
+        let out = resolve_inputs(&merged(&[]), &BTreeMap::new(), &d, &[]).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-default"));
     }
 
@@ -1191,7 +1203,7 @@ mod tests {
         let mut env = BTreeMap::new();
         env.insert("base_url".into(), serde_json::json!("https://staging"));
         env.insert("db_url".into(), serde_json::json!("postgres://x"));
-        let out = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d, &[]).unwrap();
+        let out = resolve_inputs(&merged(&[]), &env, &d, &[]).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("https://staging"));
         assert!(!out.contains_key("db_url"));
     }
@@ -1201,7 +1213,7 @@ mod tests {
         let d = decls("  count: { type: integer }");
         let mut env = BTreeMap::new();
         env.insert("count".into(), serde_json::json!("not a number"));
-        let err = resolve_inputs(&raw(&[]), &BTreeMap::new(), &env, &d, &[]).unwrap_err();
+        let err = resolve_inputs(&merged(&[]), &env, &d, &[]).unwrap_err();
         assert!(
             err.contains("count") && err.contains("environment"),
             "got: {err}"
@@ -1234,18 +1246,25 @@ mod tests {
         }
     }
 
+    /// Spec on #151: `--seed`, `--headed`, and `--inputs-file` were
+    /// pruned from `duhem run`. clap must now reject each as an unknown
+    /// argument (the breaking CLI surface change). The black-box
+    /// stderr/exit-code shape is pinned in `run_flags.rs`; here we pin
+    /// the parser rejection.
     #[test]
-    fn seed_flag_parses_as_u64() {
-        let parsed = Cli::try_parse_from(["duhem", "run", "v.yml", "--seed", "42"]).expect("parse");
-        match parsed.cmd {
-            Some(Cmd::Run { seed, .. }) => assert_eq!(seed, Some(42)),
-            _ => panic!("expected Run"),
-        }
-        // Negative / non-numeric seed rejected by clap's u64 parser:
-        // protects authors from accidentally passing an option-looking
-        // arg that silently parses as 0.
-        let err = Cli::try_parse_from(["duhem", "run", "v.yml", "--seed", "-1"]);
-        assert!(err.is_err(), "negative seed should reject");
+    fn removed_flags_are_rejected_by_clap() {
+        assert!(
+            Cli::try_parse_from(["duhem", "run", "v.yml", "--seed", "42"]).is_err(),
+            "--seed should be unknown"
+        );
+        assert!(
+            Cli::try_parse_from(["duhem", "run", "v.yml", "--headed"]).is_err(),
+            "--headed should be unknown"
+        );
+        assert!(
+            Cli::try_parse_from(["duhem", "run", "v.yml", "--inputs-file", "x.yml"]).is_err(),
+            "--inputs-file should be unknown"
+        );
     }
 
     #[test]
@@ -1318,18 +1337,5 @@ mod tests {
         // clap level (issue #69 §Design).
         let err = Cli::try_parse_from(["duhem", "run", "v.yml", "-f", "ops/duhem.yml"]);
         assert!(err.is_err(), "positional path + -f must conflict");
-    }
-
-    #[test]
-    fn inputs_file_flag_parses_as_path() {
-        let parsed =
-            Cli::try_parse_from(["duhem", "run", "v.yml", "--inputs-file", "ci-inputs.yml"])
-                .expect("parse");
-        match parsed.cmd {
-            Some(Cmd::Run { inputs_file, .. }) => {
-                assert_eq!(inputs_file, Some(PathBuf::from("ci-inputs.yml")))
-            }
-            _ => panic!("expected Run"),
-        }
     }
 }

@@ -25,8 +25,8 @@ if [ -f "$PID_FILE" ]; then
   rm -f "$PID_FILE"
 fi
 
-# Chreode stores app/run data under ~/.arbor (ARBOR_HOME). It is left in
+# Chreode stores app/run data under ~/.chreode (CHREODE_HOME). It is left in
 # place between runs — runs accumulate under unique ids and don't
-# collide. Clear it (`rm -rf ~/.arbor`) when the fixtures pile up.
+# collide. Clear it (`rm -rf ~/.chreode`) when the fixtures pile up.
 
 exit 0

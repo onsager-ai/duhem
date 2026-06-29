@@ -1,7 +1,7 @@
 # `chreode-create-and-ship-app`
 
 Duhem's second dogfood Verification Definition: it drives the real
-[Chreode](https://github.com/onsager-ai/arbor) dashboard end-to-end and
+[Chreode](https://github.com/onsager-ai/chreode) dashboard end-to-end and
 verifies the product's core promise — describe an app in plain
 language, and Chreode builds and **ships** a working app.
 
@@ -26,25 +26,25 @@ re-prioritization toward Chreode + Crawlab).
 Chreode's **default** mode needs no opt-in env vars to be cheap and
 repeatable:
 
-- **FakeAgent** — with `ARBOR_AGENT` unset there is no live LLM call
-  and no spend (`../arbor packages/factory/src/agent.ts`).
-- **dry-run drivers** — with `ARBOR_DRIVERS` unset the deploy is
+- **FakeAgent** — with `CHREODE_AGENT` unset there is no live LLM call
+  and no spend (`../chreode packages/chreode/src/agent.ts`).
+- **dry-run drivers** — with `CHREODE_DRIVERS` unset the deploy is
   simulated, but the dry-run promote step stands up a **real** local
   preview server and advertises a clickable `127.0.0.1` URL
-  (`../arbor packages/factory/src/drivers/dry-run.ts`). So AC-2
+  (`../chreode packages/chreode/src/drivers/dry-run.ts`). So AC-2
   verifies a genuinely reachable deployment, not a stub — the
   Holistic Verification Principle (`docs/duhem-spec.md` §8) holds.
 - **loopback no-auth** — binding to `127.0.0.1` (the default
-  `ARBOR_HOST`) yields a local admin session, so there is no login
+  `CHREODE_HOST`) yields a local admin session, so there is no login
   prelude to script.
 
 ## Operator setup
 
 1. Clone Chreode next to this repo, or point at it:
    ```sh
-   export DUHEM_CHREODE_REPO_DIR=/path/to/onsager-ai/arbor
+   export DUHEM_CHREODE_REPO_DIR=/path/to/onsager-ai/chreode
    ```
-   `up.sh` defaults to `../../../arbor` relative to this directory.
+   `up.sh` defaults to `../../../chreode` relative to this directory.
 2. Toolchain on `PATH`: `pnpm` + Node (Chreode targets Node 20+) and
    Playwright Chromium for Duhem's browser actions:
    ```sh
@@ -85,7 +85,7 @@ environments:
    on a `role: link` whose visible text is `/preview/live/` — the
    proxied relative path the single-port registrar advertises once the
    deploy is promoted. This is **environment-coupled**: a non-
-   registrar deploy or the cloud `cli` drivers (`ARBOR_DRIVERS=cli` +
+   registrar deploy or the cloud `cli` drivers (`CHREODE_DRIVERS=cli` +
    tokens) advertise an absolute host (e.g. `*.vercel.app`) instead,
    so the locator text changes with the environment. If AC-2 times
    out, first confirm a run actually reaches `outcome: shipped`
@@ -96,7 +96,7 @@ environments:
    on the dev machine — and Onsager's `/api/health` *also* returns
    200, so a 4100 target would silently drive Onsager and still pass
    the readiness probe. The VD and `up.sh` default to `:4180` to keep
-   the two dogfoods side by side. Override the URL inputs / `ARBOR_PORT`
+   the two dogfoods side by side. Override the URL inputs / `CHREODE_PORT`
    for a different layout.
 
 ## Further reading

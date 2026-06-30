@@ -18,8 +18,11 @@
 #   - Endpoint paths + `/api` prefix + admin/admin + login envelope:
 #     CONFIRMED (see ../auth-tokens/duhem.yml provenance).
 #   - Single-resource read returns `{data:<node>}`: CONFIRMED envelope.
-#   - PATCH update body is TOP-LEVEL ({description:<v>}, no `data` wrapper):
-#     per API-009 §3.1's literal body. INFERRED — FLAG to confirm.
+#   - PATCH update body is `data`-wrapped ({data:{description:<v>}}):
+#     CONFIRMED against crawlab's generic create/update controller
+#     (controllers/base.go PatchByIdParams binds `Data` from the `data`
+#     field, same envelope as POST/PUT and the spiders leaf). A top-level
+#     body binds nothing and is rejected 400 "no fields to update".
 #   - `nodes` documents carry `is_master` (bool), `status`, `hostname`,
 #     `ip`: per API-009's documented node response shape (§"Node Response
 #     Format"). The `status` VALUE "online" is INFERRED — crawlab may encode
@@ -267,7 +270,8 @@ criteria:
                 Content-Type: application/json
                 Authorization: $steps.login.outputs.body.data
               body:
-                description: $inputs.node_description
+                data:
+                  description: $inputs.node_description
               within: 15s
             outputs:
               status: status
@@ -277,10 +281,12 @@ criteria:
               connection: $inputs.mongo_url
               find:
                 collection: nodes
-                # Read the SAME node by _id, not is_master — a full-replace
-                # PATCH (crawlab bug) wipes unspecified fields (incl. is_master),
-                # so an is_master filter would 0-row; by _id the description
-                # assertion fails crisply and proves the field was lost.
+                # Read the SAME node by _id (not by is_master): a correct
+                # partial PATCH leaves is_master intact, but reading by _id is
+                # the robust regression check — it still finds the row even if a
+                # full-replace regression (the original #128 bug) were to wipe
+                # is_master, so the description assertion fails crisply instead
+                # of silently 0-rowing.
                 filter:
                   _id: $steps.master_doc.outputs.rows[0]._id
                 sort:
@@ -292,3 +298,6 @@ criteria:
         assertions:
           - $steps.update.outputs.status == 200
           - $steps.persisted.outputs.rows[0].description == $inputs.node_description
+          # #128 core claim: a partial PATCH must NOT wipe unspecified fields —
+          # is_master must survive the description-only update.
+          - $steps.persisted.outputs.rows[0].is_master == true

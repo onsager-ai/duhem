@@ -19,8 +19,11 @@
 #     INFERRED from the generic create envelope (controllers/base.go) the
 #     auth-tokens/projects leaves use; API-008 lists the fields without an
 #     explicit wrapper. FLAG: confirm the schedule create envelope.
-#   - PATCH update body is TOP-LEVEL ({cron:<new>}, no `data` wrapper): per
-#     API-008 step 3.1's literal body. INFERRED — FLAG to confirm.
+#   - PATCH update body is `data`-wrapped ({data:{cron:<new>}}): CONFIRMED
+#     against crawlab's generic create/update controller (base.go
+#     PatchByIdParams binds `Data` from the `data` field, same envelope as
+#     POST/PUT and the spiders leaf). A top-level body binds nothing and is
+#     rejected 400 "no fields to update".
 #   - enable/disable are POST /{id}/enable|disable toggling the `enabled`
 #     boolean in Mongo: CONFIRMED endpoints from API-008 §4.1/4.2; the
 #     `enabled` field name is the spec's documented response shape.
@@ -189,7 +192,8 @@ criteria:
                 Content-Type: application/json
                 Authorization: $steps.login.outputs.body.data
               body:
-                cron: $inputs.updated_cron
+                data:
+                  cron: $inputs.updated_cron
               within: 15s
             outputs:
               status: status
@@ -199,9 +203,11 @@ criteria:
               connection: $inputs.mongo_url
               find:
                 collection: schedules
-                # Read by stable _id, not the mutated name — a full-replace
-                # PATCH (crawlab bug) that wipes name still yields the row, so
-                # the field assertions fail crisply instead of 0-row inconclusive.
+                # Read by stable _id (not the mutated name): a correct partial
+                # PATCH leaves name intact, but reading by _id is the robust
+                # check — it still yields the row even if a full-replace
+                # regression (the original #128 bug) wiped name, so the field
+                # assertions fail crisply instead of 0-row inconclusive.
                 filter:
                   _id: $steps.create.outputs.body.data._id
                 sort:
@@ -259,6 +265,9 @@ criteria:
           # The cron update lands in the database.
           - $steps.update.outputs.status == 200
           - $steps.persisted_after.outputs.rows[0].cron == $inputs.updated_cron
+          # #128 core claim: a partial PATCH must NOT wipe unspecified fields —
+          # the name must survive the cron-only update.
+          - $steps.persisted_after.outputs.rows[0].name == $inputs.schedule_name
           # Delete succeeds and the schedule is then gone.
           - $steps.delete.outputs.status == 200
           - $steps.get_gone.outputs.status == 404

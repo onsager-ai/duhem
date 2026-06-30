@@ -72,6 +72,21 @@ maintainer-sanctioned **dev/test** license for the regression cluster
 use a real license instead, export `CRAWLAB_LICENSE` before `duhem run`
 and `up.sh` will use it as-is.
 
+### Image under test
+
+By default the suite runs `crawlabteam/crawlab-pro:develop`. Select a
+different image with **`DUHEM_CRAWLAB_IMAGE`** (the Duhem env whitelist only
+passes `DUHEM_*` through, so a bare `CRAWLAB_IMAGE` won't reach `up.sh`):
+
+```sh
+# the published test tag
+DUHEM_CRAWLAB_IMAGE=crawlabteam/crawlab-pro:test duhem run verifications/crawlab-regression
+# or a locally-built tag, e.g. before/after a fix for regression diffing
+DUHEM_CRAWLAB_IMAGE=crawlab-pro:after duhem run verifications/crawlab-regression
+```
+
+(Both `:develop` and `:test` currently exhibit the bugs tracked in #167.)
+
 ### Operator setup (to run it green in a product env)
 
 ```sh

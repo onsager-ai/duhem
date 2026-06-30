@@ -468,6 +468,61 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
             };
             Ok(Value::Int(n))
         }
+        // `contains(array, value)`: True if `array` has an element equal
+        // to `value`, by the same scalar-equality rule the `==` operator
+        // uses (numeric `Int`/`Float` promote). A non-array first arg is a
+        // `TypeMismatch` (mirrors `len`); elements whose shape can't be
+        // compared to `value` are simply not matches, not errors. The
+        // direct way to assert list membership —
+        // `$runtime.contains($steps.api.outputs.body.tokens, "t-1")` —
+        // without a `len(...) >= 1` proxy.
+        ("contains", 2) => {
+            let arr = match eval_value(&args[0], ctx)? {
+                Value::Array(a) => a,
+                other => {
+                    return Err(InconclusiveCause::TypeMismatch {
+                        lhs: other.shape(),
+                        rhs: ValueShape::Array,
+                    });
+                }
+            };
+            let needle = eval_value(&args[1], ctx)?;
+            let found = arr.iter().any(|elem| value_eq(elem, &needle));
+            Ok(Value::Bool(found))
+        }
+        // `any(array, field, value)`: True if `array` has an *object*
+        // element whose `field` equals `value` (scalar equality). The
+        // object-array analogue of `contains` — membership by a field:
+        // `$runtime.any($steps.api.outputs.body.data, "name", "ws-1")`.
+        // A non-array first arg or a non-string `field` is a
+        // `TypeMismatch`; an element that is not an object, or an object
+        // missing `field`, is simply not a match (false), not an error.
+        ("any", 3) => {
+            let arr = match eval_value(&args[0], ctx)? {
+                Value::Array(a) => a,
+                other => {
+                    return Err(InconclusiveCause::TypeMismatch {
+                        lhs: other.shape(),
+                        rhs: ValueShape::Array,
+                    });
+                }
+            };
+            let field = match eval_value(&args[1], ctx)? {
+                Value::Str(s) => s,
+                other => {
+                    return Err(InconclusiveCause::TypeMismatch {
+                        lhs: other.shape(),
+                        rhs: ValueShape::Str,
+                    });
+                }
+            };
+            let needle = eval_value(&args[2], ctx)?;
+            let found = arr.iter().any(|elem| match elem {
+                Value::Object(map) => map.get(&field).is_some_and(|v| value_eq(v, &needle)),
+                _ => false,
+            });
+            Ok(Value::Bool(found))
+        }
         // Case / whitespace normalization, for robust string comparisons.
         ("lower", 1) => Ok(Value::Str(
             scalar_to_string(eval_value(&args[0], ctx)?)?.to_lowercase(),
@@ -648,6 +703,16 @@ fn compare(op: BinOp, l: &Value, r: &Value) -> EvalRes {
             rhs: r.shape(),
         }),
     }
+}
+
+/// Scalar equality for array membership (`contains` / `any`). Reuses
+/// the `==` operator's `compare` so numeric promotion (`Int` vs `Float`)
+/// and the per-shape rules stay identical. Shapes that `compare` rejects
+/// (a `TypeMismatch`, e.g. comparing a string element to an int needle)
+/// count as "not equal", not as an error — membership over a mixed array
+/// is a clean false, never inconclusive.
+fn value_eq(a: &Value, b: &Value) -> bool {
+    matches!(compare(BinOp::Eq, a, b), Ok(Value::Bool(true)))
 }
 
 fn apply_ord<T: PartialOrd>(op: BinOp, a: &T, b: &T) -> bool {
@@ -1306,6 +1371,199 @@ mod tests {
                 &ctx
             ),
             EvalResult::True
+        );
+    }
+
+    // ---- $runtime.contains array-membership helper (#173) ----
+
+    #[test]
+    fn contains_scalar_array_present_and_absent() {
+        let arr = Value::Array(vec![
+            Value::Str("t-1".into()),
+            Value::Str("t-2".into()),
+            Value::Str("t-3".into()),
+        ]);
+        let ctx = TestCtx::new().with_output("api", "tokens", arr);
+        assert_eq!(
+            run(
+                r#"$runtime.contains($steps.api.outputs.tokens, "t-2")"#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+        assert_eq!(
+            run(
+                r#"$runtime.contains($steps.api.outputs.tokens, "t-9")"#,
+                &ctx
+            ),
+            EvalResult::False
+        );
+    }
+
+    #[test]
+    fn contains_numeric_promotion_matches() {
+        // Int needle finds a Float element (and vice versa), matching the
+        // `==` operator's Int/Float promotion.
+        let arr = Value::Array(vec![Value::Float(1.0), Value::Float(2.0)]);
+        let ctx = TestCtx::new().with_input("xs", arr);
+        assert_eq!(
+            run("$runtime.contains($inputs.xs, 2)", &ctx),
+            EvalResult::True
+        );
+        assert_eq!(
+            run("$runtime.contains($inputs.xs, 3)", &ctx),
+            EvalResult::False
+        );
+    }
+
+    #[test]
+    fn contains_empty_array_is_false() {
+        let ctx = TestCtx::new().with_input("xs", Value::Array(vec![]));
+        assert_eq!(
+            run(r#"$runtime.contains($inputs.xs, "x")"#, &ctx),
+            EvalResult::False
+        );
+    }
+
+    #[test]
+    fn contains_mixed_shape_element_is_not_a_match() {
+        // A string element next to an int needle is a clean non-match,
+        // not an inconclusive type error.
+        let arr = Value::Array(vec![Value::Str("3".into()), Value::Int(7)]);
+        let ctx = TestCtx::new().with_input("xs", arr);
+        assert_eq!(
+            run("$runtime.contains($inputs.xs, 3)", &ctx),
+            EvalResult::False
+        );
+        assert_eq!(
+            run("$runtime.contains($inputs.xs, 7)", &ctx),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn contains_non_array_first_arg_is_type_mismatch() {
+        let ctx = TestCtx::new().with_input("n", Value::Int(5));
+        assert_eq!(
+            run("$runtime.contains($inputs.n, 5)", &ctx),
+            EvalResult::Inconclusive(InconclusiveCause::TypeMismatch {
+                lhs: ValueShape::Int,
+                rhs: ValueShape::Array,
+            })
+        );
+    }
+
+    #[test]
+    fn contains_missing_array_propagates_inconclusive() {
+        let ctx = TestCtx::new();
+        assert_eq!(
+            run(
+                r#"$runtime.contains($steps.api.outputs.missing, "x")"#,
+                &ctx
+            ),
+            EvalResult::Inconclusive(InconclusiveCause::MissingObservation {
+                step: "api".into(),
+                output: "missing".into(),
+            })
+        );
+    }
+
+    // ---- $runtime.any object-array membership helper (#173) ----
+
+    fn user_array() -> Value {
+        // [ { name: "ws-1", id: 1 }, { name: "ws-2", id: 2 } ]
+        Value::Array(vec![
+            obj(vec![
+                ("name", Value::Str("ws-1".into())),
+                ("id", Value::Int(1)),
+            ]),
+            obj(vec![
+                ("name", Value::Str("ws-2".into())),
+                ("id", Value::Int(2)),
+            ]),
+        ])
+    }
+
+    #[test]
+    fn any_object_array_field_present_and_absent() {
+        let ctx = TestCtx::new().with_output("api", "data", user_array());
+        assert_eq!(
+            run(
+                r#"$runtime.any($steps.api.outputs.data, "name", "ws-2")"#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+        assert_eq!(
+            run(
+                r#"$runtime.any($steps.api.outputs.data, "name", "ws-9")"#,
+                &ctx
+            ),
+            EvalResult::False
+        );
+    }
+
+    #[test]
+    fn any_missing_field_is_not_a_match() {
+        // No element carries `email`; that's a clean false, not an error.
+        let ctx = TestCtx::new().with_output("api", "data", user_array());
+        assert_eq!(
+            run(
+                r#"$runtime.any($steps.api.outputs.data, "email", "x")"#,
+                &ctx
+            ),
+            EvalResult::False
+        );
+    }
+
+    #[test]
+    fn any_non_object_element_is_not_a_match() {
+        // Scalars in the array can't carry a field; they're skipped.
+        let arr = Value::Array(vec![
+            Value::Str("scalar".into()),
+            obj(vec![("k", Value::Int(1))]),
+        ]);
+        let ctx = TestCtx::new().with_input("xs", arr);
+        assert_eq!(
+            run(r#"$runtime.any($inputs.xs, "k", 1)"#, &ctx),
+            EvalResult::True
+        );
+        assert_eq!(
+            run(r#"$runtime.any($inputs.xs, "k", 9)"#, &ctx),
+            EvalResult::False
+        );
+    }
+
+    #[test]
+    fn any_empty_array_is_false() {
+        let ctx = TestCtx::new().with_input("xs", Value::Array(vec![]));
+        assert_eq!(
+            run(r#"$runtime.any($inputs.xs, "k", 1)"#, &ctx),
+            EvalResult::False
+        );
+    }
+
+    #[test]
+    fn any_non_array_first_arg_is_type_mismatch() {
+        let ctx = TestCtx::new().with_input("n", Value::Int(5));
+        assert_eq!(
+            run(r#"$runtime.any($inputs.n, "k", 1)"#, &ctx),
+            EvalResult::Inconclusive(InconclusiveCause::TypeMismatch {
+                lhs: ValueShape::Int,
+                rhs: ValueShape::Array,
+            })
+        );
+    }
+
+    #[test]
+    fn any_non_string_field_is_type_mismatch() {
+        let ctx = TestCtx::new().with_output("api", "data", user_array());
+        assert_eq!(
+            run("$runtime.any($steps.api.outputs.data, 1, 1)", &ctx),
+            EvalResult::Inconclusive(InconclusiveCause::TypeMismatch {
+                lhs: ValueShape::Int,
+                rhs: ValueShape::Str,
+            })
         );
     }
 }

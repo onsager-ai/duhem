@@ -67,6 +67,15 @@ pub(crate) struct With {
     url: String,
     #[serde(default)]
     headers: BTreeMap<String, String>,
+    /// Optional query parameters, appended to `url` as a urlencoded
+    /// `?k=v&...` string. Scalars only (string/int/bool/float). The
+    /// `BTreeMap` yields keys in sorted order so the rendered query
+    /// string — and the evidence it lands in — is reproducible. If
+    /// `url` already carries a `?query`, these are merged onto it with
+    /// `&`. Saves authors from hand-building pagination/filter URLs
+    /// with `$runtime.format`.
+    #[serde(default)]
+    query: BTreeMap<String, QueryScalar>,
     /// Request body. A YAML mapping/sequence/scalar (other than a
     /// String) is serialized as JSON; a YAML string is sent verbatim.
     /// `None` means no body.
@@ -74,6 +83,65 @@ pub(crate) struct With {
     body: Option<serde_yml::Value>,
     #[serde(default)]
     within: Option<WithinSpec>,
+}
+
+/// A single query-parameter value. Restricted to scalars — a query
+/// string has no representation for nested objects or sequences. The
+/// `untagged` variant order matters: `bool` and the integer kinds are
+/// tried before `String` so `page: 1` / `active: true` keep their
+/// natural YAML type instead of being swallowed as strings, and the
+/// final `String` arm catches everything else (including quoted
+/// `"10"`).
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum QueryScalar {
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Str(String),
+}
+
+impl QueryScalar {
+    /// Render the value as the raw (pre-urlencode) string that goes on
+    /// the wire. Encoding is applied later by [`build_url`].
+    fn to_param_string(&self) -> String {
+        match self {
+            QueryScalar::Bool(b) => b.to_string(),
+            QueryScalar::Int(i) => i.to_string(),
+            QueryScalar::Float(f) => f.to_string(),
+            QueryScalar::Str(s) => s.clone(),
+        }
+    }
+}
+
+/// Append `query` to `url` as a urlencoded `?k=v&...` string.
+///
+/// - An empty `query` returns `url` unchanged (byte-identical to a
+///   request authored without a `query:` block).
+/// - Keys are emitted in `BTreeMap` (sorted) order for reproducible
+///   evidence.
+/// - Values are application/x-www-form-urlencoded (space → `+`,
+///   reserved bytes percent-escaped) via `form_urlencoded`, matching
+///   the convention `reqwest`'s own `.query()` uses.
+/// - If `url` already contains a `?`, the new pairs are joined with
+///   `&` (or appended directly when `url` ends in a bare `?`).
+fn build_url(url: &str, query: &BTreeMap<String, QueryScalar>) -> String {
+    if query.is_empty() {
+        return url.to_string();
+    }
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    for (k, v) in query {
+        serializer.append_pair(k, &v.to_param_string());
+    }
+    let rendered = serializer.finish();
+    let separator = match url.find('?') {
+        None => "?",
+        // `url` already ends with a bare `?` — no existing pair to
+        // join against, so append the rendered string directly.
+        Some(idx) if idx + 1 == url.len() => "",
+        Some(_) => "&",
+    };
+    format!("{url}{separator}{rendered}")
 }
 
 pub struct Call;
@@ -127,7 +195,8 @@ pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
         .build()
         .map_err(|e| ActionError::Http(format!("api/call: build client: {e}")))?;
 
-    let mut req = client.request(method, &with.url);
+    let url = build_url(&with.url, &with.query);
+    let mut req = client.request(method, &url);
     for (k, v) in &with.headers {
         req = req.header(k, v);
     }
@@ -289,6 +358,7 @@ mod tests {
         assert_eq!(w.method, "GET");
         assert_eq!(w.url, "http://x/");
         assert!(w.headers.is_empty());
+        assert!(w.query.is_empty());
         assert!(w.body.is_none());
         assert!(w.within.is_none());
     }
@@ -322,6 +392,79 @@ within: 3s
     fn rejects_unknown_field() {
         let r: Result<With, _> = serde_yml::from_str(r#"{ method: GET, url: "x", color: red }"#);
         assert!(r.is_err());
+    }
+
+    // --- query parameters --------------------------------------------
+
+    #[test]
+    fn query_parses_scalar_types() {
+        let w = parse_with(
+            r#"
+method: GET
+url: "http://x/"
+query:
+  page: 1
+  size: 10
+  active: true
+  ratio: 1.5
+  q: "hello world"
+"#,
+        );
+        assert_eq!(w.query.len(), 5);
+        assert!(matches!(w.query.get("page"), Some(QueryScalar::Int(1))));
+        assert!(matches!(
+            w.query.get("active"),
+            Some(QueryScalar::Bool(true))
+        ));
+        assert!(matches!(w.query.get("ratio"), Some(QueryScalar::Float(_))));
+        match w.query.get("q") {
+            Some(QueryScalar::Str(s)) => assert_eq!(s, "hello world"),
+            other => panic!("expected string, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_url_absent_query_is_byte_identical() {
+        let empty = BTreeMap::new();
+        assert_eq!(build_url("http://x/list", &empty), "http://x/list");
+        // Even a url that already carries a `?query` is untouched when
+        // no `query:` block is supplied.
+        assert_eq!(build_url("http://x/list?a=1", &empty), "http://x/list?a=1");
+    }
+
+    #[test]
+    fn build_url_sorts_keys_and_coerces_scalars() {
+        // Insertion order is deliberately unsorted; BTreeMap iteration
+        // (and therefore the rendered query) must come out sorted.
+        let mut q = BTreeMap::new();
+        q.insert("size".to_string(), QueryScalar::Int(10));
+        q.insert("page".to_string(), QueryScalar::Int(1));
+        q.insert("active".to_string(), QueryScalar::Bool(true));
+        assert_eq!(
+            build_url("http://x/list", &q),
+            "http://x/list?active=true&page=1&size=10"
+        );
+    }
+
+    #[test]
+    fn build_url_urlencodes_special_chars() {
+        let mut q = BTreeMap::new();
+        q.insert("q".to_string(), QueryScalar::Str("a b&c=d".to_string()));
+        // Space → `+`, `&` and `=` percent-escaped (form-urlencoded).
+        assert_eq!(build_url("http://x/s", &q), "http://x/s?q=a+b%26c%3Dd");
+    }
+
+    #[test]
+    fn build_url_merges_with_existing_query() {
+        let mut q = BTreeMap::new();
+        q.insert("page".to_string(), QueryScalar::Int(2));
+        // Existing `?token=t` is preserved; the new pair joins with `&`.
+        assert_eq!(
+            build_url("http://x/list?token=t", &q),
+            "http://x/list?token=t&page=2"
+        );
+        // A url ending in a bare `?` gets the pairs appended directly.
+        assert_eq!(build_url("http://x/list?", &q), "http://x/list?page=2");
     }
 
     // --- network behavior --------------------------------------------
@@ -465,6 +608,38 @@ body:
             }
             other => panic!("expected ActionError::Http, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn query_block_reaches_the_server_sorted_and_encoded() {
+        // Server echoes back the raw query string it received so we can
+        // assert the wire form: keys sorted, value urlencoded.
+        let app = Router::new().route(
+            "/list",
+            axum::routing::get(|req: axum::http::Request<axum::body::Body>| async move {
+                let q = req.uri().query().unwrap_or("").to_string();
+                (StatusCode::OK, q)
+            }),
+        );
+        let fx = start(app).await;
+        let r = execute(parse_with(&format!(
+            r#"
+method: GET
+url: "{}"
+query:
+  size: 10
+  page: 1
+  q: "a b"
+within: 2s
+"#,
+            url(&fx, "/list")
+        )))
+        .await
+        .expect("execute");
+        assert_eq!(
+            r.outputs.get("body_text").and_then(|v| v.as_str()),
+            Some("page=1&q=a+b&size=10")
+        );
     }
 
     #[tokio::test]

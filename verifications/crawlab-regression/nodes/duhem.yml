@@ -1,0 +1,294 @@
+# yaml-language-server: $schema=../../../schema/duhem.schema.json
+# Crawlab regression suite leaf — node management & metrics (API-009)
+#
+# A faithful Duhem port of crawlab-team/crawlab-test's
+# `specs/api/API-009-node-management-metrics.md`. A suite leaf (no own
+# `environment:`): it runs against the shared LICENSED Pro cluster the
+# parent manifest (`../duhem.yml`) provisions — a master + worker + Mongo.
+# Standalone, run with `--no-env-up` and pass the inherited inputs via
+# `--inputs`.
+#
+# Surface: GET /api/nodes, GET /api/nodes/{id}, PATCH /api/nodes/{id},
+# GET /api/nodes/metrics, GET /api/nodes/{id}/metrics/current. Node
+# create/delete are not exposed by the API (nodes self-register), so this
+# leaf reads the cluster topology and confirms it directly against Mongo's
+# `nodes` collection.
+#
+# Provenance — confirmed vs inferred:
+#   - Endpoint paths + `/api` prefix + admin/admin + login envelope:
+#     CONFIRMED (see ../auth-tokens/duhem.yml provenance).
+#   - Single-resource read returns `{data:<node>}`: CONFIRMED envelope.
+#   - PATCH update body is TOP-LEVEL ({description:<v>}, no `data` wrapper):
+#     per API-009 §3.1's literal body. INFERRED — FLAG to confirm.
+#   - `nodes` documents carry `is_master` (bool), `status`, `hostname`,
+#     `ip`: per API-009's documented node response shape (§"Node Response
+#     Format"). The `status` VALUE "online" is INFERRED — crawlab may encode
+#     status as an int/enum; FLAG to correct on first live run.
+#   - The cluster has BOTH a master and a worker online: this leaf asserts
+#     the manifest's documented topology (master + worker). A worker that
+#     has not yet registered at readiness (the /api/health probe gates on
+#     the master) would make the worker assertions RED — that is a real
+#     finding about registration latency, not a check bug. FLAG.
+#   - Metrics endpoints return `{data:<metrics>}` with cpu/memory/disk/
+#     timestamp fields: per API-009's documented metrics shape. Asserted as
+#     a 200 with a present `data` payload; field-level shape is INFERRED and
+#     deliberately left loose until the first live run pins it. FLAG.
+
+verification: Crawlab — node management & metrics (API-009)
+spec_ref: crawlab-team/crawlab-test specs/api/API-009-node-management-metrics.md
+
+# OWN inputs: the nodes + metrics endpoints and the description this leaf
+# writes onto the master node (harmless, durable). Shared login URL + admin
+# credentials + Mongo URL are inherited from the parent manifest (spec
+# #135). The endpoint URLs mirror that manifest's host:port.
+inputs:
+  nodes_url:
+    type: string
+    default: http://127.0.0.1:8090/api/nodes
+  node_metrics_url:
+    type: string
+    default: http://127.0.0.1:8090/api/nodes/metrics
+  node_description:
+    type: string
+    default: duhem-regr-node-description
+
+inherits:
+  - login_url
+  - mongo_url
+  - password
+  - username
+
+criteria:
+  - id: AC-1
+    description: |
+      The cluster's node topology is real and reported: the node list
+      includes both a master and a worker, and the database confirms a
+      master node flagged as master and online plus a registered worker.
+      The cluster is genuinely multi-node, verified at the store, not just
+      asserted by the API's own count.
+    checks:
+      - id: AC-1.1
+        description: |
+          Log in, list nodes (expecting at least the master + worker), then
+          read the `nodes` collection in Mongo to confirm a master node
+          (is_master true, online) and a worker node are both registered.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: list
+            uses: api/call
+            with:
+              method: GET
+              url: $inputs.nodes_url
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: master_doc
+            uses: db/query
+            with:
+              connection: $inputs.mongo_url
+              find:
+                collection: nodes
+                filter:
+                  is_master: true
+                sort:
+                  _id: -1
+                limit: 1
+              within: 15s
+            outputs:
+              rows: rows
+              row_count: row_count
+          - id: worker_doc
+            uses: db/query
+            with:
+              connection: $inputs.mongo_url
+              find:
+                collection: nodes
+                filter:
+                  is_master: false
+                sort:
+                  _id: -1
+                limit: 1
+              within: 15s
+            outputs:
+              rows: rows
+              row_count: row_count
+        assertions:
+          - $steps.list.outputs.status == 200
+          # Master + worker → at least two nodes in the cluster.
+          - $runtime.len($steps.list.outputs.body.data) >= 2
+          # A master node is registered, flagged master, and online.
+          - $steps.master_doc.outputs.row_count >= 1
+          - $steps.master_doc.outputs.rows[0].is_master == true
+          - $steps.master_doc.outputs.rows[0].status == "online"
+          # A worker node is registered.
+          - $steps.worker_doc.outputs.row_count >= 1
+          - $steps.worker_doc.outputs.rows[0].is_master == false
+
+  - id: AC-2
+    description: |
+      Node details and metrics are served: the master node is fetchable by
+      id with its identifying fields (hostname, ip, status), the all-nodes
+      metrics endpoint responds, and the master's current-metrics endpoint
+      returns a metrics payload. The monitoring surface is live, not a stub.
+    checks:
+      - id: AC-2.1
+        description: |
+          Log in, read the master node's id from Mongo, fetch it by id and
+          confirm its identifying fields, then call the all-nodes metrics
+          endpoint and the master's current-metrics endpoint and confirm
+          both return a payload.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: master_doc
+            uses: db/query
+            with:
+              connection: $inputs.mongo_url
+              find:
+                collection: nodes
+                filter:
+                  is_master: true
+                sort:
+                  _id: -1
+                limit: 1
+              within: 15s
+            outputs:
+              rows: rows
+          - id: get_one
+            uses: api/call
+            with:
+              method: GET
+              url: '$runtime.format("{}/{}", $inputs.nodes_url, $steps.master_doc.outputs.rows[0]._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: all_metrics
+            uses: api/call
+            with:
+              method: GET
+              url: $inputs.node_metrics_url
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+          - id: current_metrics
+            uses: api/call
+            with:
+              method: GET
+              url: '$runtime.format("{}/{}/metrics/current", $inputs.nodes_url, $steps.master_doc.outputs.rows[0]._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+              body: body
+        assertions:
+          - $steps.get_one.outputs.status == 200
+          - $steps.get_one.outputs.body.data.is_master == true
+          - $runtime.exists($steps.get_one.outputs.body.data.hostname)
+          - $runtime.exists($steps.get_one.outputs.body.data.ip)
+          - $runtime.exists($steps.get_one.outputs.body.data.status)
+          - $steps.all_metrics.outputs.status == 200
+          - $steps.current_metrics.outputs.status == 200
+          - $runtime.exists($steps.current_metrics.outputs.body.data)
+
+  - id: AC-3
+    description: |
+      A node property update is durable: setting the master node's
+      description over REST lands in the database. Node updates are
+      persisted, not merely acknowledged.
+    checks:
+      - id: AC-3.1
+        description: |
+          Log in, read the master node's id from Mongo, PATCH its
+          description, then read the `nodes` collection back and confirm the
+          new description persisted.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: master_doc
+            uses: db/query
+            with:
+              connection: $inputs.mongo_url
+              find:
+                collection: nodes
+                filter:
+                  is_master: true
+                sort:
+                  _id: -1
+                limit: 1
+              within: 15s
+            outputs:
+              rows: rows
+          - id: update
+            uses: api/call
+            with:
+              method: PATCH
+              url: '$runtime.format("{}/{}", $inputs.nodes_url, $steps.master_doc.outputs.rows[0]._id)'
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                description: $inputs.node_description
+              within: 15s
+            outputs:
+              status: status
+          - id: persisted
+            uses: db/query
+            with:
+              connection: $inputs.mongo_url
+              find:
+                collection: nodes
+                # Read the SAME node by _id, not is_master — a full-replace
+                # PATCH (crawlab bug) wipes unspecified fields (incl. is_master),
+                # so an is_master filter would 0-row; by _id the description
+                # assertion fails crisply and proves the field was lost.
+                filter:
+                  _id: $steps.master_doc.outputs.rows[0]._id
+                sort:
+                  _id: -1
+                limit: 1
+              within: 15s
+            outputs:
+              rows: rows
+        assertions:
+          - $steps.update.outputs.status == 200
+          - $steps.persisted.outputs.rows[0].description == $inputs.node_description

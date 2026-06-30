@@ -1,0 +1,476 @@
+# yaml-language-server: $schema=../../../schema/duhem.schema.json
+# Crawlab regression suite leaf — user management (API-003)
+#
+# A faithful Duhem port of crawlab-team/crawlab-test's
+# `specs/api/API-003-user-management.md`. A suite leaf (no own
+# `environment:`): it runs against the shared LICENSED Pro cluster the
+# parent manifest (`../duhem.yml`) provisions. Standalone, run with
+# `--no-env-up` against an already-up crawlab-pro and pass the inherited
+# inputs via `--inputs`.
+#
+# Surface: POST/GET/PUT/DELETE /api/users, GET /api/users/{id},
+# POST /api/users/{id}/change-password — mechanical `api/call`, with a
+# `db/query` on Mongo's `users` collection where it adds real DB-state
+# depth (a created/updated user read straight from the store).
+#
+# Provenance — confirmed vs inferred (cite the contract, not guesses):
+#   - Endpoint paths + `/api` prefix + admin/admin: CONFIRMED from
+#     crawlab-test API-003 (the maintainer's own test corpus) +
+#     docker-compose.test.yml `/api/health`.
+#   - Bare `Authorization: <token>` (no `Bearer`); login returns the JWT
+#     under `{data:<token>}`: CONFIRMED from sibling OSS-core VDs'
+#     provenance (../../crawlab/auth; core/controllers/login.go,
+#     core/utils/token.go).
+#   - POST create wraps the model under `data` ({data:{username,...}}) and
+#     single-resource reads return `{data:<model>}`: CONFIRMED shape used
+#     by the auth-tokens + projects leaves (controllers/base.go generic
+#     create). API-003 step 3 shows the same `{"data":{...}}` body.
+#   - PUT update body wraps under `data`: INFERRED — API-003 step 10 shows
+#     a `{"data":{...}}` PUT body, but the generic PutById envelope is not
+#     independently confirmed. FLAG: confirm against crawlab-pro source.
+#   - change-password takes a TOP-LEVEL `{password:<new>}` (no `data`
+#     wrapper): per API-003 step 13's literal body. INFERRED envelope —
+#     FLAG to confirm.
+#   - Password is NEVER returned in GET/PUT responses (AC-1): the spec's
+#     explicit contract (step 8 / Data Validation). Asserted as
+#     exists(...password) == false; if crawlab returns an empty string
+#     instead of omitting the field, this fails and surfaces reality.
+#   - A freshly created user can authenticate with its password (AC-2):
+#     INFERRED — if crawlab gates login on an assigned role/enabled flag,
+#     login_new fails and the contract must be reframed. FLAG.
+
+verification: Crawlab — user management (API-003)
+spec_ref: crawlab-team/crawlab-test specs/api/API-003-user-management.md
+
+# This leaf's OWN inputs: the users endpoint + the test identities it
+# creates. Distinct usernames per check so a failed cleanup in one check
+# cannot collide with another within the same run (the suite tears Mongo
+# down with `down -v`, so stable names are safe across runs). The shared
+# login URL + admin credentials + Mongo URL are inherited from the parent
+# manifest's `environments:` block (spec #135), declared once in
+# `../duhem.yml`. `users_url` mirrors that manifest's host:port.
+inputs:
+  users_url:
+    type: string
+    default: http://127.0.0.1:8090/api/users
+  lifecycle_user:
+    type: string
+    default: duhem-regr-user-crud
+  pw_user:
+    type: string
+    default: duhem-regr-user-pw
+  dup_user:
+    type: string
+    default: duhem-regr-user-dup
+  user_password:
+    type: string
+    default: Duhem-Regr-Pw-1
+  user_email:
+    type: string
+    default: duhem-regr-user@example.com
+  updated_email:
+    type: string
+    default: duhem-regr-user-updated@example.com
+  new_password:
+    type: string
+    default: Duhem-Regr-Pw-2
+
+inherits:
+  - login_url
+  - mongo_url
+  - password
+  - username
+
+criteria:
+  - id: AC-1
+    description: |
+      A user has a real CRUD lifecycle backed by the database: a user
+      created over REST persists in Crawlab's Mongo `users` collection with
+      the same identifier and fields, is listed and fetchable by id, can be
+      updated (the change lands in the database), and once deleted is gone —
+      a subsequent fetch is refused. The password is never echoed back in
+      any read. User CRUD is verified at the database layer, not by the
+      handler's own response.
+    checks:
+      - id: AC-1.1
+        description: |
+          One holistic slice of the user lifecycle: log in as admin, create
+          a user, read the `users` collection in Mongo to confirm it
+          persisted with the API's `_id` + username + email, list users,
+          fetch by id (confirming the password is NOT returned), update the
+          email via PUT and confirm the change landed in Mongo, then delete
+          and confirm a re-fetch is refused.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: create
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.users_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  username: $inputs.lifecycle_user
+                  password: $inputs.user_password
+                  email: $inputs.user_email
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: persisted
+            uses: db/query
+            with:
+              connection: $inputs.mongo_url
+              find:
+                collection: users
+                filter:
+                  username: $inputs.lifecycle_user
+                sort:
+                  _id: -1
+                limit: 1
+              within: 15s
+            outputs:
+              rows: rows
+              row_count: row_count
+          - id: list
+            uses: api/call
+            with:
+              method: GET
+              url: $inputs.users_url
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: get_one
+            uses: api/call
+            with:
+              method: GET
+              url: '$runtime.format("{}/{}", $inputs.users_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: update
+            uses: api/call
+            with:
+              method: PUT
+              url: '$runtime.format("{}/{}", $inputs.users_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  username: $inputs.lifecycle_user
+                  password: $inputs.user_password
+                  email: $inputs.updated_email
+              within: 15s
+            outputs:
+              status: status
+          - id: persisted_after
+            uses: db/query
+            with:
+              connection: $inputs.mongo_url
+              find:
+                collection: users
+                filter:
+                  username: $inputs.lifecycle_user
+                sort:
+                  _id: -1
+                limit: 1
+              within: 15s
+            outputs:
+              rows: rows
+          - id: delete
+            uses: api/call
+            with:
+              method: DELETE
+              url: '$runtime.format("{}/{}", $inputs.users_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+          - id: get_gone
+            uses: api/call
+            with:
+              method: GET
+              url: '$runtime.format("{}/{}", $inputs.users_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+        assertions:
+          - $steps.create.outputs.status == 200
+          - $runtime.exists($steps.create.outputs.body.data._id)
+          # The user actually persisted in Mongo with the API's id + fields.
+          - $steps.persisted.outputs.row_count >= 1
+          - $steps.persisted.outputs.rows[0].username == $inputs.lifecycle_user
+          - $steps.persisted.outputs.rows[0].email == $inputs.user_email
+          - $steps.persisted.outputs.rows[0]._id == $steps.create.outputs.body.data._id
+          # The list endpoint serves the users (non-empty).
+          - $steps.list.outputs.status == 200
+          - $runtime.len($steps.list.outputs.body.data) >= 1
+          # Fetch by id returns the same user and NEVER the password.
+          - $steps.get_one.outputs.status == 200
+          - $steps.get_one.outputs.body.data.username == $inputs.lifecycle_user
+          - $runtime.exists($steps.get_one.outputs.body.data.password) == false
+          # Update lands in the database.
+          - $steps.update.outputs.status == 200
+          - $steps.persisted_after.outputs.rows[0].email == $inputs.updated_email
+          # Delete succeeds and the user is then gone.
+          - $steps.delete.outputs.status == 200
+          - $steps.get_gone.outputs.status == 404
+
+  - id: AC-2
+    description: |
+      Password management is real, not nominal: after an admin changes a
+      user's password, the old password no longer authenticates and the new
+      password does. The credential store is actually rewritten, verified by
+      logging in end to end — not by trusting the change handler's own 200.
+    checks:
+      - id: AC-2.1
+        description: |
+          Log in as admin, create a user, change that user's password,
+          then prove the change took effect at the auth boundary: a login
+          with the OLD password is refused (4xx) and a login with the NEW
+          password succeeds and issues a usable token. Clean up the user.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: create
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.users_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  username: $inputs.pw_user
+                  password: $inputs.user_password
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: change_pw
+            uses: api/call
+            with:
+              method: POST
+              url: '$runtime.format("{}/{}/change-password", $inputs.users_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                password: $inputs.new_password
+              within: 15s
+            outputs:
+              status: status
+          - id: login_old
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.pw_user
+                password: $inputs.user_password
+              within: 15s
+            outputs:
+              status: status
+          - id: login_new
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.pw_user
+                password: $inputs.new_password
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: delete
+            uses: api/call
+            with:
+              method: DELETE
+              url: '$runtime.format("{}/{}", $inputs.users_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+        assertions:
+          - $steps.create.outputs.status == 200
+          - $steps.change_pw.outputs.status == 200
+          # Old password no longer authenticates.
+          - $steps.login_old.outputs.status >= 400
+          - $steps.login_old.outputs.status < 500
+          # New password authenticates and issues a real token.
+          - $steps.login_new.outputs.status == 200
+          - $runtime.len($steps.login_new.outputs.body.data) > 20
+          - $steps.delete.outputs.status == 200
+
+  - id: AC-3
+    description: |
+      Invalid user operations are refused with the right client errors: a
+      create missing the required fields is rejected, a duplicate username is
+      rejected, and a fetch of a non-existent user is a 404. The validation
+      and uniqueness rules are enforced, not nominal.
+    checks:
+      - id: AC-3.1
+        description: |
+          Attempt to create a user with no username/password (only an
+          email) and confirm it is refused with a 4xx — required-field
+          validation is real.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: create_missing
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.users_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  email: $inputs.user_email
+              within: 15s
+            outputs:
+              status: status
+        assertions:
+          - $steps.create_missing.outputs.status >= 400
+          - $steps.create_missing.outputs.status < 500
+      - id: AC-3.2
+        description: |
+          Create a user, then attempt to create a second user with the same
+          username and confirm it is refused with a 4xx (400/409) — usernames
+          are unique. Clean up the first user.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: create_first
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.users_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  username: $inputs.dup_user
+                  password: $inputs.user_password
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: create_dup
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.users_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  username: $inputs.dup_user
+                  password: $inputs.user_password
+              within: 15s
+            outputs:
+              status: status
+          - id: delete
+            uses: api/call
+            with:
+              method: DELETE
+              url: '$runtime.format("{}/{}", $inputs.users_url, $steps.create_first.outputs.body.data._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+        assertions:
+          - $steps.create_first.outputs.status == 200
+          - $steps.create_dup.outputs.status >= 400
+          - $steps.create_dup.outputs.status < 500
+      - id: AC-3.3
+        description: |
+          Fetch a user by a well-formed but non-existent id and confirm the
+          response is 404 Not Found.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: get_missing
+            uses: api/call
+            with:
+              method: GET
+              url: '$runtime.format("{}/{}", $inputs.users_url, "000000000000000000000000")'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+        assertions:
+          - $steps.get_missing.outputs.status == 404

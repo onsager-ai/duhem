@@ -77,3 +77,8 @@ verifications:
   - path: spider-files/duhem.yml
   - path: tasks/duhem.yml
   - path: task-logs/duhem.yml
+  - path: users/duhem.yml
+  - path: schedules/duhem.yml
+  - path: nodes/duhem.yml
+  - path: roles/duhem.yml
+  - path: projects-environments/duhem.yml

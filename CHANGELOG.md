@@ -20,6 +20,8 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [additive] db/query Mongo find: coerces 24-hex string filter values on _id/*_id fields to ObjectId, so _id equality matches BSON-typed ids (fixes post-update state reads in Mongo VDs). (#171)
+
 - [clarifying] Crawlab regression cluster: select the image under test via DUHEM_CRAWLAB_IMAGE (e.g. crawlabteam/crawlab-pro:test, or a local before/after tag); defaults to :develop. (#160)
 
 - [clarifying] Crawlab regression suite P0: licensed master+worker cluster shared-environment + API-002 auth/token leaf (verifications/crawlab-regression/). Authored; green run in product env. (#160)

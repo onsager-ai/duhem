@@ -18,7 +18,10 @@
 //! - `find` (MongoDB only): `collection` plus an optional `filter`,
 //!   `projection`, `sort`, and `limit`. `filter`/`projection`/`sort`
 //!   are BSON documents written as YAML mappings; `filter` defaults to
-//!   `{}` (match everything).
+//!   `{}` (match everything). In `filter`, a 24-hex string value on an
+//!   `_id` or `*_id` field (e.g. `spider_id`) is coerced to a BSON
+//!   `ObjectId` so equality matches an ObjectId-typed `_id`; non-`_id`
+//!   fields and non-hex values are left as strings.
 //! - `within` (optional): wall-clock budget for connect + query.
 //!
 //! Outputs:
@@ -41,6 +44,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use mongodb::Client;
+use mongodb::bson::oid::ObjectId;
 use mongodb::bson::{Bson, Document};
 use mongodb::options::ClientOptions;
 use serde::Deserialize;
@@ -172,7 +176,7 @@ async fn run_mongo(with: With) -> Result<ActionResult, ActionError> {
         .database(&db_name)
         .collection::<Document>(&find.collection);
 
-    let filter = to_bson_document("filter", find.filter)?;
+    let filter = coerce_object_id_filter(to_bson_document("filter", find.filter)?);
     let mut req = coll.find(filter);
     if let Some(p) = find.projection {
         req = req.projection(to_bson_document("projection", p)?);
@@ -215,6 +219,72 @@ fn to_bson_document(label: &str, v: serde_yml::Value) -> Result<Document, Action
     }
     mongodb::bson::serialize_to_document(&v)
         .map_err(|e| ActionError::Db(format!("db/query: `{label}` must be a document: {e}")))
+}
+
+/// Coerce 24-hex string filter values on `_id` / `*_id` fields to BSON
+/// `ObjectId`. Crawlab (and Mongo generally) stores `_id` as an
+/// `ObjectId`, so a `{_id: "<24hex>"}` filter with a *string* operand
+/// matches nothing — the post-update state reads in the Crawlab VDs
+/// returned 0 rows for exactly this reason. We scope the coercion to id
+/// fields (key is `_id` or ends with `_id`, e.g. `spider_id`) and only
+/// when the operand parses as a 24-char hex string; any other field or
+/// value passes through unchanged so we never over-coerce a legitimate
+/// string. Operator sub-documents (`{$in: [...]}`, `{$eq: "<hex>"}`)
+/// and logical operators (`$and` / `$or` / `$nor`) recurse so the rule
+/// reaches nested id operands too.
+fn coerce_object_id_filter(doc: Document) -> Document {
+    doc.into_iter()
+        .map(|(key, value)| {
+            let value = if field_targets_object_id(&key) {
+                coerce_id_operand(value)
+            } else {
+                recurse_filter_value(value)
+            };
+            (key, value)
+        })
+        .collect()
+}
+
+/// An id field is `_id` or any `*_id` field (e.g. `spider_id`). `_id`
+/// itself ends with `_id`, so the suffix check covers both.
+fn field_targets_object_id(key: &str) -> bool {
+    key.ends_with("_id")
+}
+
+/// A 24-char all-hex string is an `ObjectId` hex repr (matching the
+/// `ObjectId → 24-hex string` rendering in `bson_to_json`).
+fn is_object_id_hex(s: &str) -> bool {
+    s.len() == 24 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The operand of an id field: a bare hex string becomes an `ObjectId`;
+/// an array (e.g. an `$in` list) or operator document coerces its own
+/// hex-string operands element-wise. A non-hex string is left alone.
+fn coerce_id_operand(value: Bson) -> Bson {
+    match value {
+        Bson::String(s) if is_object_id_hex(&s) => match ObjectId::parse_str(&s) {
+            Ok(oid) => Bson::ObjectId(oid),
+            Err(_) => Bson::String(s),
+        },
+        Bson::Array(items) => Bson::Array(items.into_iter().map(coerce_id_operand).collect()),
+        Bson::Document(d) => Bson::Document(
+            d.into_iter()
+                .map(|(k, v)| (k, coerce_id_operand(v)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+/// Recurse through non-id keys so logical operators (`$and` / `$or` /
+/// `$nor`, whose values are arrays/documents of sub-filters) still have
+/// their nested id fields coerced. Scalars on non-id keys are untouched.
+fn recurse_filter_value(value: Bson) -> Bson {
+    match value {
+        Bson::Document(d) => Bson::Document(coerce_object_id_filter(d)),
+        Bson::Array(items) => Bson::Array(items.into_iter().map(recurse_filter_value).collect()),
+        other => other,
+    }
 }
 
 /// Render a BSON value as judge-comparable JSON: an `ObjectId` collapses
@@ -423,6 +493,81 @@ sql: "select 1"
         assert_eq!(json["nested"]["ok"], serde_json::json!(true));
     }
 
+    fn filter_doc(yaml: &str) -> Document {
+        let v: serde_yml::Value = serde_yml::from_str(yaml).unwrap();
+        coerce_object_id_filter(to_bson_document("filter", v).unwrap())
+    }
+
+    const HEX: &str = "65f0000000000000000000aa";
+
+    #[test]
+    fn id_hex_string_coerces_to_object_id() {
+        let doc = filter_doc(&format!("_id: \"{HEX}\""));
+        assert_eq!(
+            doc.get("_id"),
+            Some(&Bson::ObjectId(ObjectId::parse_str(HEX).unwrap()))
+        );
+    }
+
+    #[test]
+    fn suffix_id_field_coerces_to_object_id() {
+        // `*_id` fields (e.g. spider_id) reference an ObjectId-typed _id
+        // on another collection, so they coerce too.
+        let doc = filter_doc(&format!("spider_id: \"{HEX}\""));
+        assert_eq!(
+            doc.get("spider_id"),
+            Some(&Bson::ObjectId(ObjectId::parse_str(HEX).unwrap()))
+        );
+    }
+
+    #[test]
+    fn non_hex_id_value_stays_string() {
+        // A human-readable id (not 24-hex) is a real string id; leave it.
+        let doc = filter_doc("_id: \"not-an-objectid\"");
+        assert_eq!(
+            doc.get("_id"),
+            Some(&Bson::String("not-an-objectid".into()))
+        );
+    }
+
+    #[test]
+    fn non_id_field_with_hex_value_stays_string() {
+        // A 24-hex value on a non-id field is just a string; don't
+        // over-coerce it into an ObjectId.
+        let doc = filter_doc(&format!("token: \"{HEX}\""));
+        assert_eq!(doc.get("token"), Some(&Bson::String(HEX.into())));
+    }
+
+    #[test]
+    fn id_operator_and_logical_operands_coerce() {
+        // `$in` list under _id and an _id nested inside `$and` both reach
+        // the coercion via operand/logical recursion.
+        let other = "65f0000000000000000000bb";
+        let doc = filter_doc(&format!(
+            "_id: {{ $in: [\"{HEX}\", \"{other}\"] }}\n\
+             $and:\n  - spider_id: \"{HEX}\"\n  - status: active"
+        ));
+        let in_list = doc.get_document("_id").unwrap().get_array("$in").unwrap();
+        assert_eq!(
+            in_list[0],
+            Bson::ObjectId(ObjectId::parse_str(HEX).unwrap())
+        );
+        assert_eq!(
+            in_list[1],
+            Bson::ObjectId(ObjectId::parse_str(other).unwrap())
+        );
+        let and = doc.get_array("$and").unwrap();
+        assert_eq!(
+            and[0].as_document().unwrap().get("spider_id"),
+            Some(&Bson::ObjectId(ObjectId::parse_str(HEX).unwrap()))
+        );
+        // A non-id field nested in $and is still a plain string.
+        assert_eq!(
+            and[1].as_document().unwrap().get("status"),
+            Some(&Bson::String("active".into()))
+        );
+    }
+
     /// Live read against a real MongoDB. Ignored by default (no
     /// in-memory Mongo exists, unlike SQLite); run with a reachable
     /// server: `DUHEM_MONGO_TEST_URL=mongodb://127.0.0.1:27018/test \
@@ -450,5 +595,45 @@ find:
                 .and_then(|v| v.as_i64())
                 .is_some()
         );
+    }
+
+    /// Live proof that a 24-hex `_id` filter matches an ObjectId-typed
+    /// document — the regression #160/#167 hit. Seeds a doc with an
+    /// `ObjectId` `_id`, then reads it back filtering by the hex string.
+    /// Ignored by default; run with a reachable server like
+    /// `mongo_reads_documents` above.
+    #[tokio::test]
+    #[ignore = "requires a live mongod via DUHEM_MONGO_TEST_URL"]
+    async fn mongo_find_matches_object_id_by_hex() {
+        use mongodb::bson::doc;
+
+        let url = std::env::var("DUHEM_MONGO_TEST_URL").expect("DUHEM_MONGO_TEST_URL");
+        let opts = ClientOptions::parse(&url).await.unwrap();
+        let db_name = opts.default_database.clone().unwrap();
+        let client = Client::with_options(opts).unwrap();
+        let coll = client
+            .database(&db_name)
+            .collection::<Document>("duhem_oid_probe");
+        let oid = ObjectId::new();
+        coll.insert_one(doc! { "_id": oid, "marker": "oid-probe" })
+            .await
+            .expect("seed");
+
+        let r = execute(parse(&format!(
+            r#"
+connection: "{url}"
+find:
+  collection: duhem_oid_probe
+  filter: {{ _id: "{hex}" }}
+"#,
+            hex = oid.to_hex()
+        )))
+        .await
+        .expect("mongo find");
+
+        coll.delete_many(doc! { "_id": oid }).await.ok();
+        assert_eq!(r.outputs.get("row_count").and_then(|v| v.as_i64()), Some(1));
+        let rows = r.outputs.get("rows").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(rows[0]["marker"], serde_json::json!("oid-probe"));
     }
 }

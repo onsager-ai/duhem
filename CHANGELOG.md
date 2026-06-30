@@ -26,6 +26,8 @@ criteria) lives in the spec issue that introduced
 
 - [additive] api/call: optional query: mapping appended as a deterministic urlencoded query string (no more $runtime.format for pagination/filters). (#172)
 
+- [clarifying] Crawlab regression suite: API-003/008/009/018/019 leaves (users, schedules, nodes, roles, projects+environments). (#160)
+
 - [clarifying] Crawlab regression cluster: select the image under test via DUHEM_CRAWLAB_IMAGE (e.g. crawlabteam/crawlab-pro:test, or a local before/after tag); defaults to :develop. (#160)
 
 - [clarifying] Crawlab regression suite: API-004..007 leaves (spider CRUD, spider files, task CRUD+execution, task logs/results). (#160)

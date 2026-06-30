@@ -1,0 +1,465 @@
+# yaml-language-server: $schema=../../../schema/duhem.schema.json
+# Crawlab regression suite leaf — schedule management (API-008)
+#
+# A faithful Duhem port of crawlab-team/crawlab-test's
+# `specs/api/API-008-schedule-management.md`. A suite leaf (no own
+# `environment:`): it runs against the shared LICENSED Pro cluster the
+# parent manifest (`../duhem.yml`) provisions. Standalone, run with
+# `--no-env-up` and pass the inherited inputs via `--inputs`.
+#
+# Surface: POST/GET/PATCH/DELETE /api/schedules, GET /api/schedules/{id},
+# POST /api/schedules/{id}/enable|disable — a cron schedule bound to a
+# spider, with `db/query` on Mongo's `schedules` collection confirming the
+# cron + spider binding + enabled toggle land in the store.
+#
+# Provenance — confirmed vs inferred:
+#   - Endpoint paths + `/api` prefix + admin/admin + login envelope:
+#     CONFIRMED (see ../auth-tokens/duhem.yml provenance).
+#   - POST create wraps under `data` ({data:{spider_id,name,cron,enabled}}):
+#     INFERRED from the generic create envelope (controllers/base.go) the
+#     auth-tokens/projects leaves use; API-008 lists the fields without an
+#     explicit wrapper. FLAG: confirm the schedule create envelope.
+#   - PATCH update body is TOP-LEVEL ({cron:<new>}, no `data` wrapper): per
+#     API-008 step 3.1's literal body. INFERRED — FLAG to confirm.
+#   - enable/disable are POST /{id}/enable|disable toggling the `enabled`
+#     boolean in Mongo: CONFIRMED endpoints from API-008 §4.1/4.2; the
+#     `enabled` field name is the spec's documented response shape.
+#   - A schedule needs a real spider_id: this leaf creates a throwaway
+#     spider via POST /api/spiders {data:{name}} (INFERRED bare-name create
+#     envelope — spiders are batch-1's territory; FLAG if name alone is
+#     insufficient) and deletes it on cleanup.
+#   - Invalid cron is rejected (AC-3): the spec's "appropriate error
+#     response" (§7.1). Asserted as 4xx; if crawlab accepts an invalid cron
+#     and 200s, this fails and surfaces reality. FLAG inferred.
+#
+# Note: schedule "run immediately" (API-008 §4.3) creates a real task and
+# is left to the spider/task lifecycle leaves (batch 1, API-004..007) to
+# avoid overlap; this leaf stays on CRUD + the enable/disable toggle.
+
+verification: Crawlab — schedule management (API-008)
+spec_ref: crawlab-team/crawlab-test specs/api/API-008-schedule-management.md
+
+# OWN inputs: the schedules + spiders endpoints and the test identities.
+# Distinct names per check guard against intra-run collisions. Shared
+# login URL + admin credentials + Mongo URL are inherited from the parent
+# manifest (spec #135). The endpoint URLs mirror that manifest's host:port.
+inputs:
+  schedules_url:
+    type: string
+    default: http://127.0.0.1:8090/api/schedules
+  spiders_url:
+    type: string
+    default: http://127.0.0.1:8090/api/spiders
+  spider_name:
+    type: string
+    default: duhem-regr-sched-spider
+  schedule_name:
+    type: string
+    default: duhem-regr-schedule
+  cron:
+    type: string
+    default: "0 0 * * *"
+  updated_cron:
+    type: string
+    default: "0 12 * * *"
+  spider_name_toggle:
+    type: string
+    default: duhem-regr-sched-spider-toggle
+  schedule_name_toggle:
+    type: string
+    default: duhem-regr-schedule-toggle
+  bad_cron:
+    type: string
+    default: not-a-valid-cron
+
+inherits:
+  - login_url
+  - mongo_url
+  - password
+  - username
+
+criteria:
+  - id: AC-1
+    description: |
+      A schedule has a real CRUD lifecycle backed by the database: a cron
+      schedule created for a spider over REST persists in Crawlab's Mongo
+      `schedules` collection with the same identifier, cron expression, and
+      spider binding; is listed and fetchable by id; can have its cron
+      updated (the change lands in the database); and once deleted is gone.
+      Schedule CRUD is verified at the database layer, not echoed by the
+      handler.
+    checks:
+      - id: AC-1.1
+        description: |
+          One holistic slice: log in, create a throwaway spider, create a
+          cron schedule bound to it, read the `schedules` collection in
+          Mongo to confirm the cron + spider_id + `_id` persisted, list and
+          fetch by id, update the cron via PATCH and confirm the new cron
+          landed in Mongo, then delete and confirm the re-fetch is refused.
+          Clean up the spider.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: spider
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.spiders_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  name: $inputs.spider_name
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: create
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.schedules_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  spider_id: $steps.spider.outputs.body.data._id
+                  name: $inputs.schedule_name
+                  cron: $inputs.cron
+                  enabled: true
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: persisted
+            uses: db/query
+            with:
+              connection: $inputs.mongo_url
+              find:
+                collection: schedules
+                filter:
+                  name: $inputs.schedule_name
+                sort:
+                  _id: -1
+                limit: 1
+              within: 15s
+            outputs:
+              rows: rows
+              row_count: row_count
+          - id: list
+            uses: api/call
+            with:
+              method: GET
+              url: $inputs.schedules_url
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: get_one
+            uses: api/call
+            with:
+              method: GET
+              url: '$runtime.format("{}/{}", $inputs.schedules_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: update
+            uses: api/call
+            with:
+              method: PATCH
+              url: '$runtime.format("{}/{}", $inputs.schedules_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                cron: $inputs.updated_cron
+              within: 15s
+            outputs:
+              status: status
+          - id: persisted_after
+            uses: db/query
+            with:
+              connection: $inputs.mongo_url
+              find:
+                collection: schedules
+                filter:
+                  name: $inputs.schedule_name
+                sort:
+                  _id: -1
+                limit: 1
+              within: 15s
+            outputs:
+              rows: rows
+          - id: delete
+            uses: api/call
+            with:
+              method: DELETE
+              url: '$runtime.format("{}/{}", $inputs.schedules_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+          - id: get_gone
+            uses: api/call
+            with:
+              method: GET
+              url: '$runtime.format("{}/{}", $inputs.schedules_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+          - id: delete_spider
+            uses: api/call
+            with:
+              method: DELETE
+              url: '$runtime.format("{}/{}", $inputs.spiders_url, $steps.spider.outputs.body.data._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+        assertions:
+          - $steps.spider.outputs.status == 200
+          - $runtime.exists($steps.spider.outputs.body.data._id)
+          - $steps.create.outputs.status == 200
+          - $runtime.exists($steps.create.outputs.body.data._id)
+          # The schedule persisted in Mongo with its cron + spider binding.
+          - $steps.persisted.outputs.row_count >= 1
+          - $steps.persisted.outputs.rows[0].name == $inputs.schedule_name
+          - $steps.persisted.outputs.rows[0].cron == $inputs.cron
+          - $steps.persisted.outputs.rows[0].spider_id == $steps.spider.outputs.body.data._id
+          - $steps.persisted.outputs.rows[0]._id == $steps.create.outputs.body.data._id
+          # Listed and fetchable by id with the right cron.
+          - $steps.list.outputs.status == 200
+          - $runtime.len($steps.list.outputs.body.data) >= 1
+          - $steps.get_one.outputs.status == 200
+          - $steps.get_one.outputs.body.data.cron == $inputs.cron
+          # The cron update lands in the database.
+          - $steps.update.outputs.status == 200
+          - $steps.persisted_after.outputs.rows[0].cron == $inputs.updated_cron
+          # Delete succeeds and the schedule is then gone.
+          - $steps.delete.outputs.status == 200
+          - $steps.get_gone.outputs.status == 404
+
+  - id: AC-2
+    description: |
+      The enable/disable toggle is real and durable: disabling a schedule
+      flips its `enabled` flag to false in the database, and enabling it
+      flips it back to true. The toggle is verified at the store, not by the
+      control endpoint's own 200.
+    checks:
+      - id: AC-2.1
+        description: |
+          Log in, create a spider + an enabled schedule, POST .../disable and
+          confirm `enabled` is false in Mongo, POST .../enable and confirm
+          `enabled` is true in Mongo. Clean up the schedule + spider.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: spider
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.spiders_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  name: $inputs.spider_name_toggle
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: create
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.schedules_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  spider_id: $steps.spider.outputs.body.data._id
+                  name: $inputs.schedule_name_toggle
+                  cron: $inputs.cron
+                  enabled: true
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: disable
+            uses: api/call
+            with:
+              method: POST
+              url: '$runtime.format("{}/{}/disable", $inputs.schedules_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+          - id: persisted_disabled
+            uses: db/query
+            with:
+              connection: $inputs.mongo_url
+              find:
+                collection: schedules
+                filter:
+                  name: $inputs.schedule_name_toggle
+                sort:
+                  _id: -1
+                limit: 1
+              within: 15s
+            outputs:
+              rows: rows
+          - id: enable
+            uses: api/call
+            with:
+              method: POST
+              url: '$runtime.format("{}/{}/enable", $inputs.schedules_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+          - id: persisted_enabled
+            uses: db/query
+            with:
+              connection: $inputs.mongo_url
+              find:
+                collection: schedules
+                filter:
+                  name: $inputs.schedule_name_toggle
+                sort:
+                  _id: -1
+                limit: 1
+              within: 15s
+            outputs:
+              rows: rows
+          - id: delete
+            uses: api/call
+            with:
+              method: DELETE
+              url: '$runtime.format("{}/{}", $inputs.schedules_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+          - id: delete_spider
+            uses: api/call
+            with:
+              method: DELETE
+              url: '$runtime.format("{}/{}", $inputs.spiders_url, $steps.spider.outputs.body.data._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+        assertions:
+          - $steps.create.outputs.status == 200
+          - $steps.disable.outputs.status == 200
+          - $steps.persisted_disabled.outputs.rows[0].enabled == false
+          - $steps.enable.outputs.status == 200
+          - $steps.persisted_enabled.outputs.rows[0].enabled == true
+          - $steps.delete.outputs.status == 200
+
+  - id: AC-3
+    description: |
+      Schedule creation validates its inputs: a schedule with a malformed
+      cron expression is refused with a client error rather than silently
+      stored. The cron is parsed, not taken on faith.
+    checks:
+      - id: AC-3.1
+        description: |
+          Log in, create a throwaway spider, then attempt to create a
+          schedule with an invalid cron expression and confirm it is refused
+          with a 4xx. Clean up the spider.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: spider
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.spiders_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  name: $inputs.spider_name
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: create_bad
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.schedules_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  spider_id: $steps.spider.outputs.body.data._id
+                  name: $inputs.schedule_name
+                  cron: $inputs.bad_cron
+                  enabled: true
+              within: 15s
+            outputs:
+              status: status
+          - id: delete_spider
+            uses: api/call
+            with:
+              method: DELETE
+              url: '$runtime.format("{}/{}", $inputs.spiders_url, $steps.spider.outputs.body.data._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+        assertions:
+          - $steps.create_bad.outputs.status >= 400
+          - $steps.create_bad.outputs.status < 500

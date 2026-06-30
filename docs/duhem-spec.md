@@ -593,6 +593,19 @@ Borrowed from Arazzo. References available in expressions:
   without a template).
 - `$runtime.len(x)` — element count of an array / object, or character
   count of a string (`$runtime.len($steps.api.outputs.body.data) == 3`).
+- `$runtime.contains(array, value)` — `true` if `array` has an element
+  equal to `value` (scalar equality, same `Int`/`Float` promotion as
+  `==`). The direct way to assert list membership —
+  `$runtime.contains($steps.api.outputs.body.tokens, "t-1")` — instead
+  of a `len(...) >= 1` proxy. A non-array first argument is a type
+  mismatch (`inconclusive`); elements of an incomparable shape are simply
+  not matches.
+- `$runtime.any(array, field, value)` — the object-array analogue:
+  `true` if `array` has an *object* element whose `field` equals `value`
+  (`$runtime.any($steps.api.outputs.body.data, "name", "ws-1")`). A
+  non-array first argument or a non-string `field` is a type mismatch
+  (`inconclusive`); an element that is not an object, or an object
+  missing `field`, is simply not a match (`false`), never an error.
 - `$runtime.lower(s)` / `$runtime.upper(s)` / `$runtime.trim(s)` — case
   and whitespace normalization for robust string comparisons.
 - `$runtime.replace(s, from, to)` — literal substring replace.
@@ -601,8 +614,9 @@ Borrowed from Arazzo. References available in expressions:
   optional fields.
 
 The `$runtime` helper catalog is **closed** at v1: the authored helpers
-are exactly `uuid`, `now`, `format`, `concat`, `len`, `lower`, `upper`,
-`trim`, `replace`, and `default`. The evaluator additionally recognizes
+are exactly `uuid`, `now`, `format`, `concat`, `len`, `contains`, `any`,
+`lower`, `upper`, `trim`, `replace`, and `default`. The evaluator
+additionally recognizes
 `exists`, `matches`, and `type_check` as internal desugaring shims behind
 the §10.6 assertion forms (`exists:`, `matches:`, `type_check:`); these
 are not part of the authored `$runtime.<fn>(…)` surface.

@@ -38,6 +38,15 @@ else
 fi
 export CRAWLAB_LICENSE
 
+# Image under test. The Duhem env whitelist only passes DUHEM_* through, so
+# the operator selects the image via DUHEM_CRAWLAB_IMAGE; we forward it to the
+# compose's CRAWLAB_IMAGE. Default: the published :develop tag. Point it at
+# :test (the published test tag) or a locally-built tag (e.g. crawlab-pro:after)
+# to gate a specific build — `DUHEM_CRAWLAB_IMAGE=crawlabteam/crawlab-pro:test`.
+CRAWLAB_IMAGE="${DUHEM_CRAWLAB_IMAGE:-crawlabteam/crawlab-pro:develop}"
+export CRAWLAB_IMAGE
+echo "up.sh: image under test = $CRAWLAB_IMAGE"
+
 echo "up.sh: bringing up crawlab-pro cluster (mongo + master + worker)"
 # shellcheck disable=SC2086
 $COMPOSE up -d

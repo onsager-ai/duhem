@@ -24,6 +24,8 @@ criteria) lives in the spec issue that introduced
 
 - [additive] $runtime.contains(array, value) + $runtime.any(array, field, value) — array-membership helpers for direct list-contains assertions (pure, deterministic). (#173)
 
+- [additive] api/call: optional query: mapping appended as a deterministic urlencoded query string (no more $runtime.format for pagination/filters). (#172)
+
 - [clarifying] Crawlab regression cluster: select the image under test via DUHEM_CRAWLAB_IMAGE (e.g. crawlabteam/crawlab-pro:test, or a local before/after tag); defaults to :develop. (#160)
 
 - [clarifying] Crawlab regression suite P0: licensed master+worker cluster shared-environment + API-002 auth/token leaf (verifications/crawlab-regression/). Authored; green run in product env. (#160)

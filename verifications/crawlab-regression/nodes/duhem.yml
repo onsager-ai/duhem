@@ -277,8 +277,12 @@ criteria:
               connection: $inputs.mongo_url
               find:
                 collection: nodes
+                # Read the SAME node by _id, not is_master — a full-replace
+                # PATCH (crawlab bug) wipes unspecified fields (incl. is_master),
+                # so an is_master filter would 0-row; by _id the description
+                # assertion fails crisply and proves the field was lost.
                 filter:
-                  is_master: true
+                  _id: $steps.master_doc.outputs.rows[0]._id
                 sort:
                   _id: -1
                 limit: 1

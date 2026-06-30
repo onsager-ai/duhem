@@ -199,8 +199,11 @@ criteria:
               connection: $inputs.mongo_url
               find:
                 collection: schedules
+                # Read by stable _id, not the mutated name — a full-replace
+                # PATCH (crawlab bug) that wipes name still yields the row, so
+                # the field assertions fail crisply instead of 0-row inconclusive.
                 filter:
-                  name: $inputs.schedule_name
+                  _id: $steps.create.outputs.body.data._id
                 sort:
                   _id: -1
                 limit: 1

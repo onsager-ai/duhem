@@ -34,6 +34,10 @@ duhem run verifications/crawlab-regression --no-env-up --keep-env  # iterate liv
 | Leaf | What it verifies |
 | ---- | ---------------- |
 | [`auth-tokens/`](auth-tokens/duhem.yml) | API-002: login issues a usable session token (→ `/api/users/me`); the API-token CRUD lifecycle is backed by Mongo's `tokens` collection; logout invalidates the session; the gate rejects missing/malformed tokens (401); login refuses bad credentials. |
+| [`spiders/`](spiders/duhem.yml) | API-004: spider CRUD — create persists every field to Mongo's `spiders` collection; get/list (with `?page=&size=` + total); PATCH partial / PUT full update verified in Mongo; delete is gone from API (404) and Mongo; invalid id → 404; duplicate name → 4xx (contract claim — likely RED, see leaf header). |
+| [`spider-files/`](spider-files/duhem.yml) | API-005: spider file management — save a file and read it back byte-for-byte (real workspace round-trip); file info (is_dir false); directory create + nested-file listing; copy/rename/delete lifecycle; missing path → 4xx. |
+| [`tasks/`](tasks/duhem.yml) | API-006: task CRUD & execution — the deepest leaf: run a spider to `finished` over the gRPC worker and assert the persisted `tasks` doc (status, `cmd`, `spider_id` link, reported id); `/api/tasks/run` create+link; list/pagination/get-by-id; delete a finished task → 404. |
+| [`task-logs/`](task-logs/duhem.yml) | API-007: task logs & results — after a `finished` task, logs endpoint returns a non-empty body (+ paginated form); results endpoint is a well-formed 200; logs/results for an unknown task id → 4xx. |
 
 Each leaf has **no** `environment:` of its own — it targets the shared
 cluster (`8090` REST under `/api`, `27018` Mongo). The leaves' shared

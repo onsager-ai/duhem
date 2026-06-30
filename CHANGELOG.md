@@ -28,6 +28,8 @@ criteria) lives in the spec issue that introduced
 
 - [clarifying] Crawlab regression cluster: select the image under test via DUHEM_CRAWLAB_IMAGE (e.g. crawlabteam/crawlab-pro:test, or a local before/after tag); defaults to :develop. (#160)
 
+- [clarifying] Crawlab regression suite: API-004..007 leaves (spider CRUD, spider files, task CRUD+execution, task logs/results). (#160)
+
 - [clarifying] Crawlab regression suite P0: licensed master+worker cluster shared-environment + API-002 auth/token leaf (verifications/crawlab-regression/). Authored; green run in product env. (#160)
 
 - [clarifying] Chreode VDs: rebrand internal literals to chreode (repo onsager-ai/chreode, CHREODE_* env, ~/.chreode, pnpm chreode) per the full Arbor→Chreode product rename. (#163)

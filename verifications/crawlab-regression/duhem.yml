@@ -47,6 +47,13 @@ environments:
     logout_url: http://127.0.0.1:8090/api/logout
     me_url: http://127.0.0.1:8090/api/users/me
     tokens_url: http://127.0.0.1:8090/api/tokens
+    # Base collection URLs for the spider/task leaves (API-004..007). The
+    # Pro `develop` image serves REST under `/api`; sub-resource endpoints
+    # are composed from these with $runtime.format from a created id —
+    # `<spiders_url>/<id>`, `<spiders_url>/<id>/files/save`,
+    # `<spiders_url>/<id>/run`, `<tasks_url>/<id>`, `<tasks_url>/<id>/logs`.
+    spiders_url: http://127.0.0.1:8090/api/spiders
+    tasks_url: http://127.0.0.1:8090/api/tasks
     mongo_url: mongodb://admin:admin@127.0.0.1:27018/crawlab?authSource=admin
     username: admin
     password: admin
@@ -66,3 +73,7 @@ environment:
 
 verifications:
   - path: auth-tokens/duhem.yml
+  - path: spiders/duhem.yml
+  - path: spider-files/duhem.yml
+  - path: tasks/duhem.yml
+  - path: task-logs/duhem.yml

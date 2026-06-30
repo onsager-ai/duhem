@@ -1,0 +1,495 @@
+# yaml-language-server: $schema=../../../schema/duhem.schema.json
+# Crawlab regression suite leaf — spider file management (API-005)
+#
+# A faithful Duhem port of crawlab-team/crawlab-test's
+# `specs/api/API-005-spider-file-management.md`. A suite leaf (no own
+# `environment:`): runs against the shared LICENSED Pro cluster the parent
+# manifest (`../duhem.yml`) provisions. Standalone, run with `--no-env-up`
+# against an already-up crawlab-pro and pass the inherited inputs.
+#
+# Covers the spec's surface: POST /spiders/{id}/files/save (+ /save/dir),
+# GET /spiders/{id}/files/get|list|info, POST /spiders/{id}/files/copy and
+# /rename, DELETE /spiders/{id}/files — all mechanical `api/call`. A
+# spider's files live in the worker/master workspace on disk (NOT Mongo),
+# so the DB-state depth here is the REAL content ROUND-TRIP (save writes to
+# disk, get reads it back) — a handler echo can't fake a file that
+# survives the save→get boundary. A `db/query` confirms the parent spider
+# is a real DB-backed document.
+#
+# POSTURE — keep finding (Duhem #160/#167): assertions encode the CORRECT
+# contract API-005 describes; a real defect surfaces RED.
+#
+# Provenance — confirmed vs INFERRED:
+#   - POST /spiders/{id}/files/save with body `{path, data}` writes a
+#     spider file: CONFIRMED from the proven lifecycle VD
+#     (../../crawlab-spider-task-lifecycle; core/controllers/spider.go
+#     PostSpiderSaveFile).
+#   - `/api` prefix, login envelope, bare Authorization, spider create
+#     `{data:{...}}`: CONFIRMED (see ../auth-tokens, lifecycle VD).
+#   - GET /files/get?path=<p> returns the content under `{data:<string>}`;
+#     GET /files/list?path=<p> returns `{data:[{name,is_dir,path,...}]}`;
+#     GET /files/info?path=<p> returns `{data:{name,is_dir,size,...}}`;
+#     POST /files/save/dir, /files/copy {path,new_path}, /files/rename
+#     {path,new_path}; DELETE /files {path}: INFERRED from API-005's
+#     endpoint table + step bodies. Confirm the exact query-param name
+#     (`path`), body field names, and the get/list/info response shapes
+#     against crawlab-pro source on the first live run.
+#   - file content round-trips byte-for-byte (no newline mangling): a
+#     CORRECT-contract claim; if crawlab normalizes trailing newlines the
+#     equality assertion in AC-1 surfaces it — FLAG, don't pre-adjust.
+
+verification: Crawlab — spider file management (API-005)
+spec_ref: crawlab-team/crawlab-test specs/api/API-005-spider-file-management.md
+
+inputs:
+  # AC-1 — save + read back a main script.
+  name_save:
+    type: string
+    default: duhem-spider-files-save
+  main_path:
+    type: string
+    default: main.py
+  main_data:
+    type: string
+    default: "print('hello-from-duhem-spider-files')\n"
+  # AC-2 — directory + subdirectory listing.
+  name_dir:
+    type: string
+    default: duhem-spider-files-dir
+  dir_path:
+    type: string
+    default: utils
+  helper_path:
+    type: string
+    default: utils/helper.py
+  helper_data:
+    type: string
+    default: "def help():\n    return 1\n"
+  # AC-3 — copy / rename / delete lifecycle.
+  name_lifecycle:
+    type: string
+    default: duhem-spider-files-lifecycle
+  src_path:
+    type: string
+    default: main.py
+  copy_path:
+    type: string
+    default: main_backup.py
+  rename_path:
+    type: string
+    default: main_copy.py
+  # AC-4 — invalid path.
+  name_badpath:
+    type: string
+    default: duhem-spider-files-badpath
+  missing_path:
+    type: string
+    default: nonexistent.py
+
+inherits:
+  - login_url
+  - spiders_url
+  - mongo_url
+  - username
+  - password
+
+criteria:
+  - id: AC-1
+    description: |
+      A saved spider file round-trips through the real workspace: after
+      saving a file with content, fetching it back returns exactly that
+      content, and its metadata reports a file (not a directory). The save
+      hit the disk and the get read it back — not a handler echo. The parent
+      spider is confirmed to be a real DB-backed document.
+    checks:
+      - id: AC-1.1
+        description: |
+          Log in, create a spider (confirm it persisted in Mongo `spiders`),
+          save `main.py` with content, get the content back and assert it is
+          byte-for-byte equal, then get the file info and assert it is a file.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: create
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.spiders_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  name: $inputs.name_save
+                  cmd: bash main.sh
+                  mode: random
+              within: 15s
+            outputs:
+              body: body
+          - id: spider_db
+            uses: db/query
+            with:
+              connection: $inputs.mongo_url
+              find:
+                collection: spiders
+                filter:
+                  name: $inputs.name_save
+                sort:
+                  _id: -1
+                limit: 1
+              within: 15s
+            outputs:
+              rows: rows
+              row_count: row_count
+          - id: save
+            uses: api/call
+            with:
+              method: POST
+              url: '$runtime.format("{}/{}/files/save", $inputs.spiders_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                path: $inputs.main_path
+                data: $inputs.main_data
+              within: 15s
+            outputs:
+              status: status
+          - id: get
+            uses: api/call
+            with:
+              method: GET
+              url: '$runtime.format("{}/{}/files/get?path={}", $inputs.spiders_url, $steps.create.outputs.body.data._id, $inputs.main_path)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: info
+            uses: api/call
+            with:
+              method: GET
+              url: '$runtime.format("{}/{}/files/info?path={}", $inputs.spiders_url, $steps.create.outputs.body.data._id, $inputs.main_path)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+              body: body
+        assertions:
+          # The parent spider is a real DB-backed document.
+          - $steps.spider_db.outputs.row_count >= 1
+          - $steps.spider_db.outputs.rows[0]._id == $steps.create.outputs.body.data._id
+          # Save accepted; content round-trips byte-for-byte.
+          - $steps.save.outputs.status == 200
+          - $steps.get.outputs.status == 200
+          - $steps.get.outputs.body.data == $inputs.main_data
+          # Metadata reports a file, not a directory.
+          - $steps.info.outputs.status == 200
+          - $steps.info.outputs.body.data.is_dir == false
+
+  - id: AC-2
+    description: |
+      Directories and nested files are real: a created directory and a file
+      saved inside it both appear when listing, and the listing distinguishes
+      the file from the directory. The workspace tree is navigable, not flat.
+    checks:
+      - id: AC-2.1
+        description: |
+          Create a spider, create a `utils` directory, save `utils/helper.py`,
+          list the root (non-empty) and list `utils` (non-empty), confirming
+          the nested file is reachable.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: create
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.spiders_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  name: $inputs.name_dir
+                  cmd: bash main.sh
+                  mode: random
+              within: 15s
+            outputs:
+              body: body
+          - id: mkdir
+            uses: api/call
+            with:
+              method: POST
+              url: '$runtime.format("{}/{}/files/save/dir", $inputs.spiders_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                path: $inputs.dir_path
+              within: 15s
+            outputs:
+              status: status
+          - id: save_helper
+            uses: api/call
+            with:
+              method: POST
+              url: '$runtime.format("{}/{}/files/save", $inputs.spiders_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                path: $inputs.helper_path
+                data: $inputs.helper_data
+              within: 15s
+            outputs:
+              status: status
+          - id: list_root
+            uses: api/call
+            with:
+              method: GET
+              url: '$runtime.format("{}/{}/files/list?path=", $inputs.spiders_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: list_dir
+            uses: api/call
+            with:
+              method: GET
+              url: '$runtime.format("{}/{}/files/list?path={}", $inputs.spiders_url, $steps.create.outputs.body.data._id, $inputs.dir_path)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+              body: body
+        assertions:
+          - $steps.mkdir.outputs.status == 200
+          - $steps.save_helper.outputs.status == 200
+          # Root listing is non-empty (main + utils).
+          - $steps.list_root.outputs.status == 200
+          - $runtime.len($steps.list_root.outputs.body.data) >= 1
+          # Subdirectory listing serves the nested helper file.
+          - $steps.list_dir.outputs.status == 200
+          - $runtime.len($steps.list_dir.outputs.body.data) >= 1
+
+  - id: AC-3
+    description: |
+      Copy, rename, and delete operate on real files: a copy produces an
+      independent duplicate whose content matches the original, a rename
+      makes the file readable under the new path, and a delete removes it so
+      a subsequent get is refused.
+    checks:
+      - id: AC-3.1
+        description: |
+          Save `main.py`, copy it to `main_backup.py` and confirm the copy's
+          content matches, rename the copy to `main_copy.py` and confirm it
+          reads back, then delete it and confirm a re-fetch is refused.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: create
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.spiders_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  name: $inputs.name_lifecycle
+                  cmd: bash main.sh
+                  mode: random
+              within: 15s
+            outputs:
+              body: body
+          - id: save
+            uses: api/call
+            with:
+              method: POST
+              url: '$runtime.format("{}/{}/files/save", $inputs.spiders_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                path: $inputs.src_path
+                data: $inputs.main_data
+              within: 15s
+            outputs:
+              status: status
+          - id: copy
+            uses: api/call
+            with:
+              method: POST
+              url: '$runtime.format("{}/{}/files/copy", $inputs.spiders_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                path: $inputs.src_path
+                new_path: $inputs.copy_path
+              within: 15s
+            outputs:
+              status: status
+          - id: get_copy
+            uses: api/call
+            with:
+              method: GET
+              url: '$runtime.format("{}/{}/files/get?path={}", $inputs.spiders_url, $steps.create.outputs.body.data._id, $inputs.copy_path)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: rename
+            uses: api/call
+            with:
+              method: POST
+              url: '$runtime.format("{}/{}/files/rename", $inputs.spiders_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                path: $inputs.copy_path
+                new_path: $inputs.rename_path
+              within: 15s
+            outputs:
+              status: status
+          - id: get_renamed
+            uses: api/call
+            with:
+              method: GET
+              url: '$runtime.format("{}/{}/files/get?path={}", $inputs.spiders_url, $steps.create.outputs.body.data._id, $inputs.rename_path)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: delete
+            uses: api/call
+            with:
+              method: DELETE
+              url: '$runtime.format("{}/{}/files", $inputs.spiders_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                path: $inputs.rename_path
+              within: 15s
+            outputs:
+              status: status
+          - id: get_gone
+            uses: api/call
+            with:
+              method: GET
+              url: '$runtime.format("{}/{}/files/get?path={}", $inputs.spiders_url, $steps.create.outputs.body.data._id, $inputs.rename_path)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+        assertions:
+          - $steps.save.outputs.status == 200
+          # Copy is an independent duplicate with matching content.
+          - $steps.copy.outputs.status == 200
+          - $steps.get_copy.outputs.status == 200
+          - $steps.get_copy.outputs.body.data == $inputs.main_data
+          # Rename preserves the content under the new path.
+          - $steps.rename.outputs.status == 200
+          - $steps.get_renamed.outputs.status == 200
+          - $steps.get_renamed.outputs.body.data == $inputs.main_data
+          # Delete removes the file; a re-fetch is refused.
+          - $steps.delete.outputs.status == 200
+          - $steps.get_gone.outputs.status >= 400
+
+  - id: AC-4
+    description: |
+      The file API reports a missing file as missing: fetching a path that
+      was never created is refused with a client error, not served as empty
+      content. Without this, the round-trip checks could pass against a
+      handler that returns success for anything.
+    checks:
+      - id: AC-4.1
+        description: |
+          Create a spider and GET a file path that does not exist; confirm a
+          4xx client error.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: create
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.spiders_url
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  name: $inputs.name_badpath
+                  cmd: bash main.sh
+                  mode: random
+              within: 15s
+            outputs:
+              body: body
+          - id: get_missing
+            uses: api/call
+            with:
+              method: GET
+              url: '$runtime.format("{}/{}/files/get?path={}", $inputs.spiders_url, $steps.create.outputs.body.data._id, $inputs.missing_path)'
+              headers:
+                Authorization: $steps.login.outputs.body.data
+              within: 15s
+            outputs:
+              status: status
+        assertions:
+          - $steps.get_missing.outputs.status >= 400
+          - $steps.get_missing.outputs.status < 500

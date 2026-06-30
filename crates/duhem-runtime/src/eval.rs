@@ -366,17 +366,22 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
     match (helper, args.len()) {
         ("uuid", 0) => Ok(Value::Str(ctx.uuid().to_string())),
         ("now", 0) => Ok(Value::Int(ctx.now().timestamp_millis())),
-        // `exists(value)`: True if the value path resolves to a
-        // present scalar, False if any underlying lookup reports
-        // missing. Anything else (e.g. TypeMismatch) propagates as
-        // Inconclusive. The closed-enum `Assertion::Exists` shim in
-        // the engine emits this call.
+        // `exists(value)`: True if the value path resolves, False if any
+        // underlying reference is missing — an absent output/setup
+        // observation/input/env OR a present base whose nested field/index
+        // does not resolve (MissingField). Mirrors `default`'s missing-cause
+        // set so `exists(x) == false` is a usable absent-field check (e.g.
+        // a password the API must never echo). Anything else (TypeMismatch,
+        // NotNavigable into a scalar) propagates as Inconclusive. The
+        // closed-enum `Assertion::Exists` shim in the engine emits this call.
         ("exists", 1) => match eval_value(&args[0], ctx) {
             Ok(_) => Ok(Value::Bool(true)),
             Err(
                 InconclusiveCause::MissingObservation { .. }
+                | InconclusiveCause::MissingSetupObservation { .. }
                 | InconclusiveCause::MissingInput(_)
-                | InconclusiveCause::MissingEnv(_),
+                | InconclusiveCause::MissingEnv(_)
+                | InconclusiveCause::MissingField(_),
             ) => Ok(Value::Bool(false)),
             Err(c) => Err(c),
         },
@@ -1192,6 +1197,26 @@ mod tests {
         assert_eq!(
             run("$steps.api.outputs.body.app.email == \"x\"", &ctx),
             EvalResult::Inconclusive(InconclusiveCause::MissingField("body.app.email".into()))
+        );
+    }
+
+    #[test]
+    fn exists_on_missing_nested_field_is_false() {
+        // A present base (`body.app`) whose nested key is absent must read as
+        // `exists(...) == false`, not inconclusive — so "the API never returns
+        // this field" (e.g. a scrubbed password) is a usable assertion. Mirrors
+        // `default`'s missing-cause handling.
+        let ctx = TestCtx::new().with_output("api", "body", body_with_app());
+        assert_eq!(
+            run("$runtime.exists($steps.api.outputs.body.app.password)", &ctx),
+            EvalResult::False
+        );
+        assert_eq!(
+            run(
+                "$runtime.exists($steps.api.outputs.body.app.password) == false",
+                &ctx
+            ),
+            EvalResult::True
         );
     }
 

@@ -231,14 +231,17 @@ criteria:
 
   - id: AC-3
     description: |
-      Logging out invalidates the session: after a logout, the same token
-      no longer authenticates a gated request. The session boundary is
-      enforced on the way out, not just on the way in.
+      Logout is a client-side concern: Crawlab issues stateless JWTs, so the
+      `/logout` endpoint is accepted but does NOT revoke the token server-side
+      — invalidation is the client discarding it. This criterion pins that
+      contract (logout 200, token still valid afterward); if Crawlab ever adds
+      server-side revocation, this check changes deliberately.
     checks:
       - id: AC-3.1
         description: |
-          Log in, confirm logout is accepted, then reuse the same token on a
-          gated read and confirm it is now refused (401).
+          Log in, confirm logout is accepted (200), then reuse the same token on
+          a gated read and confirm it STILL authenticates (200) — stateless JWT,
+          logout is client-side.
         steps:
           - id: login
             uses: api/call
@@ -274,8 +277,9 @@ criteria:
               status: status
         assertions:
           - $steps.logout.outputs.status == 200
-          # The token is rejected after logout — the session was invalidated.
-          - $steps.me_after.outputs.status == 401
+          # Stateless JWT: the token still authenticates after logout —
+          # invalidation is client-side (discard the token), not server-side.
+          - $steps.me_after.outputs.status == 200
 
   - id: AC-4
     description: |

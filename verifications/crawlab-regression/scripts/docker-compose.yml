@@ -30,16 +30,12 @@
 networks:
   crawlab_regression:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.21.0.0/16
 
 services:
   mongo:
     image: mongo:5
     networks:
-      crawlab_regression:
-        ipv4_address: 172.21.0.10
+      - crawlab_regression
     environment:
       MONGO_INITDB_DATABASE: crawlab
       MONGO_INITDB_ROOT_USERNAME: admin
@@ -58,8 +54,7 @@ services:
   master:
     image: "${CRAWLAB_IMAGE:-crawlabteam/crawlab-pro:develop}"
     networks:
-      crawlab_regression:
-        ipv4_address: 172.21.0.20
+      - crawlab_regression
     environment:
       CRAWLAB_NODE_NAME: "Master Node"
       CRAWLAB_NODE_MASTER: "Y"
@@ -93,8 +88,7 @@ services:
   worker:
     image: "${CRAWLAB_IMAGE:-crawlabteam/crawlab-pro:develop}"
     networks:
-      crawlab_regression:
-        ipv4_address: 172.21.0.30
+      - crawlab_regression
     environment:
       CRAWLAB_NODE_NAME: "Worker Node 01"
       CRAWLAB_NODE_MASTER: "N"

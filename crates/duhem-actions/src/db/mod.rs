@@ -33,9 +33,11 @@ use sqlx::{Column, Row, any::AnyRow};
 
 use crate::error::ActionError;
 
+pub mod observe;
 pub mod query;
 pub mod seed;
 
+pub use observe::Observe as DbObserve;
 pub use query::Query;
 pub use seed::Seed;
 

@@ -27,7 +27,7 @@ use async_trait::async_trait;
 use duhem_actions::Page;
 use duhem_actions::{
     Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertState, AssertUrl, Call,
-    Click, Invoke, Navigate, Observe, Poll, Query, Seed, Select, Stream, Type,
+    Click, DbObserve, Invoke, Navigate, Observe, Poll, Query, Seed, Select, Stream, Type,
 };
 
 /// Engine-internal dispatcher. One implementor per registered action
@@ -121,6 +121,7 @@ pub(crate) fn default_registry() -> ActionRegistry {
     insert(&mut m, ConcreteAction::new(Box::new(Stream)));
     insert(&mut m, ConcreteAction::new(Box::new(Invoke)));
     insert(&mut m, ConcreteAction::new(Box::new(Query)));
+    insert(&mut m, ConcreteAction::new(Box::new(DbObserve)));
     insert(&mut m, ConcreteAction::new(Box::new(Seed)));
     m
 }
@@ -146,6 +147,7 @@ mod tests {
                 "api/poll",
                 "api/stream",
                 "cli/invoke",
+                "db/observe",
                 "db/query",
                 "db/seed",
                 "ui/assert-element",

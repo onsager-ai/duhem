@@ -293,7 +293,10 @@ fn ensure_no_path_fields(u: &Until) -> Result<(), ActionError> {
 
 /// Walk a dotted/bracket path into a JSON value: `data.status`,
 /// `items[0].id`. Returns `None` if any segment is absent.
-fn navigate<'a>(root: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+pub(crate) fn navigate<'a>(
+    root: &'a serde_json::Value,
+    path: &str,
+) -> Option<&'a serde_json::Value> {
     let mut cur = root;
     for seg in split_path(path) {
         cur = match cur {
@@ -306,7 +309,7 @@ fn navigate<'a>(root: &'a serde_json::Value, path: &str) -> Option<&'a serde_jso
 }
 
 /// Split `a.b[0].c` into `["a","b","0","c"]`.
-fn split_path(path: &str) -> Vec<String> {
+pub(crate) fn split_path(path: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut buf = String::new();
     let mut chars = path.chars().peekable();
@@ -339,7 +342,7 @@ fn split_path(path: &str) -> Vec<String> {
     out
 }
 
-fn value_as_str(v: &serde_json::Value) -> Option<String> {
+pub(crate) fn value_as_str(v: &serde_json::Value) -> Option<String> {
     match v {
         serde_json::Value::String(s) => Some(s.clone()),
         serde_json::Value::Number(n) => Some(n.to_string()),
@@ -348,7 +351,7 @@ fn value_as_str(v: &serde_json::Value) -> Option<String> {
     }
 }
 
-fn yml_to_json_value(v: &serde_yml::Value) -> serde_json::Value {
+pub(crate) fn yml_to_json_value(v: &serde_yml::Value) -> serde_json::Value {
     crate::api::call::yml_to_json(v).unwrap_or(serde_json::Value::Null)
 }
 

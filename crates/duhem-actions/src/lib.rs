@@ -30,7 +30,7 @@ pub use browser::{
     SelectBy,
 };
 pub use cli::Invoke;
-pub use db::{Query, Seed};
+pub use db::{DbObserve, Query, Seed};
 pub use error::ActionError;
 pub use locator::{ExistenceState, Locator};
 pub use playwright::to_selector;

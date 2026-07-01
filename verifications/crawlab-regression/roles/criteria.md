@@ -11,23 +11,27 @@ derivative mechanism (`docs/duhem-spec.md` §7.2 / §7.3). Verified against a
 real licensed crawlab-pro cluster with no mocks at the web boundary
 (`docs/duhem-spec.md` §8): roles are not created via the API (they are
 system-seeded), so the role records are read straight from the database
-rather than trusted from the API's own response. API-018 exposes no create
-endpoint, so this leaf exercises the read / update / delete surface over
-the default roles.
+rather than trusted from the API's own response. API-018 documents only the
+read / update / delete surface over the seeded default roles, but
+crawlab-pro's generic controller also exposes create — AC-2 uses it to mint
+a throwaway non-admin role, because the root Admin role is protected from
+modification.
 
 ## AC-1
 
 The system ships with real roles, backed by the database: the role list is
-non-empty, a role is fetchable by id with its permission shape (pages and
-permissions arrays), and the database confirms a root-admin role exists in
-the `roles` collection. Roles are genuine records, not a synthetic API
-response.
+non-empty, a role is fetchable by id with its model shape (a `routes` array
+and a `root_admin` flag), and the database confirms a root-admin role
+exists in the `roles` collection. Roles are genuine records, not a
+synthetic API response.
 
 ## AC-2
 
-A role update is durable: changing a role's description over REST lands in
-the database. Role edits are persisted, not merely acknowledged by the
-handler.
+A non-admin role update is durable, and the protected root-admin role is
+guarded: creating a fresh non-admin role and changing its description over
+REST lands in the database (200), while an attempt to modify the root Admin
+role is refused (403). Role edits are persisted, not merely acknowledged by
+the handler — and the root role is not freely mutable.
 
 ## AC-3
 

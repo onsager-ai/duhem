@@ -1208,7 +1208,10 @@ mod tests {
         // `default`'s missing-cause handling.
         let ctx = TestCtx::new().with_output("api", "body", body_with_app());
         assert_eq!(
-            run("$runtime.exists($steps.api.outputs.body.app.password)", &ctx),
+            run(
+                "$runtime.exists($steps.api.outputs.body.app.password)",
+                &ctx
+            ),
             EvalResult::False
         );
         assert_eq!(

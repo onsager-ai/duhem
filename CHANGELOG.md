@@ -22,6 +22,10 @@ criteria) lives in the spec issue that introduced
 
 - [additive] db/observe action — the DB analogue of api/poll: re-runs a db/query (Mongo find: or SQL sql:) on an interval until the rows satisfy an until: condition ({row_count: N} or a {path, equals|matches|exists|gte} predicate over rows[i].field/row_count) or a budget elapses; outputs satisfied/rows/row_count. Lets VDs read-after-settle against eventually-consistent backends (e.g. crawlab's async spider sync, #179) instead of one-shot reads that catch a row mid-write. (#181)
 
+- [clarifying] Crawlab regression suite: nodes & schedules PATCH leaves now send the body under the {data:{...}} wrapper (crawlab's generic create/update contract, same as POST/PUT and the spiders leaf) instead of a top-level body that binds nothing; both leaves now assert a partial PATCH preserves unspecified fields (node is_master, schedule name) — the #128 partial-update claim. (#160)
+
+- [clarifying] $runtime.exists() now returns false (not inconclusive) when a present base has an absent nested field/index (MissingField) — aligns with its documented contract ("false if any underlying lookup reports missing") and the sibling default() helper, so `exists(x) == false` is a usable absent-field assertion (e.g. a password the API must never echo). (#160)
+
 - [additive] db/query Mongo find: coerces 24-hex string filter values on _id/*_id fields to ObjectId, so _id equality matches BSON-typed ids (fixes post-update state reads in Mongo VDs). (#171)
 
 - [additive] $runtime.contains(array, value) + $runtime.any(array, field, value) — array-membership helpers for direct list-contains assertions (pure, deterministic). (#173)

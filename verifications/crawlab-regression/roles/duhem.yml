@@ -7,11 +7,14 @@
 # parent manifest (`../duhem.yml`) provisions. Standalone, run with
 # `--no-env-up` and pass the inherited inputs via `--inputs`.
 #
-# Surface: GET /api/roles, GET /api/roles/{id}, PUT /api/roles/{id},
-# DELETE /api/roles/{id}. Per API-018 there is NO create endpoint — roles
-# are seeded by the system — so this leaf exercises the read/update/delete
-# surface over the default roles and confirms the `roles` collection
-# directly in Mongo.
+# Surface: POST /api/roles, GET /api/roles, GET /api/roles/{id},
+# PUT /api/roles/{id}, DELETE /api/roles/{id}. API-018 documents only
+# read/update/delete over the seeded default roles, but crawlab-pro's
+# generic controller also exposes POST /api/roles (create) — AC-2 uses it
+# to mint a throwaway NON-ADMIN role, because the root Admin role is
+# protected from modification (PUT → 403; crawlab #180) and so cannot carry
+# the durable-update assertion. Confirms the `roles` collection directly in
+# Mongo.
 #
 # Provenance — confirmed vs inferred:
 #   - Endpoint paths + `/api` prefix + admin/admin + login envelope:
@@ -20,14 +23,13 @@
 #     serves everything under `/api`; CONFIRMED against the suite's other
 #     leaves.
 #   - Single-resource read returns `{data:<role>}`: CONFIRMED envelope.
-#   - Role documents carry `pages` + `permissions` arrays and a
-#     `root_admin` bool: per API-018's "Role Structure" key validations.
-#     The derived `is_root_admin` field is NOT asserted (computed, not
-#     stored). FLAG `pages`/`permissions` field names to confirm.
+#   - Role documents carry a `routes` array and a `root_admin` bool
+#     (crawlab #180 — the model exposes `routes`/`root_admin`, NOT the
+#     `pages`/`permissions` that API-018's prose implied). AC-1 asserts the
+#     fields the model actually returns.
 #   - PUT update body wraps under `data` ({data:{name,description}}):
-#     INFERRED from the generic update envelope; PUT replaces the resource,
-#     so a minimal body MAY drop pages/permissions — acceptable on the
-#     throwaway cluster, but FLAG the PUT-replace semantics.
+#     INFERRED from the generic update envelope. The root Admin role rejects
+#     PUT with 403 (AC-2.2); a non-admin role accepts it (AC-2.1).
 #   - Default/system roles are PROTECTED from deletion (AC-3): per API-018
 #     step 11 / error case (400/403). Asserted as 4xx; if crawlab allows
 #     deleting a root role, this fails and surfaces reality. FLAG inferred.
@@ -43,6 +45,12 @@ inputs:
   roles_url:
     type: string
     default: http://127.0.0.1:8090/api/roles
+  # The non-admin role this leaf creates + edits (AC-2.1). The root Admin
+  # role is protected (403 on PUT), so durable-update assertions must run
+  # against a test-created role, not a seeded system role (crawlab #180).
+  role_name:
+    type: string
+    default: duhem-regr-role
   updated_role_description:
     type: string
     default: duhem-regr-role-description
@@ -57,17 +65,17 @@ criteria:
   - id: AC-1
     description: |
       The system ships with real roles, backed by the database: the role
-      list is non-empty, a role is fetchable by id with its permission shape
-      (pages and permissions arrays), and the database confirms a root-admin
-      role exists in the `roles` collection. Roles are genuine records, not a
-      synthetic API response.
+      list is non-empty, a role is fetchable by id with its model shape (a
+      `routes` array and a `root_admin` flag), and the database confirms a
+      root-admin role exists in the `roles` collection. Roles are genuine
+      records, not a synthetic API response.
     checks:
       - id: AC-1.1
         description: |
           Log in, list roles (expecting the default roles), fetch the first
-          role by id and confirm its permission arrays are present, then read
-          the `roles` collection in Mongo to confirm a root-admin role
-          exists.
+          role by id and confirm its model fields (`routes`, `root_admin`)
+          are present, then read the `roles` collection in Mongo to confirm
+          a root-admin role exists.
         steps:
           - id: login
             uses: api/call
@@ -122,23 +130,29 @@ criteria:
           - $steps.list.outputs.status == 200
           - $runtime.len($steps.list.outputs.body.data) >= 1
           - $steps.get_one.outputs.status == 200
-          - $runtime.exists($steps.get_one.outputs.body.data.pages)
-          - $runtime.exists($steps.get_one.outputs.body.data.permissions)
+          # The role model exposes `routes` + `root_admin` (crawlab #180),
+          # NOT `pages`/`permissions` — assert the fields the model returns.
+          - $runtime.exists($steps.get_one.outputs.body.data.routes)
+          - $runtime.exists($steps.get_one.outputs.body.data.root_admin)
           # A root-admin role exists in the roles collection.
           - $steps.root_db.outputs.row_count >= 1
           - $steps.root_db.outputs.rows[0].root_admin == true
 
   - id: AC-2
     description: |
-      A role update is durable: changing a role's description over REST
-      lands in the database. Role edits are persisted, not merely
-      acknowledged by the handler.
+      A non-admin role update is durable AND the protected root-admin role
+      is guarded: creating a fresh non-admin role and PUTting a new
+      description onto it lands in the database (200), while an attempt to
+      modify the root Admin role is refused (403). Role edits are persisted,
+      not merely acknowledged by the handler — and the root role is not
+      freely mutable.
     checks:
       - id: AC-2.1
         description: |
-          Log in, list roles, PUT a new description onto the first role,
-          then read the `roles` collection back and confirm the new
-          description persisted for that role.
+          Log in, create a fresh non-admin role, PUT a new description onto
+          it, then read the `roles` collection back and confirm the new
+          description persisted for that role (a non-admin role is editable,
+          so the update returns 200).
         steps:
           - id: login
             uses: api/call
@@ -152,27 +166,33 @@ criteria:
               within: 15s
             outputs:
               body: body
-          - id: list
+          - id: create
             uses: api/call
             with:
-              method: GET
+              method: POST
               url: $inputs.roles_url
-              headers:
-                Authorization: $steps.login.outputs.body.data
-              within: 15s
-            outputs:
-              body: body
-          - id: update
-            uses: api/call
-            with:
-              method: PUT
-              url: '$runtime.format("{}/{}", $inputs.roles_url, $steps.list.outputs.body.data[0]._id)'
               headers:
                 Content-Type: application/json
                 Authorization: $steps.login.outputs.body.data
               body:
                 data:
-                  name: $steps.list.outputs.body.data[0].name
+                  name: $inputs.role_name
+                  description: duhem-regr-role-seed
+              within: 15s
+            outputs:
+              status: status
+              body: body
+          - id: update
+            uses: api/call
+            with:
+              method: PUT
+              url: '$runtime.format("{}/{}", $inputs.roles_url, $steps.create.outputs.body.data._id)'
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  name: $inputs.role_name
                   description: $inputs.updated_role_description
               within: 15s
             outputs:
@@ -184,7 +204,7 @@ criteria:
               find:
                 collection: roles
                 filter:
-                  name: $steps.list.outputs.body.data[0].name
+                  name: $inputs.role_name
                 sort:
                   _id: -1
                 limit: 1
@@ -192,8 +212,59 @@ criteria:
             outputs:
               rows: rows
         assertions:
+          - $steps.create.outputs.status == 200
+          - $runtime.exists($steps.create.outputs.body.data._id)
           - $steps.update.outputs.status == 200
           - $steps.persisted.outputs.rows[0].description == $inputs.updated_role_description
+      - id: AC-2.2
+        description: |
+          Log in, locate the root-admin role in Mongo, then PUT a new
+          description onto it and confirm the update is refused with 403 —
+          crawlab protects the root Admin role from modification.
+        steps:
+          - id: login
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.login_url
+              headers: { Content-Type: application/json }
+              body:
+                username: $inputs.username
+                password: $inputs.password
+              within: 15s
+            outputs:
+              body: body
+          - id: admin_db
+            uses: db/query
+            with:
+              connection: $inputs.mongo_url
+              find:
+                collection: roles
+                filter:
+                  root_admin: true
+                sort:
+                  _id: -1
+                limit: 1
+              within: 15s
+            outputs:
+              rows: rows
+          - id: update_admin
+            uses: api/call
+            with:
+              method: PUT
+              url: '$runtime.format("{}/{}", $inputs.roles_url, $steps.admin_db.outputs.rows[0]._id)'
+              headers:
+                Content-Type: application/json
+                Authorization: $steps.login.outputs.body.data
+              body:
+                data:
+                  name: $steps.admin_db.outputs.rows[0].name
+                  description: $inputs.updated_role_description
+              within: 15s
+            outputs:
+              status: status
+        assertions:
+          - $steps.update_admin.outputs.status == 403
 
   - id: AC-3
     description: |

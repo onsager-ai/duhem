@@ -284,11 +284,12 @@ criteria:
       - id: AC-3.1
         description: |
           Create a spider, PATCH a subset of fields and confirm in Mongo that
-          only those changed (name unchanged), then PUT a full replacement and
-          confirm in Mongo the new fields landed under the same `_id`. The
-          Mongo read-backs poll until the write settles (db/observe), so
-          crawlab's async spider sync can't false-fail a mid-sync read
-          (crawlab #179).
+          only those changed and the rest survived (name/cmd unchanged), then
+          PUT a full replacement and confirm in Mongo the new fields landed
+          under the same `_id`. Read-backs are one-shot db/query by stable
+          `_id`: crawlab-pro's partial PATCH deterministically wipes
+          unspecified fields (crawlab-pro#133, settled in duhem#179), so this
+          check goes crisply RED on a broken build and GREEN once fixed.
         steps:
           - id: login
             uses: api/call
@@ -335,16 +336,18 @@ criteria:
             outputs:
               status: status
           - id: after_patch
-            # Read-AFTER-SETTLE (db/observe, #181). crawlab-pro's async
-            # master↔worker spider sync can transiently ReplaceOne this doc
-            # with a zeroed struct (name:"" — crawlab #179 / crawlab-pro#133),
-            # so a one-shot db/query read can catch the row mid-sync and
-            # false-fail. Poll the stable _id until `name` is back to
-            # name_update, then assert the PATCH's effects on the settled
-            # snapshot. NOTE: v1 db/observe is first-match — it waits out a
-            # zeroed→repopulated window; a persistent zero times out
-            # (satisfied:false → the check stays RED, surfacing a real defect).
-            uses: db/observe
+            # One-shot read by stable _id (db/query). crawlab-pro's partial
+            # PATCH is a DETERMINISTIC data-integrity defect (crawlab-pro#133,
+            # settled in duhem#179): PatchById binds `data` into a zero-valued
+            # Spider struct and ReplaceOne's the whole doc, so every field NOT
+            # in the PATCH body is wiped to its Go zero (name:"" cmd:"") — the
+            # patched fields are all that survive. This is immediate and
+            # PERMANENT (not the async master↔worker sync: create-only docs are
+            # never zeroed), so there is no settle window to wait out. We read
+            # once and assert the invariant crisply: name/cmd MUST survive a
+            # partial PATCH. Broken build → RED immediately at the name check;
+            # a fixed build (crawlab-pro:rgr129 preserves fields) → GREEN.
+            uses: db/query
             with:
               connection: $inputs.mongo_url
               find:
@@ -354,14 +357,10 @@ criteria:
                 sort:
                   _id: -1
                 limit: 1
-              within: 20s
-              interval: 1s
-              until:
-                path: rows[0].name
-                equals: $inputs.name_update
+              within: 15s
             outputs:
-              satisfied: satisfied
               rows: rows
+              row_count: row_count
           - id: put
             uses: api/call
             with:
@@ -380,10 +379,12 @@ criteria:
             outputs:
               status: status
           - id: after_put
-            # Same read-after-settle as after_patch (#181): the PUT'd doc is
-            # equally exposed to the sync race. Poll until `name` is the
-            # replacement, then assert the replaced fields on the settled row.
-            uses: db/observe
+            # One-shot read by stable _id (db/query). A full PUT sends every
+            # field, so it is NOT affected by the partial-PATCH wipe above
+            # (crawlab-pro#133) and needs no settle wait — the replaced doc is
+            # synchronously visible. Assert the replacement landed under the
+            # same _id.
+            uses: db/query
             with:
               connection: $inputs.mongo_url
               find:
@@ -393,27 +394,23 @@ criteria:
                 sort:
                   _id: -1
                 limit: 1
-              within: 20s
-              interval: 1s
-              until:
-                path: rows[0].name
-                equals: $inputs.name_replaced
+              within: 15s
             outputs:
-              satisfied: satisfied
               rows: rows
               row_count: row_count
         assertions:
-          # PATCH changed only the named fields; name is untouched. The doc is
-          # read after the async sync settles (satisfied == true), so a
-          # transient zeroing can't false-fail the field checks.
+          # A partial PATCH must change ONLY the named fields and leave the
+          # rest intact (#128 core claim). name/cmd are NOT in the PATCH body,
+          # so they MUST survive — the crawlab-pro#133 defect wipes them to ""
+          # and this goes crisply RED at the name check on a broken build.
           - $steps.patch.outputs.status == 200
-          - $steps.after_patch.outputs.satisfied == true
+          - $steps.after_patch.outputs.row_count >= 1
+          - $steps.after_patch.outputs.rows[0].name == $inputs.name_update
+          - $steps.after_patch.outputs.rows[0].cmd == $inputs.cmd_update
           - $steps.after_patch.outputs.rows[0].priority == 8
           - $steps.after_patch.outputs.rows[0].description == $inputs.description_patched
-          - $steps.after_patch.outputs.rows[0].name == $inputs.name_update
-          # PUT replaced the fields under the SAME _id (read after settle).
+          # PUT replaced the fields under the SAME _id.
           - $steps.put.outputs.status == 200
-          - $steps.after_put.outputs.satisfied == true
           - $steps.after_put.outputs.row_count >= 1
           - $steps.after_put.outputs.rows[0]._id == $steps.create.outputs.body.data._id
           - $steps.after_put.outputs.rows[0].cmd == $inputs.cmd_replaced

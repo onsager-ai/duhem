@@ -110,79 +110,116 @@ pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
 }
 
 async fn run(with: With) -> Result<ActionResult, ActionError> {
-    if is_mongo_url(&with.connection) {
-        run_mongo(with).await
-    } else {
-        run_sql(with).await
-    }
+    let rows = fetch_rows(
+        "db/query",
+        &with.connection,
+        with.sql.as_deref(),
+        &with.params,
+        with.find.as_ref(),
+    )
+    .await?;
+    Ok(rows_result(rows))
 }
 
 /// MongoDB connections are routed by URL scheme; everything else is a
 /// SQL URL handed to sqlx's `Any` driver.
-fn is_mongo_url(url: &str) -> bool {
+pub(crate) fn is_mongo_url(url: &str) -> bool {
     url.starts_with("mongodb://") || url.starts_with("mongodb+srv://")
 }
 
-async fn run_sql(with: With) -> Result<ActionResult, ActionError> {
-    if with.find.is_some() {
-        return Err(ActionError::Db(
-            "db/query: `find:` is only valid for mongodb:// connections; \
-             a SQL connection uses `sql:`"
-                .into(),
-        ));
+/// Run one read (SQL or Mongo) and return the raw JSON rows — the shared
+/// executor behind both `db/query` and `db/observe` (spec #181), so the
+/// `find:`/`sql:` shapes, `_id` coercion, and value mapping stay
+/// identical across the one-shot read and the poll loop. `action` labels
+/// the error messages; the `find:` vs `sql:`/`params:` combo is validated
+/// here.
+pub(crate) async fn fetch_rows(
+    action: &'static str,
+    connection: &str,
+    sql: Option<&str>,
+    params: &[serde_yml::Value],
+    find: Option<&FindSpec>,
+) -> Result<Vec<serde_json::Value>, ActionError> {
+    if is_mongo_url(connection) {
+        fetch_mongo(action, connection, sql, params, find).await
+    } else {
+        fetch_sql(action, connection, sql, params, find).await
     }
-    let sql = with.sql.as_deref().ok_or_else(|| {
-        ActionError::Db("db/query: a SQL connection requires a `sql:` query".into())
+}
+
+async fn fetch_sql(
+    action: &'static str,
+    connection: &str,
+    sql: Option<&str>,
+    params: &[serde_yml::Value],
+    find: Option<&FindSpec>,
+) -> Result<Vec<serde_json::Value>, ActionError> {
+    if find.is_some() {
+        return Err(ActionError::Db(format!(
+            "{action}: `find:` is only valid for mongodb:// connections; \
+             a SQL connection uses `sql:`"
+        )));
+    }
+    let sql = sql.ok_or_else(|| {
+        ActionError::Db(format!(
+            "{action}: a SQL connection requires a `sql:` query"
+        ))
     })?;
 
-    let mut conn = connect(&with.connection).await?;
+    let mut conn = connect(connection).await?;
 
     let mut q = sqlx::query(sql);
-    for p in &with.params {
+    for p in params {
         q = bind_param(q, p)?;
     }
     let rows = q
         .fetch_all(&mut conn)
         .await
-        .map_err(|e| ActionError::Db(format!("db/query: {e}")))?;
+        .map_err(|e| ActionError::Db(format!("{action}: {e}")))?;
 
-    let json_rows: Vec<serde_json::Value> = rows.iter().map(row_to_json).collect();
-    Ok(rows_result(json_rows))
+    Ok(rows.iter().map(row_to_json).collect())
 }
 
-async fn run_mongo(with: With) -> Result<ActionResult, ActionError> {
-    if with.sql.is_some() || !with.params.is_empty() {
-        return Err(ActionError::Db(
-            "db/query: `sql:`/`params:` are only valid for SQL connections; \
+async fn fetch_mongo(
+    action: &'static str,
+    connection: &str,
+    sql: Option<&str>,
+    params: &[serde_yml::Value],
+    find: Option<&FindSpec>,
+) -> Result<Vec<serde_json::Value>, ActionError> {
+    if sql.is_some() || !params.is_empty() {
+        return Err(ActionError::Db(format!(
+            "{action}: `sql:`/`params:` are only valid for SQL connections; \
              a mongodb:// connection uses `find:`"
-                .into(),
-        ));
+        )));
     }
-    let find = with.find.ok_or_else(|| {
-        ActionError::Db("db/query: a mongodb:// connection requires a `find:` block".into())
+    let find = find.ok_or_else(|| {
+        ActionError::Db(format!(
+            "{action}: a mongodb:// connection requires a `find:` block"
+        ))
     })?;
 
-    let opts = ClientOptions::parse(&with.connection)
+    let opts = ClientOptions::parse(connection)
         .await
-        .map_err(|e| ActionError::Db(format!("db/query: invalid mongodb url: {e}")))?;
+        .map_err(|e| ActionError::Db(format!("{action}: invalid mongodb url: {e}")))?;
     let db_name = opts.default_database.clone().ok_or_else(|| {
-        ActionError::Db(
-            "db/query: mongodb url must name a database (mongodb://host:port/<db>)".into(),
-        )
+        ActionError::Db(format!(
+            "{action}: mongodb url must name a database (mongodb://host:port/<db>)"
+        ))
     })?;
     let client = Client::with_options(opts)
-        .map_err(|e| ActionError::Db(format!("db/query: mongodb client: {e}")))?;
+        .map_err(|e| ActionError::Db(format!("{action}: mongodb client: {e}")))?;
     let coll = client
         .database(&db_name)
         .collection::<Document>(&find.collection);
 
-    let filter = coerce_object_id_filter(to_bson_document("filter", find.filter)?);
+    let filter = coerce_object_id_filter(to_bson_document(action, "filter", find.filter.clone())?);
     let mut req = coll.find(filter);
-    if let Some(p) = find.projection {
-        req = req.projection(to_bson_document("projection", p)?);
+    if let Some(p) = &find.projection {
+        req = req.projection(to_bson_document(action, "projection", p.clone())?);
     }
-    if let Some(s) = find.sort {
-        req = req.sort(to_bson_document("sort", s)?);
+    if let Some(s) = &find.sort {
+        req = req.sort(to_bson_document(action, "sort", s.clone())?);
     }
     if let Some(limit) = find.limit {
         req = req.limit(limit);
@@ -190,17 +227,16 @@ async fn run_mongo(with: With) -> Result<ActionResult, ActionError> {
 
     let cursor = req
         .await
-        .map_err(|e| ActionError::Db(format!("db/query: mongodb find: {e}")))?;
+        .map_err(|e| ActionError::Db(format!("{action}: mongodb find: {e}")))?;
     let docs: Vec<Document> = cursor
         .try_collect()
         .await
-        .map_err(|e| ActionError::Db(format!("db/query: mongodb cursor: {e}")))?;
+        .map_err(|e| ActionError::Db(format!("{action}: mongodb cursor: {e}")))?;
 
-    let json_rows: Vec<serde_json::Value> = docs
+    Ok(docs
         .into_iter()
         .map(|d| bson_to_json(Bson::Document(d)))
-        .collect();
-    Ok(rows_result(json_rows))
+        .collect())
 }
 
 /// Pack rows into the shared `rows` / `row_count` output contract.
@@ -213,12 +249,16 @@ fn rows_result(json_rows: Vec<serde_json::Value>) -> ActionResult {
 
 /// Convert a YAML mapping (`filter` / `projection` / `sort`) to a BSON
 /// document. A null/absent value is an empty document (match all).
-fn to_bson_document(label: &str, v: serde_yml::Value) -> Result<Document, ActionError> {
+fn to_bson_document(
+    action: &str,
+    label: &str,
+    v: serde_yml::Value,
+) -> Result<Document, ActionError> {
     if matches!(v, serde_yml::Value::Null) {
         return Ok(Document::new());
     }
     mongodb::bson::serialize_to_document(&v)
-        .map_err(|e| ActionError::Db(format!("db/query: `{label}` must be a document: {e}")))
+        .map_err(|e| ActionError::Db(format!("{action}: `{label}` must be a document: {e}")))
 }
 
 /// Coerce 24-hex string filter values on `_id` / `*_id` fields to BSON
@@ -495,7 +535,7 @@ sql: "select 1"
 
     fn filter_doc(yaml: &str) -> Document {
         let v: serde_yml::Value = serde_yml::from_str(yaml).unwrap();
-        coerce_object_id_filter(to_bson_document("filter", v).unwrap())
+        coerce_object_id_filter(to_bson_document("db/query", "filter", v).unwrap())
     }
 
     const HEX: &str = "65f0000000000000000000aa";

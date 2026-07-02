@@ -202,6 +202,7 @@ mod tests {
             "api/poll",
             "api/stream",
             "db/query",
+            "db/observe",
             "db/seed",
             "cli/invoke",
         ] {

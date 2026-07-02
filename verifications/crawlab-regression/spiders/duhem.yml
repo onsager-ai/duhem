@@ -285,7 +285,10 @@ criteria:
         description: |
           Create a spider, PATCH a subset of fields and confirm in Mongo that
           only those changed (name unchanged), then PUT a full replacement and
-          confirm in Mongo the new fields landed under the same `_id`.
+          confirm in Mongo the new fields landed under the same `_id`. The
+          Mongo read-backs poll until the write settles (db/observe), so
+          crawlab's async spider sync can't false-fail a mid-sync read
+          (crawlab #179).
         steps:
           - id: login
             uses: api/call
@@ -332,21 +335,32 @@ criteria:
             outputs:
               status: status
           - id: after_patch
-            uses: db/query
+            # Read-AFTER-SETTLE (db/observe, #181). crawlab-pro's async
+            # master↔worker spider sync can transiently ReplaceOne this doc
+            # with a zeroed struct (name:"" — crawlab #179 / crawlab-pro#133),
+            # so a one-shot db/query read can catch the row mid-sync and
+            # false-fail. Poll the stable _id until `name` is back to
+            # name_update, then assert the PATCH's effects on the settled
+            # snapshot. NOTE: v1 db/observe is first-match — it waits out a
+            # zeroed→repopulated window; a persistent zero times out
+            # (satisfied:false → the check stays RED, surfacing a real defect).
+            uses: db/observe
             with:
               connection: $inputs.mongo_url
               find:
                 collection: spiders
-                # Read by the stable _id (not the mutated name): if PATCH wipes
-                # fields, the row is still found and the field assertions fail
-                # crisply (vs an inconclusive 0-row read by a wiped name).
                 filter:
                   _id: $steps.create.outputs.body.data._id
                 sort:
                   _id: -1
                 limit: 1
-              within: 15s
+              within: 20s
+              interval: 1s
+              until:
+                path: rows[0].name
+                equals: $inputs.name_update
             outputs:
+              satisfied: satisfied
               rows: rows
           - id: put
             uses: api/call
@@ -366,7 +380,10 @@ criteria:
             outputs:
               status: status
           - id: after_put
-            uses: db/query
+            # Same read-after-settle as after_patch (#181): the PUT'd doc is
+            # equally exposed to the sync race. Poll until `name` is the
+            # replacement, then assert the replaced fields on the settled row.
+            uses: db/observe
             with:
               connection: $inputs.mongo_url
               find:
@@ -376,18 +393,27 @@ criteria:
                 sort:
                   _id: -1
                 limit: 1
-              within: 15s
+              within: 20s
+              interval: 1s
+              until:
+                path: rows[0].name
+                equals: $inputs.name_replaced
             outputs:
+              satisfied: satisfied
               rows: rows
               row_count: row_count
         assertions:
-          # PATCH changed only the named fields; name is untouched.
+          # PATCH changed only the named fields; name is untouched. The doc is
+          # read after the async sync settles (satisfied == true), so a
+          # transient zeroing can't false-fail the field checks.
           - $steps.patch.outputs.status == 200
+          - $steps.after_patch.outputs.satisfied == true
           - $steps.after_patch.outputs.rows[0].priority == 8
           - $steps.after_patch.outputs.rows[0].description == $inputs.description_patched
           - $steps.after_patch.outputs.rows[0].name == $inputs.name_update
-          # PUT replaced the fields under the SAME _id.
+          # PUT replaced the fields under the SAME _id (read after settle).
           - $steps.put.outputs.status == 200
+          - $steps.after_put.outputs.satisfied == true
           - $steps.after_put.outputs.row_count >= 1
           - $steps.after_put.outputs.rows[0]._id == $steps.create.outputs.body.data._id
           - $steps.after_put.outputs.rows[0].cmd == $inputs.cmd_replaced

@@ -12,6 +12,7 @@ use thiserror::Error;
 
 use crate::criterion::Criterion;
 use crate::environment::Environment;
+use crate::project::ProjectDecl;
 use crate::step::Step;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -23,6 +24,15 @@ pub struct VerificationDefinition {
     /// Optional reference to an upstream spec / issue / URL.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spec_ref: Option<String>,
+
+    /// Optional declared target coordinate (#191): what this
+    /// verification verifies (a repo, a service URL, an image, or a
+    /// locally-named project). Top rung of the identity-resolution
+    /// ladder; absent → the runtime falls through to CI context /
+    /// normalized remote / path. A leaf declaration wins over a
+    /// manifest-level one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectDecl>,
 
     /// Optional operator-supplied environment lifecycle hooks. When
     /// present, the runtime forks `environment.up:` before `setup:`,
@@ -195,6 +205,7 @@ criteria:
         let v = VerificationDefinition {
             verification: "x".into(),
             spec_ref: None,
+            project: None,
             environment: None,
             inputs,
             inherits: vec![],

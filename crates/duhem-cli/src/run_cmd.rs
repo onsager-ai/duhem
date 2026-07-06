@@ -131,6 +131,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // tuples plus the evidence-namespacing strategy. A single leaf
     // stays in the today's evidence layout (`<root>/<run_id>/`); a
     // manifest namespaces per-leaf (`<root>/<leaf>/<run_id>/`).
+    // One-shot dispatch enum; the size skew vs `SingleLeaf` is
+    // irrelevant for a single stack value per invocation.
+    #[allow(clippy::large_enum_variant)]
     enum Scope {
         SingleLeaf,
         Manifest {
@@ -144,6 +147,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             /// leaf's engine: per-step `within:` fallback, inconclusive
             /// policy, retry posture. `None` on a defaults-less manifest.
             defaults: Option<duhem_schema::ManifestDefaults>,
+            /// Suite-wide declared target (#191); a leaf's own
+            /// `project:` wins over it.
+            project: Option<duhem_schema::ProjectDecl>,
         },
     }
     // Named-environment selection (spec #68). On a manifest we pick the
@@ -191,6 +197,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                     environment: manifest.environment,
                     manifest_dir,
                     defaults: manifest.defaults,
+                    project: manifest.project,
                 },
             )
         }
@@ -218,6 +225,11 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // Pattern A authors pay no cost.
     let manifest_defaults: Option<duhem_schema::ManifestDefaults> = match &scope {
         Scope::Manifest { defaults, .. } => defaults.clone(),
+        Scope::SingleLeaf => None,
+    };
+    // Suite-wide declared target (#191); leaf `project:` wins below.
+    let manifest_project: Option<duhem_schema::ProjectDecl> = match &scope {
+        Scope::Manifest { project, .. } => project.clone(),
         Scope::SingleLeaf => None,
     };
 
@@ -489,6 +501,19 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         engine = engine.with_store(store.clone());
         if let Some(id) = pinned_run_id.as_deref() {
             engine = engine.with_run_id(id);
+        }
+        // Target identity (#191): the declared `project:` (leaf wins
+        // over manifest) enters the resolution ladder; the VD's
+        // directory anchors the verifier side.
+        {
+            let declared = def.project.as_ref().or(manifest_project.as_ref());
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let vd_dir = leaf_path.parent().map(Path::to_path_buf);
+            engine = engine.with_scope(duhem_runtime::resolve_scope(
+                declared,
+                &cwd,
+                vd_dir.as_deref(),
+            ));
         }
         if let Some(f) = leaf_filter {
             engine = engine.with_filter(f);

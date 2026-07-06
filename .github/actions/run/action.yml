@@ -181,6 +181,14 @@ runs:
         VERIFICATION_PATH: ${{ inputs.verification-path }}
         VD_INPUTS: ${{ inputs.inputs }}
         REPORTER: ${{ inputs.reporter }}
+        # Provenance (#191): the runner's GITHUB_REPOSITORY/GITHUB_SHA
+        # already name the TARGET (the caller's repo@sha). The
+        # VERIFIER is this action's own checkout — the runner extracts
+        # it without a .git dir, so pass the action coordinate
+        # explicitly. github.action_ref is a tag/branch name, which is
+        # the honest verifier revision for a tag-pinned action.
+        DUHEM_VERIFIER_REPO: github.com/${{ github.action_repository || github.repository }}
+        DUHEM_VERIFIER_SHA: ${{ github.action_ref || github.sha }}
       run: |
         # Path validation already ran in `Validate verification-path
         # stays inside the Duhem checkout`. We propagate the CLI's

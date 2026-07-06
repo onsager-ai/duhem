@@ -255,3 +255,21 @@ runs:
         echo "store=$STORE" >> "$GITHUB_OUTPUT"
         echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
         exit "$RC"
+
+    # Opt-in hub replication (#194): ship the run bundle when the
+    # caller configured a hub (DUHEM_HUB_URL secret/var + token).
+    # `--if-configured` makes this a clean no-op otherwise, and
+    # `if: always()` ships red runs too — failure evidence is the
+    # point. Never gates the verdict: a ship failure warns, the
+    # job's pass/fail stays the run's exit code above.
+    - name: Ship run bundle to hub (opt-in)
+      if: always() && steps.run.outputs.run-id != ''
+      shell: bash
+      working-directory: ${{ steps.src.outputs.src }}
+      continue-on-error: true
+      env:
+        DUHEM_HUB_URL: ${{ env.DUHEM_HUB_URL }}
+        DUHEM_HUB_TOKEN: ${{ env.DUHEM_HUB_TOKEN }}
+        RUN_ID: ${{ steps.run.outputs.run-id }}
+      run: |
+        ./target/release/duhem ship "$RUN_ID" --db .duhem/duhem.db --if-configured

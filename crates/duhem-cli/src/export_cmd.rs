@@ -1,33 +1,54 @@
-//! `duhem export` (#189): write one run out of the store as a
-//! self-contained bundle — the portability path now that evidence
-//! lives in a DB instead of per-run files.
+//! `duhem export` (#189) and `duhem ship` (#194): two destinations
+//! for one format — the [`duhem_evidence::RunBundle`].
 //!
-//! Bundle layout under `--out` (default `duhem-export-<run-id>/`):
-//!
-//! ```text
-//! bundle.json         # bundle_version + run header + verdict
-//! events.jsonl        # the wire-format event stream (#10 shape)
-//! artifacts/<sha256>  # content-addressed blobs the stream references
-//! ```
-//!
-//! The stream + artifacts are everything replay and rendering need;
-//! `bundle.json` carries the store-level header so the bundle is
-//! self-describing without the DB row next to it. The bundle format
-//! is versioned (`bundle_version`) — the hub ingest contract (#194)
-//! formalizes it as a wire contract; this is version 1.
+//! `export` writes the human-browsable directory layout; `ship`
+//! POSTs the canonical JSON envelope to a hub's ingest endpoint,
+//! keyed by the bundle's content hash so re-shipping the same run is
+//! a server-side no-op. The hub server itself is the closed-source
+//! sibling (#188 open-core seam) — this repo owns only the client
+//! and the wire contract (`tests/bundle_contract.rs` pins it).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use duhem_evidence::{Event, EventPayload, ObservationValue, RunRecord, SqliteStore, Store};
+use duhem_evidence::{RunBundle, SqliteStore};
 
-/// Version of the bundle layout. Bumped on breaking shape changes;
-/// #194 pins it with a cross-repo contract test.
-pub const BUNDLE_VERSION: u32 = 1;
+/// Environment variables the ship step reads. The URL names the hub
+/// ingest endpoint; the token authenticates (the OAuth/session flow
+/// that mints it is the hub's concern).
+pub const HUB_URL_ENV: &str = "DUHEM_HUB_URL";
+pub const HUB_TOKEN_ENV: &str = "DUHEM_HUB_TOKEN";
+
+async fn open_and_bundle(run_id: &str, db: Option<&Path>) -> Result<RunBundle, String> {
+    let db_path = match db {
+        Some(p) => p.to_path_buf(),
+        None => {
+            let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+            duhem_evidence::project_db_path(&cwd).map_err(|e| e.to_string())?
+        }
+    };
+    // Read-only: neither export nor ship may mutate the store.
+    let store = SqliteStore::open_read_only(&db_path)
+        .await
+        .map_err(|e| e.to_string())?;
+    RunBundle::from_store(&store, run_id)
+        .await
+        .map_err(|e| e.to_string())
+}
 
 pub async fn run_export(run_id: &str, db: Option<&Path>, out: Option<&Path>) -> ExitCode {
-    match export_run(run_id, db, out).await {
-        Ok(out_dir) => {
+    let bundle = match open_and_bundle(run_id, db).await {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("export: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let out_dir = out
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from(format!("duhem-export-{run_id}")));
+    match bundle.write_dir(&out_dir) {
+        Ok(()) => {
             println!("exported run {run_id} to {}", out_dir.display());
             ExitCode::SUCCESS
         }
@@ -38,125 +59,75 @@ pub async fn run_export(run_id: &str, db: Option<&Path>, out: Option<&Path>) -> 
     }
 }
 
-async fn export_run(
+/// `duhem ship <run-id>`: POST the bundle to the hub. Without a hub
+/// URL configured this is a clean no-op success — the CI ship step
+/// can run unconditionally and only bites when the operator opted in.
+pub async fn run_ship(
     run_id: &str,
     db: Option<&Path>,
-    out: Option<&Path>,
-) -> Result<PathBuf, String> {
-    let db_path = match db {
-        Some(p) => p.to_path_buf(),
-        None => {
-            let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
-            duhem_evidence::project_db_path(&cwd).map_err(|e| e.to_string())?
+    hub_url: Option<&str>,
+    quiet_unconfigured: bool,
+) -> ExitCode {
+    let url = hub_url
+        .map(str::to_string)
+        .or_else(|| std::env::var(HUB_URL_ENV).ok().filter(|v| !v.is_empty()));
+    let Some(url) = url else {
+        if quiet_unconfigured {
+            println!("ship: no hub configured ({HUB_URL_ENV} unset); skipping");
+            return ExitCode::SUCCESS;
+        }
+        eprintln!("ship: no hub URL — pass --hub-url or set {HUB_URL_ENV}");
+        return ExitCode::FAILURE;
+    };
+
+    let bundle = match open_and_bundle(run_id, db).await {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("ship: {e}");
+            return ExitCode::FAILURE;
         }
     };
-    // Read-only: an export must never mutate the store.
-    let store = SqliteStore::open_read_only(&db_path)
-        .await
+    match ship_bundle(&bundle, &url, std::env::var(HUB_TOKEN_ENV).ok().as_deref()).await {
+        Ok(hash) => {
+            println!("shipped run {run_id} to {url} (content hash {hash})");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("ship: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The ingest client (#194): one POST of the canonical envelope.
+/// Idempotency: the `X-Duhem-Content-Hash` header carries the
+/// bundle's hash; a hub that has it already answers 200/409 without
+/// re-storing. 2xx = shipped.
+pub async fn ship_bundle(
+    bundle: &RunBundle,
+    url: &str,
+    token: Option<&str>,
+) -> Result<String, String> {
+    let body = bundle.wire_bytes().map_err(|e| e.to_string())?;
+    let hash = bundle.content_hash().map_err(|e| e.to_string())?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
         .map_err(|e| e.to_string())?;
-
-    let record = store
-        .get_run(run_id)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("unknown run: {run_id} (store: {})", db_path.display()))?;
-    let events = store.run_events(run_id).await.map_err(|e| e.to_string())?;
-
-    let out_dir = out
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from(format!("duhem-export-{run_id}")));
-    std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
-
-    // bundle.json — the run header (manifest successor) + verdict.
-    let bundle = bundle_header(&record);
-    std::fs::write(
-        out_dir.join("bundle.json"),
-        serde_json::to_vec_pretty(&bundle).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-
-    // events.jsonl — the wire-format stream, one event per line.
-    let mut jsonl = String::new();
-    for evt in &events {
-        jsonl.push_str(&serde_json::to_string(evt).map_err(|e| e.to_string())?);
-        jsonl.push('\n');
+    let mut req = client
+        .post(url)
+        .header("content-type", "application/json")
+        .header("x-duhem-bundle-version", bundle.bundle_version.to_string())
+        .header("x-duhem-content-hash", &hash)
+        .body(body);
+    if let Some(token) = token {
+        req = req.bearer_auth(token);
     }
-    std::fs::write(out_dir.join("events.jsonl"), jsonl).map_err(|e| e.to_string())?;
-
-    // artifacts/<sha256> — every blob the stream references.
-    let shas = referenced_blobs(&events);
-    if !shas.is_empty() {
-        let artifacts_dir = out_dir.join("artifacts");
-        std::fs::create_dir_all(&artifacts_dir).map_err(|e| e.to_string())?;
-        for sha in shas {
-            let bytes = store
-                .get_blob(&sha)
-                .await
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| format!("stream references missing artifact {sha}"))?;
-            std::fs::write(artifacts_dir.join(&sha), bytes).map_err(|e| e.to_string())?;
-        }
+    let res = req.send().await.map_err(|e| e.to_string())?;
+    if !res.status().is_success() {
+        let status = res.status();
+        let text = res.text().await.unwrap_or_default();
+        return Err(format!("hub answered {status}: {}", text.trim()));
     }
-
-    Ok(out_dir)
-}
-
-fn bundle_header(record: &RunRecord) -> serde_json::Value {
-    serde_json::json!({
-        "bundle_version": BUNDLE_VERSION,
-        "run": {
-            "run_id": record.run_id,
-            "verification": record.verification,
-            "schema_version": record.schema_version,
-            "inputs": record.inputs,
-            "started_at": record.started_at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
-            "verdict": record.verdict.map(|v| v.to_string()),
-            "finished_at": record
-                .finished_at
-                .map(|t| t.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()),
-            "duration_ms": record.duration_ms,
-        },
-    })
-}
-
-/// Every content address the event stream references — observation
-/// blobs plus captured env stdio.
-fn referenced_blobs(events: &[Event]) -> Vec<String> {
-    let mut shas: Vec<String> = Vec::new();
-    let mut push = |sha: &String| {
-        if !shas.contains(sha) {
-            shas.push(sha.clone());
-        }
-    };
-    for evt in events {
-        match &evt.payload {
-            EventPayload::StepObservation {
-                value: ObservationValue::Blob { blob_sha256 },
-                ..
-            }
-            | EventPayload::SetupStepObservation {
-                value: ObservationValue::Blob { blob_sha256 },
-                ..
-            } => push(blob_sha256),
-            EventPayload::EnvUpFinished {
-                stdout_blob_sha256,
-                stderr_blob_sha256,
-                ..
-            }
-            | EventPayload::EnvDownFinished {
-                stdout_blob_sha256,
-                stderr_blob_sha256,
-                ..
-            } => {
-                if let Some(s) = stdout_blob_sha256 {
-                    push(s);
-                }
-                if let Some(s) = stderr_blob_sha256 {
-                    push(s);
-                }
-            }
-            _ => {}
-        }
-    }
-    shas
+    Ok(hash)
 }

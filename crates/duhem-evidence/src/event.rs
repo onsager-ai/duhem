@@ -148,6 +148,14 @@ pub enum EventPayload {
     SetupStepStarted {
         step_index: u32,
         uses: String,
+        /// Delivery-web layer the executed action exercised (#192):
+        /// `ui` / `api` / `data` / `runtime`. Stamped by the runtime
+        /// from the action catalog family — never inferred. Absent
+        /// for pre-tag traces and for `uses` outside the catalog
+        /// families (untagged, not guessed). Additive to the #10
+        /// wire shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<String>,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         with: BTreeMap<String, serde_json::Value>,
     },
@@ -169,6 +177,10 @@ pub enum EventPayload {
         check_id: String,
         step_index: u32,
         uses: String,
+        /// Delivery-web layer the executed action exercised (#192).
+        /// Same contract as `SetupStepStarted.layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer: Option<String>,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         with: BTreeMap<String, serde_json::Value>,
     },
@@ -322,6 +334,7 @@ mod tests {
             EventPayload::SetupStepStarted {
                 step_index: 0,
                 uses: "ui/navigate".into(),
+                layer: None,
                 with: BTreeMap::new(),
             },
             EventPayload::SetupStepObservation {

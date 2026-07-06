@@ -133,6 +133,22 @@ pub struct CriterionHistoryEntry {
     pub verdict: VerdictState,
 }
 
+/// One delivery-web span (#192): a layer-tagged step a check (or the
+/// setup phase, `check_id: None`) crossed, with the step's outcome.
+/// A check's ordered span set is the `auth → api → data → runtime`
+/// chain the ④ view renders; a failing span pinpoints the broken
+/// layer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Span {
+    /// Seq of the opening `step_started` event — the evidence link.
+    pub seq: u64,
+    pub check_id: Option<String>,
+    pub layer: String,
+    pub ok: bool,
+    /// Outcome token when not ok (`error` / `timeout`).
+    pub detail: Option<String>,
+}
+
 /// The asymmetric-trust answer for one target coordinate (#190):
 /// what the latest recorded run against `target_repo@target_sha`
 /// concluded, and whether that sha is blocked. With provenance in
@@ -205,6 +221,11 @@ pub trait Store: Send + Sync {
         target_repo: &str,
         target_sha: &str,
     ) -> Result<Option<TargetStatus>, StoreError>;
+
+    /// The ordered delivery-web spans one check crossed (#192) — the
+    /// ④ view's data. Empty for pre-tag runs and untagged steps
+    /// ("layer unknown", never guessed).
+    async fn check_spans(&self, run_id: &str, check_id: &str) -> Result<Vec<Span>, StoreError>;
 }
 
 /// Serialize a verdict to its bare wire token (`pass` / `fail` /

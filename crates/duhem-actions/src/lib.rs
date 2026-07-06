@@ -22,7 +22,8 @@ pub mod ui;
 pub mod with;
 
 pub use action::{
-    Action, ActionCtx, ActionResult, DEFAULT_WITHIN, Observation, Outcome, uses_requires_page,
+    Action, ActionCtx, ActionResult, DEFAULT_WITHIN, Observation, Outcome, layer_for_uses,
+    uses_requires_page,
 };
 pub use api::{Call, Observe, Poll, Stream};
 pub use browser::{

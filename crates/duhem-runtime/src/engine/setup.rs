@@ -143,6 +143,8 @@ pub(crate) async fn run_setup(
             .append(EventPayload::SetupStepStarted {
                 step_index: idx as u32,
                 uses: step.uses.clone(),
+                // Same honesty contract as the per-check tag (#192).
+                layer: duhem_actions::layer_for_uses(&step.uses).map(str::to_string),
                 with: with_to_evidence_map(&resolved_with),
             })
             .await?;

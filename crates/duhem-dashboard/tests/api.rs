@@ -354,6 +354,7 @@ async fn colliding_check_ids_attribute_to_the_first_owner() {
             check_id: "DUP".into(),
             step_index: 0,
             uses: "api/call".into(),
+            layer: None,
             with: BTreeMap::new(),
         })
         .await

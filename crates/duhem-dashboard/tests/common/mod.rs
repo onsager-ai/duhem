@@ -84,6 +84,7 @@ pub async fn write_passing_run(
     w.append(EventPayload::SetupStepStarted {
         step_index: 0,
         uses: "ui/navigate".into(),
+        layer: None,
         with: BTreeMap::new(),
     })
     .await
@@ -112,6 +113,7 @@ pub async fn write_passing_run(
         check_id: "AC-1.1".into(),
         step_index: 0,
         uses: "ui/navigate".into(),
+        layer: None,
         with: BTreeMap::new(),
     })
     .await
@@ -138,6 +140,7 @@ pub async fn write_passing_run(
         check_id: "AC-1.1".into(),
         step_index: 1,
         uses: "ui/assert-element".into(),
+        layer: None,
         with: BTreeMap::new(),
     })
     .await
@@ -201,6 +204,7 @@ pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition
         check_id: "AC-1.1".into(),
         step_index: 0,
         uses: "api/call".into(),
+        layer: None,
         with: BTreeMap::new(),
     })
     .await
@@ -255,6 +259,7 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
     w.append(EventPayload::SetupStepStarted {
         step_index: 0,
         uses: "api/call".into(),
+        layer: None,
         with: BTreeMap::new(),
     })
     .await
@@ -290,6 +295,7 @@ pub async fn write_in_progress_run(store: Arc<SqliteStore>, run_id: &str, defini
         check_id: "AC-1.1".into(),
         step_index: 0,
         uses: "ui/navigate".into(),
+        layer: None,
         with: BTreeMap::new(),
     })
     .await

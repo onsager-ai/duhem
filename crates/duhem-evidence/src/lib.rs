@@ -19,12 +19,14 @@
 //! - Portability is `duhem export` — a self-contained bundle of the
 //!   run header, event stream, and artifacts.
 
+pub mod bundle;
 pub mod event;
 pub mod reader;
 pub mod replay;
 pub mod store;
 pub mod writer;
 
+pub use bundle::{BUNDLE_VERSION, BundleArtifact, BundleRun, RunBundle};
 pub use event::{
     BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, ObservationValue, SCHEMA_VERSION,
     StepOutcome, VerdictState,

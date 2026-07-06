@@ -199,6 +199,25 @@ enum Cmd {
         #[arg(long = "out", value_name = "DIR")]
         out: Option<PathBuf>,
     },
+    /// Ship one run's bundle to a hub ingest endpoint (#194) —
+    /// replication keyed by content hash, not dual-truth. No-op
+    /// success with `--if-configured` when no hub is set.
+    Ship {
+        /// Run id (ULID) to ship.
+        run_id: String,
+        /// Evidence store to read from. Defaults to the working
+        /// copy's project store.
+        #[arg(long = "db", value_name = "PATH")]
+        db: Option<PathBuf>,
+        /// Hub ingest URL. Defaults to $DUHEM_HUB_URL; the bearer
+        /// token comes from $DUHEM_HUB_TOKEN.
+        #[arg(long = "hub-url", value_name = "URL")]
+        hub_url: Option<String>,
+        /// Exit 0 (skip) instead of erroring when no hub URL is
+        /// configured — the CI ship step runs unconditionally.
+        #[arg(long = "if-configured", default_value_t = false)]
+        if_configured: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -231,6 +250,23 @@ fn main() -> ExitCode {
                 &run_id,
                 db.as_deref(),
                 out.as_deref(),
+            ))
+        }
+        Some(Cmd::Ship {
+            run_id,
+            db,
+            hub_url,
+            if_configured,
+        }) => {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            rt.block_on(export_cmd::run_ship(
+                &run_id,
+                db.as_deref(),
+                hub_url.as_deref(),
+                if_configured,
             ))
         }
         Some(Cmd::Run {

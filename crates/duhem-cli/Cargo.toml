@@ -18,6 +18,7 @@ duhem-actions = { path = "../duhem-actions" }
 duhem-evidence = { path = "../duhem-evidence" }
 duhem-summary = { path = "../duhem-summary" }
 clap.workspace = true
+reqwest.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true

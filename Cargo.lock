@@ -748,6 +748,7 @@ dependencies = [
  "duhem-runtime",
  "duhem-schema",
  "duhem-summary",
+ "reqwest",
  "serde",
  "serde_json",
  "serde_yml",
@@ -785,6 +786,7 @@ name = "duhem-evidence"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64",
  "chrono",
  "directories",
  "duhem-judge",

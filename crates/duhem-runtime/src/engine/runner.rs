@@ -26,8 +26,8 @@ use std::time::Duration;
 use duhem_actions::Page;
 use duhem_actions::{Outcome, RunBrowser};
 use duhem_evidence::{
-    EventPayload, EvidenceWriter, SqliteStore, Store, StoreError, VerdictState, new_run_id,
-    project_db_path, run_started,
+    EventPayload, EvidenceWriter, RunScope, SqliteStore, Store, StoreError, VerdictState,
+    new_run_id, project_db_path, run_started,
 };
 use duhem_judge::{
     AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusiveCause,
@@ -87,6 +87,11 @@ pub struct Engine {
     /// and mint a fresh ULID. A collision with an existing run fails
     /// loudly at `begin_run` (run ids are primary keys).
     run_id: Option<String>,
+    /// Scoping + provenance for recorded runs (#190): the project
+    /// hint and the `verifier VERIFIES target` coordinates. Default
+    /// (all-`None`) records an unattributed run; #191's resolution
+    /// ladder populates it.
+    scope: RunScope,
     /// Skip `environment.up:` + readiness probe (the `--no-env-up`
     /// escape hatch on issue #50). The operator is presumed to have
     /// brought the SUT up already. Teardown still runs unless
@@ -135,6 +140,7 @@ impl Engine {
             filter: None,
             seed: None,
             run_id: None,
+            scope: RunScope::default(),
             skip_env_up: false,
             keep_env: false,
             env: BTreeMap::new(),
@@ -208,6 +214,15 @@ impl Engine {
     /// with an existing run fails at `begin_run`.
     pub fn with_run_id(mut self, run_id: impl Into<String>) -> Self {
         self.run_id = Some(run_id.into());
+        self
+    }
+
+    /// Attach scoping + provenance to recorded runs (#190): the
+    /// project hint and `verifier_repo@sha VERIFIES target_repo@sha`.
+    /// The identity-resolution ladder that computes these is #191's;
+    /// this only records what the caller resolved.
+    pub fn with_scope(mut self, scope: RunScope) -> Self {
+        self.scope = scope;
         self
     }
 
@@ -337,8 +352,14 @@ impl Engine {
             .definition_path
             .clone()
             .unwrap_or_else(|| def.verification.clone());
-        let mut writer =
-            EvidenceWriter::begin(store, &run_id, &evidence_path, inputs.clone()).await?;
+        let mut writer = EvidenceWriter::begin_scoped(
+            store,
+            &run_id,
+            &evidence_path,
+            inputs.clone(),
+            self.scope.clone(),
+        )
+        .await?;
 
         writer
             .append(run_started(evidence_path.clone(), inputs.clone()))
@@ -878,6 +899,7 @@ mod tests {
             filter: None,
             seed: None,
             run_id: None,
+            scope: RunScope::default(),
             skip_env_up: false,
             keep_env: false,
             env: BTreeMap::new(),

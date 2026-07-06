@@ -19,7 +19,9 @@ use crate::event::{Event, EventPayload};
 use crate::writer::Sha256Hex;
 
 use super::{
-    RunMeta, RunRecord, Store, StoreError, is_valid_sha256_hex, parse_verdict, verdict_token,
+    CriterionHistoryEntry, ProjectSummary, RunMeta, RunRecord, RunScope, Store, StoreError,
+    TargetStatus, is_valid_sha256_hex, parse_verdict, verdict_token, verification_key,
+    verification_name,
 };
 
 /// RFC 3339 with exactly millisecond precision — the same shape the
@@ -118,27 +120,70 @@ fn row_to_run_record(row: &sqlx::sqlite::SqliteRow) -> Result<RunRecord, StoreEr
         verdict: verdict.as_deref().map(parse_verdict).transpose()?,
         finished_at: finished_at.as_deref().map(parse_ts).transpose()?,
         duration_ms: duration_ms.map(|d| d as u64),
+        scope: RunScope {
+            project_id: row.get("project_id"),
+            verifier_repo: row.get("verifier_repo"),
+            verifier_sha: row.get("verifier_sha"),
+            target_repo: row.get("target_repo"),
+            target_sha: row.get("target_sha"),
+        },
     })
 }
 
 const RUN_SELECT: &str = "SELECT r.run_id, r.verification, r.schema_version, r.inputs, \
-     r.started_at, v.verdict, v.finished_at, v.duration_ms \
+     r.started_at, r.project_id, r.verifier_repo, r.verifier_sha, r.target_repo, \
+     r.target_sha, v.verdict, v.finished_at, v.duration_ms \
      FROM runs r LEFT JOIN run_verdicts v ON v.run_id = r.run_id";
 
 #[async_trait]
 impl Store for SqliteStore {
     async fn begin_run(&self, meta: &RunMeta) -> Result<(), StoreError> {
+        let name = verification_name(&meta.verification);
+        let verification_id = verification_key(meta.scope.project_id.as_deref(), &name);
+        let mut tx = self.pool.begin().await?;
+
+        // Fold the dimension rows first (idempotent identity upserts),
+        // then the run row referencing them — one transaction, so the
+        // writer's referential integrity can't be observed half-done.
+        if let Some(project) = &meta.scope.project_id {
+            sqlx::query(
+                "INSERT OR IGNORE INTO projects (project_id, workspace_id) VALUES (?, 'local')",
+            )
+            .bind(project)
+            .execute(&mut *tx)
+            .await?;
+        }
         sqlx::query(
-            "INSERT INTO runs (run_id, verification, schema_version, inputs, started_at) \
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO verifications \
+             (verification_id, project_id, name, definition_path) VALUES (?, ?, ?, ?)",
+        )
+        .bind(&verification_id)
+        .bind(&meta.scope.project_id)
+        .bind(&name)
+        .bind(&meta.verification)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO runs (run_id, verification, schema_version, inputs, started_at, \
+             workspace_id, project_id, verification_id, verifier_repo, verifier_sha, \
+             target_repo, target_sha) \
+             VALUES (?, ?, ?, ?, ?, 'local', ?, ?, ?, ?, ?, ?)",
         )
         .bind(&meta.run_id)
         .bind(&meta.verification)
         .bind(&meta.schema_version)
         .bind(serde_json::to_string(&meta.inputs)?)
         .bind(fmt_ts(&meta.started_at))
-        .execute(&self.pool)
+        .bind(&meta.scope.project_id)
+        .bind(&verification_id)
+        .bind(&meta.scope.verifier_repo)
+        .bind(&meta.scope.verifier_sha)
+        .bind(&meta.scope.target_repo)
+        .bind(&meta.scope.target_sha)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -306,5 +351,110 @@ impl Store for SqliteStore {
                 .fetch_optional(&self.pool)
                 .await?;
         Ok(bytes)
+    }
+
+    async fn portfolio(&self) -> Result<Vec<ProjectSummary>, StoreError> {
+        // Latest run per project via a correlated pick on
+        // (started_at, run_id) — ULIDs tie-break identically-stamped
+        // rows chronologically.
+        let rows = sqlx::query(
+            "SELECT r.project_id, COUNT(*) AS run_count, \
+             COUNT(DISTINCT r.verification_id) AS verification_count, \
+             l.run_id AS latest_run_id, l.started_at AS latest_started_at, \
+             lv.verdict AS latest_verdict \
+             FROM runs r \
+             LEFT JOIN runs l ON l.run_id = ( \
+                 SELECT r2.run_id FROM runs r2 \
+                 WHERE r2.project_id IS r.project_id \
+                 ORDER BY r2.started_at DESC, r2.run_id DESC LIMIT 1) \
+             LEFT JOIN run_verdicts lv ON lv.run_id = l.run_id \
+             GROUP BY r.project_id \
+             ORDER BY (r.project_id IS NULL), MAX(r.started_at) DESC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|row| {
+                let latest_started_at: Option<String> = row.get("latest_started_at");
+                let latest_verdict: Option<String> = row.get("latest_verdict");
+                Ok(ProjectSummary {
+                    project_id: row.get("project_id"),
+                    run_count: row.get::<i64, _>("run_count") as u64,
+                    verification_count: row.get::<i64, _>("verification_count") as u64,
+                    latest_run_id: row.get("latest_run_id"),
+                    latest_started_at: latest_started_at.as_deref().map(parse_ts).transpose()?,
+                    latest_verdict: latest_verdict.as_deref().map(parse_verdict).transpose()?,
+                })
+            })
+            .collect()
+    }
+
+    async fn verification_history(&self, name: &str) -> Result<Vec<RunRecord>, StoreError> {
+        let rows = sqlx::query(&format!(
+            "{RUN_SELECT} JOIN verifications vf ON vf.verification_id = r.verification_id \
+             WHERE vf.name = ? ORDER BY r.started_at DESC, r.run_id DESC"
+        ))
+        .bind(name)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(row_to_run_record).collect()
+    }
+
+    async fn criterion_history(
+        &self,
+        name: &str,
+    ) -> Result<Vec<CriterionHistoryEntry>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT c.run_id, r.started_at, c.criterion_id, c.verdict \
+             FROM criteria c \
+             JOIN runs r ON r.run_id = c.run_id \
+             JOIN verifications vf ON vf.verification_id = r.verification_id \
+             WHERE vf.name = ? \
+             ORDER BY r.started_at DESC, r.run_id DESC, c.criterion_id",
+        )
+        .bind(name)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|row| {
+                Ok(CriterionHistoryEntry {
+                    run_id: row.get("run_id"),
+                    started_at: parse_ts(row.get("started_at"))?,
+                    criterion_id: row.get("criterion_id"),
+                    verdict: parse_verdict(row.get("verdict"))?,
+                })
+            })
+            .collect()
+    }
+
+    async fn target_status(
+        &self,
+        target_repo: &str,
+        target_sha: &str,
+    ) -> Result<Option<TargetStatus>, StoreError> {
+        let row = sqlx::query(
+            "SELECT r.run_id, v.verdict FROM runs r \
+             LEFT JOIN run_verdicts v ON v.run_id = r.run_id \
+             WHERE r.target_repo = ? AND r.target_sha = ? \
+             ORDER BY r.started_at DESC, r.run_id DESC LIMIT 1",
+        )
+        .bind(target_repo)
+        .bind(target_sha)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let verdict: Option<String> = row.get("verdict");
+        let latest_verdict = verdict.as_deref().map(parse_verdict).transpose()?;
+        Ok(Some(TargetStatus {
+            target_repo: target_repo.to_string(),
+            target_sha: target_sha.to_string(),
+            latest_run_id: row.get("run_id"),
+            latest_verdict,
+            // Only a recorded pass unblocks; an unfinished run is not
+            // attestation.
+            blocked: latest_verdict != Some(crate::event::VerdictState::Pass),
+        }))
     }
 }

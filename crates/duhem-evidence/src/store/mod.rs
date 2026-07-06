@@ -65,6 +65,28 @@ pub struct RunMeta {
     pub schema_version: String,
     pub inputs: BTreeMap<String, serde_json::Value>,
     pub started_at: DateTime<Utc>,
+    /// Scoping + provenance (#190). Defaults to unattributed; #191's
+    /// resolution ladder populates it for real runs.
+    pub scope: RunScope,
+}
+
+/// Scoping + two-repo provenance for one run (#190):
+/// `workspace → project → verification` addressing plus
+/// `verifier_repo@sha VERIFIES target_repo@sha`.
+///
+/// `project_id` is a best-effort identity **hint stored as-is** (a
+/// declared `project:`, a normalized remote — #191 decides); the hub
+/// reconciles hints to forge repo-IDs (#188). Locally the workspace
+/// is always the `local` sentinel.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RunScope {
+    pub project_id: Option<String>,
+    /// The repo the Verification Definition lives in.
+    pub verifier_repo: Option<String>,
+    pub verifier_sha: Option<String>,
+    /// The repo of the artifact under test.
+    pub target_repo: Option<String>,
+    pub target_sha: Option<String>,
 }
 
 /// One run as the store knows it: the `runs` row joined with its
@@ -81,6 +103,51 @@ pub struct RunRecord {
     pub verdict: Option<VerdictState>,
     pub finished_at: Option<DateTime<Utc>>,
     pub duration_ms: Option<u64>,
+    /// Scoping + provenance (#190). All-`None` for runs recorded
+    /// before the scoping migration or without attribution.
+    pub scope: RunScope,
+}
+
+/// One project row in the portfolio rollup (#190): a project's run
+/// count, distinct verifications, and its most recent run's verdict.
+/// `project_id: None` is the unattributed bucket (runs recorded
+/// without a project hint).
+#[derive(Debug, Clone)]
+pub struct ProjectSummary {
+    pub project_id: Option<String>,
+    pub run_count: u64,
+    pub verification_count: u64,
+    pub latest_run_id: Option<String>,
+    pub latest_started_at: Option<DateTime<Utc>>,
+    pub latest_verdict: Option<VerdictState>,
+}
+
+/// One criterion verdict on one historical run of a verification —
+/// the ② VD-over-time row (#190): the criterion is the stable spine,
+/// its verdict tracked across runs.
+#[derive(Debug, Clone)]
+pub struct CriterionHistoryEntry {
+    pub run_id: String,
+    pub started_at: DateTime<Utc>,
+    pub criterion_id: String,
+    pub verdict: VerdictState,
+}
+
+/// The asymmetric-trust answer for one target coordinate (#190):
+/// what the latest recorded run against `target_repo@target_sha`
+/// concluded, and whether that sha is blocked. With provenance in
+/// rows, "a target PR at a fail-verdict sha cannot self-attest" is a
+/// `SELECT`, not doctrine.
+#[derive(Debug, Clone)]
+pub struct TargetStatus {
+    pub target_repo: String,
+    pub target_sha: String,
+    pub latest_run_id: String,
+    pub latest_verdict: Option<VerdictState>,
+    /// `true` unless the latest recorded run for this sha passed. An
+    /// unfinished (verdict-less) run blocks: absence of a verdict is
+    /// not attestation.
+    pub blocked: bool,
 }
 
 /// The storage seam. Object-safe (`Arc<dyn Store>`) so the runtime,
@@ -115,6 +182,29 @@ pub trait Store: Send + Sync {
     async fn events_after(&self, run_id: &str, after: i64) -> Result<Vec<Event>, StoreError>;
 
     async fn get_blob(&self, sha256: &str) -> Result<Option<Vec<u8>>, StoreError>;
+
+    /// Portfolio rollup (#190): runs grouped by project, most recent
+    /// activity first, with the unattributed bucket last.
+    async fn portfolio(&self) -> Result<Vec<ProjectSummary>, StoreError>;
+
+    /// All runs of one verification (by leaf name), newest first —
+    /// the run axis of the ② VD-over-time view.
+    async fn verification_history(&self, name: &str) -> Result<Vec<RunRecord>, StoreError>;
+
+    /// Per-criterion verdicts across all runs of one verification,
+    /// newest run first — the criterion spine of ② VD-over-time.
+    async fn criterion_history(&self, name: &str)
+    -> Result<Vec<CriterionHistoryEntry>, StoreError>;
+
+    /// The asymmetric-trust query (#190): the latest recorded run
+    /// against `target_repo@target_sha` and whether that sha is
+    /// blocked. `None` = no run recorded for that coordinate (caller
+    /// policy decides what no-evidence means).
+    async fn target_status(
+        &self,
+        target_repo: &str,
+        target_sha: &str,
+    ) -> Result<Option<TargetStatus>, StoreError>;
 }
 
 /// Serialize a verdict to its bare wire token (`pass` / `fail` /
@@ -134,4 +224,36 @@ pub(crate) fn parse_verdict(token: &str) -> Result<VerdictState, StoreError> {
 
 pub(crate) fn is_valid_sha256_hex(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// Canonical verification name for a definition path — the CLI
+/// `leaf_name` rule: a `duhem.yml` / `duhem.yaml` leaf is named by
+/// its parent directory, anything else by its file stem. The store
+/// folds `verifications` dimension rows with this name (#190); the
+/// dashboard displays it.
+pub fn verification_name(definition_path: &str) -> String {
+    let path = std::path::Path::new(definition_path);
+    let file_name = path.file_name().and_then(|n| n.to_str());
+    if matches!(file_name, Some("duhem.yml") | Some("duhem.yaml"))
+        && let Some(parent) = path.parent()
+        && let Some(name) = parent.file_name().and_then(|n| n.to_str())
+        && !name.is_empty()
+        && name != "."
+        && name != ".."
+    {
+        return name.to_string();
+    }
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("verification")
+        .to_string()
+}
+
+/// Deterministic `verifications` dimension key (#190):
+/// `<project>#<name>`, or bare `<name>` for unattributed runs.
+pub(crate) fn verification_key(project_id: Option<&str>, name: &str) -> String {
+    match project_id {
+        Some(p) => format!("{p}#{name}"),
+        None => name.to_string(),
+    }
 }

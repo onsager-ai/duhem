@@ -22,7 +22,7 @@ use thiserror::Error;
 use crate::event::{
     BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, ObservationValue, SCHEMA_VERSION,
 };
-use crate::store::{RunMeta, Store, StoreError};
+use crate::store::{RunMeta, RunScope, Store, StoreError};
 
 /// Truncate to millisecond precision. The wire format pins `ts` at
 /// ms; in-memory `Utc::now()` carries ns. Truncate at the stamping
@@ -69,6 +69,19 @@ impl EvidenceWriter {
         definition_path: &str,
         inputs: BTreeMap<String, serde_json::Value>,
     ) -> Result<Self, WriterError> {
+        Self::begin_scoped(store, run_id, definition_path, inputs, RunScope::default()).await
+    }
+
+    /// [`EvidenceWriter::begin`] with scoping + provenance (#190):
+    /// the project hint and the `verifier VERIFIES target`
+    /// coordinates land on the run header row.
+    pub async fn begin_scoped(
+        store: Arc<dyn Store>,
+        run_id: impl Into<String>,
+        definition_path: &str,
+        inputs: BTreeMap<String, serde_json::Value>,
+        scope: RunScope,
+    ) -> Result<Self, WriterError> {
         let run_id = run_id.into();
         store
             .begin_run(&RunMeta {
@@ -77,6 +90,7 @@ impl EvidenceWriter {
                 schema_version: SCHEMA_VERSION.to_string(),
                 inputs,
                 started_at: now_ms(),
+                scope,
             })
             .await?;
         Ok(Self {

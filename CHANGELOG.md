@@ -20,6 +20,8 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [clarifying] Store scoping + provenance (#190): additive store migration (internal sqlx schema, not the `SCHEMA_VERSION` wire contract) — `workspaces`/`projects`/`verifications` dimension tables, `(workspace_id, project_id, verification_id)` scoping and `(verifier_repo, verifier_sha, target_repo, target_sha)` provenance columns on `runs`, and new `Store` read queries: `portfolio()`, `verification_history()`, `criterion_history()`, `target_status()` (the asymmetric-trust SELECT: a target sha without a recorded pass is blocked). `project_id` is stored as the raw hint; #191 populates it. (#190)
+
 - [breaking] Evidence store (#189): the DB is the single source of truth — runs are recorded in a per-working-copy SQLite store (`$XDG_STATE_HOME/duhem/projects/<path-slug>/duhem.db`, `DUHEM_HOME` honored) instead of per-run `.duhem/runs/<id>/trace.jsonl` files; the trace *wire format* (#10) is unchanged (it lives in the store's `events` rows and in `duhem export` bundles), so `duhem_schema::SCHEMA_VERSION` is unchanged. Breaking surfaces: CLI `duhem run --evidence-dir` → `--db` (+ new `--run-id` pin and `duhem export <run-id>` bundle command); `duhem dashboard --evidence-dir` → `--db`; the `duhem/run` action output `evidence-dir` → `store` + `run-id`. (#189)
 
 ### Reporter contract

@@ -13,7 +13,6 @@
 //! #188). The rollup verdict is the judge's `aggregate_run_set` fold
 //! over recorded verdicts — the dashboard never invents a verdict.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
@@ -70,25 +69,7 @@ impl RunEvidence {
     }
 }
 
-/// `leaf_name` twin (see `duhem-cli`): `duhem.yml` / `duhem.yaml` →
-/// parent dir name; otherwise the file stem.
-pub fn verification_name(definition_path: &str) -> String {
-    let path = Path::new(definition_path);
-    let file_name = path.file_name().and_then(|n| n.to_str());
-    if matches!(file_name, Some("duhem.yml") | Some("duhem.yaml"))
-        && let Some(parent) = path.parent()
-        && let Some(name) = parent.file_name().and_then(|n| n.to_str())
-        && !name.is_empty()
-        && name != "."
-        && name != ".."
-    {
-        return name.to_string();
-    }
-    path.file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("verification")
-        .to_string()
-}
+pub use duhem_evidence::verification_name;
 
 /// Read-only view over the evidence store. Clone-cheap (`Arc`).
 #[derive(Clone)]

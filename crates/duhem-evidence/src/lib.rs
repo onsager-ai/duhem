@@ -32,7 +32,8 @@ pub use event::{
 pub use reader::{ReadError, Trace};
 pub use replay::{ReplayDivergence, ReplayError, ReplayedRun, replay};
 pub use store::{
-    RunMeta, RunRecord, SqliteStore, Store, StoreError, project_db_path, project_slug, state_root,
+    CriterionHistoryEntry, ProjectSummary, RunMeta, RunRecord, RunScope, SqliteStore, Store,
+    StoreError, TargetStatus, project_db_path, project_slug, state_root, verification_name,
 };
 pub use writer::{EvidenceWriter, Sha256Hex, WriterError, run_started};
 

@@ -474,3 +474,307 @@ async fn list_runs_orders_most_recent_first() {
     let ids: Vec<&str> = runs.iter().map(|r| r.run_id.as_str()).collect();
     assert_eq!(ids, vec!["01C", "01B", "01A"]);
 }
+
+// ---------------------------------------------------------------
+// Scoping + provenance (#190)
+// ---------------------------------------------------------------
+
+use duhem_evidence::RunScope;
+
+/// Write a minimal finished run with the given scope and verdict.
+async fn write_scoped_run(
+    store: Arc<SqliteStore>,
+    run_id: &str,
+    definition_path: &str,
+    scope: RunScope,
+    verdict: VerdictState,
+) {
+    let mut w =
+        EvidenceWriter::begin_scoped(store, run_id, definition_path, BTreeMap::new(), scope)
+            .await
+            .unwrap();
+    w.append(run_started(definition_path, BTreeMap::new()))
+        .await
+        .unwrap();
+    w.append(EventPayload::StepStarted {
+        criterion_id: "AC-1".into(),
+        check_id: "AC-1.1".into(),
+        step_index: 0,
+        uses: "api/call".into(),
+        with: BTreeMap::new(),
+    })
+    .await
+    .unwrap();
+    w.append(EventPayload::CriterionFinished {
+        criterion_id: "AC-1".into(),
+        verdict,
+    })
+    .await
+    .unwrap();
+    w.append(EventPayload::RunFinished { verdict })
+        .await
+        .unwrap();
+}
+
+fn scope_for(project: &str, target_sha: &str, verdict_target: &str) -> RunScope {
+    RunScope {
+        project_id: Some(project.to_string()),
+        verifier_repo: Some("github.com/onsager-ai/duhem".to_string()),
+        verifier_sha: Some("deadbeef".to_string()),
+        target_repo: Some(verdict_target.to_string()),
+        target_sha: Some(target_sha.to_string()),
+    }
+}
+
+#[tokio::test]
+async fn migration_is_additive_and_lossless_over_a_pre_scoping_store() {
+    // Build a store as #189 shipped it: apply ONLY migration 0001
+    // (with sqlx's own bookkeeping so the migrator sees it as
+    // applied), insert a run through raw SQL, then open through
+    // `SqliteStore::open` — which applies 0002 — and verify nothing
+    // was lost and append-only still holds.
+    use sqlx::ConnectOptions;
+    use sqlx::migrate::Migration;
+
+    let tmp = TempDir::new().unwrap();
+    let db = tmp.path().join("duhem.db");
+    let migrator = sqlx::migrate!("./migrations");
+    let first: &Migration = migrator
+        .iter()
+        .find(|m| m.version == 1)
+        .expect("migration 0001 present");
+
+    {
+        let mut conn = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&db)
+            .create_if_missing(true)
+            .connect()
+            .await
+            .unwrap();
+        // sqlx's bookkeeping table, exactly as the migrator creates it.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS _sqlx_migrations (\
+             version BIGINT PRIMARY KEY, description TEXT NOT NULL, \
+             installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+             success BOOLEAN NOT NULL, checksum BLOB NOT NULL, \
+             execution_time BIGINT NOT NULL)",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        sqlx::raw_sql(&first.sql).execute(&mut conn).await.unwrap();
+        sqlx::query(
+            "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) \
+             VALUES (?, ?, TRUE, ?, 0)",
+        )
+        .bind(first.version)
+        .bind(&*first.description)
+        .bind(&*first.checksum)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        // A pre-#190 run row + verdict, via the 0001 schema only.
+        sqlx::query(
+            "INSERT INTO runs (run_id, verification, schema_version, inputs, started_at) \
+             VALUES ('01OLD', 'old.yml', 'v1', '{}', '2026-07-01T00:00:00.000Z')",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO events (run_id, seq, ts, kind, payload) VALUES \
+             ('01OLD', 0, '2026-07-01T00:00:00.000Z', 'run_started', \
+             '{\"seq\":0,\"ts\":\"2026-07-01T00:00:00.000Z\",\"kind\":\"run_started\",\"verification_path\":\"old.yml\",\"schema_version\":\"v1\"}')",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    }
+
+    // Reopen through the store: migration 0002 applies additively.
+    let store = SqliteStore::open(&db).await.unwrap();
+    let old = store.get_run("01OLD").await.unwrap().expect("old run kept");
+    assert_eq!(old.verification, "old.yml");
+    assert_eq!(
+        old.scope,
+        RunScope::default(),
+        "pre-scoping rows are unattributed"
+    );
+    assert_eq!(store.run_events("01OLD").await.unwrap().len(), 1);
+
+    // Append-only still enforced post-migration, and new scoped runs land.
+    assert!(
+        sqlx::query("UPDATE runs SET verification = 'tampered'")
+            .execute(store.pool())
+            .await
+            .is_err()
+    );
+    let store = Arc::new(store);
+    write_scoped_run(
+        store.clone(),
+        "01NEW",
+        "verifications/x.yml",
+        scope_for("github.com/acme/app", "abc123", "github.com/acme/app"),
+        VerdictState::Pass,
+    )
+    .await;
+    let new = store.get_run("01NEW").await.unwrap().unwrap();
+    assert_eq!(new.scope.project_id.as_deref(), Some("github.com/acme/app"));
+}
+
+#[tokio::test]
+async fn portfolio_groups_runs_by_project() {
+    let (_tmp, store) = open_store().await;
+    write_scoped_run(
+        store.clone(),
+        "01A",
+        "verifications/app-vd/duhem.yml",
+        scope_for("github.com/acme/app", "sha-a1", "github.com/acme/app"),
+        VerdictState::Pass,
+    )
+    .await;
+    write_scoped_run(
+        store.clone(),
+        "01B",
+        "verifications/app-vd/duhem.yml",
+        scope_for("github.com/acme/app", "sha-a2", "github.com/acme/app"),
+        VerdictState::Fail,
+    )
+    .await;
+    write_scoped_run(
+        store.clone(),
+        "01C",
+        "verifications/lib-vd/duhem.yml",
+        scope_for("github.com/acme/lib", "sha-l1", "github.com/acme/lib"),
+        VerdictState::Pass,
+    )
+    .await;
+    // An unattributed run lands in the `None` bucket.
+    write_scoped_run(
+        store.clone(),
+        "01D",
+        "verifications/misc.yml",
+        RunScope::default(),
+        VerdictState::Pass,
+    )
+    .await;
+
+    let portfolio = store.portfolio().await.unwrap();
+    assert_eq!(
+        portfolio.len(),
+        3,
+        "two projects + unattributed: {portfolio:?}"
+    );
+    let app = portfolio
+        .iter()
+        .find(|p| p.project_id.as_deref() == Some("github.com/acme/app"))
+        .unwrap();
+    assert_eq!(app.run_count, 2);
+    assert_eq!(app.verification_count, 1);
+    assert_eq!(app.latest_run_id.as_deref(), Some("01B"));
+    assert_eq!(app.latest_verdict, Some(VerdictState::Fail));
+    let lib = portfolio
+        .iter()
+        .find(|p| p.project_id.as_deref() == Some("github.com/acme/lib"))
+        .unwrap();
+    assert_eq!(lib.run_count, 1);
+    // The unattributed bucket sorts last.
+    assert!(portfolio.last().unwrap().project_id.is_none());
+}
+
+#[tokio::test]
+async fn criterion_history_tracks_a_criterion_across_runs() {
+    let (_tmp, store) = open_store().await;
+    for (id, verdict) in [
+        ("01A", VerdictState::Pass),
+        ("01B", VerdictState::Fail),
+        ("01C", VerdictState::Pass),
+    ] {
+        write_scoped_run(
+            store.clone(),
+            id,
+            "verifications/login/duhem.yml",
+            scope_for("github.com/acme/app", id, "github.com/acme/app"),
+            verdict,
+        )
+        .await;
+    }
+
+    let history = store.criterion_history("login").await.unwrap();
+    assert_eq!(history.len(), 3, "{history:?}");
+    assert!(history.iter().all(|h| h.criterion_id == "AC-1"));
+    // Newest first (ULID tie-break on identical millis).
+    let ids: Vec<&str> = history.iter().map(|h| h.run_id.as_str()).collect();
+    assert_eq!(ids, vec!["01C", "01B", "01A"]);
+    assert_eq!(history[1].verdict, VerdictState::Fail);
+
+    let runs = store.verification_history("login").await.unwrap();
+    assert_eq!(runs.len(), 3);
+    assert_eq!(runs[0].run_id, "01C");
+}
+
+#[tokio::test]
+async fn target_status_reports_a_failed_sha_as_blocked() {
+    let (_tmp, store) = open_store().await;
+    write_scoped_run(
+        store.clone(),
+        "01A",
+        "verifications/x.yml",
+        scope_for("github.com/acme/app", "badsha", "github.com/acme/app"),
+        VerdictState::Fail,
+    )
+    .await;
+    write_scoped_run(
+        store.clone(),
+        "01B",
+        "verifications/x.yml",
+        scope_for("github.com/acme/app", "goodsha", "github.com/acme/app"),
+        VerdictState::Pass,
+    )
+    .await;
+
+    let bad = store
+        .target_status("github.com/acme/app", "badsha")
+        .await
+        .unwrap()
+        .expect("run recorded");
+    assert!(bad.blocked, "fail verdict blocks the sha");
+    assert_eq!(bad.latest_verdict, Some(VerdictState::Fail));
+    assert_eq!(bad.latest_run_id, "01A");
+
+    let good = store
+        .target_status("github.com/acme/app", "goodsha")
+        .await
+        .unwrap()
+        .expect("run recorded");
+    assert!(!good.blocked, "pass verdict unblocks");
+
+    assert!(
+        store
+            .target_status("github.com/acme/app", "unseen")
+            .await
+            .unwrap()
+            .is_none(),
+        "no evidence = None, caller policy decides"
+    );
+
+    // An unfinished run does not attest: begin a run against a new
+    // sha and never finish it — the sha stays blocked.
+    let w = EvidenceWriter::begin_scoped(
+        store.clone(),
+        "01E",
+        "verifications/x.yml",
+        BTreeMap::new(),
+        scope_for("github.com/acme/app", "inflight", "github.com/acme/app"),
+    )
+    .await
+    .unwrap();
+    drop(w);
+    let inflight = store
+        .target_status("github.com/acme/app", "inflight")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(inflight.blocked, "verdict-less run is not attestation");
+    assert_eq!(inflight.latest_verdict, None);
+}

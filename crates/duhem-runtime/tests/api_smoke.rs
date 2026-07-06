@@ -95,9 +95,14 @@ async fn api_echo_fixture_passes_end_to_end_and_replays() {
         .expect("launch chromium (run `npx playwright install chromium`)");
 
     let tmp = tempfile::tempdir().expect("tempdir");
+    let store = std::sync::Arc::new(
+        duhem_evidence::SqliteStore::open(tmp.path().join("duhem.db"))
+            .await
+            .expect("open store"),
+    );
     let mut engine = Engine::new()
         .with_browser(browser)
-        .with_evidence_root(tmp.path());
+        .with_store(store.clone());
 
     let mut inputs = BTreeMap::new();
     inputs.insert("echo_url".to_string(), serde_json::Value::String(echo_url));
@@ -106,13 +111,13 @@ async fn api_echo_fixture_passes_end_to_end_and_replays() {
     let verdict = engine.run(&def, inputs).await.expect("engine.run");
     assert_eq!(verdict.state, VerdictState::Pass, "verdict = {verdict:?}");
 
-    let entries: Vec<_> = std::fs::read_dir(tmp.path())
-        .expect("readdir")
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .collect();
-    assert_eq!(entries.len(), 1, "exactly one run directory");
-    let trace = Trace::open(&entries[0]).expect("open trace");
+    let runs = duhem_evidence::Store::list_runs(store.as_ref())
+        .await
+        .expect("list runs");
+    assert_eq!(runs.len(), 1, "exactly one run in the store");
+    let trace = Trace::from_store(store.as_ref(), &runs[0].run_id)
+        .await
+        .expect("open trace");
     let replayed = replay(&trace).expect("replay");
     assert_eq!(replayed.run.state, VerdictState::Pass);
 }

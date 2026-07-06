@@ -22,14 +22,15 @@ and §11.2 (trust boundary).
 |---------------------|----------|---------|-------------|
 | `verification-path` | yes      | —       | Path to a `.yml` Verification Definition, **resolved relative to the `onsager-ai/duhem` repo at the pinned action tag** — not relative to the caller's checkout. Absolute paths and paths that normalize to anything outside the Duhem checkout are rejected before invoking `duhem run`; see "Trust contract" below. |
 | `inputs`            | no       | `""`    | Newline-separated `key=value` pairs forwarded as repeated `--inputs key=value` flags to `duhem run`. Coerced per the Verification Definition's typed input catalog. |
-| `reporter`          | no       | `json`  | Stdout reporter (`default` / `quiet` / `json`, plus plugin reporters from `.duhem.toml`). The action's `verdict` + `evidence-dir` outputs depend on parsing the json summary, so leave at the default unless you have a plugin that emits the same single-line JSON contract. |
+| `reporter`          | no       | `json`  | Stdout reporter (`default` / `quiet` / `json`, plus plugin reporters from `.duhem.toml`). The action's `verdict` + `store` outputs depend on parsing the json summary, so leave at the default unless you have a plugin that emits the same single-line JSON contract. |
 
 ## Outputs
 
 | Name           | Description |
 |----------------|-------------|
-| `verdict`      | `pass` / `fail` / `inconclusive:<cause>` as emitted by `duhem run --reporter json`. Empty when the CLI failed before producing a summary (e.g. browser launch failure). |
-| `evidence-dir` | Path on the runner to the per-run evidence directory (`.duhem/runs/<run-id>`). Empty when no summary was produced. |
+| `verdict` | `pass` / `fail` / `inconclusive:<cause>` as emitted by `duhem run --reporter json`. Empty when the CLI failed before producing a summary (e.g. browser launch failure). |
+| `store`   | Path on the runner to the evidence store (SQLite DB) the run was recorded into (`.duhem/duhem.db` inside the Duhem checkout). Empty when no summary was produced. |
+| `run-id`  | The run's ULID inside the store. Empty when no summary was produced. |
 
 ## Exit code contract
 
@@ -37,8 +38,8 @@ The action propagates `duhem run`'s exit code: `0` on `Pass`,
 non-zero on `Fail` or `Inconclusive`. That makes the step turn red on
 a failing verdict, which is what required-check gating relies on.
 Outputs are set in both cases, so downstream `if: failure()` steps
-can still read `verdict` / `evidence-dir` to post comments or upload
-evidence.
+can still read `verdict` / `store` / `run-id` to post comments or
+upload evidence.
 
 ## Usage (from `onsager-ai/onsager`)
 
@@ -81,7 +82,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: duhem-evidence
-          path: ${{ steps.duhem.outputs.evidence-dir }}
+          path: ${{ steps.duhem.outputs.store }}
 ```
 
 Onsager-side branch protection on `main` then adds the

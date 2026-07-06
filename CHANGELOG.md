@@ -20,6 +20,12 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
+- [breaking] Evidence store (#189): the DB is the single source of truth — runs are recorded in a per-working-copy SQLite store (`$XDG_STATE_HOME/duhem/projects/<path-slug>/duhem.db`, `DUHEM_HOME` honored) instead of per-run `.duhem/runs/<id>/trace.jsonl` files; the trace *wire format* (#10) is unchanged (it lives in the store's `events` rows and in `duhem export` bundles), so `duhem_schema::SCHEMA_VERSION` is unchanged. Breaking surfaces: CLI `duhem run --evidence-dir` → `--db` (+ new `--run-id` pin and `duhem export <run-id>` bundle command); `duhem dashboard --evidence-dir` → `--db`; the `duhem/run` action output `evidence-dir` → `store` + `run-id`. (#189)
+
+### Reporter contract
+
+- [breaking] `RunSummary` v1 → **v2** (#189): `evidence_dir` (per-run trace directory) → `store` (evidence-store DB path). The field a plugin used to locate evidence changed name and meaning; plugins pinned to v1 refuse the new shape loudly. `RunSetSummary` stays v1 (wrapper unchanged).
+
 - [additive] db/observe action — the DB analogue of api/poll: re-runs a db/query (Mongo find: or SQL sql:) on an interval until the rows satisfy an until: condition ({row_count: N} or a {path, equals|matches|exists|gte} predicate over rows[i].field/row_count) or a budget elapses; outputs satisfied/rows/row_count. Lets VDs read-after-settle against eventually-consistent backends (e.g. crawlab's async spider sync, #179) instead of one-shot reads that catch a row mid-write. (#181)
 
 - [clarifying] Crawlab regression suite: nodes & schedules PATCH leaves now send the body under the {data:{...}} wrapper (crawlab's generic create/update contract, same as POST/PUT and the spiders leaf) instead of a top-level body that binds nothing; both leaves now assert a partial PATCH preserves unspecified fields (node is_master, schedule name) — the #128 partial-update claim. (#160)

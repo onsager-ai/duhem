@@ -3,20 +3,28 @@
 //! Kept as a separate binary from `duhem` (the #53 alignment
 //! decision) so the web server + SPA toolchain stays out of the core
 //! CLI; `duhem dashboard` shells out to this (#87).
+//!
+//! The dashboard opens the evidence store **read-only** (#189): by
+//! default the working copy's project DB
+//! (`$XDG_STATE_HOME/duhem/projects/<slug>/duhem.db`, `DUHEM_HOME`
+//! honored), or an explicit `--db` path.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
-use duhem_dashboard::{DEFAULT_EVIDENCE_DIR, DEFAULT_PORT, EvidenceReader, export, router};
+use duhem_dashboard::{DEFAULT_PORT, EvidenceReader, export, router};
+use duhem_evidence::SqliteStore;
 
-/// Read-only web dashboard over Duhem run evidence.
+/// Read-only web dashboard over the Duhem evidence store.
 #[derive(Debug, Parser)]
 #[command(name = "duhem-dashboard", version)]
 struct Cli {
-    /// Evidence directory to read runs from.
-    #[arg(long = "evidence-dir", value_name = "PATH", default_value = DEFAULT_EVIDENCE_DIR, global = true)]
-    evidence_dir: PathBuf,
+    /// Evidence store (SQLite DB) to read runs from. Defaults to the
+    /// working copy's project store under the duhem state dir.
+    #[arg(long = "db", value_name = "PATH", global = true)]
+    db: Option<PathBuf>,
 
     /// Listen port (serve mode).
     #[arg(long = "port", value_name = "PORT", default_value_t = DEFAULT_PORT)]
@@ -44,10 +52,46 @@ enum Cmd {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let reader = EvidenceReader::new(&cli.evidence_dir);
+    let rt = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("runtime: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    rt.block_on(run(cli))
+}
+
+async fn run(cli: Cli) -> ExitCode {
+    let db_path = match &cli.db {
+        Some(p) => p.clone(),
+        None => match std::env::current_dir()
+            .map_err(duhem_evidence::StoreError::Io)
+            .and_then(|cwd| duhem_evidence::project_db_path(&cwd))
+        {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("resolve store: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+    };
+
+    // Read-only lens: the dashboard can never mutate the store.
+    let store = match SqliteStore::open_read_only(&db_path).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("open store: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let reader = EvidenceReader::new(Arc::new(store));
 
     match cli.cmd {
-        Some(Cmd::Export { out }) => match export(&reader, &out) {
+        Some(Cmd::Export { out }) => match export(&reader, &out).await {
             Ok(stats) => {
                 println!(
                     "exported {} run(s), {} check page(s), {} artifact(s), {} SPA file(s) to {}",
@@ -64,24 +108,16 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        None => {
-            let rt = match tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(rt) => rt,
-                Err(e) => {
-                    eprintln!("runtime: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            rt.block_on(serve(reader, &cli.host, cli.port))
-        }
+        None => serve(reader, &db_path, &cli.host, cli.port).await,
     }
 }
 
-async fn serve(reader: EvidenceReader, host: &str, port: u16) -> ExitCode {
-    let evidence = reader.root().display().to_string();
+async fn serve(
+    reader: EvidenceReader,
+    db_path: &std::path::Path,
+    host: &str,
+    port: u16,
+) -> ExitCode {
     let listener = match tokio::net::TcpListener::bind((host, port)).await {
         Ok(l) => l,
         Err(e) => {
@@ -93,7 +129,10 @@ async fn serve(reader: EvidenceReader, host: &str, port: u16) -> ExitCode {
         .local_addr()
         .map(|a| a.to_string())
         .unwrap_or_default();
-    println!("duhem dashboard listening on http://{addr}/ (evidence: {evidence})");
+    println!(
+        "duhem dashboard listening on http://{addr}/ (store: {})",
+        db_path.display()
+    );
     match axum::serve(listener, router(reader)).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {

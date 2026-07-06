@@ -42,8 +42,8 @@ fn serve_mode_forwards_flags_and_propagates_exit_code() {
         .env("DUHEM_DASHBOARD_BIN", &bin)
         .args([
             "dashboard",
-            "--evidence-dir",
-            "ev",
+            "--db",
+            "ev.db",
             "--port",
             "8123",
             "--host",
@@ -55,14 +55,7 @@ fn serve_mode_forwards_flags_and_propagates_exit_code() {
     let argv = std::fs::read_to_string(argv_log).unwrap();
     assert_eq!(
         argv.lines().collect::<Vec<_>>(),
-        vec![
-            "--evidence-dir",
-            "ev",
-            "--port",
-            "8123",
-            "--host",
-            "0.0.0.0"
-        ]
+        vec!["--db", "ev.db", "--port", "8123", "--host", "0.0.0.0"]
     );
 }
 
@@ -73,21 +66,14 @@ fn export_mode_forwards_the_subcommand() {
 
     let status = Command::new(duhem_bin())
         .env("DUHEM_DASHBOARD_BIN", &bin)
-        .args([
-            "dashboard",
-            "export",
-            "--out",
-            "site",
-            "--evidence-dir",
-            "ev",
-        ])
+        .args(["dashboard", "export", "--out", "site", "--db", "ev.db"])
         .status()
         .unwrap();
     assert!(status.success());
     let argv = std::fs::read_to_string(argv_log).unwrap();
     assert_eq!(
         argv.lines().collect::<Vec<_>>(),
-        vec!["--evidence-dir", "ev", "export", "--out", "site"]
+        vec!["--db", "ev.db", "export", "--out", "site"]
     );
 }
 
@@ -137,14 +123,24 @@ fn dashboard_serve_end_to_end() {
     );
 
     let evidence = tempfile::tempdir().unwrap();
+    // The dashboard opens the store read-only, so an (empty, migrated)
+    // store must exist first.
+    let db_path = evidence.path().join("duhem.db");
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            duhem_evidence::SqliteStore::open(&db_path).await.unwrap();
+        });
     // Own process group so teardown can kill the `duhem` wrapper AND
     // the `duhem-dashboard` grandchild it spawned — killing only the
     // wrapper would orphan the server (and leak the stdout pipe).
     use std::os::unix::process::CommandExt;
     let mut child = Command::new(duhem_bin())
         .env("DUHEM_DASHBOARD_BIN", &dashboard_bin)
-        .args(["dashboard", "--port", "0", "--evidence-dir"])
-        .arg(evidence.path())
+        .args(["dashboard", "--port", "0", "--db"])
+        .arg(&db_path)
         .stdout(Stdio::piped())
         .process_group(0)
         .spawn()
@@ -179,6 +175,6 @@ fn dashboard_serve_end_to_end() {
     assert!(response.starts_with("HTTP/1.1 200"), "got: {response}");
     assert!(
         response.ends_with("[]"),
-        "empty evidence dir lists no runs: {response}"
+        "empty store lists no runs: {response}"
     );
 }

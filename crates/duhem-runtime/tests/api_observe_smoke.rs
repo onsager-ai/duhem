@@ -90,9 +90,14 @@ async fn api_observe_captures_clicked_post_and_passes_end_to_end() {
         .expect("launch chromium (run `npx playwright install chromium`)");
 
     let tmp = tempfile::tempdir().expect("tempdir");
+    let store = std::sync::Arc::new(
+        duhem_evidence::SqliteStore::open(tmp.path().join("duhem.db"))
+            .await
+            .expect("open store"),
+    );
     let mut engine = Engine::new()
         .with_browser(browser)
-        .with_evidence_root(tmp.path());
+        .with_store(store.clone());
 
     let mut inputs = BTreeMap::new();
     inputs.insert("base_url".to_string(), serde_json::Value::String(base_url));

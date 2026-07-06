@@ -79,9 +79,11 @@ pub(crate) async fn run_setup(
     run: &mut RunState,
     setup: &[Step],
 ) -> Result<SetupResult, EngineError> {
-    writer.append(EventPayload::SetupStarted {
-        step_count: setup.len() as u32,
-    })?;
+    writer
+        .append(EventPayload::SetupStarted {
+            step_count: setup.len() as u32,
+        })
+        .await?;
 
     // Decide up front whether any step in this block needs a real
     // page. Mirrors the per-check logic in `Engine::run_check` so
@@ -137,11 +139,13 @@ pub(crate) async fn run_setup(
             });
         }
 
-        writer.append(EventPayload::SetupStepStarted {
-            step_index: idx as u32,
-            uses: step.uses.clone(),
-            with: with_to_evidence_map(&resolved_with),
-        })?;
+        writer
+            .append(EventPayload::SetupStepStarted {
+                step_index: idx as u32,
+                uses: step.uses.clone(),
+                with: with_to_evidence_map(&resolved_with),
+            })
+            .await?;
 
         let outcome = if aborted.is_some() {
             Outcome::Error
@@ -164,10 +168,12 @@ pub(crate) async fn run_setup(
             }
         };
 
-        writer.append(EventPayload::SetupStepFinished {
-            step_index: idx as u32,
-            outcome: outcome_to_evidence(&outcome),
-        })?;
+        writer
+            .append(EventPayload::SetupStepFinished {
+                step_index: idx as u32,
+                outcome: outcome_to_evidence(&outcome),
+            })
+            .await?;
 
         if aborted.is_none() {
             aborted = match outcome {
@@ -182,9 +188,11 @@ pub(crate) async fn run_setup(
         let _ = cb.close().await;
     }
 
-    writer.append(EventPayload::SetupFinished {
-        aborted: aborted.is_some(),
-    })?;
+    writer
+        .append(EventPayload::SetupFinished {
+            aborted: aborted.is_some(),
+        })
+        .await?;
     Ok(SetupResult { aborted })
 }
 
@@ -216,7 +224,7 @@ async fn invoke_and_record(
             // Setup observations get their own event variant so
             // readers can attribute the observation to the
             // run-level setup block, not a per-check step.
-            append_setup_observation(writer, idx as u32, name.clone(), value.clone())?;
+            append_setup_observation(writer, idx as u32, name.clone(), value.clone()).await?;
         }
     }
     Ok(outcome)
@@ -225,7 +233,7 @@ async fn invoke_and_record(
 /// Mirror of `EvidenceWriter::append_observation` for setup. The
 /// inline-vs-blob policy (`BLOB_INLINE_THRESHOLD_BYTES`) is shared;
 /// only the event variant differs.
-fn append_setup_observation(
+async fn append_setup_observation(
     writer: &mut EvidenceWriter,
     step_index: u32,
     output_name: String,
@@ -234,16 +242,18 @@ fn append_setup_observation(
     use duhem_evidence::{BLOB_INLINE_THRESHOLD_BYTES, ObservationValue};
     let inline_bytes = serde_json::to_vec(&value).map_err(duhem_evidence::WriterError::from)?;
     let obs = if inline_bytes.len() > BLOB_INLINE_THRESHOLD_BYTES {
-        let sha = writer.write_blob(&inline_bytes)?;
+        let sha = writer.write_blob(&inline_bytes).await?;
         ObservationValue::Blob { blob_sha256: sha.0 }
     } else {
         ObservationValue::Inline { value }
     };
-    writer.append(EventPayload::SetupStepObservation {
-        step_index,
-        output_name,
-        value: obs,
-    })?;
+    writer
+        .append(EventPayload::SetupStepObservation {
+            step_index,
+            output_name,
+            value: obs,
+        })
+        .await?;
     Ok(())
 }
 
@@ -291,10 +301,19 @@ mod tests {
         }
     }
 
-    fn make_writer() -> (EvidenceWriter, tempfile::TempDir) {
+    async fn make_writer() -> (EvidenceWriter, tempfile::TempDir) {
         let tmp = tempfile::tempdir().unwrap();
-        let run_dir = tmp.path().join("run");
-        let w = EvidenceWriter::new(&run_dir, "x.yml").unwrap();
+        let store = duhem_evidence::SqliteStore::open(tmp.path().join("duhem.db"))
+            .await
+            .unwrap();
+        let w = EvidenceWriter::begin(
+            std::sync::Arc::new(store),
+            duhem_evidence::new_run_id(),
+            "x.yml",
+            BTreeMap::new(),
+        )
+        .await
+        .unwrap();
         (w, tmp)
     }
 
@@ -309,7 +328,7 @@ mod tests {
 
     #[tokio::test]
     async fn setup_publishes_outputs_into_run_state() {
-        let (mut w, _tmp) = make_writer();
+        let (mut w, _tmp) = make_writer().await;
         let mut registry: ActionRegistry = BTreeMap::new();
         registry.insert(
             "fake/seed",
@@ -334,7 +353,7 @@ mod tests {
 
     #[tokio::test]
     async fn setup_aborts_on_first_error() {
-        let (mut w, _tmp) = make_writer();
+        let (mut w, _tmp) = make_writer().await;
         let mut registry: ActionRegistry = BTreeMap::new();
         registry.insert(
             "fake/boom",
@@ -379,7 +398,7 @@ mod tests {
         // later setup steps from running, and pins the abort reason
         // to `Timeout` (which the engine maps to
         // `Inconclusive(Timeout)` on the run verdict).
-        let (mut w, _tmp) = make_writer();
+        let (mut w, _tmp) = make_writer().await;
         let mut registry: ActionRegistry = BTreeMap::new();
         registry.insert(
             "fake/slow",

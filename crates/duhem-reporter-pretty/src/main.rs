@@ -82,9 +82,9 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
             id_w = id_w
         )?;
     }
-    // Failure detail (v2): under the table, list each non-passing
-    // check and the assertions that explain it, so `fail` is legible
-    // without opening `trace.jsonl`.
+    // Failure detail: under the table, list each non-passing check
+    // and the assertions that explain it, so `fail` is legible
+    // without querying the store.
     if !s.failures.is_empty() {
         writeln!(out)?;
         writeln!(out, "FAILURES")?;
@@ -98,7 +98,7 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
             }
         }
     }
-    writeln!(out, "evidence: {}", s.evidence_dir.display())?;
+    writeln!(out, "store: {} (run {})", s.store.display(), s.run_id)?;
     Ok(())
 }
 
@@ -132,7 +132,7 @@ mod tests {
                     verdict: VerdictState::Pass,
                 },
             ],
-            PathBuf::from(".duhem/runs/01J000000000000000000RUN"),
+            PathBuf::from("state/duhem.db"),
         );
         let mut buf = Vec::new();
         render(&s, &mut buf).unwrap();
@@ -145,8 +145,8 @@ mod tests {
         assert!(out.contains("AC-1"), "AC-1 row: {out}");
         assert!(out.contains("AC-2"), "AC-2 row: {out}");
         assert!(
-            out.contains("evidence: .duhem/runs/01J000000000000000000RUN"),
-            "evidence dir footer: {out}"
+            out.contains("store: state/duhem.db (run 01J000000000000000000RUN)"),
+            "store footer: {out}"
         );
     }
 

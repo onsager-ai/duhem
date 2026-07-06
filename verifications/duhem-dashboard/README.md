@@ -32,19 +32,18 @@ trust role.
 
 No mocks at the boundary (`docs/duhem-spec.md` §8): `environment.up`
 runs the offline `fixture/dashboard-fixture.yml` through the real
-`duhem run` pipeline to write a genuine `trace.jsonl`, then launches the
-real `duhem dashboard` over it.
+`duhem run` pipeline to record a genuine run in the production evidence
+store (#189), then launches the real `duhem dashboard` over it.
 
 ## Holistic posture & the fixture
 
 `scripts/up.sh`:
 
 1. Runs `fixture/dashboard-fixture.yml` (one offline, page-free
-   `cli/invoke` step → verdict `pass`) through `duhem run`, producing a
-   real run's evidence in the production format.
-2. Renames the produced run directory to the fixed id
-   `dashboard-fixture-run` so the VD's URLs are deterministic.
-3. Launches `duhem dashboard --evidence-dir <scratch> --port <port>`
+   `cli/invoke` step → verdict `pass`) through `duhem run --db
+   <scratch>/duhem.db --run-id dashboard-fixture-run`, recording a real
+   run in the production store under a deterministic id.
+2. Launches `duhem dashboard --db <scratch>/duhem.db --port <port>`
    (serve mode), backgrounded in its own process group.
 
 `scripts/down.sh` signals that process group (and a targeted `pkill`

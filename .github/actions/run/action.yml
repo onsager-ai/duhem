@@ -36,10 +36,10 @@ inputs:
     description: |
       Stdout reporter for the post-run summary. Defaults to `json` so
       the action can parse the verdict line. Built-ins: `default`,
-      `quiet`, `json`. The action's verdict + evidence-dir outputs
-      depend on parsing the json summary, so callers should leave this
-      at the default unless they have a plugin reporter that emits the
-      same single-line JSON contract.
+      `quiet`, `json`. The action's verdict + store outputs depend on
+      parsing the json summary, so callers should leave this at the
+      default unless they have a plugin reporter that emits the same
+      single-line JSON contract.
     required: false
     default: "json"
 
@@ -50,11 +50,17 @@ outputs:
       (`pass`, `fail`, or `inconclusive:<cause>`). Empty when the CLI
       failed before producing a summary (e.g. browser launch failure).
     value: ${{ steps.run.outputs.verdict }}
-  evidence-dir:
+  store:
     description: |
-      Path on the runner to the per-run evidence directory
-      (`.duhem/runs/<run-id>`). Empty when no summary was produced.
-    value: ${{ steps.run.outputs.evidence-dir }}
+      Path on the runner to the evidence store (SQLite DB) the run was
+      recorded into; the run's evidence is addressed by this DB plus
+      `run-id`. Empty when no summary was produced.
+    value: ${{ steps.run.outputs.store }}
+  run-id:
+    description: |
+      The run's ULID inside the store. Empty when no summary was
+      produced.
+    value: ${{ steps.run.outputs.run-id }}
 
 runs:
   using: composite
@@ -182,7 +188,7 @@ runs:
         # Inconclusive → non-zero) so the calling workflow step turns
         # red on a failing verdict — that is the verdict-as-status-check
         # contract. But we also want to set `outputs.verdict` /
-        # `outputs.evidence-dir` even when the run failed, so downstream
+        # `outputs.store` / `outputs.run-id` even when the run failed, so downstream
         # steps can post a comment or upload evidence on red. The
         # `set +e` / explicit `exit $RC` dance is what gives us both.
         set +e
@@ -200,8 +206,12 @@ runs:
         done <<< "$VD_INPUTS"
 
         OUT_FILE="$(mktemp)"
+        # The evidence store lands at a workspace-local path on the
+        # runner (not the XDG state dir) so the artifact-upload path
+        # is predictable and the runner's home stays untouched.
         ./target/release/duhem run "$VERIFICATION_PATH" \
           --reporter "$REPORTER" \
+          --db .duhem/duhem.db \
           "${ARGS[@]}" \
           | tee "$OUT_FILE"
         RC=${PIPESTATUS[0]}
@@ -216,20 +226,24 @@ runs:
           SUMMARY="$(grep -E '^\{.*\}$' "$OUT_FILE" | tail -n 1 || true)"
           if [ -n "$SUMMARY" ]; then
             VERDICT="$(printf '%s' "$SUMMARY" | jq -r '.verdict // ""')"
-            EDIR="$(printf '%s' "$SUMMARY" | jq -r '.evidence_dir // ""')"
+            STORE="$(printf '%s' "$SUMMARY" | jq -r '.store // ""')"
+            RUN_ID="$(printf '%s' "$SUMMARY" | jq -r '.run_id // ""')"
           else
             # Reached when the CLI errored before the reporter ran
             # (e.g. browser launch failure, validation error). The
             # action's exit code below still surfaces the failure.
             echo "::warning::duhem/run: no json summary on stdout; outputs.verdict will be empty. Inspect the step log for the underlying error."
             VERDICT=""
-            EDIR=""
+            STORE=""
+            RUN_ID=""
           fi
         else
           VERDICT=""
-          EDIR=""
+          STORE=""
+          RUN_ID=""
         fi
 
         echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
-        echo "evidence-dir=$EDIR" >> "$GITHUB_OUTPUT"
+        echo "store=$STORE" >> "$GITHUB_OUTPUT"
+        echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
         exit "$RC"

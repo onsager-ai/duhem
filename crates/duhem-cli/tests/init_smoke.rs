@@ -58,7 +58,7 @@ fn init_then_validate_passes() {
 fn init_then_validate_then_run_passes_against_example_com() {
     let tmp = tempfile::tempdir().unwrap();
     let target = tmp.path().join("v");
-    let evidence = tmp.path().join("evidence");
+    let db = tmp.path().join("duhem.db");
 
     let init = Command::new(bin())
         .args(["init"])
@@ -86,8 +86,8 @@ fn init_then_validate_then_run_passes_against_example_com() {
     let run = Command::new(bin())
         .args(["run"])
         .arg(target.join("duhem.yml"))
-        .args(["--evidence-dir"])
-        .arg(&evidence)
+        .args(["--db"])
+        .arg(&db)
         .args(["--reporter", "json"])
         .output()
         .expect("spawn run");

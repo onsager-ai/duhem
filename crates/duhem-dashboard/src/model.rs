@@ -13,7 +13,7 @@ use serde::Serialize;
 
 /// Discriminates the two row kinds on the runs list. A `run-set` row
 /// is a verification directory grouping leaf runs (#49 manifest runs
-/// land at `<evidence-dir>/<leaf-name>/<run-id>/`); a `leaf` row is a
+/// group several recorded runs); a `leaf` row is a
 /// single run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]

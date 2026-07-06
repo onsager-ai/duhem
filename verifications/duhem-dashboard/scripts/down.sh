@@ -27,13 +27,13 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 # Belt-and-suspenders: kill any `duhem-dashboard` listener still serving
-# THIS port's scratch evidence dir (the match is unique per port). Guards
+# THIS port's scratch store (the match is unique per port). Guards
 # against a startup race where the group signal missed a just-spawned
 # child.
 if command -v pkill >/dev/null 2>&1; then
-  pkill -KILL -f "duhem-dashboard --evidence-dir ${WORK}/runs" 2>/dev/null || true
+  pkill -KILL -f "duhem-dashboard --db ${WORK}/duhem.db" 2>/dev/null || true
 fi
 
-# Drop the scratch evidence dir so runs don't accumulate.
+# Drop the scratch dir so stores don't accumulate.
 rm -rf "$WORK" 2>/dev/null || true
 exit 0

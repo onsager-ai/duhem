@@ -2,9 +2,10 @@
 //! SSE endpoint, and a fallthrough that serves the embedded SPA
 //! bundle (#86).
 //!
-//! Every handler re-reads the evidence directory on each request —
-//! the MVP's hot-reload posture. The server owns no mutable state and
-//! never invokes the runtime or judge.
+//! Every handler re-queries the evidence store on each request — the
+//! MVP's hot-reload posture. The server holds a read-only store
+//! handle, owns no mutable state, and never invokes the runtime or
+//! judge.
 
 use axum::Router;
 use axum::extract::{Path, State};
@@ -67,11 +68,14 @@ fn strip_json_suffix(s: &str) -> &str {
 }
 
 async fn list_runs(State(reader): State<EvidenceReader>) -> Response {
-    axum::Json(reader.list()).into_response()
+    match reader.list().await {
+        Ok(list) => axum::Json(list).into_response(),
+        Err(e) => e.into_response(),
+    }
 }
 
 async fn run_detail(State(reader): State<EvidenceReader>, Path(run_id): Path<String>) -> Response {
-    match reader.run_detail(strip_json_suffix(&run_id)) {
+    match reader.run_detail(strip_json_suffix(&run_id)).await {
         Ok(Some(detail)) => axum::Json(detail).into_response(),
         Ok(None) => not_found("run"),
         Err(e) => e.into_response(),
@@ -89,7 +93,7 @@ async fn check_detail(
             "expected <criterion-id>::<check-id>",
         );
     };
-    match reader.check_detail(&run_id, criterion_id, check_id) {
+    match reader.check_detail(&run_id, criterion_id, check_id).await {
         Ok(Some(detail)) => axum::Json(detail).into_response(),
         Ok(None) => not_found("check"),
         Err(e) => e.into_response(),
@@ -97,12 +101,12 @@ async fn check_detail(
 }
 
 async fn raw_trace(State(reader): State<EvidenceReader>, Path(run_id): Path<String>) -> Response {
-    let Some(dir) = reader.locate_run(&run_id) else {
-        return not_found("run");
-    };
-    match std::fs::read(dir.join("trace.jsonl")) {
-        Ok(bytes) => ([(header::CONTENT_TYPE, "application/x-ndjson")], bytes).into_response(),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    match reader.raw_events_jsonl(&run_id).await {
+        Ok(Some(jsonl)) => {
+            ([(header::CONTENT_TYPE, "application/x-ndjson")], jsonl).into_response()
+        }
+        Ok(None) => not_found("run"),
+        Err(e) => e.into_response(),
     }
 }
 
@@ -110,7 +114,7 @@ async fn artifact(
     State(reader): State<EvidenceReader>,
     Path((run_id, artifact_id)): Path<(String, String)>,
 ) -> Response {
-    match reader.artifact(&run_id, &artifact_id) {
+    match reader.artifact(&run_id, &artifact_id).await {
         Ok(Some((bytes, mime))) => ([(header::CONTENT_TYPE, mime)], bytes).into_response(),
         Ok(None) => not_found("artifact"),
         Err(e) => e.into_response(),
@@ -118,16 +122,17 @@ async fn artifact(
 }
 
 /// `GET /api/runs/:run_id/live` (#84): replay-then-follow SSE over
-/// the run's trace. Available for finished runs too — the stream then
-/// replays to `run_finished` and closes immediately, which keeps the
-/// client logic mode-free.
+/// the run's event stream. Available for finished runs too — the
+/// stream then replays to `run_finished` and closes immediately,
+/// which keeps the client logic mode-free.
 async fn live(State(reader): State<EvidenceReader>, Path(run_id): Path<String>) -> Response {
-    let Some(dir) = reader.locate_run(&run_id) else {
-        return not_found("run");
-    };
-    Sse::new(live_stream(dir))
-        .keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)))
-        .into_response()
+    match reader.store().get_run(&run_id).await {
+        Ok(Some(_)) => Sse::new(live_stream(reader.store().clone(), run_id))
+            .keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)))
+            .into_response(),
+        Ok(None) => not_found("run"),
+        Err(e) => ReaderError::from(e).into_response(),
+    }
 }
 
 /// Serve the embedded SPA. Unknown non-`/api` paths fall back to

@@ -1,24 +1,23 @@
-//! Read-only evidence reader: walks an evidence directory and builds
-//! the API shapes in [`crate::model`] from `trace.jsonl`.
+//! Read-only evidence reader: builds the API shapes in
+//! [`crate::model`] from the evidence store (#189).
 //!
-//! Layout (set by `duhem-cli`): a single-leaf `duhem run` lands at
-//! `<evidence-dir>/<run-id>/`; a manifest run (#49) lands each leaf at
-//! `<evidence-dir>/<leaf-name>/<run-id>/`. A directory is a run dir
-//! iff it contains `trace.jsonl`.
+//! The reader holds a **read-only** store handle — the read-only-lens
+//! invariant is enforced by the connection (SQLite `mode=ro`), not by
+//! discipline. Every call re-queries the store (the MVP's hot-reload
+//! posture from #53 — no cache, no invalidation bug).
 //!
-//! Parsing is *lenient at the tail*: an in-progress run (#84) may have
-//! a final line still being appended, so only complete
-//! `\n`-terminated lines are parsed (the writer's line-atomicity
-//! guarantee makes this safe). Everything else stays strict — bad
-//! JSON or a non-monotonic `seq` on a complete line is an error, same
-//! posture as `duhem_evidence::Trace`.
+//! Runs are listed flat from the store and grouped by verification
+//! name: a verification with more than one recorded run renders as a
+//! run-set row with its runs as children (the pre-#190 stand-in for
+//! real scoping; it also seeds the ② VD-over-time altitude from
+//! #188). The rollup verdict is the judge's `aggregate_run_set` fold
+//! over recorded verdicts — the dashboard never invents a verdict.
 
-use std::fs;
-use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use duhem_evidence::{Event, EventPayload, ObservationValue, VerdictState};
+use duhem_evidence::{Event, EventPayload, ObservationValue, RunRecord, Store, VerdictState};
 use duhem_judge::{RunVerdict, aggregate_run_set};
 use thiserror::Error;
 
@@ -28,134 +27,52 @@ use crate::model::{
 
 #[derive(Debug, Error)]
 pub enum ReaderError {
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("trace parse error in {run_id} line {line}: {source}")]
-    Parse {
-        run_id: String,
-        line: usize,
-        #[source]
-        source: serde_json::Error,
-    },
-    #[error("trace seq not monotonic in {run_id} line {line}: expected {expected}, got {got}")]
-    SeqNotMonotonic {
-        run_id: String,
-        line: usize,
-        expected: u64,
-        got: u64,
-    },
+    #[error("store error: {0}")]
+    Store(#[from] duhem_evidence::StoreError),
     #[error("artifact id {0:?} is not a 64-char lowercase hex sha-256")]
     BadArtifactId(String),
 }
 
-/// All complete events of one run, plus what the tail told us.
+/// All events of one run plus its store header — the unit the API
+/// models are folded from.
 #[derive(Debug, Clone)]
 pub struct RunEvidence {
-    pub run_id: String,
-    pub run_dir: PathBuf,
+    pub record: RunRecord,
     pub events: Vec<Event>,
-    /// `true` iff a `run_finished` event is present. The inverse is
-    /// the #84 "in progress" predicate.
-    pub finished: bool,
-}
-
-/// Parse the complete (`\n`-terminated) lines of `trace.jsonl` under
-/// `run_dir`. A trailing partial line is ignored, not an error.
-pub fn load_run(run_dir: &Path) -> Result<RunEvidence, ReaderError> {
-    let run_id = dir_name(run_dir);
-    let mut raw = Vec::new();
-    fs::File::open(run_dir.join("trace.jsonl"))?.read_to_end(&mut raw)?;
-    // Drop the partial tail: everything after the last '\n' is a line
-    // still being appended by a live writer.
-    let complete = match raw.iter().rposition(|&b| b == b'\n') {
-        Some(pos) => &raw[..=pos],
-        None => &[][..],
-    };
-
-    let mut events = Vec::new();
-    let mut finished = false;
-    for (idx, line) in complete.split(|&b| b == b'\n').enumerate() {
-        if line.is_empty() {
-            continue;
-        }
-        let evt: Event = serde_json::from_slice(line).map_err(|e| ReaderError::Parse {
-            run_id: run_id.clone(),
-            line: idx + 1,
-            source: e,
-        })?;
-        let expected = events.len() as u64;
-        if evt.seq != expected {
-            return Err(ReaderError::SeqNotMonotonic {
-                run_id: run_id.clone(),
-                line: idx + 1,
-                expected,
-                got: evt.seq,
-            });
-        }
-        if matches!(evt.payload, EventPayload::RunFinished { .. }) {
-            finished = true;
-        }
-        events.push(evt);
-    }
-
-    Ok(RunEvidence {
-        run_id,
-        run_dir: run_dir.to_path_buf(),
-        events,
-        finished,
-    })
 }
 
 impl RunEvidence {
-    pub fn started_at(&self) -> Option<DateTime<Utc>> {
-        self.events.first().map(|e| e.ts)
+    /// `true` iff the run's verdict has landed. The inverse is the
+    /// #84 "in progress" predicate.
+    pub fn finished(&self) -> bool {
+        self.record.verdict.is_some()
     }
 
-    /// Wall-clock span of the trace. Only meaningful once finished.
+    pub fn started_at(&self) -> Option<DateTime<Utc>> {
+        Some(self.record.started_at)
+    }
+
     pub fn duration_ms(&self) -> Option<u64> {
-        if !self.finished {
-            return None;
-        }
-        let first = self.events.first()?.ts;
-        let last = self.events.last()?.ts;
-        u64::try_from((last - first).num_milliseconds()).ok()
+        self.record.duration_ms
     }
 
     /// The judge's recorded run verdict, if the run has finished.
     pub fn verdict(&self) -> Option<VerdictState> {
-        self.events.iter().rev().find_map(|e| match &e.payload {
-            EventPayload::RunFinished { verdict } => Some(*verdict),
-            _ => None,
-        })
+        self.record.verdict
     }
 
-    /// Verification name: prefer `manifest.json`'s `definition_path`,
-    /// fall back to the `run_started` event's `verification_path`,
-    /// then to the run dir name. The path→name rule mirrors the CLI's
-    /// `leaf_name`: a `duhem.yml` leaf is named by its parent dir,
-    /// anything else by its file stem.
+    /// Verification name derived from the recorded definition path.
+    /// The path→name rule mirrors the CLI's `leaf_name`: a `duhem.yml`
+    /// leaf is named by its parent dir, anything else by its file
+    /// stem.
     pub fn verification(&self) -> String {
-        if let Ok(bytes) = fs::read(self.run_dir.join("manifest.json"))
-            && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes)
-            && let Some(path) = v.get("definition_path").and_then(|p| p.as_str())
-        {
-            return verification_name(path);
-        }
-        for e in &self.events {
-            if let EventPayload::RunStarted {
-                verification_path, ..
-            } = &e.payload
-            {
-                return verification_name(verification_path);
-            }
-        }
-        self.run_id.clone()
+        verification_name(&self.record.verification)
     }
 }
 
 /// `leaf_name` twin (see `duhem-cli`): `duhem.yml` / `duhem.yaml` →
 /// parent dir name; otherwise the file stem.
-fn verification_name(definition_path: &str) -> String {
+pub fn verification_name(definition_path: &str) -> String {
     let path = Path::new(definition_path);
     let file_name = path.file_name().and_then(|n| n.to_str());
     if matches!(file_name, Some("duhem.yml") | Some("duhem.yaml"))
@@ -173,179 +90,150 @@ fn verification_name(definition_path: &str) -> String {
         .to_string()
 }
 
-fn dir_name(dir: &Path) -> String {
-    dir.file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
-        .to_string()
-}
-
-fn is_run_dir(dir: &Path) -> bool {
-    dir.join("trace.jsonl").is_file()
-}
-
-/// Read-only view over one evidence directory. Stateless: every call
-/// re-reads the filesystem (the MVP's hot-reload posture from #53 —
-/// no cache, no invalidation bug).
-#[derive(Debug, Clone)]
+/// Read-only view over the evidence store. Clone-cheap (`Arc`).
+#[derive(Clone)]
 pub struct EvidenceReader {
-    root: PathBuf,
+    store: Arc<dyn Store>,
 }
 
 impl EvidenceReader {
-    pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+    /// Wrap a store handle. Callers pass a read-only handle
+    /// (`SqliteStore::open_read_only`) — the dashboard never needs a
+    /// writable one.
+    pub fn new(store: Arc<dyn Store>) -> Self {
+        Self { store }
     }
 
-    pub fn root(&self) -> &Path {
-        &self.root
+    pub fn store(&self) -> &Arc<dyn Store> {
+        &self.store
     }
 
-    /// Find the run dir for `run_id`: directly under the root, or one
-    /// verification-directory level down (#49 layout).
-    pub fn locate_run(&self, run_id: &str) -> Option<PathBuf> {
-        // Run ids are ULIDs minted by the engine; reject path-shaped
-        // input before joining it to the root.
-        if run_id.is_empty()
-            || !run_id
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
-        {
-            return None;
-        }
-        let direct = self.root.join(run_id);
-        if is_run_dir(&direct) {
-            return Some(direct);
-        }
-        for group in read_subdirs(&self.root) {
-            let nested = group.join(run_id);
-            if is_run_dir(&nested) {
-                return Some(nested);
-            }
-        }
-        None
-    }
-
-    /// `GET /api/runs`: leaf rows for runs directly under the root,
-    /// run-set rows (with nested leaf children) for verification
-    /// directories. Unreadable run dirs are skipped — one corrupt
-    /// trace must not take down the whole list.
-    pub fn list(&self) -> Vec<RunsListEntry> {
-        let mut entries = Vec::new();
-        for dir in read_subdirs(&self.root) {
-            if is_run_dir(&dir) {
-                if let Ok(run) = load_run(&dir) {
-                    entries.push(leaf_entry(&run, None));
-                }
-            } else {
-                let group_name = dir_name(&dir);
-                let mut children: Vec<RunsListEntry> = read_subdirs(&dir)
-                    .into_iter()
-                    .filter(|d| is_run_dir(d))
-                    .filter_map(|d| load_run(&d).ok())
-                    .map(|run| leaf_entry(&run, Some(&group_name)))
-                    .collect();
-                if children.is_empty() {
-                    continue;
-                }
-                sort_newest_first(&mut children);
-                entries.push(group_entry(group_name, children));
-            }
-        }
-        sort_newest_first(&mut entries);
-        entries
-    }
-
-    pub fn run_detail(&self, run_id: &str) -> Result<Option<RunDetail>, ReaderError> {
-        let Some(dir) = self.locate_run(run_id) else {
+    async fn load(&self, run_id: &str) -> Result<Option<RunEvidence>, ReaderError> {
+        let Some(record) = self.store.get_run(run_id).await? else {
             return Ok(None);
         };
-        let run = load_run(&dir)?;
-        Ok(Some(build_run_detail(&run, self.group_of(&dir))))
+        let events = self.store.run_events(run_id).await?;
+        Ok(Some(RunEvidence { record, events }))
     }
 
-    pub fn check_detail(
+    /// `GET /api/runs`: leaf rows for verifications with one recorded
+    /// run, run-set rows (children newest-first) for verifications
+    /// with several. Unreadable runs are skipped — one corrupt run
+    /// must not take down the whole list.
+    pub async fn list(&self) -> Result<Vec<RunsListEntry>, ReaderError> {
+        let records = self.store.list_runs().await?;
+
+        // Group by verification name, preserving newest-first order.
+        let mut groups: Vec<(String, Vec<RunsListEntry>)> = Vec::new();
+        for record in records {
+            let name = verification_name(&record.verification);
+            let leaf = leaf_entry_from_record(&record);
+            match groups.iter_mut().find(|(n, _)| *n == name) {
+                Some((_, rows)) => rows.push(leaf),
+                None => groups.push((name, vec![leaf])),
+            }
+        }
+
+        let mut entries: Vec<RunsListEntry> = groups
+            .into_iter()
+            .map(|(name, mut rows)| {
+                if rows.len() == 1 {
+                    rows.pop().expect("one row")
+                } else {
+                    sort_newest_first(&mut rows);
+                    group_entry(name, rows)
+                }
+            })
+            .collect();
+        sort_newest_first(&mut entries);
+        Ok(entries)
+    }
+
+    pub async fn run_detail(&self, run_id: &str) -> Result<Option<RunDetail>, ReaderError> {
+        let Some(run) = self.load(run_id).await? else {
+            return Ok(None);
+        };
+        Ok(Some(build_run_detail(&run)))
+    }
+
+    pub async fn check_detail(
         &self,
         run_id: &str,
         criterion_id: &str,
         check_id: &str,
     ) -> Result<Option<CheckDetail>, ReaderError> {
-        let Some(dir) = self.locate_run(run_id) else {
+        let Some(run) = self.load(run_id).await? else {
             return Ok(None);
         };
-        let run = load_run(&dir)?;
         Ok(build_check_detail(&run, criterion_id, check_id))
     }
 
+    /// The raw wire-format event stream for a run (NDJSON), if the
+    /// run exists.
+    pub async fn raw_events_jsonl(&self, run_id: &str) -> Result<Option<String>, ReaderError> {
+        if self.store.get_run(run_id).await?.is_none() {
+            return Ok(None);
+        }
+        let events = self.store.run_events(run_id).await?;
+        Ok(Some(events_to_jsonl(&events)))
+    }
+
     /// Raw artifact bytes by content address, with a sniffed
-    /// content-type. The hex check mirrors `Trace::read_blob`'s
-    /// traversal guard.
-    pub fn artifact(
+    /// content-type. The hex guard mirrors the store's own.
+    pub async fn artifact(
         &self,
-        run_id: &str,
+        _run_id: &str,
         artifact_id: &str,
     ) -> Result<Option<(Vec<u8>, &'static str)>, ReaderError> {
         if !is_valid_sha256_hex(artifact_id) {
             return Err(ReaderError::BadArtifactId(artifact_id.to_string()));
         }
-        let Some(dir) = self.locate_run(run_id) else {
+        let Some(bytes) = self.store.get_blob(artifact_id).await? else {
             return Ok(None);
         };
-        let path = dir.join("blobs").join(artifact_id);
-        if !path.is_file() {
-            return Ok(None);
-        }
-        let bytes = fs::read(path)?;
         let mime = sniff_content_type(&bytes);
         Ok(Some((bytes, mime)))
     }
-
-    /// Verification-group name when the run dir is nested (#49).
-    fn group_of(&self, run_dir: &Path) -> Option<String> {
-        let parent = run_dir.parent()?;
-        (parent != self.root).then(|| dir_name(parent))
-    }
 }
 
-fn read_subdirs(dir: &Path) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = fs::read_dir(dir)
-        .map(|rd| {
-            rd.filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .filter(|p| p.is_dir())
-                .collect()
-        })
-        .unwrap_or_default();
-    out.sort();
+/// Serialize events back to the wire-format NDJSON (one event JSON
+/// object per line) — the export/raw-trace shape, byte-compatible
+/// with the retired `trace.jsonl` files.
+pub fn events_to_jsonl(events: &[Event]) -> String {
+    let mut out = String::new();
+    for e in events {
+        if let Ok(line) = serde_json::to_string(e) {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
     out
 }
 
 fn sort_newest_first(entries: &mut [RunsListEntry]) {
-    // Newest first; runs with no parseable start (empty trace) sink
-    // to the bottom — a bare `Reverse(Option)` would float them to
-    // the top instead, since `None < Some` pre-reversal.
+    // Newest first; runs with no parseable start sink to the bottom —
+    // a bare `Reverse(Option)` would float them to the top instead,
+    // since `None < Some` pre-reversal.
     entries.sort_by_key(|e| (e.started_at.is_none(), std::cmp::Reverse(e.started_at)));
 }
 
-fn leaf_entry(run: &RunEvidence, group: Option<&str>) -> RunsListEntry {
+fn leaf_entry_from_record(record: &RunRecord) -> RunsListEntry {
     RunsListEntry {
-        run_id: run.run_id.clone(),
-        verification: group
-            .map(str::to_string)
-            .unwrap_or_else(|| run.verification()),
-        started_at: run.started_at(),
-        duration_ms: run.duration_ms(),
-        verdict: run.verdict(),
+        run_id: record.run_id.clone(),
+        verification: verification_name(&record.verification),
+        started_at: Some(record.started_at),
+        duration_ms: record.duration_ms,
+        verdict: record.verdict,
         kind: EntryKind::Leaf,
-        live: !run.finished,
+        live: record.verdict.is_none(),
         children: None,
     }
 }
 
-/// Roll a verification directory up into a run-set row. The rollup
-/// state is the judge's `aggregate_run_set` fold over the *recorded*
-/// child verdicts — the dashboard never invents a verdict. While any
-/// child is still live the rollup is withheld (`None`).
+/// Roll a verification's runs up into a run-set row. The rollup state
+/// is the judge's `aggregate_run_set` fold over the *recorded* child
+/// verdicts — the dashboard never invents a verdict. While any child
+/// is still live the rollup is withheld (`None`).
 fn group_entry(name: String, children: Vec<RunsListEntry>) -> RunsListEntry {
     let verdict = if children.iter().all(|c| c.verdict.is_some()) {
         let runs: Vec<RunVerdict> = children
@@ -376,15 +264,15 @@ fn group_entry(name: String, children: Vec<RunsListEntry>) -> RunsListEntry {
     }
 }
 
-fn build_run_detail(run: &RunEvidence, group: Option<String>) -> RunDetail {
+fn build_run_detail(run: &RunEvidence) -> RunDetail {
     let mut inputs = serde_json::Map::new();
     let mut setup_aborted = false;
-    // First-seen orderings from the trace itself.
+    // First-seen orderings from the event stream itself.
     let mut criterion_order: Vec<String> = Vec::new();
     let mut checks_by_criterion: Vec<(String, Vec<CheckRef>)> = Vec::new();
     // A check belongs to exactly one criterion (replay rejects
     // conflicting mappings outright); first `step_started` wins here
-    // so a malformed trace can't smear one check's verdict across
+    // so a malformed stream can't smear one check's verdict across
     // criteria.
     let mut criterion_of_check: Vec<(String, String)> = Vec::new();
     let mut run_verdict = None;
@@ -436,7 +324,7 @@ fn build_run_detail(run: &RunEvidence, group: Option<String>) -> RunDetail {
                     });
                 // Only the owning criterion lists the check; a
                 // colliding `step_started` under another criterion is
-                // a malformed trace and must not duplicate the row.
+                // a malformed stream and must not duplicate the row.
                 if owner == *criterion_id {
                     note_check(
                         &mut criterion_order,
@@ -494,12 +382,12 @@ fn build_run_detail(run: &RunEvidence, group: Option<String>) -> RunDetail {
         .collect();
 
     RunDetail {
-        run_id: run.run_id.clone(),
-        verification: group.unwrap_or_else(|| run.verification()),
+        run_id: run.record.run_id.clone(),
+        verification: run.verification(),
         started_at: run.started_at(),
         inputs,
         verdict: run_verdict,
-        live: !run.finished,
+        live: !run.finished(),
         setup_aborted,
         criteria,
     }
@@ -573,7 +461,7 @@ fn build_check_detail(
             } => Some(ArtifactRef {
                 id: blob_sha256.clone(),
                 kind: output_name.clone(),
-                url: format!("/api/runs/{}/artifact/{}", run.run_id, blob_sha256),
+                url: format!("/api/runs/{}/artifact/{}", run.record.run_id, blob_sha256),
             }),
             _ => None,
         })
@@ -593,7 +481,7 @@ fn is_valid_sha256_hex(s: &str) -> bool {
 }
 
 /// Cheap content sniff for artifact serving and export extensions.
-/// Blobs carry no media type in the trace (the observation's
+/// Blobs carry no media type in the stream (the observation's
 /// `output_name` is a label, not a MIME), so the bytes decide.
 pub fn sniff_content_type(bytes: &[u8]) -> &'static str {
     if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {

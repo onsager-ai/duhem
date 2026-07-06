@@ -1,6 +1,7 @@
 //! Event schema for the append-only run trace.
 //!
-//! Every line of `trace.jsonl` deserializes to exactly one [`Event`].
+//! Every wire-format event line (an `events.payload` row, an export
+//! bundle line) deserializes to exactly one [`Event`].
 //! The variants here are the closed set: an unknown `kind` on read is
 //! a hard error (see `reader.rs`). New kinds in future minor versions
 //! are additive — existing kinds are stable, per the v1 schema
@@ -31,15 +32,15 @@ pub(crate) mod ts_ms {
     }
 }
 
-/// On-disk schema version carried in `manifest.json` and (redundantly)
-/// in every `run_started` event. The redundancy is on purpose: the
-/// manifest can be lost or copied without the directory and the trace
-/// must still be self-describing.
+/// Trace wire version carried on the run header row and (redundantly)
+/// in every `run_started` event. The redundancy is on purpose: an
+/// exported event stream must stay self-describing without the store
+/// row next to it.
 pub const SCHEMA_VERSION: &str = "v1";
 
 /// Inline-vs-blob threshold for `step_observation.value`. Values whose
-/// serialized byte length exceeds this are written to `blobs/` and the
-/// event carries `blob_sha256` instead.
+/// serialized byte length exceeds this are written to the artifact
+/// store and the event carries `blob_sha256` instead.
 pub const BLOB_INLINE_THRESHOLD_BYTES: usize = 4 * 1024;
 
 /// Outcome of a single step invocation. Distinct from a verdict —
@@ -68,14 +69,16 @@ pub use duhem_judge::VerdictState;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ObservationValue {
-    /// Blob reference. The bytes live at `blobs/<sha256>`.
+    /// Blob reference. The bytes live in the artifact store under
+    /// this content address.
     Blob { blob_sha256: String },
     /// Inline JSON value.
     Inline { value: serde_json::Value },
 }
 
-/// One line in `trace.jsonl`. The `seq` field is monotonic per run
-/// (gap = bug) and `ts` is RFC 3339 with millisecond precision.
+/// One event on a run's wire-format stream. The `seq` field is
+/// monotonic per run (gap = bug) and `ts` is RFC 3339 with
+/// millisecond precision.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Event {
     /// Monotonic per run, starting at 0. A backwards-or-flat seq on
@@ -109,7 +112,7 @@ pub enum EventPayload {
     EnvUpFinished {
         exit_code: i32,
         duration_ms: u64,
-        /// Content-addressed reference into `blobs/` for the captured
+        /// Content-addressed artifact reference for the captured
         /// stdout stream. `None` when the script produced no stdout
         /// (or `--no-env-up` skipped the invocation).
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -200,6 +203,33 @@ pub enum EventPayload {
 }
 
 impl EventPayload {
+    /// The wire discriminant for this payload — the same string the
+    /// `kind` tag carries on the serialized form. The store keeps it
+    /// in a dedicated column so events can be filtered without JSON
+    /// extraction.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            EventPayload::RunStarted { .. } => "run_started",
+            EventPayload::EnvUpStarted { .. } => "env_up_started",
+            EventPayload::EnvUpFinished { .. } => "env_up_finished",
+            EventPayload::EnvReady { .. } => "env_ready",
+            EventPayload::EnvDownStarted { .. } => "env_down_started",
+            EventPayload::EnvDownFinished { .. } => "env_down_finished",
+            EventPayload::SetupStarted { .. } => "setup_started",
+            EventPayload::SetupStepStarted { .. } => "setup_step_started",
+            EventPayload::SetupStepObservation { .. } => "setup_step_observation",
+            EventPayload::SetupStepFinished { .. } => "setup_step_finished",
+            EventPayload::SetupFinished { .. } => "setup_finished",
+            EventPayload::StepStarted { .. } => "step_started",
+            EventPayload::StepObservation { .. } => "step_observation",
+            EventPayload::StepFinished { .. } => "step_finished",
+            EventPayload::AssertionEvaluated { .. } => "assertion_evaluated",
+            EventPayload::CheckFinished { .. } => "check_finished",
+            EventPayload::CriterionFinished { .. } => "criterion_finished",
+            EventPayload::RunFinished { .. } => "run_finished",
+        }
+    }
+
     /// Whether this payload requires an `fsync` after the line is
     /// written. The contract from issue #10: fsync at every
     /// `*_finished` event, buffer step observations.

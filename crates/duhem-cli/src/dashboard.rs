@@ -39,9 +39,10 @@ pub fn resolve_binary(env_override: Option<&str>, current_exe: Option<&Path>) ->
 /// The `duhem dashboard` clap surface (#87).
 #[derive(Debug, Args)]
 pub struct DashboardOpts {
-    /// Evidence directory to read runs from (default `.duhem/runs`).
-    #[arg(long = "evidence-dir", value_name = "PATH", global = true)]
-    pub evidence_dir: Option<PathBuf>,
+    /// Evidence store (SQLite DB) to read runs from. Defaults to the
+    /// working copy's project store under the duhem state dir.
+    #[arg(long = "db", value_name = "PATH", global = true)]
+    pub db: Option<PathBuf>,
     /// Listen port (serve mode; default 7878).
     #[arg(long = "port", value_name = "PORT")]
     pub port: Option<u16>,
@@ -65,7 +66,7 @@ pub enum DashboardCmd {
 
 /// Arguments for the child, mirroring the `duhem dashboard` surface.
 pub struct DashboardArgs {
-    pub evidence_dir: Option<PathBuf>,
+    pub db: Option<PathBuf>,
     pub port: Option<u16>,
     pub host: Option<String>,
     /// `Some(out)` selects export mode.
@@ -75,13 +76,13 @@ pub struct DashboardArgs {
 impl From<DashboardOpts> for DashboardArgs {
     fn from(opts: DashboardOpts) -> Self {
         let DashboardOpts {
-            evidence_dir,
+            db,
             port,
             host,
             cmd,
         } = opts;
         DashboardArgs {
-            evidence_dir,
+            db,
             port,
             host,
             export_out: cmd.map(|DashboardCmd::Export { out }| out),
@@ -91,9 +92,9 @@ impl From<DashboardOpts> for DashboardArgs {
 
 pub fn forward_args(args: &DashboardArgs) -> Vec<String> {
     let mut argv = Vec::new();
-    if let Some(dir) = &args.evidence_dir {
-        argv.push("--evidence-dir".into());
-        argv.push(dir.display().to_string());
+    if let Some(db) = &args.db {
+        argv.push("--db".into());
+        argv.push(db.display().to_string());
     }
     match &args.export_out {
         Some(out) => {
@@ -183,7 +184,7 @@ mod tests {
     #[test]
     fn serve_flags_forward_and_export_selects_the_subcommand() {
         let serve = DashboardArgs {
-            evidence_dir: Some(PathBuf::from(".duhem/runs")),
+            db: Some(PathBuf::from("state/duhem.db")),
             port: Some(8080),
             host: Some("0.0.0.0".into()),
             export_out: None,
@@ -191,8 +192,8 @@ mod tests {
         assert_eq!(
             forward_args(&serve),
             vec![
-                "--evidence-dir",
-                ".duhem/runs",
+                "--db",
+                "state/duhem.db",
                 "--port",
                 "8080",
                 "--host",
@@ -201,7 +202,7 @@ mod tests {
         );
 
         let export = DashboardArgs {
-            evidence_dir: None,
+            db: None,
             port: Some(8080), // serve-only flag: not forwarded in export mode
             host: None,
             export_out: Some(PathBuf::from("site/")),

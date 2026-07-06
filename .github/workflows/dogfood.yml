@@ -144,8 +144,8 @@ jobs:
             plan_id=duhem-fixture-${{ github.run_id }}
 
       - name: Surface evidence on red
-        if: failure() && steps.duhem.outputs.evidence-dir != ''
+        if: failure() && steps.duhem.outputs.store != ''
         uses: actions/upload-artifact@v4
         with:
           name: duhem-evidence
-          path: ${{ steps.duhem.outputs.evidence-dir }}
+          path: ${{ steps.duhem.outputs.store }}

@@ -79,9 +79,13 @@ criteria:
     let def = VerificationDefinition::from_yaml_str(&std::fs::read_to_string(&vd_path).unwrap())
         .expect("parse");
 
-    let evidence_root = tmp.path().join("runs");
+    let store = std::sync::Arc::new(
+        duhem_evidence::SqliteStore::open(tmp.path().join("duhem.db"))
+            .await
+            .expect("open store"),
+    );
     let mut engine = Engine::new()
-        .with_evidence_root(&evidence_root)
+        .with_store(store.clone())
         .with_definition_path(vd_path.display().to_string());
 
     let outcome = engine
@@ -90,7 +94,10 @@ criteria:
         .expect("engine run");
     assert_eq!(outcome.verdict.state, VerdictState::Pass);
 
-    let events = Trace::open(&outcome.run_dir).unwrap().into_events();
+    let events = Trace::from_store(store.as_ref(), &outcome.run_id)
+        .await
+        .unwrap()
+        .into_events();
 
     // Locate the canonical sequence of Env*/RunFinished events and
     // assert document order.
@@ -175,9 +182,13 @@ criteria:
 
     let def = VerificationDefinition::from_yaml_str(&std::fs::read_to_string(&vd_path).unwrap())
         .expect("parse");
-    let evidence_root = tmp.path().join("runs");
+    let store = std::sync::Arc::new(
+        duhem_evidence::SqliteStore::open(tmp.path().join("duhem.db"))
+            .await
+            .expect("open store"),
+    );
     let mut engine = Engine::new()
-        .with_evidence_root(&evidence_root)
+        .with_store(store.clone())
         .with_definition_path(vd_path.display().to_string());
 
     let mut inputs = BTreeMap::new();

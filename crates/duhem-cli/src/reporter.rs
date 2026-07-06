@@ -105,6 +105,7 @@ pub fn render(
     reporter: &Reporter,
     out: &mut dyn Write,
     outcome: &RunOutcome,
+    store_db: &std::path::Path,
 ) -> Result<(), RenderError> {
     match reporter {
         Reporter::Default => {
@@ -115,7 +116,7 @@ pub fn render(
         }
         Reporter::Quiet => Ok(()),
         Reporter::Json => {
-            let summary = build_summary(outcome);
+            let summary = build_summary(outcome, store_db);
             // One JSON object per run, newline-terminated. Authors
             // who want bulk-parsing get JSON-lines-friendly output.
             serde_json::to_writer(&mut *out, &summary)
@@ -123,7 +124,7 @@ pub fn render(
             writeln!(out)?;
             Ok(())
         }
-        Reporter::Plugin { name, argv } => render_plugin(name, argv, out, outcome),
+        Reporter::Plugin { name, argv } => render_plugin(name, argv, out, outcome, store_db),
     }
 }
 
@@ -144,6 +145,7 @@ pub fn render_set(
     out: &mut dyn Write,
     leaves: &[(String, RunOutcome)],
     set_verdict: &RunSetVerdict,
+    store_db: &std::path::Path,
 ) -> Result<(), RenderError> {
     match reporter {
         Reporter::Default => {
@@ -155,7 +157,10 @@ pub fn render_set(
         }
         Reporter::Quiet => Ok(()),
         Reporter::Json => {
-            let runs: Vec<RunSummary> = leaves.iter().map(|(_, o)| build_summary(o)).collect();
+            let runs: Vec<RunSummary> = leaves
+                .iter()
+                .map(|(_, o)| build_summary(o, store_db))
+                .collect();
             let summary = RunSetSummary::new(set_verdict.state, runs);
             serde_json::to_writer(&mut *out, &summary)
                 .map_err(|e| RenderError::Io(std::io::Error::other(e)))?;
@@ -171,7 +176,7 @@ pub fn render_set(
             // #60 review).
             let mut tracked = NewlineTracker::new(out);
             for (_, outcome) in leaves {
-                render_plugin(name, argv, &mut tracked, outcome)?;
+                render_plugin(name, argv, &mut tracked, outcome, store_db)?;
             }
             if !tracked.at_line_start() {
                 writeln!(&mut tracked)?;
@@ -222,7 +227,7 @@ impl Write for NewlineTracker<'_> {
 
 /// Append per-failing-check assertion detail under a `fail` /
 /// `inconclusive` verdict line, so an author sees *which* assertion
-/// failed (and any cause) without opening `trace.jsonl`. Nothing is
+/// failed (and any cause) without querying the store. Nothing is
 /// written for a passing run (`failures` is empty). ASCII-only and
 /// ANSI-free, matching the built-in reporters' plain posture.
 fn write_failures(out: &mut dyn Write, failures: &[CheckFailure]) -> Result<(), RenderError> {
@@ -248,7 +253,7 @@ fn write_warnings(out: &mut dyn Write, warnings: &[String]) -> Result<(), Render
     Ok(())
 }
 
-fn build_summary(o: &RunOutcome) -> RunSummary {
+fn build_summary(o: &RunOutcome, store_db: &std::path::Path) -> RunSummary {
     let failures = o
         .failures
         .iter()
@@ -277,7 +282,7 @@ fn build_summary(o: &RunOutcome) -> RunSummary {
                 verdict: c.state,
             })
             .collect(),
-        o.run_dir.clone(),
+        store_db.to_path_buf(),
     )
     .with_failures(failures)
     .with_warnings(o.warnings.clone())
@@ -305,6 +310,7 @@ fn render_plugin(
     argv: &[String],
     out: &mut dyn Write,
     outcome: &RunOutcome,
+    store_db: &std::path::Path,
 ) -> Result<(), RenderError> {
     // argv is non-empty per `PluginRegistry::load`'s validation, so
     // [0] is safe.
@@ -320,7 +326,7 @@ fn render_plugin(
 
     // Serialize the RunSummary up-front so the writer thread doesn't
     // need to know about it.
-    let summary = build_summary(outcome);
+    let summary = build_summary(outcome, store_db);
     let line =
         serde_json::to_vec(&summary).map_err(|e| RenderError::Io(std::io::Error::other(e)))?;
 
@@ -371,7 +377,7 @@ fn render_plugin(
 /// without going through stdout.
 #[cfg(test)]
 pub(crate) fn json_line_for(outcome: &RunOutcome) -> String {
-    let summary = build_summary(outcome);
+    let summary = build_summary(outcome, std::path::Path::new("state/duhem.db"));
     serde_json::to_string(&summary).unwrap()
 }
 
@@ -412,7 +418,6 @@ mod tests {
     use duhem_judge::{
         CheckVerdict, CriterionVerdict, InconclusiveCause, RunVerdict, VerdictState,
     };
-    use std::path::PathBuf;
 
     fn outcome(state: VerdictState) -> RunOutcome {
         RunOutcome {
@@ -428,7 +433,6 @@ mod tests {
                 }],
             },
             run_id: "01J000000000000000000RUN".into(),
-            run_dir: PathBuf::from(".duhem/runs/01J000000000000000000RUN"),
             failures: Vec::new(),
             warnings: Vec::new(),
         }
@@ -436,7 +440,13 @@ mod tests {
 
     fn capture(reporter: &Reporter, o: &RunOutcome) -> String {
         let mut buf = Vec::new();
-        render(reporter, &mut buf, o).unwrap();
+        render(
+            reporter,
+            &mut buf,
+            o,
+            std::path::Path::new("state/duhem.db"),
+        )
+        .unwrap();
         String::from_utf8(buf).unwrap()
     }
 
@@ -471,11 +481,11 @@ mod tests {
         assert_eq!(v["verdict"], "pass");
         assert_eq!(v["criteria"][0]["id"], "AC-1");
         assert_eq!(v["criteria"][0]["verdict"], "pass");
-        assert_eq!(v["evidence_dir"], ".duhem/runs/01J000000000000000000RUN");
+        assert_eq!(v["store"], "state/duhem.db");
         // Spec on #34: the contract surfaces schema_version on the wire.
-        // The `failures` addition (#125) is additive, so the version
-        // stays "1" — see RunSummary::SCHEMA_VERSION (#129).
-        assert_eq!(v["schema_version"], "1");
+        // v2 (#189): `evidence_dir` → `store`, a breaking rename — see
+        // RunSummary::SCHEMA_VERSION.
+        assert_eq!(v["schema_version"], "2");
     }
 
     #[test]
@@ -561,7 +571,13 @@ mod tests {
         };
         let o = outcome(VerdictState::Pass);
         let mut buf = Vec::new();
-        let err = render(&plugin, &mut buf, &o).unwrap_err();
+        let err = render(
+            &plugin,
+            &mut buf,
+            &o,
+            std::path::Path::new("state/duhem.db"),
+        )
+        .unwrap_err();
         match err {
             RenderError::PluginExit { name, code, .. } => {
                 assert_eq!(name, "boom");
@@ -590,7 +606,14 @@ mod tests {
         set: &RunSetVerdict,
     ) -> String {
         let mut buf = Vec::new();
-        render_set(reporter, &mut buf, leaves, set).unwrap();
+        render_set(
+            reporter,
+            &mut buf,
+            leaves,
+            set,
+            std::path::Path::new("state/duhem.db"),
+        )
+        .unwrap();
         String::from_utf8(buf).unwrap()
     }
 
@@ -637,7 +660,13 @@ mod tests {
         };
         let o = outcome(VerdictState::Pass);
         let mut buf = Vec::new();
-        let err = render(&plugin, &mut buf, &o).unwrap_err();
+        let err = render(
+            &plugin,
+            &mut buf,
+            &o,
+            std::path::Path::new("state/duhem.db"),
+        )
+        .unwrap_err();
         match err {
             RenderError::PluginSpawn { name, .. } => assert_eq!(name, "nope"),
             other => panic!("expected PluginSpawn, got {other}"),

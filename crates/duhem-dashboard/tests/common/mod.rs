@@ -1,6 +1,6 @@
-//! Shared fixtures: realistic traces written through the production
-//! `EvidenceWriter`, so the dashboard tests exercise the same wire
-//! format `duhem run` produces.
+//! Shared fixtures: realistic runs written through the production
+//! `EvidenceWriter` into a real `SqliteStore`, so the dashboard tests
+//! exercise the same write path `duhem run` produces.
 //!
 //! Each integration-test binary compiles this module independently
 //! and uses a different subset of the fixtures, so the unused-item
@@ -8,10 +8,11 @@
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::sync::Arc;
 
 use duhem_evidence::{
-    EventPayload, EvidenceWriter, ObservationValue, StepOutcome, VerdictState, run_started,
+    EventPayload, EvidenceWriter, ObservationValue, SqliteStore, StepOutcome, VerdictState,
+    run_started,
 };
 use duhem_judge::InconclusiveCause;
 
@@ -23,6 +24,20 @@ pub fn png_bytes() -> Vec<u8> {
     bytes
 }
 
+/// A fresh store in a tempdir, plus a read-only handle onto the same
+/// DB (the dashboard's view).
+pub async fn open_stores() -> (tempfile::TempDir, Arc<SqliteStore>, Arc<SqliteStore>) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let db = tmp.path().join("duhem.db");
+    let rw = Arc::new(SqliteStore::open(&db).await.expect("open store"));
+    let ro = Arc::new(
+        SqliteStore::open_read_only(&db)
+            .await
+            .expect("open read-only store"),
+    );
+    (tmp, rw, ro)
+}
+
 fn inputs() -> BTreeMap<String, serde_json::Value> {
     let mut m = BTreeMap::new();
     m.insert("workspace_name".into(), serde_json::json!("ws-fixture"));
@@ -32,12 +47,21 @@ fn inputs() -> BTreeMap<String, serde_json::Value> {
 /// A finished, passing run with env + setup + one criterion (AC-1)
 /// holding one check (AC-1.1) of two steps; the second step records a
 /// PNG blob artifact. Returns the blob's sha-256.
-pub fn write_passing_run(run_dir: &Path, definition_path: &str) -> String {
-    let mut w = EvidenceWriter::new(run_dir, definition_path).expect("writer");
-    w.append(run_started(definition_path, inputs())).unwrap();
+pub async fn write_passing_run(
+    store: Arc<SqliteStore>,
+    run_id: &str,
+    definition_path: &str,
+) -> String {
+    let mut w = EvidenceWriter::begin(store, run_id, definition_path, inputs())
+        .await
+        .expect("writer");
+    w.append(run_started(definition_path, inputs()))
+        .await
+        .unwrap();
     w.append(EventPayload::EnvUpStarted {
         command: "./up.sh".into(),
     })
+    .await
     .unwrap();
     w.append(EventPayload::EnvUpFinished {
         exit_code: 0,
@@ -45,20 +69,24 @@ pub fn write_passing_run(run_dir: &Path, definition_path: &str) -> String {
         stdout_blob_sha256: None,
         stderr_blob_sha256: None,
     })
+    .await
     .unwrap();
     w.append(EventPayload::EnvReady {
         probe_kind: "http".into(),
         ok: true,
         elapsed_ms: 30,
     })
+    .await
     .unwrap();
     w.append(EventPayload::SetupStarted { step_count: 1 })
+        .await
         .unwrap();
     w.append(EventPayload::SetupStepStarted {
         step_index: 0,
         uses: "ui/navigate".into(),
         with: BTreeMap::new(),
     })
+    .await
     .unwrap();
     w.append(EventPayload::SetupStepObservation {
         step_index: 0,
@@ -67,13 +95,16 @@ pub fn write_passing_run(run_dir: &Path, definition_path: &str) -> String {
             value: serde_json::json!("http://sut/"),
         },
     })
+    .await
     .unwrap();
     w.append(EventPayload::SetupStepFinished {
         step_index: 0,
         outcome: StepOutcome::Ok,
     })
+    .await
     .unwrap();
     w.append(EventPayload::SetupFinished { aborted: false })
+        .await
         .unwrap();
 
     w.append(EventPayload::StepStarted {
@@ -83,6 +114,7 @@ pub fn write_passing_run(run_dir: &Path, definition_path: &str) -> String {
         uses: "ui/navigate".into(),
         with: BTreeMap::new(),
     })
+    .await
     .unwrap();
     w.append(EventPayload::StepObservation {
         step_index: 0,
@@ -91,14 +123,16 @@ pub fn write_passing_run(run_dir: &Path, definition_path: &str) -> String {
             value: serde_json::json!("http://sut/projects"),
         },
     })
+    .await
     .unwrap();
     w.append(EventPayload::StepFinished {
         step_index: 0,
         outcome: StepOutcome::Ok,
     })
+    .await
     .unwrap();
 
-    let sha = w.write_blob(&png_bytes()).unwrap();
+    let sha = w.write_blob(&png_bytes()).await.unwrap();
     w.append(EventPayload::StepStarted {
         criterion_id: "AC-1".into(),
         check_id: "AC-1.1".into(),
@@ -106,6 +140,7 @@ pub fn write_passing_run(run_dir: &Path, definition_path: &str) -> String {
         uses: "ui/assert-element".into(),
         with: BTreeMap::new(),
     })
+    .await
     .unwrap();
     w.append(EventPayload::StepObservation {
         step_index: 1,
@@ -114,11 +149,13 @@ pub fn write_passing_run(run_dir: &Path, definition_path: &str) -> String {
             blob_sha256: sha.as_str().to_string(),
         },
     })
+    .await
     .unwrap();
     w.append(EventPayload::StepFinished {
         step_index: 1,
         outcome: StepOutcome::Ok,
     })
+    .await
     .unwrap();
 
     w.append(EventPayload::AssertionEvaluated {
@@ -127,30 +164,37 @@ pub fn write_passing_run(run_dir: &Path, definition_path: &str) -> String {
         state: VerdictState::Pass,
         detail: None,
     })
+    .await
     .unwrap();
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
         verdict: VerdictState::Pass,
     })
+    .await
     .unwrap();
     w.append(EventPayload::CriterionFinished {
         criterion_id: "AC-1".into(),
         verdict: VerdictState::Pass,
     })
+    .await
     .unwrap();
     w.append(EventPayload::RunFinished {
         verdict: VerdictState::Pass,
     })
+    .await
     .unwrap();
-    w.finish().unwrap();
+    w.finish().await.unwrap();
     sha.as_str().to_string()
 }
 
 /// A finished failing run: one criterion, one check, one failing
 /// assertion.
-pub fn write_failing_run(run_dir: &Path, definition_path: &str) {
-    let mut w = EvidenceWriter::new(run_dir, definition_path).expect("writer");
+pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition_path: &str) {
+    let mut w = EvidenceWriter::begin(store, run_id, definition_path, BTreeMap::new())
+        .await
+        .expect("writer");
     w.append(run_started(definition_path, BTreeMap::new()))
+        .await
         .unwrap();
     w.append(EventPayload::StepStarted {
         criterion_id: "AC-1".into(),
@@ -159,11 +203,13 @@ pub fn write_failing_run(run_dir: &Path, definition_path: &str) {
         uses: "api/call".into(),
         with: BTreeMap::new(),
     })
+    .await
     .unwrap();
     w.append(EventPayload::StepFinished {
         step_index: 0,
         outcome: StepOutcome::Ok,
     })
+    .await
     .unwrap();
     w.append(EventPayload::AssertionEvaluated {
         check_id: "AC-1.1".into(),
@@ -171,59 +217,73 @@ pub fn write_failing_run(run_dir: &Path, definition_path: &str) {
         state: VerdictState::Fail,
         detail: Some("status 500 != 200".into()),
     })
+    .await
     .unwrap();
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
         verdict: VerdictState::Fail,
     })
+    .await
     .unwrap();
     w.append(EventPayload::CriterionFinished {
         criterion_id: "AC-1".into(),
         verdict: VerdictState::Fail,
     })
+    .await
     .unwrap();
     w.append(EventPayload::RunFinished {
         verdict: VerdictState::Fail,
     })
+    .await
     .unwrap();
-    w.finish().unwrap();
+    w.finish().await.unwrap();
 }
 
 /// A setup-aborted run, mirroring the engine's abort path (#20): no
 /// checks ran, `setup_finished { aborted: true }`, run verdict
 /// `inconclusive:environment_error`.
-pub fn write_aborted_run(run_dir: &Path, definition_path: &str) {
-    let mut w = EvidenceWriter::new(run_dir, definition_path).expect("writer");
+pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition_path: &str) {
+    let mut w = EvidenceWriter::begin(store, run_id, definition_path, BTreeMap::new())
+        .await
+        .expect("writer");
     w.append(run_started(definition_path, BTreeMap::new()))
+        .await
         .unwrap();
     w.append(EventPayload::SetupStarted { step_count: 1 })
+        .await
         .unwrap();
     w.append(EventPayload::SetupStepStarted {
         step_index: 0,
         uses: "api/call".into(),
         with: BTreeMap::new(),
     })
+    .await
     .unwrap();
     w.append(EventPayload::SetupStepFinished {
         step_index: 0,
         outcome: StepOutcome::Error,
     })
+    .await
     .unwrap();
     w.append(EventPayload::SetupFinished { aborted: true })
+        .await
         .unwrap();
     w.append(EventPayload::RunFinished {
         verdict: VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
     })
+    .await
     .unwrap();
-    w.finish().unwrap();
+    w.finish().await.unwrap();
 }
 
-/// An in-progress run (#84): a step has started, no `run_finished`,
-/// and the file ends with a partially-appended line that a lenient
-/// reader must ignore.
-pub fn write_in_progress_run(run_dir: &Path, definition_path: &str) {
-    let mut w = EvidenceWriter::new(run_dir, definition_path).expect("writer");
+/// An in-progress run (#84): a step has started, no `run_finished` —
+/// the store-era "live" shape (no verdict row).
+pub async fn write_in_progress_run(store: Arc<SqliteStore>, run_id: &str, definition_path: &str) {
+    let mut w = EvidenceWriter::begin(store, run_id, definition_path, BTreeMap::new())
+        .await
+        .expect("writer");
     w.append(run_started(definition_path, BTreeMap::new()))
+        .await
         .unwrap();
     w.append(EventPayload::StepStarted {
         criterion_id: "AC-1".into(),
@@ -232,14 +292,7 @@ pub fn write_in_progress_run(run_dir: &Path, definition_path: &str) {
         uses: "ui/navigate".into(),
         with: BTreeMap::new(),
     })
+    .await
     .unwrap();
-    w.finish().unwrap();
-    // Simulate a writer mid-append: a half line with no trailing \n.
-    use std::io::Write;
-    let mut f = std::fs::OpenOptions::new()
-        .append(true)
-        .open(run_dir.join("trace.jsonl"))
-        .unwrap();
-    f.write_all(br#"{"seq":2,"ts":"2026-06-10T0"#).unwrap();
-    f.flush().unwrap();
+    // No run_finished — the run stays live/unfinished in the store.
 }

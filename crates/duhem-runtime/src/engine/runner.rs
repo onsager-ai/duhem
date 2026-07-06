@@ -20,12 +20,14 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use duhem_actions::Page;
-use duhem_actions::{ActionError, Outcome, RunBrowser};
+use duhem_actions::{Outcome, RunBrowser};
 use duhem_evidence::{
-    EventPayload, EvidenceWriter, VerdictState, WriterError, new_run_id, run_started,
+    EventPayload, EvidenceWriter, SqliteStore, Store, StoreError, VerdictState, new_run_id,
+    project_db_path, run_started,
 };
 use duhem_judge::{
     AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusiveCause,
@@ -33,8 +35,12 @@ use duhem_judge::{
     apply_inconclusive_policy,
 };
 use duhem_schema::{Check, Criterion, RetryBackoff, RetryPolicy, VerificationDefinition};
-use thiserror::Error;
 use tracing::debug;
+
+pub(crate) use crate::engine::outcome::step_label;
+pub use crate::engine::outcome::{
+    CheckFailure, CheckFilter, EngineError, FailedAssertion, RunOutcome,
+};
 
 use crate::engine::context::{RunContext, RunState, json_to_value};
 use crate::engine::registry::{ActionRegistry, default_registry};
@@ -46,121 +52,15 @@ use crate::engine::translate::{
 };
 use crate::eval::{EvalResult, Value, describe_comparison, eval};
 
-/// Surfaces only "the runtime itself failed" cases. A failing
-/// artifact yields `RunVerdict::Fail`, not `Err`.
-#[derive(Debug, Error)]
-pub enum EngineError {
-    /// Evidence directory or trace file could not be written.
-    #[error("evidence: {0}")]
-    Evidence(#[from] WriterError),
-    /// Browser failed to launch when the run needed one. Carries the
-    /// install-hint humanization from `RunBrowser::launch`.
-    #[error("browser: {0}")]
-    Browser(String),
-    /// A declared input's JSON value is outside the runtime `Value`
-    /// model — e.g. a numeric literal that fits neither `i64` nor a
-    /// finite `f64`. Surface this as an engine error instead of
-    /// silently dropping the input (which would manifest later as a
-    /// confusing `Inconclusive(MissingInput)`).
-    #[error("input `{name}`: value is not representable as a runtime value")]
-    InputUnrepresentable { name: String },
-    /// A `$...` reference inside a step's `with:` payload resolved to
-    /// nothing at runtime. We refuse to hand an action a literal
-    /// `$...` string (#134): the reference is either undeclared or its
-    /// upstream value is absent. Names the reference and the step so
-    /// the failure points at the VD, not at a phantom broken SUT.
-    #[error("step `{step}`: unresolved reference `{reference}` in `with:`")]
-    UnresolvedReference { reference: String, step: String },
-    /// A `$inputs.<name>` reference names an input the leaf declared
-    /// under `inherits:` (spec #135), but nothing on the resolution
-    /// chain bound it — no manifest environment was selected and no
-    /// `--inputs` supplied it. Distinct from the generic
-    /// `UnresolvedReference` so the remedy (run the suite, or pass
-    /// `--inputs`) is named instead of a deep network failure.
-    #[error(
-        "input `{name}` is declared `inherits:` but no environment or --inputs provides it; run the suite (e.g. `duhem run verifications/<suite>`) or pass `--inputs {name}=...`"
-    )]
-    UnresolvedInheritedInput { name: String },
-}
-
-impl From<ActionError> for EngineError {
-    fn from(e: ActionError) -> Self {
-        EngineError::Browser(e.to_string())
-    }
-}
-
-/// A step's diagnostic label: its `id` when declared, else
-/// `<uses> #<index>`. Used to name a step in an
-/// [`EngineError::UnresolvedReference`] so the author can locate the
-/// offending `with:` reference even in an anonymous step.
-pub(crate) fn step_label(step: &duhem_schema::Step, idx: usize) -> String {
-    step.id
-        .clone()
-        .unwrap_or_else(|| format!("{} #{idx}", step.uses))
-}
-
-/// Predicate that decides whether the engine should execute a given
-/// `(criterion_id, check_id)` pair. Used by the CLI `--filter` flag
-/// (spec on issue #23) to skip checks the author isn't iterating on.
-///
-/// A filtered-out check is **skipped entirely**: no `StepStarted` /
-/// `CheckFinished` events on the trace, no `AssertionOutcome` slot. A
-/// criterion whose checks are all filtered out aggregates as empty →
-/// `Inconclusive(EmptyAggregation)` per `aggregate_criterion(&[])`.
-pub trait CheckFilter: Send + Sync {
-    fn matches(&self, criterion_id: &str, check_id: &str) -> bool;
-}
-
-/// Engine-side run summary that carries the evidence location
-/// alongside the verdict. Returned by [`Engine::run_with_metadata`];
-/// thin convenience around [`Engine::run`] for callers (the CLI's
-/// `--reporter json`, replay tooling) that need to point a downstream
-/// reader at `trace.jsonl`.
-#[derive(Debug, Clone)]
-pub struct RunOutcome {
-    pub verdict: RunVerdict,
-    pub run_id: String,
-    pub run_dir: PathBuf,
-    /// Checks that did not pass, each with its failing assertions.
-    /// Carried out of the run so reporters can show *which* assertion
-    /// failed (and any cause detail) without the author hand-reading
-    /// `trace.jsonl`. Empty on a fully-passing run.
-    pub failures: Vec<CheckFailure>,
-    /// Non-fatal warnings produced during the run — currently the
-    /// `inconclusive_policy: warn` notices (spec #66): a criterion that
-    /// aggregated to `inconclusive` but was treated as a pass by the
-    /// manifest default. Empty unless `warn` softened something. The
-    /// reporter surfaces these in the run summary.
-    pub warnings: Vec<String>,
-}
-
-/// One assertion that failed or was inconclusive within a check.
-#[derive(Debug, Clone)]
-pub struct FailedAssertion {
-    /// The human-authored assertion line, reconstructed from the schema
-    /// (`assertion_to_expr`) — e.g. `$steps.q.outputs.status == 200`.
-    pub expr: String,
-    /// `Fail` or `Inconclusive(..)`; never `Pass` (passing assertions
-    /// are not collected).
-    pub state: VerdictState,
-    /// Evidence-bound cause detail when present (e.g. a missing
-    /// observation or type mismatch). `None` for a plain comparison
-    /// that evaluated false — the expression itself localizes it.
-    pub detail: Option<String>,
-}
-
-/// One non-passing check and the assertions that explain its verdict.
-#[derive(Debug, Clone)]
-pub struct CheckFailure {
-    pub criterion_id: String,
-    pub check_id: String,
-    pub assertions: Vec<FailedAssertion>,
-}
-
 /// The minimal step executor.
 pub struct Engine {
     registry: ActionRegistry,
-    evidence_root: PathBuf,
+    /// The evidence store this engine writes runs into. `None` until
+    /// first use — [`Engine::run_with_metadata`] lazily opens the
+    /// working copy's default store (`project_db_path(cwd)`), so
+    /// zero-config runs work; the CLI passes an explicit store via
+    /// [`Engine::with_store`].
+    store: Option<Arc<dyn Store>>,
     /// Optional pre-launched browser. Set on production paths via
     /// `Engine::with_browser` so unit tests can construct an Engine
     /// without paying the Playwright launch cost.
@@ -182,6 +82,11 @@ pub struct Engine {
     /// deterministically from the seed instead of `Uuid::new_v4`. No
     /// other runtime semantics depend on this today.
     seed: Option<u64>,
+    /// Optional caller-supplied run id (#189). Fixtures and tests use
+    /// it for deterministic run URLs; production runs leave it unset
+    /// and mint a fresh ULID. A collision with an existing run fails
+    /// loudly at `begin_run` (run ids are primary keys).
+    run_id: Option<String>,
     /// Skip `environment.up:` + readiness probe (the `--no-env-up`
     /// escape hatch on issue #50). The operator is presumed to have
     /// brought the SUT up already. Teardown still runs unless
@@ -217,16 +122,19 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Build the v1 engine with the closed action catalog and a
-    /// default evidence root of `.duhem/runs/`.
+    /// Build the v1 engine with the closed action catalog. The
+    /// evidence store defaults to the working copy's project DB
+    /// (opened lazily on first run) unless [`Engine::with_store`]
+    /// supplies one.
     pub fn new() -> Self {
         Self {
             registry: default_registry(),
-            evidence_root: PathBuf::from(".duhem/runs"),
+            store: None,
             browser: None,
             definition_path: None,
             filter: None,
             seed: None,
+            run_id: None,
             skip_env_up: false,
             keep_env: false,
             env: BTreeMap::new(),
@@ -254,10 +162,12 @@ impl Engine {
         self
     }
 
-    /// Override the evidence root. Each run still lands in a fresh
-    /// ULID-named subdirectory; this only changes the parent.
-    pub fn with_evidence_root(mut self, root: impl Into<PathBuf>) -> Self {
-        self.evidence_root = root.into();
+    /// Attach the evidence store this engine writes runs into. The
+    /// CLI resolves the store (default project DB or `--db` override)
+    /// and threads it here; without one, the engine lazily opens the
+    /// working copy's default store on first run.
+    pub fn with_store(mut self, store: Arc<dyn Store>) -> Self {
+        self.store = Some(store);
         self
     }
 
@@ -290,6 +200,14 @@ impl Engine {
     /// seed see identical uuid output (spec on issue #33).
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = Some(seed);
+        self
+    }
+
+    /// Pin the run id instead of minting a fresh ULID (#189). For
+    /// fixtures and tests that need deterministic run URLs; colliding
+    /// with an existing run fails at `begin_run`.
+    pub fn with_run_id(mut self, run_id: impl Into<String>) -> Self {
+        self.run_id = Some(run_id.into());
         self
     }
 
@@ -393,8 +311,21 @@ impl Engine {
             run_state = run_state.with_env(self.env.clone());
         }
 
-        let run_id = new_run_id();
-        let run_dir = self.evidence_root.join(&run_id);
+        // Resolve the store: the caller-supplied one (CLI), else the
+        // working copy's default project DB — so zero-config
+        // programmatic runs still land somewhere sensible.
+        let store: Arc<dyn Store> = match &self.store {
+            Some(s) => s.clone(),
+            None => {
+                let cwd = std::env::current_dir().map_err(StoreError::Io)?;
+                let db = project_db_path(&cwd)?;
+                let opened: Arc<dyn Store> = Arc::new(SqliteStore::open(db).await?);
+                self.store = Some(opened.clone());
+                opened
+            }
+        };
+
+        let run_id = self.run_id.clone().unwrap_or_else(new_run_id);
         // Evidence records the *source* of the Verification
         // Definition. Prefer the caller-supplied `definition_path`
         // (the CLI threads the actual `.yml` path here). Fall back to
@@ -406,9 +337,12 @@ impl Engine {
             .definition_path
             .clone()
             .unwrap_or_else(|| def.verification.clone());
-        let mut writer = EvidenceWriter::new(&run_dir, &evidence_path)?;
+        let mut writer =
+            EvidenceWriter::begin(store, &run_id, &evidence_path, inputs.clone()).await?;
 
-        writer.append(run_started(evidence_path.clone(), inputs.clone()))?;
+        writer
+            .append(run_started(evidence_path.clone(), inputs.clone()))
+            .await?;
 
         // Resolve the Verification Definition's directory so relative
         // `environment.up:` / `down:` paths anchor at the same place
@@ -449,14 +383,15 @@ impl Engine {
                     env_should_tear_down,
                 )
                 .await?;
-                writer.append(EventPayload::RunFinished {
-                    verdict: verdict.state,
-                })?;
-                writer.finish()?;
+                writer
+                    .append(EventPayload::RunFinished {
+                        verdict: verdict.state,
+                    })
+                    .await?;
+                writer.finish().await?;
                 return Ok(RunOutcome {
                     verdict,
                     run_id,
-                    run_dir,
                     // The run aborted before any criterion executed, so
                     // there are no per-assertion failures or warnings
                     // to surface.
@@ -498,14 +433,15 @@ impl Engine {
                     )
                     .await?;
                 }
-                writer.append(EventPayload::RunFinished {
-                    verdict: verdict.state,
-                })?;
-                writer.finish()?;
+                writer
+                    .append(EventPayload::RunFinished {
+                        verdict: verdict.state,
+                    })
+                    .await?;
+                writer.finish().await?;
                 return Ok(RunOutcome {
                     verdict,
                     run_id,
-                    run_dir,
                     // The run aborted before any criterion executed, so
                     // there are no per-assertion failures or warnings
                     // to surface.
@@ -528,10 +464,12 @@ impl Engine {
                     &mut warnings,
                 )
                 .await?;
-            writer.append(EventPayload::CriterionFinished {
-                criterion_id: criterion.id.clone(),
-                verdict: cv.state,
-            })?;
+            writer
+                .append(EventPayload::CriterionFinished {
+                    criterion_id: criterion.id.clone(),
+                    verdict: cv.state,
+                })
+                .await?;
             criterion_verdicts.push(cv);
         }
 
@@ -546,15 +484,16 @@ impl Engine {
             )
             .await?;
         }
-        writer.append(EventPayload::RunFinished {
-            verdict: run_verdict.state,
-        })?;
-        writer.finish()?;
+        writer
+            .append(EventPayload::RunFinished {
+                verdict: run_verdict.state,
+            })
+            .await?;
+        writer.finish().await?;
 
         Ok(RunOutcome {
             verdict: run_verdict,
             run_id,
-            run_dir,
             failures,
             warnings,
         })
@@ -582,10 +521,12 @@ impl Engine {
             let cv = self
                 .run_check_with_retry(writer, run, &criterion.id, check, failures)
                 .await?;
-            writer.append(EventPayload::CheckFinished {
-                check_id: check.id.clone(),
-                verdict: cv.state,
-            })?;
+            writer
+                .append(EventPayload::CheckFinished {
+                    check_id: check.id.clone(),
+                    verdict: cv.state,
+                })
+                .await?;
             check_verdicts.push(cv);
         }
         // Criterion-level aggregation, then the manifest's
@@ -723,13 +664,15 @@ impl Engine {
                 apply_default_within(&mut resolved_with, default);
             }
 
-            writer.append(EventPayload::StepStarted {
-                criterion_id: criterion_id.to_string(),
-                check_id: check.id.clone(),
-                step_index: idx as u32,
-                uses: step.uses.clone(),
-                with: with_to_evidence_map(&resolved_with),
-            })?;
+            writer
+                .append(EventPayload::StepStarted {
+                    criterion_id: criterion_id.to_string(),
+                    check_id: check.id.clone(),
+                    step_index: idx as u32,
+                    uses: step.uses.clone(),
+                    with: with_to_evidence_map(&resolved_with),
+                })
+                .await?;
 
             let known = self.registry.contains_key(step.uses.as_str());
             let outcome = if !known || environment_failed || step_aborted {
@@ -757,17 +700,21 @@ impl Engine {
                         {
                             ctx.record_output(id, name, scalar);
                         }
-                        writer.append_observation(idx as u32, name.clone(), value.clone())?;
+                        writer
+                            .append_observation(idx as u32, name.clone(), value.clone())
+                            .await?;
                     }
                 }
 
                 outcome
             };
 
-            writer.append(EventPayload::StepFinished {
-                step_index: idx as u32,
-                outcome: outcome_to_evidence(&outcome),
-            })?;
+            writer
+                .append(EventPayload::StepFinished {
+                    step_index: idx as u32,
+                    outcome: outcome_to_evidence(&outcome),
+                })
+                .await?;
 
             if matches!(outcome, Outcome::Error) {
                 step_aborted = true;
@@ -807,12 +754,14 @@ impl Engine {
                 };
                 (state, detail)
             };
-            writer.append(EventPayload::AssertionEvaluated {
-                check_id: check.id.clone(),
-                assertion_index: i as u32,
-                state,
-                detail: detail.clone(),
-            })?;
+            writer
+                .append(EventPayload::AssertionEvaluated {
+                    check_id: check.id.clone(),
+                    assertion_index: i as u32,
+                    state,
+                    detail: detail.clone(),
+                })
+                .await?;
             if !matches!(state, VerdictState::Pass) {
                 failed.push(FailedAssertion {
                     expr: assertion.display(),
@@ -861,7 +810,7 @@ mod tests {
     use super::*;
     use crate::engine::registry::Dispatch;
     use async_trait::async_trait;
-    use duhem_actions::{ActionResult, Outcome};
+    use duhem_actions::{ActionError, ActionResult, Outcome};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
@@ -916,15 +865,19 @@ mod tests {
         }
     }
 
-    fn engine_for_test() -> (Engine, tempfile::TempDir) {
+    async fn engine_for_test() -> (Engine, tempfile::TempDir) {
         let tmp = tempfile::tempdir().expect("tempdir");
+        let store = SqliteStore::open(tmp.path().join("duhem.db"))
+            .await
+            .expect("open test store");
         let mut e = Engine {
             registry: BTreeMap::new(),
-            evidence_root: tmp.path().to_path_buf(),
+            store: Some(Arc::new(store)),
             browser: None,
             definition_path: None,
             filter: None,
             seed: None,
+            run_id: None,
             skip_env_up: false,
             keep_env: false,
             env: BTreeMap::new(),
@@ -946,7 +899,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_action_yields_inconclusive_missing_observation_for_every_assertion() {
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         let v = def(r#"
 verification: t
 criteria:
@@ -976,7 +929,7 @@ criteria:
 
     #[tokio::test]
     async fn step_outputs_are_threaded_into_sibling_assertions() {
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(
             StubAction::new("fake/produce", Outcome::Ok).with_output("x", serde_json::json!(42)),
         ));
@@ -999,7 +952,7 @@ criteria:
 
     #[tokio::test]
     async fn outcome_error_aborts_remaining_steps_in_same_check_only() {
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         let after_err = Arc::new(AtomicUsize::new(0));
         // Step 1: returns Error. Step 2: tracks invocations. Step 2
         // should never be invoked because step 1 aborts the check.
@@ -1069,23 +1022,21 @@ criteria:
         }
     }
 
-    /// Walk the run directory left behind by an `Engine::run` and
-    /// return the parsed events for the (single) run inside it.
-    fn read_only_run_events(tmp: &tempfile::TempDir) -> Vec<duhem_evidence::Event> {
-        let entries: Vec<_> = std::fs::read_dir(tmp.path())
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .collect();
-        assert_eq!(entries.len(), 1, "exactly one run dir");
-        duhem_evidence::Trace::open(&entries[0])
+    /// Read back the events of the (single) run the engine left in
+    /// the test store.
+    async fn read_only_run_events(engine: &Engine) -> Vec<duhem_evidence::Event> {
+        let store = engine.store.as_ref().expect("test engine has a store");
+        let runs = store.list_runs().await.unwrap();
+        assert_eq!(runs.len(), 1, "exactly one run in the store");
+        duhem_evidence::Trace::from_store(store.as_ref(), &runs[0].run_id)
+            .await
             .unwrap()
             .into_events()
     }
 
     #[tokio::test]
     async fn missing_browser_for_page_step_yields_environment_error_not_pass() {
-        let (mut engine, tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(PageRequiringStub {
             uses: "ui/needs-page",
         }));
@@ -1109,7 +1060,7 @@ criteria:
             verdict.state,
             VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
         );
-        let events = read_only_run_events(&tmp);
+        let events = read_only_run_events(&engine).await;
         let detail = events
             .iter()
             .find_map(|e| match &e.payload {
@@ -1122,7 +1073,7 @@ criteria:
 
     #[tokio::test]
     async fn assertion_detail_preserves_specific_evaluator_cause() {
-        let (mut engine, tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         let v = def(r#"
 verification: t
 inputs:
@@ -1146,7 +1097,7 @@ criteria:
             verdict.state,
             VerdictState::Inconclusive(InconclusiveCause::EnvironmentError)
         ));
-        let events = read_only_run_events(&tmp);
+        let events = read_only_run_events(&engine).await;
         let detail = events
             .iter()
             .find_map(|e| match &e.payload {
@@ -1162,7 +1113,7 @@ criteria:
 
     #[tokio::test]
     async fn unknown_action_short_circuit_still_emits_step_events() {
-        let (mut engine, tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         let v = def(r#"
 verification: t
 criteria:
@@ -1183,7 +1134,7 @@ criteria:
         // The unknown step must still surface in evidence as
         // step_started + step_finished(Error), so a reader can see
         // *which* author-declared step couldn't run.
-        let events = read_only_run_events(&tmp);
+        let events = read_only_run_events(&engine).await;
         let saw_started = events.iter().any(|e| {
             matches!(&e.payload, duhem_evidence::EventPayload::StepStarted { uses, .. } if uses == "nope/unknown")
         });
@@ -1209,7 +1160,7 @@ criteria:
         // assertion when a setup step produced output `<x>`. Inverse
         // (missing output) yields the run-level
         // Inconclusive(MissingObservation) path through the assertion.
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(
             StubAction::new("fake/seed", Outcome::Ok).with_output("tok", serde_json::json!("abc")),
         ));
@@ -1235,7 +1186,7 @@ criteria:
         // Typed-input-catalog spec worked example: declared integer /
         // boolean / object inputs reach the evaluator as the right
         // scalar/structured shape — not as opaque strings.
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         let v = def(r#"
 verification: t
 inputs:
@@ -1269,7 +1220,7 @@ criteria:
         // setup, no criterion executes, the run verdict is
         // Inconclusive, and `SetupFinished { aborted: true }` is on
         // the trace.
-        let (mut engine, tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(StubAction::new("fake/boom", Outcome::Error)));
         let criterion_calls = Arc::new(AtomicUsize::new(0));
         let criterion_tracker = StubAction {
@@ -1305,7 +1256,7 @@ criteria:
             "criteria must not run after setup abort"
         );
         // Evidence carries `setup_finished { aborted: true }`.
-        let events = read_only_run_events(&tmp);
+        let events = read_only_run_events(&engine).await;
         let saw_aborted = events.iter().any(|e| {
             matches!(
                 &e.payload,
@@ -1321,7 +1272,7 @@ criteria:
         // the abort policy applies to `Outcome::Timeout` too, and the
         // verdict's `InconclusiveCause` distinguishes it from an
         // environmental setup failure.
-        let (mut engine, tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(StubAction::new("fake/slow", Outcome::Timeout)));
         let criterion_calls = Arc::new(AtomicUsize::new(0));
         let criterion_tracker = StubAction {
@@ -1357,7 +1308,7 @@ criteria:
             0,
             "criteria must not run after setup timeout"
         );
-        let events = read_only_run_events(&tmp);
+        let events = read_only_run_events(&engine).await;
         let saw_aborted = events.iter().any(|e| {
             matches!(
                 &e.payload,
@@ -1371,7 +1322,7 @@ criteria:
     async fn empty_setup_emits_no_setup_events() {
         // Spec on #20: a definition with no `setup:` block produces a
         // byte-identical trace to today's setup-free definitions.
-        let (mut engine, tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         let v = def(r#"
 verification: t
 criteria:
@@ -1383,7 +1334,7 @@ criteria:
           - "true"
 "#);
         let _ = engine.run(&v, BTreeMap::new()).await.unwrap();
-        let events = read_only_run_events(&tmp);
+        let events = read_only_run_events(&engine).await;
         let has_setup = events.iter().any(|e| {
             matches!(
                 e.payload,
@@ -1403,7 +1354,7 @@ criteria:
         // Inconclusive(MissingObservation) — the
         // `MissingSetupObservation` evaluator cause maps to the
         // judge-level `MissingObservation` verdict.
-        let (mut engine, tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(StubAction::new("fake/seed", Outcome::Ok)));
         let v = def(r#"
 verification: t
@@ -1423,7 +1374,7 @@ criteria:
             verdict.state,
             VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
         ));
-        let events = read_only_run_events(&tmp);
+        let events = read_only_run_events(&engine).await;
         let detail = events
             .iter()
             .find_map(|e| match &e.payload {
@@ -1443,7 +1394,7 @@ criteria:
         // `Value::Str("3")` and `count == 3` was a type_mismatch
         // Inconclusive. With typed coercion this is now a real
         // numeric comparison.
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         let v = def(r#"
 verification: t
 inputs:
@@ -1476,7 +1427,7 @@ criteria:
 
     #[tokio::test]
     async fn filtered_out_check_emits_no_events_and_no_verdict_slot() {
-        let (mut engine, tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         engine.filter = Some(Box::new(AllowList(vec![("AC-1", "AC-1.1")])));
         let v = def(r#"
 verification: t
@@ -1495,7 +1446,7 @@ criteria:
         let only_check = &verdict.criteria[0].checks;
         assert_eq!(only_check.len(), 1, "filtered check absent from verdict");
         assert_eq!(only_check[0].check_id, "AC-1.1");
-        let events = read_only_run_events(&tmp);
+        let events = read_only_run_events(&engine).await;
         let saw_filtered_check = events.iter().any(|e| {
             matches!(&e.payload, duhem_evidence::EventPayload::CheckFinished { check_id, .. } if check_id == "AC-1.2")
         });
@@ -1507,7 +1458,7 @@ criteria:
         // Spec (#23): a criterion whose checks are all filtered out
         // aggregates as empty → Inconclusive(EmptyAggregation), which
         // bubbles up to the run-level verdict.
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         engine.filter = Some(Box::new(AllowList(vec![("AC-1", "AC-1.1")])));
         let v = def(r#"
 verification: t
@@ -1563,7 +1514,7 @@ criteria:
 "#
         );
         let v = def(&yaml);
-        let (mut e1, _tmp1) = engine_for_test();
+        let (mut e1, _tmp1) = engine_for_test().await;
         e1.seed = Some(42);
         let v1 = e1.run(&v, BTreeMap::new()).await.unwrap();
         assert_eq!(
@@ -1573,7 +1524,7 @@ criteria:
         );
 
         // Sanity: a second seeded engine reaches the same verdict.
-        let (mut e2, _tmp2) = engine_for_test();
+        let (mut e2, _tmp2) = engine_for_test().await;
         e2.seed = Some(42);
         let v2 = e2.run(&v, BTreeMap::new()).await.unwrap();
         assert_eq!(v2.state, VerdictState::Pass);
@@ -1581,7 +1532,7 @@ criteria:
         // Sanity: omitting the seed flips the verdict — `Uuid::new_v4`
         // colliding with the seeded literal would be a one-in-2^122
         // event, so this is a real determinism signal.
-        let (mut e3, _tmp3) = engine_for_test();
+        let (mut e3, _tmp3) = engine_for_test().await;
         let v3 = e3.run(&v, BTreeMap::new()).await.unwrap();
         assert_eq!(
             v3.state,
@@ -1592,7 +1543,7 @@ criteria:
 
     #[tokio::test]
     async fn run_verdict_preserves_document_order_of_criteria() {
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         // No steps means no actions needed; assertions evaluate
         // straight from literals.
         let v = def(r#"
@@ -1635,7 +1586,7 @@ criteria:
         use std::io::Write as _;
         use std::os::unix::fs::PermissionsExt;
 
-        let (mut engine, tmp) = engine_for_test();
+        let (mut engine, tmp) = engine_for_test().await;
         let scripts_dir = tmp.path().join("scripts");
         std::fs::create_dir_all(&scripts_dir).unwrap();
         let up = scripts_dir.join("up.sh");
@@ -1676,9 +1627,13 @@ criteria:
             .unwrap();
         assert_eq!(outcome.verdict.state, VerdictState::Pass);
 
-        let events = duhem_evidence::Trace::open(&outcome.run_dir)
-            .unwrap()
-            .into_events();
+        let events = duhem_evidence::Trace::from_store(
+            engine.store.as_ref().unwrap().as_ref(),
+            &outcome.run_id,
+        )
+        .await
+        .unwrap()
+        .into_events();
         let kinds: Vec<&'static str> = events
             .iter()
             .map(|e| match &e.payload {
@@ -1715,7 +1670,7 @@ criteria:
         use std::io::Write as _;
         use std::os::unix::fs::PermissionsExt;
 
-        let (mut engine, tmp) = engine_for_test();
+        let (mut engine, tmp) = engine_for_test().await;
         let scripts_dir = tmp.path().join("scripts");
         std::fs::create_dir_all(&scripts_dir).unwrap();
         let up = scripts_dir.join("up.sh");
@@ -1759,9 +1714,13 @@ criteria:
         );
         assert!(outcome.verdict.criteria.is_empty(), "no criterion runs");
 
-        let events = duhem_evidence::Trace::open(&outcome.run_dir)
-            .unwrap()
-            .into_events();
+        let events = duhem_evidence::Trace::from_store(
+            engine.store.as_ref().unwrap().as_ref(),
+            &outcome.run_id,
+        )
+        .await
+        .unwrap()
+        .into_events();
         let saw_down = events.iter().any(|e| {
             matches!(
                 &e.payload,
@@ -1780,7 +1739,7 @@ criteria:
         use std::io::Write as _;
         use std::os::unix::fs::PermissionsExt;
 
-        let (mut engine, tmp) = engine_for_test();
+        let (mut engine, tmp) = engine_for_test().await;
         let scripts_dir = tmp.path().join("scripts");
         std::fs::create_dir_all(&scripts_dir).unwrap();
         let up = scripts_dir.join("up.sh");
@@ -1829,9 +1788,13 @@ criteria:
             VerdictState::Inconclusive(InconclusiveCause::Timeout),
         );
 
-        let events = duhem_evidence::Trace::open(&outcome.run_dir)
-            .unwrap()
-            .into_events();
+        let events = duhem_evidence::Trace::from_store(
+            engine.store.as_ref().unwrap().as_ref(),
+            &outcome.run_id,
+        )
+        .await
+        .unwrap()
+        .into_events();
         let saw_ready_fail = events.iter().any(|e| {
             matches!(
                 &e.payload,
@@ -1857,7 +1820,7 @@ criteria:
         use std::io::Write as _;
         use std::os::unix::fs::PermissionsExt;
 
-        let (mut engine, tmp) = engine_for_test();
+        let (mut engine, tmp) = engine_for_test().await;
         let scripts_dir = tmp.path().join("scripts");
         std::fs::create_dir_all(&scripts_dir).unwrap();
         let up = scripts_dir.join("up.sh");
@@ -1896,9 +1859,13 @@ criteria:
             .unwrap();
         assert_eq!(outcome.verdict.state, VerdictState::Pass);
 
-        let events = duhem_evidence::Trace::open(&outcome.run_dir)
-            .unwrap()
-            .into_events();
+        let events = duhem_evidence::Trace::from_store(
+            engine.store.as_ref().unwrap().as_ref(),
+            &outcome.run_id,
+        )
+        .await
+        .unwrap()
+        .into_events();
         let saw_env = events.iter().any(|e| {
             matches!(
                 &e.payload,
@@ -1922,7 +1889,7 @@ criteria:
         use std::io::Write as _;
         use std::os::unix::fs::PermissionsExt;
 
-        let (mut engine, tmp) = engine_for_test();
+        let (mut engine, tmp) = engine_for_test().await;
         let scripts_dir = tmp.path().join("scripts");
         std::fs::create_dir_all(&scripts_dir).unwrap();
         let up = scripts_dir.join("up.sh");
@@ -1966,9 +1933,13 @@ criteria:
             .unwrap();
         assert_eq!(outcome.verdict.state, VerdictState::Pass);
 
-        let events = duhem_evidence::Trace::open(&outcome.run_dir)
-            .unwrap()
-            .into_events();
+        let events = duhem_evidence::Trace::from_store(
+            engine.store.as_ref().unwrap().as_ref(),
+            &outcome.run_id,
+        )
+        .await
+        .unwrap()
+        .into_events();
         // No up-side events (skipped).
         let saw_up = events.iter().any(|e| {
             matches!(
@@ -1996,7 +1967,7 @@ criteria:
     /// (no `Env*` events).
     #[tokio::test]
     async fn no_environment_block_emits_no_env_events() {
-        let (mut engine, tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         let v = def(r#"
 verification: t
 criteria:
@@ -2007,7 +1978,7 @@ criteria:
         assertions: ["true"]
 "#);
         let _ = engine.run(&v, BTreeMap::new()).await.unwrap();
-        let events = read_only_run_events(&tmp);
+        let events = read_only_run_events(&engine).await;
         let saw_env = events.iter().any(|e| {
             matches!(
                 e.payload,
@@ -2039,7 +2010,7 @@ criteria:
           - $env.base_url == "https://staging.example.com"
 "#);
         // With the env seeded, the assertion passes.
-        let (engine, _tmp) = engine_for_test();
+        let (engine, _tmp) = engine_for_test().await;
         let mut env = BTreeMap::new();
         env.insert(
             "base_url".to_string(),
@@ -2051,7 +2022,7 @@ criteria:
 
         // With no env seeded, `$env.base_url` is not whitelisted: the
         // verdict is not a pass.
-        let (mut bare, _tmp2) = engine_for_test();
+        let (mut bare, _tmp2) = engine_for_test().await;
         let bare_outcome = bare.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
         assert_ne!(bare_outcome.verdict.state, VerdictState::Pass);
     }
@@ -2073,7 +2044,7 @@ criteria:
         assertions:
           - $inputs.login_url == "x"
 "#);
-        let (engine, _tmp) = engine_for_test();
+        let (engine, _tmp) = engine_for_test().await;
         let mut engine = engine.with_inherited(v.inherits.clone());
         let err = engine
             .run_with_metadata(&v, BTreeMap::new())
@@ -2107,7 +2078,7 @@ criteria:
         assertions:
           - $inputs.login_url == "https://example.test/login"
 "#);
-        let (engine, _tmp) = engine_for_test();
+        let (engine, _tmp) = engine_for_test().await;
         let mut engine = engine.with_inherited(v.inherits.clone());
         let mut inputs = BTreeMap::new();
         inputs.insert(
@@ -2134,7 +2105,7 @@ criteria:
         assertions:
           - $runtime.default($inputs.maybe, "x") == "x"
 "#);
-        let (engine, _tmp) = engine_for_test();
+        let (engine, _tmp) = engine_for_test().await;
         let mut engine = engine.with_inherited(v.inherits.clone());
         let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
         assert_eq!(outcome.verdict.state, VerdictState::Pass);
@@ -2175,7 +2146,7 @@ criteria:
 
     #[tokio::test]
     async fn default_timeout_fills_within_when_step_omits_it() {
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         engine.default_within = Some(Duration::from_secs(7));
         let seen = Arc::new(AtomicU64::new(0));
         engine.register_test_action(Box::new(WithinCapture {
@@ -2205,7 +2176,7 @@ criteria:
 
     #[tokio::test]
     async fn per_step_within_wins_over_default_timeout() {
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         engine.default_within = Some(Duration::from_secs(7));
         let seen = Arc::new(AtomicU64::new(0));
         engine.register_test_action(Box::new(WithinCapture {
@@ -2234,7 +2205,7 @@ criteria:
         // An Inconclusive(EnvironmentError) check (here via an invalid
         // regex pattern) re-runs from step 0 up to `max` times: 1
         // initial attempt + 2 retries = 3 step invocations.
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         engine.retry = Some(RetryPolicy {
             max: 2,
             backoff: RetryBackoff::Exponential,
@@ -2268,7 +2239,7 @@ criteria:
 
     #[tokio::test]
     async fn fail_never_retries() {
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         engine.retry = Some(RetryPolicy {
             max: 3,
             backoff: RetryBackoff::Linear,
@@ -2295,7 +2266,7 @@ criteria:
 
     #[tokio::test]
     async fn missing_observation_inconclusive_not_retried() {
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         engine.retry = Some(RetryPolicy {
             max: 3,
             backoff: RetryBackoff::Exponential,
@@ -2343,7 +2314,7 @@ criteria:
 
     #[tokio::test]
     async fn inconclusive_policy_warn_softens_to_pass_with_warning() {
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         engine.inconclusive_policy = InconclusivePolicy::Warn;
         let v = def(UNKNOWN_ACTION_VD);
         let o = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
@@ -2357,7 +2328,7 @@ criteria:
 
     #[tokio::test]
     async fn inconclusive_policy_pass_softens_silently() {
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         engine.inconclusive_policy = InconclusivePolicy::Pass;
         let v = def(UNKNOWN_ACTION_VD);
         let o = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
@@ -2367,7 +2338,7 @@ criteria:
 
     #[tokio::test]
     async fn inconclusive_policy_block_preserves_todays_behavior() {
-        let (mut engine, _tmp) = engine_for_test();
+        let (mut engine, _tmp) = engine_for_test().await;
         // default policy is Block.
         let v = def(UNKNOWN_ACTION_VD);
         let o = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();

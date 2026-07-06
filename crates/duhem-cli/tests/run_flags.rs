@@ -4,7 +4,7 @@
 //! launches a Playwright browser before invoking the engine (a
 //! launch-once-then-reuse policy that predates this spec), so even
 //! browser-free fixtures need `npx playwright install chromium` to
-//! reach the reporter / evidence code paths these tests exercise.
+//! reach the reporter / store code paths these tests exercise.
 //! `just test-cli-smoke` (or `cargo test -p duhem-cli -- --ignored`)
 //! runs them locally; the matching unit tests in `filter.rs`,
 //! `reporter.rs`, and the engine-level test in
@@ -62,13 +62,13 @@ fn default_reporter_matches_pre_spec_output_byte_for_byte() {
     // bytes so existing CI scripts grepping for `pass` keep working.
     let tmp = tempfile::tempdir().unwrap();
     let path = fixture(&tmp, ONE_CRITERION);
-    let evidence = tmp.path().join("evidence");
+    let db = tmp.path().join("duhem.db");
 
     let out = Command::new(bin())
         .arg("run")
         .arg(&path)
-        .arg("--evidence-dir")
-        .arg(&evidence)
+        .arg("--db")
+        .arg(&db)
         .output()
         .expect("spawn duhem");
 
@@ -85,15 +85,15 @@ fn default_reporter_matches_pre_spec_output_byte_for_byte() {
 fn quiet_reporter_writes_nothing_to_stdout() {
     let tmp = tempfile::tempdir().unwrap();
     let path = fixture(&tmp, ONE_CRITERION);
-    let evidence = tmp.path().join("evidence");
+    let db = tmp.path().join("duhem.db");
 
     let out = Command::new(bin())
         .arg("run")
         .arg(&path)
         .arg("--reporter")
         .arg("quiet")
-        .arg("--evidence-dir")
-        .arg(&evidence)
+        .arg("--db")
+        .arg(&db)
         .output()
         .expect("spawn duhem");
 
@@ -110,15 +110,15 @@ fn quiet_reporter_writes_nothing_to_stdout() {
 fn json_reporter_emits_one_valid_json_line() {
     let tmp = tempfile::tempdir().unwrap();
     let path = fixture(&tmp, ONE_CRITERION);
-    let evidence = tmp.path().join("evidence");
+    let db = tmp.path().join("duhem.db");
 
     let out = Command::new(bin())
         .arg("run")
         .arg(&path)
         .arg("--reporter")
         .arg("json")
-        .arg("--evidence-dir")
-        .arg(&evidence)
+        .arg("--db")
+        .arg(&db)
         .output()
         .expect("spawn duhem");
 
@@ -136,30 +136,28 @@ fn json_reporter_emits_one_valid_json_line() {
     let v: serde_json::Value = serde_json::from_str(trimmed).expect("valid JSON");
     assert_eq!(v["verdict"], "pass");
     assert_eq!(v["criteria"][0]["id"], "AC-1");
-    assert!(
-        v["evidence_dir"]
-            .as_str()
-            .unwrap()
-            .starts_with(evidence.to_str().unwrap()),
-        "evidence_dir should live under --evidence-dir, got {:?}",
-        v["evidence_dir"],
+    assert_eq!(
+        v["store"].as_str().unwrap(),
+        db.to_str().unwrap(),
+        "store should be the --db path, got {:?}",
+        v["store"],
     );
 }
 
 #[test]
 #[ignore = "requires `npx playwright install chromium`; `duhem run` launches a browser unconditionally"]
-fn evidence_dir_lands_trace_under_caller_path_and_creates_missing_dirs() {
+fn db_flag_lands_store_at_caller_path_and_creates_missing_dirs() {
     let tmp = tempfile::tempdir().unwrap();
     let path = fixture(&tmp, ONE_CRITERION);
     // Intentionally point at a path whose parent doesn't exist yet —
-    // the writer must create the chain (spec on #23).
-    let evidence = tmp.path().join("nested").join("not-yet").join("runs");
+    // the store open must create the chain (specs #23 / #189).
+    let db = tmp.path().join("nested").join("not-yet").join("duhem.db");
 
     let out = Command::new(bin())
         .arg("run")
         .arg(&path)
-        .arg("--evidence-dir")
-        .arg(&evidence)
+        .arg("--db")
+        .arg(&db)
         .output()
         .expect("spawn duhem");
     assert!(
@@ -168,21 +166,7 @@ fn evidence_dir_lands_trace_under_caller_path_and_creates_missing_dirs() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    assert!(
-        evidence.is_dir(),
-        "evidence dir was not created: {evidence:?}"
-    );
-    let runs: Vec<_> = std::fs::read_dir(&evidence)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .collect();
-    assert_eq!(runs.len(), 1, "exactly one run subdir");
-    let trace = runs[0].path().join("trace.jsonl");
-    assert!(
-        trace.is_file(),
-        "trace.jsonl missing under {:?}",
-        runs[0].path()
-    );
+    assert!(db.is_file(), "store DB was not created: {db:?}");
 }
 
 #[test]
@@ -198,7 +182,7 @@ fn filter_selects_a_single_check_and_skips_the_failing_sibling() {
     // the same time.
     let tmp = tempfile::tempdir().unwrap();
     let path = fixture(&tmp, TWO_CRITERIA);
-    let evidence = tmp.path().join("evidence");
+    let db = tmp.path().join("duhem.db");
 
     let out = Command::new(bin())
         .arg("run")
@@ -207,8 +191,8 @@ fn filter_selects_a_single_check_and_skips_the_failing_sibling() {
         .arg("AC-1::AC-1.1")
         .arg("--reporter")
         .arg("json")
-        .arg("--evidence-dir")
-        .arg(&evidence)
+        .arg("--db")
+        .arg(&db)
         .output()
         .expect("spawn duhem");
     let stdout = String::from_utf8(out.stdout).unwrap();
@@ -239,7 +223,7 @@ fn filter_with_or_includes_both_criteria_and_run_passes() {
     // check from AC-1 and AC-2's only check should land us at Pass.
     let tmp = tempfile::tempdir().unwrap();
     let path = fixture(&tmp, TWO_CRITERIA);
-    let evidence = tmp.path().join("evidence");
+    let db = tmp.path().join("duhem.db");
 
     let out = Command::new(bin())
         .arg("run")
@@ -248,8 +232,8 @@ fn filter_with_or_includes_both_criteria_and_run_passes() {
         .arg("AC-1::AC-1.1")
         .arg("--filter")
         .arg("AC-2")
-        .arg("--evidence-dir")
-        .arg(&evidence)
+        .arg("--db")
+        .arg(&db)
         .output()
         .expect("spawn duhem");
     assert!(
@@ -292,14 +276,8 @@ fn dry_run_prints_resolved_pairs_and_exits_zero() {
         stdout.contains("WOULD RUN: AC-2::AC-2.1"),
         "stdout was {stdout:?}"
     );
-    // No evidence directory should be created — the `--evidence-dir`
-    // wasn't passed, but the default `.duhem/runs` shouldn't be either.
-    let default_evidence = std::path::Path::new(".duhem");
-    // (We can't assert .duhem/runs doesn't exist because tests might
-    // race with other tests in the repo. The check below — that no
-    // trace.jsonl was written for *this* invocation — is what
-    // actually matters.)
-    let _ = default_evidence;
+    // No store should be touched — `--dry-run` returns before the
+    // store is opened (spec #189: a dry run writes nothing).
 }
 
 /// Spec on #33: `--dry-run` honors `--filter`. Confirms filter
@@ -917,13 +895,13 @@ fn manifest_runs_every_leaf_and_aggregates_verdicts() {
     // exit code reflects the aggregated verdict.
     let tmp = tempfile::tempdir().unwrap();
     let manifest = manifest_with_two_leaves(tmp.path());
-    let evidence = tmp.path().join("evidence");
+    let db = tmp.path().join("duhem.db");
 
     let out = Command::new(bin())
         .arg("run")
         .arg(&manifest)
-        .arg("--evidence-dir")
-        .arg(&evidence)
+        .arg("--db")
+        .arg(&db)
         .output()
         .expect("spawn duhem");
     assert!(
@@ -947,11 +925,8 @@ fn manifest_runs_every_leaf_and_aggregates_verdicts() {
         stdout.lines().last().unwrap_or("").trim() == "pass",
         "expected aggregated verdict on last line: {stdout:?}"
     );
-    // Per-leaf evidence: `<evidence>/<leaf>/<run_id>/`.
-    let leaf_a_runs = evidence.join("leaf-a");
-    let leaf_b_runs = evidence.join("leaf-b");
-    assert!(leaf_a_runs.is_dir(), "leaf-a evidence dir missing");
-    assert!(leaf_b_runs.is_dir(), "leaf-b evidence dir missing");
+    // Both leaf runs landed in the one store.
+    assert!(db.is_file(), "store DB missing: {db:?}");
 }
 
 // ---- #69: manifest discovery (ancestor walk, `-f` override) --------

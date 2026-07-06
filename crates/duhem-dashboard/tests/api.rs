@@ -1,12 +1,13 @@
 //! Integration tests for the #85 JSON API: every endpoint, against
-//! fixture evidence dirs written by the production `EvidenceWriter`.
+//! fixture runs written into a real store by the production
+//! `EvidenceWriter` (#189).
 
 mod common;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use duhem_dashboard::{EvidenceReader, load_run, router};
-use duhem_evidence::{Trace, replay};
+use duhem_dashboard::{EvidenceReader, events_to_jsonl, router};
+use duhem_evidence::{Store, Trace, replay};
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -34,20 +35,24 @@ async fn get_json(reader: EvidenceReader, path: &str) -> (StatusCode, Value) {
 }
 
 #[tokio::test]
-async fn runs_list_empty_dir_is_empty_array() {
-    let tmp = tempfile::tempdir().unwrap();
-    let (status, json) = get_json(EvidenceReader::new(tmp.path()), "/api/runs").await;
+async fn runs_list_empty_store_is_empty_array() {
+    let (_tmp, _rw, ro) = common::open_stores().await;
+    let (status, json) = get_json(EvidenceReader::new(ro), "/api/runs").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json, serde_json::json!([]));
 }
 
 #[tokio::test]
 async fn runs_list_single_leaf_run() {
-    let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("01J0000000000000000000000A");
-    common::write_passing_run(&run_dir, "verifications/create-workspace.yml");
+    let (_tmp, rw, ro) = common::open_stores().await;
+    common::write_passing_run(
+        rw,
+        "01J0000000000000000000000A",
+        "verifications/create-workspace.yml",
+    )
+    .await;
 
-    let (status, json) = get_json(EvidenceReader::new(tmp.path()), "/api/runs").await;
+    let (status, json) = get_json(EvidenceReader::new(ro), "/api/runs").await;
     assert_eq!(status, StatusCode::OK);
     let rows = json.as_array().unwrap();
     assert_eq!(rows.len(), 1);
@@ -62,18 +67,22 @@ async fn runs_list_single_leaf_run() {
 }
 
 #[tokio::test]
-async fn runs_list_nests_run_set_leaves_and_rolls_up_with_the_judge_fold() {
-    let tmp = tempfile::tempdir().unwrap();
+async fn runs_list_groups_a_verifications_runs_and_rolls_up_with_the_judge_fold() {
+    let (_tmp, rw, ro) = common::open_stores().await;
     common::write_passing_run(
-        &tmp.path().join("login/01J0000000000000000000000A"),
+        rw.clone(),
+        "01J0000000000000000000000A",
         "verifications/login/duhem.yml",
-    );
+    )
+    .await;
     common::write_failing_run(
-        &tmp.path().join("login/01J0000000000000000000000B"),
+        rw,
+        "01J0000000000000000000000B",
         "verifications/login/duhem.yml",
-    );
+    )
+    .await;
 
-    let (status, json) = get_json(EvidenceReader::new(tmp.path()), "/api/runs").await;
+    let (status, json) = get_json(EvidenceReader::new(ro), "/api/runs").await;
     assert_eq!(status, StatusCode::OK);
     let rows = json.as_array().unwrap();
     assert_eq!(rows.len(), 1);
@@ -90,11 +99,10 @@ async fn runs_list_nests_run_set_leaves_and_rolls_up_with_the_judge_fold() {
 
 #[tokio::test]
 async fn in_progress_run_is_live_with_no_verdict() {
-    let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("01J0000000000000000000000C");
-    common::write_in_progress_run(&run_dir, "verifications/live.yml");
+    let (_tmp, rw, ro) = common::open_stores().await;
+    common::write_in_progress_run(rw, "01J0000000000000000000000C", "verifications/live.yml").await;
 
-    let (_, json) = get_json(EvidenceReader::new(tmp.path()), "/api/runs").await;
+    let (_, json) = get_json(EvidenceReader::new(ro), "/api/runs").await;
     let row = &json.as_array().unwrap()[0];
     assert_eq!(row["live"], true);
     assert_eq!(row["verdict"], Value::Null);
@@ -103,12 +111,16 @@ async fn in_progress_run_is_live_with_no_verdict() {
 
 #[tokio::test]
 async fn run_detail_carries_inputs_verdict_and_criteria() {
-    let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("01J0000000000000000000000A");
-    common::write_passing_run(&run_dir, "verifications/create-workspace.yml");
+    let (_tmp, rw, ro) = common::open_stores().await;
+    common::write_passing_run(
+        rw,
+        "01J0000000000000000000000A",
+        "verifications/create-workspace.yml",
+    )
+    .await;
 
     let (status, json) = get_json(
-        EvidenceReader::new(tmp.path()),
+        EvidenceReader::new(ro),
         "/api/runs/01J0000000000000000000000A",
     )
     .await;
@@ -130,9 +142,9 @@ async fn run_detail_carries_inputs_verdict_and_criteria() {
 
 #[tokio::test]
 async fn run_detail_unknown_run_is_404() {
-    let tmp = tempfile::tempdir().unwrap();
+    let (_tmp, _rw, ro) = common::open_stores().await;
     let (status, _) = get_json(
-        EvidenceReader::new(tmp.path()),
+        EvidenceReader::new(ro),
         "/api/runs/01J0000000000000000000000Z",
     )
     .await;
@@ -141,12 +153,16 @@ async fn run_detail_unknown_run_is_404() {
 
 #[tokio::test]
 async fn aborted_setup_run_surfaces_the_abort() {
-    let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("01J0000000000000000000000D");
-    common::write_aborted_run(&run_dir, "verifications/aborted.yml");
+    let (_tmp, rw, ro) = common::open_stores().await;
+    common::write_aborted_run(
+        rw,
+        "01J0000000000000000000000D",
+        "verifications/aborted.yml",
+    )
+    .await;
 
     let (status, json) = get_json(
-        EvidenceReader::new(tmp.path()),
+        EvidenceReader::new(ro),
         "/api/runs/01J0000000000000000000000D",
     )
     .await;
@@ -157,13 +173,17 @@ async fn aborted_setup_run_surfaces_the_abort() {
 }
 
 #[tokio::test]
-async fn check_detail_timeline_matches_trace_order_and_lists_artifacts() {
-    let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("01J0000000000000000000000A");
-    let sha = common::write_passing_run(&run_dir, "verifications/create-workspace.yml");
+async fn check_detail_timeline_matches_stream_order_and_lists_artifacts() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let sha = common::write_passing_run(
+        rw,
+        "01J0000000000000000000000A",
+        "verifications/create-workspace.yml",
+    )
+    .await;
 
     let (status, json) = get_json(
-        EvidenceReader::new(tmp.path()),
+        EvidenceReader::new(ro),
         "/api/runs/01J0000000000000000000000A/checks/AC-1::AC-1.1",
     )
     .await;
@@ -190,8 +210,8 @@ async fn check_detail_timeline_matches_trace_order_and_lists_artifacts() {
             "check_finished",
         ]
     );
-    // Trace order == seq order: the timeline is a filter over the
-    // trace, never a re-sort.
+    // Stream order == seq order: the timeline is a filter over the
+    // stream, never a re-sort.
     let seqs: Vec<u64> = timeline
         .iter()
         .map(|e| e["seq"].as_u64().unwrap())
@@ -210,10 +230,9 @@ async fn check_detail_timeline_matches_trace_order_and_lists_artifacts() {
 
 #[tokio::test]
 async fn check_detail_unknown_pair_is_404_and_bad_pair_is_400() {
-    let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("01J0000000000000000000000A");
-    common::write_passing_run(&run_dir, "verifications/x.yml");
-    let reader = EvidenceReader::new(tmp.path());
+    let (_tmp, rw, ro) = common::open_stores().await;
+    common::write_passing_run(rw, "01J0000000000000000000000A", "verifications/x.yml").await;
+    let reader = EvidenceReader::new(ro);
 
     let (status, _) = get_json(
         reader.clone(),
@@ -231,28 +250,27 @@ async fn check_detail_unknown_pair_is_404_and_bad_pair_is_400() {
 }
 
 #[tokio::test]
-async fn raw_trace_is_served_byte_identical() {
-    let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("01J0000000000000000000000A");
-    common::write_passing_run(&run_dir, "verifications/x.yml");
-    let on_disk = std::fs::read(run_dir.join("trace.jsonl")).unwrap();
+async fn raw_trace_is_served_as_the_wire_format_stream() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    common::write_passing_run(rw, "01J0000000000000000000000A", "verifications/x.yml").await;
+    let expected = events_to_jsonl(&ro.run_events("01J0000000000000000000000A").await.unwrap());
 
     let (status, body, content_type) = get(
-        EvidenceReader::new(tmp.path()),
+        EvidenceReader::new(ro),
         "/api/runs/01J0000000000000000000000A/trace.jsonl",
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body, on_disk);
+    assert_eq!(body, expected.as_bytes());
     assert_eq!(content_type, "application/x-ndjson");
 }
 
 #[tokio::test]
 async fn artifact_serves_bytes_with_sniffed_content_type() {
-    let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("01J0000000000000000000000A");
-    let sha = common::write_passing_run(&run_dir, "verifications/x.yml");
-    let reader = EvidenceReader::new(tmp.path());
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let sha =
+        common::write_passing_run(rw, "01J0000000000000000000000A", "verifications/x.yml").await;
+    let reader = EvidenceReader::new(ro);
 
     let (status, body, content_type) = get(
         reader.clone(),
@@ -263,7 +281,7 @@ async fn artifact_serves_bytes_with_sniffed_content_type() {
     assert_eq!(content_type, "image/png");
     assert_eq!(body, common::png_bytes());
 
-    // Path-shaped ids are rejected before touching the filesystem.
+    // Path-shaped ids are rejected before touching the store.
     let (status, _, _) = get(
         reader.clone(),
         "/api/runs/01J0000000000000000000000A/artifact/not-a-sha",
@@ -282,10 +300,9 @@ async fn artifact_serves_bytes_with_sniffed_content_type() {
 
 #[tokio::test]
 async fn json_suffix_aliases_serve_the_same_shapes() {
-    let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("01J0000000000000000000000A");
-    common::write_passing_run(&run_dir, "verifications/x.yml");
-    let reader = EvidenceReader::new(tmp.path());
+    let (_tmp, rw, ro) = common::open_stores().await;
+    common::write_passing_run(rw, "01J0000000000000000000000A", "verifications/x.yml").await;
+    let reader = EvidenceReader::new(ro);
 
     let (s1, plain) = get_json(reader.clone(), "/api/runs/01J0000000000000000000000A").await;
     let (s2, suffixed) = get_json(reader, "/api/runs/01J0000000000000000000000A.json").await;
@@ -296,8 +313,8 @@ async fn json_suffix_aliases_serve_the_same_shapes() {
 
 #[tokio::test]
 async fn spa_index_is_served_at_root_and_as_deep_link_fallback() {
-    let tmp = tempfile::tempdir().unwrap();
-    let reader = EvidenceReader::new(tmp.path());
+    let (_tmp, _rw, ro) = common::open_stores().await;
+    let reader = EvidenceReader::new(ro);
 
     let (status, body, content_type) = get(reader.clone(), "/").await;
     assert_eq!(status, StatusCode::OK);
@@ -310,28 +327,7 @@ async fn spa_index_is_served_at_root_and_as_deep_link_fallback() {
     assert_eq!(fallback, body);
 }
 
-/// PR #88 review: a run with no parseable `started_at` (empty trace)
-/// must sort to the bottom of the list, not float to the top.
-#[tokio::test]
-async fn runs_with_no_timestamp_sort_last() {
-    let tmp = tempfile::tempdir().unwrap();
-    let empty_dir = tmp.path().join("01J0000000000000000000000E");
-    std::fs::create_dir_all(&empty_dir).unwrap();
-    std::fs::write(empty_dir.join("trace.jsonl"), b"").unwrap();
-    common::write_passing_run(
-        &tmp.path().join("01J0000000000000000000000A"),
-        "verifications/x.yml",
-    );
-
-    let (_, json) = get_json(EvidenceReader::new(tmp.path()), "/api/runs").await;
-    let rows = json.as_array().unwrap();
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0]["run_id"], "01J0000000000000000000000A");
-    assert_eq!(rows[1]["run_id"], "01J0000000000000000000000E");
-    assert_eq!(rows[1]["started_at"], Value::Null);
-}
-
-/// PR #88 review: when a malformed trace reuses one check id under
+/// PR #88 review: when a malformed stream reuses one check id under
 /// two criteria, the first `step_started` owns it — the check is
 /// listed once, its verdict lands only there, and the colliding pair
 /// is not addressable.
@@ -340,10 +336,17 @@ async fn colliding_check_ids_attribute_to_the_first_owner() {
     use duhem_evidence::{EventPayload, EvidenceWriter, StepOutcome, VerdictState, run_started};
     use std::collections::BTreeMap;
 
-    let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("01J0000000000000000000000F");
-    let mut w = EvidenceWriter::new(&run_dir, "verifications/dup.yml").unwrap();
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let mut w = EvidenceWriter::begin(
+        rw,
+        "01J0000000000000000000000F",
+        "verifications/dup.yml",
+        BTreeMap::new(),
+    )
+    .await
+    .unwrap();
     w.append(run_started("verifications/dup.yml", BTreeMap::new()))
+        .await
         .unwrap();
     for criterion in ["AC-1", "AC-2"] {
         w.append(EventPayload::StepStarted {
@@ -353,25 +356,29 @@ async fn colliding_check_ids_attribute_to_the_first_owner() {
             uses: "api/call".into(),
             with: BTreeMap::new(),
         })
+        .await
         .unwrap();
         w.append(EventPayload::StepFinished {
             step_index: 0,
             outcome: StepOutcome::Ok,
         })
+        .await
         .unwrap();
     }
     w.append(EventPayload::CheckFinished {
         check_id: "DUP".into(),
         verdict: VerdictState::Pass,
     })
+    .await
     .unwrap();
     w.append(EventPayload::RunFinished {
         verdict: VerdictState::Pass,
     })
+    .await
     .unwrap();
-    w.finish().unwrap();
+    w.finish().await.unwrap();
 
-    let reader = EvidenceReader::new(tmp.path());
+    let reader = EvidenceReader::new(ro);
     let (_, detail) = get_json(reader.clone(), "/api/runs/01J0000000000000000000000F").await;
     let criteria = detail["criteria"].as_array().unwrap();
     let ac1 = criteria.iter().find(|c| c["id"] == "AC-1").unwrap();
@@ -401,22 +408,21 @@ async fn colliding_check_ids_attribute_to_the_first_owner() {
 /// #85 Test bullet: the verdict the reader surfaces is the verdict
 /// `duhem_evidence::replay` reconstructs — the dashboard shows the
 /// judge's verdict, never its own.
-#[test]
-fn reader_verdict_matches_replay() {
-    let tmp = tempfile::tempdir().unwrap();
-    for (dir, def) in [
-        ("01J0000000000000000000000A", "verifications/pass.yml"),
-        ("01J0000000000000000000000B", "verifications/fail.yml"),
-    ] {
-        let run_dir = tmp.path().join(dir);
-        if def.contains("pass") {
-            common::write_passing_run(&run_dir, def);
-        } else {
-            common::write_failing_run(&run_dir, def);
-        }
-        let evidence = load_run(&run_dir).unwrap();
-        let trace = Trace::open(&run_dir).unwrap();
+#[tokio::test]
+async fn reader_verdict_matches_replay() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    common::write_passing_run(
+        rw.clone(),
+        "01J0000000000000000000000A",
+        "verifications/pass.yml",
+    )
+    .await;
+    common::write_failing_run(rw, "01J0000000000000000000000B", "verifications/fail.yml").await;
+
+    for run_id in ["01J0000000000000000000000A", "01J0000000000000000000000B"] {
+        let record = ro.get_run(run_id).await.unwrap().unwrap();
+        let trace = Trace::from_store(ro.as_ref(), run_id).await.unwrap();
         let replayed = replay(&trace).expect("fixture must replay cleanly");
-        assert_eq!(evidence.verdict(), Some(replayed.run.state));
+        assert_eq!(record.verdict, Some(replayed.run.state));
     }
 }

@@ -683,8 +683,30 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 
 **Evidence Store** (`duhem-evidence`)
 
-- Append-only structured log + binary blobs (screenshots, videos, HAR)
-- Queryable via dashboard
+> **Alignment note (2026-07-06, #189 — storage posture).** The
+> original posture here was "evidence is a file": each run appended
+> to a per-run `trace.jsonl` under `.duhem/runs/`, and the dashboard
+> (#53) read those files as truth. That posture is superseded (#188):
+> **the store is the single source of truth** — a database
+> (`SqliteStore` locally, under `$XDG_STATE_HOME/duhem` with a
+> per-working-copy path-slug namespace; a hosted Postgres store is
+> the #188 commercial layer). The invariants are preserved, restated:
+> the runtime (carrying the judge's verdicts) is the store's **sole
+> writer**; rows are **insert-only** and a run is sealed at its
+> verdict; the dashboard is a **read-only lens** (SQLite `mode=ro` —
+> enforced by the connection, not by discipline); and **`duhem
+> export`** is the portability path — a self-contained bundle (run
+> header + wire-format event stream + artifacts) that round-trips
+> what the old files carried. The trace *wire format* (#10) is
+> unchanged; it now lives in the store's `events` rows and in export
+> bundles.
+
+- Append-only run store: the wire-format event stream, derived
+  verdict/criteria/check projections, and content-addressed binary
+  blobs (screenshots, videos, HAR), one database per working copy
+- Sole writer: the runtime; the dashboard reads through a read-only
+  handle
+- Portable via `duhem export` (self-contained per-run bundle)
 
 **Run Summary & Reporters** (`duhem-summary`, `duhem-reporter-pretty`, `duhem-reporter-junit`)
 

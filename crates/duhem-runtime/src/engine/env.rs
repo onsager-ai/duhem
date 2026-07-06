@@ -97,19 +97,23 @@ pub(crate) async fn bring_environment_up(
 
     let up_script = resolve_script_path(&env.up, vd_dir);
     let command_str = up_script.display().to_string();
-    writer.append(EventPayload::EnvUpStarted {
-        command: command_str.clone(),
-    })?;
+    writer
+        .append(EventPayload::EnvUpStarted {
+            command: command_str.clone(),
+        })
+        .await?;
 
     let (exit_code, duration, stdout, stderr) = run_script(&up_script, vd_dir).await;
-    let stdout_blob = write_blob_if_nonempty(writer, &stdout)?;
-    let stderr_blob = write_blob_if_nonempty(writer, &stderr)?;
-    writer.append(EventPayload::EnvUpFinished {
-        exit_code,
-        duration_ms: duration_ms_u64(duration),
-        stdout_blob_sha256: stdout_blob,
-        stderr_blob_sha256: stderr_blob,
-    })?;
+    let stdout_blob = write_blob_if_nonempty(writer, &stdout).await?;
+    let stderr_blob = write_blob_if_nonempty(writer, &stderr).await?;
+    writer
+        .append(EventPayload::EnvUpFinished {
+            exit_code,
+            duration_ms: duration_ms_u64(duration),
+            stdout_blob_sha256: stdout_blob,
+            stderr_blob_sha256: stderr_blob,
+        })
+        .await?;
 
     if exit_code != 0 {
         // `up:` failed: nothing was provisioned, so teardown must
@@ -127,11 +131,13 @@ pub(crate) async fn bring_environment_up(
                 (ok, elapsed, PROBE_KIND_HTTP)
             }
         };
-        writer.append(EventPayload::EnvReady {
-            probe_kind: kind.to_string(),
-            ok,
-            elapsed_ms: duration_ms_u64(elapsed),
-        })?;
+        writer
+            .append(EventPayload::EnvReady {
+                probe_kind: kind.to_string(),
+                ok,
+                elapsed_ms: duration_ms_u64(elapsed),
+            })
+            .await?;
         if !ok {
             // `up:` succeeded but the SUT never became ready. Teardown
             // still runs so the half-booted SUT cleans up after
@@ -172,26 +178,30 @@ pub(crate) async fn tear_environment_down(
         return Ok(());
     };
     let down_script = resolve_script_path(down, vd_dir);
-    writer.append(EventPayload::EnvDownStarted {
-        command: down_script.display().to_string(),
-    })?;
+    writer
+        .append(EventPayload::EnvDownStarted {
+            command: down_script.display().to_string(),
+        })
+        .await?;
     let (exit_code, duration, stdout, stderr) = run_script(&down_script, vd_dir).await;
-    let stdout_blob = write_blob_if_nonempty(writer, &stdout)?;
-    let stderr_blob = write_blob_if_nonempty(writer, &stderr)?;
-    writer.append(EventPayload::EnvDownFinished {
-        exit_code,
-        duration_ms: duration_ms_u64(duration),
-        stdout_blob_sha256: stdout_blob,
-        stderr_blob_sha256: stderr_blob,
-    })?;
+    let stdout_blob = write_blob_if_nonempty(writer, &stdout).await?;
+    let stderr_blob = write_blob_if_nonempty(writer, &stderr).await?;
+    writer
+        .append(EventPayload::EnvDownFinished {
+            exit_code,
+            duration_ms: duration_ms_u64(duration),
+            stdout_blob_sha256: stdout_blob,
+            stderr_blob_sha256: stderr_blob,
+        })
+        .await?;
     Ok(())
 }
 
 /// A manifest's shared environment, provisioned **once** for the whole
 /// suite (spec #131). The CLI provisions before any leaf runs and tears
 /// down after the last leaf, instead of each leaf standing up its own
-/// stack. Suite-level `up:` / `ready:` / `down:` evidence is written to
-/// its own trace directory, distinct from each leaf's run dir.
+/// stack. Suite-level `up:` / `ready:` / `down:` evidence is recorded
+/// as its own run in the store, distinct from each leaf's run.
 pub struct SuiteEnvironment {
     env: Environment,
     dir: Option<PathBuf>,
@@ -203,19 +213,25 @@ pub struct SuiteEnvironment {
 
 impl SuiteEnvironment {
     /// Provision the shared environment. `manifest_dir` anchors relative
-    /// `up:` / `down:` script paths; `evidence_dir` is the suite-level
-    /// trace directory. `skip_env_up` is the manifest-level `--no-env-up`.
+    /// `up:` / `down:` script paths; `store` is where the suite-level
+    /// evidence run lands. `skip_env_up` is the manifest-level
+    /// `--no-env-up`.
     pub async fn provision(
         env: &Environment,
         manifest_dir: Option<&Path>,
-        evidence_root: &Path,
+        store: std::sync::Arc<dyn duhem_evidence::Store>,
         skip_env_up: bool,
     ) -> Result<Self, EngineError> {
         let run = RunState::new(std::collections::BTreeMap::new());
-        // Fresh per-run trace dir so repeated suite runs don't collide
-        // on `<root>/_suite/trace.jsonl`.
-        let dir = evidence_root.join(new_run_id());
-        let mut writer = EvidenceWriter::new(&dir, "<suite>")?;
+        // The suite's shared-environment evidence is its own run row,
+        // identified by the `<suite>` verification marker.
+        let mut writer = EvidenceWriter::begin(
+            store,
+            new_run_id(),
+            "<suite>",
+            std::collections::BTreeMap::new(),
+        )
+        .await?;
         let up = bring_environment_up(&mut writer, env, manifest_dir, &run, skip_env_up).await?;
         Ok(Self {
             env: env.clone(),
@@ -244,7 +260,7 @@ impl SuiteEnvironment {
             self.should_tear_down,
         )
         .await?;
-        self.writer.finish()?;
+        self.writer.finish().await?;
         Ok(())
     }
 
@@ -397,14 +413,14 @@ fn resolve_url(raw: &str, run: &RunState) -> String {
     }
 }
 
-fn write_blob_if_nonempty(
+async fn write_blob_if_nonempty(
     writer: &mut EvidenceWriter,
     bytes: &[u8],
 ) -> Result<Option<String>, EngineError> {
     if bytes.is_empty() {
         return Ok(None);
     }
-    let sha = writer.write_blob(bytes)?;
+    let sha = writer.write_blob(bytes).await?;
     Ok(Some(sha.0))
 }
 
@@ -536,11 +552,14 @@ mod tests {
             down: Some(PathBuf::from("down.sh")),
             ready: None,
         };
-        let evidence_root = base.join("evidence");
-
-        let session = SuiteEnvironment::provision(&env, Some(&base), &evidence_root, false)
+        let store = duhem_evidence::SqliteStore::open(base.join("duhem.db"))
             .await
-            .expect("provision");
+            .unwrap();
+
+        let session =
+            SuiteEnvironment::provision(&env, Some(&base), std::sync::Arc::new(store), false)
+                .await
+                .expect("provision");
         assert!(session.aborted_cause().is_none(), "suite should be up");
         session.tear_down(false).await.expect("tear down");
 

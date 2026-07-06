@@ -14,10 +14,10 @@
 //!
 //! Scope: criterion-level verdicts, plus a `failures` list that
 //! carries the *non-passing* checks and their failing assertions so a
-//! reporter can explain a `fail` without re-reading `trace.jsonl`. The
-//! full per-check / per-step trace still lives in `trace.jsonl` (the
-//! trace is the trace; the summary carries only what a verdict line
-//! needs to be legible).
+//! reporter can explain a `fail` without querying the evidence store.
+//! The full per-check / per-step event stream still lives in the
+//! store (the evidence is the evidence; the summary carries only what
+//! a verdict line needs to be legible).
 //!
 //! The crate has exactly one dependency on `duhem-judge` (`VerdictState`)
 //! so consumers — including reference plugins — can deserialize without
@@ -44,11 +44,14 @@ pub struct RunSummary {
     pub verdict: VerdictState,
     /// Per-criterion verdicts, in document order.
     pub criteria: Vec<CriterionSummary>,
-    /// On-disk evidence directory for the run.
-    pub evidence_dir: PathBuf,
+    /// Path to the evidence store (SQLite DB) the run was recorded
+    /// in; the run's evidence is addressed by (`store`, `run_id`).
+    /// **v2**: replaces v1's `evidence_dir` (per-run trace directories
+    /// were retired for the store in #189).
+    pub store: PathBuf,
     /// Non-passing checks and the assertions that explain their verdict.
     /// Lets a reporter show *which* assertion failed (and the observed
-    /// values) without the author hand-reading `trace.jsonl`. Empty on a
+    /// values) without the author querying the store. Empty on a
     /// passing run; `#[serde(default)]`, so a summary written before this
     /// field existed still deserializes.
     #[serde(default)]
@@ -73,7 +76,11 @@ impl RunSummary {
     /// version check refuses. Either kind needs a `CHANGELOG.md` entry
     /// under the `### Reporter contract` heading in the current
     /// `## v0.x — unreleased` section.
-    pub const SCHEMA_VERSION: &'static str = "1";
+    ///
+    /// **v2** (#189): `evidence_dir` (per-run trace directory) →
+    /// `store` (evidence-store DB path). Breaking: the field a plugin
+    /// used to locate evidence changed name and meaning.
+    pub const SCHEMA_VERSION: &'static str = "2";
 
     /// Construct a summary at the current schema version. `failures`
     /// defaults empty; populate it with [`RunSummary::with_failures`].
@@ -81,14 +88,14 @@ impl RunSummary {
         run_id: impl Into<String>,
         verdict: VerdictState,
         criteria: Vec<CriterionSummary>,
-        evidence_dir: PathBuf,
+        store: PathBuf,
     ) -> Self {
         Self {
             schema_version: Self::SCHEMA_VERSION.to_string(),
             run_id: run_id.into(),
             verdict,
             criteria,
-            evidence_dir,
+            store,
             failures: Vec::new(),
             warnings: Vec::new(),
         }
@@ -183,14 +190,14 @@ mod tests {
                 id: "AC-1".into(),
                 verdict: VerdictState::Pass,
             }],
-            PathBuf::from(".duhem/runs/01J000000000000000000RUN"),
+            PathBuf::from("state/duhem.db"),
         );
         let line = serde_json::to_string(&s).unwrap();
         let back: RunSummary = serde_json::from_str(&line).unwrap();
         assert_eq!(back, s);
         // Sanity: the contract is versioned on the wire, not just in
         // memory — a plugin sees `schema_version` as a field.
-        assert!(line.contains("\"schema_version\":\"1\""), "got: {line}");
+        assert!(line.contains("\"schema_version\":\"2\""), "got: {line}");
     }
 
     #[test]
@@ -201,10 +208,11 @@ mod tests {
 
     #[test]
     fn failures_round_trip_and_default_empty() {
-        // A v1-shaped line (no `failures`) still deserializes — the
-        // field is `#[serde(default)]`.
-        let v1 = r#"{"schema_version":"1","run_id":"r","verdict":"pass","criteria":[],"evidence_dir":"."}"#;
-        let back: RunSummary = serde_json::from_str(v1).unwrap();
+        // A failures-free line still deserializes — the field is
+        // `#[serde(default)]`.
+        let bare =
+            r#"{"schema_version":"2","run_id":"r","verdict":"pass","criteria":[],"store":"."}"#;
+        let back: RunSummary = serde_json::from_str(bare).unwrap();
         assert!(back.failures.is_empty());
 
         // A populated failures list round-trips.
@@ -240,8 +248,9 @@ mod tests {
         let back: RunSummary = serde_json::from_str(&line).unwrap();
         assert_eq!(back, s);
         // A summary written before this field still deserializes.
-        let v1 = r#"{"schema_version":"1","run_id":"r","verdict":"pass","criteria":[],"evidence_dir":"."}"#;
-        let back: RunSummary = serde_json::from_str(v1).unwrap();
+        let bare =
+            r#"{"schema_version":"2","run_id":"r","verdict":"pass","criteria":[],"store":"."}"#;
+        let back: RunSummary = serde_json::from_str(bare).unwrap();
         assert!(back.warnings.is_empty());
     }
 
@@ -254,7 +263,7 @@ mod tests {
                 id: "AC-1".into(),
                 verdict: VerdictState::Pass,
             }],
-            PathBuf::from(".duhem/runs/leaf-a/01J00000000000000000000001"),
+            PathBuf::from("state/duhem.db"),
         );
         let set = RunSetSummary::new(VerdictState::Pass, vec![leaf]);
         let line = serde_json::to_string(&set).unwrap();

@@ -10,6 +10,7 @@
 pub mod context;
 pub mod env;
 pub mod inherit;
+pub mod outcome;
 pub mod registry;
 pub mod runner;
 pub mod setup;

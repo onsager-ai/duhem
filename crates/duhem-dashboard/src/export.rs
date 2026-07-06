@@ -8,7 +8,7 @@
 //! index.html, assets/…                  # the SPA bundle
 //! api/runs.json                         # GET /api/runs
 //! api/runs/<run-id>.json                # GET /api/runs/:id
-//! api/runs/<run-id>/trace.jsonl         # raw trace passthrough
+//! api/runs/<run-id>/trace.jsonl         # wire-format event stream
 //! api/runs/<run-id>/checks/<c>::<k>.json
 //! run/<run-id>/artifact/<sha>.<ext>     # artifact bytes (#53 path)
 //! ```
@@ -35,7 +35,7 @@ pub struct ExportStats {
     pub spa_files: usize,
 }
 
-pub fn export(reader: &EvidenceReader, out: &Path) -> anyhow::Result<ExportStats> {
+pub async fn export(reader: &EvidenceReader, out: &Path) -> anyhow::Result<ExportStats> {
     let mut stats = ExportStats::default();
     fs::create_dir_all(out).with_context(|| format!("create {}", out.display()))?;
 
@@ -44,25 +44,25 @@ pub fn export(reader: &EvidenceReader, out: &Path) -> anyhow::Result<ExportStats
         stats.spa_files += 1;
     }
 
-    let mut list = reader.list();
+    let mut list = reader.list().await?;
     for entry in &mut list {
         freeze_live(entry);
     }
     write_file(out, "api/runs.json", &serde_json::to_vec_pretty(&list)?)?;
 
     for run_id in leaf_run_ids(&list) {
-        export_run(reader, out, &run_id, &mut stats)?;
+        export_run(reader, out, &run_id, &mut stats).await?;
     }
     Ok(stats)
 }
 
-fn export_run(
+async fn export_run(
     reader: &EvidenceReader,
     out: &Path,
     run_id: &str,
     stats: &mut ExportStats,
 ) -> anyhow::Result<()> {
-    let Some(mut detail) = reader.run_detail(run_id)? else {
+    let Some(mut detail) = reader.run_detail(run_id).await? else {
         return Ok(());
     };
     detail.live = false;
@@ -72,21 +72,27 @@ fn export_run(
         &serde_json::to_vec_pretty(&detail)?,
     )?;
 
-    let run_dir = reader
-        .locate_run(run_id)
-        .context("run located a moment ago vanished")?;
-    let trace = fs::read(run_dir.join("trace.jsonl"))?;
-    write_file(out, &format!("api/runs/{run_id}/trace.jsonl"), &trace)?;
+    let trace = reader
+        .raw_events_jsonl(run_id)
+        .await?
+        .context("run listed a moment ago vanished")?;
+    write_file(
+        out,
+        &format!("api/runs/{run_id}/trace.jsonl"),
+        trace.as_bytes(),
+    )?;
     stats.runs += 1;
 
     for criterion in &detail.criteria {
         for check in &criterion.checks {
-            let Some(mut check_detail) = reader.check_detail(run_id, &criterion.id, &check.id)?
+            let Some(mut check_detail) = reader
+                .check_detail(run_id, &criterion.id, &check.id)
+                .await?
             else {
                 continue;
             };
             for artifact in &mut check_detail.artifacts {
-                let Some((bytes, mime)) = reader.artifact(run_id, &artifact.id)? else {
+                let Some((bytes, mime)) = reader.artifact(run_id, &artifact.id).await? else {
                     continue;
                 };
                 let ext = extension_for(sniff_content_type(&bytes));

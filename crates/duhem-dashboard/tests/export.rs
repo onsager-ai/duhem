@@ -103,6 +103,7 @@ async fn export_refuses_traversal_shaped_ids() {
         check_id: "../pwn".into(),
         step_index: 0,
         uses: "api/call".into(),
+        layer: None,
         with: BTreeMap::new(),
     })
     .await

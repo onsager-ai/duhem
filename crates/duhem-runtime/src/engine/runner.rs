@@ -691,6 +691,11 @@ impl Engine {
                     check_id: check.id.clone(),
                     step_index: idx as u32,
                     uses: step.uses.clone(),
+                    // Honest evidence (#192): the layer comes from the
+                    // executed action's catalog family, never from
+                    // parsing intent; out-of-catalog `uses` stays
+                    // untagged.
+                    layer: duhem_actions::layer_for_uses(&step.uses).map(str::to_string),
                     with: with_to_evidence_map(&resolved_with),
                 })
                 .await?;

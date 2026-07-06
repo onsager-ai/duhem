@@ -19,7 +19,7 @@ use crate::event::{Event, EventPayload};
 use crate::writer::Sha256Hex;
 
 use super::{
-    CriterionHistoryEntry, ProjectSummary, RunMeta, RunRecord, RunScope, Store, StoreError,
+    CriterionHistoryEntry, ProjectSummary, RunMeta, RunRecord, RunScope, Span, Store, StoreError,
     TargetStatus, is_valid_sha256_hex, parse_verdict, verdict_token, verification_key,
     verification_name,
 };
@@ -262,6 +262,55 @@ impl Store for SqliteStore {
                 .execute(&mut *tx)
                 .await?;
             }
+            EventPayload::StepFinished {
+                step_index,
+                outcome,
+            }
+            | EventPayload::SetupStepFinished {
+                step_index,
+                outcome,
+            } => {
+                // Delivery-web span fold (#192): pair this finish with
+                // the most recent matching `*_step_started`; a span row
+                // exists only when that opener carried a layer tag —
+                // untagged steps yield no row (honesty: no inference).
+                let opener_kind = if matches!(event.payload, EventPayload::StepFinished { .. }) {
+                    "step_started"
+                } else {
+                    "setup_step_started"
+                };
+                let opener: Option<(i64, String)> = sqlx::query_as(
+                    "SELECT seq, payload FROM events                      WHERE run_id = ? AND kind = ?                      AND json_extract(payload, '$.step_index') = ? AND seq < ?                      ORDER BY seq DESC LIMIT 1",
+                )
+                .bind(run_id)
+                .bind(opener_kind)
+                .bind(*step_index as i64)
+                .bind(event.seq as i64)
+                .fetch_optional(&mut *tx)
+                .await?;
+                if let Some((opener_seq, payload)) = opener {
+                    let opener_evt: serde_json::Value = serde_json::from_str(&payload)?;
+                    if let Some(layer) = opener_evt.get("layer").and_then(|l| l.as_str()) {
+                        let ok = matches!(outcome, crate::event::StepOutcome::Ok);
+                        let detail = match outcome {
+                            crate::event::StepOutcome::Ok => None,
+                            crate::event::StepOutcome::Error => Some("error"),
+                            crate::event::StepOutcome::Timeout => Some("timeout"),
+                        };
+                        sqlx::query(
+                            "INSERT INTO spans (run_id, seq, check_id, layer, ok, detail)                              VALUES (?, ?, ?, ?, ?, ?)",
+                        )
+                        .bind(run_id)
+                        .bind(opener_seq)
+                        .bind(opener_evt.get("check_id").and_then(|c| c.as_str()))
+                        .bind(layer)
+                        .bind(ok as i64)
+                        .bind(detail)
+                        .execute(&mut *tx)
+                        .await?;
+                    }
+                }
+            }
             EventPayload::RunFinished { verdict } => {
                 let started_at: Option<String> =
                     sqlx::query_scalar("SELECT started_at FROM runs WHERE run_id = ?")
@@ -456,5 +505,25 @@ impl Store for SqliteStore {
             // attestation.
             blocked: latest_verdict != Some(crate::event::VerdictState::Pass),
         }))
+    }
+
+    async fn check_spans(&self, run_id: &str, check_id: &str) -> Result<Vec<Span>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT seq, check_id, layer, ok, detail FROM spans              WHERE run_id = ? AND check_id = ? ORDER BY seq",
+        )
+        .bind(run_id)
+        .bind(check_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|row| Span {
+                seq: row.get::<i64, _>("seq") as u64,
+                check_id: row.get("check_id"),
+                layer: row.get("layer"),
+                ok: row.get::<i64, _>("ok") != 0,
+                detail: row.get("detail"),
+            })
+            .collect())
     }
 }

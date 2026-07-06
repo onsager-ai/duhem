@@ -133,6 +133,29 @@ pub fn uses_requires_page(uses: &str) -> bool {
     uses.starts_with("ui/") || uses == "api/observe"
 }
 
+/// Which layer of the delivery web a `Step.uses` action exercises
+/// (#192): `ui/*` → `ui`, `api/*` → `api`, `db/*` → `data`,
+/// `cli/*` → `runtime`. The tag is derived from the *executed*
+/// action's catalog family — never inferred from intent or URLs —
+/// and a `uses` outside the catalog families is untagged (`None`)
+/// rather than guessed (the mechanical-judgment posture: no
+/// inference dressed as evidence). The closed token set is the ④
+/// delivery-web-span vocabulary; the runtime stamps it onto
+/// `step_started` evidence and the store folds it into `spans`.
+pub fn layer_for_uses(uses: &str) -> Option<&'static str> {
+    if uses.starts_with("ui/") {
+        Some("ui")
+    } else if uses.starts_with("api/") {
+        Some("api")
+    } else if uses.starts_with("db/") {
+        Some("data")
+    } else if uses.starts_with("cli/") {
+        Some("runtime")
+    } else {
+        None
+    }
+}
+
 /// One built-in action type. Implementors live under `ui/`, `api/`,
 /// `db/`, etc.
 ///
@@ -208,5 +231,24 @@ mod tests {
         ] {
             assert!(!uses_requires_page(u), "{u} should be page-free");
         }
+    }
+}
+
+#[cfg(test)]
+mod layer_tests {
+    use super::layer_for_uses;
+
+    #[test]
+    fn catalog_families_map_to_their_layers_and_nothing_is_guessed() {
+        assert_eq!(layer_for_uses("ui/click"), Some("ui"));
+        assert_eq!(layer_for_uses("ui/assert-element"), Some("ui"));
+        assert_eq!(layer_for_uses("api/call"), Some("api"));
+        assert_eq!(layer_for_uses("api/observe"), Some("api"));
+        assert_eq!(layer_for_uses("db/query"), Some("data"));
+        assert_eq!(layer_for_uses("db/observe"), Some("data"));
+        assert_eq!(layer_for_uses("cli/invoke"), Some("runtime"));
+        // Out-of-catalog: untagged, never guessed.
+        assert_eq!(layer_for_uses("custom/thing"), None);
+        assert_eq!(layer_for_uses(""), None);
     }
 }

@@ -44,6 +44,7 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
         check_id: "AC-1.1".into(),
         step_index: 0,
         uses: "ui/click".into(),
+        layer: None,
         with,
     })
     .await
@@ -501,6 +502,7 @@ async fn write_scoped_run(
         check_id: "AC-1.1".into(),
         step_index: 0,
         uses: "api/call".into(),
+        layer: None,
         with: BTreeMap::new(),
     })
     .await
@@ -777,4 +779,184 @@ async fn target_status_reports_a_failed_sha_as_blocked() {
         .unwrap();
     assert!(inflight.blocked, "verdict-less run is not attestation");
     assert_eq!(inflight.latest_verdict, None);
+}
+
+// ---------------------------------------------------------------
+// Delivery-web spans (#192)
+// ---------------------------------------------------------------
+
+use duhem_evidence::Span;
+
+/// Append one tagged (or untagged) step pair for `check_id`.
+async fn step_pair(
+    w: &mut EvidenceWriter,
+    check_id: &str,
+    step_index: u32,
+    uses: &str,
+    layer: Option<&str>,
+    outcome: StepOutcome,
+) {
+    w.append(EventPayload::StepStarted {
+        criterion_id: "AC-1".into(),
+        check_id: check_id.into(),
+        step_index,
+        uses: uses.into(),
+        layer: layer.map(str::to_string),
+        with: BTreeMap::new(),
+    })
+    .await
+    .unwrap();
+    w.append(EventPayload::StepFinished {
+        step_index,
+        outcome,
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn spans_fold_a_checks_layer_chain_in_order() {
+    let (_tmp, store) = open_store().await;
+    let mut w = EvidenceWriter::begin(store.clone(), RUN_ID, "x.yml", BTreeMap::new())
+        .await
+        .unwrap();
+    w.append(run_started("x.yml", BTreeMap::new()))
+        .await
+        .unwrap();
+
+    // A two-layer chain: the sign-in shape from the worked example —
+    // ui (form) → api (/login) — everything ok.
+    step_pair(&mut w, "AC-1.1", 0, "ui/type", Some("ui"), StepOutcome::Ok).await;
+    step_pair(
+        &mut w,
+        "AC-1.1",
+        1,
+        "api/call",
+        Some("api"),
+        StepOutcome::Ok,
+    )
+    .await;
+    w.append(EventPayload::CheckFinished {
+        check_id: "AC-1.1".into(),
+        verdict: VerdictState::Pass,
+    })
+    .await
+    .unwrap();
+
+    let spans = store.check_spans(RUN_ID, "AC-1.1").await.unwrap();
+    let chain: Vec<(&str, bool)> = spans.iter().map(|s| (s.layer.as_str(), s.ok)).collect();
+    assert_eq!(chain, vec![("ui", true), ("api", true)]);
+    // Every span links back to its opening evidence event.
+    assert!(spans.windows(2).all(|w| w[0].seq < w[1].seq));
+}
+
+#[tokio::test]
+async fn a_failing_span_pinpoints_the_broken_layer() {
+    let (_tmp, store) = open_store().await;
+    let mut w = EvidenceWriter::begin(store.clone(), RUN_ID, "x.yml", BTreeMap::new())
+        .await
+        .unwrap();
+    w.append(run_started("x.yml", BTreeMap::new()))
+        .await
+        .unwrap();
+
+    // api → data, with the data layer timing out.
+    step_pair(
+        &mut w,
+        "AC-2.1",
+        0,
+        "api/call",
+        Some("api"),
+        StepOutcome::Ok,
+    )
+    .await;
+    step_pair(
+        &mut w,
+        "AC-2.1",
+        1,
+        "db/observe",
+        Some("data"),
+        StepOutcome::Timeout,
+    )
+    .await;
+
+    let spans = store.check_spans(RUN_ID, "AC-2.1").await.unwrap();
+    assert_eq!(spans.len(), 2);
+    assert!(spans[0].ok && spans[0].layer == "api");
+    let broken = &spans[1];
+    assert_eq!(broken.layer, "data");
+    assert!(!broken.ok);
+    assert_eq!(broken.detail.as_deref(), Some("timeout"));
+}
+
+#[tokio::test]
+async fn untagged_steps_yield_no_span_rows() {
+    // Honesty constraint: a step whose opener carries no layer tag
+    // (out-of-catalog uses, or a pre-tag trace) folds no span — the
+    // view says "layer unknown" instead of guessing.
+    let (_tmp, store) = open_store().await;
+    let mut w = EvidenceWriter::begin(store.clone(), RUN_ID, "x.yml", BTreeMap::new())
+        .await
+        .unwrap();
+    w.append(run_started("x.yml", BTreeMap::new()))
+        .await
+        .unwrap();
+    step_pair(&mut w, "AC-3.1", 0, "custom/thing", None, StepOutcome::Ok).await;
+
+    assert!(
+        store
+            .check_spans(RUN_ID, "AC-3.1")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // And a pre-tag wire line (no `layer` key at all) still parses —
+    // the additive-field back-compat contract.
+    let old = r#"{"seq":0,"ts":"2026-05-08T12:00:00.000Z","kind":"step_started","criterion_id":"AC-1","check_id":"AC-1.1","step_index":0,"uses":"ui/click"}"#;
+    let evt: Event = serde_json::from_str(old).unwrap();
+    match &evt.payload {
+        EventPayload::StepStarted { layer, .. } => assert_eq!(layer, &None),
+        _ => panic!("wrong kind"),
+    }
+}
+
+#[tokio::test]
+async fn setup_phase_spans_carry_no_check_id() {
+    let (_tmp, store) = open_store().await;
+    let mut w = EvidenceWriter::begin(store.clone(), RUN_ID, "x.yml", BTreeMap::new())
+        .await
+        .unwrap();
+    w.append(run_started("x.yml", BTreeMap::new()))
+        .await
+        .unwrap();
+    w.append(EventPayload::SetupStepStarted {
+        step_index: 0,
+        uses: "cli/invoke".into(),
+        layer: Some("runtime".into()),
+        with: BTreeMap::new(),
+    })
+    .await
+    .unwrap();
+    w.append(EventPayload::SetupStepFinished {
+        step_index: 0,
+        outcome: StepOutcome::Ok,
+    })
+    .await
+    .unwrap();
+
+    let rows: Vec<(Option<String>, String)> =
+        sqlx::query_as("SELECT check_id, layer FROM spans WHERE run_id = ?")
+            .bind(RUN_ID)
+            .fetch_all(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(rows, vec![(None, "runtime".to_string())]);
+    let _ = Span {
+        seq: 0,
+        check_id: None,
+        layer: "runtime".into(),
+        ok: true,
+        detail: None,
+    };
 }

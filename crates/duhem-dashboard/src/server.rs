@@ -35,6 +35,16 @@ pub fn router(reader: EvidenceReader) -> Router {
         .route("/api/runs/{run_id}/trace.jsonl", get(raw_trace))
         .route("/api/runs/{run_id}/artifact/{artifact_id}", get(artifact))
         .route("/api/runs/{run_id}/live", get(live))
+        .route(
+            "/api/verifications/{name}/history",
+            get(verification_history),
+        )
+        // Static-export twin (the SPA always fetches the `.json`
+        // spelling — same rationale as `strip_json_suffix`).
+        .route(
+            "/api/verifications/{name}/history.json",
+            get(verification_history),
+        )
         .fallback(get(static_asset))
         .with_state(reader)
 }
@@ -117,6 +127,18 @@ async fn artifact(
     match reader.artifact(&run_id, &artifact_id).await {
         Ok(Some((bytes, mime))) => ([(header::CONTENT_TYPE, mime)], bytes).into_response(),
         Ok(None) => not_found("artifact"),
+        Err(e) => e.into_response(),
+    }
+}
+
+/// `GET /api/verifications/:name/history` (#193 ② VD-over-time).
+async fn verification_history(
+    State(reader): State<EvidenceReader>,
+    Path(name): Path<String>,
+) -> Response {
+    match reader.verification_history(&name).await {
+        Ok(Some(history)) => axum::Json(history).into_response(),
+        Ok(None) => not_found("verification"),
         Err(e) => e.into_response(),
     }
 }

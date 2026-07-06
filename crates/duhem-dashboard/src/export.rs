@@ -53,6 +53,21 @@ pub async fn export(reader: &EvidenceReader, out: &Path) -> anyhow::Result<Expor
     for run_id in leaf_run_ids(&list) {
         export_run(reader, out, &run_id, &mut stats).await?;
     }
+
+    // ② VD-over-time snapshots (#193): one history document per
+    // verification name on the list.
+    let mut names: Vec<String> = list.iter().map(|e| e.verification.clone()).collect();
+    names.sort();
+    names.dedup();
+    for name in names {
+        if let Some(history) = reader.verification_history(&name).await? {
+            write_file(
+                out,
+                &format!("api/verifications/{name}/history.json"),
+                &serde_json::to_vec_pretty(&history)?,
+            )?;
+        }
+    }
     Ok(stats)
 }
 

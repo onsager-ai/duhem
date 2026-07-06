@@ -46,7 +46,11 @@ function Row({ entry, nested }: { entry: RunsListEntry; nested?: boolean }) {
     <>
       <tr className={nested ? "nested" : undefined}>
         <td>{name}</td>
-        <td>{entry.verification}</td>
+        <td>
+          <Link to={`/verification/${encodeURIComponent(entry.verification)}`}>
+            {entry.verification}
+          </Link>
+        </td>
         <td>{formatStartedAt(entry.started_at)}</td>
         <td>{formatDuration(entry.duration_ms)}</td>
         <td>

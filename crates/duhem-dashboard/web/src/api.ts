@@ -55,12 +55,38 @@ export interface ArtifactRef {
   url: string;
 }
 
+export interface SpanModel {
+  seq: number;
+  layer: string;
+  ok: boolean;
+  detail?: string;
+}
+
 export interface CheckDetail {
   criterion_id: string;
   check_id: string;
   verdict: Verdict | null;
+  spans: SpanModel[];
   timeline: TraceEvent[];
   artifacts: ArtifactRef[];
+}
+
+export interface HistoryRun {
+  run_id: string;
+  started_at: string | null;
+  verdict: Verdict | null;
+  duration_ms: number | null;
+}
+
+export interface CriterionHistory {
+  criterion_id: string;
+  verdicts: (Verdict | null)[];
+}
+
+export interface VerificationHistory {
+  name: string;
+  runs: HistoryRun[];
+  criteria: CriterionHistory[];
 }
 
 async function getJson<T>(path: string): Promise<T> {
@@ -86,6 +112,12 @@ export function fetchCheck(
 ): Promise<CheckDetail> {
   const pair = encodeURIComponent(`${criterionId}::${checkId}`);
   return getJson(`api/runs/${encodeURIComponent(runId)}/checks/${pair}.json`);
+}
+
+export function fetchVerificationHistory(
+  name: string,
+): Promise<VerificationHistory> {
+  return getJson(`api/verifications/${encodeURIComponent(name)}/history.json`);
 }
 
 export function traceUrl(runId: string): string {

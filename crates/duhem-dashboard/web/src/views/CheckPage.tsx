@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { fetchCheck, type CheckDetail, type TraceEvent } from "../api";
+import { fetchCheck, type CheckDetail, type SpanModel, type TraceEvent } from "../api";
 import { VerdictBadge, isImageArtifact } from "../ui";
 
 function eventDetail(evt: TraceEvent): string {
@@ -27,6 +27,37 @@ export function Timeline({ events }: { events: TraceEvent[] }) {
         </li>
       ))}
     </ol>
+  );
+}
+
+// ④ delivery-web span chain (#193 over #192 data): the ordered layers
+// the check actually crossed, colored by outcome; the first broken
+// layer carries its detail. Empty spans = a pre-tag or untagged run —
+// say "layer unknown", never guess.
+export function SpanChain({ spans }: { spans: SpanModel[] }) {
+  if (spans.length === 0) {
+    return (
+      <p className="kv muted" data-testid="spanchain-unknown">
+        delivery web: layer unknown (run predates layer tags or steps are untagged)
+      </p>
+    );
+  }
+  return (
+    <p className="spanchain" data-testid="spanchain">
+      <span className="muted">delivery web: </span>
+      {spans.map((s, i) => (
+        <span key={s.seq}>
+          {i > 0 && <span className="muted"> → </span>}
+          <span
+            className={`span-node ${s.ok ? "span-ok" : "span-fail"}`}
+            title={`step evidence #${s.seq}${s.detail ? ` — ${s.detail}` : ""}`}
+          >
+            {s.layer}
+            {!s.ok && s.detail ? ` ✕ ${s.detail}` : !s.ok ? " ✕" : ""}
+          </span>
+        </span>
+      ))}
+    </p>
   );
 }
 
@@ -79,6 +110,7 @@ export default function CheckPage() {
           {check.criterion_id} :: {check.check_id}{" "}
           <VerdictBadge verdict={check.verdict} />
         </h2>
+        <SpanChain spans={check.spans} />
         <Timeline events={check.timeline} />
       </div>
       <Artifacts artifacts={check.artifacts} />

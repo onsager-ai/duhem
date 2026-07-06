@@ -5,7 +5,14 @@
 
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { fetchRun, liveUrl, traceUrl, type RunDetail, type TraceEvent } from "../api";
+import {
+  fetchCheck,
+  fetchRun,
+  liveUrl,
+  traceUrl,
+  type RunDetail,
+  type TraceEvent,
+} from "../api";
 import { foldRun } from "../fold";
 import { VerdictBadge, formatStartedAt } from "../ui";
 
@@ -134,18 +141,70 @@ function CriterionRows({
         </td>
       </tr>
       {criterion.checks.map((check) => (
-        <tr key={check.id} className="nested">
+        <CheckRows key={check.id} runId={runId} criterionId={criterion.id} check={check} />
+      ))}
+    </>
+  );
+}
+
+// ③ failure-first (#193): a non-passing check auto-expands its
+// non-passing assertions inline — the judge's recorded state plus the
+// evidence-bound detail ("actual X, expected Y") — so the failure is
+// legible without leaving the run page. Passing checks stay compact.
+function CheckRows({
+  runId,
+  criterionId,
+  check,
+}: {
+  runId: string;
+  criterionId: string;
+  check: { id: string; verdict: string | null };
+}) {
+  const failing = check.verdict !== null && check.verdict !== "pass";
+  const [assertions, setAssertions] = useState<TraceEvent[]>([]);
+
+  useEffect(() => {
+    if (!failing) return;
+    fetchCheck(runId, criterionId, check.id).then(
+      (detail) =>
+        setAssertions(
+          detail.timeline.filter(
+            (e) => e.kind === "assertion_evaluated" && e.state !== "pass",
+          ),
+        ),
+      () => {},
+    );
+  }, [runId, criterionId, check.id, failing]);
+
+  return (
+    <>
+      <tr className="nested">
+        <td>
+          <Link
+            to={`/run/${encodeURIComponent(runId)}/check/${encodeURIComponent(
+              `${criterionId}::${check.id}`,
+            )}`}
+          >
+            {check.id}
+          </Link>
+        </td>
+        <td>
+          <VerdictBadge verdict={check.verdict} />
+        </td>
+      </tr>
+      {assertions.map((a) => (
+        <tr key={a.seq} className="nested assertion" data-testid="failing-assertion">
           <td>
-            <Link
-              to={`/run/${encodeURIComponent(runId)}/check/${encodeURIComponent(
-                `${criterion.id}::${check.id}`,
-              )}`}
-            >
-              {check.id}
-            </Link>
+            <span className="muted">assertion #{String(a.assertion_index)}</span>
+            {typeof a.detail === "string" && a.detail && (
+              <>
+                {" "}
+                <code>{a.detail}</code>
+              </>
+            )}
           </td>
           <td>
-            <VerdictBadge verdict={check.verdict} />
+            <VerdictBadge verdict={String(a.state)} />
           </td>
         </tr>
       ))}

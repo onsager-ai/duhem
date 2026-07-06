@@ -427,3 +427,78 @@ async fn reader_verdict_matches_replay() {
         assert_eq!(record.verdict, Some(replayed.run.state));
     }
 }
+
+/// #193: the check detail carries the ④ span chain folded from the
+/// run's layer tags, each span linking back to its evidence seq.
+#[tokio::test]
+async fn check_detail_carries_the_delivery_web_spans() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    common::write_passing_run(rw, "01J0000000000000000000000A", "verifications/x.yml").await;
+
+    let (status, json) = get_json(
+        EvidenceReader::new(ro),
+        "/api/runs/01J0000000000000000000000A/checks/AC-1::AC-1.1",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let spans = json["spans"].as_array().unwrap();
+    assert_eq!(spans.len(), 2, "two tagged ui steps: {spans:?}");
+    assert!(spans.iter().all(|s| s["layer"] == "ui" && s["ok"] == true));
+    // Evidence linkage: span seq points at a real timeline event.
+    let seqs: Vec<u64> = json["timeline"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["seq"].as_u64().unwrap())
+        .collect();
+    assert!(
+        spans
+            .iter()
+            .all(|s| seqs.contains(&s["seq"].as_u64().unwrap()))
+    );
+}
+
+/// #193 ②: the verification-history endpoint returns the runs axis
+/// (newest first) and each criterion's verdict across them.
+#[tokio::test]
+async fn verification_history_returns_the_criterion_spine() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    common::write_passing_run(
+        rw.clone(),
+        "01J0000000000000000000000A",
+        "verifications/login/duhem.yml",
+    )
+    .await;
+    common::write_failing_run(
+        rw,
+        "01J0000000000000000000000B",
+        "verifications/login/duhem.yml",
+    )
+    .await;
+
+    let (status, json) = get_json(
+        EvidenceReader::new(ro.clone()),
+        "/api/verifications/login/history",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["name"], "login");
+    let runs = json["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 2);
+    // Newest first: B was written after A.
+    assert_eq!(runs[0]["run_id"], "01J0000000000000000000000B");
+    assert_eq!(runs[0]["verdict"], "fail");
+    assert_eq!(runs[1]["verdict"], "pass");
+    let criteria = json["criteria"].as_array().unwrap();
+    assert_eq!(criteria.len(), 1);
+    assert_eq!(criteria[0]["criterion_id"], "AC-1");
+    assert_eq!(
+        criteria[0]["verdicts"],
+        serde_json::json!(["fail", "pass"]),
+        "criterion verdicts follow the runs axis"
+    );
+
+    // Unknown verification → 404.
+    let (status, _) = get_json(EvidenceReader::new(ro), "/api/verifications/nope/history").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

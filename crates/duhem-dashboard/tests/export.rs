@@ -187,3 +187,32 @@ async fn exported_json_contains_no_absolute_urls() {
     walk(&out.path().join("api"), &mut hits);
     assert!(hits.is_empty(), "absolute URLs in export: {hits:#?}");
 }
+
+/// #193: the static export renders the ② history snapshots so the
+/// exported tree serves the same views as serve mode.
+#[tokio::test]
+async fn export_writes_verification_history_snapshots() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    common::write_passing_run(
+        rw.clone(),
+        "01J0000000000000000000000A",
+        "verifications/login/duhem.yml",
+    )
+    .await;
+    common::write_failing_run(
+        rw,
+        "01J0000000000000000000000B",
+        "verifications/login/duhem.yml",
+    )
+    .await;
+
+    let out = tempfile::tempdir().unwrap();
+    export(&EvidenceReader::new(ro), out.path()).await.unwrap();
+
+    let history: Value = serde_json::from_slice(
+        &std::fs::read(out.path().join("api/verifications/login/history.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(history["runs"].as_array().unwrap().len(), 2);
+    assert_eq!(history["criteria"][0]["criterion_id"], "AC-1");
+}

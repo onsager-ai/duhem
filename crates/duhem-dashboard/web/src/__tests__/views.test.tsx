@@ -126,3 +126,48 @@ describe("Artifacts", () => {
     expect(links).toHaveLength(2);
   });
 });
+
+// ---- #193: ④ delivery-web span chain --------------------------------
+
+import { SpanChain } from "../views/CheckPage";
+import { Sparkline } from "../views/VerificationPage";
+import type { SpanModel } from "../api";
+
+describe("SpanChain (④)", () => {
+  it("renders the ordered layer chain with per-layer outcome", () => {
+    const spans: SpanModel[] = [
+      { seq: 1, layer: "ui", ok: true },
+      { seq: 3, layer: "api", ok: true },
+      { seq: 5, layer: "data", ok: false, detail: "timeout" },
+    ];
+    render(<SpanChain spans={spans} />);
+    const chain = screen.getByTestId("spanchain");
+    expect(chain.textContent).toContain("ui");
+    expect(chain.textContent).toContain("api");
+    // The broken layer carries its detail inline.
+    expect(chain.textContent).toContain("data ✕ timeout");
+  });
+
+  it("says layer unknown for a pre-tag run instead of guessing", () => {
+    render(<SpanChain spans={[]} />);
+    expect(screen.getByTestId("spanchain-unknown").textContent).toContain(
+      "layer unknown",
+    );
+  });
+});
+
+// ---- #193: ② criterion sparkline ------------------------------------
+
+describe("Sparkline (②)", () => {
+  it("renders one dot per run, absent runs dashed", () => {
+    const { container } = render(
+      <Sparkline verdicts={["pass", "fail", null, "inconclusive:timeout"]} />,
+    );
+    const dots = container.querySelectorAll(".dot");
+    expect(dots).toHaveLength(4);
+    expect(dots[0].className).toContain("verdict-pass");
+    expect(dots[1].className).toContain("verdict-fail");
+    expect(dots[2].className).toContain("dot-absent");
+    expect(dots[3].className).toContain("verdict-inconclusive");
+  });
+});

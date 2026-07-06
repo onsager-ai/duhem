@@ -13,6 +13,7 @@ pub mod expr;
 pub mod includes;
 pub mod jsonschema;
 pub mod manifest;
+pub mod project;
 pub mod step;
 pub mod validate;
 pub mod verification;
@@ -27,6 +28,7 @@ pub use manifest::{
     InconclusivePolicy, LoadError, Loaded, LoadedLeaf, ManifestDefaults, ManifestEntry,
     RetryBackoff, RetryPolicy, RootManifest, discover, load,
 };
+pub use project::{ProjectDecl, ProjectKind};
 pub use step::Step;
 pub use validate::{ValidationError, validate};
 pub use verification::{InputDecl, InputType, SchemaError, VerificationDefinition};

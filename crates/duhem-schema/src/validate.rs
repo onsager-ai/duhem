@@ -161,6 +161,9 @@ pub enum ValidationError {
 
     #[error("`inherits:` entry #{index} is empty — list input names, e.g. `inherits: [base_url]`")]
     EmptyInheritedName { index: usize },
+
+    #[error("{0}")]
+    BadProjectDecl(String),
 }
 
 /// Run every structural rule. Always reports as many errors as
@@ -171,6 +174,13 @@ pub fn validate(v: &VerificationDefinition) -> Result<(), Vec<ValidationError>> 
 
     if v.criteria.is_empty() {
         errs.push(ValidationError::NoCriteria);
+    }
+
+    // `project:` (#191): exactly one non-empty coordinate field.
+    if let Some(project) = &v.project
+        && let Err(msg) = project.check()
+    {
+        errs.push(ValidationError::BadProjectDecl(msg));
     }
 
     let setup_outputs = collect_setup_outputs(&v.setup, &mut errs);

@@ -15,6 +15,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::environment::{DurationSpec, Environment};
+use crate::project::ProjectDecl;
 use crate::verification::{SchemaError, VerificationDefinition};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -104,6 +105,12 @@ pub struct RootManifest {
     /// byte-for-byte as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub defaults: Option<ManifestDefaults>,
+    /// Optional suite-wide declared target coordinate (#191): what
+    /// the whole suite verifies. A leaf's own `project:` wins over
+    /// this. Absent → the runtime's identity-resolution ladder falls
+    /// through to CI context / normalized remote / path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectDecl>,
     /// Entries that resolve to leaf Verification Definitions. Order
     /// determines execution order across leaves.
     pub verifications: Vec<ManifestEntry>,
@@ -355,6 +362,10 @@ pub enum LoadError {
         target: PathBuf,
         max: usize,
     },
+    /// The suite-wide `project:` block is malformed (#191): zero or
+    /// multiple coordinate fields, or an empty coordinate.
+    #[error("{path}: {message}")]
+    BadProjectDecl { path: PathBuf, message: String },
 }
 
 /// Currently-supported `manifest_version` value. Bumping this is
@@ -549,6 +560,16 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
         &mut chain,
         0,
     )?;
+    // Suite-wide `project:` discipline (#191): exactly one non-empty
+    // coordinate. Same load-time home as the other structural checks.
+    if let Some(project) = &manifest.project
+        && let Err(msg) = project.check()
+    {
+        return Err(LoadError::BadProjectDecl {
+            path: manifest_path.to_path_buf(),
+            message: msg,
+        });
+    }
     // Named-environments discipline (spec #68): well-formed names,
     // non-empty key maps. Cheap structural checks at load time, the
     // same place the manifest-version and path checks live.

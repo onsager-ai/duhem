@@ -29,6 +29,14 @@
 
 manifest_version: 1
 
+# Declared target coordinate (#191): this suite verifies crawlab-pro,
+# not the repo the VDs live in — the declaration is the top rung of
+# the identity ladder, so every run records
+# `project_id = github.com/crawlab-team/crawlab-pro` and groups under
+# that project in the portfolio regardless of where the suite runs.
+project:
+  repo: github.com/crawlab-team/crawlab-pro
+
 # Shared input VALUES, declared once (spec #135, rides on #68). These are
 # the cluster's identity — its REST endpoints and seeded credentials. A
 # single environment is declared, so it auto-selects; its keys bind the

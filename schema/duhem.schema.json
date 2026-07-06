@@ -270,6 +270,41 @@
       ],
       "description": "One entry in `verifications:`. An author writes either `path:` for an explicit leaf (Pattern B) or `glob:` for a globbed expansion (Pattern C). The two are mutually exclusive at the YAML level (untagged enum), which keeps the wire shape unambiguous."
     },
+    "ProjectDecl": {
+      "additionalProperties": false,
+      "description": "The declared target coordinate. Wire shape:\n\n```yaml project: repo: github.com/crawlab-team/crawlab-pro   # git kind, OR # url: https://app.example.com              # url kind, OR # image: registry.example.com/app:tag       # image kind, OR # id: crawlab-pro                           # custom kind ```",
+      "properties": {
+        "id": {
+          "description": "Custom kind: a human-stable local name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image": {
+          "description": "Image kind: a container image reference.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repo": {
+          "description": "Git kind: a forge coordinate (`host/owner/repo`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "Url kind: a deployed service.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ReadyProbe": {
       "properties": {
         "http": {
@@ -362,6 +397,17 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "project": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProjectDecl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional suite-wide declared target coordinate (#191): what the whole suite verifies. A leaf's own `project:` wins over this. Absent → the runtime's identity-resolution ladder falls through to CI context / normalized remote / path."
+        },
         "verifications": {
           "description": "Entries that resolve to leaf Verification Definitions. Order determines execution order across leaves.",
           "items": {
@@ -440,6 +486,17 @@
           },
           "description": "Declared inputs. Map keys are alphabetized on round-trip (BTreeMap); fixtures should be authored alphabetized.",
           "type": "object"
+        },
+        "project": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProjectDecl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional declared target coordinate (#191): what this verification verifies (a repo, a service URL, an image, or a locally-named project). Top rung of the identity-resolution ladder; absent → the runtime falls through to CI context / normalized remote / path. A leaf declaration wins over a manifest-level one."
         },
         "setup": {
           "description": "Optional setup steps run once before the criteria.",

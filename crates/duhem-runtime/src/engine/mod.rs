@@ -9,6 +9,7 @@
 
 pub mod context;
 pub mod env;
+pub mod identity;
 pub mod inherit;
 pub mod outcome;
 pub mod registry;
@@ -20,4 +21,5 @@ pub mod translate;
 
 pub use context::{RunContext, RunState};
 pub use env::SuiteEnvironment;
+pub use identity::resolve_scope;
 pub use runner::{CheckFailure, CheckFilter, Engine, EngineError, FailedAssertion, RunOutcome};

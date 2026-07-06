@@ -1040,3 +1040,192 @@ fn invalid_filter_pattern_errors_before_browser_launch() {
         "stderr should name the bad pattern: {stderr}"
     );
 }
+
+// ---- #191: target identity (project: + resolution ladder) ----------
+
+/// Open the store read-only and return the single run's
+/// (project_id, target_repo, target_sha, verifier_repo).
+fn scope_of_single_run(
+    db: &std::path::Path,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        use duhem_evidence::Store;
+        let store = duhem_evidence::SqliteStore::open_read_only(db)
+            .await
+            .unwrap();
+        let runs = store.list_runs().await.unwrap();
+        assert_eq!(runs.len(), 1, "one run in the store");
+        let s = &runs[0].scope;
+        (
+            s.project_id.clone(),
+            s.target_repo.clone(),
+            s.target_sha.clone(),
+            s.verifier_repo.clone(),
+        )
+    })
+}
+
+const DECLARED_PROJECT: &str = r#"
+verification: idcheck
+project:
+  repo: github.com/crawlab-team/crawlab-pro
+criteria:
+  - id: AC-1
+    description: trivially passing
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+
+/// Spec #191 Test: a declared `project:` populates `project_id` /
+/// `target_repo`, beating any CI context. Stepless VD → browser-free.
+#[test]
+fn declared_project_beats_ci_context_and_lands_in_the_store() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, DECLARED_PROJECT);
+    let db = tmp.path().join("duhem.db");
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--db")
+        .arg(&db)
+        // A CI-shaped environment the declaration must beat for
+        // identity — while its sha still dates the run.
+        .env("GITHUB_REPOSITORY", "acme/from-ci")
+        .env("GITHUB_SHA", "cisha123")
+        .env_remove("DUHEM_TARGET_REPO")
+        .env_remove("DUHEM_TARGET_SHA")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let (project_id, target_repo, target_sha, _) = scope_of_single_run(&db);
+    assert_eq!(
+        project_id.as_deref(),
+        Some("github.com/crawlab-team/crawlab-pro")
+    );
+    assert_eq!(
+        target_repo.as_deref(),
+        Some("github.com/crawlab-team/crawlab-pro")
+    );
+    assert_eq!(target_sha.as_deref(), Some("cisha123"));
+}
+
+/// Spec #191 Test: with no declaration, the CI context rung resolves
+/// the target (`DUHEM_TARGET_*` beating `GITHUB_*`), and the verifier
+/// env override lands in provenance.
+#[test]
+fn ci_context_resolves_target_when_undeclared() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ONE_CRITERION);
+    let db = tmp.path().join("duhem.db");
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--db")
+        .arg(&db)
+        .env("GITHUB_REPOSITORY", "acme/from-gh")
+        .env("GITHUB_SHA", "ghsha")
+        .env("DUHEM_TARGET_REPO", "gitlab.com/acme/real")
+        .env("DUHEM_TARGET_SHA", "realsha")
+        .env("DUHEM_VERIFIER_REPO", "github.com/onsager-ai/duhem")
+        .env("DUHEM_VERIFIER_SHA", "v0.1.0")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let (project_id, target_repo, target_sha, verifier_repo) = scope_of_single_run(&db);
+    assert_eq!(project_id.as_deref(), Some("gitlab.com/acme/real"));
+    assert_eq!(target_repo.as_deref(), Some("gitlab.com/acme/real"));
+    assert_eq!(target_sha.as_deref(), Some("realsha"));
+    assert_eq!(
+        verifier_repo.as_deref(),
+        Some("github.com/onsager-ai/duhem")
+    );
+}
+
+/// Spec #191 Test (back-compat): a VD with no `project:` and no CI
+/// env still runs; identity falls through to the remote/path rungs
+/// without erroring.
+#[test]
+fn undeclared_project_without_ci_still_runs_and_attributes_something() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ONE_CRITERION);
+    let db = tmp.path().join("duhem.db");
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--db")
+        .arg(&db)
+        .env_remove("GITHUB_REPOSITORY")
+        .env_remove("GITHUB_SHA")
+        .env_remove("DUHEM_TARGET_REPO")
+        .env_remove("DUHEM_TARGET_SHA")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Remote rung (running inside the duhem checkout) or the path
+    // fallback — either way the hint is populated, never empty.
+    let (project_id, _, _, _) = scope_of_single_run(&db);
+    assert!(
+        project_id.is_some_and(|p| !p.is_empty()),
+        "identity hint must be populated"
+    );
+}
+
+/// Spec #191 Test: `validate` rejects a malformed `project:` block.
+#[test]
+fn validate_rejects_a_malformed_project_block() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(
+        &tmp,
+        r#"
+verification: bad
+project:
+  repo: a/b
+  id: also-this
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#,
+    );
+    let out = Command::new(bin())
+        .arg("validate")
+        .arg(&path)
+        .output()
+        .expect("spawn duhem");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("2 coordinates"),
+        "stderr should name the rule: {stderr}"
+    );
+}

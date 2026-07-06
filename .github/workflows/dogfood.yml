@@ -28,6 +28,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Hub replication (#194 ship step in the action; hub per
+  # onsager-ai/duhem-hub#6): with the secrets set, every dogfood run
+  # ships its bundle; without them the step is a clean no-op.
+  DUHEM_HUB_URL: ${{ secrets.DUHEM_HUB_URL }}
+  DUHEM_HUB_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
 
 jobs:
   wiring:

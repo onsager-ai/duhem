@@ -103,7 +103,26 @@ jobs:
       - name: Run duhem-cli regression VD
         run: |
           ./target/release/duhem run verifications/duhem-cli \
+            --db .duhem/duhem.db \
             --inputs duhem_bin="$PWD/target/release/duhem"
+
+      # Hub replication (#194's ship contract; hub per
+      # onsager-ai/duhem-hub#6). `if: always()` ships red runs too —
+      # failure evidence is the point — and never gates the verdict.
+      # Clean no-op when the secrets aren't configured.
+      - name: Ship run bundle to hub (opt-in)
+        if: always()
+        continue-on-error: true
+        env:
+          DUHEM_HUB_URL: ${{ secrets.DUHEM_HUB_URL }}
+          DUHEM_HUB_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
+        run: |
+          RUN_ID=$(python3 -c "import sqlite3; print(sqlite3.connect('.duhem/duhem.db').execute('SELECT run_id FROM runs ORDER BY started_at DESC LIMIT 1').fetchone()[0])" 2>/dev/null || true)
+          if [ -n "$RUN_ID" ]; then
+            ./target/release/duhem ship "$RUN_ID" --db .duhem/duhem.db --if-configured
+          else
+            echo "no run recorded; nothing to ship"
+          fi
 
   dashboard-regression:
     name: dashboard regression
@@ -155,4 +174,21 @@ jobs:
       - name: Run duhem-dashboard regression VD
         env:
           DUHEM_BIN: ${{ github.workspace }}/target/release/duhem
-        run: ./target/release/duhem run verifications/duhem-dashboard
+        run: |
+          ./target/release/duhem run verifications/duhem-dashboard \
+            --db .duhem/duhem.db
+
+      # Hub replication — same contract as the duhem-cli job above.
+      - name: Ship run bundle to hub (opt-in)
+        if: always()
+        continue-on-error: true
+        env:
+          DUHEM_HUB_URL: ${{ secrets.DUHEM_HUB_URL }}
+          DUHEM_HUB_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
+        run: |
+          RUN_ID=$(python3 -c "import sqlite3; print(sqlite3.connect('.duhem/duhem.db').execute('SELECT run_id FROM runs ORDER BY started_at DESC LIMIT 1').fetchone()[0])" 2>/dev/null || true)
+          if [ -n "$RUN_ID" ]; then
+            ./target/release/duhem ship "$RUN_ID" --db .duhem/duhem.db --if-configured
+          else
+            echo "no run recorded; nothing to ship"
+          fi

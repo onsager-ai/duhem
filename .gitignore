@@ -7,7 +7,7 @@
 .vscode/
 
 # Local Duhem run evidence (written by `duhem run`)
-.duhem/runs/
+.duhem/
 
 # Dashboard SPA toolchain output (built in CI; build.rs writes a
 # placeholder when absent)

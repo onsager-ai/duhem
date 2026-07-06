@@ -113,7 +113,7 @@ pub async fn write_passing_run(
         check_id: "AC-1.1".into(),
         step_index: 0,
         uses: "ui/navigate".into(),
-        layer: None,
+        layer: Some("ui".into()),
         with: BTreeMap::new(),
     })
     .await
@@ -140,7 +140,7 @@ pub async fn write_passing_run(
         check_id: "AC-1.1".into(),
         step_index: 1,
         uses: "ui/assert-element".into(),
-        layer: None,
+        layer: Some("ui".into()),
         with: BTreeMap::new(),
     })
     .await
@@ -204,7 +204,7 @@ pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition
         check_id: "AC-1.1".into(),
         step_index: 0,
         uses: "api/call".into(),
-        layer: None,
+        layer: Some("api".into()),
         with: BTreeMap::new(),
     })
     .await

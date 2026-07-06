@@ -9,6 +9,7 @@ import { HashRouter, Route, Routes } from "react-router-dom";
 import RunsList from "./views/RunsList";
 import RunPage from "./views/RunPage";
 import CheckPage from "./views/CheckPage";
+import VerificationPage from "./views/VerificationPage";
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
           <Route path="/" element={<RunsList />} />
           <Route path="/run/:runId" element={<RunPage />} />
           <Route path="/run/:runId/check/:pair" element={<CheckPage />} />
+          <Route path="/verification/:name" element={<VerificationPage />} />
         </Routes>
       </main>
     </HashRouter>

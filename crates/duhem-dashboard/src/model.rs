@@ -77,6 +77,10 @@ pub struct CheckDetail {
     pub criterion_id: String,
     pub check_id: String,
     pub verdict: Option<VerdictState>,
+    /// The ordered delivery-web layers this check crossed (#192 data,
+    /// ④ view). Empty for pre-tag runs / untagged steps — the view
+    /// renders "layer unknown" rather than guessing.
+    pub spans: Vec<SpanModel>,
     /// The check's slice of the trace, in trace order: `step_started`,
     /// `step_observation`, `step_finished`, `assertion_evaluated`,
     /// `check_finished`. Events are rendered as-is (same wire shape as
@@ -84,6 +88,47 @@ pub struct CheckDetail {
     /// a filter over it.
     pub timeline: Vec<Event>,
     pub artifacts: Vec<ArtifactRef>,
+}
+
+/// One delivery-web span (④): a layer the check crossed, with the
+/// executed step's outcome. `seq` links back to the opening
+/// `step_started` event on the timeline.
+#[derive(Debug, Clone, Serialize)]
+pub struct SpanModel {
+    pub seq: u64,
+    pub layer: String,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// `GET /api/verifications/:name/history` — the ② VD-over-time shape:
+/// the verification's runs (newest first) and each criterion as a
+/// stable spine with its verdict on every run it appeared in.
+#[derive(Debug, Clone, Serialize)]
+pub struct VerificationHistory {
+    pub name: String,
+    /// Newest first — the column axis of the spine table. Ordered by
+    /// `started_at` (the #190 history queries' axis).
+    pub runs: Vec<HistoryRun>,
+    /// First-seen order across runs; the row axis.
+    pub criteria: Vec<CriterionHistory>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HistoryRun {
+    pub run_id: String,
+    pub started_at: Option<DateTime<Utc>>,
+    pub verdict: Option<VerdictState>,
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CriterionHistory {
+    pub criterion_id: String,
+    /// One entry per run in `runs` order; `None` = the criterion did
+    /// not appear on that run (VD edited between runs).
+    pub verdicts: Vec<Option<VerdictState>>,
 }
 
 /// A content-addressed blob referenced from the check's timeline.

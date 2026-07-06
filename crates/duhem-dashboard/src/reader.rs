@@ -21,7 +21,8 @@ use duhem_judge::{RunVerdict, aggregate_run_set};
 use thiserror::Error;
 
 use crate::model::{
-    ArtifactRef, CheckDetail, CheckRef, CriterionDetail, EntryKind, RunDetail, RunsListEntry,
+    ArtifactRef, CheckDetail, CheckRef, CriterionDetail, CriterionHistory, EntryKind, HistoryRun,
+    RunDetail, RunsListEntry, SpanModel, VerificationHistory,
 };
 
 #[derive(Debug, Error)]
@@ -146,7 +147,68 @@ impl EvidenceReader {
         let Some(run) = self.load(run_id).await? else {
             return Ok(None);
         };
-        Ok(build_check_detail(&run, criterion_id, check_id))
+        let spans = self
+            .store
+            .check_spans(run_id, check_id)
+            .await?
+            .into_iter()
+            .map(|s| SpanModel {
+                seq: s.seq,
+                layer: s.layer,
+                ok: s.ok,
+                detail: s.detail,
+            })
+            .collect();
+        Ok(build_check_detail(&run, criterion_id, check_id, spans))
+    }
+
+    /// `GET /api/verifications/:name/history` (② VD-over-time, #193):
+    /// the verification's runs newest-first plus each criterion's
+    /// verdict across them, straight from the #190 history queries.
+    pub async fn verification_history(
+        &self,
+        name: &str,
+    ) -> Result<Option<VerificationHistory>, ReaderError> {
+        let records = self.store.verification_history(name).await?;
+        if records.is_empty() {
+            return Ok(None);
+        }
+        let runs: Vec<HistoryRun> = records
+            .iter()
+            .map(|r| HistoryRun {
+                run_id: r.run_id.clone(),
+                started_at: Some(r.started_at),
+                verdict: r.verdict,
+                duration_ms: r.duration_ms,
+            })
+            .collect();
+        let entries = self.store.criterion_history(name).await?;
+        // Criterion spine in first-seen order (stable across runs);
+        // one verdict slot per run column, `None` where the criterion
+        // did not appear on that run.
+        let mut criteria: Vec<CriterionHistory> = Vec::new();
+        for e in &entries {
+            if !criteria.iter().any(|c| c.criterion_id == e.criterion_id) {
+                criteria.push(CriterionHistory {
+                    criterion_id: e.criterion_id.clone(),
+                    verdicts: vec![None; runs.len()],
+                });
+            }
+        }
+        for e in &entries {
+            let col = runs.iter().position(|r| r.run_id == e.run_id);
+            let row = criteria
+                .iter_mut()
+                .find(|c| c.criterion_id == e.criterion_id);
+            if let (Some(col), Some(row)) = (col, row) {
+                row.verdicts[col] = Some(e.verdict);
+            }
+        }
+        Ok(Some(VerificationHistory {
+            name: name.to_string(),
+            runs,
+            criteria,
+        }))
     }
 
     /// The raw wire-format event stream for a run (NDJSON), if the
@@ -378,6 +440,7 @@ fn build_check_detail(
     run: &RunEvidence,
     criterion_id: &str,
     check_id: &str,
+    spans: Vec<SpanModel>,
 ) -> Option<CheckDetail> {
     // A check belongs to exactly one criterion — replay hard-errors
     // on conflicting mappings; the view applies the same first-wins
@@ -452,6 +515,7 @@ fn build_check_detail(
         criterion_id: criterion_id.to_string(),
         check_id: check_id.to_string(),
         verdict,
+        spans,
         timeline,
         artifacts,
     })

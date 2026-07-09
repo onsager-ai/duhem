@@ -197,6 +197,14 @@ Authoring rules:
   while role-based selectors track the user-visible affordance.
 - A check that has no `assertions:` is a script, not a check.
   Reject it.
+- The `capture/` output-name prefix is reserved for runner-emitted
+  failure evidence (spec #202): a failing ui check automatically
+  records `capture/screenshot` + `capture/dom` blob observations
+  (`duhem run --capture` controls the policy). An authored output
+  under `capture/` is rejected at validate time, and captures are
+  never recorded as `$steps.<id>.outputs.*` bindings — so nothing
+  can forge a capture and no assertion can bind one. Captures are
+  evidence for humans/agents, never judge input.
 
 ### 4. The holistic-environment tax
 

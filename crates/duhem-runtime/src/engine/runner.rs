@@ -39,9 +39,10 @@ use tracing::debug;
 
 pub(crate) use crate::engine::outcome::step_label;
 pub use crate::engine::outcome::{
-    CheckFailure, CheckFilter, EngineError, FailedAssertion, RunOutcome,
+    CapturedArtifact, CheckFailure, CheckFilter, EngineError, FailedAssertion, RunOutcome,
 };
 
+use crate::engine::capture::{CapturePolicy, capture_failure_evidence};
 use crate::engine::context::{RunContext, RunState, json_to_value};
 use crate::engine::registry::{ActionRegistry, default_registry};
 use crate::engine::shim::assertion_to_expr;
@@ -124,6 +125,8 @@ pub struct Engine {
     /// Retry backoff base; tests drop it to zero. Production:
     /// [`RETRY_BACKOFF_BASE`].
     retry_backoff_base: Duration,
+    /// Failure-evidence capture posture (spec #202).
+    capture: CapturePolicy,
 }
 
 impl Engine {
@@ -149,6 +152,7 @@ impl Engine {
             inconclusive_policy: InconclusivePolicy::Block,
             retry: None,
             retry_backoff_base: RETRY_BACKOFF_BASE,
+            capture: CapturePolicy::default(),
         }
     }
 
@@ -182,6 +186,13 @@ impl Engine {
     /// (heavyweight) Playwright process is started.
     pub fn with_browser(mut self, browser: RunBrowser) -> Self {
         self.browser = Some(browser);
+        self
+    }
+
+    /// Set the failure-evidence capture posture (spec #202). Default
+    /// is [`CapturePolicy::OnFailure`].
+    pub fn with_capture(mut self, capture: CapturePolicy) -> Self {
+        self.capture = capture;
         self
     }
 
@@ -802,7 +813,23 @@ impl Engine {
             });
         }
 
+        // Failure-evidence capture (spec #202): the browser is still
+        // open and the failure set is known, so this is the one spot
+        // where "what did the page look like" can be recorded. Rides
+        // the `step_observation` blob channel under the reserved
+        // `capture/` prefix — the dashboard's existing artifact
+        // pipeline picks it up with no reader/SPA changes.
+        let mut captures: Vec<CapturedArtifact> = Vec::new();
         if let Some(cb) = check_browser {
+            let wants_capture = match self.capture {
+                CapturePolicy::Off => false,
+                CapturePolicy::Always => true,
+                CapturePolicy::OnFailure => !failed.is_empty(),
+            };
+            if wants_capture {
+                let last_step = check.steps.len().saturating_sub(1) as u32;
+                captures = capture_failure_evidence(writer, &cb.page, last_step).await;
+            }
             let _ = cb.close().await;
         }
 
@@ -819,6 +846,7 @@ impl Engine {
                 criterion_id: criterion_id.to_string(),
                 check_id: check.id.clone(),
                 assertions: failed,
+                captures,
             });
         }
         Ok(verdict)
@@ -914,6 +942,7 @@ mod tests {
             retry: None,
             // Zero backoff so retry-loop tests run instantly.
             retry_backoff_base: Duration::ZERO,
+            capture: CapturePolicy::default(),
         };
         // Clear default registry so each test composes its own.
         e.registry.clear();

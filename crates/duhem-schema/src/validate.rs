@@ -56,6 +56,16 @@ pub enum ValidationError {
     },
 
     #[error(
+        "criterion `{criterion}` / check `{check}`: step `{step}` output `{name}` uses the reserved `capture/` prefix (runner-emitted failure evidence, spec #202)"
+    )]
+    ReservedOutputPrefix {
+        criterion: String,
+        check: String,
+        step: String,
+        name: String,
+    },
+
+    #[error(
         "criterion `{criterion}` / check `{check}`: {site} `{raw}` references undeclared step `{step}`"
     )]
     UnresolvedStepRef {
@@ -378,7 +388,22 @@ fn validate_check(
     let mut step_outputs: HashMap<&str, &BTreeMap<String, String>> = HashMap::new();
     let mut seen_step_ids: HashSet<&str> = HashSet::new();
 
-    for s in &ch.steps {
+    for (idx, s) in ch.steps.iter().enumerate() {
+        // The `capture/` output namespace is reserved for runner-emitted
+        // failure evidence (spec #202) so authored outputs can never
+        // masquerade as captures. Enforced here at the authoring
+        // boundary — no action produces `capture/*`, so the runtime is
+        // the only source.
+        for name in s.outputs.keys() {
+            if name.starts_with("capture/") {
+                errs.push(ValidationError::ReservedOutputPrefix {
+                    criterion: c.id.clone(),
+                    check: ch.id.clone(),
+                    step: step_label(s, idx),
+                    name: name.clone(),
+                });
+            }
+        }
         if let Some(id) = &s.id {
             if !seen_step_ids.insert(id.as_str()) {
                 errs.push(ValidationError::DuplicateStepId {
@@ -1094,6 +1119,62 @@ criteria:
             )),
             "expected InputDefaultTypeMismatch, got {errs:?}"
         );
+    }
+
+    #[test]
+    fn authored_output_under_capture_prefix_is_rejected() {
+        // The `capture/` namespace is reserved for runner-emitted
+        // failure evidence (spec #202); an authored output can't
+        // masquerade as a capture.
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: s
+            uses: ui/navigate
+            with: { url: http://x }
+            outputs:
+              capture/screenshot: satisfied
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::ReservedOutputPrefix { criterion, check, name, .. }
+                    if criterion == "AC-1" && check == "AC-1.1" && name == "capture/screenshot"
+            )),
+            "expected ReservedOutputPrefix, got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn ordinary_output_name_is_allowed() {
+        // A normal alias with no reserved prefix validates fine — the
+        // guard must not over-reject.
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: s
+            uses: ui/assert-element
+            with: { locator: { role: button, name: Go }, expected: visible }
+            outputs:
+              satisfied: satisfied
+        assertions:
+          - $steps.s.outputs.satisfied == true
+"#;
+        let v = parse(y);
+        validate(&v).expect("validate");
     }
 
     #[test]

@@ -309,6 +309,19 @@ async function dispatch(req) {
     case 'cookies':
       return await page(req).context().cookies()
 
+    case 'screenshot':
+      // Full-page PNG, base64 over the pipe. Fed to the runtime's
+      // failure-evidence capture (spec #202) — evidence for humans
+      // and agents, never judge input.
+      return (
+        await page(req).screenshot({ fullPage: true, timeout: req.timeoutMs })
+      ).toString('base64')
+
+    case 'content':
+      // Current DOM serialized as HTML — the greppable half of the
+      // failure-evidence pair.
+      return await page(req).content()
+
     case 'pollNetwork': {
       // Return recorded responses from `cursor` onward plus the new
       // cursor (buffer length). `observe.rs` polls this within its

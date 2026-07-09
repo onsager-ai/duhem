@@ -125,6 +125,25 @@ describe("Artifacts", () => {
     const links = container.querySelectorAll("a");
     expect(links).toHaveLength(2);
   });
+
+  it("renders the runner's capture/* kinds inline (spec #202)", () => {
+    // The runtime's failure-evidence capture emits exactly these
+    // output names; the extensionless store URL is what the reader
+    // builds. The screenshot must render as an image on kind alone.
+    const shot = "c".repeat(64);
+    const dom = "d".repeat(64);
+    const { container } = render(
+      <Artifacts
+        artifacts={[
+          { id: shot, kind: "capture/screenshot", url: `run/r/artifact/${shot}` },
+          { id: dom, kind: "capture/dom", url: `run/r/artifact/${dom}` },
+        ]}
+      />,
+    );
+    const imgs = container.querySelectorAll("img");
+    expect(imgs).toHaveLength(1);
+    expect(imgs[0].getAttribute("src")).toBe(`run/r/artifact/${shot}`);
+  });
 });
 
 // ---- #193: ④ delivery-web span chain --------------------------------

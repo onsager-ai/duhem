@@ -117,4 +117,17 @@ pub struct CheckFailure {
     pub criterion_id: String,
     pub check_id: String,
     pub assertions: Vec<FailedAssertion>,
+    /// Failure-evidence captures recorded for this check (spec #202):
+    /// the `capture/*` blob observations, so the reporter can point
+    /// at the picture without trace-reading. Empty when capture is
+    /// off, the check had no browser, or every capture op failed.
+    pub captures: Vec<CapturedArtifact>,
+}
+
+/// One runner-emitted capture: the reserved `capture/*` output name
+/// and the content address of its blob in the evidence store.
+#[derive(Debug, Clone)]
+pub struct CapturedArtifact {
+    pub kind: String,
+    pub sha256: String,
 }

@@ -33,6 +33,7 @@ pub struct RunArgs {
     pub dry_run: bool,
     pub no_env_up: bool,
     pub keep_env: bool,
+    pub capture: duhem_runtime::CapturePolicy,
 }
 
 pub async fn run_command(args: RunArgs) -> ExitCode {
@@ -48,6 +49,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         dry_run,
         no_env_up,
         keep_env,
+        capture,
     } = args;
 
     // The headed-browser debug toggle is the `DUHEM_HEADED` env var
@@ -491,7 +493,8 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             .skip_env_up(no_env_up || suite_managed)
             .keep_env(keep_env || suite_managed)
             .with_env(env_whitelist.clone())
-            .with_inherited(def.inherits.clone());
+            .with_inherited(def.inherits.clone())
+            .with_capture(capture);
         if let Some(d) = manifest_defaults.as_ref() {
             engine = engine.with_defaults(d);
         }

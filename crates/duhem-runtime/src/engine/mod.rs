@@ -7,6 +7,7 @@
 //! belong to `duhem-schema`, `duhem-judge`, `duhem-actions`, and
 //! `duhem-evidence` respectively; the engine is purely compositional.
 
+pub mod capture;
 pub mod context;
 pub mod env;
 pub mod identity;
@@ -19,7 +20,10 @@ pub mod shim;
 pub mod template;
 pub mod translate;
 
+pub use capture::CapturePolicy;
 pub use context::{RunContext, RunState};
 pub use env::SuiteEnvironment;
 pub use identity::resolve_scope;
-pub use runner::{CheckFailure, CheckFilter, Engine, EngineError, FailedAssertion, RunOutcome};
+pub use runner::{
+    CapturedArtifact, CheckFailure, CheckFilter, Engine, EngineError, FailedAssertion, RunOutcome,
+};

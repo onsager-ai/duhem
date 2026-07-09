@@ -10,6 +10,7 @@
 pub mod capture;
 pub mod context;
 pub mod env;
+pub mod har;
 pub mod identity;
 pub mod inherit;
 pub mod outcome;

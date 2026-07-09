@@ -835,6 +835,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "base64",
  "chrono",
  "duhem-actions",
  "duhem-evidence",

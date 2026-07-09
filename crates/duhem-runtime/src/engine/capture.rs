@@ -14,6 +14,7 @@ use duhem_actions::Page;
 use duhem_evidence::{EventPayload, EvidenceWriter, ObservationValue};
 use tracing::warn;
 
+use crate::engine::har;
 use crate::engine::outcome::CapturedArtifact;
 
 /// Failure-evidence capture policy. A runner knob, not an authored
@@ -99,6 +100,24 @@ pub(crate) async fn capture_failure_evidence(
             }
         }
         Some(Err(e)) => warn!(error = %e, "dom capture failed; verdict unaffected"),
+        None => {}
+    }
+    // Network HAR tail (spec #204): the browser page's recorded traffic
+    // — the network the delivery web generated as the UI drove it. The
+    // recorder always ran, so we drain the whole buffer and keep the
+    // tail. An empty buffer (page-free check, or no requests) emits
+    // nothing. Serialization redacts secrets before the blob is stored.
+    match bounded("network", CAPTURE_DEADLINE, page.poll_network(0)).await {
+        Some(Ok(batch)) if !batch.events.is_empty() => {
+            let har = har::to_har(&batch.events, har::DEFAULT_BODY_CAP);
+            if let Some(c) =
+                append_capture(writer, step_index, har::CAPTURE_NETWORK, har.as_bytes()).await
+            {
+                captured.push(c);
+            }
+        }
+        Some(Ok(_)) => {}
+        Some(Err(e)) => warn!(error = %e, "network capture failed; verdict unaffected"),
         None => {}
     }
     captured

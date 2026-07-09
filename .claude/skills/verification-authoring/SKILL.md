@@ -198,13 +198,19 @@ Authoring rules:
 - A check that has no `assertions:` is a script, not a check.
   Reject it.
 - The `capture/` output-name prefix is reserved for runner-emitted
-  failure evidence (spec #202): a failing ui check automatically
-  records `capture/screenshot` + `capture/dom` blob observations
-  (`duhem run --capture` controls the policy). An authored output
-  under `capture/` is rejected at validate time, and captures are
-  never recorded as `$steps.<id>.outputs.*` bindings — so nothing
-  can forge a capture and no assertion can bind one. Captures are
-  evidence for humans/agents, never judge input.
+  failure evidence (specs #202 / #204): a failing ui check
+  automatically records `capture/screenshot` + `capture/dom` +
+  `capture/network` (a HAR 1.2 log of the page's traffic) blob
+  observations (`duhem run --capture` controls the policy). An
+  authored output under `capture/` is rejected at validate time, and
+  captures are never recorded as `$steps.<id>.outputs.*` bindings —
+  so nothing can forge a capture and no assertion can bind one.
+  Captures are evidence for humans/agents, never judge input. The
+  network HAR redacts sensitive headers and auth request bodies, but
+  response bodies are captured verbatim (the repair signal) — like the
+  DOM snapshot, a page that echoes a secret in a response carries it
+  into the evidence, which is shipped to the hub; keep that in mind
+  for capture-sensitive targets (use `--capture off`).
 
 ### 4. The holistic-environment tax
 

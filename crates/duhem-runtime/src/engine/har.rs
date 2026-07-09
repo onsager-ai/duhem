@@ -4,9 +4,11 @@
 //! valid HAR 1.2 log so a failing `ui/*` check's traffic opens in any
 //! browser devtools / HAR viewer. The recorder (`api/observe`'s
 //! source) captures method / url / status / headers / bodies but no
-//! per-request timing, so the fields HAR requires and we don't record
-//! (`startedDateTime`, `timings`, sizes) are emitted as honest stubs
-//! (epoch / `-1`) rather than fabricated.
+//! per-request timing or on-wire byte counts, so the fields HAR
+//! requires and we don't record (`startedDateTime`, `timings`,
+//! `headersSize`, `bodySize`) are emitted as honest stubs (epoch /
+//! `-1`) rather than fabricated. Response `content.size` is the real
+//! decoded body length.
 //!
 //! Redaction is not optional here: network events reliably carry
 //! secrets (`Authorization` / `Cookie` headers, credentials in auth
@@ -87,6 +89,20 @@ fn decode_body(b64: &str, cap: usize) -> (String, usize, Option<&'static str>, b
     }
 }
 
+/// Compose the body-marker comment from the decode flags. Both signals
+/// coexist — a binary body that is also truncated keeps its `base64`
+/// marker (they used to clobber each other in `postData`).
+fn body_marker(encoding: Option<&str>, truncated: bool) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(enc) = encoding {
+        parts.push(format!("encoding: {enc}"));
+    }
+    if truncated {
+        parts.push("truncated".to_string());
+    }
+    (!parts.is_empty()).then(|| parts.join("; "))
+}
+
 fn mime_of(headers: &std::collections::BTreeMap<String, String>) -> String {
     headers
         .iter()
@@ -114,11 +130,8 @@ fn request_json(evt: &NetworkEvent, cap: usize) -> Value {
         } else {
             let (text, _size, encoding, truncated) = decode_body(b64, cap);
             let mut pd = json!({ "mimeType": mime_of(&evt.request_headers), "text": text });
-            if let Some(enc) = encoding {
-                pd["comment"] = json!(format!("encoding: {enc}"));
-            }
-            if truncated {
-                pd["comment"] = json!("truncated");
+            if let Some(marker) = body_marker(encoding, truncated) {
+                pd["comment"] = json!(marker);
             }
             pd
         };
@@ -310,6 +323,27 @@ mod tests {
         assert_eq!(
             v["log"]["entries"][0]["response"]["content"]["encoding"],
             "base64"
+        );
+    }
+
+    #[test]
+    fn truncated_binary_request_body_keeps_both_markers() {
+        // A non-auth (so kept) binary request body that also overflows
+        // the cap must not lose its base64 marker to the truncation
+        // marker — both coexist in the postData comment.
+        let mut e = evt();
+        e.method = "POST".into();
+        e.request_headers
+            .insert("content-type".into(), "application/octet-stream".into());
+        e.request_body_base64 = Some(BASE64.encode([0xFFu8; 100]));
+        let v: Value = serde_json::from_str(&to_har(&[e], 10)).unwrap();
+        let comment = v["log"]["entries"][0]["request"]["postData"]["comment"]
+            .as_str()
+            .unwrap();
+        assert!(comment.contains("base64"), "lost base64 marker: {comment}");
+        assert!(
+            comment.contains("truncated"),
+            "lost truncated marker: {comment}"
         );
     }
 }

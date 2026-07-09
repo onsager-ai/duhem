@@ -22,4 +22,7 @@ pub mod translate;
 pub use context::{RunContext, RunState};
 pub use env::SuiteEnvironment;
 pub use identity::resolve_scope;
-pub use runner::{CheckFailure, CheckFilter, Engine, EngineError, FailedAssertion, RunOutcome};
+pub use runner::{
+    CapturePolicy, CapturedArtifact, CheckFailure, CheckFilter, Engine, EngineError,
+    FailedAssertion, RunOutcome,
+};

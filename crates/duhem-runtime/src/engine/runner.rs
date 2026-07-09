@@ -26,8 +26,8 @@ use std::time::Duration;
 use duhem_actions::Page;
 use duhem_actions::{Outcome, RunBrowser};
 use duhem_evidence::{
-    EventPayload, EvidenceWriter, RunScope, SqliteStore, Store, StoreError, VerdictState,
-    new_run_id, project_db_path, run_started,
+    EventPayload, EvidenceWriter, ObservationValue, RunScope, SqliteStore, Store, StoreError,
+    VerdictState, new_run_id, project_db_path, run_started,
 };
 use duhem_judge::{
     AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusiveCause,
@@ -35,11 +35,11 @@ use duhem_judge::{
     apply_inconclusive_policy,
 };
 use duhem_schema::{Check, Criterion, RetryBackoff, RetryPolicy, VerificationDefinition};
-use tracing::debug;
+use tracing::{debug, warn};
 
 pub(crate) use crate::engine::outcome::step_label;
 pub use crate::engine::outcome::{
-    CheckFailure, CheckFilter, EngineError, FailedAssertion, RunOutcome,
+    CapturedArtifact, CheckFailure, CheckFilter, EngineError, FailedAssertion, RunOutcome,
 };
 
 use crate::engine::context::{RunContext, RunState, json_to_value};
@@ -51,6 +51,34 @@ use crate::engine::translate::{
     outcome_to_evidence, retry_delay, with_to_evidence_map,
 };
 use crate::eval::{EvalResult, Value, describe_comparison, eval};
+
+/// Failure-evidence capture policy (spec #202). A runner knob, not
+/// an authored contract: `on-failure` (the default) captures a
+/// full-page screenshot + DOM snapshot when a ui check ends with any
+/// non-pass assertion; `always` also captures the final state of
+/// passing ui checks; `off` disables capture. Captures are evidence
+/// for humans and agents, never judge input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CapturePolicy {
+    #[default]
+    OnFailure,
+    Always,
+    Off,
+}
+
+impl std::str::FromStr for CapturePolicy {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "on-failure" => Ok(Self::OnFailure),
+            "always" => Ok(Self::Always),
+            "off" => Ok(Self::Off),
+            other => Err(format!(
+                "unknown capture policy `{other}` (expected on-failure | always | off)"
+            )),
+        }
+    }
+}
 
 /// The minimal step executor.
 pub struct Engine {
@@ -124,6 +152,8 @@ pub struct Engine {
     /// Retry backoff base; tests drop it to zero. Production:
     /// [`RETRY_BACKOFF_BASE`].
     retry_backoff_base: Duration,
+    /// Failure-evidence capture posture (spec #202).
+    capture: CapturePolicy,
 }
 
 impl Engine {
@@ -149,6 +179,7 @@ impl Engine {
             inconclusive_policy: InconclusivePolicy::Block,
             retry: None,
             retry_backoff_base: RETRY_BACKOFF_BASE,
+            capture: CapturePolicy::default(),
         }
     }
 
@@ -182,6 +213,13 @@ impl Engine {
     /// (heavyweight) Playwright process is started.
     pub fn with_browser(mut self, browser: RunBrowser) -> Self {
         self.browser = Some(browser);
+        self
+    }
+
+    /// Set the failure-evidence capture posture (spec #202). Default
+    /// is [`CapturePolicy::OnFailure`].
+    pub fn with_capture(mut self, capture: CapturePolicy) -> Self {
+        self.capture = capture;
         self
     }
 
@@ -802,7 +840,23 @@ impl Engine {
             });
         }
 
+        // Failure-evidence capture (spec #202): the browser is still
+        // open and the failure set is known, so this is the one spot
+        // where "what did the page look like" can be recorded. Rides
+        // the `step_observation` blob channel under the reserved
+        // `capture/` prefix — the dashboard's existing artifact
+        // pipeline picks it up with no reader/SPA changes.
+        let mut captures: Vec<CapturedArtifact> = Vec::new();
         if let Some(cb) = check_browser {
+            let wants_capture = match self.capture {
+                CapturePolicy::Off => false,
+                CapturePolicy::Always => true,
+                CapturePolicy::OnFailure => !failed.is_empty(),
+            };
+            if wants_capture {
+                let last_step = check.steps.len().saturating_sub(1) as u32;
+                captures = capture_failure_evidence(writer, &cb.page, last_step).await;
+            }
             let _ = cb.close().await;
         }
 
@@ -819,6 +873,7 @@ impl Engine {
                 criterion_id: criterion_id.to_string(),
                 check_id: check.id.clone(),
                 assertions: failed,
+                captures,
             });
         }
         Ok(verdict)
@@ -829,6 +884,80 @@ impl Default for Engine {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Ceiling for one capture op. Generous because a full-page
+/// screenshot on a heavy page is slow, but bounded so a wedged page
+/// can't stall the run's teardown.
+const CAPTURE_TIMEOUT_MS: f64 = 10_000.0;
+
+/// Reserved output-name prefix for runner-emitted captures. Authored
+/// step outputs cannot contain `/` in practice and the prefix is
+/// documented as reserved, so assertions never bind to captures.
+const CAPTURE_SCREENSHOT: &str = "capture/screenshot";
+const CAPTURE_DOM: &str = "capture/dom";
+
+/// Capture a full-page screenshot + DOM snapshot and append them as
+/// `capture/*` blob observations (spec #202). Returns the refs that
+/// actually landed so the reporter can point at them. Every failure
+/// in here is a warning, never an error: evidence gathering must not
+/// mask or manufacture a verdict.
+async fn capture_failure_evidence(
+    writer: &mut EvidenceWriter,
+    page: &Page,
+    step_index: u32,
+) -> Vec<CapturedArtifact> {
+    let mut captured = Vec::new();
+    match page.screenshot(CAPTURE_TIMEOUT_MS).await {
+        Ok(png) => {
+            if let Some(c) = append_capture(writer, step_index, CAPTURE_SCREENSHOT, &png).await {
+                captured.push(c);
+            }
+        }
+        Err(e) => warn!(error = %e, "screenshot capture failed; verdict unaffected"),
+    }
+    match page.dom().await {
+        Ok(html) => {
+            if let Some(c) = append_capture(writer, step_index, CAPTURE_DOM, html.as_bytes()).await
+            {
+                captured.push(c);
+            }
+        }
+        Err(e) => warn!(error = %e, "dom capture failed; verdict unaffected"),
+    }
+    captured
+}
+
+async fn append_capture(
+    writer: &mut EvidenceWriter,
+    step_index: u32,
+    name: &str,
+    bytes: &[u8],
+) -> Option<CapturedArtifact> {
+    let sha = match writer.write_blob(bytes).await {
+        Ok(sha) => sha,
+        Err(e) => {
+            warn!(error = %e, capture = name, "capture blob write failed; verdict unaffected");
+            return None;
+        }
+    };
+    if let Err(e) = writer
+        .append(EventPayload::StepObservation {
+            step_index,
+            output_name: name.to_string(),
+            value: ObservationValue::Blob {
+                blob_sha256: sha.0.clone(),
+            },
+        })
+        .await
+    {
+        warn!(error = %e, capture = name, "capture observation append failed; verdict unaffected");
+        return None;
+    }
+    Some(CapturedArtifact {
+        kind: name.to_string(),
+        sha256: sha.0,
+    })
 }
 
 #[cfg(test)]
@@ -914,6 +1043,7 @@ mod tests {
             retry: None,
             // Zero backoff so retry-loop tests run instantly.
             retry_backoff_base: Duration::ZERO,
+            capture: CapturePolicy::default(),
         };
         // Clear default registry so each test composes its own.
         e.registry.clear();

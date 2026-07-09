@@ -525,10 +525,14 @@ impl Page {
     }
 
     /// Current DOM serialized as HTML (`page.content()`). The
-    /// greppable half of the failure-evidence pair.
+    /// greppable half of the failure-evidence pair. A non-string
+    /// reply is an error, not an empty snapshot — the caller must see
+    /// the warning rather than silently record empty evidence.
     pub async fn dom(&self) -> Result<String, PwError> {
         let v = self.conn.request("content", self.p()).await?;
-        Ok(v.as_str().unwrap_or("").to_string())
+        v.as_str()
+            .map(str::to_string)
+            .ok_or_else(|| PwError("content: non-string reply".into()))
     }
 
     /// Drain recorded network responses from `cursor` onward. Returns

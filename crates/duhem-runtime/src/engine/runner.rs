@@ -700,8 +700,14 @@ impl Engine {
             }
 
             // Collect ui/assert-element targets for the element-highlight
-            // overlay (spec #214) — probed for a bounding box at capture.
-            if let Some(t) = target_from_step(&step.uses, &resolved_with) {
+            // overlay (spec #214) — but only for steps that actually run.
+            // A skipped step (env failure, an earlier abort, unknown
+            // action) never "looked" for anything, so recording its
+            // locator would be misleading evidence.
+            let will_run = !environment_failed
+                && !step_aborted
+                && self.registry.contains_key(step.uses.as_str());
+            if will_run && let Some(t) = target_from_step(&step.uses, &resolved_with) {
                 targets.push(t);
             }
 

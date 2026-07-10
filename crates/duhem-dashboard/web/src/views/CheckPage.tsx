@@ -193,6 +193,8 @@ function artifactLabel(kind: string): string {
       return "DOM snapshot";
     case "capture/network":
       return "Network (HAR)";
+    case "capture/target-rect":
+      return "Target highlight";
     default:
       return kind;
   }
@@ -477,10 +479,17 @@ export function ScreenshotArtifact({
 }
 
 export function Artifacts({ artifacts }: { artifacts: CheckDetail["artifacts"] }) {
-  // The target-rect is an overlay input for the screenshot (#214), not a
-  // standalone artifact — consume it, don't list it as its own row.
-  const rectsUrl = artifacts.find((a) => a.kind === "capture/target-rect")?.url;
-  const shown = artifacts.filter((a) => a.kind !== "capture/target-rect");
+  // The target-rect is an overlay input for the screenshot (#214). Only
+  // hide it from the list when a screenshot exists to overlay it onto —
+  // otherwise (screenshot capture failed) keep it as its own row so the
+  // evidence isn't lost.
+  const hasScreenshot = artifacts.some((a) => isImageArtifact(a.kind, a.url));
+  const rectsUrl = hasScreenshot
+    ? artifacts.find((a) => a.kind === "capture/target-rect")?.url
+    : undefined;
+  const shown = hasScreenshot
+    ? artifacts.filter((a) => a.kind !== "capture/target-rect")
+    : artifacts;
   if (shown.length === 0) return null;
   return (
     <div className="panel">

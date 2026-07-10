@@ -72,6 +72,11 @@ const CAPTURE_TARGET_RECT: &str = "capture/target-rect";
 /// `found: false` quickly rather than wait out a long timeout.
 const TARGET_RECT_TIMEOUT_MS: f64 = 800.0;
 
+/// Wall-clock deadline per target-rect probe — kept just above the
+/// Playwright-side timeout so a wedged sidecar can't extend teardown
+/// by the full `CAPTURE_DEADLINE` once per assert-element step.
+const TARGET_RECT_DEADLINE: Duration = Duration::from_millis(1_500);
+
 /// A ui/assert-element target to probe for the element-highlight
 /// overlay (spec #214): the resolved Playwright selector + the
 /// authored `expected:` state.
@@ -120,7 +125,7 @@ pub(crate) async fn capture_target_rects(
     for t in targets {
         let rect: Option<Rect> = match bounded(
             "target-rect",
-            CAPTURE_DEADLINE,
+            TARGET_RECT_DEADLINE,
             page.bounding_box(&t.selector, TARGET_RECT_TIMEOUT_MS),
         )
         .await
@@ -139,8 +144,15 @@ pub(crate) async fn capture_target_rects(
             "rect": rect,
         }));
     }
-    let blob = serde_json::to_vec(&entries).unwrap_or_default();
-    append_capture(writer, step_index, CAPTURE_TARGET_RECT, &blob).await
+    // Warn + skip rather than emit an empty/partial blob that would
+    // mislead the dashboard (e.g. a non-finite float defeats JSON).
+    match serde_json::to_vec(&entries) {
+        Ok(blob) => append_capture(writer, step_index, CAPTURE_TARGET_RECT, &blob).await,
+        Err(e) => {
+            warn!(error = %e, "target-rect serialization failed; verdict unaffected");
+            None
+        }
+    }
 }
 
 /// Capture a full-page screenshot + DOM snapshot and append them as

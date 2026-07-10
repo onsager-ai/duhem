@@ -348,6 +348,15 @@ describe("element-highlight (#214)", () => {
     expect(container.textContent).not.toContain("capture/target-rect");
     expect(container.querySelectorAll(".artifact")).toHaveLength(1);
   });
+
+  it("lists capture/target-rect as its own row when there's no screenshot to overlay", () => {
+    const { container } = render(
+      <Artifacts artifacts={[{ id: "t".repeat(64), kind: "capture/target-rect", url: "u/rect" }]} />,
+    );
+    // Not lost: rendered as its own artifact row (friendly label).
+    expect(container.querySelectorAll(".artifact")).toHaveLength(1);
+    expect(container.textContent).toContain("Target highlight");
+  });
 });
 
 // ---- #193: ④ delivery-web span chain --------------------------------

@@ -322,6 +322,24 @@ async function dispatch(req) {
       // failure-evidence pair.
       return await page(req).content()
 
+    case 'boundingBox': {
+      // Bounding rect of the target locator, for the element-highlight
+      // overlay (spec #214). CSS px, document-relative — maps directly
+      // to the full-page screenshot (context is deviceScaleFactor 1).
+      // Absent / not visible → { found: false }, never a throw.
+      try {
+        const box = await page(req)
+          .locator(req.selector)
+          .first()
+          .boundingBox({ timeout: req.timeoutMs })
+        return box
+          ? { found: true, x: box.x, y: box.y, width: box.width, height: box.height }
+          : { found: false }
+      } catch {
+        return { found: false }
+      }
+    }
+
     case 'pollNetwork': {
       // Return recorded responses from `cursor` onward plus the new
       // cursor (buffer length). `observe.rs` polls this within its

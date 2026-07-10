@@ -240,11 +240,16 @@ async fn failing_ui_check_captures_screenshot_dom_and_network_by_default() {
     let blobs = capture_blobs(&events);
     let names: Vec<&str> = blobs.iter().map(|(n, _)| n.as_str()).collect();
     // The page navigated, so its document response is in the buffer —
-    // network capture rides along with screenshot + DOM.
+    // network + target-rect capture ride along with screenshot + DOM.
     assert_eq!(
         names,
-        vec!["capture/screenshot", "capture/dom", "capture/network"],
-        "expected all three captures, got {names:?}"
+        vec![
+            "capture/screenshot",
+            "capture/dom",
+            "capture/network",
+            "capture/target-rect"
+        ],
+        "expected all four captures, got {names:?}"
     );
 
     // The screenshot is a real PNG and the DOM snapshot is the real
@@ -269,13 +274,32 @@ async fn failing_ui_check_captures_screenshot_dom_and_network_by_default() {
         "dom snapshot should carry the fixture page, got: {dom}"
     );
 
+    // The target-rect records where the assertion looked. The "Sign in
+    // with SSO" button is absent, so it's recorded found:false (never a
+    // guessed box) — the dashboard renders a "target not found" note.
+    let tr = store
+        .get_blob(&blobs[3].1)
+        .await
+        .expect("get target-rect")
+        .expect("target-rect blob present");
+    let tr: serde_json::Value = serde_json::from_slice(&tr).expect("target-rect is JSON");
+    assert_eq!(tr[0]["found"], false);
+    assert!(
+        tr[0]["selector"]
+            .as_str()
+            .unwrap()
+            .contains("Sign in with SSO"),
+        "target-rect carries the locator: {tr:?}"
+    );
+
     // The reporter-facing failure carries the same refs.
     assert_eq!(outcome.failures.len(), 1);
     let caps = &outcome.failures[0].captures;
-    assert_eq!(caps.len(), 3, "CheckFailure.captures = {caps:?}");
+    assert_eq!(caps.len(), 4, "CheckFailure.captures = {caps:?}");
     assert_eq!(caps[0].kind, "capture/screenshot");
     assert_eq!(caps[1].kind, "capture/dom");
     assert_eq!(caps[2].kind, "capture/network");
+    assert_eq!(caps[3].kind, "capture/target-rect");
     assert_eq!(caps[0].sha256, blobs[0].1);
 
     // Captured traces still replay to the recorded verdict — the
@@ -307,7 +331,12 @@ async fn always_policy_captures_on_pass() {
     let names: Vec<String> = capture_blobs(&events).into_iter().map(|(n, _)| n).collect();
     assert_eq!(
         names,
-        vec!["capture/screenshot", "capture/dom", "capture/network"]
+        vec![
+            "capture/screenshot",
+            "capture/dom",
+            "capture/network",
+            "capture/target-rect"
+        ]
     );
 }
 

@@ -102,6 +102,18 @@ pub struct Cookie {
     pub name: String,
 }
 
+/// A bounding rect (CSS px, document-relative) — the element-highlight
+/// capture (spec #214). Serializes into the `capture/target-rect`
+/// evidence blob; the dashboard overlays it on the full-page
+/// screenshot.
+#[derive(Debug, Clone, Copy, serde::Serialize, Deserialize)]
+pub struct Rect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 /// One recorded HTTP response on a page, surfaced to `api/observe`
 /// (#72). The sidecar's per-page recorder (`page.on('response', …)`)
 /// materializes every field up front — including reading the body
@@ -533,6 +545,31 @@ impl Page {
         v.as_str()
             .map(str::to_string)
             .ok_or_else(|| PwError("content: non-string reply".into()))
+    }
+
+    /// Bounding rect of `selector`'s first match (spec #214), or `None`
+    /// when it isn't present/visible within `timeout_ms`. CSS px,
+    /// document-relative — the element-highlight overlay maps these
+    /// onto the full-page screenshot.
+    pub async fn bounding_box(
+        &self,
+        selector: &str,
+        timeout_ms: f64,
+    ) -> Result<Option<Rect>, PwError> {
+        let mut req = self.p();
+        req["selector"] = json!(selector);
+        req["timeoutMs"] = json!(timeout_ms);
+        let v = self.conn.request("boundingBox", req).await?;
+        if v.get("found").and_then(serde_json::Value::as_bool) == Some(true) {
+            Ok(Some(Rect {
+                x: v["x"].as_f64().unwrap_or(0.0),
+                y: v["y"].as_f64().unwrap_or(0.0),
+                width: v["width"].as_f64().unwrap_or(0.0),
+                height: v["height"].as_f64().unwrap_or(0.0),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Drain recorded network responses from `cursor` onward. Returns

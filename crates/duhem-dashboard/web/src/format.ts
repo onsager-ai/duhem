@@ -86,6 +86,8 @@ function blobLabel(outputName: string): { icon: string; label: string } {
       return { icon: "📄", label: "DOM captured" };
     case "capture/network":
       return { icon: "🌐", label: "network captured" };
+    case "capture/target-rect":
+      return { icon: "🎯", label: "target highlighted" };
     default:
       return { icon: "📎", label: `${outputName} captured` };
   }

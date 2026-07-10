@@ -27,8 +27,8 @@ pub use action::{
 };
 pub use api::{Call, Observe, Poll, Stream};
 pub use browser::{
-    CheckBrowser, Cookie, ElementState, NetworkBatch, NetworkEvent, Page, PwError, RunBrowser,
-    SelectBy,
+    CheckBrowser, Cookie, ElementState, NetworkBatch, NetworkEvent, Page, PwError, Rect,
+    RunBrowser, SelectBy,
 };
 pub use cli::Invoke;
 pub use db::{DbObserve, Query, Seed};

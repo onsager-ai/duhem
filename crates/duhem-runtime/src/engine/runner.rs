@@ -42,7 +42,9 @@ pub use crate::engine::outcome::{
     CapturedArtifact, CheckFailure, CheckFilter, EngineError, FailedAssertion, RunOutcome,
 };
 
-use crate::engine::capture::{CapturePolicy, capture_failure_evidence};
+use crate::engine::capture::{
+    CapturePolicy, TargetLocator, capture_failure_evidence, capture_target_rects, target_from_step,
+};
 use crate::engine::context::{RunContext, RunState, json_to_value};
 use crate::engine::registry::{ActionRegistry, default_registry};
 use crate::engine::shim::assertion_to_expr;
@@ -676,6 +678,7 @@ impl Engine {
         // is more useful when it records what the author wrote, not
         // what the engine got around to invoking.
         let mut step_aborted = false;
+        let mut targets: Vec<TargetLocator> = Vec::new();
         for (idx, step) in check.steps.iter().enumerate() {
             // Resolve template references in `with:` against whatever
             // context we have. Cheap and same-shape for every code
@@ -694,6 +697,18 @@ impl Engine {
             // `DEFAULT_WITHIN` (5s) remains the last resort.
             if let Some(default) = self.default_within {
                 apply_default_within(&mut resolved_with, default);
+            }
+
+            // Collect ui/assert-element targets for the element-highlight
+            // overlay (spec #214) — but only for steps that actually run.
+            // A skipped step (env failure, an earlier abort, unknown
+            // action) never "looked" for anything, so recording its
+            // locator would be misleading evidence.
+            let will_run = !environment_failed
+                && !step_aborted
+                && self.registry.contains_key(step.uses.as_str());
+            if will_run && let Some(t) = target_from_step(&step.uses, &resolved_with) {
+                targets.push(t);
             }
 
             writer
@@ -829,6 +844,9 @@ impl Engine {
             if wants_capture {
                 let last_step = check.steps.len().saturating_sub(1) as u32;
                 captures = capture_failure_evidence(writer, &cb.page, last_step).await;
+                if let Some(c) = capture_target_rects(writer, &cb.page, last_step, &targets).await {
+                    captures.push(c);
+                }
             }
             let _ = cb.close().await;
         }

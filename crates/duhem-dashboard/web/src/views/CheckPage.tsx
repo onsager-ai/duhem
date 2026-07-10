@@ -193,6 +193,8 @@ function artifactLabel(kind: string): string {
       return "DOM snapshot";
     case "capture/network":
       return "Network (HAR)";
+    case "capture/target-rect":
+      return "Target highlight";
     default:
       return kind;
   }
@@ -394,33 +396,105 @@ export function DomViewer({ url }: { url: string }) {
   );
 }
 
+interface TargetRect {
+  selector: string;
+  expected: string;
+  found: boolean;
+  rect?: { x: number; y: number; width: number; height: number } | null;
+}
+
 // Image artifacts render as an inline thumbnail — a full-bleed
-// screenshot dominates the panel otherwise. Click toggles to full size.
-export function ScreenshotArtifact({ artifact }: { artifact: ArtifactRef }) {
+// screenshot dominates the panel otherwise. Click toggles to full
+// size. When a `capture/target-rect` (#214) is available, the expanded
+// view overlays "where the assertion looked" and notes absent targets.
+export function ScreenshotArtifact({
+  artifact,
+  rectsUrl,
+}: {
+  artifact: ArtifactRef;
+  rectsUrl?: string;
+}) {
   const [expanded, setExpanded] = useState(false);
+  const [rects, setRects] = useState<TargetRect[]>([]);
+  const [nat, setNat] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    if (!rectsUrl) {
+      setRects([]);
+      return;
+    }
+    let live = true;
+    fetch(rectsUrl)
+      .then((r) => r.json())
+      .then((j) => live && setRects(Array.isArray(j) ? j : []))
+      .catch(() => live && setRects([]));
+    return () => {
+      live = false;
+    };
+  }, [rectsUrl]);
+  const found = rects.filter((r) => r.found && r.rect);
+  const notFound = rects.filter((r) => !r.found);
   return (
-    <button
-      type="button"
-      className={`shot-btn ${expanded ? "shot-expanded" : "shot-collapsed"}`}
-      onClick={() => setExpanded((e) => !e)}
-      aria-expanded={expanded}
-      aria-label={expanded ? "collapse screenshot" : "expand screenshot to full size"}
-      data-testid="shot-toggle"
-    >
-      <img src={artifact.url} alt={artifactLabel(artifact.kind)} />
-      <span className="shot-overlay">
-        <span className="shot-cue">{expanded ? "Collapse" : "⤢  Expand"}</span>
-      </span>
-    </button>
+    <>
+      <button
+        type="button"
+        className={`shot-btn ${expanded ? "shot-expanded" : "shot-collapsed"}`}
+        onClick={() => setExpanded((e) => !e)}
+        aria-expanded={expanded}
+        aria-label={expanded ? "collapse screenshot" : "expand screenshot to full size"}
+        data-testid="shot-toggle"
+      >
+        <img
+          src={artifact.url}
+          alt={artifactLabel(artifact.kind)}
+          onLoad={(e) => setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+        />
+        {/* Boxes map only on the natural-aspect expanded image. */}
+        {expanded &&
+          nat &&
+          found.map((r, i) => (
+            <span
+              key={i}
+              className="target-box"
+              data-testid="target-box"
+              title={r.selector}
+              style={{
+                left: `${(r.rect!.x / nat.w) * 100}%`,
+                top: `${(r.rect!.y / nat.h) * 100}%`,
+                width: `${(r.rect!.width / nat.w) * 100}%`,
+                height: `${(r.rect!.height / nat.h) * 100}%`,
+              }}
+            />
+          ))}
+        <span className="shot-overlay">
+          <span className="shot-cue">{expanded ? "Collapse" : "⤢  Expand"}</span>
+        </span>
+      </button>
+      {notFound.length > 0 && (
+        <p className="muted target-note" data-testid="target-note">
+          target not found on the page: {notFound.map((r) => r.selector).join(" · ")}
+        </p>
+      )}
+    </>
   );
 }
 
 export function Artifacts({ artifacts }: { artifacts: CheckDetail["artifacts"] }) {
-  if (artifacts.length === 0) return null;
+  // The target-rect is an overlay input for the screenshot (#214). Only
+  // hide it from the list when a screenshot exists to overlay it onto —
+  // otherwise (screenshot capture failed) keep it as its own row so the
+  // evidence isn't lost.
+  const hasScreenshot = artifacts.some((a) => isImageArtifact(a.kind, a.url));
+  const rectsUrl = hasScreenshot
+    ? artifacts.find((a) => a.kind === "capture/target-rect")?.url
+    : undefined;
+  const shown = hasScreenshot
+    ? artifacts.filter((a) => a.kind !== "capture/target-rect")
+    : artifacts;
+  if (shown.length === 0) return null;
   return (
     <div className="panel">
       <h2>Artifacts</h2>
-      {artifacts.map((artifact) => (
+      {shown.map((artifact) => (
         <div className="artifact" key={artifact.id}>
           <p className="kv">
             <strong>{artifactLabel(artifact.kind)}</strong> ·{" "}
@@ -429,7 +503,7 @@ export function Artifacts({ artifacts }: { artifacts: CheckDetail["artifacts"] }
             </a>
           </p>
           {isImageArtifact(artifact.kind, artifact.url) && (
-            <ScreenshotArtifact artifact={artifact} />
+            <ScreenshotArtifact artifact={artifact} rectsUrl={rectsUrl} />
           )}
           {artifact.kind === "capture/network" && <HarTable url={artifact.url} />}
           {artifact.kind === "capture/dom" && <DomViewer url={artifact.url} />}

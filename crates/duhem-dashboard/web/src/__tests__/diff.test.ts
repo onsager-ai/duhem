@@ -31,6 +31,10 @@ describe("diffPixels (#213)", () => {
     const b = new Uint8ClampedArray([108, 100, 100, 255]); // channel-sum diff 8 < 32
     expect(diffPixels(a, b).changed).toBe(0);
   });
+
+  it("throws on a length mismatch rather than reporting a bogus 0%", () => {
+    expect(() => diffPixels(new Uint8ClampedArray(4), new Uint8ClampedArray(8))).toThrow();
+  });
 });
 
 describe("harDelta (#212 network delta)", () => {
@@ -59,5 +63,15 @@ describe("harDelta (#212 network delta)", () => {
   it("tolerates a malformed HAR shape", () => {
     expect(harDelta({}, { log: {} })).toEqual([]);
     expect(harDelta(null, undefined)).toEqual([]);
+  });
+
+  it("drops entries missing a method or url instead of keying a bogus row", () => {
+    const base = har([entry("GET", "/a", 200)]);
+    // One well-formed entry + one malformed (no url) + one junk object.
+    const cur = har([entry("GET", "/a", 200), { request: { method: "GET" }, response: { status: 500 } }, {}]);
+    const rows = harDelta(base, cur);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].url).toBe("/a");
+    expect(rows[0].kind).toBe("unchanged");
   });
 });

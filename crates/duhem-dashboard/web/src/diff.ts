@@ -35,6 +35,12 @@ export function diffPixels(
   b: Uint8ClampedArray,
   tolerance = 32,
 ): PixelDiff {
+  // Fail loudly on a length mismatch rather than reading `undefined`
+  // (→ NaN) and reporting a misleading 0% diff. The caller already
+  // guards on image dimensions and surfaces the error state.
+  if (a.length !== b.length) {
+    throw new Error(`pixel buffers differ in length (${a.length} vs ${b.length})`);
+  }
   const total = Math.floor(a.length / 4);
   const mask = new Uint8ClampedArray(a.length);
   let changed = 0;
@@ -77,17 +83,21 @@ function entriesOf(har: unknown): HarReq[] {
   const log = (har as { log?: { entries?: unknown } } | null | undefined)?.log;
   const es = log?.entries;
   if (!Array.isArray(es)) return [];
-  return es.map((e) => {
-    const ee = e as {
-      request?: { method?: unknown; url?: unknown };
-      response?: { status?: unknown };
-    };
-    return {
-      method: typeof ee.request?.method === "string" ? ee.request.method : "",
-      url: typeof ee.request?.url === "string" ? ee.request.url : "",
-      status: typeof ee.response?.status === "number" ? ee.response.status : 0,
-    };
-  });
+  return es
+    .map((e) => {
+      const ee = e as {
+        request?: { method?: unknown; url?: unknown };
+        response?: { status?: unknown };
+      };
+      return {
+        method: typeof ee.request?.method === "string" ? ee.request.method : "",
+        url: typeof ee.request?.url === "string" ? ee.request.url : "",
+        status: typeof ee.response?.status === "number" ? ee.response.status : 0,
+      };
+    })
+    // Drop malformed entries (no method+url) rather than key a bogus
+    // " " row or merge unrelated ones; a malformed HAR still yields [].
+    .filter((r) => r.method !== "" && r.url !== "");
 }
 
 /**

@@ -66,6 +66,45 @@ describe("DiffPage (#212)", () => {
     expect(screen.getAllByText("pass").length).toBeGreaterThanOrEqual(1);
   });
 
+  it("shows baseline → current when the assertion detail itself changed", async () => {
+    stub({
+      current: { run_id: "R01", started_at: null, verdict: "fail" },
+      baseline: { run_id: "R00", started_at: null, verdict: "fail" },
+      criteria: [
+        {
+          id: "AC-1",
+          baseline_verdict: "fail",
+          current_verdict: "fail",
+          changed: false,
+          checks: [
+            {
+              id: "AC-1.1",
+              baseline_verdict: "fail",
+              current_verdict: "fail",
+              changed: true,
+              assertions: [
+                {
+                  assertion_index: 0,
+                  baseline_state: "fail",
+                  current_state: "fail",
+                  baseline_detail: "actual 200, expected 201",
+                  current_detail: "actual 500, expected 201",
+                  changed: true,
+                },
+              ],
+              baseline_artifacts: [],
+              current_artifacts: [],
+            },
+          ],
+        },
+      ],
+    });
+    renderDiff();
+    expect(await screen.findByText(/actual 500, expected 201/)).toBeTruthy();
+    // The prior detail is shown (struck through) alongside the new one.
+    expect(screen.getByText("actual 200, expected 201")).toBeTruthy();
+  });
+
   it("shows the honest empty state when there is no baseline", async () => {
     stub({
       current: { run_id: "R01", started_at: null, verdict: "fail" },

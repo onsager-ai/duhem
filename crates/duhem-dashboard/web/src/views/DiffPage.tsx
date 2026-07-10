@@ -174,7 +174,20 @@ function CheckBlock({ check }: { check: CheckDiff }) {
             <li key={a.assertion_index}>
               <span className="muted">assertion #{a.assertion_index}: </span>
               <VerdictArrow from={a.baseline_state} to={a.current_state} />
-              {a.current_detail && <span className="diff-detail"> — {a.current_detail}</span>}
+              {(a.baseline_detail || a.current_detail) && (
+                <span className="diff-detail">
+                  {" — "}
+                  {a.baseline_detail && a.baseline_detail !== a.current_detail ? (
+                    <>
+                      <span className="detail-was">{a.baseline_detail}</span>
+                      {" → "}
+                      {a.current_detail ?? "(cleared)"}
+                    </>
+                  ) : (
+                    (a.current_detail ?? a.baseline_detail)
+                  )}
+                </span>
+              )}
             </li>
           ))}
         </ul>

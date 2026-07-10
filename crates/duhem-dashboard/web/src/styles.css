@@ -106,21 +106,50 @@ tr.nested td:first-child { padding-left: 2rem; }
   font-size: 0.9rem;
 }
 
-ol.timeline { list-style: none; margin: 0; padding: 0; font-size: 0.85rem; }
-ol.timeline li {
+/* -- #206: plain-language check summary ------------------------------ */
+.check-summary {
+  margin: 0.75rem 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.check-summary.tone-ok { border-left-color: var(--pass); }
+.check-summary.tone-fail { border-left-color: var(--fail); }
+.check-summary.tone-inconclusive { border-left-color: var(--inconclusive); }
+.summary-headline { margin: 0; font-size: 0.95rem; }
+.summary-failing { margin: 0.5rem 0 0; padding-left: 1.1rem; color: var(--muted); }
+.summary-failing li { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.82rem; }
+
+/* -- #206: legible event timeline ------------------------------------ */
+ol.timeline { list-style: none; margin: 0; padding: 0; font-size: 0.88rem; }
+ol.timeline li.ev {
   display: grid;
-  grid-template-columns: 3rem 11rem 1fr;
-  gap: 0.75rem;
-  padding: 0.4rem 0.25rem;
+  grid-template-columns: 1.5rem 1fr auto;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.35rem 0.25rem;
   border-bottom: 1px solid var(--border);
 }
-ol.timeline .seq { color: var(--muted); }
-ol.timeline .kind { color: var(--live); }
-ol.timeline pre {
-  margin: 0.25rem 0 0;
+.ev-icon { text-align: center; }
+.ev-label { font-weight: 500; }
+.ev-detail { color: var(--muted); margin-left: 0.5rem; }
+.ev-artifact { margin-left: 0.5rem; font-size: 0.8rem; }
+.ev-time { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.ev.tone-fail .ev-label { color: var(--fail); }
+.ev.tone-ok .ev-label { color: var(--pass); }
+.ev.tone-inconclusive .ev-label { color: var(--inconclusive); }
+.ev.tone-anchor { background: rgba(255, 255, 255, 0.03); }
+.ev.tone-anchor .ev-label { font-weight: 700; }
+.ev-raw { display: inline-block; margin-left: 0.5rem; }
+.ev-raw summary { color: var(--muted); cursor: pointer; font-size: 0.78rem; list-style: revert; }
+.ev-raw pre {
+  margin: 0.35rem 0 0;
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--muted);
+  font-size: 0.8rem;
 }
 
 .artifact { margin: 0.75rem 0; }
@@ -129,6 +158,28 @@ ol.timeline pre {
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+
+/* -- #206: network HAR request table --------------------------------- */
+table.har {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+}
+table.har th, table.har td {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+table.har th { color: var(--muted); font-weight: 500; }
+table.har td.har-url {
+  max-width: 32rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+table.har tr.har-bad td:last-child { color: var(--fail); font-weight: 600; }
 
 .error { color: var(--fail); }
 .muted { color: var(--muted); }

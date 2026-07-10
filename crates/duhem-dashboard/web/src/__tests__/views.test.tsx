@@ -5,7 +5,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RunsList, { matchesFilters } from "../views/RunsList";
-import { Artifacts, Timeline } from "../views/CheckPage";
+import { Artifacts, HarTable, Timeline } from "../views/CheckPage";
 import type { RunsListEntry, TraceEvent } from "../api";
 
 afterEach(() => {
@@ -94,17 +94,45 @@ describe("matchesFilters", () => {
 });
 
 describe("Timeline", () => {
-  it("renders events in the order given (trace order, no re-sort)", () => {
+  it("renders each event as a legible row in trace order, raw one click away", () => {
     const events: TraceEvent[] = [
-      { seq: 4, ts: "t4", kind: "step_started" },
-      { seq: 5, ts: "t5", kind: "step_finished" },
-      { seq: 6, ts: "t6", kind: "check_finished" },
+      {
+        seq: 4,
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "step_started",
+        uses: "ui/navigate",
+        layer: "ui",
+        with: { url: "http://x/" },
+      },
+      {
+        seq: 5,
+        ts: "2026-01-01T00:00:01.000Z",
+        kind: "assertion_evaluated",
+        check_id: "AC-1.1",
+        assertion_index: 0,
+        state: "fail",
+        detail: "actual false, expected true",
+      },
+      {
+        seq: 6,
+        ts: "2026-01-01T00:00:01.100Z",
+        kind: "check_finished",
+        check_id: "AC-1.1",
+        verdict: "fail",
+      },
     ];
     const { container } = render(<Timeline events={events} />);
-    const kinds = [...container.querySelectorAll(".kind")].map((el) => el.textContent);
-    expect(kinds).toEqual(["step_started", "step_finished", "check_finished"]);
-    const seqs = [...container.querySelectorAll(".seq")].map((el) => el.textContent);
-    expect(seqs).toEqual(["#4", "#5", "#6"]);
+    // Legible labels, in trace order — no raw JSON, no re-sort.
+    const labels = [...container.querySelectorAll(".ev-label")].map((el) => el.textContent);
+    expect(labels).toEqual(["navigate", "assertion failed", "verdict: fail"]);
+    // The failing assertion row carries its recorded detail and fail tone.
+    expect(container.querySelector(".ev.tone-fail .ev-detail")?.textContent).toContain(
+      "actual false",
+    );
+    // Raw JSON is preserved, tucked behind a per-row <details> toggle.
+    const raws = container.querySelectorAll(".ev-raw pre");
+    expect(raws).toHaveLength(3);
+    expect(raws[0].textContent).toContain("ui/navigate");
   });
 });
 
@@ -143,6 +171,37 @@ describe("Artifacts", () => {
     const imgs = container.querySelectorAll("img");
     expect(imgs).toHaveLength(1);
     expect(imgs[0].getAttribute("src")).toBe(`run/r/artifact/${shot}`);
+  });
+
+  it("renders capture/network as a HAR request table with failing status flagged (#206)", async () => {
+    const har = {
+      log: {
+        entries: [
+          { request: { method: "GET", url: "http://x/" }, response: { status: 200 } },
+          { request: { method: "POST", url: "http://x/api/charge" }, response: { status: 500 } },
+        ],
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(har), { status: 200 })),
+    );
+    render(<HarTable url="run/r/artifact/net" />);
+    const table = await screen.findByTestId("har-table");
+    const rows = table.querySelectorAll("tbody tr");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("GET");
+    expect(rows[1].className).toContain("har-bad");
+    expect(rows[1].textContent).toContain("500");
+  });
+
+  it("survives a HAR blob with a non-array entries shape", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ log: {} }), { status: 200 })),
+    );
+    render(<HarTable url="run/r/artifact/empty" />);
+    expect(await screen.findByText(/no requests recorded/i)).toBeTruthy();
   });
 });
 

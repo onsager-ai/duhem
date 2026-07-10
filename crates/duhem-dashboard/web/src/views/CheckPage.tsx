@@ -3,11 +3,11 @@
 // detail · Δ) with the raw JSON one click away, and a rich artifacts
 // panel (screenshots inline, network HAR as a request table).
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { fetchCheck, type ArtifactRef, type CheckDetail, type SpanModel, type TraceEvent } from "../api";
 import { VerdictBadge, isImageArtifact } from "../ui";
-import { formatEvent, summarizeCheck } from "../format";
+import { formatEvent, groupTimeline, summarizeCheck, type TimelineNode } from "../format";
 
 // Plain-language "what happened", derived mechanically from the
 // recorded timeline (never re-judged, never LLM-authored).
@@ -45,9 +45,13 @@ function TimelineRow({
       <span className="ev-icon" aria-hidden="true">
         {fe.icon}
       </span>
-      <span className="ev-body">
-        <span className="ev-label">{fe.label}</span>
-        {fe.detail && <span className="ev-detail">{fe.detail}</span>}
+      <span className="ev-label">{fe.label}</span>
+      <span className="ev-detail">
+        {fe.detail && (
+          <span className="ev-detail-text" title={fe.detail}>
+            {fe.detail}
+          </span>
+        )}
         {art && (
           <a className="ev-artifact" href={art.url} target="_blank" rel="noreferrer">
             open
@@ -65,6 +69,68 @@ function TimelineRow({
   );
 }
 
+// A step's lifecycle collapsed into one row: the action + its outcome
+// + observation count as the summary, its observations one click away.
+// The check-level signal (assertions, verdict, captures) stays outside
+// any group, so nothing load-bearing is hidden.
+function StepGroup({
+  node,
+  prevOf,
+  artifacts,
+}: {
+  node: Extract<TimelineNode, { kind: "step" }>;
+  prevOf: (evt: TraceEvent) => TraceEvent | undefined;
+  artifacts: ArtifactRef[];
+}) {
+  const started = node.events[0];
+  const finished = node.events.find(
+    (e) => e.kind === "step_finished" || e.kind === "setup_step_finished",
+  );
+  const observations = node.events.filter(
+    (e) => e.kind === "step_observation" || e.kind === "setup_step_observation",
+  );
+  const fe = formatEvent(started, prevOf(started));
+  const outcome = finished ? formatEvent(finished) : null;
+  return (
+    <li className="ev step-group" data-testid="step-group">
+      <details>
+        <summary>
+          <span className="ev-icon" aria-hidden="true">
+            {fe.icon}
+          </span>
+          <span className="ev-label">{fe.label}</span>
+          <span className="ev-detail">
+            {fe.detail && (
+              <span className="ev-detail-text" title={fe.detail}>
+                {fe.detail}
+              </span>
+            )}
+            {outcome && (
+              <span className={`step-outcome tone-${outcome.tone}`}>
+                {outcome.icon} {outcome.label}
+              </span>
+            )}
+            {observations.length > 0 && (
+              <span className="obs-count">{observations.length} obs</span>
+            )}
+          </span>
+          <span className="ev-time" title={started.ts}>
+            {fe.delta ?? ""}
+          </span>
+        </summary>
+        <ol className="timeline step-inner">
+          {/* The full step detail — started (with its args), each
+              observation, and finished (with its outcome) — each row
+              keeps its own raw toggle, so nothing is unreachable. */}
+          {node.events.map((e) => (
+            <TimelineRow key={e.seq} evt={e} prev={prevOf(e)} artifacts={artifacts} />
+          ))}
+        </ol>
+      </details>
+    </li>
+  );
+}
+
 export function Timeline({
   events,
   artifacts = [],
@@ -72,11 +138,18 @@ export function Timeline({
   events: TraceEvent[];
   artifacts?: ArtifactRef[];
 }) {
+  const nodes = groupTimeline(events);
+  const idx = new Map(events.map((e, i) => [e.seq, i]));
+  const prevOf = (evt: TraceEvent) => events[(idx.get(evt.seq) ?? 0) - 1];
   return (
     <ol className="timeline">
-      {events.map((evt, i) => (
-        <TimelineRow key={evt.seq} evt={evt} prev={events[i - 1]} artifacts={artifacts} />
-      ))}
+      {nodes.map((n) =>
+        n.kind === "step" ? (
+          <StepGroup key={n.key} node={n} prevOf={prevOf} artifacts={artifacts} />
+        ) : (
+          <TimelineRow key={n.key} evt={n.event} prev={prevOf(n.event)} artifacts={artifacts} />
+        ),
+      )}
     </ol>
   );
 }
@@ -125,13 +198,92 @@ function artifactLabel(kind: string): string {
   }
 }
 
+interface HarHeader {
+  name: string;
+  value: string;
+}
 interface HarEntry {
-  request: { method: string; url: string; postData?: { text?: string } };
-  response: { status: number; content?: { text?: string } };
+  request: { method: string; url: string; headers?: HarHeader[]; postData?: { text?: string } };
+  response: { status: number; headers?: HarHeader[]; content?: { text?: string } };
 }
 
-// Render a fetched HAR blob as a compact request table — the network
-// evidence read for humans, redaction markers intact.
+function HarHeaders({ title, headers }: { title: string; headers?: HarHeader[] }) {
+  if (!headers || headers.length === 0) return null;
+  return (
+    <div className="har-kv">
+      <h4>{title}</h4>
+      <dl>
+        {headers.map((h, i) => (
+          <Fragment key={i}>
+            <dt>{h.name}</dt>
+            <dd>{h.value}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function HarBody({ title, text }: { title: string; text?: string }) {
+  if (text === undefined || text === "") return null;
+  return (
+    <div className="har-body">
+      <h4>{title}</h4>
+      <pre>{text}</pre>
+    </div>
+  );
+}
+
+// One request row that expands to its redacted headers + bodies (the
+// data is already in the fetched blob — a real inspector, no new fetch).
+function HarRow({ entry }: { entry: HarEntry }) {
+  const [open, setOpen] = useState(false);
+  const ok = entry.response.status < 400;
+  return (
+    <>
+      <tr
+        className={`har-row${ok ? "" : " har-bad"}`}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen((o) => !o);
+          }
+        }}
+        tabIndex={0}
+        role="button"
+        aria-expanded={open}
+        data-testid="har-row"
+      >
+        <td>
+          <span className="har-caret" aria-hidden="true">
+            {open ? "▾" : "▸"}
+          </span>{" "}
+          {entry.request.method}
+        </td>
+        <td className="har-url" title={entry.request.url}>
+          {entry.request.url}
+        </td>
+        <td>
+          <span className={`status-pill ${ok ? "ok" : "bad"}`}>{entry.response.status}</span>
+        </td>
+      </tr>
+      {open && (
+        <tr className="har-detail">
+          <td colSpan={3}>
+            <HarHeaders title="request headers" headers={entry.request.headers} />
+            <HarBody title="request body" text={entry.request.postData?.text} />
+            <HarHeaders title="response headers" headers={entry.response.headers} />
+            <HarBody title="response body" text={entry.response.content?.text} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+// Render a fetched HAR blob as a request table — the network evidence
+// read for humans, redaction markers intact, each row expandable.
 export function HarTable({ url }: { url: string }) {
   const [entries, setEntries] = useState<HarEntry[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -168,20 +320,98 @@ export function HarTable({ url }: { url: string }) {
         </tr>
       </thead>
       <tbody>
-        {entries.map((e, i) => {
-          const ok = e.response.status < 400;
-          return (
-            <tr key={i} className={ok ? "" : "har-bad"}>
-              <td>{e.request.method}</td>
-              <td className="har-url" title={e.request.url}>
-                {e.request.url}
-              </td>
-              <td>{e.response.status}</td>
-            </tr>
-          );
-        })}
+        {entries.map((e, i) => (
+          <HarRow key={i} entry={e} />
+        ))}
       </tbody>
     </table>
+  );
+}
+
+// Inline viewer for a captured DOM snapshot: the HTML rendered in a
+// fully sandboxed iframe (no scripts, no same-origin — the snapshot is
+// untrusted page content) plus text search over the source, so you can
+// ask "was this node ever present?" without downloading the blob.
+export function DomViewer({ url }: { url: string }) {
+  const [html, setHtml] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [q, setQ] = useState("");
+  const [showRender, setShowRender] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setHtml(null);
+    setErr(null);
+    fetch(url)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+      })
+      .then((t) => live && setHtml(t))
+      .catch((e) => live && setErr(String(e)));
+    return () => {
+      live = false;
+    };
+  }, [url]);
+  // Lowercase the (potentially large) snapshot once, not on every
+  // keystroke — the search box stays responsive.
+  const haystack = useMemo(() => (html ?? "").toLowerCase(), [html]);
+  if (err) return <p className="muted">could not load DOM: {err}</p>;
+  if (html === null) return <p className="muted">loading DOM…</p>;
+  const matches = q ? haystack.split(q.toLowerCase()).length - 1 : 0;
+  return (
+    <div className="dom-viewer" data-testid="dom-viewer">
+      <div className="dom-search">
+        <input
+          type="search"
+          placeholder="search the snapshot…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          aria-label="search the DOM snapshot"
+        />
+        {q && (
+          <span className="muted" data-testid="dom-matches">
+            {matches} match{matches === 1 ? "" : "es"}
+          </span>
+        )}
+        <button
+          type="button"
+          className="dom-toggle"
+          onClick={() => setShowRender((s) => !s)}
+          aria-expanded={showRender}
+          data-testid="dom-render-toggle"
+        >
+          {showRender ? "hide rendered snapshot" : "show rendered snapshot"}
+        </button>
+      </div>
+      {showRender && (
+        <>
+          {/* sandbox="" disables scripts and same-origin — snapshot is untrusted. */}
+          <iframe className="dom-frame" sandbox="" srcDoc={html} title="DOM snapshot" />
+          <p className="muted dom-note">Rendered without external assets — structure and text, not pixels (see the screenshot for that).</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Image artifacts render as an inline thumbnail — a full-bleed
+// screenshot dominates the panel otherwise. Click toggles to full size.
+export function ScreenshotArtifact({ artifact }: { artifact: ArtifactRef }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <button
+      type="button"
+      className={`shot-btn ${expanded ? "shot-expanded" : "shot-collapsed"}`}
+      onClick={() => setExpanded((e) => !e)}
+      aria-expanded={expanded}
+      aria-label={expanded ? "collapse screenshot" : "expand screenshot to full size"}
+      data-testid="shot-toggle"
+    >
+      <img src={artifact.url} alt={artifactLabel(artifact.kind)} />
+      <span className="shot-overlay">
+        <span className="shot-cue">{expanded ? "Collapse" : "⤢  Expand"}</span>
+      </span>
+    </button>
   );
 }
 
@@ -199,9 +429,10 @@ export function Artifacts({ artifacts }: { artifacts: CheckDetail["artifacts"] }
             </a>
           </p>
           {isImageArtifact(artifact.kind, artifact.url) && (
-            <img src={artifact.url} alt={`${artifactLabel(artifact.kind)}`} />
+            <ScreenshotArtifact artifact={artifact} />
           )}
           {artifact.kind === "capture/network" && <HarTable url={artifact.url} />}
+          {artifact.kind === "capture/dom" && <DomViewer url={artifact.url} />}
         </div>
       ))}
     </div>

@@ -1,11 +1,11 @@
 // Component tests (#86): runs list (empty / one / many), timeline
 // ordering, artifact rendering.
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RunsList, { matchesFilters } from "../views/RunsList";
-import { Artifacts, HarTable, Timeline } from "../views/CheckPage";
+import { Artifacts, DomViewer, HarTable, ScreenshotArtifact, Timeline } from "../views/CheckPage";
 import type { RunsListEntry, TraceEvent } from "../api";
 
 afterEach(() => {
@@ -100,9 +100,17 @@ describe("Timeline", () => {
         seq: 4,
         ts: "2026-01-01T00:00:00.000Z",
         kind: "step_started",
+        step_index: 0,
         uses: "ui/navigate",
         layer: "ui",
         with: { url: "http://x/" },
+      },
+      {
+        seq: 45,
+        ts: "2026-01-01T00:00:00.500Z",
+        kind: "step_finished",
+        step_index: 0,
+        outcome: "ok",
       },
       {
         seq: 5,
@@ -122,17 +130,24 @@ describe("Timeline", () => {
       },
     ];
     const { container } = render(<Timeline events={events} />);
-    // Legible labels, in trace order — no raw JSON, no re-sort.
-    const labels = [...container.querySelectorAll(".ev-label")].map((el) => el.textContent);
+    // The step folds into a group; check-level events stay standalone,
+    // legible labels in trace order. The step's full detail (started +
+    // finished, each with its raw toggle) lives inside the group, so
+    // we scope the top-level assertion to rows outside `.step-inner`.
+    expect(container.querySelectorAll('[data-testid="step-group"]')).toHaveLength(1);
+    const labels = [...container.querySelectorAll(".ev-label")]
+      .filter((el) => !el.closest(".step-inner"))
+      .map((el) => el.textContent);
     expect(labels).toEqual(["navigate", "assertion failed", "verdict: fail"]);
     // The failing assertion row carries its recorded detail and fail tone.
     expect(container.querySelector(".ev.tone-fail .ev-detail")?.textContent).toContain(
       "actual false",
     );
-    // Raw JSON is preserved, tucked behind a per-row <details> toggle.
-    const raws = container.querySelectorAll(".ev-raw pre");
-    expect(raws).toHaveLength(3);
-    expect(raws[0].textContent).toContain("ui/navigate");
+    // Raw JSON is preserved behind a per-row <details> toggle on the
+    // standalone events.
+    const raws = [...container.querySelectorAll(".ev-raw pre")];
+    expect(raws.length).toBeGreaterThanOrEqual(2);
+    expect(raws.some((p) => p.textContent?.includes("actual false"))).toBe(true);
   });
 });
 
@@ -202,6 +217,97 @@ describe("Artifacts", () => {
     );
     render(<HarTable url="run/r/artifact/empty" />);
     expect(await screen.findByText(/no requests recorded/i)).toBeTruthy();
+  });
+});
+
+// ---- #210: in-page artifact inspection -----------------------------
+
+describe("in-page inspection (#210)", () => {
+  it("expands a HAR row to its redacted headers and bodies", async () => {
+    const har = {
+      log: {
+        entries: [
+          {
+            request: {
+              method: "POST",
+              url: "http://x/api/charge",
+              headers: [{ name: "authorization", value: "<redacted>" }],
+              postData: { text: "<redacted>" },
+            },
+            response: {
+              status: 500,
+              headers: [{ name: "content-type", value: "application/json" }],
+              content: { text: '{"error":"declined"}' },
+            },
+          },
+        ],
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(har), { status: 200 })));
+    render(<HarTable url="run/r/artifact/net" />);
+    const row = await screen.findByTestId("har-row");
+    // Collapsed: the body is not shown yet, and it's keyboard-focusable.
+    expect(screen.queryByText(/"error":"declined"/)).toBeNull();
+    expect(row.getAttribute("role")).toBe("button");
+    expect(row.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(row);
+    expect(row.getAttribute("aria-expanded")).toBe("true");
+    // Expanded: redacted header + response body are revealed from the blob.
+    expect(screen.getByText("authorization")).toBeTruthy();
+    expect(screen.getByText('{"error":"declined"}')).toBeTruthy();
+    expect(screen.getAllByText("<redacted>").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders a captured DOM snapshot with source search; the render is collapsed by default", async () => {
+    const html = "<html><body><button>Pay now</button><div>Payment complete</div></body></html>";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(html, { status: 200 })));
+    render(<DomViewer url="run/r/artifact/dom" />);
+    const viewer = await screen.findByTestId("dom-viewer");
+    // The heavy iframe is collapsed by default; search is always available.
+    expect(viewer.querySelector("iframe")).toBeNull();
+    fireEvent.change(viewer.querySelector("input")!, { target: { value: "Payment complete" } });
+    expect(screen.getByTestId("dom-matches").textContent).toContain("1 match");
+    // Reveal the rendered snapshot — fully sandboxed (untrusted content).
+    fireEvent.click(screen.getByTestId("dom-render-toggle"));
+    const frame = viewer.querySelector("iframe");
+    expect(frame?.getAttribute("sandbox")).toBe("");
+    expect(frame?.getAttribute("srcdoc")).toContain("Payment complete");
+  });
+
+  it("renders an image artifact as a thumbnail that expands to full size on click", () => {
+    const art = { id: "e".repeat(64), kind: "capture/screenshot", url: "run/r/artifact/shot" };
+    render(<ScreenshotArtifact artifact={art} />);
+    const btn = screen.getByTestId("shot-toggle");
+    // Collapsed (thumbnail) by default.
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    expect(btn.className).toContain("shot-collapsed");
+    fireEvent.click(btn);
+    // Expanded (full size) after click.
+    expect(btn.getAttribute("aria-expanded")).toBe("true");
+    expect(btn.className).toContain("shot-expanded");
+    expect(btn.querySelector("img")?.getAttribute("src")).toBe("run/r/artifact/shot");
+  });
+
+  it("groups a step's events into a node and keeps the verdict standalone", () => {
+    const events: TraceEvent[] = [
+      { seq: 1, ts: "t1", kind: "step_started", step_index: 0, uses: "ui/navigate", with: { url: "http://x/" } },
+      { seq: 2, ts: "t2", kind: "step_observation", step_index: 0, output_name: "count", value: 1 },
+      { seq: 3, ts: "t3", kind: "step_finished", step_index: 0, outcome: "ok" },
+      { seq: 4, ts: "t4", kind: "check_finished", verdict: "pass" },
+    ];
+    const { container } = render(<Timeline events={events} />);
+    const groups = container.querySelectorAll('[data-testid="step-group"]');
+    expect(groups).toHaveLength(1);
+    expect(groups[0].textContent).toContain("navigate");
+    expect(groups[0].textContent).toContain("step ok");
+    // The step's own started/finished raws stay reachable inside the group.
+    const innerRaw = groups[0].querySelectorAll(".step-inner .ev-raw pre");
+    expect([...innerRaw].some((p) => p.textContent?.includes("ui/navigate"))).toBe(true);
+    // The verdict is a standalone row, never folded into a step group.
+    const labels = [...container.querySelectorAll(".ev-label")]
+      .filter((e) => !e.closest(".step-inner"))
+      .map((e) => e.textContent);
+    expect(labels).toContain("verdict: pass");
   });
 });
 

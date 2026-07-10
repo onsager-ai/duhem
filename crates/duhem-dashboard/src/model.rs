@@ -131,6 +131,66 @@ pub struct CriterionHistory {
     pub verdicts: Vec<Option<VerdictState>>,
 }
 
+/// `GET /api/runs/:run_id/diff` (#211): the run compared against its
+/// baseline — the most recent prior *passing* run of the same
+/// verification + target (last-pass). The diff is evidence, never a
+/// judge input: it only surfaces recorded transitions, it never
+/// recomputes a verdict.
+#[derive(Debug, Clone, Serialize)]
+pub struct RunDiff {
+    pub current: RunSide,
+    /// `None` when the verification has no prior passing run to compare
+    /// against — the view says "no passing baseline" rather than
+    /// diffing two failures.
+    pub baseline: Option<RunSide>,
+    pub criteria: Vec<CriterionDiff>,
+}
+
+/// One end of a diff: a run's identity + recorded verdict.
+#[derive(Debug, Clone, Serialize)]
+pub struct RunSide {
+    pub run_id: String,
+    pub started_at: Option<DateTime<Utc>>,
+    pub verdict: Option<VerdictState>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CriterionDiff {
+    pub id: String,
+    pub baseline_verdict: Option<VerdictState>,
+    pub current_verdict: Option<VerdictState>,
+    /// `true` iff a baseline exists and the verdict differs — the view
+    /// surfaces changed criteria first.
+    pub changed: bool,
+    pub checks: Vec<CheckDiff>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CheckDiff {
+    pub id: String,
+    pub baseline_verdict: Option<VerdictState>,
+    pub current_verdict: Option<VerdictState>,
+    pub changed: bool,
+    pub assertions: Vec<AssertionDiff>,
+    /// The check's `capture/*` (and other blob) artifacts on each side,
+    /// so the view can render baseline↔current evidence side by side
+    /// and diff the HAR/screenshot itself.
+    pub baseline_artifacts: Vec<ArtifactRef>,
+    pub current_artifacts: Vec<ArtifactRef>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AssertionDiff {
+    pub assertion_index: u32,
+    pub baseline_state: Option<VerdictState>,
+    pub current_state: Option<VerdictState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline_detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_detail: Option<String>,
+    pub changed: bool,
+}
+
 /// A content-addressed blob referenced from the check's timeline.
 #[derive(Debug, Clone, Serialize)]
 pub struct ArtifactRef {

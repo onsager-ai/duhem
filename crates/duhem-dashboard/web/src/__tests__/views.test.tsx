@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RunsList, { matchesFilters } from "../views/RunsList";
-import { Artifacts, DomViewer, HarTable, Timeline } from "../views/CheckPage";
+import { Artifacts, DomViewer, HarTable, ScreenshotArtifact, Timeline } from "../views/CheckPage";
 import type { RunsListEntry, TraceEvent } from "../api";
 
 afterEach(() => {
@@ -258,18 +258,34 @@ describe("in-page inspection (#210)", () => {
     expect(screen.getAllByText("<redacted>").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("renders a captured DOM snapshot in a fully sandboxed iframe with source search", async () => {
+  it("renders a captured DOM snapshot with source search; the render is collapsed by default", async () => {
     const html = "<html><body><button>Pay now</button><div>Payment complete</div></body></html>";
     vi.stubGlobal("fetch", vi.fn(async () => new Response(html, { status: 200 })));
     render(<DomViewer url="run/r/artifact/dom" />);
     const viewer = await screen.findByTestId("dom-viewer");
+    // The heavy iframe is collapsed by default; search is always available.
+    expect(viewer.querySelector("iframe")).toBeNull();
+    fireEvent.change(viewer.querySelector("input")!, { target: { value: "Payment complete" } });
+    expect(screen.getByTestId("dom-matches").textContent).toContain("1 match");
+    // Reveal the rendered snapshot — fully sandboxed (untrusted content).
+    fireEvent.click(screen.getByTestId("dom-render-toggle"));
     const frame = viewer.querySelector("iframe");
-    // Fully sandboxed: no scripts, no same-origin (untrusted page content).
     expect(frame?.getAttribute("sandbox")).toBe("");
     expect(frame?.getAttribute("srcdoc")).toContain("Payment complete");
-    const input = viewer.querySelector("input");
-    fireEvent.change(input!, { target: { value: "Payment complete" } });
-    expect(screen.getByTestId("dom-matches").textContent).toContain("1 match");
+  });
+
+  it("renders an image artifact as a thumbnail that expands to full size on click", () => {
+    const art = { id: "e".repeat(64), kind: "capture/screenshot", url: "run/r/artifact/shot" };
+    render(<ScreenshotArtifact artifact={art} />);
+    const btn = screen.getByTestId("shot-toggle");
+    // Collapsed (thumbnail) by default.
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    expect(btn.className).toContain("shot-collapsed");
+    fireEvent.click(btn);
+    // Expanded (full size) after click.
+    expect(btn.getAttribute("aria-expanded")).toBe("true");
+    expect(btn.className).toContain("shot-expanded");
+    expect(btn.querySelector("img")?.getAttribute("src")).toBe("run/r/artifact/shot");
   });
 
   it("groups a step's events into a node and keeps the verdict standalone", () => {

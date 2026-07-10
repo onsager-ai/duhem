@@ -45,9 +45,13 @@ function TimelineRow({
       <span className="ev-icon" aria-hidden="true">
         {fe.icon}
       </span>
-      <span className="ev-body">
-        <span className="ev-label">{fe.label}</span>
-        {fe.detail && <span className="ev-detail">{fe.detail}</span>}
+      <span className="ev-label">{fe.label}</span>
+      <span className="ev-detail">
+        {fe.detail && (
+          <span className="ev-detail-text" title={fe.detail}>
+            {fe.detail}
+          </span>
+        )}
         {art && (
           <a className="ev-artifact" href={art.url} target="_blank" rel="noreferrer">
             open
@@ -94,16 +98,20 @@ function StepGroup({
           <span className="ev-icon" aria-hidden="true">
             {fe.icon}
           </span>
-          <span className="ev-body">
-            <span className="ev-label">{fe.label}</span>
-            {fe.detail && <span className="ev-detail">{fe.detail}</span>}
+          <span className="ev-label">{fe.label}</span>
+          <span className="ev-detail">
+            {fe.detail && (
+              <span className="ev-detail-text" title={fe.detail}>
+                {fe.detail}
+              </span>
+            )}
             {outcome && (
               <span className={`step-outcome tone-${outcome.tone}`}>
                 {outcome.icon} {outcome.label}
               </span>
             )}
             {observations.length > 0 && (
-              <span className="muted"> · {observations.length} obs</span>
+              <span className="obs-count">{observations.length} obs</span>
             )}
           </span>
           <span className="ev-time" title={started.ts}>
@@ -256,7 +264,9 @@ function HarRow({ entry }: { entry: HarEntry }) {
         <td className="har-url" title={entry.request.url}>
           {entry.request.url}
         </td>
-        <td>{entry.response.status}</td>
+        <td>
+          <span className={`status-pill ${ok ? "ok" : "bad"}`}>{entry.response.status}</span>
+        </td>
       </tr>
       {open && (
         <tr className="har-detail">
@@ -326,6 +336,7 @@ export function DomViewer({ url }: { url: string }) {
   const [html, setHtml] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const [showRender, setShowRender] = useState(false);
   useEffect(() => {
     let live = true;
     setHtml(null);
@@ -362,11 +373,45 @@ export function DomViewer({ url }: { url: string }) {
             {matches} match{matches === 1 ? "" : "es"}
           </span>
         )}
+        <button
+          type="button"
+          className="dom-toggle"
+          onClick={() => setShowRender((s) => !s)}
+          aria-expanded={showRender}
+          data-testid="dom-render-toggle"
+        >
+          {showRender ? "hide rendered snapshot" : "show rendered snapshot"}
+        </button>
       </div>
-      {/* sandbox="" disables scripts and same-origin — snapshot is untrusted. */}
-      <iframe className="dom-frame" sandbox="" srcDoc={html} title="DOM snapshot" />
-      <p className="muted dom-note">Rendered without external assets — structure and text, not pixels (see the screenshot for that).</p>
+      {showRender && (
+        <>
+          {/* sandbox="" disables scripts and same-origin — snapshot is untrusted. */}
+          <iframe className="dom-frame" sandbox="" srcDoc={html} title="DOM snapshot" />
+          <p className="muted dom-note">Rendered without external assets — structure and text, not pixels (see the screenshot for that).</p>
+        </>
+      )}
     </div>
+  );
+}
+
+// Image artifacts render as an inline thumbnail — a full-bleed
+// screenshot dominates the panel otherwise. Click toggles to full size.
+export function ScreenshotArtifact({ artifact }: { artifact: ArtifactRef }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <button
+      type="button"
+      className={`shot-btn ${expanded ? "shot-expanded" : "shot-collapsed"}`}
+      onClick={() => setExpanded((e) => !e)}
+      aria-expanded={expanded}
+      aria-label={expanded ? "collapse screenshot" : "expand screenshot to full size"}
+      data-testid="shot-toggle"
+    >
+      <img src={artifact.url} alt={artifactLabel(artifact.kind)} />
+      <span className="shot-overlay">
+        <span className="shot-cue">{expanded ? "Collapse" : "⤢  Expand"}</span>
+      </span>
+    </button>
   );
 }
 
@@ -384,7 +429,7 @@ export function Artifacts({ artifacts }: { artifacts: CheckDetail["artifacts"] }
             </a>
           </p>
           {isImageArtifact(artifact.kind, artifact.url) && (
-            <img src={artifact.url} alt={`${artifactLabel(artifact.kind)}`} />
+            <ScreenshotArtifact artifact={artifact} />
           )}
           {artifact.kind === "capture/network" && <HarTable url={artifact.url} />}
           {artifact.kind === "capture/dom" && <DomViewer url={artifact.url} />}

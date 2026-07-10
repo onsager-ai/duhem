@@ -191,9 +191,13 @@ time series for ρ_dynamic.
 
 ## Reproduction
 
-- Runs: `--filter AC-2|AC-3 --no-env-up --keep-env --db <store> --reporter json`
-  against the `scripts/up.sh` cluster; fixture varied via `--inputs @<file>`
-  (`spider_file_data` only). Full-VD runs identical minus `--filter`.
+- Runs: one criterion per invocation —
+  `duhem run <vd> --filter AC-2 --no-env-up --keep-env --db <store> --reporter json --inputs @<file>`
+  (and separately `--filter AC-3`) against the `scripts/up.sh` cluster; fixture
+  varied via `--inputs @<file>` (`spider_file_data` only). Full-VD runs are
+  identical minus the `--filter` flag. (AC-2 and AC-3 cannot share one invocation:
+  each re-creates `$inputs.spider_name`, which now 409s — the break documented
+  above.)
 - Fixtures: `echo` (1 line), 3-line echo, real HTTP fetch (`curl` the master
   health endpoint), `true`/`cd /` (zero output), `exit 1` (non-zero), `sleep 105`
   (exceeds the 90 s poll budget).

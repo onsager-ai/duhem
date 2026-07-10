@@ -3,7 +3,7 @@
 // detail · Δ) with the raw JSON one click away, and a rich artifacts
 // panel (screenshots inline, network HAR as a request table).
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { fetchCheck, type ArtifactRef, type CheckDetail, type SpanModel, type TraceEvent } from "../api";
 import { VerdictBadge, isImageArtifact } from "../ui";
@@ -110,13 +110,14 @@ function StepGroup({
             {fe.delta ?? ""}
           </span>
         </summary>
-        {observations.length > 0 && (
-          <ol className="timeline step-inner">
-            {observations.map((o) => (
-              <TimelineRow key={o.seq} evt={o} prev={prevOf(o)} artifacts={artifacts} />
-            ))}
-          </ol>
-        )}
+        <ol className="timeline step-inner">
+          {/* The full step detail — started (with its args), each
+              observation, and finished (with its outcome) — each row
+              keeps its own raw toggle, so nothing is unreachable. */}
+          {node.events.map((e) => (
+            <TimelineRow key={e.seq} evt={e} prev={prevOf(e)} artifacts={artifacts} />
+          ))}
+        </ol>
       </details>
     </li>
   );
@@ -235,6 +236,15 @@ function HarRow({ entry }: { entry: HarEntry }) {
       <tr
         className={`har-row${ok ? "" : " har-bad"}`}
         onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen((o) => !o);
+          }
+        }}
+        tabIndex={0}
+        role="button"
+        aria-expanded={open}
         data-testid="har-row"
       >
         <td>
@@ -331,9 +341,12 @@ export function DomViewer({ url }: { url: string }) {
       live = false;
     };
   }, [url]);
+  // Lowercase the (potentially large) snapshot once, not on every
+  // keystroke — the search box stays responsive.
+  const haystack = useMemo(() => (html ?? "").toLowerCase(), [html]);
   if (err) return <p className="muted">could not load DOM: {err}</p>;
   if (html === null) return <p className="muted">loading DOM…</p>;
-  const matches = q ? html.toLowerCase().split(q.toLowerCase()).length - 1 : 0;
+  const matches = q ? haystack.split(q.toLowerCase()).length - 1 : 0;
   return (
     <div className="dom-viewer" data-testid="dom-viewer">
       <div className="dom-search">

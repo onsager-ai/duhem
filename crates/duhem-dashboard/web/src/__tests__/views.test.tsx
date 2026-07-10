@@ -131,9 +131,13 @@ describe("Timeline", () => {
     ];
     const { container } = render(<Timeline events={events} />);
     // The step folds into a group; check-level events stay standalone,
-    // legible labels in trace order.
+    // legible labels in trace order. The step's full detail (started +
+    // finished, each with its raw toggle) lives inside the group, so
+    // we scope the top-level assertion to rows outside `.step-inner`.
     expect(container.querySelectorAll('[data-testid="step-group"]')).toHaveLength(1);
-    const labels = [...container.querySelectorAll(".ev-label")].map((el) => el.textContent);
+    const labels = [...container.querySelectorAll(".ev-label")]
+      .filter((el) => !el.closest(".step-inner"))
+      .map((el) => el.textContent);
     expect(labels).toEqual(["navigate", "assertion failed", "verdict: fail"]);
     // The failing assertion row carries its recorded detail and fail tone.
     expect(container.querySelector(".ev.tone-fail .ev-detail")?.textContent).toContain(
@@ -242,9 +246,12 @@ describe("in-page inspection (#210)", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(har), { status: 200 })));
     render(<HarTable url="run/r/artifact/net" />);
     const row = await screen.findByTestId("har-row");
-    // Collapsed: the body is not shown yet.
+    // Collapsed: the body is not shown yet, and it's keyboard-focusable.
     expect(screen.queryByText(/"error":"declined"/)).toBeNull();
+    expect(row.getAttribute("role")).toBe("button");
+    expect(row.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(row);
+    expect(row.getAttribute("aria-expanded")).toBe("true");
     // Expanded: redacted header + response body are revealed from the blob.
     expect(screen.getByText("authorization")).toBeTruthy();
     expect(screen.getByText('{"error":"declined"}')).toBeTruthy();
@@ -277,8 +284,13 @@ describe("in-page inspection (#210)", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].textContent).toContain("navigate");
     expect(groups[0].textContent).toContain("step ok");
+    // The step's own started/finished raws stay reachable inside the group.
+    const innerRaw = groups[0].querySelectorAll(".step-inner .ev-raw pre");
+    expect([...innerRaw].some((p) => p.textContent?.includes("ui/navigate"))).toBe(true);
     // The verdict is a standalone row, never folded into a step group.
-    const labels = [...container.querySelectorAll(".ev-label")].map((e) => e.textContent);
+    const labels = [...container.querySelectorAll(".ev-label")]
+      .filter((e) => !e.closest(".step-inner"))
+      .map((e) => e.textContent);
     expect(labels).toContain("verdict: pass");
   });
 });

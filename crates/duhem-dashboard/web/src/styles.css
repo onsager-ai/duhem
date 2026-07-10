@@ -184,6 +184,7 @@ table.har tr.har-bad td:last-child { color: var(--fail); font-weight: 600; }
 /* -- #210: expandable HAR rows -------------------------------------- */
 table.har tr.har-row { cursor: pointer; }
 table.har tr.har-row:hover { background: rgba(255, 255, 255, 0.03); }
+table.har tr.har-row:focus-visible { outline: 2px solid var(--live); outline-offset: -2px; }
 .har-caret { color: var(--muted); display: inline-block; width: 0.9rem; }
 table.har tr.har-detail td { background: rgba(255, 255, 255, 0.02); }
 .har-kv h4, .har-body h4 {

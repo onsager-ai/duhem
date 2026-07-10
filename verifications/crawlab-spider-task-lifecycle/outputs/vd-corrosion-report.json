@@ -1,0 +1,494 @@
+{
+  "vd_id": "crawlab-spider-task-lifecycle",
+  "measured_at": "2026-07-10",
+  "target": {
+    "repo": "crawlab-team/crawlab-pro",
+    "head": "dfd1132 (2026-07-09)",
+    "version": "0.7.3"
+  },
+  "N": 30,
+  "theta": 0.6,
+  "A": 50,
+  "A_detail": {
+    "commits_since_freeze": 50,
+    "tagged_releases_since_freeze": 1,
+    "freeze_date": "2026-06-25",
+    "freeze_commit": "aca3070"
+  },
+  "p_pass": 0.9167,
+  "t_hat": 0.5333,
+  "d_hat": 0.3833,
+  "d_hat_ci": [
+    0.2726,
+    0.5039
+  ],
+  "p_pass_scope": "executable-core pooled (AC-2+AC-3, 60 runs). The VD AS SHIPPED is non-executable (see vd_as_shipped): its true current p_pass is undefined (0 pass / 0 fail / 30 inconclusive).",
+  "per_assertion_rho": [
+    {
+      "criterion": "AC-2",
+      "assertion_index": 0,
+      "expr": "$steps.savefile.outputs.status == 200",
+      "judged_true": 30,
+      "judged_true_and_out_of_spec": 14,
+      "rho": 0.4667,
+      "exposed_by_fixtures": [
+        "nonzero",
+        "noop",
+        "noop2",
+        "timeout"
+      ]
+    },
+    {
+      "criterion": "AC-2",
+      "assertion_index": 1,
+      "expr": "$steps.run.outputs.status == 200",
+      "judged_true": 30,
+      "judged_true_and_out_of_spec": 14,
+      "rho": 0.4667,
+      "exposed_by_fixtures": [
+        "nonzero",
+        "noop",
+        "noop2",
+        "timeout"
+      ]
+    },
+    {
+      "criterion": "AC-2",
+      "assertion_index": 2,
+      "expr": "$steps.awaited.outputs.satisfied == true",
+      "judged_true": 25,
+      "judged_true_and_out_of_spec": 9,
+      "rho": 0.36,
+      "exposed_by_fixtures": [
+        "noop",
+        "noop2"
+      ]
+    },
+    {
+      "criterion": "AC-2",
+      "assertion_index": 3,
+      "expr": "$steps.executed.outputs.row_count >= 1",
+      "judged_true": 30,
+      "judged_true_and_out_of_spec": 14,
+      "rho": 0.4667,
+      "exposed_by_fixtures": [
+        "nonzero",
+        "noop",
+        "noop2",
+        "timeout"
+      ]
+    },
+    {
+      "criterion": "AC-2",
+      "assertion_index": 4,
+      "expr": "$steps.executed.outputs.rows[0].status == \"finished\"",
+      "judged_true": 25,
+      "judged_true_and_out_of_spec": 9,
+      "rho": 0.36,
+      "exposed_by_fixtures": [
+        "noop",
+        "noop2"
+      ]
+    },
+    {
+      "criterion": "AC-2",
+      "assertion_index": 5,
+      "expr": "$steps.executed.outputs.rows[0].cmd == $inputs.spider_cmd",
+      "judged_true": 30,
+      "judged_true_and_out_of_spec": 14,
+      "rho": 0.4667,
+      "exposed_by_fixtures": [
+        "nonzero",
+        "noop",
+        "noop2",
+        "timeout"
+      ]
+    },
+    {
+      "criterion": "AC-3",
+      "assertion_index": 0,
+      "expr": "$steps.executed.outputs.rows[0].spider_id == $steps.create.outputs.body.data._id",
+      "judged_true": 30,
+      "judged_true_and_out_of_spec": 14,
+      "rho": 0.4667,
+      "exposed_by_fixtures": [
+        "nonzero",
+        "noop",
+        "noop2",
+        "timeout"
+      ]
+    },
+    {
+      "criterion": "AC-3",
+      "assertion_index": 1,
+      "expr": "$steps.executed.outputs.rows[0]._id == $steps.run.outputs.body.data[0]",
+      "judged_true": 30,
+      "judged_true_and_out_of_spec": 14,
+      "rho": 0.4667,
+      "exposed_by_fixtures": [
+        "nonzero",
+        "noop",
+        "noop2",
+        "timeout"
+      ]
+    }
+  ],
+  "high_risk_assertions": [
+    {
+      "criterion": "AC-2",
+      "expr": "$steps.savefile.outputs.status == 200",
+      "rho": 0.4667,
+      "judged_true": 30,
+      "judged_true_and_out_of_spec": 14,
+      "exposed_by_fixtures": [
+        "nonzero",
+        "noop",
+        "noop2",
+        "timeout"
+      ]
+    },
+    {
+      "criterion": "AC-2",
+      "expr": "$steps.run.outputs.status == 200",
+      "rho": 0.4667,
+      "judged_true": 30,
+      "judged_true_and_out_of_spec": 14,
+      "exposed_by_fixtures": [
+        "nonzero",
+        "noop",
+        "noop2",
+        "timeout"
+      ]
+    },
+    {
+      "criterion": "AC-2",
+      "expr": "$steps.executed.outputs.row_count >= 1",
+      "rho": 0.4667,
+      "judged_true": 30,
+      "judged_true_and_out_of_spec": 14,
+      "exposed_by_fixtures": [
+        "nonzero",
+        "noop",
+        "noop2",
+        "timeout"
+      ]
+    },
+    {
+      "criterion": "AC-2",
+      "expr": "$steps.executed.outputs.rows[0].cmd == $inputs.spider_cmd",
+      "rho": 0.4667,
+      "judged_true": 30,
+      "judged_true_and_out_of_spec": 14,
+      "exposed_by_fixtures": [
+        "nonzero",
+        "noop",
+        "noop2",
+        "timeout"
+      ]
+    },
+    {
+      "criterion": "AC-3",
+      "expr": "$steps.executed.outputs.rows[0].spider_id == $steps.create.outputs.body.data._id",
+      "rho": 0.4667,
+      "judged_true": 30,
+      "judged_true_and_out_of_spec": 14,
+      "exposed_by_fixtures": [
+        "nonzero",
+        "noop",
+        "noop2",
+        "timeout"
+      ]
+    },
+    {
+      "criterion": "AC-3",
+      "expr": "$steps.executed.outputs.rows[0]._id == $steps.run.outputs.body.data[0]",
+      "rho": 0.4667,
+      "judged_true": 30,
+      "judged_true_and_out_of_spec": 14,
+      "exposed_by_fixtures": [
+        "nonzero",
+        "noop",
+        "noop2",
+        "timeout"
+      ]
+    }
+  ],
+  "D0": 0.3833,
+  "rho_dynamic_or_null": null,
+  "rho_dynamic_note": "insufficient time series - one measurement point. Drift here is NOT gradual: it is a STEP change to non-executability introduced by a single target commit (98e99a2, 2026-07-02), 7 days after freeze. A linear rho_dynamic is the wrong model; the step has already fired.",
+  "verdict": "RE-DERIVE NOW",
+  "verdict_rationale": [
+    "The VD as shipped no longer executes against the current target: 30/30 full-VD runs abort at step `savefile` with an unresolved-reference engine error (no verdict emitted). Cause: crawlab commit 98e99a2 (2026-07-02) added per-project spider-name uniqueness; AC-2/AC-3 re-create the same $inputs.spider_name that AC-1 already created, so the second create returns 409 and body.data._id is absent.",
+    "Even counterfactually (running each criterion in isolation so it executes), the check layer is Goodhart-drifted: AC-3 passes 30/30 including tasks that ERRORED or were CANCELLED (D_hat=0.47, CI up to 0.64 which crosses theta=0.6); AC-2 passes 9/25 hollow (finished-but-zero-output) runs (D_hat=0.30).",
+    "Crawlab's own Mongo data-yield metric (task_stats.result_count) is 0 for all 55 executable passes, yet the VD reports success - the checks never look at whether the spider produced anything."
+  ],
+  "trigger_evaluation": {
+    "d_hat_executable_core": 0.3833,
+    "d_hat_gt_theta_now": false,
+    "note": "D_hat (executable core, 0.38) is below theta=0.6, which in isolation reads MONITOR. But the dominant corrosion is the already-realized STEP to non-executability (a target change has ALREADY broken the VD), which is an unconditional RE-DERIVE trigger independent of theta. AC-3's CI upper bound (0.64) also crosses theta. Releases-until-theta: 0 - the breaking change already landed within A=50 commits."
+  },
+  "vd_as_shipped": {
+    "N": 30,
+    "pass": 0,
+    "fail": 0,
+    "inconclusive": 30,
+    "classification": "inconclusive:engine_error (no verdict emitted)",
+    "abort_step": "savefile",
+    "abort_error": "unresolved reference $steps.create.outputs.body.data._id (create 409, duplicate name)",
+    "fixture_independent": true,
+    "note": "AC-1 executes and passes (spider persisted) in all 30 before the abort; AC-2/AC-3 never reach a verdict."
+  },
+  "per_criterion": {
+    "AC-1": {
+      "criterion": "AC-1",
+      "n": 30,
+      "pass": 30,
+      "fail": 0,
+      "inconclusive": 0,
+      "p_pass": 1.0,
+      "in_spec_passes": 30,
+      "out_of_spec_passes": 0,
+      "p_in_spec_given_pass": 1.0,
+      "t_hat": 1.0,
+      "d_hat": 0.0,
+      "d_hat_ci95": [
+        0.0,
+        0.0
+      ],
+      "note": "create+persist; the spider document genuinely lands in Mongo, so every pass is in-spec. AC-1 does not execute a spider, so the finished-but-hollow blind spot does not apply.",
+      "per_assertion_rho": [
+        {
+          "criterion": "AC-1",
+          "assertion_index": 0,
+          "expr": "$steps.create.outputs.status == 200",
+          "judged_true": 30,
+          "judged_true_and_out_of_spec": 0,
+          "rho": 0.0,
+          "exposed_by_fixtures": []
+        },
+        {
+          "criterion": "AC-1",
+          "assertion_index": 1,
+          "expr": "$steps.persisted.outputs.row_count >= 1",
+          "judged_true": 30,
+          "judged_true_and_out_of_spec": 0,
+          "rho": 0.0,
+          "exposed_by_fixtures": []
+        },
+        {
+          "criterion": "AC-1",
+          "assertion_index": 2,
+          "expr": "$steps.persisted.outputs.rows[0].name == $inputs.spider_name",
+          "judged_true": 30,
+          "judged_true_and_out_of_spec": 0,
+          "rho": 0.0,
+          "exposed_by_fixtures": []
+        },
+        {
+          "criterion": "AC-1",
+          "assertion_index": 3,
+          "expr": "$steps.persisted.outputs.rows[0].cmd == $inputs.spider_cmd",
+          "judged_true": 30,
+          "judged_true_and_out_of_spec": 0,
+          "rho": 0.0,
+          "exposed_by_fixtures": []
+        },
+        {
+          "criterion": "AC-1",
+          "assertion_index": 4,
+          "expr": "$steps.persisted.outputs.rows[0]._id == $steps.create.outputs.body.data._id",
+          "judged_true": 30,
+          "judged_true_and_out_of_spec": 0,
+          "rho": 0.0,
+          "exposed_by_fixtures": []
+        }
+      ]
+    },
+    "AC-2": {
+      "criterion": "AC-2",
+      "n": 30,
+      "pass": 25,
+      "fail": 5,
+      "inconclusive": 0,
+      "p_pass": 0.8333,
+      "in_spec_passes": 16,
+      "out_of_spec_passes": 9,
+      "p_in_spec_given_pass": 0.64,
+      "t_hat": 0.5333,
+      "d_hat": 0.3,
+      "d_hat_ci95": [
+        0.1687,
+        0.4623
+      ],
+      "per_assertion_rho": [
+        {
+          "criterion": "AC-2",
+          "assertion_index": 0,
+          "expr": "$steps.savefile.outputs.status == 200",
+          "judged_true": 30,
+          "judged_true_and_out_of_spec": 14,
+          "rho": 0.4667,
+          "exposed_by_fixtures": [
+            "nonzero",
+            "noop",
+            "noop2",
+            "timeout"
+          ]
+        },
+        {
+          "criterion": "AC-2",
+          "assertion_index": 1,
+          "expr": "$steps.run.outputs.status == 200",
+          "judged_true": 30,
+          "judged_true_and_out_of_spec": 14,
+          "rho": 0.4667,
+          "exposed_by_fixtures": [
+            "nonzero",
+            "noop",
+            "noop2",
+            "timeout"
+          ]
+        },
+        {
+          "criterion": "AC-2",
+          "assertion_index": 2,
+          "expr": "$steps.awaited.outputs.satisfied == true",
+          "judged_true": 25,
+          "judged_true_and_out_of_spec": 9,
+          "rho": 0.36,
+          "exposed_by_fixtures": [
+            "noop",
+            "noop2"
+          ]
+        },
+        {
+          "criterion": "AC-2",
+          "assertion_index": 3,
+          "expr": "$steps.executed.outputs.row_count >= 1",
+          "judged_true": 30,
+          "judged_true_and_out_of_spec": 14,
+          "rho": 0.4667,
+          "exposed_by_fixtures": [
+            "nonzero",
+            "noop",
+            "noop2",
+            "timeout"
+          ]
+        },
+        {
+          "criterion": "AC-2",
+          "assertion_index": 4,
+          "expr": "$steps.executed.outputs.rows[0].status == \"finished\"",
+          "judged_true": 25,
+          "judged_true_and_out_of_spec": 9,
+          "rho": 0.36,
+          "exposed_by_fixtures": [
+            "noop",
+            "noop2"
+          ]
+        },
+        {
+          "criterion": "AC-2",
+          "assertion_index": 5,
+          "expr": "$steps.executed.outputs.rows[0].cmd == $inputs.spider_cmd",
+          "judged_true": 30,
+          "judged_true_and_out_of_spec": 14,
+          "rho": 0.4667,
+          "exposed_by_fixtures": [
+            "nonzero",
+            "noop",
+            "noop2",
+            "timeout"
+          ]
+        }
+      ]
+    },
+    "AC-3": {
+      "criterion": "AC-3",
+      "n": 30,
+      "pass": 30,
+      "fail": 0,
+      "inconclusive": 0,
+      "p_pass": 1.0,
+      "in_spec_passes": 16,
+      "out_of_spec_passes": 14,
+      "p_in_spec_given_pass": 0.5333,
+      "t_hat": 0.5333,
+      "d_hat": 0.4667,
+      "d_hat_ci95": [
+        0.3023,
+        0.6386
+      ],
+      "per_assertion_rho": [
+        {
+          "criterion": "AC-3",
+          "assertion_index": 0,
+          "expr": "$steps.executed.outputs.rows[0].spider_id == $steps.create.outputs.body.data._id",
+          "judged_true": 30,
+          "judged_true_and_out_of_spec": 14,
+          "rho": 0.4667,
+          "exposed_by_fixtures": [
+            "nonzero",
+            "noop",
+            "noop2",
+            "timeout"
+          ]
+        },
+        {
+          "criterion": "AC-3",
+          "assertion_index": 1,
+          "expr": "$steps.executed.outputs.rows[0]._id == $steps.run.outputs.body.data[0]",
+          "judged_true": 30,
+          "judged_true_and_out_of_spec": 14,
+          "rho": 0.4667,
+          "exposed_by_fixtures": [
+            "nonzero",
+            "noop",
+            "noop2",
+            "timeout"
+          ]
+        }
+      ]
+    }
+  },
+  "executable_core_pooled": {
+    "n": 60,
+    "pass": 55,
+    "fail": 5,
+    "inconclusive": 0,
+    "p_pass": 0.9167,
+    "in_spec_passes": 32,
+    "p_in_spec_given_pass": 0.5818,
+    "t_hat": 0.5333,
+    "d_hat": 0.3833,
+    "d_hat_ci95": [
+      0.2726,
+      0.5039
+    ]
+  },
+  "drift_model": {
+    "form": "D(t) = D0 + rho_dynamic * A",
+    "D0": 0.3833,
+    "rho_dynamic": null,
+    "A": 50,
+    "shape": "step (discontinuous) at commit 98e99a2 (2026-07-02), not linear",
+    "breaking_commit": {
+      "repo": "crawlab-team/crawlab-pro (crawlab submodule)",
+      "sha": "98e99a2",
+      "date": "2026-07-02",
+      "subject": "feat(spider): reject duplicate spider name within a project",
+      "days_after_freeze": 7
+    }
+  },
+  "method_notes": [
+    "Measurement is downstream of the verdict only: duhem.yml / criteria.md / judge were never edited. Runs used the documented --filter (to isolate an executable criterion, since the full VD aborts) and --no-env-up/--keep-env against one live Crawlab Pro cluster (master+worker over gRPC, real MongoDB) brought up by scripts/up.sh.",
+    "Independent re-review signal (T): the task's captured stdout OUTPUT LINE COUNT from Crawlab's own task log (/var/log/crawlab/tasks/<id>/log.txt, framework lines filtered), cross-checked with Mongo tasks.status/error and task_stats.result_count/runtime_duration. The judge reads only the `tasks` collection (status/cmd/spider_id); it never reads output or result_count, so this re-review is genuinely independent.",
+    "Crawlab's default FILE log driver puts spider output on disk, not Mongo; result_count (the Mongo yield metric) is structurally 0 for these unconfigured bash spiders. So neither Mongo signal the judge COULD have used would distinguish a real run from a hollow one - the blind spot is intrinsic, not incidental.",
+    "in_spec (ground-truth proxy for real work) := task reached terminal `finished` AND error=='' AND output_line_count>=1."
+  ],
+  "sample_size_caveats": [
+    "AC-2 D_hat=0.30 rests on n=25 passes; 95% CI [0.17, 0.46] is wide. To tighten the in-spec proportion CI half-width to +/-0.05 would need ~384 passes (>=~461 runs at this pass rate).",
+    "rho values rest on 24-30 judged-true observations per assertion; treat +/-0.1 as the practical uncertainty band.",
+    "rho_dynamic has no estimate (single time point); a slope needs repeated runs across future target releases."
+  ]
+}

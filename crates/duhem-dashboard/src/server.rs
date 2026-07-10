@@ -32,6 +32,8 @@ pub fn router(reader: EvidenceReader) -> Router {
         .route("/api/runs.json", get(list_runs))
         .route("/api/runs/{run_id}", get(run_detail))
         .route("/api/runs/{run_id}/checks/{pair}", get(check_detail))
+        .route("/api/runs/{run_id}/diff", get(run_diff))
+        .route("/api/runs/{run_id}/diff.json", get(run_diff))
         .route("/api/runs/{run_id}/trace.jsonl", get(raw_trace))
         .route("/api/runs/{run_id}/artifact/{artifact_id}", get(artifact))
         .route("/api/runs/{run_id}/live", get(live))
@@ -106,6 +108,29 @@ async fn check_detail(
     match reader.check_detail(&run_id, criterion_id, check_id).await {
         Ok(Some(detail)) => axum::Json(detail).into_response(),
         Ok(None) => not_found("check"),
+        Err(e) => e.into_response(),
+    }
+}
+
+/// `GET /api/runs/:run_id/diff` (#211): the run vs its last-pass
+/// baseline. `?baseline=<run-id>` pins a specific run instead of
+/// auto-resolving.
+#[derive(serde::Deserialize)]
+struct DiffQuery {
+    baseline: Option<String>,
+}
+
+async fn run_diff(
+    State(reader): State<EvidenceReader>,
+    Path(run_id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<DiffQuery>,
+) -> Response {
+    match reader
+        .run_diff(strip_json_suffix(&run_id), q.baseline.as_deref())
+        .await
+    {
+        Ok(Some(diff)) => axum::Json(diff).into_response(),
+        Ok(None) => not_found("run"),
         Err(e) => e.into_response(),
     }
 }

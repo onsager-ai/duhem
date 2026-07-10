@@ -12,9 +12,10 @@
 Measurement is strictly downstream of the verdict: `duhem.yml`, `criteria.md`, and
 the judge were never touched, and the judge stayed deterministic and LLM-free. All
 runs drove a live Crawlab **Pro** cluster (master + worker over gRPC, real MongoDB)
-via `scripts/up.sh`. Every number traces to collected run records
-(`ac2_runs*.jsonl`, `ac3_runs*.jsonl`, `fullvd_runs.jsonl`, `cp_runs.jsonl`,
-`ts_results.json`) or to `git`.
+via `scripts/up.sh`. Every number traces to per-run records collected during
+measurement (verdict + Mongo task state + output-line count per run) or to `git`;
+the aggregates are embedded in `vd-corrosion-report.json` and the raw runs are
+reproducible via the method below.
 
 ## Evidence base
 
@@ -238,4 +239,6 @@ Re-run this meter after re-derivation to confirm D̂ collapses.
 - Ground truth per run: Mongo `tasks`/`task_stats` by task `_id` +
   `/var/log/crawlab/tasks/<id>/log.txt` output-line count.
 - Time series: `git worktree` at each commit; `up.sh` rebuilds the Pro binary per
-  commit; main checkout untouched. Raw data in `*_runs.jsonl` / `ts_results.json`.
+  commit; main checkout untouched. Aggregated results are in
+  `vd-corrosion-report.json` (`time_series.points`, `cross_vd_breadth`,
+  `per_criterion`); per-run raw records are reproducible via the steps above.

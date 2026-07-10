@@ -228,3 +228,55 @@ export function summarizeCheck(detail: CheckDetail): CheckSummaryModel {
   }
   return { verdict: v, headline, failing };
 }
+
+/**
+ * A step node groups a step's own lifecycle (`step_started` → its
+ * observations → `step_finished`) into one collapsible block; every
+ * other event (assertions, the verdict, trailing captures) stays a
+ * standalone row so the signal is never hidden inside a step.
+ */
+export type TimelineNode =
+  | { kind: "step"; key: string; stepIndex: number; events: TraceEvent[] }
+  | { kind: "event"; key: string; event: TraceEvent };
+
+const STEP_STARTED = new Set(["step_started", "setup_step_started"]);
+const STEP_INNER = new Set([
+  "step_observation",
+  "setup_step_observation",
+  "step_finished",
+  "setup_step_finished",
+]);
+
+/**
+ * Fold the flat event stream into step groups + standalone rows, so
+ * the timeline reads as N steps rather than 3N events. Trailing
+ * capture observations (emitted after the assertion, once the step
+ * group has closed) stay standalone — they read well on their own.
+ */
+export function groupTimeline(events: TraceEvent[]): TimelineNode[] {
+  const nodes: TimelineNode[] = [];
+  let group: { kind: "step"; key: string; stepIndex: number; events: TraceEvent[] } | null = null;
+  const flush = () => {
+    if (group) {
+      nodes.push(group);
+      group = null;
+    }
+  };
+  for (const evt of events) {
+    const si = typeof evt.step_index === "number" ? (evt.step_index as number) : undefined;
+    if (STEP_STARTED.has(evt.kind)) {
+      flush();
+      group = { kind: "step", key: `s${evt.seq}`, stepIndex: si ?? -1, events: [evt] };
+      continue;
+    }
+    if (group && si === group.stepIndex && STEP_INNER.has(evt.kind)) {
+      group.events.push(evt);
+      if (evt.kind === "step_finished" || evt.kind === "setup_step_finished") flush();
+      continue;
+    }
+    flush();
+    nodes.push({ kind: "event", key: `e${evt.seq}`, event: evt });
+  }
+  flush();
+  return nodes;
+}

@@ -1,7 +1,7 @@
 // Unit tests for the pure event/summary formatters (#206).
 
 import { describe, expect, it } from "vitest";
-import { describeWith, formatEvent, summarizeCheck } from "../format";
+import { describeWith, formatEvent, groupTimeline, summarizeCheck } from "../format";
 import type { CheckDetail, TraceEvent } from "../api";
 
 const ev = (kind: string, extra: Record<string, unknown> = {}, seq = 1): TraceEvent => ({
@@ -115,6 +115,38 @@ const check = (verdict: CheckDetail["verdict"], timeline: TraceEvent[]): CheckDe
   spans: [],
   timeline,
   artifacts: [],
+});
+
+describe("groupTimeline", () => {
+  it("folds a step's lifecycle into one node, keeps check-level events standalone", () => {
+    const events: TraceEvent[] = [
+      ev("step_started", { step_index: 0, uses: "ui/navigate" }, 1),
+      ev("step_finished", { step_index: 0, outcome: "ok" }, 2),
+      ev("step_started", { step_index: 1, uses: "ui/assert-element" }, 3),
+      ev("step_observation", { step_index: 1, output_name: "satisfied", value: false }, 4),
+      ev("step_finished", { step_index: 1, outcome: "ok" }, 5),
+      ev("assertion_evaluated", { state: "fail", detail: "x" }, 6),
+      // Capture observations are emitted after the assertion, once the
+      // step group has closed — they must stay standalone.
+      ev("step_observation", { step_index: 1, output_name: "capture/screenshot", blob_sha256: "abc" }, 7),
+      ev("check_finished", { verdict: "fail" }, 8),
+    ];
+    const nodes = groupTimeline(events);
+    expect(nodes.map((n) => n.kind)).toEqual(["step", "step", "event", "event", "event"]);
+    const step1 = nodes[1];
+    if (step1.kind !== "step") throw new Error("expected step");
+    expect(step1.stepIndex).toBe(1);
+    expect(step1.events.map((e) => e.seq)).toEqual([3, 4, 5]);
+    const trailingCapture = nodes[3];
+    if (trailingCapture.kind !== "event") throw new Error("expected event");
+    expect(trailingCapture.event.seq).toBe(7);
+  });
+
+  it("returns a flat list when there are no steps", () => {
+    const nodes = groupTimeline([ev("check_finished", { verdict: "pass" })]);
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].kind).toBe("event");
+  });
 });
 
 describe("summarizeCheck", () => {

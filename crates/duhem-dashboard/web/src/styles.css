@@ -301,6 +301,64 @@ table.har td.har-url {
 .status-pill.ok { color: var(--pass); background: rgba(63, 185, 80, 0.12); }
 .status-pill.bad { color: var(--fail); background: rgba(248, 81, 73, 0.14); }
 
+/* -- #212/#213: run-to-run diff ------------------------------------- */
+.diff-heads { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; font-size: 0.92rem; }
+.verdict-arrow { display: inline-flex; align-items: center; gap: 0.3rem; }
+.diff-empty {
+  margin: 0.75rem 0 0;
+  padding: 0.75rem 1rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.diff-criterion h2 { display: flex; align-items: center; gap: 0.5rem; }
+.diff-check {
+  margin: 0.75rem 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+.diff-check.unchanged { opacity: 0.7; }
+.diff-check.changed { border-left: 3px solid var(--fail); }
+.diff-check-head { margin: 0; }
+.diff-assertions { margin: 0.5rem 0 0.25rem; padding-left: 1.1rem; font-size: 0.85rem; }
+.diff-assertions li { margin: 0.15rem 0; }
+.diff-detail { color: var(--muted); font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.82rem; }
+.detail-was { text-decoration: line-through; opacity: 0.65; }
+
+.shot-diff { margin-top: 0.6rem; }
+.shot-diff-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.shot-diff-pair figure { margin: 0; }
+.shot-diff-pair figcaption, .shot-diff-overlay figcaption {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.25rem;
+}
+.shot-diff-pair img, .shot-diff-overlay img {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.shot-diff-controls { margin-top: 0.5rem; }
+.shot-diff-overlay { margin: 0.5rem 0 0; }
+.linkish {
+  background: none;
+  border: 0;
+  color: var(--live);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+}
+.linkish:hover { text-decoration: underline; }
+
+table.net-delta { margin-top: 0.6rem; }
+table.net-delta .net-kind { text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.03em; color: var(--muted); white-space: nowrap; }
+table.net-delta tr.har-bad .net-kind { color: var(--fail); }
+
 /* -- #210: expandable HAR rows -------------------------------------- */
 table.har tr.har-row { cursor: pointer; }
 table.har tr.har-row:hover { background: rgba(255, 255, 255, 0.03); }

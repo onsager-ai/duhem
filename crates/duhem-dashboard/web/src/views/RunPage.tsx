@@ -79,6 +79,7 @@ export default function RunPage() {
         </h2>
         <p className="kv">
           started {formatStartedAt(run.started_at)} ·{" "}
+          <Link to={`/run/${encodeURIComponent(run.run_id)}/diff`}>compare to baseline</Link> ·{" "}
           <a href={traceUrl(run.run_id)} target="_blank" rel="noreferrer">
             raw trace.jsonl
           </a>

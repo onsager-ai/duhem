@@ -66,6 +66,15 @@ describe("formatEvent", () => {
     expect(f.tone).toBe("inconclusive");
   });
 
+  it("does not mislabel a missing or unknown assertion state as failed", () => {
+    const missing = formatEvent(ev("assertion_evaluated", { detail: "x" }));
+    expect(missing.label).toBe("assertion evaluated");
+    expect(missing.tone).toBe("muted");
+    const future = formatEvent(ev("assertion_evaluated", { state: "skipped" }));
+    expect(future.label).toBe("assertion evaluated");
+    expect(future.tone).toBe("muted");
+  });
+
   it("anchors the final verdict", () => {
     const fail = formatEvent(ev("check_finished", { verdict: "fail" }));
     expect(fail.icon).toBe("⛔");

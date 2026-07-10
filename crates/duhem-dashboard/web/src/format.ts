@@ -24,12 +24,6 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
-function toneOfState(state: string): Tone {
-  if (state === "pass") return "ok";
-  if (state === "fail") return "fail";
-  return "inconclusive";
-}
-
 /** Compact one-line value for an inline observation or arg scalar. */
 function compactValue(v: unknown): string {
   if (v === null) return "null";
@@ -166,15 +160,19 @@ export function formatEvent(
     }
     case "assertion_evaluated": {
       const state = str(evt.state) ?? "";
-      const tone = toneOfState(state);
       const detail = str(evt.detail) ?? "";
       if (state === "pass") {
-        return { ...base, icon: "✓", label: "assertion held", detail, tone };
+        return { ...base, icon: "✓", label: "assertion held", detail, tone: "ok" };
       }
-      const label = state.startsWith("inconclusive")
-        ? "assertion inconclusive"
-        : "assertion failed";
-      return { ...base, icon: "✗", label, detail, tone };
+      if (state === "fail") {
+        return { ...base, icon: "✗", label: "assertion failed", detail, tone: "fail" };
+      }
+      if (state.startsWith("inconclusive")) {
+        return { ...base, icon: "✗", label: "assertion inconclusive", detail, tone: "inconclusive" };
+      }
+      // Missing or unknown future state — record it, don't call it a
+      // failure (a forward-compatible trace must not be mislabeled).
+      return { ...base, icon: "·", label: "assertion evaluated", detail: detail || state, tone: "muted" };
     }
     case "check_finished": {
       const verdict = str(evt.verdict) ?? "";

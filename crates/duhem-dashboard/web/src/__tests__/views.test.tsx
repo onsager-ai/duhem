@@ -5,7 +5,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RunsList, { matchesFilters } from "../views/RunsList";
-import { Artifacts, Timeline } from "../views/CheckPage";
+import { Artifacts, HarTable, Timeline } from "../views/CheckPage";
 import type { RunsListEntry, TraceEvent } from "../api";
 
 afterEach(() => {
@@ -171,6 +171,37 @@ describe("Artifacts", () => {
     const imgs = container.querySelectorAll("img");
     expect(imgs).toHaveLength(1);
     expect(imgs[0].getAttribute("src")).toBe(`run/r/artifact/${shot}`);
+  });
+
+  it("renders capture/network as a HAR request table with failing status flagged (#206)", async () => {
+    const har = {
+      log: {
+        entries: [
+          { request: { method: "GET", url: "http://x/" }, response: { status: 200 } },
+          { request: { method: "POST", url: "http://x/api/charge" }, response: { status: 500 } },
+        ],
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(har), { status: 200 })),
+    );
+    render(<HarTable url="run/r/artifact/net" />);
+    const table = await screen.findByTestId("har-table");
+    const rows = table.querySelectorAll("tbody tr");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("GET");
+    expect(rows[1].className).toContain("har-bad");
+    expect(rows[1].textContent).toContain("500");
+  });
+
+  it("survives a HAR blob with a non-array entries shape", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ log: {} }), { status: 200 })),
+    );
+    render(<HarTable url="run/r/artifact/empty" />);
+    expect(await screen.findByText(/no requests recorded/i)).toBeTruthy();
   });
 });
 

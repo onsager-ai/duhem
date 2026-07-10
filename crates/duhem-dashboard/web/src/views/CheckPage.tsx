@@ -137,9 +137,19 @@ export function HarTable({ url }: { url: string }) {
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
+    // Reset on url change so switching artifacts never shows stale rows.
+    setEntries(null);
+    setErr(null);
     fetch(url)
-      .then((r) => r.json())
-      .then((h) => live && setEntries(h?.log?.entries ?? []))
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((h) => {
+        if (!live) return;
+        const e = h?.log?.entries;
+        setEntries(Array.isArray(e) ? e : []);
+      })
       .catch((e) => live && setErr(String(e)));
     return () => {
       live = false;

@@ -89,6 +89,46 @@ export interface VerificationHistory {
   criteria: CriterionHistory[];
 }
 
+// #211 run-to-run diff.
+export interface RunSide {
+  run_id: string;
+  started_at: string | null;
+  verdict: Verdict | null;
+}
+
+export interface AssertionDiff {
+  assertion_index: number;
+  baseline_state: Verdict | null;
+  current_state: Verdict | null;
+  baseline_detail?: string;
+  current_detail?: string;
+  changed: boolean;
+}
+
+export interface CheckDiff {
+  id: string;
+  baseline_verdict: Verdict | null;
+  current_verdict: Verdict | null;
+  changed: boolean;
+  assertions: AssertionDiff[];
+  baseline_artifacts: ArtifactRef[];
+  current_artifacts: ArtifactRef[];
+}
+
+export interface CriterionDiff {
+  id: string;
+  baseline_verdict: Verdict | null;
+  current_verdict: Verdict | null;
+  changed: boolean;
+  checks: CheckDiff[];
+}
+
+export interface RunDiff {
+  current: RunSide;
+  baseline: RunSide | null;
+  criteria: CriterionDiff[];
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(path);
   if (!res.ok) {
@@ -118,6 +158,11 @@ export function fetchVerificationHistory(
   name: string,
 ): Promise<VerificationHistory> {
   return getJson(`api/verifications/${encodeURIComponent(name)}/history.json`);
+}
+
+export function fetchDiff(runId: string, baseline?: string): Promise<RunDiff> {
+  const q = baseline ? `?baseline=${encodeURIComponent(baseline)}` : "";
+  return getJson(`api/runs/${encodeURIComponent(runId)}/diff.json${q}`);
 }
 
 export function traceUrl(runId: string): string {

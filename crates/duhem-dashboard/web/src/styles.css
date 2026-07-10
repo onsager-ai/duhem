@@ -256,6 +256,15 @@ ol.timeline > li.ev:last-child { border-bottom: none; }
   backdrop-filter: blur(3px);
 }
 .shot-expanded .shot-overlay { align-items: flex-start; justify-content: flex-end; padding: 0.6rem; }
+/* #214: element-highlight — where the assertion looked, on the shot. */
+.target-box {
+  position: absolute;
+  border: 2px solid var(--fail);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 12px rgba(248, 81, 73, 0.5);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.target-note { margin: 0.35rem 0 0; font-size: 0.8rem; }
 
 /* -- #206: network HAR request table --------------------------------- */
 table.har {

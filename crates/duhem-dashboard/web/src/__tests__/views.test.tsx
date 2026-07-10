@@ -311,6 +311,45 @@ describe("in-page inspection (#210)", () => {
   });
 });
 
+// ---- #214: element-highlight overlay --------------------------------
+
+describe("element-highlight (#214)", () => {
+  it("notes an absent target from capture/target-rect", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify([
+            { selector: 'role=button[name="Sign in with SSO"]', expected: "visible", found: false },
+          ]),
+          { status: 200 },
+        ),
+      ),
+    );
+    render(
+      <ScreenshotArtifact
+        artifact={{ id: "a".repeat(64), kind: "capture/screenshot", url: "run/r/artifact/shot" }}
+        rectsUrl="run/r/artifact/rect"
+      />,
+    );
+    const note = await screen.findByTestId("target-note");
+    expect(note.textContent).toContain("Sign in with SSO");
+  });
+
+  it("consumes capture/target-rect as an overlay, not a listed artifact row", () => {
+    const { container } = render(
+      <Artifacts
+        artifacts={[
+          { id: "s".repeat(64), kind: "capture/screenshot", url: "u/shot" },
+          { id: "t".repeat(64), kind: "capture/target-rect", url: "u/rect" },
+        ]}
+      />,
+    );
+    expect(container.textContent).not.toContain("capture/target-rect");
+    expect(container.querySelectorAll(".artifact")).toHaveLength(1);
+  });
+});
+
 // ---- #193: ④ delivery-web span chain --------------------------------
 
 import { SpanChain } from "../views/CheckPage";

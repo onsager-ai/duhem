@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use duhem_actions::Page;
+use duhem_actions::{Page, Rect};
 use duhem_evidence::{EventPayload, EvidenceWriter, ObservationValue};
 use tracing::warn;
 
@@ -65,6 +65,83 @@ const CAPTURE_DEADLINE: Duration = Duration::from_millis(12_000);
 /// reference them either.
 const CAPTURE_SCREENSHOT: &str = "capture/screenshot";
 const CAPTURE_DOM: &str = "capture/dom";
+const CAPTURE_TARGET_RECT: &str = "capture/target-rect";
+
+/// Per-locator ceiling for the bounding-box probe. Short: at capture
+/// time the page state is settled, so an absent target should report
+/// `found: false` quickly rather than wait out a long timeout.
+const TARGET_RECT_TIMEOUT_MS: f64 = 800.0;
+
+/// A ui/assert-element target to probe for the element-highlight
+/// overlay (spec #214): the resolved Playwright selector + the
+/// authored `expected:` state.
+pub(crate) struct TargetLocator {
+    pub selector: String,
+    pub expected: String,
+}
+
+/// The element-highlight target of a `ui/assert-element` step — its
+/// resolved Playwright selector + `expected:` state. `None` for any
+/// other step, or a locator that won't parse.
+pub(crate) fn target_from_step(
+    uses: &str,
+    resolved_with: &serde_yml::Value,
+) -> Option<TargetLocator> {
+    if uses != "ui/assert-element" {
+        return None;
+    }
+    let loc = resolved_with.get("locator")?;
+    let locator = serde_yml::from_value::<duhem_actions::Locator>(loc.clone()).ok()?;
+    Some(TargetLocator {
+        selector: duhem_actions::to_selector(&locator),
+        expected: resolved_with
+            .get("expected")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+    })
+}
+
+/// Record the bounding rects of a check's `ui/assert-element` targets
+/// as one `capture/target-rect` JSON blob (spec #214) — the dashboard
+/// overlays them on the screenshot ("we looked here"). An absent /
+/// invisible target is recorded `found: false` (never a guessed box),
+/// so a not-found note can replace the box. Warn-never-fail.
+pub(crate) async fn capture_target_rects(
+    writer: &mut EvidenceWriter,
+    page: &Page,
+    step_index: u32,
+    targets: &[TargetLocator],
+) -> Option<CapturedArtifact> {
+    if targets.is_empty() {
+        return None;
+    }
+    let mut entries = Vec::with_capacity(targets.len());
+    for t in targets {
+        let rect: Option<Rect> = match bounded(
+            "target-rect",
+            CAPTURE_DEADLINE,
+            page.bounding_box(&t.selector, TARGET_RECT_TIMEOUT_MS),
+        )
+        .await
+        {
+            Some(Ok(r)) => r,
+            Some(Err(e)) => {
+                warn!(error = %e, "target-rect probe failed; verdict unaffected");
+                None
+            }
+            None => None,
+        };
+        entries.push(serde_json::json!({
+            "selector": t.selector,
+            "expected": t.expected,
+            "found": rect.is_some(),
+            "rect": rect,
+        }));
+    }
+    let blob = serde_json::to_vec(&entries).unwrap_or_default();
+    append_capture(writer, step_index, CAPTURE_TARGET_RECT, &blob).await
+}
 
 /// Capture a full-page screenshot + DOM snapshot and append them as
 /// `capture/*` blob observations. Returns the refs that actually

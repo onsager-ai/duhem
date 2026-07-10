@@ -94,17 +94,45 @@ describe("matchesFilters", () => {
 });
 
 describe("Timeline", () => {
-  it("renders events in the order given (trace order, no re-sort)", () => {
+  it("renders each event as a legible row in trace order, raw one click away", () => {
     const events: TraceEvent[] = [
-      { seq: 4, ts: "t4", kind: "step_started" },
-      { seq: 5, ts: "t5", kind: "step_finished" },
-      { seq: 6, ts: "t6", kind: "check_finished" },
+      {
+        seq: 4,
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "step_started",
+        uses: "ui/navigate",
+        layer: "ui",
+        with: { url: "http://x/" },
+      },
+      {
+        seq: 5,
+        ts: "2026-01-01T00:00:01.000Z",
+        kind: "assertion_evaluated",
+        check_id: "AC-1.1",
+        assertion_index: 0,
+        state: "fail",
+        detail: "actual false, expected true",
+      },
+      {
+        seq: 6,
+        ts: "2026-01-01T00:00:01.100Z",
+        kind: "check_finished",
+        check_id: "AC-1.1",
+        verdict: "fail",
+      },
     ];
     const { container } = render(<Timeline events={events} />);
-    const kinds = [...container.querySelectorAll(".kind")].map((el) => el.textContent);
-    expect(kinds).toEqual(["step_started", "step_finished", "check_finished"]);
-    const seqs = [...container.querySelectorAll(".seq")].map((el) => el.textContent);
-    expect(seqs).toEqual(["#4", "#5", "#6"]);
+    // Legible labels, in trace order — no raw JSON, no re-sort.
+    const labels = [...container.querySelectorAll(".ev-label")].map((el) => el.textContent);
+    expect(labels).toEqual(["navigate", "assertion failed", "verdict: fail"]);
+    // The failing assertion row carries its recorded detail and fail tone.
+    expect(container.querySelector(".ev.tone-fail .ev-detail")?.textContent).toContain(
+      "actual false",
+    );
+    // Raw JSON is preserved, tucked behind a per-row <details> toggle.
+    const raws = container.querySelectorAll(".ev-raw pre");
+    expect(raws).toHaveLength(3);
+    expect(raws[0].textContent).toContain("ui/navigate");
   });
 });
 

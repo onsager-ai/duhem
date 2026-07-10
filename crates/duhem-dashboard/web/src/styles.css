@@ -219,23 +219,30 @@ table.har tr.har-detail td { background: rgba(255, 255, 255, 0.02); }
 }
 
 /* -- #210: step-grouped timeline ------------------------------------ */
-li.ev.step-group { display: block; padding: 0; }
+/* Must out-specify `ol.timeline li.ev { display: grid }` (0,2,2), or the
+   whole <details> gets crammed into the grid's 1.5rem first column. */
+ol.timeline li.ev.step-group { display: block; padding: 0; }
 li.ev.step-group > details > summary {
-  display: grid;
-  grid-template-columns: 1.5rem 1fr auto;
-  gap: 0.6rem;
+  display: flex;
   align-items: baseline;
+  gap: 0.6rem;
   padding: 0.35rem 0.25rem;
   cursor: pointer;
-  list-style: revert;
+  list-style: none;
 }
+/* Suppress the native disclosure marker — the caret is the ▶ icon. */
+li.ev.step-group > details > summary::-webkit-details-marker { display: none; }
 li.ev.step-group > details > summary:hover { background: rgba(255, 255, 255, 0.03); }
+/* The body grows to fill the row so content never wraps into a narrow
+   column with dead space beside it; the delta sits flush right. */
+li.ev.step-group .ev-icon { flex: 0 0 1.5rem; text-align: center; }
+li.ev.step-group .ev-body { flex: 1 1 auto; min-width: 0; }
+li.ev.step-group .ev-time { flex: 0 0 auto; }
 li.ev.step-group .ev-label { white-space: nowrap; }
 .step-outcome { font-size: 0.82rem; margin-left: 0.5rem; white-space: nowrap; }
 .step-outcome.tone-ok { color: var(--pass); }
 .step-outcome.tone-fail { color: var(--fail); }
 .step-outcome.tone-inconclusive { color: var(--inconclusive); }
-li.ev.step-group .ev-time { margin-left: auto; }
 ol.timeline.step-inner { margin-left: 1.5rem; border-left: 1px solid var(--border); }
 
 /* -- #210: inline DOM snapshot viewer ------------------------------- */

@@ -22,8 +22,8 @@ use thiserror::Error;
 
 use crate::model::{
     ArtifactRef, AssertionDiff, CheckDetail, CheckDiff, CheckRef, CriterionDetail, CriterionDiff,
-    CriterionHistory, EntryKind, HistoryRun, RunDetail, RunDiff, RunSide, RunsListEntry, SpanModel,
-    VerificationHistory,
+    CriterionHistory, EntryKind, FailingAssertion, FailingCheck, FailingRequest, FailureEnvelope,
+    HistoryRun, RunDetail, RunDiff, RunSide, RunsListEntry, SpanModel, VerificationHistory,
 };
 
 #[derive(Debug, Error)]
@@ -269,6 +269,142 @@ impl EvidenceReader {
             Some(rec) => self.load(&rec.run_id).await,
             None => Ok(None),
         }
+    }
+
+    /// `GET /api/runs/:run_id/failure` (#216): the machine-readable
+    /// failure envelope — every non-passing check with its failing
+    /// assertions, delivery-web layer chain, artifact URLs, and first
+    /// failing request. Everything an agent needs to react to a `fail`
+    /// without scraping the SPA. `None` only when the run doesn't
+    /// exist; a passing run yields `failing: []`.
+    pub async fn failure_envelope(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<FailureEnvelope>, ReaderError> {
+        let Some(run) = self.load(run_id).await? else {
+            return Ok(None);
+        };
+        let proj = project_run(&run);
+        let mut failing = Vec::new();
+        for c in &proj.checks {
+            if c.verdict == Some(VerdictState::Pass) {
+                continue;
+            }
+            failing.push(self.build_failing_check(run_id, c).await?);
+        }
+        Ok(Some(FailureEnvelope {
+            run_id: run.record.run_id.clone(),
+            verification: verification_name(&run.record.verification),
+            verdict: run.record.verdict,
+            failing,
+        }))
+    }
+
+    /// `GET /api/runs/:run_id/failure/:crit::check` — the same envelope
+    /// scoped to one check (an agent handling a specific failure).
+    /// `None` when the run or that check doesn't exist.
+    pub async fn failing_check(
+        &self,
+        run_id: &str,
+        criterion_id: &str,
+        check_id: &str,
+    ) -> Result<Option<FailingCheck>, ReaderError> {
+        let Some(run) = self.load(run_id).await? else {
+            return Ok(None);
+        };
+        let proj = project_run(&run);
+        let Some(c) = proj
+            .checks
+            .iter()
+            .find(|c| c.check_id == check_id && c.criterion_id == criterion_id)
+        else {
+            return Ok(None);
+        };
+        Ok(Some(self.build_failing_check(run_id, c).await?))
+    }
+
+    async fn build_failing_check(
+        &self,
+        run_id: &str,
+        c: &CheckProjection,
+    ) -> Result<FailingCheck, ReaderError> {
+        let layers = self
+            .store
+            .check_spans(run_id, &c.check_id)
+            .await?
+            .into_iter()
+            .map(|s| s.layer)
+            .collect();
+        let assertions = c
+            .assertions
+            .iter()
+            .filter(|(_, s, _)| *s != VerdictState::Pass)
+            .map(|(i, s, d)| FailingAssertion {
+                assertion_index: *i,
+                state: *s,
+                detail: d.clone(),
+            })
+            .collect();
+        let first_failing_request = self.first_failing_request(&c.artifacts).await?;
+        Ok(FailingCheck {
+            criterion_id: c.criterion_id.clone(),
+            check_id: c.check_id.clone(),
+            verdict: c.verdict,
+            layers,
+            assertions,
+            artifacts: c.artifacts.clone(),
+            first_failing_request,
+        })
+    }
+
+    /// The first request in the check's `capture/network` HAR whose
+    /// response status is an error (≥ 400) — usually the request that
+    /// broke. `None` when there's no network capture or no error.
+    async fn first_failing_request(
+        &self,
+        artifacts: &[ArtifactRef],
+    ) -> Result<Option<FailingRequest>, ReaderError> {
+        let Some(net) = artifacts.iter().find(|a| a.kind == "capture/network") else {
+            return Ok(None);
+        };
+        let Some(bytes) = self.store.get_blob(&net.id).await? else {
+            return Ok(None);
+        };
+        let Ok(har) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            return Ok(None);
+        };
+        let Some(entries) = har
+            .get("log")
+            .and_then(|l| l.get("entries"))
+            .and_then(|e| e.as_array())
+        else {
+            return Ok(None);
+        };
+        for e in entries {
+            let status = e
+                .get("response")
+                .and_then(|r| r.get("status"))
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            if status < 400 {
+                continue;
+            }
+            let req = |k: &str| {
+                e.get("request")
+                    .and_then(|r| r.get(k))
+                    .and_then(serde_json::Value::as_str)
+            };
+            // Skip a malformed entry (missing method/url) rather than
+            // emit an empty request that would mislead the agent.
+            if let (Some(method), Some(url)) = (req("method"), req("url")) {
+                return Ok(Some(FailingRequest {
+                    method: method.to_string(),
+                    url: url.to_string(),
+                    status: status as u16,
+                }));
+            }
+        }
+        Ok(None)
     }
 
     /// The raw wire-format event stream for a run (NDJSON), if the

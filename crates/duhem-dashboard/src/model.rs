@@ -191,6 +191,55 @@ pub struct AssertionDiff {
     pub changed: bool,
 }
 
+/// `GET /api/runs/:run_id/failure` (#216): the machine-readable
+/// failure envelope for an agent reacting to a `fail` in CI —
+/// everything needed to close the verify→repair loop without scraping
+/// the SPA. Derived mechanically from the recorded trace; never a
+/// judge input, no verdict recomputed. This is an agent-facing
+/// contract (`docs/failure-envelope-contract.md`).
+#[derive(Debug, Clone, Serialize)]
+pub struct FailureEnvelope {
+    pub run_id: String,
+    pub verification: String,
+    pub verdict: Option<VerdictState>,
+    /// One entry per non-passing check. Empty on a fully-passing run.
+    pub failing: Vec<FailingCheck>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FailingCheck {
+    pub criterion_id: String,
+    pub check_id: String,
+    pub verdict: Option<VerdictState>,
+    /// The delivery-web layer chain the check crossed (#192), in order
+    /// — `ui` / `api` / `data` / `runtime`. Empty for pre-tag runs.
+    pub layers: Vec<String>,
+    /// The non-passing assertions with their recorded cause.
+    pub assertions: Vec<FailingAssertion>,
+    /// The check's `capture/*` (and other blob) artifacts.
+    pub artifacts: Vec<ArtifactRef>,
+    /// The first request in this check's captured network (#204) whose
+    /// status is an error (≥ 400) — usually the request that broke.
+    /// `None` when there's no network capture or no error response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_failing_request: Option<FailingRequest>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FailingAssertion {
+    pub assertion_index: u32,
+    pub state: VerdictState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FailingRequest {
+    pub method: String,
+    pub url: String,
+    pub status: u16,
+}
+
 /// A content-addressed blob referenced from the check's timeline.
 #[derive(Debug, Clone, Serialize)]
 pub struct ArtifactRef {

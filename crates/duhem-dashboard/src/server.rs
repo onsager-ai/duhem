@@ -34,6 +34,9 @@ pub fn router(reader: EvidenceReader) -> Router {
         .route("/api/runs/{run_id}/checks/{pair}", get(check_detail))
         .route("/api/runs/{run_id}/diff", get(run_diff))
         .route("/api/runs/{run_id}/diff.json", get(run_diff))
+        .route("/api/runs/{run_id}/failure", get(failure_envelope))
+        .route("/api/runs/{run_id}/failure.json", get(failure_envelope))
+        .route("/api/runs/{run_id}/failure/{pair}", get(failing_check))
         .route("/api/runs/{run_id}/trace.jsonl", get(raw_trace))
         .route("/api/runs/{run_id}/artifact/{artifact_id}", get(artifact))
         .route("/api/runs/{run_id}/live", get(live))
@@ -131,6 +134,40 @@ async fn run_diff(
     {
         Ok(Some(diff)) => axum::Json(diff).into_response(),
         Ok(None) => not_found("run"),
+        Err(e) => e.into_response(),
+    }
+}
+
+/// `GET /api/runs/:run_id/failure` (#216): the machine-readable
+/// failure envelope for an agent reacting to a `fail`.
+async fn failure_envelope(
+    State(reader): State<EvidenceReader>,
+    Path(run_id): Path<String>,
+) -> Response {
+    match reader.failure_envelope(strip_json_suffix(&run_id)).await {
+        Ok(Some(env)) => axum::Json(env).into_response(),
+        Ok(None) => not_found("run"),
+        Err(e) => e.into_response(),
+    }
+}
+
+/// `GET /api/runs/:run_id/failure/:crit::check` — the envelope scoped
+/// to one check.
+async fn failing_check(
+    State(reader): State<EvidenceReader>,
+    Path((run_id, pair)): Path<(String, String)>,
+) -> Response {
+    let run_id = strip_json_suffix(&run_id);
+    let pair = strip_json_suffix(&pair);
+    let Some((criterion_id, check_id)) = pair.split_once("::") else {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "expected <criterion-id>::<check-id>",
+        );
+    };
+    match reader.failing_check(run_id, criterion_id, check_id).await {
+        Ok(Some(fc)) => axum::Json(fc).into_response(),
+        Ok(None) => not_found("check"),
         Err(e) => e.into_response(),
     }
 }

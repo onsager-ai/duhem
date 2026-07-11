@@ -46,6 +46,13 @@ describe("formatEvent", () => {
     expect(f.blobSha).toBe("abc123");
   });
 
+  it("labels a capture/video observation (#215)", () => {
+    const f = formatEvent(ev("step_observation", { output_name: "capture/video", blob_sha256: "vid1" }));
+    expect(f.icon).toBe("🎬");
+    expect(f.label).toBe("video recorded");
+    expect(f.blobSha).toBe("vid1");
+  });
+
   it("tones step_finished by outcome", () => {
     expect(formatEvent(ev("step_finished", { outcome: "ok" })).tone).toBe("ok");
     expect(formatEvent(ev("step_finished", { outcome: "error" })).tone).toBe("fail");

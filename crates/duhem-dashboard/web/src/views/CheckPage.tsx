@@ -195,6 +195,8 @@ function artifactLabel(kind: string): string {
       return "Network (HAR)";
     case "capture/target-rect":
       return "Target highlight";
+    case "capture/video":
+      return "Video";
     default:
       return kind;
   }
@@ -478,6 +480,23 @@ export function ScreenshotArtifact({
   );
 }
 
+// The screencast of the check (#215). Rendered inline with native
+// controls; the browser streams it from the artifact route. Opt-in
+// capture, so it only appears when `--capture-video` recorded one.
+export function VideoArtifact({ artifact }: { artifact: ArtifactRef }) {
+  return (
+    <video
+      className="capture-video"
+      data-testid="capture-video"
+      src={artifact.url}
+      controls
+      preload="metadata"
+    >
+      <a href={artifact.url}>download video</a>
+    </video>
+  );
+}
+
 export function Artifacts({ artifacts }: { artifacts: CheckDetail["artifacts"] }) {
   // The target-rect is an overlay input for the screenshot (#214). Only
   // hide it from the list when a screenshot exists to overlay it onto —
@@ -507,6 +526,7 @@ export function Artifacts({ artifacts }: { artifacts: CheckDetail["artifacts"] }
           )}
           {artifact.kind === "capture/network" && <HarTable url={artifact.url} />}
           {artifact.kind === "capture/dom" && <DomViewer url={artifact.url} />}
+          {artifact.kind === "capture/video" && <VideoArtifact artifact={artifact} />}
         </div>
       ))}
     </div>

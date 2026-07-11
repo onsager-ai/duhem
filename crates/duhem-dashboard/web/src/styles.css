@@ -213,6 +213,17 @@ ol.timeline > li.ev:last-child { border-bottom: none; }
 .artifact { margin: 1rem 0; }
 .artifact:first-of-type { margin-top: 0.5rem; }
 
+/* -- #215: screencast video card ------------------------------------ */
+.capture-video {
+  display: block;
+  margin-top: 0.5rem;
+  max-width: 100%;
+  width: 480px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #000;
+}
+
 /* -- #210: screenshot media card (thumbnail → full on click) -------- */
 .shot-btn {
   position: relative;

@@ -187,7 +187,8 @@ pub(crate) async fn run_setup(
     }
 
     if let Some(cb) = setup_browser {
-        let _ = cb.close().await;
+        // Setup never keeps a video; skip the read + transfer entirely.
+        let _ = cb.close(false, 0).await;
     }
 
     writer

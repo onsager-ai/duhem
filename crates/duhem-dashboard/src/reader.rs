@@ -946,6 +946,9 @@ pub fn sniff_content_type(bytes: &[u8]) -> &'static str {
         "image/png"
     } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
         "image/jpeg"
+    } else if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
+        // EBML header — Matroska/WebM. Playwright records WebM (#215).
+        "video/webm"
     } else if serde_json::from_slice::<serde_json::Value>(bytes).is_ok() {
         "application/json"
     } else if std::str::from_utf8(bytes).is_ok() {
@@ -960,6 +963,7 @@ pub fn extension_for(mime: &str) -> &'static str {
     match mime {
         "image/png" => "png",
         "image/jpeg" => "jpg",
+        "video/webm" => "webm",
         "application/json" => "json",
         m if m.starts_with("text/plain") => "txt",
         _ => "bin",

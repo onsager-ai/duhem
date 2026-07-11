@@ -24,7 +24,7 @@
 
 import { chromium } from 'playwright'
 import readline from 'node:readline'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { join } from 'node:path'
 import os from 'node:os'
@@ -123,6 +123,14 @@ const contexts = new Map()
 const pages = new Map()
 /** @type {Map<string, NetworkRecord[]>} */
 const networkBuffers = new Map()
+// Video recording (#215) is per-context and finalized only on
+// context close. When a context is opened with `recordVideo`, we keep
+// its scratch dir (to clean up) and the page's `Video` handle (to read
+// the finalized file after close) keyed by contextId.
+/** @type {Map<string, string>} */
+const videoDirs = new Map()
+/** @type {Map<string, import('playwright').Video>} */
+const videos = new Map()
 let nextHandle = 1
 
 /** @param {unknown} e */
@@ -236,9 +244,31 @@ async function dispatch(req) {
 
     case 'newContext': {
       if (!browser) throw new Error('newContext before launch')
-      const ctx = await browser.newContext()
       const id = 'c' + nextHandle++
+      // `recordVideo` (#215) must be set at context-creation time —
+      // Playwright cannot start recording after the fact. The runtime
+      // decides whether to *keep* the video after the check (per its
+      // capture policy); the sidecar always records once asked.
+      let opts = {}
+      let dir = null
+      if (req.recordVideo) {
+        dir = mkdtempSync(join(os.tmpdir(), 'duhem-video-'))
+        opts = { recordVideo: { dir } }
+      }
+      let ctx
+      try {
+        ctx = await browser.newContext(opts)
+      } catch (e) {
+        // Don't leak the scratch dir if the context never opens.
+        if (dir) {
+          try {
+            rmSync(dir, { recursive: true, force: true })
+          } catch {}
+        }
+        throw e
+      }
       contexts.set(id, ctx)
+      if (dir) videoDirs.set(id, dir)
       return { contextId: id }
     }
 
@@ -248,6 +278,13 @@ async function dispatch(req) {
       const p = await ctx.newPage()
       const id = 'p' + nextHandle++
       pages.set(id, p)
+      // Grab the page's `Video` handle now; its file only exists once
+      // the context closes. One page per context (Duhem's model), so
+      // key it by contextId for `closeContext` to read.
+      if (videoDirs.has(req.contextId)) {
+        const vid = p.video()
+        if (vid) videos.set(req.contextId, vid)
+      }
       /** @type {NetworkRecord[]} */
       const buf = []
       networkBuffers.set(id, buf)
@@ -354,10 +391,46 @@ async function dispatch(req) {
     case 'closeContext': {
       const ctx = contexts.get(req.contextId)
       if (ctx) {
+        // Closing the context finalizes any recording to disk (#215).
         await ctx.close()
         contexts.delete(req.contextId)
       }
-      return null
+      // Read back the finalized video, if this context recorded one and
+      // the runtime will keep it. A discarded video (e.g. a passing
+      // check under `on-failure`) is recorded by Playwright but never
+      // read — no point paying the read + base64 + pipe transfer for
+      // bytes the runtime throws away. The size cap (`maxBytes`) is
+      // enforced against the file on disk, before the expensive read.
+      // Best-effort throughout: a read failure warns but never fails the
+      // check — video is evidence, not a judge input.
+      let video = null
+      const vid = videos.get(req.contextId)
+      if (vid) {
+        if (req.keepVideo) {
+          try {
+            const p = await vid.path()
+            const size = statSync(p).size
+            if (typeof req.maxBytes === 'number' && size > req.maxBytes) {
+              process.stderr.write(
+                `duhem-sidecar: video ${size}B over cap ${req.maxBytes}B; skipped\n`,
+              )
+            } else {
+              video = readFileSync(p).toString('base64')
+            }
+          } catch (e) {
+            process.stderr.write(`duhem-sidecar: video read failed: ${e}\n`)
+          }
+        }
+        videos.delete(req.contextId)
+      }
+      const dir = videoDirs.get(req.contextId)
+      if (dir) {
+        try {
+          rmSync(dir, { recursive: true, force: true })
+        } catch {}
+        videoDirs.delete(req.contextId)
+      }
+      return { video }
     }
 
     case 'shutdown':

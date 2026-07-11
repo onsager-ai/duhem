@@ -45,10 +45,17 @@ fn step_started(idx: u32, uses: &str) -> EventPayload {
     }
 }
 
+fn good_har() -> Value {
+    json!({ "log": { "entries": [
+        { "request": { "method": "GET", "url": "http://x/" }, "response": { "status": 200 } },
+        { "request": { "method": "POST", "url": "http://x/api/charge" }, "response": { "status": 500 } },
+    ] } })
+}
+
 /// A finished run of one criterion / one check. `pass` drives the
-/// verdict + assertion; a failing run also records a screenshot and a
-/// network capture whose HAR carries a 500.
-async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool) {
+/// verdict + assertion; a failing run records a screenshot and, when
+/// `network` is given, a `capture/network` HAR blob.
+async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, network: Option<Value>) {
     let mut w = EvidenceWriter::begin(store, run_id, DEF, BTreeMap::new())
         .await
         .unwrap();
@@ -97,23 +104,21 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool) {
         })
         .await
         .unwrap();
-        let har = serde_json::to_vec(&json!({
-            "log": { "entries": [
-                { "request": { "method": "GET", "url": "http://x/" }, "response": { "status": 200 } },
-                { "request": { "method": "POST", "url": "http://x/api/charge" }, "response": { "status": 500 } },
-            ] }
-        }))
-        .unwrap();
-        let net = w.write_blob(&har).await.unwrap();
-        w.append(EventPayload::StepObservation {
-            step_index: 1,
-            output_name: "capture/network".into(),
-            value: ObservationValue::Blob {
-                blob_sha256: net.as_str().into(),
-            },
-        })
-        .await
-        .unwrap();
+        if let Some(har) = network {
+            let net = w
+                .write_blob(&serde_json::to_vec(&har).unwrap())
+                .await
+                .unwrap();
+            w.append(EventPayload::StepObservation {
+                step_index: 1,
+                output_name: "capture/network".into(),
+                value: ObservationValue::Blob {
+                    blob_sha256: net.as_str().into(),
+                },
+            })
+            .await
+            .unwrap();
+        }
     }
     let verdict = if pass {
         VerdictState::Pass
@@ -141,7 +146,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool) {
 #[tokio::test]
 async fn envelope_hands_an_agent_everything_to_react() {
     let (_tmp, rw, ro) = common::open_stores().await;
-    seed(rw, RUN, false).await;
+    seed(rw, RUN, false, Some(good_har())).await;
 
     let (status, json) =
         get_json(EvidenceReader::new(ro), &format!("/api/runs/{RUN}/failure")).await;
@@ -180,7 +185,7 @@ async fn envelope_hands_an_agent_everything_to_react() {
 #[tokio::test]
 async fn a_passing_run_has_no_failing_checks() {
     let (_tmp, rw, ro) = common::open_stores().await;
-    seed(rw, PASS, true).await;
+    seed(rw, PASS, true, None).await;
     let (status, json) = get_json(
         EvidenceReader::new(ro),
         &format!("/api/runs/{PASS}/failure"),
@@ -194,7 +199,7 @@ async fn a_passing_run_has_no_failing_checks() {
 #[tokio::test]
 async fn per_check_variant_scopes_to_one_check() {
     let (_tmp, rw, ro) = common::open_stores().await;
-    seed(rw, RUN, false).await;
+    seed(rw, RUN, false, Some(good_har())).await;
     let (status, json) = get_json(
         EvidenceReader::new(ro),
         &format!("/api/runs/{RUN}/failure/AC-1::AC-1.1"),
@@ -203,6 +208,25 @@ async fn per_check_variant_scopes_to_one_check() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["check_id"], "AC-1.1");
     assert_eq!(json["first_failing_request"]["status"], 500);
+}
+
+#[tokio::test]
+async fn malformed_failing_request_is_omitted_not_emitted_empty() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    // The only ≥400 entry lacks a `request.url` — skip it rather than
+    // emit an empty method/url that would mislead the agent.
+    let bad = json!({ "log": { "entries": [
+        { "request": { "method": "POST" }, "response": { "status": 500 } },
+    ] } });
+    seed(rw, "01FAILENVELOPE00000000000C", false, Some(bad)).await;
+    let (status, json) = get_json(
+        EvidenceReader::new(ro),
+        "/api/runs/01FAILENVELOPE00000000000C/failure",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // No usable request → the field is omitted (never `{method:"", url:""}`).
+    assert!(json["failing"][0]["first_failing_request"].is_null());
 }
 
 #[tokio::test]

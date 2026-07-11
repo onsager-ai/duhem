@@ -157,6 +157,7 @@ async fn failing_check(
     State(reader): State<EvidenceReader>,
     Path((run_id, pair)): Path<(String, String)>,
 ) -> Response {
+    let run_id = strip_json_suffix(&run_id);
     let pair = strip_json_suffix(&pair);
     let Some((criterion_id, check_id)) = pair.split_once("::") else {
         return error_response(
@@ -164,7 +165,7 @@ async fn failing_check(
             "expected <criterion-id>::<check-id>",
         );
     };
-    match reader.failing_check(&run_id, criterion_id, check_id).await {
+    match reader.failing_check(run_id, criterion_id, check_id).await {
         Ok(Some(fc)) => axum::Json(fc).into_response(),
         Ok(None) => not_found("check"),
         Err(e) => e.into_response(),

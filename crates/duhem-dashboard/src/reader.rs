@@ -386,17 +386,20 @@ impl EvidenceReader {
                 .and_then(|r| r.get("status"))
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
-            if status >= 400 {
-                let req = |k: &str| {
-                    e.get("request")
-                        .and_then(|r| r.get(k))
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("")
-                        .to_string()
-                };
+            if status < 400 {
+                continue;
+            }
+            let req = |k: &str| {
+                e.get("request")
+                    .and_then(|r| r.get(k))
+                    .and_then(serde_json::Value::as_str)
+            };
+            // Skip a malformed entry (missing method/url) rather than
+            // emit an empty request that would mislead the agent.
+            if let (Some(method), Some(url)) = (req("method"), req("url")) {
                 return Ok(Some(FailingRequest {
-                    method: req("method"),
-                    url: req("url"),
+                    method: method.to_string(),
+                    url: url.to_string(),
                     status: status as u16,
                 }));
             }

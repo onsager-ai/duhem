@@ -6,7 +6,7 @@ The failure envelope is the **agent-facing** counterpart to the human
 dashboard: one machine-readable document with everything a coding
 agent needs to react to a Duhem `fail` in CI — the failing assertions
 and their recorded cause, the delivery-web layer chain, artifact URLs
-(screenshot / DOM / network / target-rect), and the first failing
+(screenshot / DOM / network / target-rect / video), and the first failing
 network request — so the verify→repair loop never requires scraping
 the SPA.
 

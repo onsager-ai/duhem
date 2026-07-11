@@ -34,6 +34,7 @@ pub struct RunArgs {
     pub no_env_up: bool,
     pub keep_env: bool,
     pub capture: duhem_runtime::CapturePolicy,
+    pub capture_video: bool,
 }
 
 pub async fn run_command(args: RunArgs) -> ExitCode {
@@ -50,7 +51,14 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         no_env_up,
         keep_env,
         capture,
+        capture_video,
     } = args;
+
+    // Recording is enabled at context-open time, so it's a run-level
+    // decision (#215). Only record when the user asked *and* captures
+    // aren't disabled outright — otherwise every context would record a
+    // video that `--capture off` immediately discards.
+    let record_video = capture_video && !matches!(capture, duhem_runtime::CapturePolicy::Off);
 
     // The headed-browser debug toggle is the `DUHEM_HEADED` env var
     // (spec #151): truthy `1` / `true` (case-insensitive) launches a
@@ -473,7 +481,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // leaf is the cleanest model.
         let browser = if needs_browser {
             match RunBrowser::launch(headed).await {
-                Ok(b) => Some(b),
+                Ok(b) => Some(b.with_video(record_video)),
                 Err(e) => {
                     eprintln!("browser: {e}");
                     if let Some(s) = suite_env.take() {

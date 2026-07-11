@@ -10,9 +10,9 @@
 
 use std::time::Duration;
 
-use duhem_actions::{Page, Rect};
+use duhem_actions::{CheckBrowser, Page, Rect};
 use duhem_evidence::{EventPayload, EvidenceWriter, ObservationValue};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::engine::har;
 use crate::engine::outcome::CapturedArtifact;
@@ -66,6 +66,13 @@ const CAPTURE_DEADLINE: Duration = Duration::from_millis(12_000);
 const CAPTURE_SCREENSHOT: &str = "capture/screenshot";
 const CAPTURE_DOM: &str = "capture/dom";
 const CAPTURE_TARGET_RECT: &str = "capture/target-rect";
+const CAPTURE_VIDEO: &str = "capture/video";
+
+/// Upper bound on a kept video blob (#215). Recording is opt-in
+/// (`--capture-video`) and the video ships to the hosted hub, so a
+/// pathologically long check can't balloon the evidence store. Over
+/// the cap → warn + skip (evidence, never a verdict input).
+const VIDEO_MAX_BYTES: usize = 25 * 1024 * 1024;
 
 /// Per-locator ceiling for the bounding-box probe. Short: at capture
 /// time the page state is settled, so an absent target should report
@@ -212,6 +219,67 @@ pub(crate) async fn capture_failure_evidence(
     captured
 }
 
+/// Run a check's failure-evidence capture, then tear its browser
+/// context down (#202 / #214 / #215). `wants_capture` is the capture
+/// policy's decision for this check: when false, nothing is recorded,
+/// but the context is still closed — which discards any video the
+/// context recorded (recording is a run-level toggle set up front).
+/// Returns the artifacts that landed. Warn-never-fail throughout;
+/// evidence gathering never masks or manufactures a verdict.
+pub(crate) async fn finalize_capture(
+    writer: &mut EvidenceWriter,
+    cb: CheckBrowser,
+    wants_capture: bool,
+    last_step: u32,
+    targets: &[TargetLocator],
+) -> Vec<CapturedArtifact> {
+    let mut captured = Vec::new();
+    if wants_capture {
+        captured = capture_failure_evidence(writer, &cb.page, last_step).await;
+        if let Some(c) = capture_target_rects(writer, &cb.page, last_step, targets).await {
+            captured.push(c);
+        }
+    }
+    // Closing the context finalizes any recorded video (#215) and hands
+    // its bytes back; keep them only when the policy wanted this check's
+    // evidence.
+    match cb.close().await {
+        Ok(Some(video)) if wants_capture => {
+            if let Some(c) = capture_video(writer, last_step, &video).await {
+                captured.push(c);
+            }
+        }
+        Ok(_) => {}
+        Err(e) => debug!(error = %e, "check context close failed; verdict unaffected"),
+    }
+    captured
+}
+
+/// Record a check's recorded video (#215) as a `capture/video` blob.
+/// The bytes arrive from [`duhem_actions::CheckBrowser::close`] —
+/// closing the context is what finalizes the recording — so there's no
+/// page op and no deadline here, only a size cap. Warn-never-fail: an
+/// oversized or unwritable video drops silently, never touching the
+/// verdict.
+pub(crate) async fn capture_video(
+    writer: &mut EvidenceWriter,
+    step_index: u32,
+    bytes: &[u8],
+) -> Option<CapturedArtifact> {
+    if bytes.is_empty() {
+        return None;
+    }
+    if bytes.len() > VIDEO_MAX_BYTES {
+        warn!(
+            bytes = bytes.len(),
+            cap = VIDEO_MAX_BYTES,
+            "video capture over size cap; skipped (verdict unaffected)"
+        );
+        return None;
+    }
+    append_capture(writer, step_index, CAPTURE_VIDEO, bytes).await
+}
+
 /// Run one capture op under `deadline`. `None` on timeout (logged) —
 /// a wedged sidecar pipe can't stall the run's teardown.
 async fn bounded<T>(
@@ -285,5 +353,46 @@ mod tests {
             bounded("screenshot", CAPTURE_DEADLINE, async { 42 }).await,
             Some(42)
         );
+    }
+
+    async fn writer() -> (EvidenceWriter, tempfile::TempDir) {
+        use std::sync::Arc;
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            duhem_evidence::SqliteStore::open(tmp.path().join("d.db"))
+                .await
+                .unwrap(),
+        );
+        let w = EvidenceWriter::begin(
+            store,
+            "01VIDEOCAPTURE0000000000AA",
+            "v.yml",
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        (w, tmp)
+    }
+
+    #[tokio::test]
+    async fn capture_video_records_a_small_clip() {
+        let (mut w, _tmp) = writer().await;
+        // WebM EBML magic + a little payload — a plausible tiny clip.
+        let mut clip = vec![0x1A, 0x45, 0xDF, 0xA3];
+        clip.extend_from_slice(&[0u8; 512]);
+        let art = capture_video(&mut w, 0, &clip).await;
+        let art = art.expect("a small clip is recorded");
+        assert_eq!(art.kind, CAPTURE_VIDEO);
+    }
+
+    #[tokio::test]
+    async fn capture_video_skips_empty_and_oversized() {
+        let (mut w, _tmp) = writer().await;
+        // Empty → nothing to record.
+        assert!(capture_video(&mut w, 0, &[]).await.is_none());
+        // Over the cap → warn + skip, never a blob (evidence never
+        // balloons the store, never touches the verdict).
+        let huge = vec![0u8; VIDEO_MAX_BYTES + 1];
+        assert!(capture_video(&mut w, 0, &huge).await.is_none());
     }
 }

@@ -88,6 +88,8 @@ function blobLabel(outputName: string): { icon: string; label: string } {
       return { icon: "🌐", label: "network captured" };
     case "capture/target-rect":
       return { icon: "🎯", label: "target highlighted" };
+    case "capture/video":
+      return { icon: "🎬", label: "video recorded" };
     default:
       return { icon: "📎", label: `${outputName} captured` };
   }

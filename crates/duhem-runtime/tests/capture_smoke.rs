@@ -171,15 +171,25 @@ async fn run_under(
     policy: CapturePolicy,
     yaml: &str,
 ) -> (RunOutcome, Vec<Event>, Arc<SqliteStore>, tempfile::TempDir) {
-    run_app(default_app(), policy, yaml).await
+    run_app(default_app(), policy, yaml, false).await
+}
+
+/// Like [`run_under`] but with screencast recording on (#215).
+async fn run_under_video(
+    policy: CapturePolicy,
+    yaml: &str,
+) -> (RunOutcome, Vec<Event>, Arc<SqliteStore>, tempfile::TempDir) {
+    run_app(default_app(), policy, yaml, true).await
 }
 
 /// Run `yaml` under `policy` against `app`, and hand back the outcome,
 /// the full event stream, and the store (for blob fetches).
+/// `record_video` toggles per-context screencast recording (#215).
 async fn run_app(
     app: Router,
     policy: CapturePolicy,
     yaml: &str,
+    record_video: bool,
 ) -> (RunOutcome, Vec<Event>, Arc<SqliteStore>, tempfile::TempDir) {
     let fx = start_app(app).await;
     let url = format!("http://{}/", fx.addr);
@@ -187,7 +197,8 @@ async fn run_app(
 
     let browser = RunBrowser::launch(false)
         .await
-        .expect("launch chromium (run `npx playwright install chromium`)");
+        .expect("launch chromium (run `npx playwright install chromium`)")
+        .with_video(record_video);
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let store = Arc::new(
@@ -342,6 +353,56 @@ async fn always_policy_captures_on_pass() {
 
 #[tokio::test]
 #[ignore = "requires `npx playwright install chromium`"]
+async fn failing_ui_check_with_video_records_a_webm_capture() {
+    // Opt-in video (#215): a failing ui check under `on-failure` with
+    // recording on yields a `capture/video` WebM alongside the other
+    // captures — the screencast of the navigation + the failing wait.
+    let (outcome, events, store, _tmp) =
+        run_under_video(CapturePolicy::default(), FAILING_YAML).await;
+    assert_eq!(outcome.verdict.state, VerdictState::Fail);
+
+    let blobs = capture_blobs(&events);
+    let video = blobs
+        .iter()
+        .find(|(n, _)| n == "capture/video")
+        .expect("capture/video present when recording is on");
+    // The blob is a real WebM (EBML magic), not a placeholder — playable
+    // in the dashboard's <video>.
+    let bytes = store
+        .get_blob(&video.1)
+        .await
+        .expect("get video")
+        .expect("video blob present");
+    assert!(
+        bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]),
+        "video blob is not WebM/EBML"
+    );
+    // The reporter-facing failure carries the video ref too.
+    assert!(
+        outcome.failures[0]
+            .captures
+            .iter()
+            .any(|c| c.kind == "capture/video"),
+        "CheckFailure.captures should include the video"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
+async fn video_off_by_default_even_on_failure() {
+    // Recording is a separate opt-in; the default policy captures the
+    // screenshot/DOM/network/target-rect but never a video.
+    let (_outcome, events, _store, _tmp) = run_under(CapturePolicy::default(), FAILING_YAML).await;
+    assert!(
+        !capture_blobs(&events)
+            .iter()
+            .any(|(n, _)| n == "capture/video"),
+        "video must not be captured without --capture-video"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
 async fn off_policy_never_captures() {
     let (outcome, events, _store, _tmp) = run_under(CapturePolicy::Off, FAILING_YAML).await;
     assert_eq!(outcome.verdict.state, VerdictState::Fail);
@@ -371,7 +432,7 @@ fn network_app() -> Router {
 #[ignore = "requires `npx playwright install chromium`"]
 async fn network_capture_records_the_failing_request_and_redacts_secrets() {
     let (outcome, events, store, _tmp) =
-        run_app(network_app(), CapturePolicy::default(), NETWORK_YAML).await;
+        run_app(network_app(), CapturePolicy::default(), NETWORK_YAML, false).await;
     assert_eq!(outcome.verdict.state, VerdictState::Fail);
 
     let blobs = capture_blobs(&events);

@@ -188,6 +188,23 @@ describe("Artifacts", () => {
     expect(imgs[0].getAttribute("src")).toBe(`run/r/artifact/${shot}`);
   });
 
+  it("renders capture/video inline as a <video> with native controls (#215)", () => {
+    const vid = "f".repeat(64);
+    const { container, getByTestId } = render(
+      <Artifacts
+        artifacts={[{ id: vid, kind: "capture/video", url: `run/r/artifact/${vid}` }]}
+      />,
+    );
+    const video = getByTestId("capture-video") as HTMLVideoElement;
+    expect(video.tagName).toBe("VIDEO");
+    expect(video.getAttribute("src")).toBe(`run/r/artifact/${vid}`);
+    expect(video.hasAttribute("controls")).toBe(true);
+    // Kept out of the image path — it isn't a screenshot.
+    expect(container.querySelectorAll("img")).toHaveLength(0);
+    // Labelled "Video", not the raw kind.
+    expect(container.textContent).toContain("Video");
+  });
+
   it("renders capture/network as a HAR request table with failing status flagged (#206)", async () => {
     const har = {
       log: {

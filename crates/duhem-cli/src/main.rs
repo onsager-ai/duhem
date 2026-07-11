@@ -189,6 +189,14 @@ enum Cmd {
             default_value = "on-failure"
         )]
         capture: duhem_runtime::CapturePolicy,
+        /// Also record a screencast video of each ui check (spec #215),
+        /// kept under the same `--capture` policy as the screenshot/DOM.
+        /// Opt-in and off by default: video blobs are large and ship to
+        /// the hosted hub. Lands as a `capture/video` artifact. Recording
+        /// must be enabled up front, so with `--capture on-failure` every
+        /// ui check is recorded but only failing checks keep the file.
+        #[arg(long = "capture-video", default_value_t = false)]
+        capture_video: bool,
     },
     /// Browse run evidence in a read-only web dashboard.
     ///
@@ -294,6 +302,7 @@ fn main() -> ExitCode {
             no_env_up,
             keep_env,
             capture,
+            capture_video,
         }) => {
             // Resolve the reporter name BEFORE we boot the tokio
             // runtime / browser: a typoed `--reporter` should exit 2
@@ -341,6 +350,7 @@ fn main() -> ExitCode {
                 no_env_up,
                 keep_env,
                 capture,
+                capture_video,
             }))
         }
     }

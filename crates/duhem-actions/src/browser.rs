@@ -298,6 +298,11 @@ pub(crate) fn humanize_launch_error(raw: &str) -> String {
 pub struct RunBrowser {
     child: Child,
     conn: Arc<Conn>,
+    /// When set, each check's context records video (#215). Recording
+    /// must be enabled at context-creation time, so this is decided per
+    /// run, up front; whether the video is *kept* is the runtime's
+    /// capture-policy call after the check.
+    record_video: bool,
 }
 
 impl RunBrowser {
@@ -348,14 +353,27 @@ impl RunBrowser {
             .await
             .map_err(|e| ActionError::Playwright(humanize_launch_error(&e.to_string())))?;
 
-        Ok(Self { child, conn })
+        Ok(Self {
+            child,
+            conn,
+            record_video: false,
+        })
+    }
+
+    /// Record video for each check's context (#215). Off by default;
+    /// the CLI's `--capture-video` opts in. Recording must be requested
+    /// at context-open time, hence a run-level toggle rather than a
+    /// per-check one.
+    pub fn with_video(mut self, on: bool) -> Self {
+        self.record_video = on;
+        self
     }
 
     /// Allocate a fresh context + page for one check.
     pub async fn open_check(&self) -> Result<CheckBrowser, ActionError> {
         let ctx = self
             .conn
-            .request("newContext", json!({}))
+            .request("newContext", json!({ "recordVideo": self.record_video }))
             .await
             .map_err(|e| ActionError::Playwright(format!("context: {e}")))?;
         let context_id = ctx
@@ -407,12 +425,26 @@ impl CheckBrowser {
     /// Explicitly close the context. Drop of [`RunBrowser`] also tears
     /// the sidecar down; this is for callers that want close-failure
     /// surfaced per check.
-    pub async fn close(self) -> Result<(), ActionError> {
-        self.conn
+    ///
+    /// Returns the recorded video bytes (#215) when the context was
+    /// opened with [`RunBrowser::with_video`] — closing the context is
+    /// what finalizes the recording to disk. `None` when video wasn't
+    /// requested (or the sidecar couldn't read it back — a warn-only
+    /// condition on its side). Callers decide whether to keep it.
+    pub async fn close(self) -> Result<Option<Vec<u8>>, ActionError> {
+        use base64::Engine as _;
+        let reply = self
+            .conn
             .request("closeContext", json!({ "contextId": self.context_id }))
             .await
-            .map(|_| ())
-            .map_err(|e| ActionError::Playwright(format!("close: {e}")))
+            .map_err(|e| ActionError::Playwright(format!("close: {e}")))?;
+        let Some(b64) = reply.get("video").and_then(|v| v.as_str()) else {
+            return Ok(None);
+        };
+        base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .map(Some)
+            .map_err(|e| ActionError::Playwright(format!("video decode: {e}")))
     }
 }
 

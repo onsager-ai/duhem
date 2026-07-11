@@ -42,9 +42,7 @@ pub use crate::engine::outcome::{
     CapturedArtifact, CheckFailure, CheckFilter, EngineError, FailedAssertion, RunOutcome,
 };
 
-use crate::engine::capture::{
-    CapturePolicy, TargetLocator, capture_failure_evidence, capture_target_rects, target_from_step,
-};
+use crate::engine::capture::{CapturePolicy, TargetLocator, finalize_capture, target_from_step};
 use crate::engine::context::{RunContext, RunState, json_to_value};
 use crate::engine::registry::{ActionRegistry, default_registry};
 use crate::engine::shim::assertion_to_expr;
@@ -841,14 +839,8 @@ impl Engine {
                 CapturePolicy::Always => true,
                 CapturePolicy::OnFailure => !failed.is_empty(),
             };
-            if wants_capture {
-                let last_step = check.steps.len().saturating_sub(1) as u32;
-                captures = capture_failure_evidence(writer, &cb.page, last_step).await;
-                if let Some(c) = capture_target_rects(writer, &cb.page, last_step, &targets).await {
-                    captures.push(c);
-                }
-            }
-            let _ = cb.close().await;
+            let last_step = check.steps.len().saturating_sub(1) as u32;
+            captures = finalize_capture(writer, cb, wants_capture, last_step, &targets).await;
         }
 
         let outcome = CheckOutcome {

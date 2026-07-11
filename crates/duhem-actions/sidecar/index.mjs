@@ -24,7 +24,7 @@
 
 import { chromium } from 'playwright'
 import readline from 'node:readline'
-import { existsSync, readdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { join } from 'node:path'
 import os from 'node:os'
@@ -250,13 +250,25 @@ async function dispatch(req) {
       // decides whether to *keep* the video after the check (per its
       // capture policy); the sidecar always records once asked.
       let opts = {}
+      let dir = null
       if (req.recordVideo) {
-        const dir = mkdtempSync(join(os.tmpdir(), 'duhem-video-'))
-        videoDirs.set(id, dir)
+        dir = mkdtempSync(join(os.tmpdir(), 'duhem-video-'))
         opts = { recordVideo: { dir } }
       }
-      const ctx = await browser.newContext(opts)
+      let ctx
+      try {
+        ctx = await browser.newContext(opts)
+      } catch (e) {
+        // Don't leak the scratch dir if the context never opens.
+        if (dir) {
+          try {
+            rmSync(dir, { recursive: true, force: true })
+          } catch {}
+        }
+        throw e
+      }
       contexts.set(id, ctx)
+      if (dir) videoDirs.set(id, dir)
       return { contextId: id }
     }
 
@@ -383,17 +395,31 @@ async function dispatch(req) {
         await ctx.close()
         contexts.delete(req.contextId)
       }
-      // Read back the finalized video, if this context recorded one.
-      // Best-effort: a read/path failure warns but never fails the
+      // Read back the finalized video, if this context recorded one and
+      // the runtime will keep it. A discarded video (e.g. a passing
+      // check under `on-failure`) is recorded by Playwright but never
+      // read — no point paying the read + base64 + pipe transfer for
+      // bytes the runtime throws away. The size cap (`maxBytes`) is
+      // enforced against the file on disk, before the expensive read.
+      // Best-effort throughout: a read failure warns but never fails the
       // check — video is evidence, not a judge input.
       let video = null
       const vid = videos.get(req.contextId)
       if (vid) {
-        try {
-          const p = await vid.path()
-          video = readFileSync(p).toString('base64')
-        } catch (e) {
-          process.stderr.write(`duhem-sidecar: video read failed: ${e}\n`)
+        if (req.keepVideo) {
+          try {
+            const p = await vid.path()
+            const size = statSync(p).size
+            if (typeof req.maxBytes === 'number' && size > req.maxBytes) {
+              process.stderr.write(
+                `duhem-sidecar: video ${size}B over cap ${req.maxBytes}B; skipped\n`,
+              )
+            } else {
+              video = readFileSync(p).toString('base64')
+            }
+          } catch (e) {
+            process.stderr.write(`duhem-sidecar: video read failed: ${e}\n`)
+          }
         }
         videos.delete(req.contextId)
       }

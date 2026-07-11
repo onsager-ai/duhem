@@ -427,15 +427,33 @@ impl CheckBrowser {
     /// surfaced per check.
     ///
     /// Returns the recorded video bytes (#215) when the context was
-    /// opened with [`RunBrowser::with_video`] — closing the context is
-    /// what finalizes the recording to disk. `None` when video wasn't
-    /// requested (or the sidecar couldn't read it back — a warn-only
-    /// condition on its side). Callers decide whether to keep it.
-    pub async fn close(self) -> Result<Option<Vec<u8>>, ActionError> {
+    /// opened with [`RunBrowser::with_video`] *and* `want_video` is set
+    /// — closing the context is what finalizes the recording to disk.
+    /// `None` when video wasn't requested, isn't wanted, exceeds
+    /// `max_bytes`, or the sidecar couldn't read it back (a warn-only
+    /// condition on its side).
+    ///
+    /// `want_video` lets the caller skip the read + base64 + pipe
+    /// transfer for a video it will discard (recording is a run-level
+    /// toggle, so a context can record a video the policy won't keep);
+    /// `max_bytes` caps it on disk *before* that transfer, so an
+    /// oversized clip is never marshalled at all.
+    pub async fn close(
+        self,
+        want_video: bool,
+        max_bytes: usize,
+    ) -> Result<Option<Vec<u8>>, ActionError> {
         use base64::Engine as _;
         let reply = self
             .conn
-            .request("closeContext", json!({ "contextId": self.context_id }))
+            .request(
+                "closeContext",
+                json!({
+                    "contextId": self.context_id,
+                    "keepVideo": want_video,
+                    "maxBytes": max_bytes,
+                }),
+            )
             .await
             .map_err(|e| ActionError::Playwright(format!("close: {e}")))?;
         let Some(b64) = reply.get("video").and_then(|v| v.as_str()) else {

@@ -221,11 +221,12 @@ pub(crate) async fn capture_failure_evidence(
 
 /// Run a check's failure-evidence capture, then tear its browser
 /// context down (#202 / #214 / #215). `wants_capture` is the capture
-/// policy's decision for this check: when false, nothing is recorded,
-/// but the context is still closed — which discards any video the
-/// context recorded (recording is a run-level toggle set up front).
-/// Returns the artifacts that landed. Warn-never-fail throughout;
-/// evidence gathering never masks or manufactures a verdict.
+/// policy's decision for this check: when false, no `capture/*`
+/// artifacts are written, and closing the context discards any video
+/// Playwright recorded (recording is a run-level toggle, set up front,
+/// so a context can record a clip the policy won't keep). Returns the
+/// artifacts that landed. Warn-never-fail throughout; evidence
+/// gathering never masks or manufactures a verdict.
 pub(crate) async fn finalize_capture(
     writer: &mut EvidenceWriter,
     cb: CheckBrowser,
@@ -241,15 +242,16 @@ pub(crate) async fn finalize_capture(
         }
     }
     // Closing the context finalizes any recorded video (#215) and hands
-    // its bytes back; keep them only when the policy wanted this check's
-    // evidence.
-    match cb.close().await {
-        Ok(Some(video)) if wants_capture => {
+    // its bytes back. `wants_capture` gates the read at the sidecar, so
+    // a discarded video is never marshalled; `VIDEO_MAX_BYTES` caps it
+    // on disk before the transfer.
+    match cb.close(wants_capture, VIDEO_MAX_BYTES).await {
+        Ok(Some(video)) => {
             if let Some(c) = capture_video(writer, last_step, &video).await {
                 captured.push(c);
             }
         }
-        Ok(_) => {}
+        Ok(None) => {}
         Err(e) => debug!(error = %e, "check context close failed; verdict unaffected"),
     }
     captured
@@ -257,9 +259,10 @@ pub(crate) async fn finalize_capture(
 
 /// Record a check's recorded video (#215) as a `capture/video` blob.
 /// The bytes arrive from [`duhem_actions::CheckBrowser::close`] —
-/// closing the context is what finalizes the recording — so there's no
-/// page op and no deadline here, only a size cap. Warn-never-fail: an
-/// oversized or unwritable video drops silently, never touching the
+/// closing the context is what finalizes the recording — already capped
+/// on disk by the sidecar, so this is a defense-in-depth size check.
+/// Warn-never-fail: an oversized clip is dropped with a warning, and an
+/// unwritable blob warns inside `append_capture`; neither touches the
 /// verdict.
 pub(crate) async fn capture_video(
     writer: &mut EvidenceWriter,

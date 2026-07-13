@@ -54,6 +54,6 @@ meantime.
 ## Further reading
 
 - `verification-authoring` skill (`.claude/skills/verification-authoring/SKILL.md`).
-- Worked example: `verifications/onsager-dashboard-create-spec-plan/`.
+- Worked example: `templates/product-repo/` (the co-located `.duhem/` skeleton in the Duhem repo).
 - Product spec: `docs/duhem-spec.md` §10.4 (file organization
   patterns).

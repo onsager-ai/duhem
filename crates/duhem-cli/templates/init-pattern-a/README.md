@@ -73,8 +73,8 @@ duhem run {{PATH}}/duhem.yml --filter AC-1
 - Authoring discipline: the `verification-authoring` skill (see
   `.claude/skills/verification-authoring/SKILL.md` in the Duhem
   repo).
-- Worked dogfood example:
-  `verifications/onsager-dashboard-create-spec-plan/`.
+- Worked example: `templates/product-repo/` (the co-located `.duhem/`
+  skeleton in the Duhem repo).
 - Product spec: `docs/duhem-spec.md` §7 (Core Concepts), §8
   (Holistic Verification Principle), §10 (Verification
   Definition).

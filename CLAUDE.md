@@ -15,10 +15,12 @@ runtime), and gates merge/deploy on the verdict.
 > `--version`; the `ui/*` and `api/*` action families are implemented
 > (`ui/navigate`, `ui/click`, `ui/type`, `ui/select`, `ui/assert-*`,
 > `api/call`, `api/observe`); environment provisioning (`up:` /
-> `down:` hooks) is wired into the runtime; the first Onsager
-> dogfood verification lives at
-> `verifications/onsager-dashboard-create-spec-plan/` and runs through
-> the `duhem/run` composite GitHub Action. The project is open-source
+> `down:` hooks) is wired into the runtime; product Verification
+> Definitions are co-located with the products they verify under a
+> `.duhem/` suite (Chreode ships them in `onsager-ai/chreode/.duhem/`,
+> self-gated in its own CI and drift-monitored here; epic #225). The
+> `duhem/run` composite GitHub Action and `templates/product-repo/`
+> support that model. The project is open-source
 > under **Apache-2.0** (relicensed for the first public v0.1.0 release;
 > see `docs/duhem-spec.md` §11.3). Schema is still v0.x — breaking
 > changes are expected. See `docs/duhem-spec.md` §14 for the roadmap
@@ -79,9 +81,10 @@ Changes to those four bullets are spec-level changes to
    `src/lib.rs` (or `main.rs`)
    is the concrete answer to "what does §10 / §11 actually look like
    today?".
-4. **`verifications/`** — Verification Definitions in-tree. The
-   dogfood VD lives at `verifications/onsager-dashboard-create-spec-plan/`
-   and is the worked example for §10's VD shape.
+4. **`verifications/`** — Duhem's own self-verification VDs in-tree.
+   Product VDs live co-located in the product repos under `.duhem/`
+   (epic #225); `templates/product-repo/` is the skeleton and
+   `docs/duhem-spec.md` §10.1 Pattern D is the shape.
 5. **`.claude/skills/`** — dev process under Claude Code. Start with
    `duhem-dev-process`; it delegates to the rest.
 

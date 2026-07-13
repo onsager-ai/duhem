@@ -70,13 +70,18 @@ jobs:
           # work.
           ./scripts/serve-for-duhem.sh &
 
-      - name: Verify create-spec-plan
+      - name: Verify
         id: duhem
         uses: onsager-ai/duhem/.github/actions/run@v0.1
         with:
-          verification-path: verifications/onsager-dashboard-create-spec-plan/duhem.yml
+          # Default `verification-source: duhem` resolves this inside the
+          # duhem checkout at the pinned tag (a self-verification VD, or
+          # a centralized one). A product self-gating on its OWN
+          # co-located `.duhem/` VD passes `verification-source: workspace`
+          # instead — see "Two trust postures" above.
+          verification-path: verifications/duhem-cli/duhem.yml
           inputs: |
-            plan_id=duhem-fixture-${{ github.run_id }}
+            repo_dir=.
 
       - name: Surface evidence on red
         if: failure()
@@ -249,5 +254,6 @@ minor version.
   §12.1 (GitHub integration), §14 Phase 1 milestones.
 - [`onsager-dogfood` skill](../../../.claude/skills/onsager-dogfood/SKILL.md) —
   the cross-repo seam Duhem and Onsager share.
-- [`verifications/onsager-dashboard-create-spec-plan/`](../../../verifications/onsager-dashboard-create-spec-plan) —
-  the first Verification Definition this action surfaces.
+- [`templates/product-repo/`](../../../templates/product-repo) —
+  the co-located `.duhem/` skeleton a product self-gates with
+  (`verification-source: workspace`).

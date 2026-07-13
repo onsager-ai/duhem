@@ -76,7 +76,7 @@ WOULD RUN: checks::AC-2::AC-2.1
 
 `duhem run` auto-discovers the manifest: with no path it walks the current directory and its ancestors (capped at the enclosing `.git`) for a `duhem.yml` / `.duhem.yml`, so `cd anywhere-in-the-repo && duhem run` finds the repo-root manifest — same as `git`, `cargo`, `pnpm`. Pass an explicit path to override, or `-f path/to/manifest.yml` for an out-of-tree manifest.
 
-For a real-world example — including the `up:` / `down:` environment hooks Duhem sequences around a check — see [`verifications/onsager-dashboard-create-spec-plan/`](verifications/onsager-dashboard-create-spec-plan/).
+For a real-world example — including the `up:` / `down:` environment hooks Duhem sequences around a check — see [`verifications/duhem-dashboard/`](verifications/duhem-dashboard/). Product suites live co-located in their own repos under `.duhem/` (e.g. `onsager-ai/chreode/.duhem/`); [`templates/product-repo/`](templates/product-repo/) is the drop-in skeleton.
 
 ## Core concepts
 

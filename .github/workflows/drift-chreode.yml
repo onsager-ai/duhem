@@ -1,0 +1,135 @@
+# Drift monitoring — Chreode (epic #225, P1 in #227).
+#
+# Duhem-as-tool, **Mode B**: run onsager-ai/chreode's real Verification
+# Definition with the FRESHLY-BUILT `duhem` from this checkout, so a
+# Duhem change that would break a consumer's VD turns this job red.
+# This is the reframed dogfood (`docs/duhem-spec.md` §11.2): drift
+# monitoring, not a trust seam. A red verdict here means a Duhem
+# regression *against Chreode*, caught before it ships.
+#
+# Lane: `verifications/chreode-factory-cli` — one page-free `cli/invoke`
+# (`pnpm chreode "<desc>"`), so NO Chromium is needed (browser-skip
+# #125; `cli/*` is page-free). Chreode runs in its default deterministic
+# mode (FakeAgent + dry-run drivers): no live LLM, a real local preview
+# server, ships in seconds.
+#
+# TODAY the chreode VD still lives in this repo under `verifications/`;
+# P3 of #225 relocates it into onsager-ai/chreode, at which point the
+# `duhem run` path below flips to the chreode checkout (`chreode/…`).
+# Until then verifier and VD share this repo, which is fine — Mode B
+# only cares that the VD runs against the *real* Chreode.
+#
+# Generalizing to other products (crawlab, …): copy this file, swap the
+# target repo + the env bring-up + the VD path. Crawlab additionally
+# needs docker + a CRAWLAB_LICENSE secret (see #163), hence chreode
+# first.
+
+name: drift-chreode
+
+on:
+  pull_request:
+    paths:
+      - 'crates/**'
+      - 'verifications/chreode-factory-cli/**'
+      - '.github/workflows/drift-chreode.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'verifications/chreode-factory-cli/**'
+      - '.github/workflows/drift-chreode.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: drift-chreode-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  drift:
+    name: chreode drift (factory CLI)
+    runs-on: ubuntu-latest
+    # Gated until the cross-repo checkout credential is configured.
+    # Chreode is a PRIVATE onsager-ai repo, so Duhem CI needs a token to
+    # clone it. To arm this monitor:
+    #   1. add repo secret CHREODE_CHECKOUT_TOKEN — a fine-grained PAT
+    #      scoped to onsager-ai/chreode with Contents: read (or a classic
+    #      PAT with `repo` read);
+    #   2. set repo variable CHREODE_DRIFT_READY=true.
+    # Until then the job is skipped (never red), so it can't block PRs
+    # before the credential exists.
+    if: ${{ vars.CHREODE_DRIFT_READY == 'true' }}
+    steps:
+      - name: Checkout duhem (the verifier)
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          rustup show active-toolchain
+          cargo --version
+
+      # The whole point of Mode B: build duhem from THIS checkout, so the
+      # verdict reflects the current Duhem against the real Chreode.
+      - name: Build duhem CLI (current source)
+        run: cargo build --release -p duhem-cli
+
+      - name: Checkout onsager-ai/chreode (the target)
+        uses: actions/checkout@v4
+        with:
+          repository: onsager-ai/chreode
+          token: ${{ secrets.CHREODE_CHECKOUT_TOKEN }}
+          path: chreode
+          # HEAD of chreode's default branch = monitor drift against
+          # current Chreode. Pin `ref:` here to freeze the target.
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Chreode's default deterministic mode needs no secrets and no LLM.
+      # `pnpm build` mirrors the operator setup the create-and-ship VD's
+      # up.sh does; narrow to `--filter @chreode/app-runtime` if the web
+      # bundle proves unnecessary for the factory-CLI lane.
+      - name: Install + build chreode
+        working-directory: chreode
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      # `cli/invoke` resolves a relative `cwd` against the `duhem` process
+      # working directory (the workspace root, where duhem is checked
+      # out), so `chreode_repo_dir=chreode` points the CLI at the sibling
+      # checkout above. Page-free, so no Playwright sidecar launches.
+      - name: Run chreode drift VD with the freshly-built duhem
+        id: run
+        run: |
+          set +e
+          OUT="$(mktemp)"
+          ./target/release/duhem run \
+            verifications/chreode-factory-cli/duhem.yml \
+            --inputs chreode_repo_dir=chreode \
+            --reporter json \
+            --db .duhem/duhem.db \
+            | tee "$OUT"
+          RC=${PIPESTATUS[0]}
+          set -e
+          SUMMARY="$(grep -E '^\{.*\}$' "$OUT" | tail -n 1 || true)"
+          VERDICT="$(printf '%s' "$SUMMARY" | jq -r '.verdict // ""')"
+          STORE="$(printf '%s' "$SUMMARY" | jq -r '.store // ""')"
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+          echo "store=$STORE" >> "$GITHUB_OUTPUT"
+          echo "duhem run exit=$RC verdict=$VERDICT"
+          # Propagate the CLI exit code: pass -> 0, fail/inconclusive ->
+          # non-zero, so the check turns red on drift.
+          exit $RC
+
+      - name: Surface evidence on red
+        if: ${{ failure() && steps.run.outputs.store != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: chreode-drift-evidence
+          path: ${{ steps.run.outputs.store }}

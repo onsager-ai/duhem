@@ -56,8 +56,11 @@ criteria:
             with:
               # argv form (no shell) — the description is one argument,
               # no quoting hazard. Runs in the Chreode checkout so pnpm
-              # resolves the workspace.
-              command: [pnpm, factory, $inputs.app_description]
+              # resolves the workspace. Entry point is `pnpm chreode`
+              # (the root script `@chreode/factory start`); the earlier
+              # `pnpm factory` name was retired in Chreode's arbor→chreode
+              # rebrand (chreode cd87bee) — this is that drift, repaired.
+              command: [pnpm, chreode, $inputs.app_description]
               cwd: $inputs.chreode_repo_dir
               within: 180s
             outputs:

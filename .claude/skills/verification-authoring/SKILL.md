@@ -70,14 +70,27 @@ that already exists (e.g. lifted from a spec issue's `## Test`
 section), don't re-author it — copy verbatim and translate
 mechanically.
 
+**Where the VD lives (Pattern D).** A VD that verifies a *product*
+(Onsager, Chreode, Crawlab) lives **in the product's repo** under a
+co-located `.duhem/` suite — Duhem is used as a tool, not a host
+(`docs/duhem-spec.md` §10.1 Pattern D; epic #225). Only Duhem's own
+**self-verification** VDs live here in `verifications/`. Chreode is the
+worked example (`onsager-ai/chreode/.duhem/`); `templates/product-repo/`
+is the drop-in `.duhem/` skeleton (manifest + example leaf + CODEOWNERS)
+to copy into a product repo. Author the VD there, self-gate it in the
+product's own CI (Mode A), and let Duhem's drift lane monitor it (Mode
+B) — see `onsager-dogfood`.
+
 ## Authoring loop
 
 ```
 0. Scaffold the skeleton: `duhem init --name <slug>` produces a
    runnable Pattern A skeleton (or `--pattern B` for co-located)
-   under `./verifications/<slug>/`. The skeleton is a single
-   passing check against https://example.com — your known-good
-   baseline to mutate. Spec on issue #48.
+   under `./verifications/<slug>/` (Duhem self-verification), or
+   `.duhem/<slug>/` in the product repo for a product VD (Pattern D;
+   copy `templates/product-repo/`). The skeleton is a single passing
+   check against https://example.com — your known-good baseline to
+   mutate. Spec on issue #48.
 1. Lift criteria from the spec / acceptance test / PRD
 2. Validate criteria are stable, intent-bearing, scoped to one commitment
 3. Translate each criterion to one or more checks (steps + assertions)

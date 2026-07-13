@@ -45,11 +45,20 @@ explicit rationale in the spec.
   and may change as the implementation does. Conflating the two is
   a defect. `docs/duhem-spec.md` §7.2 / §7.3.
 - **Asymmetric trust at the dogfood seam.** The verifier of AI claims
-  must be structurally independent of the AI making them. Concretely:
-  Duhem authors checks against Onsager; Onsager never authors its
-  own Duhem checks; an Onsager PR cannot self-attest past a Duhem
-  `fail`. See `.claude/skills/onsager-dogfood/SKILL.md` and
-  `docs/duhem-spec.md` §11.2.
+  is structurally independent of the AI making them — because the
+  judge has no LLM in the loop and the verdict is recorded by Duhem,
+  not the product (§11.2), *not* because the checks are hoarded in one
+  repo. Duhem is a standalone, self-verified tool: product
+  Verification Definitions live *with the product* (Crawlab, Chreode,
+  Onsager), and only Duhem's self-verification VDs live here. A
+  product PR still can't silently self-weaken its check (optional
+  per-repo CODEOWNERS) or self-attest past a `fail` (hub-recorded
+  verdict), but there is no special anchor repo. What Duhem must keep
+  true is its own contract — schema, judge, docs — consistent and
+  self-verified; the dogfood's job is drift monitoring (catch a Duhem
+  change that would break a consumer's VDs). Epic #225;
+  `.claude/skills/onsager-dogfood/SKILL.md`; `docs/duhem-spec.md`
+  §11.2.
 
 Changes to those four bullets are spec-level changes to
 `docs/duhem-spec.md` and require an explicit Alignment note.

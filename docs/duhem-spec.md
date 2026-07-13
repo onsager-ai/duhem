@@ -327,6 +327,10 @@ duhem.yml                  # root manifest
 
 Same root manifest pattern as B, just different file layout.
 
+#### Pattern D: Co-located in the target repo (cross-repo verification)
+
+Suitable when Duhem verifies a *product it does not itself ship* — a regression suite for a separate codebase. The Verification Definition lives in the **target product's** repository (Pattern B or C layout, with its own `duhem.yml`), co-located with the code it exercises, and declares its target coordinate with `project:` (§10.4). The product's own CI runs `duhem/run` against itself, and Duhem's dogfood CI runs the suite from the target ref; either way the verifier/target relationship is recorded with provenance (§11.1). Duhem is used here as a *tool*, not a host: this is how it verifies products like Crawlab, Chreode, and Onsager without hoarding their checks. Only Duhem's own self-verification VDs stay in `onsager-ai/duhem`; the trust that matters is mechanical judgment plus a self-consistent Duhem contract, not VD location (§11.2). Optional per-repo CODEOWNERS on the VD path and hub-recorded verdicts remain available as lightweight review/evidence discipline.
+
 ### 10.2 Self-identification
 
 Duhem loads a `.yml`/`.yaml` file by sniffing its top-level keys, not its filename:
@@ -733,6 +737,18 @@ Because Duhem is open-source (Apache-2.0), this commitment is directly auditable
 - **Documented judge logic**: The decision rules used by the judge are also documented in §10.6 (assertion forms), §10.7 (runtime expressions), and the `crates/duhem-judge` aggregation doc comments, so a verdict can be reasoned about without reading the full source. (Extracting these into a single standalone "judge decision reference" remains a goal.)
 - **Reproducible runs**: Every run produces a complete evidence trace. Given identical environment state and a frozen check spec, replays must produce identical verdicts. Determinism is verifiable empirically by customers.
 - **Self-hostable judge**: Because the judge is open-source, customers requiring infrastructure isolation can build and run it entirely within their own infrastructure, removing any cloud-trust dependency. `duhem-judge` is a library crate today; a standalone judge binary remains a future packaging step.
+
+#### Duhem is a tool: product Verification Definitions live with the product
+
+**Alignment note (2026-07-11, maintainer decision).** Duhem is a standalone, self-verified package — a tool you point at a codebase, not a repository that hoards every codebase's checks. Verification Definitions that verify a *product* Duhem does not itself ship (regression suites for Crawlab, Chreode, Onsager) therefore live **in that product's own repository**, co-located with the code they exercise. Only Duhem's self-verification VDs stay in `onsager-ai/duhem`. This reframes — and deliberately relaxes — the earlier posture that centralized every VD in Duhem and treated Onsager as a structural trust anchor. Tracked under epic #225.
+
+What the platform must keep true is narrower than "all checks live in one repo":
+
+- **Mechanical judgment is unchanged.** The judge still has no LLM in the loop; a verdict is deterministic over observed state and a frozen check spec (above). This is the anchor of a trustworthy `pass`, and co-location does not touch it.
+- **Duhem's own contract stays consistent and self-verified.** The schema, judge, action catalog, and reference docs are the contract that product-side VDs consume. Duhem's self-verification suite gates that contract; as long as it holds, the tool is trustworthy independent of where any product's VDs live.
+- **The dogfood inverts into drift monitoring.** Running each product's real VDs with the current Duhem is how we catch a Duhem change that would break a consumer — a regression in the tool, surfaced continuously as Duhem develops — rather than a seam policing the product.
+
+Lightweight guards remain available where wanted, as review and evidence discipline rather than a structural boundary: a product repo may CODEOWNERS-own its VD path so a check is not silently weakened, and verdicts are still recorded in the hub with `(verifier_repo/sha, target_repo/sha)` provenance (§11.1). There is no longer a special anchor repo; a Duhem-pinned check ref is the documented escalation path if a genuine independent-author scenario ever appears.
 
 ### 11.3 Source posture and opening strategy
 

@@ -11,8 +11,17 @@
 # the `action.yml` and Verification Definition from THAT clone — not
 # from the caller's repo. The caller can pass `inputs:` (URLs, fixture
 # credentials, fresh project names) but cannot substitute the
-# Verification Definition body. That asymmetry is what makes the
-# Onsager-side workflow consume a verdict it did not author.
+# Verification Definition body. That asymmetry (the DEFAULT
+# `verification-source: duhem`) is what makes the Onsager-side workflow
+# consume a verdict it did not author.
+#
+# `verification-source: workspace` is the explicit opt-out for Mode A
+# (§10.1 Pattern D): a product self-gating on its OWN co-located
+# `.duhem/` VD, which it legitimately owns and may edit under CODEOWNERS.
+# Trust there rests on mechanical judgment plus a self-consistent Duhem
+# contract, not VD location (§11.2 Duhem-as-tool Alignment note) — so
+# reading the caller's workspace is correct, not a seam violation.
+# `duhem` (clone-resolved) stays the default for centralized use.
 name: duhem/run
 description: Run a Duhem Verification Definition and surface the verdict.
 author: Duhem (https://github.com/onsager-ai/duhem)
@@ -20,11 +29,27 @@ author: Duhem (https://github.com/onsager-ai/duhem)
 inputs:
   verification-path:
     description: |
-      Path to a Verification Definition `.yml` file. Always resolved
-      relative to the `onsager-ai/duhem` repo root at the action's
-      pinned tag — NOT relative to the caller's workspace. The caller
-      cannot point this at a file in their own PR.
+      Path to a Verification Definition `.yml` file. Resolved relative
+      to the root selected by `verification-source` (the Duhem checkout
+      by default). Absolute paths and `..` escapes outside that root are
+      rejected before `duhem run` is invoked.
     required: true
+  verification-source:
+    description: |
+      Where `verification-path` resolves — the trust posture of the run.
+      - `duhem` (default): relative to the `onsager-ai/duhem` checkout
+        at the action's pinned tag. The caller cannot substitute the VD
+        body — the centralized asymmetric-trust seam (§11.2). Use for
+        VDs that live in `onsager-ai/duhem`.
+      - `workspace`: relative to the caller's own checkout
+        ($GITHUB_WORKSPACE). For a product self-gating on its OWN
+        co-located VD (Pattern D / Mode A, §10.1) — the product owns and
+        may edit the VD, guarded by CODEOWNERS on `.duhem/`. Trust here
+        rests on mechanical judgment plus a self-consistent Duhem
+        contract, not VD location (§11.2 Alignment note, Duhem-as-tool).
+      Either way `verification-path` must stay inside the resolved root.
+    required: false
+    default: "duhem"
   inputs:
     description: |
       Newline-separated `key=value` pairs forwarded to `duhem run` as
@@ -89,34 +114,66 @@ runs:
         fi
         echo "src=$DUHEM_SRC" >> "$GITHUB_OUTPUT"
 
-    # Trust-boundary enforcement: `verification-path` must resolve
-    # to a file inside the Duhem checkout. An absolute path or any
-    # traversal that lands outside `$DUHEM_SRC` would let a caller
-    # substitute their own VD body, which is exactly the
-    # asymmetric-trust violation §11.2 forbids. The CLI happily
-    # reads any path the OS reads, so the gate has to live here.
+    # Select the root that `verification-path` resolves against. This
+    # is the trust-posture switch: `duhem` keeps the centralized seam
+    # (VD comes from the Duhem clone, caller cannot substitute it);
+    # `workspace` opts into the caller's own checkout for a product
+    # self-gating on its co-located `.duhem/` VD (Mode A, §11.2
+    # Duhem-as-tool). Both modes still enforce the containment gate
+    # below — the difference is only WHICH root the VD must stay inside.
+    - name: Resolve verification root
+      id: vroot
+      shell: bash
+      env:
+        SOURCE: ${{ inputs.verification-source }}
+        DUHEM_SRC: ${{ steps.src.outputs.src }}
+      run: |
+        case "$SOURCE" in
+          duhem)
+            ROOT="$DUHEM_SRC"
+            LABEL="the Duhem checkout"
+            ;;
+          workspace)
+            ROOT="$GITHUB_WORKSPACE"
+            LABEL="the caller workspace"
+            ;;
+          *)
+            echo "::error::verification-source must be 'duhem' or 'workspace' (got: $SOURCE)"
+            exit 1
+            ;;
+        esac
+        echo "root=$ROOT" >> "$GITHUB_OUTPUT"
+        echo "label=$LABEL" >> "$GITHUB_OUTPUT"
+
+    # Trust-boundary enforcement: `verification-path` must resolve to a
+    # file inside the selected root. An absolute path or any traversal
+    # that lands outside the root would let a caller read (or, in the
+    # default `duhem` mode, substitute) a VD body the seam forbids —
+    # the asymmetric-trust violation §11.2 guards against. The CLI
+    # happily reads any path the OS reads, so the gate has to live here.
     # Runs BEFORE the build / Chromium install so a malicious path
     # fails fast and doesn't pay the cold-build cost.
-    - name: Validate verification-path stays inside the Duhem checkout
+    - name: Validate verification-path stays inside the verification root
       shell: bash
       env:
         VERIFICATION_PATH: ${{ inputs.verification-path }}
-        DUHEM_SRC: ${{ steps.src.outputs.src }}
+        VROOT: ${{ steps.vroot.outputs.root }}
+        VLABEL: ${{ steps.vroot.outputs.label }}
       run: |
         case "$VERIFICATION_PATH" in
           /*)
-            echo "::error::verification-path must be relative to the Duhem checkout, not absolute (got: $VERIFICATION_PATH)"
+            echo "::error::verification-path must be relative to $VLABEL, not absolute (got: $VERIFICATION_PATH)"
             exit 1
             ;;
         esac
         # `realpath -m` resolves `..` segments without requiring the
         # file to exist yet; we want the normalized form, then a
-        # prefix check against the Duhem source root.
-        RESOLVED="$(realpath -m "$DUHEM_SRC/$VERIFICATION_PATH")"
+        # prefix check against the verification root.
+        RESOLVED="$(realpath -m "$VROOT/$VERIFICATION_PATH")"
         case "$RESOLVED" in
-          "$DUHEM_SRC"/*|"$DUHEM_SRC") : ;;
+          "$VROOT"/*|"$VROOT") : ;;
           *)
-            echo "::error::verification-path escapes the Duhem checkout ($RESOLVED is outside $DUHEM_SRC)"
+            echo "::error::verification-path escapes $VLABEL ($RESOLVED is outside $VROOT)"
             exit 1
             ;;
         esac
@@ -176,8 +233,14 @@ runs:
     - name: Run verification
       id: run
       shell: bash
-      working-directory: ${{ steps.src.outputs.src }}
+      # Run from the verification root so the VD's relative `cwd`/paths
+      # resolve against the repo the VD lives in — the Duhem checkout in
+      # `duhem` mode, the caller's checkout in `workspace` mode. The
+      # binary is addressed absolutely below since it's always built in
+      # the Duhem clone, wherever we run from.
+      working-directory: ${{ steps.vroot.outputs.root }}
       env:
+        DUHEM_BIN: ${{ steps.src.outputs.src }}/target/release/duhem
         VERIFICATION_PATH: ${{ inputs.verification-path }}
         VD_INPUTS: ${{ inputs.inputs }}
         REPORTER: ${{ inputs.reporter }}
@@ -217,7 +280,7 @@ runs:
         # The evidence store lands at a workspace-local path on the
         # runner (not the XDG state dir) so the artifact-upload path
         # is predictable and the runner's home stays untouched.
-        ./target/release/duhem run "$VERIFICATION_PATH" \
+        "$DUHEM_BIN" run "$VERIFICATION_PATH" \
           --reporter "$REPORTER" \
           --db .duhem/duhem.db \
           "${ARGS[@]}" \
@@ -265,11 +328,14 @@ runs:
     - name: Ship run bundle to hub (opt-in)
       if: always() && steps.run.outputs.run-id != ''
       shell: bash
-      working-directory: ${{ steps.src.outputs.src }}
+      # Same root as the run step — the evidence DB was written to
+      # `$VROOT/.duhem/duhem.db`, so ship has to resolve `--db` there.
+      working-directory: ${{ steps.vroot.outputs.root }}
       continue-on-error: true
       env:
+        DUHEM_BIN: ${{ steps.src.outputs.src }}/target/release/duhem
         DUHEM_HUB_URL: ${{ env.DUHEM_HUB_URL }}
         DUHEM_HUB_TOKEN: ${{ env.DUHEM_HUB_TOKEN }}
         RUN_ID: ${{ steps.run.outputs.run-id }}
       run: |
-        ./target/release/duhem ship "$RUN_ID" --db .duhem/duhem.db --if-configured
+        "$DUHEM_BIN" ship "$RUN_ID" --db .duhem/duhem.db --if-configured

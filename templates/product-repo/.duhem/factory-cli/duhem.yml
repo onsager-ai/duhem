@@ -1,0 +1,54 @@
+# Example leaf Verification Definition — a page-free CLI check.
+#
+# A leaf is identified by the top-level `criteria:` key (§10.2). This
+# one drives a real CLI with `cli/invoke` and judges its exit code +
+# output — no browser, no server, so it needs no Chromium (browser-skip:
+# `cli/*` is page-free). Copy the shape, swap the command + assertions
+# for your product's headline path. See §7 (criteria/checks) and the
+# `cli/invoke` action reference on onsager-ai/duhem.
+#
+# Criteria are the stable human commitment about what "done" means;
+# checks are the derivative mechanical proof (§7.2/§7.3). Keep the
+# criterion prose product-facing and let the check carry the wiring.
+
+verification: Example product — the CLI ships an app
+
+inputs:
+  # Working directory for the CLI. `cli/invoke` resolves a relative
+  # `cwd` against the `duhem` process working directory (where you run
+  # `duhem run`), so `.` points at the repo root when the suite is run
+  # from there. Override with `--inputs repo_dir=/abs/path`.
+  repo_dir:
+    type: string
+    default: .
+  app_description:
+    type: string
+    default: A reading list with progress tracking
+
+criteria:
+  - id: AC-1
+    description: |
+      Running the CLI with a plain-language description builds an app
+      end to end and exits successfully, reporting a reachable app.
+    checks:
+      - id: AC-1.1
+        description: |
+          Run the real CLI and judge the process: a clean exit (code 0)
+          and a final `shipped → <url>` line prove the pipeline ran.
+        steps:
+          - id: ship
+            uses: cli/invoke
+            with:
+              # argv form (no shell) — swap for your product's entry
+              # point (e.g. `[pnpm, <script>, $inputs.app_description]`).
+              command: [echo, "shipped → http://127.0.0.1:0/"]
+              cwd: $inputs.repo_dir
+              within: 180s
+            outputs:
+              exit_code: exit_code
+              stdout: stdout
+        assertions:
+          - $steps.ship.outputs.exit_code == 0
+          - matches:
+              value: $steps.ship.outputs.stdout
+              pattern: "shipped"

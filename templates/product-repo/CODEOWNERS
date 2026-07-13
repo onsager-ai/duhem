@@ -1,0 +1,16 @@
+# Duhem Verification Definitions — the co-located `.duhem/` suite.
+#
+# Drop this stanza into your repo's CODEOWNERS file (GitHub reads it
+# from the repo root, `.github/`, or `docs/`). It routes every edit
+# under `.duhem/` to a verifier reviewer, so a PR that "fixes" a
+# failing verdict by weakening its own check still passes through
+# review. This is the lightweight self-weakening guard from
+# `docs/duhem-spec.md` §11.2 (Duhem-as-tool) — review discipline, not a
+# structural boundary. Pair it with hub-recorded verdicts (`duhem
+# ship`) for the self-attestation guard.
+#
+# Replace @<org>/duhem-verifier with the team or user that owns
+# verification review in your org. Requires branch protection with
+# "Require review from Code Owners" enabled to have teeth.
+
+/.duhem/  @<org>/duhem-verifier

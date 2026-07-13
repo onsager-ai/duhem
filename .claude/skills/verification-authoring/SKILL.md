@@ -101,9 +101,9 @@ B) — see `onsager-dogfood`.
 7. Update duhem.yml (if Pattern B/C) to register the file
 ```
 
-Start every new Verification Definition with `duhem init`; don't
-copy-paste from `verifications/onsager-dashboard-create-spec-plan/`
-or hand-write a fresh tree from scratch. The skeleton bakes the
+Start every new Verification Definition with `duhem init`; for a
+product VD, copy the `.duhem/` skeleton in `templates/product-repo/`
+rather than hand-writing a fresh tree from scratch. The skeleton bakes the
 criteria-vs-checks two-document discipline into the first commit
 and gives you a passing run to confirm your environment works
 before you've authored anything.

@@ -1,19 +1,17 @@
-# Dogfood — exercises `.github/actions/run` against this repo's first
-# Verification Definition on every push. Spec: onsager-ai/duhem#36.
+# Dogfood — exercises `.github/actions/run` as the worked example for
+# the action surface. Spec: onsager-ai/duhem#36.
 #
-# Two jobs serve as the worked example for the action surface
-# documented in `.github/actions/run/README.md`:
+# The `wiring` job dry-runs a self-verification VD through the CLI
+# (parse / validate / resolve), then asserts the action's trust-boundary
+# path validation rejects absolute / escaping `verification-path`
+# values — the regression harness for the asymmetric-trust seam
+# (§11.2). No live product environment needed; required on every PR.
 #
-# - `wiring`: parses, validates, and dry-runs the VD through the
-#   action. Catches contract drift between the action and the CLI
-#   (input parsing, flag forwarding, output capture) without needing
-#   a live Onsager environment in the runner. Required on every PR.
-# - `verdict`: the full holistic run — builds Onsager, brings it up,
-#   runs the VD end-to-end. Gated on a real Onsager source being
-#   available, which waits on the Onsager-side companion spec (the
-#   tracking note lives in the spec issue's "Open questions"). Until
-#   that lands, the job no-ops; once it lands, it flips on without a
-#   workflow rewrite.
+# The holistic onsager `verdict` run that used to live here moved out in
+# epic #225 P4: product VDs are co-located with their products now
+# (Chreode self-gates in `onsager-ai/chreode/.duhem/` and is
+# drift-monitored via `drift-chreode.yml`; Onsager the same once it
+# resumes). See `.github/actions/run/README.md`.
 
 name: dogfood
 
@@ -74,12 +72,15 @@ jobs:
       - name: Build duhem CLI
         run: cargo build --release -p duhem-cli
 
-      - name: Dry-run create-spec-plan VD (direct CLI)
+      - name: Dry-run a VD through the CLI (parse/resolve smoke)
         run: |
+          # A self-verification VD (page-free, no required inputs) is
+          # enough to smoke the action's parse/validate/resolve pipeline.
+          # The onsager dogfood VD that used to sit here moved to
+          # onsager-ai/onsager/.duhem/ (epic #225 P4).
           ./target/release/duhem run \
-            verifications/onsager-dashboard-create-spec-plan/duhem.yml \
-            --dry-run \
-            --inputs plan_id=duhem-fixture-${{ github.run_id }}
+            verifications/duhem-cli/duhem.yml \
+            --dry-run
 
       # Trust-boundary negative test #1: an absolute
       # verification-path must be rejected by the action before
@@ -118,39 +119,9 @@ jobs:
             exit 1
           fi
 
-  verdict:
-    # Holistic run against a live Onsager environment. Gated until a
-    # CI runner can bring the Onsager `just dev` stack up (Postgres +
-    # four Rust services + the Vite dashboard) and seed a workflow —
-    # see `verifications/onsager-dashboard-create-spec-plan/README.md`
-    # and the spec issue's "Open questions".
-    name: holistic run (gated)
-    runs-on: ubuntu-latest
-    if: ${{ vars.ONSAGER_DOGFOOD_READY == 'true' }}
-    steps:
-      - uses: actions/checkout@v4
-
-      # Onsager build/serve steps land with the Onsager-side companion
-      # work — a CI runner brings the `just dev` stack up on
-      # http://localhost:5173 (dashboard) / :3002 (portal) with the
-      # dev workspace + a seeded workflow. `up.sh` does this locally;
-      # the CI equivalent is the open item.
-      - name: Bring up Onsager
-        run: |
-          echo "::error::Onsager build/serve hook not yet wired. Set repo variable ONSAGER_DOGFOOD_READY=false until the Onsager dev-stack CI bring-up lands."
-          exit 1
-
-      - name: Verify create-spec-plan
-        id: duhem
-        uses: ./.github/actions/run
-        with:
-          verification-path: verifications/onsager-dashboard-create-spec-plan/duhem.yml
-          inputs: |
-            plan_id=duhem-fixture-${{ github.run_id }}
-
-      - name: Surface evidence on red
-        if: failure() && steps.duhem.outputs.store != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: duhem-evidence
-          path: ${{ steps.duhem.outputs.store }}
+  # The holistic onsager `verdict` job that used to live here was
+  # removed in epic #225 P4: the onsager `create-spec-plan` VD moved to
+  # onsager-ai/onsager/.duhem/, where Onsager self-gates it (Mode A). A
+  # `drift-onsager` lane (mirroring `drift-chreode.yml`, Mode B) can be
+  # added when Onsager resumes. This workflow now stays focused on the
+  # action-wiring worked example above.

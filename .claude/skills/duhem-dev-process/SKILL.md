@@ -17,9 +17,10 @@ Cargo workspace ships nine product crates (`duhem-cli`,
 CLI exposes `init` / `run` / `validate` / `--version`; the `ui/*` and
 `api/*` action families (`ui/navigate`, `ui/click`, `ui/type`,
 `ui/select`, `ui/assert-*`, `api/call`, `api/observe`) and the
-`up:` / `down:` environment hooks are wired in; and the first Onsager
-dogfood verification ships at
-`verifications/onsager-dashboard-create-spec-plan/`. The dev loop
+`up:` / `down:` environment hooks are wired in; and product
+Verification Definitions are co-located with the products they verify
+(Chreode ships them in `onsager-ai/chreode/.duhem/`; epic #225). The
+dev loop
 below is intentionally lean — it mirrors the discipline used on
 `onsager-ai/onsager`, but does not inherit Onsager's seam rule, area
 taxonomy, or Rust toolchain checks beyond what `cargo`, `clippy`, and

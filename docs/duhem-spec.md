@@ -329,7 +329,28 @@ Same root manifest pattern as B, just different file layout.
 
 #### Pattern D: Co-located in the target repo (cross-repo verification)
 
-Suitable when Duhem verifies a *product it does not itself ship* — a regression suite for a separate codebase. The Verification Definition lives in the **target product's** repository (Pattern B or C layout, with its own `duhem.yml`), co-located with the code it exercises, and declares its target coordinate with `project:` (§10.4). The product's own CI runs `duhem/run` against itself, and Duhem's dogfood CI runs the suite from the target ref; either way the verifier/target relationship is recorded with provenance (§11.1). Duhem is used here as a *tool*, not a host: this is how it verifies products like Crawlab, Chreode, and Onsager without hoarding their checks. Only Duhem's own self-verification VDs stay in `onsager-ai/duhem`; the trust that matters is mechanical judgment plus a self-consistent Duhem contract, not VD location (§11.2). Optional per-repo CODEOWNERS on the VD path and hub-recorded verdicts remain available as lightweight review/evidence discipline.
+Suitable when Duhem verifies a *product it does not itself ship* — a regression suite for a separate codebase. The Verification Definition lives in the **target product's** repository, co-located with the code it exercises, and declares its target coordinate with `project:` (§10.4). The product's own CI runs `duhem/run` against itself, and Duhem's dogfood CI runs the suite from the target ref; either way the verifier/target relationship is recorded with provenance (§11.1). Duhem is used here as a *tool*, not a host: this is how it verifies products like Crawlab, Chreode, and Onsager without hoarding their checks. Only Duhem's own self-verification VDs stay in `onsager-ai/duhem`; the trust that matters is mechanical judgment plus a self-consistent Duhem contract, not VD location (§11.2). Optional per-repo CODEOWNERS on the VD path and hub-recorded verdicts remain available as lightweight review/evidence discipline.
+
+The concrete layout is a **`.duhem/` directory** at the product repo root — hidden and tool-namespaced like `.github/` or `.vscode/`, so it reads as "this repo adopts the Duhem tool" and never collides with the product's own `verifications/` or test folders:
+
+```
+onsager-ai/chreode/           # the target PRODUCT repo (not onsager-ai/duhem)
+  .duhem/
+    duhem.yml                 # root manifest (§10.4) — aggregates the suite
+    chreode-factory-cli/
+      duhem.yml               # leaf Verification Definition
+      criteria.md             # human criteria prose
+  packages/                   # the product's own code
+  package.json
+CODEOWNERS                    # /.duhem/  @<org>/duhem-verifier  (optional guard)
+```
+
+Inside `.duhem/` the Pattern B / Pattern C shape applies unchanged — a root `duhem.yml` manifest plus per-VD subdirectories (or flat leaf files). The verifier runs the suite two ways (`docs/duhem-spec.md` §11.2, §12.1):
+
+- **Mode A — the product self-gates.** The product's own CI runs `duhem run .duhem/duhem.yml` (via the `duhem` CLI directly, or `duhem/run` with `verification-source: workspace`) as a required check on its PRs. The product owns and may edit its VD; the CODEOWNERS stanza on `/.duhem/` routes VD edits to a verifier reviewer.
+- **Mode B — Duhem monitors drift.** Duhem's dogfood CI checks the product out at a ref and runs its `.duhem/` suite with the freshly-built `duhem`, so a Duhem change that would break a consumer's VD turns red before it ships. This is the reframed dogfood — drift monitoring, not a trust seam.
+
+A ready-to-copy `.duhem/` skeleton, CODEOWNERS stanza, and Mode A CI snippet live in [`templates/product-repo/`](../templates/product-repo/).
 
 ### 10.2 Self-identification
 

@@ -1,0 +1,30 @@
+# Duhem root manifest — a product repo's co-located verification suite.
+#
+# This is the entry point Duhem loads for your repo. Drop the `.duhem/`
+# tree at your repo root and run `duhem run .duhem/duhem.yml` (or just
+# `duhem run .duhem`). See `docs/duhem-spec.md` §10.1 Pattern D and
+# §10.4 (manifest schema) on onsager-ai/duhem.
+#
+# A root manifest is identified by the top-level `verifications:` key
+# (§10.2). Each entry points at a leaf Verification Definition (a file
+# with a top-level `criteria:` key). Add a leaf by adding a `path:`
+# entry — the suite grows one line at a time.
+
+manifest_version: 1
+
+# Optional shared environment: provision your product's real stack once,
+# every leaf runs against it, torn down once (§11 up:/down: hooks). Omit
+# this block for a page-free CLI suite that needs no server. Example:
+#
+# environment:
+#   up: ./.duhem/scripts/up.sh
+#   down: ./.duhem/scripts/down.sh
+#   ready:
+#     http:
+#       url: http://127.0.0.1:8080/health
+#       timeout: 120s
+
+verifications:
+  # Replace with your product's leaves. One example leaf ships alongside
+  # this manifest at `factory-cli/duhem.yml`.
+  - path: factory-cli/duhem.yml

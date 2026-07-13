@@ -18,11 +18,12 @@ and §11.2 (trust boundary).
 
 ## Inputs
 
-| Name                | Required | Default | Description |
-|---------------------|----------|---------|-------------|
-| `verification-path` | yes      | —       | Path to a `.yml` Verification Definition, **resolved relative to the `onsager-ai/duhem` repo at the pinned action tag** — not relative to the caller's checkout. Absolute paths and paths that normalize to anything outside the Duhem checkout are rejected before invoking `duhem run`; see "Trust contract" below. |
-| `inputs`            | no       | `""`    | Newline-separated `key=value` pairs forwarded as repeated `--inputs key=value` flags to `duhem run`. Coerced per the Verification Definition's typed input catalog. |
-| `reporter`          | no       | `json`  | Stdout reporter (`default` / `quiet` / `json`, plus plugin reporters from `.duhem.toml`). The action's `verdict` + `store` outputs depend on parsing the json summary, so leave at the default unless you have a plugin that emits the same single-line JSON contract. |
+| Name                  | Required | Default   | Description |
+|-----------------------|----------|-----------|-------------|
+| `verification-path`   | yes      | —         | Path to a `.yml` Verification Definition, resolved relative to the root selected by `verification-source`. Absolute paths and paths that normalize outside that root are rejected before invoking `duhem run`; see "Trust contract" below. |
+| `verification-source` | no       | `duhem`   | Which root `verification-path` resolves against — the run's trust posture. `duhem`: the `onsager-ai/duhem` checkout at the pinned tag (the caller cannot substitute the VD — centralized seam). `workspace`: the caller's own checkout (`$GITHUB_WORKSPACE`), for a product self-gating on its co-located `.duhem/` VD (Mode A). See "Two trust postures" below. |
+| `inputs`              | no       | `""`      | Newline-separated `key=value` pairs forwarded as repeated `--inputs key=value` flags to `duhem run`. Coerced per the Verification Definition's typed input catalog. |
+| `reporter`            | no       | `json`    | Stdout reporter (`default` / `quiet` / `json`, plus plugin reporters from `.duhem.toml`). The action's `verdict` + `store` outputs depend on parsing the json summary, so leave at the default unless you have a plugin that emits the same single-line JSON contract. |
 
 ## Outputs
 
@@ -89,10 +90,46 @@ Onsager-side branch protection on `main` then adds the
 `duhem / create-spec-plan` status check as required. An Onsager PR
 cannot merge past a Duhem `fail`.
 
-## Trust contract (§11.2)
+## Two trust postures (`verification-source`)
+
+The action runs a VD from one of two roots, and the choice *is* the
+trust posture. Both build the `duhem` CLI from the pinned Duhem clone
+and enforce the same containment gate (no absolute paths, no `..`
+escapes); they differ only in which repo owns the VD.
+
+| `verification-source` | VD resolved from | Who owns the VD | Use for |
+|-----------------------|------------------|-----------------|---------|
+| `duhem` (default)     | the `onsager-ai/duhem` checkout at the pinned tag | Duhem maintainers | Centralized VDs in `onsager-ai/duhem`. The caller cannot substitute the VD body — the asymmetric-trust seam (below). |
+| `workspace`           | the caller's own checkout (`$GITHUB_WORKSPACE`) | the product | A product self-gating on its co-located `.duhem/` VD (**Mode A**, §10.1 Pattern D). |
+
+**Why `workspace` is not a seam violation.** The §11.2 Alignment note
+(Duhem-as-tool) decoupled trust from VD *location*: what makes a `pass`
+trustworthy is mechanical judgment (no LLM in the judge) plus a
+self-consistent Duhem contract — not where the VD file lives. In Mode A
+the product legitimately owns its VD and gates its own PRs on it; the
+lightweight guard against silent self-weakening is a CODEOWNERS stanza
+on `/.duhem/` routing VD edits to a verifier reviewer, plus
+hub-recorded verdicts (`duhem ship`) that a product PR can't rewrite.
+A drop-in `.duhem/` skeleton + CODEOWNERS + Mode A CI snippet lives in
+[`templates/product-repo/`](../../../templates/product-repo/).
+
+Mode A adopters who want no GitHub Action at all can skip this action
+entirely and run the CLI directly in their CI —
+`duhem run .duhem/duhem.yml` resolves workspace-local paths natively.
+The action's value over direct-CLI is the batteries (Node + Chromium
+setup, verdict parsing, opt-in hub shipping), which matter most for
+UI-heavy suites.
+
+**Mode B** (Duhem's dogfood CI monitors drift by running a product's
+co-located suite with a freshly-built `duhem`) does not use this action
+at all — it invokes the CLI directly against a checked-out product ref.
+See [`.github/workflows/drift-chreode.yml`](../../workflows/drift-chreode.yml).
+
+## Trust contract (§11.2) — the default `duhem` seam
 
 Duhem's identity rests on the verifier being structurally
-independent of the AI being verified. This action is the
+independent of the AI being verified. In the default
+`verification-source: duhem` posture, this action is the
 deployment of that boundary at the CI seam.
 
 What the action does:
@@ -111,12 +148,15 @@ What the action does:
   `crates/duhem-schema/src/inputs.rs`), so a caller cannot smuggle
   options that change action behavior — only data values.
 
-What the action does **not** do:
+What the action does **not** do (in the default `duhem` posture):
 
 - It does not read the Verification Definition from the caller's
   workspace. A caller cannot land a PR that "fixes" a failing
   verdict by editing the VD inline; that edit lives in the caller's
-  PR and is not visible to this action's CLI invocation.
+  PR and is not visible to this action's CLI invocation. (This is
+  exactly what `verification-source: workspace` opts out of, for the
+  Mode A self-gating case above — where the product is *meant* to own
+  its VD.)
 - It does not accept arbitrary `duhem run` flags. The surface is
   the three inputs above plus the verdict-line contract. Adding a
   pass-through `extra-args` input here would let a caller pass

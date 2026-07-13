@@ -1,0 +1,112 @@
+# Adopt Duhem in a product repo (`.duhem/` template)
+
+Drop-in skeleton for **co-locating Duhem Verification Definitions with
+the product they verify** — the concrete form of Pattern D
+(`docs/duhem-spec.md` §10.1). Duhem is used here as a *tool*: your
+repo owns its checks, next to the code they exercise. Copy the
+`.duhem/` tree and the `CODEOWNERS` stanza into your product repo.
+
+```
+your-product/
+├── .duhem/
+│   ├── duhem.yml                # root manifest — aggregates the suite
+│   └── factory-cli/
+│       └── duhem.yml            # a leaf Verification Definition
+├── CODEOWNERS                   # routes /.duhem/ edits to a verifier
+└── … your product code …
+```
+
+`.duhem/` is hidden and tool-namespaced (like `.github/`), so it reads
+as "this repo adopts the Duhem tool" and never collides with your own
+`verifications/` or test folders. Inside it, the normal manifest +
+leaf shape applies (§10.1 Pattern B/C, §10.4).
+
+Commit the `.duhem/` VDs, but ignore the evidence DB `duhem run`
+writes there — add this to your `.gitignore`:
+
+```gitignore
+# Duhem run evidence — ignore the DB, commit the VDs
+.duhem/*.db
+.duhem/*.db-*
+```
+
+## Run it locally
+
+```bash
+duhem validate .duhem/duhem.yml    # schema-check the suite
+duhem run .duhem/duhem.yml         # run it; exit 0 == pass
+```
+
+## Mode A — self-gate on your own PRs
+
+Make the suite a required check on your repo. Two ways:
+
+**Direct CLI (simplest; no GitHub Action).** Install or build `duhem`,
+then run the suite. Best for page-free CLI/API suites that need no
+browser.
+
+```yaml
+# .github/workflows/duhem.yml
+name: duhem
+on: pull_request
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # …bring your product's real environment up (build, serve, seed)…
+      - name: Install duhem
+        run: npm i -g @onsager/duhem   # or download a release binary
+      - name: Verify
+        run: duhem run .duhem/duhem.yml
+```
+
+**Via `duhem/run` (batteries included).** Use the composite action with
+`verification-source: workspace` so it resolves your co-located VD from
+your checkout. It sets up Node + Chromium, parses the verdict, and can
+ship evidence to a hub — worth it for UI-heavy suites.
+
+```yaml
+# .github/workflows/duhem.yml
+name: duhem
+on: pull_request
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # …bring your product's real environment up…
+      - name: Verify
+        uses: onsager-ai/duhem/.github/actions/run@v0.1
+        with:
+          verification-source: workspace
+          verification-path: .duhem/duhem.yml
+```
+
+Then add the `duhem` check as required in branch protection.
+
+## Mode B — Duhem monitors drift (nothing to set up here)
+
+Duhem's own CI checks your repo out at a ref and runs your `.duhem/`
+suite with a freshly-built `duhem`, so a Duhem change that would break
+your VD turns red on the *Duhem* side before it ships. This is the
+reframed dogfood — drift monitoring, not a trust seam (§11.2). You
+don't configure it; the Duhem maintainers point their drift lane at
+your repo (see `.github/workflows/drift-chreode.yml` for the shape).
+
+## Guard against silent self-weakening
+
+Because you own your VD, a PR could in principle weaken a check to dodge
+a failing verdict. Two lightweight guards (§11.2 — review/evidence
+discipline, not a structural boundary):
+
+1. **CODEOWNERS on `/.duhem/`** (the `CODEOWNERS` file here) routes VD
+   edits to a verifier reviewer. Needs branch protection with "Require
+   review from Code Owners".
+2. **Hub-recorded verdicts** (`duhem ship`) record each verdict with
+   `(verifier_repo/sha, target_repo/sha)` provenance the product PR
+   can't rewrite.
+
+The trust that makes a `pass` meaningful is mechanical judgment (no LLM
+in the judge) plus a self-consistent Duhem contract — not where the VD
+lives. See the §11.2 Duhem-as-tool Alignment note.

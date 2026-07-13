@@ -6,8 +6,14 @@
 .idea/
 .vscode/
 
-# Local Duhem run evidence (written by `duhem run`)
-.duhem/
+# Local Duhem run evidence (written by `duhem run`). Root-anchored so a
+# committed `.duhem/` VD suite (Pattern D, `templates/product-repo/`) is
+# NOT swallowed by this rule; `*.db` catches evidence written into any
+# nested `.duhem/` too. Product repos adopting the `.duhem/` layout want
+# the same narrow pattern — ignore the DB, commit the VDs.
+/.duhem/
+.duhem/*.db
+.duhem/*.db-*
 
 # Dashboard SPA toolchain output (built in CI; build.rs writes a
 # placeholder when absent)

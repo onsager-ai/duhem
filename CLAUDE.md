@@ -93,9 +93,15 @@ two repos move together because the same person is building both,
 but they are **parallel, not shared**:
 
 - Each repo has its own `.claude/skills/` and its own SDD loop.
-- Duhem schema, CLI, runtime, judge, dashboard, integrations, and
-  the Verification Definitions that exercise Onsager features all
-  live on `onsager-ai/duhem`.
+- Duhem's schema, CLI, runtime, judge, dashboard, and integrations
+  live on `onsager-ai/duhem`, along with Duhem's own
+  self-verification VDs.
+- Product Verification Definitions live **with the product** they
+  verify, in a co-located `.duhem/` suite — Duhem is used as a tool
+  (epic #225). Chreode already moved
+  (`onsager-ai/chreode/.duhem/`, self-gated in its own CI +
+  drift-monitored here); Onsager's move is P4 (pending — Onsager is
+  paused, so its VD is still in-tree today).
 - Onsager's product surfaces (forge, stiglab, synodic, dashboard,
   events, migrations) live on `onsager-ai/onsager`.
 - Cross-repo work is two specs (one on each repo) with a contract in

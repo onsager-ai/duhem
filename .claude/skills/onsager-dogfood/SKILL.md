@@ -1,6 +1,6 @@
 ---
 name: onsager-dogfood
-description: Run Duhem against onsager-ai/onsager — Duhem's first dogfood customer. Use when authoring or maintaining Verification Definitions that target the Onsager dashboard / API / events, when wiring Duhem verdicts into Onsager's PR checks, when triaging a verdict that fired on an Onsager PR, or when you're unsure which side of the Duhem/Onsager seam owns a given change. Covers the cross-repo discipline (which spec lives where, which PR opens where), the asymmetric trust boundary (Duhem authors checks; Onsager only consumes verdicts), and the milestones in `docs/duhem-spec.md` Appendix D / §14. Triggers include "dogfood on Onsager", "verify against Onsager", "Onsager PR check", "Duhem on Onsager", "cross-repo spec", "which repo owns this", "Onsager-Duhem boundary".
+description: Dogfood Duhem against the products it verifies (Onsager, Chreode, Crawlab) — Duhem-as-tool with co-located `.duhem/` VDs. Use when authoring or maintaining a product's Verification Definitions, when wiring a product self-gate (Mode A) or Duhem's drift-monitoring lane (Mode B), when triaging a verdict that fired on a product PR, or when you're unsure which side of the Duhem/product seam owns a change. Covers the cross-repo discipline (which spec lives where, which PR opens where), the trust model (mechanical judgment + a self-verified Duhem contract + optional CODEOWNERS/hub — not hoarded checks), and `docs/duhem-spec.md` §10.1 Pattern D / Appendix D / §14. Triggers include "dogfood on Onsager", "dogfood on Chreode", "verify against a product", "product PR check", "drift monitoring", "co-locate VDs", "cross-repo spec", "which repo owns this", "Duhem/product boundary".
 ---
 
 # onsager-dogfood
@@ -15,6 +15,23 @@ The product framing is in `docs/duhem-spec.md` Appendix D
 (roadmap). Read those before invoking this skill if you haven't
 already — the discipline below makes more sense once you've seen
 why the relationship is structured the way it is.
+
+> **Reframe (epic #225 — Duhem is a tool).** Product Verification
+> Definitions no longer live in `onsager-ai/duhem`; they live **with
+> the product** in a co-located `.duhem/` suite (`docs/duhem-spec.md`
+> §10.1 Pattern D). The dogfood is now **drift monitoring**: run each
+> product's real VDs with the current Duhem to catch a Duhem change
+> that would break a consumer. A `pass` is trustworthy because Duhem's
+> judge is mechanical (no LLM) and Duhem's own contract stays
+> self-verified — **not** because the checks are hoarded here. The
+> worked, shipped example is **Chreode**
+> (`onsager-ai/chreode/.duhem/`): self-gated in its own CI (**Mode A**)
+> and drift-monitored here via `.github/workflows/drift-chreode.yml`
+> (**Mode B**). Onsager is the same pattern with its VD still in-tree
+> until P4 (Onsager is paused). Where this skill below says "the
+> dogfood VDs are Duhem artifacts in `onsager-ai/duhem`", read it
+> through this reframe — the cross-repo/two-specs/no-mocks discipline
+> still holds; only the VD's *home* and the trust *rationale* changed.
 
 ## The relationship in one paragraph
 
@@ -37,7 +54,8 @@ discipline. They are **parallel, not shared**.
 | Concern                                                       | Lives on                  | Skills involved                                                   |
 |---------------------------------------------------------------|---------------------------|-------------------------------------------------------------------|
 | Duhem schema, CLI, runtime, judge, dashboard, integrations    | `onsager-ai/duhem`        | All Duhem-side skills (`duhem-*`, `issue-spec`, `verification-authoring`) |
-| Verification Definitions that exercise Onsager features       | `onsager-ai/duhem`        | `verification-authoring` (`area:dogfood`)                          |
+| Verification Definitions that exercise a product (Onsager, Chreode, Crawlab) | The **product's** repo, co-located `.duhem/` (Chreode moved; Onsager P4-pending, still in-tree) | `verification-authoring` (Pattern D)      |
+| Duhem's own self-verification VDs                             | `onsager-ai/duhem` (`verifications/`) | `verification-authoring`                              |
 | Onsager features themselves (forge, stiglab, synodic, dashboard, etc.) | `onsager-ai/onsager` | Onsager's `onsager-dev-process`, `issue-spec`, `dashboard-ui`, etc. |
 | The GitHub Action / webhook that surfaces Duhem verdicts on Onsager PRs | `onsager-ai/onsager` (consumer side) + `onsager-ai/duhem` (publisher side) | Both sides use the global `pr-lifecycle` skill (with each repo's overlay); Duhem-side also this skill. |
 | Spec for "Duhem ought to be able to verify behavior X on Onsager" | `onsager-ai/duhem`     | `issue-spec` here, label `area:dogfood`                            |
@@ -61,59 +79,72 @@ This mirrors Onsager's own internal "split cross-subsystem specs"
 rule — at the dogfood seam, the two subsystems happen to be
 separate repos.
 
-## Asymmetric trust boundary
+## Trust boundary — independence without hoarding
 
-Duhem-Quine has a structural consequence for dogfooding: **the
-verifier of AI claims must be structurally independent of the AI
-making them.** That principle binds the Duhem-Onsager pair too,
-and asymmetrically:
+The verifier of AI claims must be structurally independent of the AI
+making them. Under the reframe (#225), that independence does **not**
+come from Duhem hoarding the product's checks — the product owns its
+co-located `.duhem/` VD. It comes from two things that survive
+co-location (`docs/duhem-spec.md` §11.2):
 
-- **Duhem authors checks against Onsager.** AI assistance writing
-  these checks is fine; humans review them; once frozen they are
-  frozen (`docs/duhem-spec.md` §7.3, §11.2).
-- **Onsager does not author its own Duhem checks.** Even though
-  the same human builds both, an Onsager-side PR cannot
-  unilaterally relax or override a verdict on itself. The
-  `area:dogfood` Verification Definitions are Duhem artifacts, not
-  Onsager artifacts; their PRs go through Duhem's review.
-- **Onsager cannot self-attest pass.** A `fail` verdict on an
-  Onsager PR cannot be overridden by another commit on the same
-  PR. Override requires explicit human action with an audit trail
-  (per §9 Stage 5), exactly as it would for any external customer.
+- **Mechanical judgment.** The verdict is deterministic evaluation of
+  structured assertions — no LLM in the judge. A product can't argue
+  its way to a `pass`; the assertions either hold against the real
+  web or they don't (§7.6, §11.2).
+- **A self-consistent, self-verified Duhem contract.** What must stay
+  trustworthy is Duhem's own schema / judge / docs, gated by Duhem's
+  self-verification suite — not the location of any product's VD.
 
-If you find yourself reaching for "I'll just relax the check from
-the Onsager side this once", **stop**. That's the trust boundary
-you'd refuse to break for a paying customer; the same applies to
-the dogfood. Resolve the failure, escalate the verdict, or update
-the criterion explicitly via a Duhem spec — never bypass.
+Two lightweight guards keep a product from quietly weakening its own
+gate (review/evidence discipline, not a structural wall):
 
-## Authoring a dogfood Verification Definition
+- **CODEOWNERS on `/.duhem/`.** A product PR that edits its own VD to
+  dodge a failure routes to a verifier reviewer. Optional and
+  per-repo; Chreode ships the stanza (inert until the verifier team +
+  branch protection exist).
+- **Hub-recorded verdicts.** Duhem records each verdict with
+  `(verifier_repo/sha, target_repo/sha)` provenance the product PR
+  can't rewrite, so a product can't self-attest past a `fail`.
 
-When the trigger is "verify <Onsager feature> with Duhem":
+If you find yourself reaching for "I'll just relax the check from the
+product side this once", **stop** — resolve the failure, escalate the
+verdict, or change the criterion explicitly (a reviewed VD edit),
+never a silent bypass. Same discipline you'd keep for a paying
+customer.
 
-1. Confirm the Onsager feature you're verifying. Read its
-   acceptance criteria (the Onsager spec issue's `## Test`
-   section is the right starting point — Onsager and Duhem agree
-   on the lean-spec format, and the criteria there should be
-   shaped exactly like Duhem criteria already).
-2. File a Duhem spec issue (via `issue-spec`) with
-   `area:dogfood` and a title like `spec(dogfood): verify
-   <onsager-feature>`. Body links the Onsager spec by URL (cross-
-   repo: spell out `onsager-ai/onsager#N`, not just `#N`).
-3. Author the Verification Definition under `verification-authoring`.
-   Inputs include the staging URL of the Onsager environment, a
-   test user fixture, and any data preconditions. The
-   environment is **Onsager's real staging**, with the real
-   Postgres event spine, the real dashboard, the real subsystem
-   binaries — not a mock. Per §8 / §11.2, Duhem is exercising
-   the actual web.
-4. Open the Duhem PR with `Closes #N` against the Duhem dogfood
-   spec. Link the Onsager spec for context.
-5. Onsager's side, separately: ensure the Onsager environment
-   exposes whatever observation seam the Duhem check needs (e.g.
-   a webhook is reachable, the test user exists, a feature flag
-   is on in staging). That's an Onsager spec, on the Onsager
-   repo, owned by Onsager's `issue-spec` skill — **not** this one.
+## Authoring a co-located Verification Definition
+
+When the trigger is "verify <product feature> with Duhem", the VD
+lives in the **product's** repo under `.duhem/` (Pattern D). Chreode
+is the worked example (`onsager-ai/chreode#288` / `#289`).
+
+1. Confirm the product feature and its acceptance criteria (the
+   product spec's `## Test` section — lean-spec criteria map straight
+   onto Duhem criteria).
+2. File the spec on the **product's** repo (its own `issue-spec`),
+   e.g. `spec(...): adopt/extend the Duhem .duhem/ suite`. If Duhem
+   needs a new surface (action type, schema field) to express the
+   check, that's a *separate* Duhem spec (`area:dogfood` /
+   `area:integration`) with its own worked-VD example.
+3. Author the VD in the product's `.duhem/<slug>/` via
+   `verification-authoring` (Pattern D). It drives the product's
+   **real** environment — real API, real dashboard, real binaries,
+   no mock (§8 / §11.2). `templates/product-repo/` is the drop-in
+   skeleton.
+4. Wire it to run:
+   - **Mode A (product self-gate).** A `duhem` workflow in the product
+     repo runs `duhem run .duhem/…` on its PRs — via the release
+     binary (see chreode's `.github/workflows/duhem.yml`) or
+     `duhem/run` with `verification-source: workspace`.
+   - **Mode B (drift monitoring, this repo).** Duhem's CI runs the
+     product's suite from a checked-out ref with a freshly-built
+     `duhem` (`.github/workflows/drift-chreode.yml`; copy per
+     product, swapping the target + env bring-up). A red here = a
+     Duhem regression against that product.
+5. Open the product PR (`Closes #N` on the product spec). Any
+   Duhem-side wiring (a new drift lane, a new action) is its own Duhem
+   PR under the Duhem spec from step 2. Cross-repo: spell out
+   `owner/repo#N`, land both before either merges, chreode-style.
 
 ## Verdict surfacing on Onsager PRs
 
@@ -158,10 +189,13 @@ the Onsager-side commit / spec amendment, not as a Duhem-side
   an Onsager spec. "Just edit Onsager from the Duhem session" is
   a process violation; route the work through Onsager's own
   SDD loop.
-- **Letting dogfood specs drift.** When Onsager's feature
+- **Letting dogfood specs drift.** When a product's feature
   changes, the criterion may not, but the check might. Keep the
-  Duhem `area:dogfood` Verification Definitions in sync via
-  Duhem-side PRs; do not edit them from Onsager-side PRs.
+  product's `.duhem/` Verification Definitions in sync via
+  **product-side** PRs (gated by the `/.duhem/` CODEOWNERS), not by
+  editing them from a Duhem PR — the VD lives with the product now.
+  Duhem's drift lane catches the *other* direction: a Duhem change
+  that breaks the product's existing VD.
 
 ## When you don't know which side owns the work
 

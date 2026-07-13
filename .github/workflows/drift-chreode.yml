@@ -7,17 +7,17 @@
 # monitoring, not a trust seam. A red verdict here means a Duhem
 # regression *against Chreode*, caught before it ships.
 #
-# Lane: `verifications/chreode-factory-cli` — one page-free `cli/invoke`
+# Lane: `chreode/.duhem/factory-cli` — one page-free `cli/invoke`
 # (`pnpm chreode "<desc>"`), so NO Chromium is needed (browser-skip
 # #125; `cli/*` is page-free). Chreode runs in its default deterministic
 # mode (FakeAgent + dry-run drivers): no live LLM, a real local preview
 # server, ships in seconds.
 #
-# TODAY the chreode VD still lives in this repo under `verifications/`;
-# P3 of #225 relocates it into onsager-ai/chreode, at which point the
-# `duhem run` path below flips to the chreode checkout (`chreode/…`).
-# Until then verifier and VD share this repo, which is fine — Mode B
-# only cares that the VD runs against the *real* Chreode.
+# The chreode VD lives in onsager-ai/chreode under `.duhem/` (P3 of
+# #225, chreode#289); the `duhem run` path below reads it from the
+# chreode checkout (`chreode/.duhem/…`). Verifier (this repo, current
+# source) and target VD (the chreode ref) are now separate — Mode B
+# runs the product's real VD against the freshly-built duhem.
 #
 # Generalizing to other products (crawlab, …): copy this file, swap the
 # target repo + the env bring-up + the VD path. Crawlab additionally
@@ -30,13 +30,11 @@ on:
   pull_request:
     paths:
       - 'crates/**'
-      - 'verifications/chreode-factory-cli/**'
       - '.github/workflows/drift-chreode.yml'
   push:
     branches: [main]
     paths:
       - 'crates/**'
-      - 'verifications/chreode-factory-cli/**'
       - '.github/workflows/drift-chreode.yml'
   workflow_dispatch:
 
@@ -87,7 +85,10 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # 24 = the version chreode's worker + dev actually run. The
+          # factory imports `node:sqlite` (a Node 22.5+ builtin), so
+          # `pnpm chreode` crashes at startup on Node 20.
+          node-version: '24'
 
       # Chreode's default deterministic mode needs no secrets and no LLM.
       # `pnpm build` mirrors the operator setup the create-and-ship VD's
@@ -110,7 +111,7 @@ jobs:
           set +e
           OUT="$(mktemp)"
           ./target/release/duhem run \
-            verifications/chreode-factory-cli/duhem.yml \
+            chreode/.duhem/factory-cli/duhem.yml \
             --inputs chreode_repo_dir=chreode \
             --reporter json \
             --db .duhem/duhem.db \

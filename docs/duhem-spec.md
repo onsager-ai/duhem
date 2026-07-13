@@ -337,7 +337,7 @@ The concrete layout is a **`.duhem/` directory** at the product repo root — hi
 onsager-ai/chreode/           # the target PRODUCT repo (not onsager-ai/duhem)
   .duhem/
     duhem.yml                 # root manifest (§10.4) — aggregates the suite
-    chreode-factory-cli/
+    factory-cli/
       duhem.yml               # leaf Verification Definition
       criteria.md             # human criteria prose
   packages/                   # the product's own code

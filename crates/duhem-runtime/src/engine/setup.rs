@@ -132,9 +132,13 @@ pub(crate) async fn run_setup(
         // template substitution.
         let ctx = crate::engine::context::RunContext::new(run);
         let mut resolved_with = step.with.clone();
-        if let Err(reference) = substitute_with(&mut resolved_with, &ctx) {
+        if let Err(u) = substitute_with(&mut resolved_with, &ctx) {
             return Err(EngineError::UnresolvedReference {
-                reference,
+                reference: u.reference,
+                context: u
+                    .context
+                    .map(|c| format!(" (evaluating `{c}`)"))
+                    .unwrap_or_default(),
                 step: step_label(step, idx),
             });
         }

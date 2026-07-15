@@ -682,9 +682,13 @@ impl Engine {
             // context we have. Cheap and same-shape for every code
             // path, so we don't bifurcate evidence on it.
             let mut resolved_with = step.with.clone();
-            if let Err(reference) = substitute_with(&mut resolved_with, &ctx) {
+            if let Err(u) = substitute_with(&mut resolved_with, &ctx) {
                 return Err(EngineError::UnresolvedReference {
-                    reference,
+                    reference: u.reference,
+                    context: u
+                        .context
+                        .map(|c| format!(" (evaluating `{c}`)"))
+                        .unwrap_or_default(),
                     step: step_label(step, idx),
                 });
             }

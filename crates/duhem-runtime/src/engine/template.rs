@@ -15,9 +15,26 @@
 //! that makes the worked-example fixture from #12 executable.
 
 use duhem_schema::Expr;
+use duhem_schema::expr::Path;
 
 use crate::engine::context::value_to_yml;
 use crate::eval::{EvalContext, eval_to_value};
+
+/// A `with:` value that failed to resolve, pinpointed to the specific
+/// `$...` sub-expression the caller can name in the engine error (#238).
+///
+/// `reference` is the smallest offending reference — for a bare
+/// `$inputs.x` it is that reference; for a `$runtime.format(...)`-style
+/// call it is the first *argument* that didn't resolve (e.g.
+/// `$steps.create.outputs.body.data._id`), so the error no longer
+/// misattributes the failure to the whole call. `context`, when the
+/// reference is a sub-part, carries the enclosing expression's source so
+/// the message can show "…in `with:` (evaluating `$runtime.format(...)`)".
+#[derive(Debug)]
+pub struct UnresolvedWith {
+    pub reference: String,
+    pub context: Option<String>,
+}
 
 /// Outcome of resolving one `with:` string slot.
 enum Resolution {
@@ -27,20 +44,25 @@ enum Resolution {
     /// The string was not a substitutable reference (no leading `$`,
     /// or parses as an assertion-shaped expr) — pass through unchanged.
     Passthrough,
-    /// The string WAS a bare `$...` reference but evaluation failed —
-    /// a hard error. No action input may carry a literal `$...`
-    /// string, so we surface the unresolved reference (#134). A
-    /// `default(...)` call evaluates successfully (yields its
-    /// fallback) and so never reaches here.
-    Unresolved,
+    /// The string WAS a bare `$...` reference (or a call over one) but
+    /// evaluation failed — a hard error. No action input may carry a
+    /// literal `$...` string, so we surface the unresolved reference
+    /// (#134), pinpointed to the failing sub-expression (#238). A
+    /// `default(...)` call evaluates successfully (yields its fallback)
+    /// and so never reaches here.
+    Unresolved(UnresolvedWith),
 }
 
 /// Recursively walk `with`, substituting any string value that parses
 /// as an `Expr` whose evaluation produces a scalar `Value`. Mutates
-/// in place. A bare `$...` reference that fails to evaluate is a hard
-/// error: `Err(raw)` carries the offending reference's source so the
-/// caller can name it alongside the step (#134).
-pub fn substitute_with(with: &mut serde_yml::Value, ctx: &dyn EvalContext) -> Result<(), String> {
+/// in place. A `$...` reference that fails to evaluate is a hard error:
+/// the returned [`UnresolvedWith`] pinpoints the offending
+/// sub-reference so the caller can name it alongside the step (#134,
+/// #238).
+pub fn substitute_with(
+    with: &mut serde_yml::Value,
+    ctx: &dyn EvalContext,
+) -> Result<(), UnresolvedWith> {
     match with {
         serde_yml::Value::String(s) => match try_resolve(s, ctx) {
             Resolution::Replace(replacement) => {
@@ -48,7 +70,7 @@ pub fn substitute_with(with: &mut serde_yml::Value, ctx: &dyn EvalContext) -> Re
                 Ok(())
             }
             Resolution::Passthrough => Ok(()),
-            Resolution::Unresolved => Err(s.clone()),
+            Resolution::Unresolved(u) => Err(u),
         },
         serde_yml::Value::Sequence(seq) => {
             for v in seq.iter_mut() {
@@ -93,12 +115,74 @@ fn try_resolve(s: &str, ctx: &dyn EvalContext) -> Resolution {
     // it here.
     match eval_to_value(&expr, ctx) {
         Ok(value) => Resolution::Replace(value_to_yml(&value)),
-        Err(_) => Resolution::Unresolved,
+        Err(_) => Resolution::Unresolved(pinpoint(&expr, s, ctx)),
     }
 }
 
 fn is_substitutable_expr(e: &Expr) -> bool {
     matches!(e, Expr::Path(_) | Expr::Call { .. })
+}
+
+/// Pinpoint the specific `$...` sub-reference of `expr` (whose overall
+/// evaluation just failed) that did not resolve, so the engine error
+/// names the missing value rather than the enclosing call (#238).
+///
+/// - A bare path is its own culprit.
+/// - A `$runtime.format(...)`-style call walks to the first argument
+///   that fails to evaluate and recurses, so a missing
+///   `$steps.create.outputs.body.data._id` argument is named — not the
+///   whole `format(...)`. The enclosing expression's source is kept as
+///   `context`.
+/// - When no single sub-path is at fault (e.g. a `format` string with
+///   the wrong number of `{}`), the whole expression is the reference.
+fn pinpoint(expr: &Expr, raw: &str, ctx: &dyn EvalContext) -> UnresolvedWith {
+    let raw = raw.trim();
+    match culprit(expr, ctx) {
+        Some(p) => {
+            let reference = render_path(p);
+            // Only add context when the culprit is a *sub*-expression;
+            // for a bare path the reference already is the whole thing.
+            let context = (reference != raw).then(|| raw.to_string());
+            UnresolvedWith { reference, context }
+        }
+        None => UnresolvedWith {
+            reference: raw.to_string(),
+            context: None,
+        },
+    }
+}
+
+/// The first path within `expr` that fails to evaluate under `ctx`,
+/// descending into call arguments. `None` when the failure isn't
+/// attributable to a single unresolved path (e.g. bad `format` arity).
+fn culprit<'a>(expr: &'a Expr, ctx: &dyn EvalContext) -> Option<&'a Path> {
+    match expr {
+        Expr::Path(p) => Some(p),
+        Expr::Call { args, .. } => args
+            .iter()
+            .find(|arg| eval_to_value(arg, ctx).is_err())
+            .and_then(|arg| culprit(arg, ctx)),
+        _ => None,
+    }
+}
+
+/// Render a parsed [`Path`] back to its `$<root>.<seg>...` source form.
+/// Digit-only segments are array indices (`[0]`); everything else is a
+/// dotted key — matching the parser's lowering and `eval`'s `nav_path`.
+fn render_path(p: &Path) -> String {
+    let mut out = String::from("$");
+    out.push_str(p.root.as_str());
+    for seg in &p.segments {
+        if !seg.is_empty() && seg.bytes().all(|b| b.is_ascii_digit()) {
+            out.push('[');
+            out.push_str(seg);
+            out.push(']');
+        } else {
+            out.push('.');
+            out.push_str(seg);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -147,7 +231,29 @@ mod tests {
         let ctx = RunContext::new(&run);
         let mut with: serde_yml::Value = serde_yml::from_str("{ url: $inputs.unset }").unwrap();
         let err = substitute_with(&mut with, &ctx).unwrap_err();
-        assert_eq!(err, "$inputs.unset");
+        // A bare ref is its own culprit — no enclosing context.
+        assert_eq!(err.reference, "$inputs.unset");
+        assert_eq!(err.context, None);
+    }
+
+    #[test]
+    fn format_arg_pinpoints_the_missing_sub_reference() {
+        // #238: a `$runtime.format(...)` whose ARGUMENT is missing must
+        // name that argument, not blame the whole call. The first arg
+        // resolves; the second (`$steps.gone…`) does not, so the error
+        // points at it with the call as context.
+        let run = run_with(&[("base", Value::Str("http://x".into()))]);
+        let ctx = RunContext::new(&run);
+        let mut with: serde_yml::Value = serde_yml::from_str(
+            r#"{ url: '$runtime.format("{}/{}", $inputs.base, $steps.gone.outputs.body.id)' }"#,
+        )
+        .unwrap();
+        let err = substitute_with(&mut with, &ctx).unwrap_err();
+        assert_eq!(err.reference, "$steps.gone.outputs.body.id");
+        assert_eq!(
+            err.context.as_deref(),
+            Some(r#"$runtime.format("{}/{}", $inputs.base, $steps.gone.outputs.body.id)"#)
+        );
     }
 
     #[test]

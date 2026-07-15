@@ -30,10 +30,21 @@ pub enum EngineError {
     /// A `$...` reference inside a step's `with:` payload resolved to
     /// nothing at runtime. We refuse to hand an action a literal
     /// `$...` string (#134): the reference is either undeclared or its
-    /// upstream value is absent. Names the reference and the step so
-    /// the failure points at the VD, not at a phantom broken SUT.
-    #[error("step `{step}`: unresolved reference `{reference}` in `with:`")]
-    UnresolvedReference { reference: String, step: String },
+    /// upstream value is absent. `reference` is pinpointed to the
+    /// smallest offending sub-expression — for a `$runtime.format(...)`
+    /// argument that didn't resolve, it names the *argument*, not the
+    /// whole call, and `context` carries the enclosing expression so the
+    /// failure isn't misattributed to the function (#238). Names the
+    /// step too, so the failure points at the VD, not a phantom SUT.
+    #[error("step `{step}`: unresolved reference `{reference}` in `with:`{context}")]
+    UnresolvedReference {
+        reference: String,
+        step: String,
+        /// Preformatted enclosing-expression suffix — either empty (the
+        /// reference is the whole `with:` value) or ` (evaluating
+        /// `<expr>`)` when the reference is a sub-part of a larger call.
+        context: String,
+    },
     /// A `$inputs.<name>` reference names an input the leaf declared
     /// under `inherits:` (spec #135), but nothing on the resolution
     /// chain bound it — no manifest environment was selected and no

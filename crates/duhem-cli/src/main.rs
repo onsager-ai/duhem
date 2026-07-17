@@ -10,6 +10,7 @@
 //! Definitions practical. The headed-browser debug toggle is the
 //! `DUHEM_HEADED` env var (spec #151), not a flag.
 
+mod browser_cmd;
 mod dashboard;
 mod environment;
 mod export_cmd;
@@ -204,6 +205,13 @@ enum Cmd {
     /// #53 / #87); `dashboard.rs` owns binary resolution and the
     /// serve/export surface.
     Dashboard(dashboard::DashboardOpts),
+    /// Provision the Playwright sidecar + Chromium for `ui/*` checks.
+    ///
+    /// `duhem browser install` installs the embedded sidecar's npm
+    /// dependencies and the Chromium binary (spec #241). A distributed
+    /// `duhem` carries the sidecar source but not `node_modules`/Chromium,
+    /// so this is the one-time setup before `ui/*` checks can run.
+    Browser(browser_cmd::BrowserOpts),
     /// Export one run from the store as a self-contained bundle
     /// (run header + wire-format event stream + artifacts) — the
     /// portability path (#189).
@@ -261,6 +269,7 @@ fn main() -> ExitCode {
             }
         },
         Some(Cmd::Dashboard(opts)) => dashboard::run(&opts.into()),
+        Some(Cmd::Browser(opts)) => browser_cmd::run(&opts),
         Some(Cmd::Export { run_id, db, out }) => {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()

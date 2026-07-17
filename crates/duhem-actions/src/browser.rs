@@ -34,6 +34,8 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 
+use directories::ProjectDirs;
+use rust_embed::RustEmbed;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
@@ -41,6 +43,18 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::Mutex;
 
 use crate::error::ActionError;
+
+/// The Playwright sidecar source (`index.mjs` + its package manifest),
+/// embedded at compile time so a distributed `duhem` binary carries its
+/// own sidecar — no source checkout and no fetch-from-tag. `node_modules`
+/// is deliberately NOT embedded: the `playwright` dependency (and the
+/// Chromium binary) are installed by `duhem browser install`, which runs
+/// `npm`/`npx` in the materialized directory.
+#[derive(RustEmbed)]
+#[folder = "sidecar/"]
+#[exclude = "node_modules/**"]
+#[exclude = ".gitignore"]
+struct SidecarAssets;
 
 /// Error from the sidecar / driver. `Display` carries the underlying
 /// Playwright message verbatim so the `ui/*` actions' existing
@@ -230,11 +244,53 @@ fn node_command() -> String {
     std::env::var("DUHEM_NODE").unwrap_or_else(|_| "node".to_string())
 }
 
-fn sidecar_dir() -> PathBuf {
-    match std::env::var("DUHEM_SIDECAR_DIR") {
-        Ok(d) => PathBuf::from(d),
-        Err(_) => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sidecar"),
+/// Where the sidecar lives at run time. Precedence:
+///
+/// 1. `DUHEM_SIDECAR_DIR` — explicit operator override.
+/// 2. The in-tree `sidecar/` beside the source (dev builds / `cargo`).
+/// 3. The embedded sidecar, materialized into the user cache dir — the
+///    path a distributed binary takes (source tree absent). If
+///    materialization fails, falls back to the in-tree path so the
+///    downstream "sidecar not found" error still points somewhere.
+pub fn sidecar_dir() -> PathBuf {
+    if let Ok(d) = std::env::var("DUHEM_SIDECAR_DIR") {
+        return PathBuf::from(d);
     }
+    let in_tree = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sidecar");
+    if in_tree.join("index.mjs").exists() {
+        return in_tree;
+    }
+    materialize_sidecar().unwrap_or(in_tree)
+}
+
+/// The cache directory the embedded sidecar is written to, versioned by
+/// the crate version so a new `duhem` re-materializes into a fresh dir.
+pub fn sidecar_cache_dir() -> PathBuf {
+    let leaf = format!("sidecar-{}", env!("CARGO_PKG_VERSION"));
+    ProjectDirs::from("ai", "onsager", "duhem")
+        .map(|d| d.cache_dir().join(&leaf))
+        .unwrap_or_else(|| std::env::temp_dir().join(format!("duhem-{leaf}")))
+}
+
+/// Write the embedded sidecar assets into the cache dir (idempotent —
+/// a file is written only when missing or its bytes differ) and return
+/// the dir. This is a distributed binary's sidecar home; `duhem browser
+/// install` then runs `npm install` + `npx playwright install` in it.
+pub fn materialize_sidecar() -> std::io::Result<PathBuf> {
+    let dir = sidecar_cache_dir();
+    std::fs::create_dir_all(&dir)?;
+    for path in SidecarAssets::iter() {
+        let asset = SidecarAssets::get(&path).expect("embedded asset present");
+        let dest = dir.join(&*path);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let current = std::fs::read(&dest).ok();
+        if current.as_deref() != Some(asset.data.as_ref()) {
+            std::fs::write(&dest, &asset.data)?;
+        }
+    }
+    Ok(dir)
 }
 
 /// Fail fast if Node is absent or older than the supported floor
@@ -280,13 +336,13 @@ pub(crate) fn humanize_launch_error(raw: &str) -> String {
         || lower.contains("looks like playwright")
     {
         format!(
-            "chromium binary not installed, and no existing browser was found to fall back to. Run `npx playwright install chromium` once, or set `DUHEM_BROWSER_EXECUTABLE=/path/to/chrome` to use a browser already on this machine, and retry. (driver said: {raw})"
+            "chromium binary not installed, and no existing browser was found to fall back to. Run `duhem browser install` once (it installs Chromium), or set `DUHEM_BROWSER_EXECUTABLE=/path/to/chrome` to use a browser already on this machine, and retry. (driver said: {raw})"
         )
     } else if lower.contains("cannot find package 'playwright'")
         || lower.contains("err_module_not_found")
     {
         format!(
-            "the Playwright sidecar's dependencies are not installed. Run `npm ci` in crates/duhem-actions/sidecar and retry. (node said: {raw})"
+            "the Playwright sidecar's dependencies are not installed. Run `duhem browser install` once and retry. (node said: {raw})"
         )
     } else {
         raw.to_string()
@@ -317,7 +373,7 @@ impl RunBrowser {
         let index = dir.join("index.mjs");
         if !index.exists() {
             return Err(ActionError::Playwright(format!(
-                "Playwright sidecar not found at {} (set DUHEM_SIDECAR_DIR to override)",
+                "Playwright sidecar not found at {} — run `duhem browser install` (or set DUHEM_SIDECAR_DIR to override)",
                 index.display()
             )));
         }
@@ -647,18 +703,46 @@ mod humanize_tests {
             "browserType.launch: Executable doesn't exist at /…/chrome-headless-shell",
         );
         assert!(msg.contains("DUHEM_BROWSER_EXECUTABLE"), "got: {msg}");
-        assert!(msg.contains("playwright install chromium"), "got: {msg}");
+        assert!(msg.contains("duhem browser install"), "got: {msg}");
     }
 
     #[test]
-    fn missing_sidecar_deps_message_unchanged() {
+    fn missing_sidecar_deps_points_at_browser_install() {
         let msg = humanize_launch_error("Cannot find package 'playwright' imported from …");
-        assert!(msg.contains("npm ci"), "got: {msg}");
+        assert!(msg.contains("duhem browser install"), "got: {msg}");
     }
 
     #[test]
     fn unrelated_error_passes_through() {
         let msg = humanize_launch_error("some other failure");
         assert_eq!(msg, "some other failure");
+    }
+}
+
+#[cfg(test)]
+mod embed_tests {
+    use super::SidecarAssets;
+
+    #[test]
+    fn embeds_sidecar_source_but_not_node_modules() {
+        let files: Vec<String> = SidecarAssets::iter().map(|c| c.to_string()).collect();
+        assert!(
+            files.iter().any(|f| f == "index.mjs"),
+            "index.mjs must be embedded: {files:?}"
+        );
+        assert!(
+            files.iter().any(|f| f == "package.json"),
+            "package.json must be embedded: {files:?}"
+        );
+        assert!(
+            files.iter().any(|f| f == "package-lock.json"),
+            "package-lock.json must be embedded (so `npm ci` works): {files:?}"
+        );
+        // The playwright dependency is installed by `duhem browser install`,
+        // never shipped inside the binary — otherwise the embed would balloon.
+        assert!(
+            !files.iter().any(|f| f.starts_with("node_modules/")),
+            "node_modules must NOT be embedded: {files:?}"
+        );
     }
 }

@@ -166,9 +166,27 @@ in one check, and that's the *intended* shape, not over-reach. Per
 the Holistic Verification Principle, decomposing a check into per-
 component sub-checks loses what makes Duhem Duhem.
 
-Action types live in §10.5. Use the existing catalog when one
-fits; if you genuinely need a new type, that's an
-`area:schema` spec — see `issue-spec`. Do not silently mint new
+**Retrieval, not recall.** Duhem is a v0.x framework no model has a
+reliable pretraining corpus for — and any corpus would be the *wrong
+version*, since the schema breaks by design. So do not guess `with:`
+keys or output names from memory. Retrieve the version-exact contract:
+
+- `duhem actions` — list the action catalog.
+- `duhem describe <uses>` — one action's `with:` fields (+ closed enums),
+  `outputs`, and a worked example. (e.g. `duhem describe ui/assert-element`
+  tells you it produces `satisfied`.)
+- or read the generated
+  [`docs/action-reference.md`](../../../docs/action-reference.md), the
+  same contract for every action in one page.
+
+Then let **`duhem validate` close the loop**: it field-checks each step's
+`with:` keys, `outputs:` action-fields, and closed-enum values against the
+same contract and names the valid options on a miss. Author → validate →
+fix converges to correct without prior Duhem knowledge — retrieval +
+verification, not pretraining.
+
+Use the existing catalog; if you genuinely need a new action type, that's
+an `area:schema` spec — see `issue-spec`. Do not silently mint new
 `uses:` strings.
 
 Common shape:

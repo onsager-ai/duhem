@@ -58,6 +58,13 @@ jobs:
       - name: spec/code drift check
         run: cargo run -p xtask --quiet -- schema-drift
 
+      # The generated action reference (docs/action-reference.md) is built
+      # from the action contracts; a contract change that isn't regenerated
+      # drifts the authoring reference away from what `duhem validate`
+      # enforces. (#248)
+      - name: action-reference drift check
+        run: cargo run -p xtask --quiet -- action-reference --check
+
       - name: changelog touch check
         if: github.event_name == 'pull_request'
         env:

@@ -16,6 +16,7 @@
 //! versioning discipline from the spec issue that introduced
 //! `duhem_schema::SCHEMA_VERSION`.
 
+mod action_reference;
 mod check_file_budget;
 mod schema_changelog_check;
 mod schema_drift;
@@ -35,9 +36,10 @@ fn main() -> ExitCode {
         Some("schema-drift") => schema_drift::run(args.collect()),
         Some("schema-changelog-check") => schema_changelog_check::run(args.collect()),
         Some("schema-json") => schema_json::run(args.collect()),
+        Some("action-reference") => action_reference::run(args.collect()),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage:\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- schema-drift\n  cargo run -p xtask -- schema-changelog-check\n  cargo run -p xtask -- schema-json [--check]"
+            "usage:\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- schema-drift\n  cargo run -p xtask -- schema-changelog-check\n  cargo run -p xtask -- schema-json [--check]\n  cargo run -p xtask -- action-reference [--check]"
         )),
     };
 

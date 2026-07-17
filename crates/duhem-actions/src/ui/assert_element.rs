@@ -50,7 +50,11 @@ impl Action for AssertElement {
             summary: "Assert an element reaches an existence/visibility state within a deadline.",
             with: vec![
                 FieldSpec::required("locator"),
-                FieldSpec::enum_of("expected", true, &["exists", "not_exists", "visible", "hidden"]),
+                FieldSpec::enum_of(
+                    "expected",
+                    true,
+                    &["exists", "not_exists", "visible", "hidden"],
+                ),
                 FieldSpec::optional("within"),
             ],
             outputs: vec!["satisfied", "count"],

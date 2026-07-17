@@ -64,3 +64,36 @@ pub fn catalog() -> Vec<ActionContract> {
 pub fn contract_for(uses: &str) -> Option<ActionContract> {
     catalog().into_iter().find(|c| c.uses == uses)
 }
+
+#[cfg(test)]
+mod catalog_tests {
+    use super::{catalog, contract_for};
+
+    #[test]
+    fn catalog_is_complete_with_unique_uses() {
+        let cat = catalog();
+        assert_eq!(cat.len(), 15, "expected 15 action contracts");
+        let mut uses: Vec<&str> = cat.iter().map(|c| c.uses).collect();
+        uses.sort();
+        uses.dedup();
+        assert_eq!(uses.len(), 15, "every `uses` is unique");
+    }
+
+    #[test]
+    fn contract_for_resolves_and_carries_the_documented_output() {
+        // The spec's headline case: an agent can learn `satisfied` by tool.
+        assert!(
+            contract_for("ui/assert-element")
+                .unwrap()
+                .outputs
+                .contains(&"satisfied")
+        );
+        assert!(
+            contract_for("api/call")
+                .unwrap()
+                .outputs
+                .contains(&"status")
+        );
+        assert!(contract_for("nope/nope").is_none());
+    }
+}

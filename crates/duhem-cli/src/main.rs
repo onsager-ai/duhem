@@ -11,7 +11,9 @@
 //! `DUHEM_HEADED` env var (spec #151), not a flag.
 
 mod browser_cmd;
+mod contract_check;
 mod dashboard;
+mod describe_cmd;
 mod environment;
 mod export_cmd;
 mod filter;
@@ -83,6 +85,16 @@ enum Cmd {
         /// and names the conflicting paths.
         #[arg(long = "force", default_value_t = false)]
         force: bool,
+    },
+    /// List the built-in action catalog (`uses` + one-line summary).
+    Actions,
+    /// Print one action's contract: its `with:` fields and `outputs`.
+    ///
+    /// Version-exact ground truth for authoring a check — e.g.
+    /// `duhem describe ui/assert-element` shows it produces `satisfied`.
+    Describe {
+        /// The action's `uses` string, e.g. `ui/assert-element`.
+        uses: String,
     },
     /// Parse and structurally validate a Verification Definition, or a
     /// manifest and every leaf it expands to.
@@ -265,6 +277,8 @@ fn main() -> ExitCode {
             name,
             force,
         }) => init::run_init(path, &pattern, &kind, name, force),
+        Some(Cmd::Actions) => describe_cmd::run_actions(),
+        Some(Cmd::Describe { uses }) => describe_cmd::run_describe(&uses),
         Some(Cmd::Validate { path }) => match validate_cmd::run_validate(path.as_deref()) {
             Ok(msg) => {
                 println!("{msg}");

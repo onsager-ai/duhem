@@ -136,6 +136,30 @@ Duhem runs `up`, waits for `ready`, runs every check against the real
 environment, then runs `down`. If the environment doesn't come up, the
 run is `inconclusive` — never a false `pass`.
 
+## Authoring with an AI assistant (MCP)
+
+Duhem is a v0.x framework no model has a reliable pretraining corpus for, so
+don't let an assistant *guess* the syntax — give it the version-exact contract
+as tools. `duhem mcp` runs a Model Context Protocol server over stdio exposing:
+
+- `duhem_actions` — list the catalog;
+- `duhem_describe` — one action's `with:` fields / `outputs` / example;
+- `duhem_validate` — validate a VD (structural + field-check), so the assistant
+  can author → validate → fix with no repo checkout.
+
+Register it once with your MCP client (Claude Desktop / Cursor / …):
+
+```json
+{
+  "mcpServers": {
+    "duhem": { "command": "duhem", "args": ["mcp"] }
+  }
+}
+```
+
+There is deliberately **no `run` tool** — running a VD needs your real system,
+which stays on your side (local or CI), never in the server.
+
 ## Next steps
 
 - **Grow a suite.** A root `duhem.yml` manifest can run many co-located

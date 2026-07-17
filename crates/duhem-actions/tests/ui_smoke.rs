@@ -62,6 +62,14 @@ const STATIC_HTML: &str = r#"<!doctype html>
         <option value="viewer">Viewer</option>
       </select>
 
+      <!-- No textbox role: only reachable via { label: Password } (#256). -->
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password">
+
+      <input id="search" name="search" type="text" placeholder="Search projects">
+
+      <button id="save" data-testid="save-btn" type="button">Save</button>
+
       <button type="submit">Submit</button>
     </form>
   </main>
@@ -303,6 +311,108 @@ text: "Alice"
         .await
         .unwrap();
     assert_eq!(value, "Alice");
+}
+
+/// The locator strategy union (#240): `label` / `testid` / `css` /
+/// `placeholder` each resolve a real element in Chromium. `label` is the
+/// one `role`-only addressing can't do — it reaches a `type=password` input
+/// (no `textbox` role), the crawlab-pro #256 unblock.
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
+async fn locator_strategies_label_testid_css_placeholder_resolve() {
+    let fx = start_fixture().await;
+    let run = fresh_browser().await;
+    let check = run.open_check().await.unwrap();
+    let ctx = ActionCtx {
+        page: Some(&check.page),
+        step_index: 0,
+    };
+    Navigate
+        .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
+        .await
+        .unwrap();
+
+    // label → getByLabel reaches the password input.
+    let r = Type
+        .invoke(
+            &ctx,
+            &yaml(
+                r#"
+locator: { label: Password }
+text: "s3cret!"
+"#,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.outcome, Outcome::Ok);
+    let pw: String = check
+        .page
+        .eval("document.getElementById('password').value")
+        .await
+        .unwrap();
+    assert_eq!(pw, "s3cret!");
+
+    // testid → the `data-testid` attribute.
+    let r = AssertElement
+        .invoke(
+            &ctx,
+            &yaml(
+                r#"
+locator: { testid: save-btn }
+expected: visible
+within: 3s
+"#,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.outcome, Outcome::Ok);
+    assert_eq!(
+        r.outputs.get("satisfied").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+
+    // css → raw CSS escape hatch.
+    let r = AssertElement
+        .invoke(
+            &ctx,
+            &yaml(
+                r#"
+locator: { css: "button#save" }
+expected: visible
+within: 3s
+"#,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.outcome, Outcome::Ok);
+    assert_eq!(
+        r.outputs.get("satisfied").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+
+    // placeholder → getByPlaceholder.
+    let r = Type
+        .invoke(
+            &ctx,
+            &yaml(
+                r#"
+locator: { placeholder: "Search projects" }
+text: "crawlab"
+"#,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.outcome, Outcome::Ok);
+    let search: String = check
+        .page
+        .eval("document.getElementById('search').value")
+        .await
+        .unwrap();
+    assert_eq!(search, "crawlab");
 }
 
 #[tokio::test]

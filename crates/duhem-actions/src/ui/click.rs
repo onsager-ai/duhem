@@ -11,10 +11,24 @@ use crate::locator::Locator;
 use crate::playwright::to_selector;
 use crate::with::WithinSpec;
 
+// The locator fields sit inline in `ui/click`'s `with:` (`{ role: button,
+// name: Create, within: 3s }`), not under a `locator:` key — kept that way
+// for backward compatibility. `WithWire` collects the inline fields
+// (rejecting unknowns), then folds them into a validated `Locator` so click
+// gains label/testid/css/placeholder and the exactly-one-primary check.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct With {
-    role: String,
+struct WithWire {
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    testid: Option<String>,
+    #[serde(default)]
+    placeholder: Option<String>,
+    #[serde(default)]
+    css: Option<String>,
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -25,18 +39,39 @@ struct With {
     within: Option<WithinSpec>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(try_from = "WithWire")]
+struct With {
+    locator: Locator,
+    within: Option<WithinSpec>,
+}
+
+impl TryFrom<WithWire> for With {
+    type Error = String;
+
+    fn try_from(w: WithWire) -> Result<Self, Self::Error> {
+        let locator = Locator {
+            role: w.role,
+            label: w.label,
+            testid: w.testid,
+            placeholder: w.placeholder,
+            css: w.css,
+            name: w.name,
+            text: w.text,
+            scope: w.scope,
+        };
+        locator.validate_primary()?;
+        Ok(With {
+            locator,
+            within: w.within,
+        })
+    }
+}
+
 impl With {
     fn into_locator(self) -> (Locator, Duration) {
         let timeout = self.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
-        (
-            Locator {
-                role: self.role,
-                name: self.name,
-                text: self.text,
-                scope: self.scope,
-            },
-            timeout,
-        )
+        (self.locator, timeout)
     }
 }
 
@@ -79,7 +114,7 @@ mod tests {
         let yaml = r#"{ role: button, name: Create }"#;
         let v: With = serde_yml::from_str(yaml).unwrap();
         let (l, _) = v.into_locator();
-        assert_eq!(l.role, "button");
+        assert_eq!(l.role.as_deref(), Some("button"));
         assert_eq!(l.name.as_deref(), Some("Create"));
     }
 
@@ -93,7 +128,7 @@ within: 3s
 "#;
         let v: With = serde_yml::from_str(yaml).unwrap();
         let (l, t) = v.into_locator();
-        assert_eq!(l.scope.as_ref().unwrap().role, "list");
+        assert_eq!(l.scope.as_ref().unwrap().role.as_deref(), Some("list"));
         assert_eq!(t, Duration::from_secs(3));
     }
 

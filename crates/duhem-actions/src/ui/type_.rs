@@ -83,7 +83,7 @@ locator: { role: textbox, name: Name }
 text: Alice
 "#;
         let v: With = serde_yml::from_str(yaml).unwrap();
-        assert_eq!(v.locator.role, "textbox");
+        assert_eq!(v.locator.role.as_deref(), Some("textbox"));
         assert_eq!(v.text, "Alice");
         assert!(v.clear, "clear defaults to true");
         assert!(v.within.is_none());

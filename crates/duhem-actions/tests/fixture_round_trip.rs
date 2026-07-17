@@ -95,7 +95,7 @@ fn each_step_with_deserializes_into_action_with() {
     let assertion: AssertWith =
         serde_yml::from_value(steps[2].with.clone()).expect("assert-element");
     assert_eq!(assertion.expected, ExistenceState::Visible);
-    assert_eq!(assertion.locator.role, "alert");
+    assert_eq!(assertion.locator.role.as_deref(), Some("alert"));
     assert_eq!(assertion.locator.text.as_deref(), Some("Created"));
     assert_eq!(assertion.within.as_deref(), Some("2s"));
 }

@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 base64 = "0.22"
+duhem-actions = { path = "../crates/duhem-actions" }
 duhem-schema = { path = "../crates/duhem-schema" }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 rustc-hash = "1"

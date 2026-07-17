@@ -7,7 +7,10 @@ It speaks newline-delimited JSON-RPC over stdio; the Rust client lives in
 
 ## Setup (once per host)
 
-Requires **Node ≥ 20**.
+Requires **Node ≥ 20**. From an installed `duhem`, the one-liner is
+**`duhem browser install`** (spec #241) — the binary embeds this directory
+(rust-embed), materializes it, and runs the two commands below for you.
+From a source checkout, run them directly:
 
 ```sh
 npm ci                          # install deps from the committed lockfile
@@ -18,9 +21,11 @@ npx playwright install chromium # install the matching Chromium
 the Chromium revision is therefore reproducible (this also covers the
 intent of issue #13). `node_modules/` is gitignored — never vendored.
 
-The Rust runtime locates this directory via `CARGO_MANIFEST_DIR`
-(`crates/duhem-actions/sidecar`); override with `DUHEM_SIDECAR_DIR`, and
-the Node binary with `DUHEM_NODE`.
+The Rust runtime locates this directory in precedence order: the
+`DUHEM_SIDECAR_DIR` override, the in-tree `sidecar/` (`CARGO_MANIFEST_DIR`,
+for source builds), then the embedded copy materialized under the user
+cache dir (`duhem browser install`, for distributed binaries). The Node
+binary is overridable with `DUHEM_NODE`.
 
 ## Using a system browser (when the bundled Chromium is unavailable)
 

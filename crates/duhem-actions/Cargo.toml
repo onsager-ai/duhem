@@ -23,6 +23,8 @@ base64.workspace = true
 form_urlencoded.workspace = true
 regex.workspace = true
 futures.workspace = true
+rust-embed = { workspace = true, features = ["include-exclude"] }
+directories.workspace = true
 
 [dev-dependencies]
 axum.workspace = true

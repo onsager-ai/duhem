@@ -721,12 +721,14 @@ dependencies = [
  "async-trait",
  "axum",
  "base64",
+ "directories",
  "duhem-schema",
  "form_urlencoded",
  "futures",
  "mongodb",
  "regex",
  "reqwest",
+ "rust-embed",
  "serde",
  "serde_json",
  "serde_yml",
@@ -1141,6 +1143,19 @@ name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+
+[[package]]
+name = "globset"
+version = "0.4.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52dfc19153a48bde0cbd630453615c8151bce3a5adfac7a0aebfbf0a1e1f57e3"
+dependencies = [
+ "aho-corasick",
+ "bstr",
+ "log",
+ "regex-automata 0.4.14",
+ "regex-syntax 0.8.10",
+]
 
 [[package]]
 name = "hashbrown"
@@ -2511,6 +2526,7 @@ version = "8.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5bcdef0be6fe7f6fa333b1073c949729274b05f123a0ad7efcb8efd878e5c3b1"
 dependencies = [
+ "globset",
  "sha2",
  "walkdir",
 ]

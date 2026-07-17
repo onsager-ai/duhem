@@ -36,8 +36,10 @@ Prebuilt binaries for each platform are attached to every [GitHub Release](https
 Running browser-backed `ui/*` checks additionally needs Node ≥ 20 and the Playwright sidecar's Chromium, installed once per host:
 
 ```sh
-(cd crates/duhem-actions/sidecar && npm ci && npx playwright install chromium)
+duhem browser install          # installs the sidecar deps + Chromium
 ```
+
+The `duhem` binary embeds the sidecar source, so `browser install` works wherever `duhem` is on your `PATH` — it materializes the sidecar and runs `npm` + `npx playwright install` for you (add `--with-deps` in CI images to also install Chromium's OS libraries). From a source checkout the equivalent is `(cd crates/duhem-actions/sidecar && npm ci && npx playwright install chromium)`.
 
 `init` and `validate`, and any VD that uses only `api/*` checks, do not need them.
 

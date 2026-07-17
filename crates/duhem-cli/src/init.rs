@@ -58,6 +58,27 @@ impl std::str::FromStr for Pattern {
     }
 }
 
+/// Which action family the scaffolded first check uses. `Api` (the
+/// default) is browser-free — a `duhem run` of the scaffold needs
+/// only a network connection. `Ui` scaffolds a browser-driven
+/// `ui/*` check, which additionally needs `duhem browser install`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Api,
+    Ui,
+}
+
+impl std::str::FromStr for Kind {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "api" | "API" => Ok(Kind::Api),
+            "ui" | "UI" => Ok(Kind::Ui),
+            other => Err(format!("unknown --kind `{other}`: expected `api` or `ui`")),
+        }
+    }
+}
+
 /// Outcome of a successful scaffold. Distinguishes the
 /// Pattern-B-TODO-stub case so `main.rs` can map it to the
 /// warning exit code (3) and a separate stderr line.
@@ -70,6 +91,7 @@ pub struct InitOutcome {
 pub struct InitArgs {
     pub path: Option<PathBuf>,
     pub pattern: Pattern,
+    pub kind: Kind,
     pub name: Option<String>,
     pub force: bool,
 }
@@ -153,9 +175,13 @@ pub(crate) fn run_with_prompt(
 
     match args.pattern {
         Pattern::A => {
+            let duhem_yml = match args.kind {
+                Kind::Api => include_str!("../templates/init-pattern-a/duhem.api.yml"),
+                Kind::Ui => include_str!("../templates/init-pattern-a/duhem.ui.yml"),
+            };
             write_template(
                 &target.join("duhem.yml"),
-                include_str!("../templates/init-pattern-a/duhem.yml"),
+                duhem_yml,
                 &name,
                 &path_in_commands,
                 &mut created,
@@ -176,9 +202,13 @@ pub(crate) fn run_with_prompt(
             )?;
         }
         Pattern::B => {
+            let duhem_yml = match args.kind {
+                Kind::Api => include_str!("../templates/init-pattern-b/duhem.api.yml"),
+                Kind::Ui => include_str!("../templates/init-pattern-b/duhem.ui.yml"),
+            };
             write_template(
                 &target.join("duhem.yml"),
-                include_str!("../templates/init-pattern-b/duhem.yml"),
+                duhem_yml,
                 &name,
                 &path_in_commands,
                 &mut created,
@@ -450,6 +480,7 @@ fn display_path_for_commands(target: &Path) -> String {
 pub fn run_init(
     path: Option<PathBuf>,
     pattern: &str,
+    kind: &str,
     name: Option<String>,
     force: bool,
 ) -> ExitCode {
@@ -460,9 +491,17 @@ pub fn run_init(
             return ExitCode::FAILURE;
         }
     };
+    let kind: Kind = match kind.parse() {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
     let args = InitArgs {
         path,
         pattern,
+        kind,
         name,
         force,
     };
@@ -487,7 +526,7 @@ pub fn run_init(
             let _ = writeln!(stdout, "  duhem run      {}", vd_path.display());
             let _ = writeln!(
                 stdout,
-                "\nAuthoring guide: .claude/skills/verification-authoring/SKILL.md"
+                "\nAuthoring guide: https://github.com/onsager-ai/duhem/blob/main/docs/getting-started.md"
             );
             let _ = stdout.flush();
 
@@ -528,6 +567,7 @@ mod tests {
         InitArgs {
             path: Some(tmp.to_path_buf()),
             pattern,
+            kind: Kind::Api,
             name: name.map(|s| s.into()),
             force,
         }
@@ -566,6 +606,7 @@ mod tests {
             InitArgs {
                 path: Some(target.clone()),
                 pattern: Pattern::A,
+                kind: Kind::Api,
                 name: Some("example".into()),
                 force: false,
             },
@@ -645,6 +686,7 @@ mod tests {
             InitArgs {
                 path: Some(target.clone()),
                 pattern: Pattern::B,
+                kind: Kind::Api,
                 name: Some("feature".into()),
                 force: false,
             },
@@ -675,6 +717,7 @@ mod tests {
             InitArgs {
                 path: Some(target.clone()),
                 pattern: Pattern::B,
+                kind: Kind::Api,
                 name: Some("feature".into()),
                 force: false,
             },
@@ -707,6 +750,7 @@ mod tests {
             InitArgs {
                 path: Some(target),
                 pattern: Pattern::B,
+                kind: Kind::Api,
                 name: Some("feature".into()),
                 force: false,
             },
@@ -738,6 +782,7 @@ mod tests {
             InitArgs {
                 path: Some(target.clone()),
                 pattern: Pattern::B,
+                kind: Kind::Api,
                 name: Some("feat-a".into()),
                 force: false,
             },
@@ -773,6 +818,7 @@ mod tests {
             InitArgs {
                 path: Some(target.clone()),
                 pattern: Pattern::B,
+                kind: Kind::Api,
                 name: Some("feature".into()),
                 force: false,
             },
@@ -827,6 +873,7 @@ mod tests {
             InitArgs {
                 path: Some(target.clone()),
                 pattern: Pattern::B,
+                kind: Kind::Api,
                 name: Some("feature".into()),
                 force: false,
             },
@@ -836,5 +883,56 @@ mod tests {
         let src = std::fs::read_to_string(target.join("duhem.yml")).unwrap();
         let def = VerificationDefinition::from_yaml_str(&src).expect("parse");
         validate(&def).expect("validate");
+    }
+
+    #[test]
+    fn kind_from_str() {
+        assert_eq!("api".parse::<Kind>().unwrap(), Kind::Api);
+        assert_eq!("ui".parse::<Kind>().unwrap(), Kind::Ui);
+        assert!("browser".parse::<Kind>().is_err());
+    }
+
+    /// The default (`api`) scaffold must be browser-free — no `ui/*`
+    /// step — so a stranger's first `duhem run` needs no Chromium.
+    #[test]
+    fn default_api_scaffold_is_browser_free() {
+        let tmp = tempfile::tempdir().unwrap();
+        run_with_prompt(
+            args(tmp.path(), Some("smoke"), Pattern::A, false),
+            ok_prompt,
+        )
+        .expect("init ok");
+        let src = std::fs::read_to_string(tmp.path().join("duhem.yml")).unwrap();
+        assert!(
+            src.contains("api/call"),
+            "api scaffold uses api/call: {src}"
+        );
+        assert!(
+            !src.contains("ui/"),
+            "default scaffold must be browser-free: {src}"
+        );
+    }
+
+    /// The `--kind ui` scaffold is opt-in but still schema-valid and
+    /// actually browser-driven.
+    #[test]
+    fn ui_kind_scaffold_validates_and_is_browser_driven() {
+        use duhem_schema::{VerificationDefinition, validate};
+        let tmp = tempfile::tempdir().unwrap();
+        run_with_prompt(
+            InitArgs {
+                path: Some(tmp.path().to_path_buf()),
+                pattern: Pattern::A,
+                kind: Kind::Ui,
+                name: Some("smoke-ui".into()),
+                force: false,
+            },
+            ok_prompt,
+        )
+        .expect("init ok");
+        let src = std::fs::read_to_string(tmp.path().join("duhem.yml")).unwrap();
+        let def = VerificationDefinition::from_yaml_str(&src).expect("parse");
+        validate(&def).expect("validate");
+        assert!(src.contains("ui/navigate"), "ui scaffold uses ui/*: {src}");
     }
 }

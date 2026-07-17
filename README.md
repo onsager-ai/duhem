@@ -95,9 +95,12 @@ The canonical reference is [`docs/duhem-spec.md`](docs/duhem-spec.md) — start 
 
 ```text
 duhem init       Scaffold a runnable Verification Definition skeleton
+duhem actions    List the built-in action catalog
+duhem describe   Print one action's contract (with-fields, outputs, example)
 duhem validate   Parse and structurally validate a Verification Definition file
 duhem run        Execute a Verification Definition end-to-end
 duhem dashboard  Browse run evidence in a read-only web dashboard (serve + static export)
+duhem mcp        Serve the action contract + validate over MCP (stdio) for AI authoring
 duhem --version  Print the CLI and schema version
 ```
 

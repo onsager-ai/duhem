@@ -19,6 +19,7 @@ mod export_cmd;
 mod filter;
 mod init;
 mod inputs;
+mod mcp_cmd;
 mod reporter;
 mod reporter_config;
 mod resolve;
@@ -96,6 +97,10 @@ enum Cmd {
         /// The action's `uses` string, e.g. `ui/assert-element`.
         uses: String,
     },
+    /// Run an MCP (Model Context Protocol) server over stdio, exposing the
+    /// action catalog, `describe`, and `validate` as tools — so a bare-chat
+    /// agent can author + validate a VD with no repo checkout. (#251)
+    Mcp,
     /// Parse and structurally validate a Verification Definition, or a
     /// manifest and every leaf it expands to.
     ///
@@ -279,6 +284,7 @@ fn main() -> ExitCode {
         }) => init::run_init(path, &pattern, &kind, name, force),
         Some(Cmd::Actions) => describe_cmd::run_actions(),
         Some(Cmd::Describe { uses }) => describe_cmd::run_describe(&uses),
+        Some(Cmd::Mcp) => mcp_cmd::run(),
         Some(Cmd::Validate { path }) => match validate_cmd::run_validate(path.as_deref()) {
             Ok(msg) => {
                 println!("{msg}");

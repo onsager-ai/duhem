@@ -92,6 +92,23 @@ impl Action for Query {
         "db/query"
     }
 
+    fn contract(&self) -> crate::action::ActionContract {
+        use crate::action::{ActionContract, FieldSpec};
+        ActionContract {
+            uses: "db/query",
+            summary: "Run a read query and observe the returned rows.",
+            with: vec![
+                FieldSpec::required("connection"),
+                FieldSpec::required("sql"),
+                FieldSpec::optional("params"),
+                FieldSpec::optional("find"),
+                FieldSpec::optional("within"),
+            ],
+            outputs: vec!["rows", "row_count"],
+            example: "- uses: db/query\n  with: { connection: $inputs.db, sql: \"select id from users\" }\n  outputs: { n: row_count }",
+        }
+    }
+
     async fn invoke(
         &self,
         _ctx: &ActionCtx<'_>,

@@ -43,6 +43,21 @@ impl Action for AssertElement {
         "ui/assert-element"
     }
 
+    fn contract(&self) -> crate::action::ActionContract {
+        use crate::action::{ActionContract, FieldSpec};
+        ActionContract {
+            uses: "ui/assert-element",
+            summary: "Assert an element reaches an existence/visibility state within a deadline.",
+            with: vec![
+                FieldSpec::required("locator"),
+                FieldSpec::enum_of("expected", true, &["exists", "not_exists", "visible", "hidden"]),
+                FieldSpec::optional("within"),
+            ],
+            outputs: vec!["satisfied", "count"],
+            example: "- uses: ui/assert-element\n  with: { locator: { role: heading, name: \"Welcome\" }, expected: visible }\n  outputs: { satisfied: satisfied }",
+        }
+    }
+
     async fn invoke(
         &self,
         ctx: &ActionCtx<'_>,

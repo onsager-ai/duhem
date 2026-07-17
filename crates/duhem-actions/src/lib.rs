@@ -22,8 +22,8 @@ pub mod ui;
 pub mod with;
 
 pub use action::{
-    Action, ActionCtx, ActionResult, DEFAULT_WITHIN, Observation, Outcome, layer_for_uses,
-    uses_requires_page,
+    Action, ActionContract, ActionCtx, ActionResult, DEFAULT_WITHIN, FieldSpec, Observation,
+    Outcome, layer_for_uses, uses_requires_page,
 };
 pub use api::{Call, Observe, Poll, Stream};
 pub use browser::{
@@ -37,3 +37,30 @@ pub use locator::{ExistenceState, Locator};
 pub use playwright::to_selector;
 pub use ui::{AssertElement, AssertState, AssertUrl, Click, Navigate, Select, Type};
 pub use with::WithinSpec;
+
+/// Every built-in action's contract — the single source of truth for
+/// `duhem describe` / `duhem actions` and validate-time field checking.
+pub fn catalog() -> Vec<ActionContract> {
+    vec![
+        Navigate.contract(),
+        Click.contract(),
+        Type.contract(),
+        Select.contract(),
+        AssertElement.contract(),
+        AssertUrl.contract(),
+        AssertState.contract(),
+        Call.contract(),
+        Observe.contract(),
+        Poll.contract(),
+        Stream.contract(),
+        Query.contract(),
+        DbObserve.contract(),
+        Seed.contract(),
+        Invoke.contract(),
+    ]
+}
+
+/// The contract for a single action by its `uses` string, if it exists.
+pub fn contract_for(uses: &str) -> Option<ActionContract> {
+    catalog().into_iter().find(|c| c.uses == uses)
+}

@@ -83,6 +83,28 @@ impl Action for Click {
         "ui/click"
     }
 
+    fn contract(&self) -> crate::action::ActionContract {
+        use crate::action::{ActionContract, FieldSpec};
+        ActionContract {
+            uses: "ui/click",
+            summary: "Click an element (locator shorthand fields, or a `locator` object).",
+            with: vec![
+                FieldSpec::optional("role"),
+                FieldSpec::optional("label"),
+                FieldSpec::optional("testid"),
+                FieldSpec::optional("placeholder"),
+                FieldSpec::optional("css"),
+                FieldSpec::optional("name"),
+                FieldSpec::optional("text"),
+                FieldSpec::optional("scope"),
+                FieldSpec::optional("locator"),
+                FieldSpec::optional("within"),
+            ],
+            outputs: vec![],
+            example: "- uses: ui/click\n  with: { role: button, name: \"Save\" }",
+        }
+    }
+
     async fn invoke(
         &self,
         ctx: &ActionCtx<'_>,

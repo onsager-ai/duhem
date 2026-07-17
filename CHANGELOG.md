@@ -20,7 +20,9 @@ criteria) lives in the spec issue that introduced
 
 ## Unreleased
 
-- [additive] Locator strategy union (#240): `ui/*` locators gain `label` (`getByLabel` — reaches an input with no ARIA role, e.g. `type=password`), `testid` (the `data-testid` attribute), `placeholder`, `css` (a raw selector escape hatch), and a standalone `text` (`getByText`), alongside the existing `role` (+`name`) / `text`-filter / `scope`. Exactly one primary strategy per locator, enforced at deserialize (two primaries or none is rejected). Backward compatible — every existing `{role, name, text, scope}` locator parses and maps byte-identically, and `ui/click`'s inline form is unchanged. `to_selector` emits the matching Playwright selector-engine strings, so there is no sidecar/protocol change; a step's `with:` is modeled opaquely in the JSON Schema, so `schema/duhem.schema.json` and `SCHEMA_VERSION` are unchanged. Surfaced by crawlab-team/crawlab-pro#256, where a `type=password` sign-in field was unaddressable by `role` alone. (#240)
+## v0.1.2 — 2026-07-17
+
+- [additive] Locator strategy union (#240): `ui/*` locators gain `label` (`getByLabel` — reaches an input with no ARIA role, e.g. `type=password`), `testid` (the `data-testid` attribute), `placeholder`, `css` (a raw selector escape hatch), and a standalone `text` (`getByText`), alongside the existing `role` (+`name`) / `text`-filter / `scope`. Exactly one primary strategy per locator, enforced at deserialize (two primaries or none is rejected). Backward compatible — every existing `{role, name, text, scope}` locator parses and maps byte-identically, and `ui/click`'s inline form is unchanged. `to_selector` emits the matching Playwright selector-engine strings, so there is no sidecar/protocol change; a step's `with:` is modeled opaquely in the JSON Schema, so `schema/duhem.schema.json` is byte-identical (the `SCHEMA_VERSION` 0.1.1 → 0.1.2 bump is the release version-literal, kept aligned with the Cargo version, not a schema-shape event). Surfaced by crawlab-team/crawlab-pro#256, where a `type=password` sign-in field was unaddressable by `role` alone. (#240)
 
 ## v0.1.1 — 2026-07-11
 

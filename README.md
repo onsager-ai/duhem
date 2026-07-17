@@ -45,16 +45,18 @@ The `duhem` binary embeds the sidecar source, so `browser install` works whereve
 
 ## Quickstart
 
-Scaffold a Verification Definition, validate it, and run one. The repo ships a worked example — [`verifications/defaults-example/`](verifications/defaults-example/) — that runs green offline with no system-under-test and no browser, so you can copy-paste the whole sequence:
+Scaffold a Verification Definition, validate it, and run one. The scaffold's default check is **browser-free** (an `api/call`), so `duhem run` goes green with only a network connection — no Chromium (add `--kind ui` for the browser-driven variant). New to Duhem? The [**getting-started guide**](docs/getting-started.md) walks this end-to-end and shows how to author your own check. Copy-paste the whole sequence:
 
 ```sh
-# scaffold a new VD skeleton (runs green against https://example.com)
+# scaffold a new VD skeleton — a browser-free api/call check that runs
+# green against https://example.com (network only, no browser)
 duhem init ./verifications/sample --name sample
 
-# structurally validate it
+# structurally validate it, then run it end-to-end
 duhem validate ./verifications/sample/duhem.yml
+duhem run      ./verifications/sample
 
-# run the offline worked example end-to-end
+# (or run the repo's fully-offline worked example)
 duhem run verifications/defaults-example
 ```
 

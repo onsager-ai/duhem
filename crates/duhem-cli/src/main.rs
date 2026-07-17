@@ -67,6 +67,12 @@ enum Cmd {
         /// loader spec lands).
         #[arg(long = "pattern", value_name = "A|B", default_value = "A")]
         pattern: String,
+        /// Action family for the scaffolded first check. `api`
+        /// (default) is browser-free — `duhem run` needs only a
+        /// network connection. `ui` scaffolds a browser-driven
+        /// `ui/*` check (needs a one-time `duhem browser install`).
+        #[arg(long = "kind", value_name = "api|ui", default_value = "api")]
+        kind: String,
         /// Verification slug, e.g. `dashboard-create-project`. Used
         /// for the default target dir and the `verification:` field
         /// in the generated YAML. Required on non-TTY stdin; prompted
@@ -255,9 +261,10 @@ fn main() -> ExitCode {
         Some(Cmd::Init {
             path,
             pattern,
+            kind,
             name,
             force,
-        }) => init::run_init(path, &pattern, name, force),
+        }) => init::run_init(path, &pattern, &kind, name, force),
         Some(Cmd::Validate { path }) => match validate_cmd::run_validate(path.as_deref()) {
             Ok(msg) => {
                 println!("{msg}");

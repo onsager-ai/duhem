@@ -115,6 +115,21 @@ impl Action for AssertUrl {
         "ui/assert-url"
     }
 
+    fn contract(&self) -> crate::action::ActionContract {
+        use crate::action::{ActionContract, FieldSpec};
+        ActionContract {
+            uses: "ui/assert-url",
+            summary: "Assert the page URL equals a string or matches a regex (exactly one of equals/matches).",
+            with: vec![
+                FieldSpec::optional("equals"),
+                FieldSpec::optional("matches"),
+                FieldSpec::optional("within"),
+            ],
+            outputs: vec!["satisfied", "actual"],
+            example: "- uses: ui/assert-url\n  with: { equals: https://example.com/ }\n  outputs: { satisfied: satisfied }",
+        }
+    }
+
     async fn invoke(
         &self,
         ctx: &ActionCtx<'_>,

@@ -106,6 +106,21 @@ impl Action for AssertState {
         "ui/assert-state"
     }
 
+    fn contract(&self) -> crate::action::ActionContract {
+        use crate::action::{ActionContract, FieldSpec};
+        ActionContract {
+            uses: "ui/assert-state",
+            summary: "Assert an app state (e.g. signed in/out, or a marker) via `state:`.",
+            with: vec![
+                FieldSpec::required("state"),
+                FieldSpec::optional("marker"),
+                FieldSpec::optional("within"),
+            ],
+            outputs: vec!["satisfied"],
+            example: "- uses: ui/assert-state\n  with: { state: signed_in }\n  outputs: { satisfied: satisfied }",
+        }
+    }
+
     async fn invoke(
         &self,
         ctx: &ActionCtx<'_>,

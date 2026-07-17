@@ -34,6 +34,13 @@ pub(crate) fn run_validate(path: Option<&Path>) -> Result<String, String> {
         // success, the un-prefixed validation-error preamble on failure.
         Loaded::Leaf { path, definition } => {
             validate(&definition).map_err(|errs| format_validation_errors(None, &errs))?;
+            let cerrs = crate::contract_check::field_errors(&definition);
+            if !cerrs.is_empty() {
+                return Err(format!(
+                    "[schema v{SCHEMA_VERSION}] action-contract check failed:\n  {}",
+                    cerrs.join("\n  ")
+                ));
+            }
             let _ = path;
             Ok("OK".to_string())
         }
@@ -59,6 +66,14 @@ pub(crate) fn run_validate(path: Option<&Path>) -> Result<String, String> {
             for leaf in &leaves {
                 if let Err(errs) = validate(&leaf.definition) {
                     errors.push(format_validation_errors(Some(&leaf.path), &errs));
+                }
+                let cerrs = crate::contract_check::field_errors(&leaf.definition);
+                if !cerrs.is_empty() {
+                    errors.push(format!(
+                        "{}: action-contract check failed:\n  {}",
+                        leaf.path.display(),
+                        cerrs.join("\n  ")
+                    ));
                 }
             }
             if !errors.is_empty() {

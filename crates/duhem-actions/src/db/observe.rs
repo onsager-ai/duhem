@@ -96,6 +96,25 @@ impl Action for Observe {
         "db/observe"
     }
 
+    fn contract(&self) -> crate::action::ActionContract {
+        use crate::action::{ActionContract, FieldSpec};
+        ActionContract {
+            uses: "db/observe",
+            summary: "Poll a query until a condition holds or the deadline elapses.",
+            with: vec![
+                FieldSpec::required("connection"),
+                FieldSpec::required("sql"),
+                FieldSpec::optional("params"),
+                FieldSpec::optional("find"),
+                FieldSpec::optional("within"),
+                FieldSpec::optional("interval"),
+                FieldSpec::optional("until"),
+            ],
+            outputs: vec!["satisfied", "rows", "row_count"],
+            example: "- uses: db/observe\n  with: { connection: $inputs.db, sql: \"select status from jobs where id=1\", until: \"$rows[0].status == 'done'\" }\n  outputs: { satisfied: satisfied }",
+        }
+    }
+
     async fn invoke(
         &self,
         _ctx: &ActionCtx<'_>,

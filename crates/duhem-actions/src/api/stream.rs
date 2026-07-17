@@ -109,6 +109,25 @@ impl Action for Stream {
         "api/stream"
     }
 
+    fn contract(&self) -> crate::action::ActionContract {
+        use crate::action::{ActionContract, FieldSpec};
+        ActionContract {
+            uses: "api/stream",
+            summary: "Consume a streaming (SSE) endpoint, collecting events until a condition.",
+            with: vec![
+                FieldSpec::required("method"),
+                FieldSpec::required("url"),
+                FieldSpec::optional("headers"),
+                FieldSpec::optional("body"),
+                FieldSpec::optional("within"),
+                FieldSpec::optional("until_event"),
+                FieldSpec::optional("max_events"),
+            ],
+            outputs: vec!["status", "events", "event_count", "last_event"],
+            example: "- uses: api/stream\n  with: { method: GET, url: $inputs.events_url, until_event: done }\n  outputs: { count: event_count }",
+        }
+    }
+
     async fn invoke(
         &self,
         _ctx: &ActionCtx<'_>,

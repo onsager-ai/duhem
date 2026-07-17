@@ -140,6 +140,22 @@ impl Action for Observe {
         "api/observe"
     }
 
+    fn contract(&self) -> crate::action::ActionContract {
+        use crate::action::{ActionContract, FieldSpec};
+        ActionContract {
+            uses: "api/observe",
+            summary: "Observe a network request the page made (matched by method + URL pattern).",
+            with: vec![
+                FieldSpec::required("method"),
+                FieldSpec::required("url_pattern"),
+                FieldSpec::optional("after"),
+                FieldSpec::optional("within"),
+            ],
+            outputs: vec![],
+            example: "- uses: api/observe\n  with: { method: POST, url_pattern: \"**/api/login\" }",
+        }
+    }
+
     async fn invoke(
         &self,
         ctx: &ActionCtx<'_>,

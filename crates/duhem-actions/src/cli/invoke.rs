@@ -93,6 +93,23 @@ impl Action for Invoke {
         "cli/invoke"
     }
 
+    fn contract(&self) -> crate::action::ActionContract {
+        use crate::action::{ActionContract, FieldSpec};
+        ActionContract {
+            uses: "cli/invoke",
+            summary: "Invoke a local command and observe its exit code, stdout, and stderr.",
+            with: vec![
+                FieldSpec::required("command"),
+                FieldSpec::optional("cwd"),
+                FieldSpec::optional("env"),
+                FieldSpec::optional("stdin"),
+                FieldSpec::optional("within"),
+            ],
+            outputs: vec!["exit_code", "stdout", "stderr"],
+            example: "- uses: cli/invoke\n  with: { command: [\"echo\", \"hi\"] }\n  outputs: { code: exit_code }",
+        }
+    }
+
     async fn invoke(
         &self,
         _ctx: &ActionCtx<'_>,

@@ -90,6 +90,25 @@ impl Action for Poll {
         "api/poll"
     }
 
+    fn contract(&self) -> crate::action::ActionContract {
+        use crate::action::{ActionContract, FieldSpec};
+        ActionContract {
+            uses: "api/poll",
+            summary: "Poll an HTTP endpoint until a condition holds or the deadline elapses.",
+            with: vec![
+                FieldSpec::required("method"),
+                FieldSpec::required("url"),
+                FieldSpec::optional("headers"),
+                FieldSpec::optional("body"),
+                FieldSpec::optional("within"),
+                FieldSpec::optional("interval"),
+                FieldSpec::required("until"),
+            ],
+            outputs: vec!["satisfied", "status", "body", "body_text"],
+            example: "- uses: api/poll\n  with: { method: GET, url: $inputs.job_url, until: \"$response.body.state == 'done'\" }\n  outputs: { satisfied: satisfied }",
+        }
+    }
+
     async fn invoke(
         &self,
         _ctx: &ActionCtx<'_>,

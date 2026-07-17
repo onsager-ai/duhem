@@ -46,6 +46,21 @@ impl Action for Seed {
         "db/seed"
     }
 
+    fn contract(&self) -> crate::action::ActionContract {
+        use crate::action::{ActionContract, FieldSpec};
+        ActionContract {
+            uses: "db/seed",
+            summary: "Run a write statement to seed or mutate data.",
+            with: vec![
+                FieldSpec::required("connection"),
+                FieldSpec::required("sql"),
+                FieldSpec::optional("within"),
+            ],
+            outputs: vec!["rows_affected"],
+            example: "- uses: db/seed\n  with: { connection: $inputs.db, sql: \"insert into users(id) values (1)\" }",
+        }
+    }
+
     async fn invoke(
         &self,
         _ctx: &ActionCtx<'_>,

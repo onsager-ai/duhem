@@ -25,6 +25,17 @@ impl Action for Navigate {
         "ui/navigate"
     }
 
+    fn contract(&self) -> crate::action::ActionContract {
+        use crate::action::{ActionContract, FieldSpec};
+        ActionContract {
+            uses: "ui/navigate",
+            summary: "Navigate the browser to a URL.",
+            with: vec![FieldSpec::required("url"), FieldSpec::optional("within")],
+            outputs: vec![],
+            example: "- uses: ui/navigate\n  with: { url: https://example.com }",
+        }
+    }
+
     async fn invoke(
         &self,
         ctx: &ActionCtx<'_>,

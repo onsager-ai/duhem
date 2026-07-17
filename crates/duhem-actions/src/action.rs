@@ -156,6 +156,62 @@ pub fn layer_for_uses(uses: &str) -> Option<&'static str> {
     }
 }
 
+/// One `with:` field an action accepts, for the machine-readable
+/// [`ActionContract`]. Names the field, whether it's required, and
+/// (for closed-enum fields) the allowed scalar values.
+#[derive(Debug, Clone, Copy)]
+pub struct FieldSpec {
+    pub name: &'static str,
+    pub required: bool,
+    /// Allowed scalar values for a closed-enum field; empty = free-form.
+    pub enum_values: &'static [&'static str],
+}
+
+impl FieldSpec {
+    pub const fn required(name: &'static str) -> Self {
+        Self {
+            name,
+            required: true,
+            enum_values: &[],
+        }
+    }
+    pub const fn optional(name: &'static str) -> Self {
+        Self {
+            name,
+            required: false,
+            enum_values: &[],
+        }
+    }
+    pub const fn enum_of(
+        name: &'static str,
+        required: bool,
+        values: &'static [&'static str],
+    ) -> Self {
+        Self {
+            name,
+            required,
+            enum_values: values,
+        }
+    }
+}
+
+/// Machine-readable contract for one action — the `with:` fields it
+/// accepts and the `outputs` it produces. Defined next to the action
+/// via [`Action::contract`] so it can't drift from `invoke`, and
+/// consumed by `duhem describe` / `duhem actions` and validate-time
+/// field checking.
+#[derive(Debug, Clone)]
+pub struct ActionContract {
+    pub uses: &'static str,
+    /// One-line summary of what the action does.
+    pub summary: &'static str,
+    pub with: Vec<FieldSpec>,
+    /// Output names surfaced as `$steps.<id>.outputs.<name>`.
+    pub outputs: Vec<&'static str>,
+    /// A minimal, copyable example step.
+    pub example: &'static str,
+}
+
 /// One built-in action type. Implementors live under `ui/`, `api/`,
 /// `db/`, etc.
 ///
@@ -166,6 +222,12 @@ pub trait Action: Send + Sync {
     /// Action-type identifier as it appears in `Step.uses` (e.g.
     /// `"ui/click"`).
     fn uses(&self) -> &'static str;
+
+    /// Machine-readable contract: the `with:` fields this action
+    /// accepts and the `outputs` it produces. Ground truth for
+    /// `duhem describe` / `duhem actions` and validate-time field
+    /// checking — defined here so it can't drift from `invoke`.
+    fn contract(&self) -> ActionContract;
 
     /// Whether this action needs a Playwright `Page`. Defaults to the
     /// family classification from [`uses_requires_page`] (`ui/*` →

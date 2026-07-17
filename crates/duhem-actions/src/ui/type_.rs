@@ -40,6 +40,22 @@ impl Action for Type {
         "ui/type"
     }
 
+    fn contract(&self) -> crate::action::ActionContract {
+        use crate::action::{ActionContract, FieldSpec};
+        ActionContract {
+            uses: "ui/type",
+            summary: "Type text into an element.",
+            with: vec![
+                FieldSpec::required("locator"),
+                FieldSpec::required("text"),
+                FieldSpec::optional("clear"),
+                FieldSpec::optional("within"),
+            ],
+            outputs: vec![],
+            example: "- uses: ui/type\n  with: { locator: { css: \"#email\" }, text: \"a@b.com\" }",
+        }
+    }
+
     async fn invoke(
         &self,
         ctx: &ActionCtx<'_>,

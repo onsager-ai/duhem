@@ -152,6 +152,24 @@ impl Action for Call {
         "api/call"
     }
 
+    fn contract(&self) -> crate::action::ActionContract {
+        use crate::action::{ActionContract, FieldSpec};
+        ActionContract {
+            uses: "api/call",
+            summary: "Make an HTTP request and observe the response.",
+            with: vec![
+                FieldSpec::required("method"),
+                FieldSpec::required("url"),
+                FieldSpec::optional("headers"),
+                FieldSpec::optional("query"),
+                FieldSpec::optional("body"),
+                FieldSpec::optional("within"),
+            ],
+            outputs: vec!["status", "body", "body_text"],
+            example: "- uses: api/call\n  with: { method: GET, url: https://example.com }\n  outputs: { status: status }",
+        }
+    }
+
     async fn invoke(
         &self,
         _ctx: &ActionCtx<'_>,

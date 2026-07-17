@@ -65,6 +65,21 @@ impl Action for Select {
         "ui/select"
     }
 
+    fn contract(&self) -> crate::action::ActionContract {
+        use crate::action::{ActionContract, FieldSpec};
+        ActionContract {
+            uses: "ui/select",
+            summary: "Select an option in a <select> by value, label, or index.",
+            with: vec![
+                FieldSpec::required("locator"),
+                FieldSpec::required("by"),
+                FieldSpec::optional("within"),
+            ],
+            outputs: vec![],
+            example: "- uses: ui/select\n  with: { locator: { css: \"#role\" }, by: { label: \"Admin\" } }",
+        }
+    }
+
     async fn invoke(
         &self,
         ctx: &ActionCtx<'_>,

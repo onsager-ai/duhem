@@ -105,7 +105,7 @@ impl Action for Poll {
                 FieldSpec::required("until"),
             ],
             outputs: vec!["satisfied", "status", "body", "body_text"],
-            example: "- uses: api/poll\n  with: { method: GET, url: $inputs.job_url, until: \"$response.body.state == 'done'\" }\n  outputs: { satisfied: satisfied }",
+            example: "- uses: api/poll\n  with: { method: GET, url: $inputs.job_url, until: \"$response.body.state == 'done'\" }",
         }
     }
 

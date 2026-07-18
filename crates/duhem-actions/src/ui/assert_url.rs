@@ -126,7 +126,7 @@ impl Action for AssertUrl {
                 FieldSpec::optional("within"),
             ],
             outputs: vec!["satisfied", "actual"],
-            example: "- uses: ui/assert-url\n  with: { equals: https://example.com/ }\n  outputs: { satisfied: satisfied }",
+            example: "- uses: ui/assert-url\n  with: { equals: https://example.com/ }",
         }
     }
 

@@ -212,6 +212,16 @@ pub struct ActionContract {
     pub example: &'static str,
 }
 
+impl ActionContract {
+    /// A judging action emits a boolean `satisfied` output (spec #253).
+    /// Judging steps implicitly assert `satisfied == true` unless the
+    /// author binds `satisfied` in the step's `outputs:` — the catalog,
+    /// not the action name, decides membership.
+    pub fn judges(&self) -> bool {
+        self.outputs.contains(&"satisfied")
+    }
+}
+
 /// One built-in action type. Implementors live under `ui/`, `api/`,
 /// `db/`, etc.
 ///

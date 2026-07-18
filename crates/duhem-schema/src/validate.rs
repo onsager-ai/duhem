@@ -48,6 +48,11 @@ pub enum ValidationError {
     #[error("criterion `{criterion}`: duplicate check id `{id}`")]
     DuplicateCheckId { criterion: String, id: String },
 
+    #[error(
+        "criterion `{criterion}` / check `{check}`: nothing to judge — no assertions and no steps (spec #253: a check may omit `assertions:` only when a judging step carries the verdict)"
+    )]
+    NothingToJudge { criterion: String, check: String },
+
     #[error("criterion `{criterion}` / check `{check}`: duplicate step id `{id}`")]
     DuplicateStepId {
         criterion: String,
@@ -385,6 +390,18 @@ fn validate_check(
     setup_outputs: &HashMap<&str, &BTreeMap<String, String>>,
     errs: &mut Vec<ValidationError>,
 ) {
+    // A check with neither assertions nor steps can never produce a
+    // verdict (the judge would see an empty aggregation). With steps
+    // but no assertions the schema layer accepts — whether one of the
+    // steps is a judging action (implicit judgment, spec #253) is a
+    // catalog question the contract-aware CLI layer answers.
+    if ch.assertions.is_empty() && ch.steps.is_empty() {
+        errs.push(ValidationError::NothingToJudge {
+            criterion: c.id.clone(),
+            check: ch.id.clone(),
+        });
+    }
+
     let mut step_outputs: HashMap<&str, &BTreeMap<String, String>> = HashMap::new();
     let mut seen_step_ids: HashSet<&str> = HashSet::new();
 
@@ -666,6 +683,47 @@ mod tests {
         let v = parse("verification: x\ncriteria: []\n");
         let errs = validate(&v).unwrap_err();
         assert!(matches!(errs[0], ValidationError::NoCriteria));
+    }
+
+    #[test]
+    fn check_with_no_assertions_and_no_steps_fails() {
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::NothingToJudge { criterion, check }
+                    if criterion == "AC-1" && check == "AC-1.1"
+            )),
+            "{errs:?}"
+        );
+    }
+
+    #[test]
+    fn check_with_steps_but_no_assertions_is_accepted_at_schema_layer() {
+        // Whether a step actually judges (spec #253) is a catalog
+        // question — the contract-aware CLI layer owns it.
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/assert-url
+            with: { matches: "/login" }
+"#;
+        let v = parse(y);
+        assert!(validate(&v).is_ok());
     }
 
     #[test]

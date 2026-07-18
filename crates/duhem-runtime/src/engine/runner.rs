@@ -30,28 +30,28 @@ use duhem_evidence::{
     new_run_id, project_db_path, run_started,
 };
 use duhem_judge::{
-    AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusiveCause,
-    InconclusivePolicy, RunVerdict, aggregate_check, aggregate_criterion, aggregate_run,
-    apply_inconclusive_policy,
+    AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusivePolicy, RunVerdict,
+    aggregate_check, aggregate_criterion, aggregate_run, apply_inconclusive_policy,
 };
 use duhem_schema::{Check, Criterion, RetryBackoff, RetryPolicy, VerificationDefinition};
 use tracing::debug;
 
-pub(crate) use crate::engine::outcome::step_label;
 pub use crate::engine::outcome::{
     CapturedArtifact, CheckFailure, CheckFilter, EngineError, FailedAssertion, RunOutcome,
+};
+pub(crate) use crate::engine::outcome::{
+    append_implicit_judgment, evaluate_explicit_assertions, implicit_judgment_outcomes, step_label,
 };
 
 use crate::engine::capture::{CapturePolicy, TargetLocator, finalize_capture, target_from_step};
 use crate::engine::context::{RunContext, RunState, json_to_value};
 use crate::engine::registry::{ActionRegistry, default_registry};
-use crate::engine::shim::assertion_to_expr;
 use crate::engine::template::substitute_with;
 use crate::engine::translate::{
-    RETRY_BACKOFF_BASE, apply_default_within, check_is_retryable, eval_cause_detail, eval_to_state,
-    outcome_to_evidence, retry_delay, with_to_evidence_map,
+    RETRY_BACKOFF_BASE, apply_default_within, check_is_retryable, outcome_to_evidence, retry_delay,
+    with_to_evidence_map,
 };
-use crate::eval::{EvalResult, Value, describe_comparison, eval};
+use crate::eval::Value;
 
 /// The minimal step executor.
 pub struct Engine {
@@ -677,6 +677,10 @@ impl Engine {
         // what the engine got around to invoking.
         let mut step_aborted = false;
         let mut targets: Vec<TargetLocator> = Vec::new();
+        // Per-step `satisfied` observations, for implicit judgment
+        // (spec #253). `None` = the step didn't run or its result
+        // carried no boolean `satisfied`.
+        let mut step_satisfied: Vec<Option<bool>> = vec![None; check.steps.len()];
         for (idx, step) in check.steps.iter().enumerate() {
             // Resolve template references in `with:` against whatever
             // context we have. Cheap and same-shape for every code
@@ -748,6 +752,9 @@ impl Engine {
                 };
 
                 if let Ok(r) = &result {
+                    if let Some(serde_json::Value::Bool(b)) = r.outputs.get("satisfied") {
+                        step_satisfied[idx] = Some(*b);
+                    }
                     for (name, value) in &r.outputs {
                         if let Some(scalar) = json_to_value(value)
                             && let Some(id) = step.id.as_deref()
@@ -775,60 +782,46 @@ impl Engine {
             }
         }
 
+        // Explicit `assertions:` (indices 0..len), then the implicit
+        // judgment of judging steps (#253) appended after them. Both
+        // paths fold into the same collections and share the
+        // unknown-action / environment-failure cause prefix.
         let mut assertion_outcomes: Vec<AssertionOutcome> = Vec::new();
         // Non-passing assertions, collected for the reporter so a failing
         // run shows *which* assertion failed without trace-reading.
         let mut failed: Vec<FailedAssertion> = Vec::new();
-        for (i, assertion) in check.assertions.iter().enumerate() {
-            let expr = assertion_to_expr(assertion);
-            let (state, detail) = if any_unknown {
-                (
-                    VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
-                    Some("unknown_action".to_string()),
-                )
-            } else if environment_failed {
-                (
-                    VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
-                    Some(if browser_missing {
-                        "browser_unavailable".to_string()
-                    } else {
-                        "check_browser_failed".to_string()
-                    }),
-                )
-            } else {
-                let r = eval(&expr, &ctx);
-                let state = eval_to_state(&r);
-                let detail = match &r {
-                    EvalResult::Inconclusive(c) => Some(eval_cause_detail(c)),
-                    // A failed comparison gets its observed operands —
-                    // "actual <lhs>, expected <rhs>" — so the reporter
-                    // shows the values, not just the expression.
-                    EvalResult::False => describe_comparison(&expr, &ctx),
-                    EvalResult::True => None,
-                };
-                (state, detail)
-            };
-            writer
-                .append(EventPayload::AssertionEvaluated {
-                    check_id: check.id.clone(),
-                    assertion_index: i as u32,
-                    state,
-                    detail: detail.clone(),
-                })
-                .await?;
-            if !matches!(state, VerdictState::Pass) {
-                failed.push(FailedAssertion {
-                    expr: assertion.display(),
-                    state,
-                    detail: detail.clone(),
-                });
-            }
-            assertion_outcomes.push(AssertionOutcome {
-                assertion_index: i,
-                state,
-                detail,
-            });
-        }
+        evaluate_explicit_assertions(
+            writer,
+            check,
+            &ctx,
+            any_unknown,
+            environment_failed,
+            browser_missing,
+            &mut assertion_outcomes,
+            &mut failed,
+        )
+        .await?;
+
+        // Implicit judgment (spec #253; see `implicit_judgment_outcomes`
+        // and §10.3.2): judging steps append their `satisfied == true`
+        // outcomes after the explicit assertions.
+        let implicit = implicit_judgment_outcomes(
+            check,
+            |uses| self.registry.get(uses).map(|d| d.judges()).unwrap_or(false),
+            &step_satisfied,
+            any_unknown,
+            environment_failed,
+            browser_missing,
+        );
+        append_implicit_judgment(
+            writer,
+            &check.id,
+            implicit,
+            check.assertions.len(),
+            &mut assertion_outcomes,
+            &mut failed,
+        )
+        .await?;
 
         // Failure-evidence capture (spec #202): the browser is still
         // open and the failure set is known, so this is the one spot
@@ -879,6 +872,7 @@ mod tests {
     use crate::engine::registry::Dispatch;
     use async_trait::async_trait;
     use duhem_actions::{ActionError, ActionResult, Outcome};
+    use duhem_judge::InconclusiveCause;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
@@ -889,6 +883,7 @@ mod tests {
         outcome: Outcome,
         outputs: Vec<(&'static str, serde_json::Value)>,
         invocations: Arc<AtomicUsize>,
+        judges: bool,
     }
 
     impl StubAction {
@@ -898,10 +893,17 @@ mod tests {
                 outcome,
                 outputs: Vec::new(),
                 invocations: Arc::new(AtomicUsize::new(0)),
+                judges: false,
             }
         }
         fn with_output(mut self, k: &'static str, v: serde_json::Value) -> Self {
             self.outputs.push((k, v));
+            self
+        }
+        /// Mark the stub as a judging action (its contract would list
+        /// a `satisfied` output) for implicit-judgment tests (#253).
+        fn judging(mut self) -> Self {
+            self.judges = true;
             self
         }
     }
@@ -913,6 +915,9 @@ mod tests {
         }
         fn requires_page(&self) -> bool {
             false
+        }
+        fn judges(&self) -> bool {
+            self.judges
         }
         async fn invoke(
             &self,
@@ -1298,6 +1303,7 @@ criteria:
             outcome: Outcome::Ok,
             outputs: Vec::new(),
             invocations: criterion_calls.clone(),
+            judges: false,
         };
         engine.register_test_action(Box::new(criterion_tracker));
         let v = def(r#"
@@ -1350,6 +1356,7 @@ criteria:
             outcome: Outcome::Ok,
             outputs: Vec::new(),
             invocations: criterion_calls.clone(),
+            judges: false,
         };
         engine.register_test_action(Box::new(criterion_tracker));
         let v = def(r#"
@@ -2417,5 +2424,161 @@ criteria:
             VerdictState::Inconclusive(InconclusiveCause::MissingObservation)
         ));
         assert!(o.warnings.is_empty());
+    }
+
+    // ---- implicit judgment (spec #253) ----
+
+    #[tokio::test]
+    async fn implicit_satisfied_true_passes_without_assertions() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/assert", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(true))
+                .judging(),
+        ));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/assert
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Pass);
+    }
+
+    #[tokio::test]
+    async fn implicit_satisfied_false_fails_the_check() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/assert", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(false))
+                .judging(),
+        ));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/assert
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Fail);
+    }
+
+    #[tokio::test]
+    async fn binding_satisfied_takes_manual_control() {
+        // Author binds `satisfied` (e.g. for a disjunction): the
+        // implicit path is disabled, so a false observation judged
+        // only by the author's own assertion still passes.
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/assert", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(false))
+                .judging(),
+        ));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: s1
+            uses: fake/assert
+            outputs:
+              satisfied: satisfied
+        assertions:
+          - $steps.s1.outputs.satisfied == false
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Pass);
+    }
+
+    #[tokio::test]
+    async fn implicit_is_inconclusive_when_step_was_skipped() {
+        // An earlier step errors and aborts the check; the judging
+        // step never runs, so its implicit assertion can't observe —
+        // Inconclusive(MissingObservation), never a silent Pass.
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/error", Outcome::Error)));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/assert", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(true))
+                .judging(),
+        ));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/error
+          - uses: fake/assert
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert!(matches!(
+            verdict.criteria[0].checks[0].state,
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation)
+        ));
+    }
+
+    #[tokio::test]
+    async fn explicit_and_implicit_assertions_coexist() {
+        // An explicit assertion failing must fail the check even when
+        // the implicit judgment passes — the fold sees both.
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/assert", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(true))
+                .judging(),
+        ));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/assert
+        assertions:
+          - "false"
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Fail);
+    }
+
+    #[tokio::test]
+    async fn no_assertions_and_no_judging_step_is_inconclusive_empty() {
+        // Defensive path: the CLI's contract layer rejects this at
+        // validate time; if it reaches the engine anyway, the empty
+        // fold surfaces as Inconclusive rather than a silent Pass.
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/noop", Outcome::Ok)));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/noop
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert!(matches!(
+            verdict.criteria[0].checks[0].state,
+            VerdictState::Inconclusive(InconclusiveCause::EmptyAggregation)
+        ));
     }
 }

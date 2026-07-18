@@ -2,9 +2,14 @@
 //! the file-token budget).
 
 use duhem_actions::ActionError;
-use duhem_evidence::{StoreError, VerdictState, WriterError};
-use duhem_judge::RunVerdict;
+use duhem_evidence::{EventPayload, EvidenceWriter, StoreError, VerdictState, WriterError};
+use duhem_judge::{AssertionOutcome, InconclusiveCause, RunVerdict};
 use thiserror::Error;
+
+use crate::engine::context::RunContext;
+use crate::engine::shim::assertion_to_expr;
+use crate::engine::translate::{eval_cause_detail, eval_to_state};
+use crate::eval::{EvalResult, describe_comparison, eval};
 
 /// Surfaces only "the runtime itself failed" cases. A failing
 /// artifact yields `RunVerdict::Fail`, not `Err`.
@@ -67,6 +72,189 @@ impl From<ActionError> for EngineError {
 /// `<uses> #<index>`. Used to name a step in an
 /// [`EngineError::UnresolvedReference`] so the author can locate the
 /// offending `with:` reference even in an anonymous step.
+/// One synthesized implicit-judgment outcome (spec #253) for a judging
+/// step, ready for the runner to emit as an `AssertionEvaluated` event.
+pub(crate) struct ImplicitOutcome {
+    pub label: String,
+    pub state: VerdictState,
+    pub detail: Option<String>,
+}
+
+/// Compute the implicit assertion outcomes for a check's judging steps
+/// (spec #253): one entry per step whose action judges (its contract
+/// emits `satisfied`, tested via `is_judging`) and that hasn't bound
+/// `satisfied` in its `outputs:` (binding it is the manual-control
+/// opt-out). Cause mapping mirrors the explicit-assertion path — an
+/// unknown action / environment failure / unrun step never yields a
+/// silent `pass`. Kept out of `run_check` for the file-token budget.
+pub(crate) fn implicit_judgment_outcomes(
+    check: &duhem_schema::Check,
+    is_judging: impl Fn(&str) -> bool,
+    step_satisfied: &[Option<bool>],
+    any_unknown: bool,
+    environment_failed: bool,
+    browser_missing: bool,
+) -> Vec<ImplicitOutcome> {
+    let mut out = Vec::new();
+    for (idx, step) in check.steps.iter().enumerate() {
+        // Opt out when the author binds an output *named* `satisfied`
+        // (the key `$steps.<id>.outputs.satisfied` resolves against),
+        // regardless of which extraction it maps to — that's the author
+        // taking manual control of the satisfied signal.
+        let judging = is_judging(step.uses.as_str()) && !step.outputs.contains_key("satisfied");
+        if !judging {
+            continue;
+        }
+        let label = step_label(step, idx);
+        let (state, detail) = if any_unknown {
+            (
+                VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+                Some("unknown_action".to_string()),
+            )
+        } else if environment_failed {
+            (
+                VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+                Some(if browser_missing {
+                    "browser_unavailable".to_string()
+                } else {
+                    "check_browser_failed".to_string()
+                }),
+            )
+        } else {
+            match step_satisfied[idx] {
+                Some(true) => (VerdictState::Pass, None),
+                Some(false) => (
+                    VerdictState::Fail,
+                    Some(format!(
+                        "actual false, expected true (implicit `satisfied` of step `{label}`)"
+                    )),
+                ),
+                None => (
+                    VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+                    Some(format!(
+                        "step `{label}` did not run or produced no `satisfied`"
+                    )),
+                ),
+            }
+        };
+        out.push(ImplicitOutcome {
+            label,
+            state,
+            detail,
+        });
+    }
+    out
+}
+
+/// Evaluate a check's explicit `assertions:` into outcomes + evidence
+/// (indices `0..assertions.len()`), folding them into the running
+/// `assertion_outcomes` / `failed` collections. An unknown action or
+/// environment failure overrides every assertion to `inconclusive`
+/// with the matching cause (the same prefix `implicit_judgment_outcomes`
+/// applies), so the two evaluation paths agree. Split out of
+/// `run_check` for the file-token budget.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn evaluate_explicit_assertions(
+    writer: &mut EvidenceWriter,
+    check: &duhem_schema::Check,
+    ctx: &RunContext<'_>,
+    any_unknown: bool,
+    environment_failed: bool,
+    browser_missing: bool,
+    assertion_outcomes: &mut Vec<AssertionOutcome>,
+    failed: &mut Vec<FailedAssertion>,
+) -> Result<(), EngineError> {
+    for (i, assertion) in check.assertions.iter().enumerate() {
+        let expr = assertion_to_expr(assertion);
+        let (state, detail) = if any_unknown {
+            (
+                VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+                Some("unknown_action".to_string()),
+            )
+        } else if environment_failed {
+            (
+                VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+                Some(if browser_missing {
+                    "browser_unavailable".to_string()
+                } else {
+                    "check_browser_failed".to_string()
+                }),
+            )
+        } else {
+            let r = eval(&expr, ctx);
+            let detail = match &r {
+                EvalResult::Inconclusive(c) => Some(eval_cause_detail(c)),
+                // A failed comparison gets its observed operands —
+                // "actual <lhs>, expected <rhs>" — so the reporter
+                // shows the values, not just the expression.
+                EvalResult::False => describe_comparison(&expr, ctx),
+                EvalResult::True => None,
+            };
+            (eval_to_state(&r), detail)
+        };
+        writer
+            .append(EventPayload::AssertionEvaluated {
+                check_id: check.id.clone(),
+                assertion_index: i as u32,
+                state,
+                detail: detail.clone(),
+            })
+            .await?;
+        if !matches!(state, VerdictState::Pass) {
+            failed.push(FailedAssertion {
+                expr: assertion.display(),
+                state,
+                detail: detail.clone(),
+            });
+        }
+        assertion_outcomes.push(AssertionOutcome {
+            assertion_index: i,
+            state,
+            detail,
+        });
+    }
+    Ok(())
+}
+
+/// Emit the implicit-judgment outcomes as `AssertionEvaluated` events
+/// (indices continuing from `start_index`) and fold them into the
+/// check's running `assertion_outcomes` / `failed` collections (spec
+/// #253). Kept beside `implicit_judgment_outcomes` and out of
+/// `run_check` for the file-token budget.
+pub(crate) async fn append_implicit_judgment(
+    writer: &mut EvidenceWriter,
+    check_id: &str,
+    outcomes: Vec<ImplicitOutcome>,
+    start_index: usize,
+    assertion_outcomes: &mut Vec<AssertionOutcome>,
+    failed: &mut Vec<FailedAssertion>,
+) -> Result<(), EngineError> {
+    for (offset, imp) in outcomes.into_iter().enumerate() {
+        let index = start_index + offset;
+        writer
+            .append(EventPayload::AssertionEvaluated {
+                check_id: check_id.to_string(),
+                assertion_index: index as u32,
+                state: imp.state,
+                detail: imp.detail.clone(),
+            })
+            .await?;
+        if !matches!(imp.state, VerdictState::Pass) {
+            failed.push(FailedAssertion {
+                expr: format!("implicit: step `{}` satisfied == true", imp.label),
+                state: imp.state,
+                detail: imp.detail.clone(),
+            });
+        }
+        assertion_outcomes.push(AssertionOutcome {
+            assertion_index: index,
+            state: imp.state,
+            detail: imp.detail,
+        });
+    }
+    Ok(())
+}
+
 pub(crate) fn step_label(step: &duhem_schema::Step, idx: usize) -> String {
     step.id
         .clone()

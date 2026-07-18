@@ -58,7 +58,7 @@ impl Action for AssertElement {
                 FieldSpec::optional("within"),
             ],
             outputs: vec!["satisfied", "count"],
-            example: "- uses: ui/assert-element\n  with: { locator: { role: heading, name: \"Welcome\" }, expected: visible }\n  outputs: { satisfied: satisfied }",
+            example: "- uses: ui/assert-element\n  with: { locator: { role: heading, name: \"Welcome\" }, expected: visible }",
         }
     }
 

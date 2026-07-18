@@ -1,0 +1,83 @@
+# Implicit judgment — worked example (spec #253)
+#
+# A *judging* action is one whose contract emits a boolean `satisfied`
+# output (`ui/assert-element`, `ui/assert-url`, `ui/assert-state`,
+# `api/poll`). Since #253 a judging step **implicitly asserts
+# `satisfied == true`** — you no longer write the id / `outputs:
+# { satisfied: satisfied }` / `$steps.<id>.outputs.satisfied == true`
+# plumbing triplet just to say "this observation must hold".
+#
+# This leaf contrasts the two authoring styles for the SAME check
+# semantics. Both criteria are structurally valid.
+#
+#   - AC-1 (terse):   assert steps carry the verdict implicitly — no
+#                     `assertions:` block at all.
+#   - AC-2 (explicit): the pre-#253 form, still fully supported —
+#                     binding `satisfied` in `outputs:` takes manual
+#                     control (e.g. for a disjunction), which disables
+#                     the implicit path.
+#
+# The `ui/*` actions drive a real browser, so a `duhem run` needs a SUT
+# and Chromium (`duhem browser install`). Offline, this validates
+# structurally:
+#
+#   duhem validate verifications/implicit-judgment-example/duhem.yml
+#
+# The runtime behavior (implicit true -> Pass, false -> Fail, skipped ->
+# Inconclusive, manual binding opts out) is covered by the engine unit
+# tests in `crates/duhem-runtime/src/engine/runner.rs`.
+
+verification: Implicit judgment — terse vs explicit
+
+inputs:
+  login_url:
+    type: string
+    default: http://127.0.0.1:8080/login
+
+criteria:
+  - id: AC-1
+    description: |
+      The sign-in page renders: the Username field and the Sign In
+      button are visible. Authored in the terse #253 form — the two
+      assert steps ARE the judgment, no `assertions:` block.
+    checks:
+      - id: AC-1.1
+        description: Navigate and confirm the form rendered.
+        steps:
+          - uses: ui/navigate
+            with:
+              url: $inputs.login_url
+          - uses: ui/assert-element
+            with:
+              locator: { role: textbox, name: Username }
+              expected: visible
+              within: 20s
+          - uses: ui/assert-element
+            with:
+              locator: { role: button, name: Sign In }
+              expected: visible
+              within: 10s
+
+  - id: AC-2
+    description: |
+      The same posture written the pre-#253 way — an explicit
+      assertion over a bound `satisfied`. Both forms are supported;
+      binding `satisfied` is how an author opts out of implicit
+      judgment (e.g. to combine several steps in one assertion).
+    checks:
+      - id: AC-2.1
+        description: Bind `satisfied` and assert it explicitly.
+        steps:
+          - uses: ui/navigate
+            with:
+              url: $inputs.login_url
+          - id: signin_visible
+            uses: ui/assert-element
+            with:
+              locator: { role: button, name: Sign In }
+              expected: visible
+              within: 10s
+            outputs:
+              satisfied: satisfied
+        assertions:
+          - $steps.signin_visible.outputs.satisfied == true

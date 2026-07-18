@@ -107,7 +107,6 @@ Assert an element reaches an existence/visibility state within a deadline.
 ```yaml
 - uses: ui/assert-element
   with: { locator: { role: heading, name: "Welcome" }, expected: visible }
-  outputs: { satisfied: satisfied }
 ```
 
 ### `ui/assert-url`
@@ -125,7 +124,6 @@ Assert the page URL equals a string or matches a regex (exactly one of equals/ma
 ```yaml
 - uses: ui/assert-url
   with: { equals: https://example.com/ }
-  outputs: { satisfied: satisfied }
 ```
 
 ### `ui/assert-state`
@@ -143,7 +141,6 @@ Assert an app state (e.g. signed in/out, or a marker) via `state:`.
 ```yaml
 - uses: ui/assert-state
   with: { state: signed_in }
-  outputs: { satisfied: satisfied }
 ```
 
 ## `api/*`
@@ -206,7 +203,6 @@ Poll an HTTP endpoint until a condition holds or the deadline elapses.
 ```yaml
 - uses: api/poll
   with: { method: GET, url: $inputs.job_url, until: "$response.body.state == 'done'" }
-  outputs: { satisfied: satisfied }
 ```
 
 ### `api/stream`

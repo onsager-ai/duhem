@@ -11,11 +11,14 @@ runtime), and gates merge/deploy on the verdict.
 > `duhem-schema`, `duhem-actions`, `duhem-evidence`, `duhem-summary`,
 > `duhem-dashboard`, `duhem-reporter-pretty`, `duhem-reporter-junit`)
 > plus an internal `xtask` build helper; the CLI exposes `init` /
-> `run` / `validate` / `dashboard` (serve + static export; live SSE) /
-> `--version`; the `ui/*` and `api/*` action families are implemented
-> (`ui/navigate`, `ui/click`, `ui/type`, `ui/select`, `ui/assert-*`,
-> `api/call`, `api/observe`); environment provisioning (`up:` /
-> `down:` hooks) is wired into the runtime; product Verification
+> `actions` / `describe` / `validate` / `run` / `browser` /
+> `dashboard` (serve + static export; live SSE) / `export` / `ship` /
+> `mcp` / `--version`; the `ui/*`, `api/*`, `db/*`, and `cli/*` action
+> families are implemented (`ui/navigate` / `click` / `type` /
+> `select` / `assert-*`, `api/call` / `observe` / `poll` / `stream`,
+> `db/query` / `observe` / `seed`, `cli/invoke`); environment
+> provisioning (`up:` / `down:` hooks) is wired into the runtime;
+> product Verification
 > Definitions are co-located with the products they verify under a
 > `.duhem/` suite (Chreode ships them in `onsager-ai/chreode/.duhem/`,
 > self-gated in its own CI and drift-monitored here; epic #225). The
@@ -101,10 +104,11 @@ but they are **parallel, not shared**:
   self-verification VDs.
 - Product Verification Definitions live **with the product** they
   verify, in a co-located `.duhem/` suite — Duhem is used as a tool
-  (epic #225). Chreode already moved
+  (epic #225, migration complete). Chreode moved
   (`onsager-ai/chreode/.duhem/`, self-gated in its own CI +
-  drift-monitored here); Onsager's move is P4 (pending — Onsager is
-  paused, so its VD is still in-tree today).
+  drift-monitored here); Onsager's in-tree VD was retired (P4 of
+  #225) and re-homes when Onsager work resumes — no product VDs
+  remain in-tree, only Duhem's own self-verification suites.
 - Onsager's product surfaces (forge, stiglab, synodic, dashboard,
   events, migrations) live on `onsager-ai/onsager`.
 - Cross-repo work is two specs (one on each repo) with a contract in

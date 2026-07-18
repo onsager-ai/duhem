@@ -51,9 +51,9 @@ fn check_judgment(c: &duhem_schema::Criterion, ch: &duhem_schema::Check, errs: &
     }
     let any_judging = ch.steps.iter().any(|s| match contract_for(&s.uses) {
         None => true, // unknown/custom action — assume it may judge.
-        Some(contract) => {
-            contract.judges() && !s.outputs.values().any(|field| field == "satisfied")
-        }
+        // Binding an output named `satisfied` is the manual-control
+        // opt-out (mirrors the runtime in `implicit_judgment_outcomes`).
+        Some(contract) => contract.judges() && !s.outputs.contains_key("satisfied"),
     });
     if !any_judging {
         errs.push(format!(
@@ -208,6 +208,17 @@ mod tests {
         // Under-enforce: a custom action may judge; the runtime
         // surfaces a truly-unknown `uses` as Inconclusive.
         let d = vd_no_assertions("          - { uses: custom/thing, with: { x: 1 } }");
+        assert!(field_errors(&d).is_empty(), "{:?}", field_errors(&d));
+    }
+
+    #[test]
+    fn no_assertions_opt_out_keys_on_output_name_not_extraction() {
+        // Binding some *other* name to the `satisfied` extraction does
+        // NOT opt out — the step still judges implicitly, so a
+        // no-assertions check with it is accepted.
+        let d = vd_no_assertions(
+            "          - { id: s, uses: ui/assert-element, with: { locator: { css: h1 }, expected: visible }, outputs: { count: satisfied } }",
+        );
         assert!(field_errors(&d).is_empty(), "{:?}", field_errors(&d));
     }
 

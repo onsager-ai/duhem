@@ -97,8 +97,11 @@ pub(crate) fn implicit_judgment_outcomes(
 ) -> Vec<ImplicitOutcome> {
     let mut out = Vec::new();
     for (idx, step) in check.steps.iter().enumerate() {
-        let judging = is_judging(step.uses.as_str())
-            && !step.outputs.values().any(|field| field == "satisfied");
+        // Opt out when the author binds an output *named* `satisfied`
+        // (the key `$steps.<id>.outputs.satisfied` resolves against),
+        // regardless of which extraction it maps to — that's the author
+        // taking manual control of the satisfied signal.
+        let judging = is_judging(step.uses.as_str()) && !step.outputs.contains_key("satisfied");
         if !judging {
             continue;
         }

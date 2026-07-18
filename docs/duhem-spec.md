@@ -154,7 +154,7 @@ Steps may produce named outputs that subsequent steps and assertions reference.
 
 The aggregated outcome of a verification run.
 
-- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state.
+- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Both are folded by the same three-state rule; a check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
 - **Per-criterion verdict**: aggregated from its checks (any check `fail` → criterion `fail`; any `inconclusive` and no `fail` → criterion `inconclusive`; all `pass` → criterion `pass`).
 - **Per-run verdict**: aggregated from all criteria, same rules.
 
@@ -466,6 +466,8 @@ criteria:
 
 Notice that AC-1.1 alone exercises five different layers: UI input capture, UI button activation, network observation, API response shape, and ID semantics. That is intentional. The check verifies a slice of the holistic web.
 
+The example above writes the `id` / `outputs: { satisfied: satisfied }` / `$steps.<id>.outputs.satisfied == true` plumbing in full to show the mechanism. In practice most assert steps don’t need it — see the implicit-judgment shorthand in §10.3.2.
+
 #### 10.3.1 Environment provisioning (`environment:`)
 
 A Verification Definition may declare an optional top-level `environment:` block of operator-supplied lifecycle hooks for the system-under-test (§9 Stage 3). When present, the runtime forks `up:` once before `setup:`, polls the optional `ready:` probe before the first criterion, and forks the optional `down:` after the criteria loop completes — regardless of verdict.
@@ -500,6 +502,31 @@ criteria:
 Failure policy is **inconclusive, never false**: a non-zero `up:` exit (or an unrunnable script) yields a run verdict of `Inconclusive(environment_error)`; a `ready:` probe that exhausts its `timeout:` yields `Inconclusive(timeout)`. A failed `up:` skips teardown (nothing came up to tear down); `down:` failures are recorded as evidence but never alter the verdict. Relative script paths resolve against the Verification Definition's directory. `up:`/`down:` scripts run under the runtime's sanitized subprocess environment (§9 Stage 3, §11.1 Runtime). The `ready:` catalog is closed at `http:` for v1.
 
 A manifest can also provision **one shared environment for the whole suite** rather than per-leaf — see the manifest `environment:` block in §10.4.
+
+#### 10.3.2 Implicit judgment (judging steps)
+
+An action whose contract emits a boolean `satisfied` output — `ui/assert-element`, `ui/assert-url`, `ui/assert-state`, `api/poll` — is a **judging action**. A judging step **implicitly asserts `satisfied == true`**: it contributes one assertion outcome to the check’s verdict without any `assertions:` entry. So the four checks above collapse to their steps alone — no `id`, no `outputs:`, no `$steps.…` line:
+
+```yaml
+      - id: AC-1.2
+        description: Workspace appears in user's workspace list
+        steps:
+          - uses: ui/assert-element
+            with:
+              locator: {role: listitem, text: $inputs.workspace_name}
+              scope: {role: "list", name: "Workspaces"}
+              expected: exists
+              within: 5s
+```
+
+Rules:
+
+- Membership is **catalog-driven**, not name-driven: a step judges iff its action’s contract lists a `satisfied` output. Custom actions that emit `satisfied` participate automatically.
+- Binding `satisfied` in the step’s `outputs:` **opts out** — the author is taking manual control (e.g. to combine several steps into one disjunctive assertion), so the implicit assertion is suppressed and only the explicit `assertions:` judge that step. Binding any *other* output (`count`, `actual`, `body`) does not opt out.
+- A skipped, errored, unknown-action, or environment-failed judging step contributes `inconclusive` with the same cause it would give an explicit assertion — never a silent `pass`.
+- `assertions:` is therefore optional. A check with neither `assertions:` nor any judging step is rejected at validate time (there is nothing to judge).
+
+Implicit and explicit judgment compose: a check may carry both, and the fold sees every outcome. This is a spelling convenience over the §7.6 verdict rule, not a new judgment path.
 
 ### 10.4 Root manifest (`duhem.yml`)
 

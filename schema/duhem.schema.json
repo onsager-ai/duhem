@@ -15,7 +15,7 @@
       "additionalProperties": false,
       "properties": {
         "assertions": {
-          "description": "Mechanically-judgable claims about what the steps must produce.",
+          "description": "Mechanically-judgable claims about what the steps must produce. Optional since spec #253: a check may rely entirely on the implicit judgment of its judging steps (actions whose contract emits a boolean `satisfied` output). A check with neither assertions nor steps has nothing to judge — the validator rejects it.",
           "items": {
             "$ref": "#/definitions/Assertion"
           },
@@ -41,7 +41,6 @@
         }
       },
       "required": [
-        "assertions",
         "id"
       ],
       "type": "object"

@@ -46,6 +46,15 @@ pub(crate) trait Dispatch: Send + Sync {
         true
     }
 
+    /// Whether this action's contract emits a boolean `satisfied`
+    /// output — a *judging* action (spec #253). Judging steps
+    /// implicitly assert `satisfied == true` unless the author binds
+    /// `satisfied` in the step's `outputs:`. Test stubs default to
+    /// `false` and opt in explicitly.
+    fn judges(&self) -> bool {
+        false
+    }
+
     async fn invoke(
         &self,
         page: Option<&Page>,
@@ -78,6 +87,10 @@ impl Dispatch for ConcreteAction {
     /// page (`ui/*`, `api/observe`) rather than for every action.
     fn requires_page(&self) -> bool {
         self.action.requires_page()
+    }
+
+    fn judges(&self) -> bool {
+        self.action.contract().judges()
     }
 
     async fn invoke(

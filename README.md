@@ -4,7 +4,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/onsager-ai/duhem/actions/workflows/ci.yml/badge.svg)](https://github.com/onsager-ai/duhem/actions/workflows/ci.yml)
-[![Schema](https://img.shields.io/badge/schema-v0.1.0-blue.svg)](CHANGELOG.md)
+[![Schema](https://img.shields.io/badge/schema-v0.1.2-blue.svg)](CHANGELOG.md)
 
 Duhem sits between AI coding agents and production. It captures human intent as acceptance criteria, translates them into mechanically-judged checks that exercise the real delivery web — code + prompts + tool wiring + data + runtime — and gates merge/deploy on the verdict.
 
@@ -31,7 +31,7 @@ npx duhem --version
 
 Prebuilt binaries for each platform are attached to every [GitHub Release](https://github.com/onsager-ai/duhem/releases) — download, unpack, and put `duhem` on your `PATH`.
 
-> The npm package and release binaries publish with the **v0.1.0** release. Until then, build from source with a Rust toolchain: `cargo build -p duhem-cli` produces `target/debug/duhem`. Substitute `cargo run -p duhem-cli --` for `duhem` in the commands below.
+> Prefer a source build? A Rust toolchain gives you the CLI without npm: `cargo build -p duhem-cli` produces `target/debug/duhem`. Substitute `cargo run -p duhem-cli --` for `duhem` in the commands below.
 
 Running browser-backed `ui/*` checks additionally needs Node ≥ 20 and the Playwright sidecar's Chromium, installed once per host:
 
@@ -99,7 +99,10 @@ duhem actions    List the built-in action catalog
 duhem describe   Print one action's contract (with-fields, outputs, example)
 duhem validate   Parse and structurally validate a Verification Definition file
 duhem run        Execute a Verification Definition end-to-end
+duhem browser    Provision the Playwright sidecar + Chromium for ui/* checks
 duhem dashboard  Browse run evidence in a read-only web dashboard (serve + static export)
+duhem export     Export one run from the store as a self-contained bundle
+duhem ship       Ship a run bundle to a hub ingest endpoint (content-hash replication)
 duhem mcp        Serve the action contract + validate over MCP (stdio) for AI authoring
 duhem --version  Print the CLI and schema version
 ```
@@ -108,7 +111,7 @@ Run `duhem <command> --help` for the full flag surface (filters, inputs, environ
 
 ## Status
 
-**Phase 0 — Foundation.** The Cargo workspace ships the CLI plus the runtime, judge, schema, actions, evidence, summary, dashboard, and reporter crates. The `ui/*` and `api/*` action families are implemented, environment provisioning (`up:` / `down:` hooks) is wired into the runtime, and the first Onsager dogfood verification runs in-tree.
+**Phase 0 — Foundation.** The Cargo workspace ships the CLI plus the runtime, judge, schema, actions, evidence, summary, dashboard, and reporter crates. The `ui/*`, `api/*`, `db/*`, and `cli/*` action families are implemented, environment provisioning (`up:` / `down:` hooks) is wired into the runtime, and Duhem self-verifies in-tree while product suites run co-located in their own repos under `.duhem/` (e.g. `onsager-ai/chreode`).
 
 Schema is **v0.x** — breaking changes are expected before v0.5. The live schema version is the `duhem_schema::SCHEMA_VERSION` constant (surfaced by `duhem --version` and `duhem validate`); per-landing changes are recorded in [`CHANGELOG.md`](CHANGELOG.md). See `docs/duhem-spec.md` §14 for the roadmap.
 

@@ -20,7 +20,7 @@ Crawlab Pro gates its `:edge` Docker image on a Duhem suite before it can promot
 **That's the class of bug this exists for: a self-masking regression that everything else — including the product's own healthcheck — was calling healthy.** Full write-up: [*Your AI Says "All Tests Pass" — But Do They?*](https://marvinzhang.dev/blog/introducing-duhem).
 
 <p align="center">
-  <img src="demo/self-masking/demo.svg" alt="Terminal recording: /health returns healthy, but 'duhem run' fails because the web front serves the wrong page; after the fix, 'duhem run' passes." width="600">
+  <img src="demo/self-masking/demo.gif" alt="Terminal recording: /health returns healthy, but 'duhem run' fails because the web front serves the wrong page; after the fix, 'duhem run' passes." width="600">
   <br>
   <em>A runnable reproduction — <a href="demo/self-masking/"><code>demo/self-masking/</code></a>: <code>/health</code> stays green while the web front breaks, so a real <code>duhem run</code> fails, then passes once the fix ships.</em>
 </p>

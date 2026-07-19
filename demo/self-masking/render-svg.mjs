@@ -38,37 +38,49 @@ const H = padTop + L.length * lineH + padBottom;
 
 const pct = (ms) => Math.max(0, Math.min(100, (ms / T) * 100));
 
-let keyframes = "";
-let body = "";
-L.forEach((ln, row) => {
-  if (!ln) return;
-  const y = padTop + row * lineH + font;
+const tspansFor = (ln) => {
   let col = 0;
-  const tspans = ln.segs
+  return ln.segs
     .map(([t, c]) => {
       const x = padX + col * charW;
       col += t.length;
       return `<tspan x="${x.toFixed(1)}" class="${c}">${esc(t)}</tspan>`;
     })
     .join("");
-  const p = pct(ln.at);
-  keyframes += `@keyframes ln${row}{0%{opacity:0}${Math.max(0, p - 0.5).toFixed(2)}%{opacity:0}${p.toFixed(2)}%{opacity:1}97%{opacity:1}100%{opacity:0}}`;
-  body += `<text y="${y}" class="line" xml:space="preserve" style="animation:ln${row} ${T}ms infinite">${tspans}</text>`;
-});
+};
 
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="ui-monospace,'SF Mono','Cascadia Code','Fira Code',Menlo,Consolas,monospace" font-size="${font}">
+const head = (extra) => `<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="ui-monospace,'SF Mono','Cascadia Code','Fira Code',Menlo,Consolas,monospace" font-size="${font}">
 <style>
-  .line{opacity:1;white-space:pre}
+  .line{white-space:pre}
   .p{fill:#56d4bb}.c{fill:#e6edf3}.o{fill:#c9d1d9}.d{fill:#7d8590}.f{fill:#f85149}.g{fill:#3fb950}.m{fill:#d29922}
-  ${keyframes}
+  ${extra}
 </style>
 <rect width="${W}" height="${H}" rx="10" fill="#0d1117"/>
 <rect width="${W}" height="30" rx="10" fill="#161b22"/><rect y="16" width="${W}" height="14" fill="#161b22"/>
 <circle cx="18" cy="15" r="5" fill="#f85149"/><circle cx="36" cy="15" r="5" fill="#d29922"/><circle cx="54" cy="15" r="5" fill="#3fb950"/>
-<text x="${W / 2}" y="19" text-anchor="middle" font-size="11" fill="#7d8590">duhem — catching a self-masking bug</text>
-${body}
-</svg>
-`;
+<text x="${W / 2}" y="19" text-anchor="middle" font-size="11" fill="#7d8590">duhem — catching a self-masking bug</text>`;
 
-writeFileSync(new URL("./demo.svg", import.meta.url), svg);
-process.stderr.write(`wrote demo.svg  ${W}x${H}\n`);
+// `--at <ms>` emits one static frame (each line shown iff revealed by then)
+// for GIF assembly; default emits the looping animated demo.svg.
+const ai = process.argv.indexOf("--at");
+if (ai !== -1) {
+  const at = Number(process.argv[ai + 1]);
+  let body = "";
+  L.forEach((ln, row) => {
+    if (!ln) return;
+    const y = padTop + row * lineH + font;
+    body += `<text y="${y}" class="line" style="opacity:${at >= ln.at ? 1 : 0}">${tspansFor(ln)}</text>`;
+  });
+  process.stdout.write(`${head("")}\n${body}\n</svg>\n`);
+} else {
+  let keyframes = "", body = "";
+  L.forEach((ln, row) => {
+    if (!ln) return;
+    const y = padTop + row * lineH + font;
+    const p = pct(ln.at);
+    keyframes += `@keyframes ln${row}{0%{opacity:0}${Math.max(0, p - 0.5).toFixed(2)}%{opacity:0}${p.toFixed(2)}%{opacity:1}97%{opacity:1}100%{opacity:0}}`;
+    body += `<text y="${y}" class="line" xml:space="preserve" style="animation:ln${row} ${T}ms infinite">${tspansFor(ln)}</text>`;
+  });
+  writeFileSync(new URL("./demo.svg", import.meta.url), `${head(keyframes)}\n${body}\n</svg>\n`);
+  process.stderr.write(`wrote demo.svg  ${W}x${H}\n`);
+}

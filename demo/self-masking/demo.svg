@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="566" height="342" viewBox="0 0 566 342" font-family="ui-monospace,'SF Mono','Cascadia Code','Fira Code',Menlo,Consolas,monospace" font-size="14">
 <style>
-  .line{opacity:1;white-space:pre}
+  .line{white-space:pre}
   .p{fill:#56d4bb}.c{fill:#e6edf3}.o{fill:#c9d1d9}.d{fill:#7d8590}.f{fill:#f85149}.g{fill:#3fb950}.m{fill:#d29922}
   @keyframes ln0{0%{opacity:0}5.82%{opacity:0}6.32%{opacity:1}97%{opacity:1}100%{opacity:0}}@keyframes ln1{0%{opacity:0}12.13%{opacity:0}12.63%{opacity:1}97%{opacity:1}100%{opacity:0}}@keyframes ln3{0%{opacity:0}21.61%{opacity:0}22.11%{opacity:1}97%{opacity:1}100%{opacity:0}}@keyframes ln4{0%{opacity:0}28.97%{opacity:0}29.47%{opacity:1}97%{opacity:1}100%{opacity:0}}@keyframes ln5{0%{opacity:0}31.08%{opacity:0}31.58%{opacity:1}97%{opacity:1}100%{opacity:0}}@keyframes ln6{0%{opacity:0}33.18%{opacity:0}33.68%{opacity:1}97%{opacity:1}100%{opacity:0}}@keyframes ln7{0%{opacity:0}35.29%{opacity:0}35.79%{opacity:1}97%{opacity:1}100%{opacity:0}}@keyframes ln9{0%{opacity:0}44.76%{opacity:0}45.26%{opacity:1}97%{opacity:1}100%{opacity:0}}@keyframes ln11{0%{opacity:0}53.18%{opacity:0}53.68%{opacity:1}97%{opacity:1}100%{opacity:0}}@keyframes ln12{0%{opacity:0}59.50%{opacity:0}60.00%{opacity:1}97%{opacity:1}100%{opacity:0}}@keyframes ln13{0%{opacity:0}66.87%{opacity:0}67.37%{opacity:1}97%{opacity:1}100%{opacity:0}}
 </style>

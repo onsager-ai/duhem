@@ -39,7 +39,9 @@ pass
 | `app.js` | The "app": `/health` always healthy; `/` serves the real app only when `APP_FIXED=1`, else a default page (both `200`). |
 | `duhem.yml` | The Verification Definition. `AC-1` checks health; `AC-2` checks the front actually serves the app. |
 | `run.sh` | Starts the app and runs the gate twice — broken, then fixed. The source the README demo is captured from. |
-| `render-svg.mjs` | Renders that real output into the animated `demo.svg` (no deps: `node render-svg.mjs`). |
+| `render-svg.mjs` | Renders the real output into the animated `demo.svg` — crisp, embeds on GitHub (`node render-svg.mjs`, no deps). `--at <ms>` emits one static frame. |
+| `render-gif.sh` | Assembles those frames into `demo.gif` for surfaces that don't animate SVG (e.g. the npm page). Needs a full `ffmpeg` + a Chromium. |
 
-The README animation shows real output from these two runs; only the
-pacing is synthesized.
+`demo.svg` / `demo.gif` are generated artifacts; the README embeds the
+GIF (animates on both GitHub and npm). Every line shown is real output
+from the two runs above — only the pacing is synthesized.

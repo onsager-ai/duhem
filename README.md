@@ -13,9 +13,17 @@ Two commitments shape everything:
 - **Holistic.** A check exercises the whole delivery web at once. Duhem does not pretend the web decomposes into independently testable units, and it does not mock the web at verification time.
 - **Mechanical judgment, not LLM judgment.** AI may help author criteria and checks, and humans review them — but the verdict is produced by deterministic evaluation of structured assertions. There is no LLM in the judging loop.
 
-## Why "Duhem"
+## It caught a real one
 
-Pierre Duhem argued that no scientific hypothesis can be tested in isolation — only the whole web of theory, apparatus, and assumption gets tested. AI delivery is the engineering instance of that thesis: when an agent ships a feature, what gets delivered is code × prompt × tool config × data state × runtime × upstream contracts. Verification must be holistic, mechanical, and structurally independent of the AI making the claim. `docs/duhem-spec.md` Appendix C unpacks the philosophy.
+Crawlab Pro gates its `:edge` Docker image on a Duhem suite before it can promote to `:stable`. One build's gate went red: the environment wouldn't come up. The cause was nearly invisible — a new image shipped without `envsubst`, so the startup script silently rendered an **empty** nginx config and the whole web front went dead on its expected port. The part that matters: the backend was fine and the product's *own* healthcheck reported **healthy** — a human clicking through, or the container's self-check, would have shipped it. Duhem didn't. No working front, no green. It refused the build *before* it could reach `:stable`, the same gate then verified the fix, and it now runs on every build.
+
+**That's the class of bug this exists for: a self-masking regression that everything else — including the product's own healthcheck — was calling healthy.** Full write-up: [*Your AI Says "All Tests Pass" — But Do They?*](https://marvinzhang.dev/blog/introducing-duhem).
+
+<p align="center">
+  <img src="demo/self-masking/demo.gif" alt="Terminal recording: /health returns healthy, but 'duhem run' fails because the web front serves the wrong page; after the fix, 'duhem run' passes." width="600">
+  <br>
+  <em>A runnable reproduction — <a href="demo/self-masking/"><code>demo/self-masking/</code></a>: <code>/health</code> stays green while the web front breaks, so a real <code>duhem run</code> fails, then passes once the fix ships.</em>
+</p>
 
 ## Install
 
@@ -67,6 +75,8 @@ checks: pass
 pass
 ```
 
+That green just proves the pipeline runs end-to-end against a live endpoint. The point is what a *real* check catches — see [It caught a real one](#it-caught-a-real-one) for a regression Duhem refused to pass while everything else called it healthy.
+
 Preview what a run would execute — without launching anything — with `--dry-run`:
 
 ```sh
@@ -91,6 +101,10 @@ For a real-world example — including the `up:` / `down:` environment hooks Duh
 
 The canonical reference is [`docs/duhem-spec.md`](docs/duhem-spec.md) — start with §1 (Why), §4 (Solution Overview), §7 (Core Concepts), §8 (Holistic Verification Principle), and §10 (VD shape).
 
+## Why "Duhem"
+
+Pierre Duhem argued that no scientific hypothesis can be tested in isolation — only the whole web of theory, apparatus, and assumption gets tested. AI delivery is the engineering instance of that thesis: when an agent ships a feature, what gets delivered is code × prompt × tool config × data state × runtime × upstream contracts. Verification must be holistic, mechanical, and structurally independent of the AI making the claim. `docs/duhem-spec.md` Appendix C unpacks the philosophy.
+
 ## CLI surface
 
 ```text
@@ -114,6 +128,12 @@ Run `duhem <command> --help` for the full flag surface (filters, inputs, environ
 **Phase 0 — Foundation.** The Cargo workspace ships the CLI plus the runtime, judge, schema, actions, evidence, summary, dashboard, and reporter crates. The `ui/*`, `api/*`, `db/*`, and `cli/*` action families are implemented, environment provisioning (`up:` / `down:` hooks) is wired into the runtime, and Duhem self-verifies in-tree while product suites run co-located in their own repos under `.duhem/` (e.g. `onsager-ai/chreode`).
 
 Schema is **v0.x** — breaking changes are expected before v0.5. The live schema version is the `duhem_schema::SCHEMA_VERSION` constant (surfaced by `duhem --version` and `duhem validate`); per-landing changes are recorded in [`CHANGELOG.md`](CHANGELOG.md). See `docs/duhem-spec.md` §14 for the roadmap.
+
+## Trying it on a real system?
+
+Duhem is open source and **early — v0.x, breaking changes expected, and we'll help you migrate.** If you own a business-critical, complex, AI-built system where a silent regression is expensive, we'd like a few people to try it and shape it with us — direct support, a direct line to the people building it. (If you can verify by looking, you don't need Duhem — and we'd rather tell you that than sell it to you.)
+
+Reach out by [opening an issue](https://github.com/onsager-ai/duhem/issues), or add me on WeChat at **`tikazyq1`** with a note saying "Duhem".
 
 ## Contributing
 

@@ -1,0 +1,41 @@
+verification: Acme — the web front actually serves the app
+# A tiny, self-contained demo of the self-masking pattern the README
+# describes: /health stays green while the web front is quietly broken.
+# `./run.sh` starts the app and runs this gate twice (broken, then fixed).
+
+inputs:
+  health_url:
+    type: string
+    default: http://127.0.0.1:8477/health
+  front_url:
+    type: string
+    default: http://127.0.0.1:8477/
+
+criteria:
+  - id: AC-1
+    description: The backend health endpoint reports healthy.
+    checks:
+      - id: AC-1.1
+        description: GET /health returns 200 and status "healthy".
+        steps:
+          - id: health
+            uses: api/call
+            with: { method: GET, url: $inputs.health_url, within: 10s }
+            outputs: { status: status, body: body }
+        assertions:
+          - $steps.health.outputs.status == 200
+          - $steps.health.outputs.body.status == "healthy"
+
+  - id: AC-2
+    description: The web front actually serves the Acme app, not a fallback page.
+    checks:
+      - id: AC-2.1
+        description: GET / returns 200 AND the body is the real app, not a default page.
+        steps:
+          - id: front
+            uses: api/call
+            with: { method: GET, url: $inputs.front_url, within: 10s }
+            outputs: { status: status, body: body }
+        assertions:
+          - $steps.front.outputs.status == 200
+          - $steps.front.outputs.body.title == "Acme Dashboard"

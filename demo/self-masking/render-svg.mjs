@@ -53,12 +53,12 @@ L.forEach((ln, row) => {
     .join("");
   const p = pct(ln.at);
   keyframes += `@keyframes ln${row}{0%{opacity:0}${Math.max(0, p - 0.5).toFixed(2)}%{opacity:0}${p.toFixed(2)}%{opacity:1}97%{opacity:1}100%{opacity:0}}`;
-  body += `<text y="${y}" class="line" style="animation:ln${row} ${T}ms infinite">${tspans}</text>`;
+  body += `<text y="${y}" class="line" xml:space="preserve" style="animation:ln${row} ${T}ms infinite">${tspans}</text>`;
 });
 
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="ui-monospace,'SF Mono','Cascadia Code','Fira Code',Menlo,Consolas,monospace" font-size="${font}">
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="ui-monospace,'SF Mono','Cascadia Code','Fira Code',Menlo,Consolas,monospace" font-size="${font}">
 <style>
-  .line{opacity:1}
+  .line{opacity:1;white-space:pre}
   .p{fill:#56d4bb}.c{fill:#e6edf3}.o{fill:#c9d1d9}.d{fill:#7d8590}.f{fill:#f85149}.g{fill:#3fb950}.m{fill:#d29922}
   ${keyframes}
 </style>

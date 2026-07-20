@@ -223,7 +223,19 @@ impl Conn {
                 .map_err(|e| PwError(format!("sidecar read: {e}")))?
             {
                 Some(l) => l,
-                None => return Err(PwError("sidecar closed the connection".into())),
+                // The stdout pipe closed with no response: the Node sidecar
+                // exited. Overwhelmingly this is a missing dependency or
+                // browser (its `Cannot find package 'playwright'` /
+                // `ERR_MODULE_NOT_FOUND` prints to the inherited stderr just
+                // above), so lead with the actionable fix instead of a bare
+                // "connection closed" (#260). Covers both the launch
+                // handshake and mid-run requests.
+                None => {
+                    return Err(PwError(
+                        "the Playwright sidecar exited before responding — its dependencies or the Chromium browser are likely not installed. Run `duhem browser install` once and retry."
+                            .into(),
+                    ));
+                }
             };
             let resp: Response = serde_json::from_str(&line)
                 .map_err(|e| PwError(format!("decode sidecar response `{line}`: {e}")))?;

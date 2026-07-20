@@ -18,7 +18,7 @@ jobs:
     name: rust
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history (not the default shallow clone) so the
           # schema-changelog-check xtask can resolve the merge-base
@@ -82,7 +82,7 @@ jobs:
     name: ui-smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Show toolchain
         run: |
@@ -95,9 +95,9 @@ jobs:
       # LTS + the sidecar's own pinned Playwright, so the Chromium
       # revision always matches the driver.
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install Playwright sidecar deps + Chromium
         working-directory: crates/duhem-actions/sidecar

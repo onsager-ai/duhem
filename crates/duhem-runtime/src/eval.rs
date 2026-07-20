@@ -473,28 +473,39 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
             };
             Ok(Value::Int(n))
         }
-        // `contains(array, value)`: True if `array` has an element equal
-        // to `value`, by the same scalar-equality rule the `==` operator
-        // uses (numeric `Int`/`Float` promote). A non-array first arg is a
-        // `TypeMismatch` (mirrors `len`); elements whose shape can't be
-        // compared to `value` are simply not matches, not errors. The
-        // direct way to assert list membership —
-        // `$runtime.contains($steps.api.outputs.body.tokens, "t-1")` —
-        // without a `len(...) >= 1` proxy.
-        ("contains", 2) => {
-            let arr = match eval_value(&args[0], ctx)? {
-                Value::Array(a) => a,
-                other => {
-                    return Err(InconclusiveCause::TypeMismatch {
-                        lhs: other.shape(),
-                        rhs: ValueShape::Array,
-                    });
-                }
-            };
-            let needle = eval_value(&args[1], ctx)?;
-            let found = arr.iter().any(|elem| value_eq(elem, &needle));
-            Ok(Value::Bool(found))
-        }
+        // `contains(haystack, value)`: membership, polymorphic over the
+        // haystack shape.
+        //
+        // - **String haystack** → literal substring test:
+        //   `$runtime.contains($steps.home.outputs.body_text, "Example
+        //   Domain")`. The natural way to assert response *content* (the
+        //   `matches(...)` sibling is for regex). The needle must be a
+        //   string too; a non-string needle is a `TypeMismatch`.
+        // - **Array haystack** → element membership by the same
+        //   scalar-equality rule `==` uses (numeric `Int`/`Float`
+        //   promote): `$runtime.contains($steps.api.outputs.body.tokens,
+        //   "t-1")`, without a `len(...) >= 1` proxy. Elements whose shape
+        //   can't be compared to `value` are simply not matches, not
+        //   errors.
+        //
+        // Any other haystack shape (mirrors `len`) is a `TypeMismatch`.
+        ("contains", 2) => match eval_value(&args[0], ctx)? {
+            Value::Str(hay) => match eval_value(&args[1], ctx)? {
+                Value::Str(needle) => Ok(Value::Bool(hay.contains(&needle))),
+                other => Err(InconclusiveCause::TypeMismatch {
+                    lhs: ValueShape::Str,
+                    rhs: other.shape(),
+                }),
+            },
+            Value::Array(arr) => {
+                let needle = eval_value(&args[1], ctx)?;
+                Ok(Value::Bool(arr.iter().any(|elem| value_eq(elem, &needle))))
+            }
+            other => Err(InconclusiveCause::TypeMismatch {
+                lhs: other.shape(),
+                rhs: ValueShape::Array,
+            }),
+        },
         // `any(array, field, value)`: True if `array` has an *object*
         // element whose `field` equals `value` (scalar equality). The
         // object-array analogue of `contains` — membership by a field:
@@ -1402,7 +1413,8 @@ mod tests {
         );
     }
 
-    // ---- $runtime.contains array-membership helper (#173) ----
+    // ---- $runtime.contains membership helper (#173): array element +
+    // string substring (#259) ----
 
     #[test]
     fn contains_scalar_array_present_and_absent() {
@@ -1492,6 +1504,45 @@ mod tests {
             EvalResult::Inconclusive(InconclusiveCause::MissingObservation {
                 step: "api".into(),
                 output: "missing".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn contains_string_substring_present_and_absent() {
+        // A string haystack does a literal substring test — the documented
+        // `contains(body_text, "...")` content check (getting-started §5).
+        let ctx = TestCtx::new().with_output(
+            "home",
+            "body_text",
+            Value::Str("<!doctype html><title>Example Domain</title>".into()),
+        );
+        assert_eq!(
+            run(
+                r#"$runtime.contains($steps.home.outputs.body_text, "Example Domain")"#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+        assert_eq!(
+            run(
+                r#"$runtime.contains($steps.home.outputs.body_text, "Not Present")"#,
+                &ctx
+            ),
+            EvalResult::False
+        );
+    }
+
+    #[test]
+    fn contains_string_needle_must_be_string() {
+        // Substring test with a non-string needle is an authoring type
+        // error — reported as `type_mismatch(str, <needle>)`.
+        let ctx = TestCtx::new().with_input("s", Value::Str("abc".into()));
+        assert_eq!(
+            run("$runtime.contains($inputs.s, 5)", &ctx),
+            EvalResult::Inconclusive(InconclusiveCause::TypeMismatch {
+                lhs: ValueShape::Str,
+                rhs: ValueShape::Int,
             })
         );
     }

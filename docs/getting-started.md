@@ -112,11 +112,25 @@ Point it at *your* system by changing three things in `duhem.yml`:
    | `ui/*`  | driving a real browser (navigate, click, type, assert) | yes |
 
 3. **`assertions`** — what must be true. Assert over a step's **scalar**
-   outputs (e.g. `status`, `body_text`); helpers like
-   `$runtime.contains(...)` cover membership. Keep each assertion one
-   verifiable claim.
+   outputs (e.g. `status`, `body_text`), each assertion one verifiable
+   claim:
 
-Then `duhem validate` (catch shape errors early) and `duhem run`.
+   ```yaml
+   assertions:
+     - $steps.home.outputs.status == 200
+     - $runtime.contains($steps.home.outputs.body_text, "Example Domain")
+   ```
+
+   `$runtime.contains(...)` is membership: on a **string** it's a literal
+   substring test (the line above — the usual way to check response
+   *content*); on an **array** it's element membership
+   (`$runtime.contains($steps.api.outputs.body.tags, "prod")`). For a
+   regular expression instead of a literal, use
+   `$runtime.matches(body_text, "Example ?Domain")`.
+
+Then `duhem validate` (catch shape errors early) and `duhem run`. A
+type error in an assertion — say `contains` against a number — is a
+`fail` that names the mismatch, not a silent pass.
 
 ## 6. Verifying a real workload that needs a running system
 

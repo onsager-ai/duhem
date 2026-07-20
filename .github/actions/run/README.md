@@ -59,7 +59,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build + serve Onsager
         run: |
@@ -85,7 +85,7 @@ jobs:
 
       - name: Surface evidence on red
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: duhem-evidence
           path: ${{ steps.duhem.outputs.store }}

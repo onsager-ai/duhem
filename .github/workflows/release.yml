@@ -34,7 +34,7 @@ jobs:
       npm-tag: ${{ steps.version.outputs.npm-tag }}
       publish: ${{ steps.gate.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - id: version
         uses: ./.github/actions/compute-version
@@ -71,7 +71,7 @@ jobs:
           - { os: windows-latest,   target: x86_64-pc-windows-msvc,    platform: windows-x64,   binary: duhem.exe }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/rust-cross-build
         with:
           target: ${{ matrix.target }}
@@ -87,9 +87,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: binary-*
           path: artifacts/
@@ -138,13 +138,13 @@ jobs:
     needs: [meta, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: binary-*
           path: artifacts/
@@ -169,10 +169,10 @@ jobs:
     needs: [meta, build, publish-platforms]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Sync versions to ${{ needs.meta.outputs.version }}

@@ -61,7 +61,7 @@ jobs:
     if: ${{ vars.CHREODE_DRIFT_READY == 'true' }}
     steps:
       - name: Checkout duhem (the verifier)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Show toolchain
         run: |
@@ -74,7 +74,7 @@ jobs:
         run: cargo build --release -p duhem-cli
 
       - name: Checkout onsager-ai/chreode (the target)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: onsager-ai/chreode
           token: ${{ secrets.CHREODE_CHECKOUT_TOKEN }}
@@ -83,7 +83,7 @@ jobs:
           # current Chreode. Pin `ref:` here to freeze the target.
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           # 24 = the version chreode's worker + dev actually run. The
           # factory imports `node:sqlite` (a Node 22.5+ builtin), so
@@ -130,7 +130,7 @@ jobs:
 
       - name: Surface evidence on red
         if: ${{ failure() && steps.run.outputs.store != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: chreode-drift-evidence
           path: ${{ steps.run.outputs.store }}

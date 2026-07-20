@@ -63,7 +63,7 @@ jobs:
       cli: ${{ steps.filter.outputs.cli }}
       dashboard: ${{ steps.filter.outputs.dashboard }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -84,7 +84,7 @@ jobs:
     if: ${{ needs.changes.outputs.cli == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Show toolchain
         run: |
@@ -130,7 +130,7 @@ jobs:
     if: ${{ needs.changes.outputs.dashboard == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Show toolchain
         run: |
@@ -143,9 +143,9 @@ jobs:
       # LTS so the SPA build + the Playwright sidecar's pinned Chromium
       # revision both match the driver.
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
 
       # build.rs embeds web/dist at compile time, so the SPA MUST be
       # built before the dashboard binary — otherwise the binary serves

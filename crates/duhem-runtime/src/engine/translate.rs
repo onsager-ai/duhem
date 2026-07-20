@@ -74,10 +74,22 @@ pub(super) fn eval_to_state(r: &EvalResult) -> VerdictState {
     match r {
         EvalResult::True => VerdictState::Pass,
         EvalResult::False => VerdictState::Fail,
+        // A type mismatch is an authoring defect: the assertion applied an
+        // operator to the wrong value shape (e.g. `contains(str, array)`,
+        // `len(int)`). A retry can't fix it and the environment is fine, so
+        // it gates as `fail` — blocking the gate and naming the specific
+        // `type_mismatch(...)` in the evidence detail — rather than a
+        // retry-eligible, misleading `inconclusive:environment_error`
+        // (#259). Other malformed-expression causes keep their existing
+        // classification for now.
+        EvalResult::Inconclusive(EvalCause::TypeMismatch { .. }) => VerdictState::Fail,
         EvalResult::Inconclusive(cause) => VerdictState::Inconclusive(map_eval_cause(cause)),
     }
 }
 
+/// Coarsen an evaluator cause to the judge's `InconclusiveCause` set.
+/// `TypeMismatch` is intercepted as `fail` in `eval_to_state` and so
+/// never reaches its arm below (kept for exhaustiveness).
 fn map_eval_cause(c: &EvalCause) -> InconclusiveCause {
     match c {
         EvalCause::MissingObservation { .. }
@@ -181,6 +193,29 @@ fn yml_to_json(v: &serde_yml::Value) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn type_mismatch_gates_as_fail_not_environment_error() {
+        // A type mismatch is a defect in the VD, not flaky infra: it must
+        // gate as `fail`, never a retry-eligible
+        // `inconclusive:environment_error` (#259).
+        use crate::eval::ValueShape;
+        let state = eval_to_state(&EvalResult::Inconclusive(EvalCause::TypeMismatch {
+            lhs: ValueShape::Str,
+            rhs: ValueShape::Array,
+        }));
+        assert_eq!(state, VerdictState::Fail);
+        assert!(!check_is_retryable(state));
+
+        // Missing data still reads as inconclusive (the environment may not
+        // have produced the observation yet).
+        assert_eq!(
+            eval_to_state(&EvalResult::Inconclusive(EvalCause::MissingInput(
+                "base_url".into()
+            ))),
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+        );
+    }
 
     #[test]
     fn retry_classification_only_recoverable_inconclusive_retries() {

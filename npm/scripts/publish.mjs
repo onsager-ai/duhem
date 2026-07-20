@@ -15,6 +15,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { config, mainDir, platformDir } from './lib.mjs';
 
 const args = process.argv.slice(2);
@@ -24,7 +26,42 @@ const target = tIdx >= 0 ? args[tIdx + 1] : 'platforms';
 const tagIdx = args.indexOf('--tag');
 const tag = tagIdx >= 0 ? args[tagIdx + 1] : 'latest';
 
+/** The `version` field of the package.json in `dir`. */
+function pkgVersion(dir) {
+  return JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).version;
+}
+
+/**
+ * True if `name@version` is already on the registry. `npm view` prints
+ * the version for a published spec and exits non-zero (404) otherwise, so
+ * a thrown error means "not published". This is the guard against the
+ * failure that motivated #261: republishing a *different build* under a
+ * version that already exists on npm, leaving two artifacts indistinguish-
+ * able by `--version`. The fix is always to bump, never to reuse.
+ */
+function alreadyPublished(name, version) {
+  try {
+    const out = execFileSync('npm', ['view', `${name}@${version}`, 'version'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return out === version;
+  } catch {
+    return false;
+  }
+}
+
 function publish(dir, name) {
+  const version = pkgVersion(dir);
+  if (!dryRun && alreadyPublished(name, version)) {
+    console.error(
+      `refusing to publish ${name}@${version}: that version is already on npm. ` +
+        `A different build must never reuse a published version — bump the ` +
+        `workspace version (Cargo.toml + the schema_version! macro), re-run ` +
+        `npm/scripts/sync-versions.mjs, and tag the new version.`,
+    );
+    process.exit(1);
+  }
   const argv = ['publish', '--access', 'public', '--tag', tag];
   if (dryRun) argv.push('--dry-run');
   console.log(`  ${dryRun ? '[dry-run] ' : ''}npm ${argv.join(' ')}  (${name})`);

@@ -346,19 +346,21 @@ fn append_gitignore_snippet(
     Ok(())
 }
 
-/// Relative path from the generated `duhem.yml` (at `yaml_path`) up to
-/// the committed `schema/duhem.schema.json` artifact, used in the
-/// `# yaml-language-server: $schema=...` header so editors load it for
-/// live key/enum autocomplete (#133).
+/// Reference to the `duhem.schema.json` artifact for a generated
+/// `duhem.yml`'s `# yaml-language-server: $schema=...` header, so editors
+/// load it for live key/enum autocomplete (#133).
 ///
-/// Walks up from the file's directory looking for a `schema/
-/// duhem.schema.json` (the repo's committed artifact) and emits a
-/// `../`-prefixed relative path to it. Falls back to the convention
-/// for a `verifications/<name>/duhem.yml` placement
-/// (`../../schema/duhem.schema.json`) when the artifact can't be
-/// located on disk — e.g. scaffolding outside a Duhem checkout.
+/// Walks up from the file's directory looking for a committed
+/// `schema/duhem.schema.json` and emits a `../`-prefixed relative path to
+/// it (works offline, pins to the local schema). When the artifact can't
+/// be located on disk — the common case for a scaffold created outside a
+/// Duhem checkout, e.g. after `npm i -g duhem` — falls back to the
+/// published raw URL rather than a repo-internal relative path the author
+/// doesn't have. yaml-language-server fetches remote `$schema` URLs, so
+/// the header still resolves (#260).
 fn schema_ref_for(yaml_path: &Path) -> String {
-    const FALLBACK: &str = "../../schema/duhem.schema.json";
+    const FALLBACK: &str =
+        "https://raw.githubusercontent.com/onsager-ai/duhem/main/schema/duhem.schema.json";
     let Some(dir) = yaml_path.parent() else {
         return FALLBACK.to_string();
     };
@@ -883,6 +885,31 @@ mod tests {
         let src = std::fs::read_to_string(target.join("duhem.yml")).unwrap();
         let def = VerificationDefinition::from_yaml_str(&src).expect("parse");
         validate(&def).expect("validate");
+    }
+
+    /// A scaffold created outside a Duhem checkout (the `npm i -g duhem`
+    /// case, here a tempdir) can't resolve a local `schema/
+    /// duhem.schema.json`, so its `$schema` header must point at the
+    /// published URL — never a repo-internal `../../schema/...` path the
+    /// author doesn't have (#260).
+    #[test]
+    fn out_of_repo_scaffold_uses_published_schema_url() {
+        let tmp = tempfile::tempdir().unwrap();
+        run_with_prompt(
+            args(tmp.path(), Some("smoke"), Pattern::A, false),
+            ok_prompt,
+        )
+        .expect("init ok");
+        let src = std::fs::read_to_string(tmp.path().join("duhem.yml")).unwrap();
+        let header = src.lines().next().unwrap_or_default();
+        assert!(
+            header.contains("$schema=https://"),
+            "expected a URL $schema header, got {header:?}"
+        );
+        assert!(
+            !header.contains("../"),
+            "scaffold must not leak a repo-internal relative schema path: {header:?}"
+        );
     }
 
     #[test]

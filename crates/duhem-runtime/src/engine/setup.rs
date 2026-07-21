@@ -25,7 +25,7 @@ use duhem_judge::InconclusiveCause;
 use duhem_schema::Step;
 use tracing::debug;
 
-use crate::engine::context::{RunState, json_to_value};
+use crate::engine::context::RunState;
 use crate::engine::registry::{ActionRegistry, Dispatch};
 use crate::engine::runner::{EngineError, step_label};
 use crate::engine::template::substitute_with;
@@ -222,12 +222,15 @@ async fn invoke_and_record(
         Err(_) => Outcome::Error,
     };
     if let Ok(r) = &result {
+        // Bind raw fields (native names) + `outputs:` aliases (spec
+        // #273) as `$setup.<id>.outputs.<name>`. Symmetric with the
+        // per-check path in `runner.rs`; see `engine::extract`.
+        if let Some(id) = step.id.as_deref() {
+            crate::engine::extract::record_step_outputs(&step.outputs, &r.outputs, |local, v| {
+                run.record_setup_output(id, local, v);
+            });
+        }
         for (name, value) in &r.outputs {
-            if let Some(scalar) = json_to_value(value)
-                && let Some(id) = step.id.as_deref()
-            {
-                run.record_setup_output(id, name, scalar);
-            }
             // Setup observations get their own event variant so
             // readers can attribute the observation to the
             // run-level setup block, not a per-check step.

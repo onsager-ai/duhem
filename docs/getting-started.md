@@ -92,8 +92,12 @@ criteria:
   They change as the implementation does; the criterion doesn't.
 - **`steps`** run in order; give a step an `id` and reference any output
   its action produces as `$steps.<id>.outputs.<name>` — **no `outputs:`
-  block required**, the action's declared outputs resolve directly. Add
-  `outputs:` only to *rename* one (`outputs: { code: status }`).
+  block required**, the action's declared outputs (including nested ones,
+  `…outputs.body.data._id`) resolve directly. Add `outputs:` only for the
+  two things a native name can't do: *rename* a field
+  (`outputs: { code: status }`) or bind a *deep extraction* to a short
+  alias (`outputs: { project_id: body.data._id }`) so you write the path
+  once instead of repeating it across assertions.
 - **`assertions`** are evaluated deterministically — no model in the
   judging loop. They're also **optional**: a `ui/assert-*` (or `api/poll`)
   step *is* the judgment, so an all-assert check needs no `assertions:`

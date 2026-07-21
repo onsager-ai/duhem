@@ -11,7 +11,10 @@ use duhem_actions::RunBrowser;
 use duhem_evidence::{SqliteStore, Store};
 use duhem_judge::{RunVerdict, VerdictState, aggregate_run_set};
 use duhem_runtime::{Engine, RunOutcome, SuiteEnvironment};
-use duhem_schema::{Loaded, LoadedLeaf, VerificationDefinition, load as load_definition, validate};
+use duhem_schema::{
+    Loaded, LoadedLeaf, VerificationDefinition, load as load_definition,
+    validate_with_contract_outputs,
+};
 
 use crate::environment;
 use crate::filter::CliCheckFilter;
@@ -254,7 +257,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         BTreeMap<String, serde_json::Value>,
     )> = Vec::with_capacity(leaves.len());
     for leaf in &leaves {
-        if let Err(errs) = validate(&leaf.definition) {
+        if let Err(errs) = validate_with_contract_outputs(&leaf.definition, &|u| {
+            crate::contract_check::contract_outputs(u)
+        }) {
             let plural = if errs.len() == 1 { "" } else { "s" };
             eprintln!(
                 "{}: [schema v{}] {} validation error{plural}:",

@@ -107,6 +107,18 @@ fn check_step(s: &Step, site: &str, errs: &mut Vec<String>) {
     }
 }
 
+/// The action-contract output resolver for `duhem_schema`'s
+/// implicit-output inference (spec #267): the output names a `uses:`
+/// declares, or empty for an unknown/custom action (which then resolves
+/// against the step's authored `outputs:` only). Passed to
+/// `duhem_schema::validate_with_contract_outputs` so `duhem validate` /
+/// `run` accept `$steps.<id>.outputs.<field>` with no `outputs:` block.
+pub(crate) fn contract_outputs(uses: &str) -> Vec<String> {
+    contract_for(uses)
+        .map(|c| c.outputs.iter().map(|s| s.to_string()).collect())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

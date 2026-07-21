@@ -46,6 +46,11 @@ pub(crate) fn run_validate(path: Option<&Path>) -> Result<String, String> {
                     cerrs.join("\n  ")
                 ));
             }
+            // Non-fatal authoring lints (spec #267) go to stderr; the
+            // verdict stays `OK` so an existing VD never breaks on them.
+            for w in crate::contract_check::lint_warnings(&definition) {
+                eprintln!("warning: {w}");
+            }
             let _ = path;
             Ok("OK".to_string())
         }
@@ -85,6 +90,13 @@ pub(crate) fn run_validate(path: Option<&Path>) -> Result<String, String> {
             }
             if !errors.is_empty() {
                 return Err(errors.join("\n"));
+            }
+            // Non-fatal authoring lints (spec #267), tagged with the
+            // offending leaf so a manifest run points at the file.
+            for leaf in &leaves {
+                for w in crate::contract_check::lint_warnings(&leaf.definition) {
+                    eprintln!("warning: {}: {w}", leaf.path.display());
+                }
             }
             let n = leaves.len();
             let plural = if n == 1 { "leaf" } else { "leaves" };

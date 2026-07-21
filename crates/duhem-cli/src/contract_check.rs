@@ -16,7 +16,9 @@
 //! `deny_unknown_fields` remains the backstop for anything not caught here.
 
 use duhem_actions::contract_for;
-use duhem_schema::{Step, VerificationDefinition};
+use duhem_schema::{
+    Assertion, BinOp, Check, Expr, Literal, PathRoot, Step, VerificationDefinition,
+};
 
 /// Field-accuracy errors across every step (setup + criteria/checks).
 /// Empty = clean.
@@ -117,6 +119,101 @@ pub(crate) fn contract_outputs(uses: &str) -> Vec<String> {
     contract_for(uses)
         .map(|c| c.outputs.iter().map(|s| s.to_string()).collect())
         .unwrap_or_default()
+}
+
+/// Non-fatal authoring lints (spec #267) — the ceremony the terser
+/// forms made unnecessary. Warnings, never errors: every VD valid today
+/// stays valid, and existing consumer suites (crawlab-pro, chreode)
+/// don't break; the author just sees where the plumbing can go. Empty =
+/// clean.
+///
+/// Two patterns, both keyed off the action contract, so a custom `uses`
+/// with no contract is never flagged (its bindings are load-bearing —
+/// inference can't cover an output the catalog doesn't know):
+///   (a) `outputs: { satisfied: satisfied }` on a judging step *paired
+///       with* a `$steps.<id>.outputs.satisfied == true` assertion — the
+///       hand-rolled, pre-#253 form of implicit judgment. The binding
+///       even opts the step *out* of implicit judgment, so the author
+///       re-adds by hand exactly what dropping both would give for free.
+///   (b) an identity `outputs: { foo: foo }` binding whose `foo` is a
+///       declared contract output — #267 inference resolves
+///       `$steps.<id>.outputs.foo` with no binding.
+/// A genuine rename/alias (`outputs: { n: row_count }`) is never
+/// flagged; neither is a bare `satisfied` binding without the paired
+/// `== true` (that is the legitimate manual-control seam).
+pub(crate) fn lint_warnings(def: &VerificationDefinition) -> Vec<String> {
+    let mut warns = Vec::new();
+    for (i, s) in def.setup.iter().enumerate() {
+        // Setup steps don't judge — only the identity-output lint applies.
+        lint_step(s, None, &format!("setup step {i}"), &mut warns);
+    }
+    for c in &def.criteria {
+        for ch in &c.checks {
+            for (i, s) in ch.steps.iter().enumerate() {
+                let site = format!("criterion `{}` / check `{}` / step {i}", c.id, ch.id);
+                lint_step(s, Some(ch), &site, &mut warns);
+            }
+        }
+    }
+    warns
+}
+
+/// Emit the redundancy warnings for one step. `check` is the enclosing
+/// check (for the `satisfied == true` pairing); `None` for a setup step.
+fn lint_step(s: &Step, check: Option<&Check>, site: &str, warns: &mut Vec<String>) {
+    let Some(contract) = contract_for(&s.uses) else {
+        return; // custom action — no contract, bindings are load-bearing.
+    };
+    for (local, field) in &s.outputs {
+        if local != field {
+            continue; // a genuine rename/alias — legitimate, never flagged.
+        }
+        if field == "satisfied" {
+            // (a) only when paired with an explicit `== true` assertion;
+            // a bare `satisfied` binding is the manual-control opt-out.
+            let paired = matches!((check, &s.id), (Some(ch), Some(id))
+                if ch.assertions.iter().any(|a| asserts_satisfied_true(a, id)));
+            if paired {
+                let id = s.id.as_deref().unwrap_or("<step>");
+                warns.push(format!(
+                    "{site}: `outputs: {{ satisfied: satisfied }}` + a `$steps.{id}.outputs.satisfied == true` assertion re-implements implicit judgment (#253) by hand — drop both; a judging step with no `satisfied` binding is asserted `== true` automatically"
+                ));
+            }
+            continue;
+        }
+        // (b) identity binding of a declared contract output — inference
+        // (#267) resolves the reference without it.
+        if contract.outputs.contains(&field.as_str()) {
+            warns.push(format!(
+                "{site}: identity binding `outputs: {{ {field}: {field} }}` is redundant — `$steps.<id>.outputs.{field}` resolves without it (#267); drop the binding"
+            ));
+        }
+    }
+}
+
+/// Is `a` the assertion `$steps.<step_id>.outputs.satisfied == true`
+/// (either operand order)? Matched on the parsed AST, not raw text, so
+/// whitespace and `true == $…` don't slip past.
+fn asserts_satisfied_true(a: &Assertion, step_id: &str) -> bool {
+    let Assertion::Expr(e) = a else { return false };
+    let Expr::BinOp {
+        op: BinOp::Eq,
+        lhs,
+        rhs,
+    } = &e.parsed
+    else {
+        return false;
+    };
+    let is_sat_path = |e: &Expr| {
+        matches!(e, Expr::Path(p)
+            if p.root == PathRoot::Steps
+            && p.segments.len() == 3
+            && p.segments[0] == step_id
+            && p.segments[1] == "outputs"
+            && p.segments[2] == "satisfied")
+    };
+    let is_true = |e: &Expr| matches!(e, Expr::Lit(Literal::Bool(true)));
+    (is_sat_path(lhs) && is_true(rhs)) || (is_true(lhs) && is_sat_path(rhs))
 }
 
 #[cfg(test)]
@@ -248,5 +345,64 @@ mod tests {
             "{:?}",
             field_errors(&d)
         );
+    }
+
+    // ---- redundancy lints (spec #267 part 3) ----
+
+    #[test]
+    fn identity_output_binding_warns() {
+        // `outputs: { status: status }` binds a declared contract output
+        // to its own name — #267 inference covers it, so it's redundant.
+        let d = vd(
+            "          - { id: h, uses: api/call, with: { method: GET, url: u }, outputs: { status: status } }",
+        );
+        assert!(
+            lint_warnings(&d)
+                .iter()
+                .any(|m| m.contains("identity binding") && m.contains("status")),
+            "{:?}",
+            lint_warnings(&d)
+        );
+    }
+
+    #[test]
+    fn rename_binding_not_warned() {
+        // A genuine alias (`n` != `row_count`) is the escape hatch, never flagged.
+        let d = vd(
+            "          - { id: q, uses: db/query, with: { connection: c, sql: s }, outputs: { n: row_count } }",
+        );
+        assert!(lint_warnings(&d).is_empty(), "{:?}", lint_warnings(&d));
+    }
+
+    #[test]
+    fn identity_binding_on_unknown_action_not_warned() {
+        // No contract → the binding is load-bearing; inference can't cover it.
+        let d =
+            vd("          - { id: c, uses: custom/thing, with: { x: 1 }, outputs: { foo: foo } }");
+        assert!(lint_warnings(&d).is_empty(), "{:?}", lint_warnings(&d));
+    }
+
+    #[test]
+    fn satisfied_pair_warns() {
+        // `outputs: { satisfied: satisfied }` + `… satisfied == true` is
+        // implicit judgment (#253) re-implemented by hand.
+        let src = "verification: t\ncriteria:\n  - id: AC-1\n    description: d\n    checks:\n      - id: AC-1.1\n        description: d\n        steps:\n          - { id: s, uses: ui/assert-element, with: { locator: { css: h1 }, expected: visible }, outputs: { satisfied: satisfied } }\n        assertions:\n          - $steps.s.outputs.satisfied == true\n";
+        let d = VerificationDefinition::from_yaml_str(src).expect("parse");
+        assert!(
+            lint_warnings(&d)
+                .iter()
+                .any(|m| m.contains("implicit judgment")),
+            "{:?}",
+            lint_warnings(&d)
+        );
+    }
+
+    #[test]
+    fn bare_satisfied_binding_not_warned() {
+        // Binding `satisfied` without the paired `== true` is the legit
+        // manual-control seam (here asserting `== false`) — not flagged.
+        let src = "verification: t\ncriteria:\n  - id: AC-1\n    description: d\n    checks:\n      - id: AC-1.1\n        description: d\n        steps:\n          - { id: s, uses: ui/assert-element, with: { locator: { css: h1 }, expected: visible }, outputs: { satisfied: satisfied } }\n        assertions:\n          - $steps.s.outputs.satisfied == false\n";
+        let d = VerificationDefinition::from_yaml_str(src).expect("parse");
+        assert!(lint_warnings(&d).is_empty(), "{:?}", lint_warnings(&d));
     }
 }

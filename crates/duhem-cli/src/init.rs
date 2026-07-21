@@ -848,13 +848,16 @@ mod tests {
         assert!(msg.contains("invalid --name"), "msg: {msg}");
     }
 
-    /// Schema-validity guard: the generated `duhem.yml` must parse
-    /// and validate against the v0.1 schema (#8). Otherwise the
-    /// scaffold ships a file `duhem validate` rejects, defeating
-    /// the "first invocation works" premise of #48.
+    /// Schema-validity guard: the generated `duhem.yml` must parse and
+    /// pass `duhem validate` (#8). Since #267 the scaffold is terse — it
+    /// references `status` with no `outputs:` binding — so this asserts
+    /// the *contract-aware* path the CLI actually runs
+    /// (`validate_with_contract_outputs`), not the pure-schema `validate`
+    /// which stays strict by design. Otherwise the scaffold would ship a
+    /// file `duhem validate` accepts but this guard rejects.
     #[test]
     fn generated_pattern_a_yaml_passes_schema_validate() {
-        use duhem_schema::{VerificationDefinition, validate};
+        use duhem_schema::{VerificationDefinition, validate_with_contract_outputs};
         let tmp = tempfile::tempdir().unwrap();
         run_with_prompt(
             args(tmp.path(), Some("smoke"), Pattern::A, false),
@@ -863,12 +866,13 @@ mod tests {
         .expect("init ok");
         let src = std::fs::read_to_string(tmp.path().join("duhem.yml")).unwrap();
         let def = VerificationDefinition::from_yaml_str(&src).expect("parse");
-        validate(&def).expect("validate");
+        validate_with_contract_outputs(&def, &|u| crate::contract_check::contract_outputs(u))
+            .expect("validate");
     }
 
     #[test]
     fn generated_pattern_b_yaml_passes_schema_validate() {
-        use duhem_schema::{VerificationDefinition, validate};
+        use duhem_schema::{VerificationDefinition, validate_with_contract_outputs};
         let tmp = tempfile::tempdir().unwrap();
         let target = tmp.path().join("feature");
         run_with_prompt(
@@ -884,7 +888,8 @@ mod tests {
         .expect("init ok");
         let src = std::fs::read_to_string(target.join("duhem.yml")).unwrap();
         let def = VerificationDefinition::from_yaml_str(&src).expect("parse");
-        validate(&def).expect("validate");
+        validate_with_contract_outputs(&def, &|u| crate::contract_check::contract_outputs(u))
+            .expect("validate");
     }
 
     /// A scaffold created outside a Duhem checkout (the `npm i -g duhem`

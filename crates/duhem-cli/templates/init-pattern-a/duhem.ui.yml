@@ -36,13 +36,12 @@ criteria:
           - uses: ui/navigate
             with:
               url: $inputs.base_url
-          - id: heading
-            uses: ui/assert-element
+          - uses: ui/assert-element
             with:
               locator: { role: heading, name: "Example Domain" }
               expected: visible
               within: 5s
-            outputs:
-              satisfied: satisfied
-        assertions:
-          - $steps.heading.outputs.satisfied == true
+        # No `outputs:`/`assertions:` — a `ui/assert-*` step IS the
+        # judgment (#253): the check passes iff the element is visible.
+        # Bind `satisfied` and assert it yourself only for manual
+        # control (e.g. a disjunction across several assert steps).

@@ -82,19 +82,23 @@ criteria:
           - id: home
             uses: api/call
             with: { method: GET, url: $inputs.base_url, within: 15s }
-            outputs: { status: status }     # bind outputs you'll assert on
         assertions:         # structured, mechanically judged — no LLM
-          - $steps.home.outputs.status == 200
+          - $steps.home.outputs.status == 200   # no outputs: block needed
 ```
 
 - **`criteria`** are the *stable* human commitment. Keep them readable —
   a non-technical stakeholder should be able to decide yes/no.
 - **`checks`** are *derivative*: how you observe that a criterion holds.
   They change as the implementation does; the criterion doesn't.
-- **`steps`** run in order; give a step an `id` to reference its
-  `outputs` downstream (`$steps.<id>.outputs.<name>`).
-- **`assertions`** are evaluated deterministically. There is no model in
-  the judging loop.
+- **`steps`** run in order; give a step an `id` and reference any output
+  its action produces as `$steps.<id>.outputs.<name>` — **no `outputs:`
+  block required**, the action's declared outputs resolve directly. Add
+  `outputs:` only to *rename* one (`outputs: { code: status }`).
+- **`assertions`** are evaluated deterministically — no model in the
+  judging loop. They're also **optional**: a `ui/assert-*` (or `api/poll`)
+  step *is* the judgment, so an all-assert check needs no `assertions:`
+  block at all. Bind `satisfied` and assert it yourself only for manual
+  control (e.g. a disjunction across steps).
 
 ## 5. Author a real check
 

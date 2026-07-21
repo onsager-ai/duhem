@@ -43,8 +43,6 @@ setup:
         drop table if exists tasks;
         create table tasks (id integer primary key, status text not null);
         insert into tasks (id, status) values (1, 'finished');
-    outputs:
-      rows_affected: rows_affected
 
 criteria:
   - id: AC-1
@@ -65,9 +63,6 @@ criteria:
               connection: $inputs.db_url
               sql: "select id, status from tasks where id = ?"
               params: [1]
-            outputs:
-              rows: rows
-              row_count: row_count
         assertions:
           - $steps.read.outputs.row_count == 1
           - $steps.read.outputs.rows[0].id == 1

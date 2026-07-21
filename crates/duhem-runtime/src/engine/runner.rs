@@ -755,12 +755,16 @@ impl Engine {
                     if let Some(serde_json::Value::Bool(b)) = r.outputs.get("satisfied") {
                         step_satisfied[idx] = Some(*b);
                     }
+                    // Bind raw fields + `outputs:` aliases (spec #273);
+                    // see `engine::extract`.
+                    if let Some(id) = step.id.as_deref() {
+                        crate::engine::extract::record_step_outputs(
+                            &step.outputs,
+                            &r.outputs,
+                            |local, v| ctx.record_output(id, local, v),
+                        );
+                    }
                     for (name, value) in &r.outputs {
-                        if let Some(scalar) = json_to_value(value)
-                            && let Some(id) = step.id.as_deref()
-                        {
-                            ctx.record_output(id, name, scalar);
-                        }
                         writer
                             .append_observation(idx as u32, name.clone(), value.clone())
                             .await?;

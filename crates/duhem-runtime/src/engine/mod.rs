@@ -10,6 +10,7 @@
 pub mod capture;
 pub mod context;
 pub mod env;
+pub(crate) mod extract;
 pub mod har;
 pub mod identity;
 pub mod inherit;

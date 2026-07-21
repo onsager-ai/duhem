@@ -34,10 +34,16 @@ pub struct Step {
     #[schemars(with = "serde_json::Value")]
     pub with: serde_yml::Value,
 
-    /// Map of output name → extraction expression. Extraction
-    /// expressions are opaque strings here (e.g. `response.status`);
-    /// the runtime evaluator binds them to live values during
-    /// execution.
+    /// Map of local alias → extraction path into the step's raw action
+    /// result. Optional: every raw field is already addressable by its
+    /// native name (`$steps.<id>.outputs.<field>`), so this is the
+    /// escape hatch for the two cases a native name can't cover — a
+    /// *rename* (`http_code: status`) and a *derived extraction*
+    /// (`project_id: body.data._id`, `first: body.items[0].id`). The
+    /// path is opaque at the schema layer; the runtime navigates it
+    /// (dotted object keys, `[N]` array indices — spec #273) and records
+    /// the value under the alias. Identity (`foo: foo`) is a redundant
+    /// no-op the validator lint flags.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub outputs: BTreeMap<String, String>,
 }

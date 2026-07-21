@@ -16,8 +16,10 @@ good baseline you mutate toward your real workload.
 2. Edit `duhem.yml` to mechanically verify each criterion: one
    or more `checks:` per criterion, each with `steps:` (actions
    that exercise the real artifact) and `assertions:` (boolean
-   expressions over `$steps.<id>.outputs.*`). The action
-   catalog lives in `docs/duhem-spec.md` §10.5.
+   expressions over `$steps.<id>.outputs.*`). To discover an
+   action's `with:` fields and outputs, ask the CLI:
+   `duhem describe <uses>` (e.g. `duhem describe api/call`), or
+   `duhem actions` to list the whole catalog.
 3. Re-validate and re-run after each edit.
 
 ## Required inputs
@@ -70,6 +72,9 @@ duhem run {{PATH}}/duhem.yml --filter AC-1
 
 ## Further reading
 
+- Action reference (every action's `with:` fields / outputs):
+  `duhem actions` and `duhem describe <uses>`, or browse
+  <https://github.com/onsager-ai/duhem/blob/main/docs/action-reference.md>.
 - Authoring discipline: the `verification-authoring` skill (see
   `.claude/skills/verification-authoring/SKILL.md` in the Duhem
   repo).

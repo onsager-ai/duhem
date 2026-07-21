@@ -123,7 +123,13 @@ impl Action for Stream {
                 FieldSpec::optional("until_event"),
                 FieldSpec::optional("max_events"),
             ],
-            outputs: vec!["status", "events", "event_count", "last_event"],
+            outputs: vec![
+                "status",
+                "events",
+                "event_count",
+                "last_event",
+                "stopped_reason",
+            ],
             example: "- uses: api/stream\n  with: { method: GET, url: $inputs.events_url, until_event: done }\n  outputs: { count: event_count }",
         }
     }

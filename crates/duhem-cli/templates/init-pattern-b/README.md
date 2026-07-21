@@ -13,7 +13,10 @@ root manifest (`../duhem.yml`) per `docs/duhem-spec.md` §10.4.
 
 1. Edit `criteria.md` to express the real commitments of your
    feature.
-2. Edit `duhem.yml` to mechanically verify each criterion.
+2. Edit `duhem.yml` to mechanically verify each criterion. To
+   discover an action's `with:` fields and outputs, run `duhem
+   describe <uses>` (e.g. `duhem describe api/call`); `duhem
+   actions` lists the catalog.
 3. Re-validate and re-run after each edit (commands below).
 
 ## Required inputs
@@ -53,6 +56,9 @@ meantime.
 
 ## Further reading
 
+- Action reference (every action's `with:` fields / outputs):
+  `duhem actions` and `duhem describe <uses>`, or browse
+  <https://github.com/onsager-ai/duhem/blob/main/docs/action-reference.md>.
 - `verification-authoring` skill (`.claude/skills/verification-authoring/SKILL.md`).
 - Worked example: `templates/product-repo/` (the co-located `.duhem/` skeleton in the Duhem repo).
 - Product spec: `docs/duhem-spec.md` §10.4 (file organization

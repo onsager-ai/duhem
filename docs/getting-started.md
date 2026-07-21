@@ -111,6 +111,18 @@ Point it at *your* system by changing three things in `duhem.yml`:
    | `cli/*` | invoking a local command | no |
    | `ui/*`  | driving a real browser (navigate, click, type, assert) | yes |
 
+   To learn a chosen action's `with:` fields, outputs, and a
+   worked example, ask the CLI — it prints the version-exact
+   contract:
+
+   ```bash
+   duhem actions                 # list the catalog
+   duhem describe api/call       # one action's with:/outputs/example
+   ```
+
+   The same catalog, browsable, is
+   [`docs/action-reference.md`](./action-reference.md).
+
 3. **`assertions`** — what must be true. Assert over a step's **scalar**
    outputs (e.g. `status`, `body_text`), each assertion one verifiable
    claim:

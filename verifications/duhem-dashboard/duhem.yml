@@ -155,6 +155,11 @@ criteria:
           observe the rendered DOM: the `Duhem` app-shell heading, the
           run header showing the `pass` verdict, and the criterion's
           check (`AC-1.1`) listed as a link into the check page.
+        # Each `ui/assert-element` below carries the verdict implicitly
+        # (#253): a judging step that doesn't bind `satisfied` asserts
+        # `satisfied == true` on its own, so the `outputs:`/`assertions:`
+        # plumbing triplet is unnecessary. The `id`s are kept only to
+        # label this regression suite's failure evidence.
         steps:
           - uses: ui/navigate
             with:
@@ -168,8 +173,6 @@ criteria:
               locator: { role: heading, name: Duhem }
               expected: visible
               within: 15s
-            outputs:
-              satisfied: satisfied
           - id: verdict_rendered
             uses: ui/assert-element
             with:
@@ -179,8 +182,6 @@ criteria:
               locator: { role: heading, text: pass }
               expected: visible
               within: 15s
-            outputs:
-              satisfied: satisfied
           - id: check_listed
             uses: ui/assert-element
             with:
@@ -190,12 +191,6 @@ criteria:
               locator: { role: link, name: AC-1.1 }
               expected: visible
               within: 15s
-            outputs:
-              satisfied: satisfied
-        assertions:
-          - $steps.shell.outputs.satisfied == true
-          - $steps.verdict_rendered.outputs.satisfied == true
-          - $steps.check_listed.outputs.satisfied == true
 
   - id: AC-3
     description: |

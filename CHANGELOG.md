@@ -28,6 +28,7 @@ needs more than a bullet.
 ## Unreleased
 
 - [additive] `outputs:` is now optional — a `$steps.<id>.outputs.<field>` reference resolves against the step action's declared contract outputs, not only the names bound in `outputs:`, so the identity binding `outputs: { foo: foo }` is no longer needed just to reference an output. `outputs:` is still honored for a rename/alias, or to bind `satisfied` for manual judgment control (#253). The pure-schema `validate` stays strict; the CLI (`validate` / `run` / MCP) infers from the action catalog. Backward compatible; `schema/duhem.schema.json` unchanged. (#267)
+- [additive] `api/stream` declares its `stopped_reason` output (`until_event` / `max_events` / `stream_end` / `timeout` / `stream_error`) — the action always emitted it, but the contract omitted it, so `duhem validate` rejected binding it and `duhem describe` / the action reference hid it. `duhem validate` / `describe` and the regenerated reference now surface it; runtime and `schema/duhem.schema.json` unchanged. (#268)
 
 ## v0.1.3 — 2026-07-20
 

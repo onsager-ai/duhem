@@ -163,7 +163,7 @@ Make an HTTP request and observe the response.
 ```yaml
 - uses: api/call
   with: { method: GET, url: https://example.com }
-  outputs: { status: status }
+# then assert directly: $steps.<id>.outputs.status == 200 (no outputs: block)
 ```
 
 ### `api/observe`

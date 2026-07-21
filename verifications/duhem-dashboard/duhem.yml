@@ -113,18 +113,12 @@ criteria:
               method: GET
               url: $inputs.runs_url
               within: 15s
-            outputs:
-              status: status
-              body: body
           - id: detail
             uses: api/call
             with:
               method: GET
               url: $inputs.run_detail_url
               within: 15s
-            outputs:
-              status: status
-              body: body
         assertions:
           # The list endpoint answers and carries the fixture leaf run.
           - $steps.list.outputs.status == 200
@@ -228,12 +222,6 @@ criteria:
               # budget would end collection (Ok), and the `stream_end`
               # assertion below would fail loudly rather than hang.
               within: 20s
-            outputs:
-              status: status
-              event_count: event_count
-              stopped_reason: stopped_reason
-              events: events
-              last_event: last_event
         assertions:
           # The subscription itself was accepted.
           - $steps.sse.outputs.status == 200

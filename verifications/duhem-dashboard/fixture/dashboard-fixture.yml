@@ -39,7 +39,5 @@ criteria:
             with:
               command: [echo, duhem-dashboard-fixture]
               within: 15s
-            outputs:
-              exit_code: exit_code
         assertions:
           - $steps.ok.outputs.exit_code == 0

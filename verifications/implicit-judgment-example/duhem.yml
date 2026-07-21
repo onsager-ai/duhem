@@ -12,10 +12,12 @@
 #
 #   - AC-1 (terse):   assert steps carry the verdict implicitly — no
 #                     `assertions:` block at all.
-#   - AC-2 (explicit): the pre-#253 form, still fully supported —
-#                     binding `satisfied` in `outputs:` takes manual
-#                     control (e.g. for a disjunction), which disables
-#                     the implicit path.
+#   - AC-2 (manual):  a disjunction. Implicit judgment can only *AND*
+#                     judging steps, so binding `satisfied` (which opts
+#                     out of the implicit path) and combining the steps
+#                     with `||` is the case that genuinely needs manual
+#                     control — not a redundant `== true` the #267 lint
+#                     would flag.
 #
 # The `ui/*` actions drive a real browser, so a `duhem run` needs a SUT
 # and Chromium (`duhem browser install`). Offline, this validates
@@ -60,18 +62,22 @@ criteria:
 
   - id: AC-2
     description: |
-      The same posture written the pre-#253 way — an explicit
-      assertion over a bound `satisfied`. Both forms are supported;
-      binding `satisfied` is how an author opts out of implicit
-      judgment (e.g. to combine several steps in one assertion).
+      The page offers *either* a classic Sign In button *or* an SSO
+      "Continue" button — at least one must be present. This is a
+      disjunction, and implicit judgment (#253) can only *AND* judging
+      steps, so it is the case that genuinely needs manual control:
+      bind `satisfied` on each assert step (opting out of the implicit
+      path) and combine them in one `||` assertion. The `== true`s here
+      are load-bearing operands of the `||`, not the redundant
+      single-step `== true` the #267 lint flags.
     checks:
       - id: AC-2.1
-        description: Bind `satisfied` and assert it explicitly.
+        description: Assert at least one sign-in affordance is present.
         steps:
           - uses: ui/navigate
             with:
               url: $inputs.login_url
-          - id: signin_visible
+          - id: password_signin
             uses: ui/assert-element
             with:
               locator: { role: button, name: Sign In }
@@ -79,5 +85,13 @@ criteria:
               within: 10s
             outputs:
               satisfied: satisfied
+          - id: sso_signin
+            uses: ui/assert-element
+            with:
+              locator: { role: button, name: Continue with SSO }
+              expected: visible
+              within: 10s
+            outputs:
+              satisfied: satisfied
         assertions:
-          - $steps.signin_visible.outputs.satisfied == true
+          - $steps.password_signin.outputs.satisfied == true || $steps.sso_signin.outputs.satisfied == true

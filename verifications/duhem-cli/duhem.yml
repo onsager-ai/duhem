@@ -91,9 +91,6 @@ criteria:
               command: [$inputs.duhem_bin, --version]
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
-              stdout: stdout
         assertions:
           - $steps.version.outputs.exit_code == 0
           - matches:
@@ -123,9 +120,6 @@ criteria:
                 - verifications/defaults-example/checks/duhem.yml
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
-              stdout: stdout
         assertions:
           - $steps.validate_good.outputs.exit_code == 0
           - matches:
@@ -155,9 +149,6 @@ criteria:
                 - verifications/duhem-cli/fixtures/bad.yml
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
-              stderr: stderr
         assertions:
           - $steps.validate_bad.outputs.exit_code != 0
           - matches:
@@ -193,18 +184,12 @@ criteria:
                 - --force
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
-              stdout: stdout
           - id: validate_scaffold
             uses: cli/invoke
             with:
               command: [$inputs.duhem_bin, validate, $inputs.scaffold_dir]
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
-              stdout: stdout
         assertions:
           - $steps.scaffold.outputs.exit_code == 0
           - matches:
@@ -240,9 +225,6 @@ criteria:
                 - json
               cwd: $inputs.repo_dir
               within: 120s
-            outputs:
-              exit_code: exit_code
-              stdout: stdout
         assertions:
           - $steps.run_example.outputs.exit_code == 0
           - matches:
@@ -284,9 +266,6 @@ criteria:
                 - '@verifications/duhem-cli/fixtures/count.yml'
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
-              stdout: stdout
         assertions:
           - $steps.at_file_loads.outputs.exit_code == 0
           - matches:
@@ -308,9 +287,6 @@ criteria:
                 - --dry-run
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
-              stderr: stderr
         assertions:
           - $steps.missing_required.outputs.exit_code != 0
           - matches:
@@ -347,9 +323,6 @@ criteria:
                 - count=notanumber
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
-              stderr: stderr
         assertions:
           - $steps.raw_last_wins.outputs.exit_code != 0
           - matches:
@@ -375,8 +348,6 @@ criteria:
                 - '@verifications/duhem-cli/fixtures/count.yml'
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
         assertions:
           - $steps.file_last_wins.outputs.exit_code == 0
 
@@ -406,8 +377,6 @@ criteria:
                 - name=@nope.yml
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
         assertions:
           - $steps.key_at_literal.outputs.exit_code == 0
       - id: AC-8.2
@@ -430,9 +399,6 @@ criteria:
                 - '@nope.yml'
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
-              stderr: stderr
         assertions:
           - $steps.bare_at_missing.outputs.exit_code != 0
           - matches:
@@ -463,9 +429,6 @@ criteria:
                 - '1'
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
-              stderr: stderr
           - id: rejected_headed
             uses: cli/invoke
             with:
@@ -476,9 +439,6 @@ criteria:
                 - --headed
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
-              stderr: stderr
           - id: rejected_inputs_file
             uses: cli/invoke
             with:
@@ -490,9 +450,6 @@ criteria:
                 - x.yml
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
-              stderr: stderr
         assertions:
           - $steps.rejected_seed.outputs.exit_code != 0
           - matches:
@@ -544,9 +501,6 @@ criteria:
                 - count=99
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
-              stdout: stdout
         assertions:
           - $steps.flag_value_wins.outputs.exit_code == 0
           - matches:
@@ -576,9 +530,6 @@ criteria:
                 - '@verifications/duhem-cli/fixtures/count.yml'
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
-              stdout: stdout
         assertions:
           - $steps.file_value_wins.outputs.exit_code == 0
           - matches:
@@ -619,9 +570,6 @@ criteria:
                 - verifications/defaults-example
               cwd: $inputs.repo_dir
               within: 30s
-            outputs:
-              exit_code: exit_code
-              stdout: stdout
         assertions:
           - $steps.validate_manifest_dir.outputs.exit_code == 0
           - matches:

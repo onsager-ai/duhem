@@ -14,7 +14,9 @@
 
 use std::path::Path;
 
-use duhem_schema::{LoadError, Loaded, SCHEMA_VERSION, ValidationError, validate};
+use duhem_schema::{
+    LoadError, Loaded, SCHEMA_VERSION, ValidationError, validate_with_contract_outputs,
+};
 
 /// Validate the target a `duhem validate [path]` invocation points at.
 ///
@@ -33,7 +35,10 @@ pub(crate) fn run_validate(path: Option<&Path>) -> Result<String, String> {
         // Single leaf: today's behavior, byte-for-byte — `OK` on
         // success, the un-prefixed validation-error preamble on failure.
         Loaded::Leaf { path, definition } => {
-            validate(&definition).map_err(|errs| format_validation_errors(None, &errs))?;
+            validate_with_contract_outputs(&definition, &|u| {
+                crate::contract_check::contract_outputs(u)
+            })
+            .map_err(|errs| format_validation_errors(None, &errs))?;
             let cerrs = crate::contract_check::field_errors(&definition);
             if !cerrs.is_empty() {
                 return Err(format!(
@@ -64,7 +69,9 @@ pub(crate) fn run_validate(path: Option<&Path>) -> Result<String, String> {
             }
             let mut errors: Vec<String> = Vec::new();
             for leaf in &leaves {
-                if let Err(errs) = validate(&leaf.definition) {
+                if let Err(errs) = validate_with_contract_outputs(&leaf.definition, &|u| {
+                    crate::contract_check::contract_outputs(u)
+                }) {
                     errors.push(format_validation_errors(Some(&leaf.path), &errs));
                 }
                 let cerrs = crate::contract_check::field_errors(&leaf.definition);
@@ -147,6 +154,34 @@ mod tests {
         std::fs::write(
             &leaf,
             "verification: x\ncriteria:\n  - id: AC-1\n    description: d\n    checks:\n      - id: AC-1.1\n        assertions: [\"true\"]\n",
+        )
+        .unwrap();
+        assert_eq!(run_validate(Some(&leaf)).unwrap(), "OK");
+    }
+
+    #[test]
+    fn validates_a_terse_leaf_with_implicit_outputs() {
+        // A step that binds no `outputs:` yet asserts over a contract
+        // output validates via the CLI's contract-aware resolver
+        // (spec #267) — the real end-to-end wiring, not a stub.
+        let tmp = tempfile::tempdir().unwrap();
+        let leaf = tmp.path().join("v.yml");
+        std::fs::write(
+            &leaf,
+            r#"verification: x
+criteria:
+  - id: AC-1
+    description: d
+    checks:
+      - id: AC-1.1
+        description: d
+        steps:
+          - id: home
+            uses: api/call
+            with: { method: GET, url: "https://example.com" }
+        assertions:
+          - $steps.home.outputs.status == 200
+"#,
         )
         .unwrap();
         assert_eq!(run_validate(Some(&leaf)).unwrap(), "OK");

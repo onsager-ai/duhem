@@ -20,7 +20,7 @@ use std::process::ExitCode;
 use serde_json::{Value, json};
 
 use duhem_actions::{catalog, contract_for};
-use duhem_schema::{VerificationDefinition, validate};
+use duhem_schema::{VerificationDefinition, validate_with_contract_outputs};
 
 /// The MCP protocol revision we speak.
 const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -174,7 +174,9 @@ fn validate_text(vd: &str) -> String {
         Err(e) => return format!("PARSE ERROR: {e}"),
     };
     let mut errs: Vec<String> = Vec::new();
-    if let Err(ve) = validate(&def) {
+    if let Err(ve) =
+        validate_with_contract_outputs(&def, &|u| crate::contract_check::contract_outputs(u))
+    {
         errs.extend(ve.iter().map(ToString::to_string));
     }
     errs.extend(crate::contract_check::field_errors(&def));

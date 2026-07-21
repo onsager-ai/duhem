@@ -30,7 +30,7 @@ pub use manifest::{
 };
 pub use project::{ProjectDecl, ProjectKind};
 pub use step::Step;
-pub use validate::{ValidationError, validate};
+pub use validate::{ValidationError, validate, validate_with_contract_outputs};
 pub use verification::{InputDecl, InputType, SchemaError, VerificationDefinition};
 
 /// Current Verification Definition schema version. Pre-1.0 per

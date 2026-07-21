@@ -27,6 +27,8 @@ needs more than a bullet.
 
 ## Unreleased
 
+## v0.1.4 — 2026-07-21
+
 - [additive] `outputs:` renames and derived extractions are now functional — a `local: extraction` binding records `$steps.<id>.outputs.<local>` (and `$setup.…` for setup steps) as the value at `extraction`, a dotted path into the step's raw result (object keys and `[N]` array indices). A rename (`http_code: status`) or a deep alias (`project_id: body.data._id`) now resolves at run time instead of silently to nothing; identity `foo: foo` stays a redundant no-op (the #267 lint flags it). A miss records nothing, surfacing as `inconclusive` on reference. No schema-shape change (only the `outputs` field description in `schema/duhem.schema.json` updated). (#273)
 - [additive] `outputs:` is now optional — a `$steps.<id>.outputs.<field>` reference resolves against the step action's declared contract outputs, not only the names bound in `outputs:`, so the identity binding `outputs: { foo: foo }` is no longer needed just to reference an output. `outputs:` is still honored for a rename/alias, or to bind `satisfied` for manual judgment control (#253). The pure-schema `validate` stays strict; the CLI (`validate` / `run` / MCP) infers from the action catalog. Backward compatible; `schema/duhem.schema.json` unchanged. (#267)
 - [additive] `api/stream` declares its `stopped_reason` output (`until_event` / `max_events` / `stream_end` / `timeout` / `stream_error`) — the action always emitted it, but the contract omitted it, so `duhem validate` rejected binding it and `duhem describe` / the action reference hid it. `duhem validate` / `describe` and the regenerated reference now surface it; runtime and `schema/duhem.schema.json` unchanged. (#268)

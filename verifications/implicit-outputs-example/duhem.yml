@@ -1,0 +1,60 @@
+# Implicit output inference — worked example (spec #267)
+#
+# Every action produces its declared outputs at run time keyed by field
+# name, whether or not a step lists them in `outputs:` (the runtime
+# records them in `crates/duhem-runtime/src/engine/runner.rs`). Since
+# #267 the validator knows that too: a `$steps.<id>.outputs.<field>`
+# reference resolves against the action's *contract* outputs, so the
+# identity binding `outputs: { foo: foo }` — pure ceremony on nearly
+# every step — is no longer needed just to reference an output.
+#
+# You still write `outputs:` for the two cases that carry information:
+#   - a rename / alias (`code: status`), or
+#   - binding `satisfied` to take manual control of a judging step
+#     (see implicit-judgment-example).
+#
+# The `api/*` action drives no browser, so this validates AND runs
+# offline against a public endpoint:
+#
+#   duhem validate verifications/implicit-outputs-example/duhem.yml
+
+verification: Implicit outputs — terse vs explicit
+spec_ref: https://github.com/onsager-ai/duhem/issues/267
+
+inputs:
+  base_url:
+    type: string
+    default: "https://example.com"
+
+criteria:
+  - id: AC-1
+    description: |
+      The endpoint answers 200 and its body names the example domain.
+      Authored in the terse #267 form — the step binds no `outputs:`;
+      the assertions reference the api/call contract outputs directly.
+    checks:
+      - id: AC-1.1
+        description: Request the page and assert status and content.
+        steps:
+          - id: home
+            uses: api/call
+            with: { method: GET, url: $inputs.base_url, within: 15s }
+        assertions:
+          - $steps.home.outputs.status == 200
+          - $runtime.contains($steps.home.outputs.body_text, "Example")
+
+  - id: AC-2
+    description: |
+      The same posture with an explicit `outputs:` rename — still
+      supported. Binding `code: status` adds the alias `code` alongside
+      the inferred contract outputs, so both resolve.
+    checks:
+      - id: AC-2.1
+        description: Bind a rename alias and assert over it.
+        steps:
+          - id: page
+            uses: api/call
+            with: { method: GET, url: $inputs.base_url, within: 15s }
+            outputs: { code: status }
+        assertions:
+          - $steps.page.outputs.code == 200

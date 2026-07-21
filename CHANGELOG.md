@@ -27,6 +27,8 @@ needs more than a bullet.
 
 ## Unreleased
 
+- [additive] `outputs:` is now optional — a `$steps.<id>.outputs.<field>` reference resolves against the step action's declared contract outputs, not only the names bound in `outputs:`, so the identity binding `outputs: { foo: foo }` is no longer needed just to reference an output. `outputs:` is still honored for a rename/alias, or to bind `satisfied` for manual judgment control (#253). The pure-schema `validate` stays strict; the CLI (`validate` / `run` / MCP) infers from the action catalog. Backward compatible; `schema/duhem.schema.json` unchanged. (#267)
+
 ## v0.1.3 — 2026-07-20
 
 - [additive] `$runtime.contains` accepts a string haystack — a literal substring test (`contains($steps.home.outputs.body_text, "Example Domain")`, complementing the regex `$runtime.matches`); an array haystack keeps its element-membership behavior. Separately, an assertion `TypeMismatch` (e.g. `contains(str, int)`, `len(int)`) now gates as `fail` with a `type_mismatch(...)` evidence detail, instead of the retry-eligible `inconclusive:environment_error` it produced before. No schema-shape change. (#259)

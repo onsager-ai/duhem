@@ -27,7 +27,7 @@ needs more than a bullet.
 
 ## Unreleased
 
-- [additive] `api/stream` contract declares its `stopped_reason` output (#268): the action has emitted `stopped_reason` (`"until_event"` / `"max_events"` / `"stream_end"` / `"timeout"` / `"stream_error"`) since it shipped (#153) — emitted in its collector, documented in the module header, and covered by four unit tests — but the action *contract* omitted it from the declared `outputs`, so `duhem validate` rejected a binding of `stopped_reason` and `duhem describe api/stream` / `docs/action-reference.md` hid it. A correct VD that live-follows an SSE stream and asserts the server closed it (`stopped_reason == "stream_end"`, distinguishing a genuine terminal from a `within:` cut-off) therefore failed to validate — caught by the `verifications/duhem-dashboard` self-regression suite, i.e. contract/implementation drift, not a stale VD. The contract now lists `stopped_reason`; `duhem validate` / `describe` and the regenerated `action-reference.md` surface it. Runtime behavior byte-identical (the output was always produced); `schema/duhem.schema.json` byte-identical (a step's `outputs` are modeled opaquely). Found via a VD-freshness audit while working on #267. (#268)
+- [additive] `api/stream` declares its `stopped_reason` output (`until_event` / `max_events` / `stream_end` / `timeout` / `stream_error`) — the action always emitted it, but the contract omitted it, so `duhem validate` rejected binding it and `duhem describe` / the action reference hid it. `duhem validate` / `describe` and the regenerated reference now surface it; runtime and `schema/duhem.schema.json` unchanged. (#268)
 
 ## v0.1.3 — 2026-07-20
 

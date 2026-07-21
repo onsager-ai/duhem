@@ -219,7 +219,7 @@ Consume a streaming (SSE) endpoint, collecting events until a condition.
 | `until_event` | no | — |
 | `max_events` | no | — |
 
-**outputs:** `status`, `events`, `event_count`, `last_event`
+**outputs:** `status`, `events`, `event_count`, `last_event`, `stopped_reason`
 
 ```yaml
 - uses: api/stream

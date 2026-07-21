@@ -27,6 +27,8 @@ needs more than a bullet.
 
 ## Unreleased
 
+- [additive] `api/stream` contract declares its `stopped_reason` output (#268): the action has emitted `stopped_reason` (`"until_event"` / `"max_events"` / `"stream_end"` / `"timeout"` / `"stream_error"`) since it shipped (#153) — emitted in its collector, documented in the module header, and covered by four unit tests — but the action *contract* omitted it from the declared `outputs`, so `duhem validate` rejected a binding of `stopped_reason` and `duhem describe api/stream` / `docs/action-reference.md` hid it. A correct VD that live-follows an SSE stream and asserts the server closed it (`stopped_reason == "stream_end"`, distinguishing a genuine terminal from a `within:` cut-off) therefore failed to validate — caught by the `verifications/duhem-dashboard` self-regression suite, i.e. contract/implementation drift, not a stale VD. The contract now lists `stopped_reason`; `duhem validate` / `describe` and the regenerated `action-reference.md` surface it. Runtime behavior byte-identical (the output was always produced); `schema/duhem.schema.json` byte-identical (a step's `outputs` are modeled opaquely). Found via a VD-freshness audit while working on #267. (#268)
+
 ## v0.1.3 — 2026-07-20
 
 - [additive] `$runtime.contains` accepts a string haystack — a literal substring test (`contains($steps.home.outputs.body_text, "Example Domain")`, complementing the regex `$runtime.matches`); an array haystack keeps its element-membership behavior. Separately, an assertion `TypeMismatch` (e.g. `contains(str, int)`, `len(int)`) now gates as `fail` with a `type_mismatch(...)` evidence detail, instead of the retry-eligible `inconclusive:environment_error` it produced before. No schema-shape change. (#259)

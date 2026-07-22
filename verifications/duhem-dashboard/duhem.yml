@@ -90,6 +90,12 @@ inputs:
   run_page_url:
     type: string
     default: http://127.0.0.1:7878/#/run/dashboard-fixture-run
+  # The Suites tab of the run report shell (#280) — where the
+  # criterion → check tree now lives (the Overview tab is the status
+  # donut + metadata).
+  run_suites_url:
+    type: string
+    default: http://127.0.0.1:7878/#/run/dashboard-fixture-run/suites
 
 criteria:
   - id: AC-1
@@ -147,8 +153,9 @@ criteria:
         description: |
           Navigate a real browser to the run detail deep link and
           observe the rendered DOM: the `Duhem` app-shell heading, the
-          run header showing the `pass` verdict, and the criterion's
-          check (`AC-1.1`) listed as a link into the check page.
+          run header showing the `pass` verdict, and — on the Suites tab
+          of the report shell (#280) — the criterion's check (`AC-1.1`)
+          listed as a link into the check page.
         # Each `ui/assert-element` below carries the verdict implicitly
         # (#253): a judging step that doesn't bind `satisfied` asserts
         # `satisfied == true` on its own, so the `outputs:`/`assertions:`
@@ -176,6 +183,11 @@ criteria:
               locator: { role: heading, text: pass }
               expected: visible
               within: 15s
+          # The criterion → check tree lives under the Suites tab of the
+          # report shell (#280); navigate there before asserting the link.
+          - uses: ui/navigate
+            with:
+              url: $inputs.run_suites_url
           - id: check_listed
             uses: ui/assert-element
             with:

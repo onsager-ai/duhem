@@ -4,7 +4,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/onsager-ai/duhem/actions/workflows/ci.yml/badge.svg)](https://github.com/onsager-ai/duhem/actions/workflows/ci.yml)
-[![Schema](https://img.shields.io/badge/schema-v0.1.2-blue.svg)](CHANGELOG.md)
+[![Schema](https://img.shields.io/badge/schema-v0.x-blue.svg)](CHANGELOG.md)
 
 Duhem sits between AI coding agents and production. It captures human intent as acceptance criteria, translates them into mechanically-judged checks that exercise the real delivery web — code + prompts + tool wiring + data + runtime — and gates merge/deploy on the verdict.
 

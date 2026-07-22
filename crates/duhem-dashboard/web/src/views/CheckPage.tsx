@@ -92,6 +92,12 @@ function StepGroup({
   );
   const fe = formatEvent(started, prevOf(started));
   const status = stepStatus(node);
+  // Surface an api/call's HTTP response status right on the step row, so a
+  // failing call (→ 500) is obvious at a glance instead of buried in "N obs".
+  const statusObs = observations.find(
+    (e) => e.output_name === "status" && typeof e.value === "number",
+  );
+  const httpStatus = statusObs ? (statusObs.value as number) : undefined;
   return (
     <li className={`ev step-group tone-${status.tone}`} data-testid="step-group">
       <details open={status.failed}>
@@ -104,6 +110,14 @@ function StepGroup({
             {fe.detail && (
               <span className="ev-detail-text" title={fe.detail}>
                 {fe.detail}
+              </span>
+            )}
+            {httpStatus !== undefined && (
+              <span
+                className={`api-status ${httpStatus >= 400 ? "bad" : "ok"}`}
+                data-testid="api-status"
+              >
+                → {httpStatus}
               </span>
             )}
             <span className={`step-outcome tone-${status.tone}`} data-testid="step-outcome">

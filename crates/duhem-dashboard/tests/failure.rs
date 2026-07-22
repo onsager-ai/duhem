@@ -91,6 +91,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, network: Option
         state,
         detail,
         step_index: None,
+        expr: None,
     })
     .await
     .unwrap();

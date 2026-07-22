@@ -167,6 +167,7 @@ pub async fn write_passing_run(
         state: VerdictState::Pass,
         detail: None,
         step_index: None,
+        expr: None,
     })
     .await
     .unwrap();
@@ -222,6 +223,7 @@ pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition
         state: VerdictState::Fail,
         detail: Some("status 500 != 200".into()),
         step_index: None,
+        expr: None,
     })
     .await
     .unwrap();

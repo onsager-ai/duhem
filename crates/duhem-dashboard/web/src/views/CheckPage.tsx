@@ -184,6 +184,10 @@ function StepGroup({
   const stepId = vd?.stepId(cid, chid, node.stepIndex);
   const label = stepId ?? fe.label;
   const detailText = stepId ? [fe.label, fe.detail].filter(Boolean).join(" · ") : fe.detail;
+  const statusObs = scalarObs.find(
+    (observation) => observation.name === "status" && typeof observation.value === "number",
+  );
+  const httpStatus = statusObs?.value as number | undefined;
   return (
     <li className={`ev step-group tone-${status.tone}`} data-testid="step-group">
       <details open={status.failed}>
@@ -198,6 +202,11 @@ function StepGroup({
               {detailText && (
                 <span className="ev-detail-text" title={detailText}>
                   {detailText}
+                </span>
+              )}
+              {httpStatus !== undefined && (
+                <span className={`api-status ${httpStatus >= 400 ? "bad" : "ok"}`} data-testid="api-status">
+                  → {httpStatus}
                 </span>
               )}
               <span className={`step-outcome tone-${status.tone}`} data-testid="step-outcome">

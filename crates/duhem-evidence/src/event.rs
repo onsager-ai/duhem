@@ -221,16 +221,25 @@ pub enum EventPayload {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         expr: Option<String>,
         /// The step this assertion is derived from, when the link is
-        /// known — set for an *implicit* judgment (spec #253), whose
-        /// outcome IS a step's `satisfied` verdict, so a reporter can
-        /// fold the assertion into its step and propagate its status
-        /// (a judging step whose implicit assertion failed is a failed
-        /// step, not a green one). `None` for an explicit `assertions:`
-        /// entry, which may reference zero or many steps. Additive and
+        /// known, so a reporter can fold the assertion into its step and
+        /// propagate its status (a step whose assertion failed is a
+        /// failed step, not a green one). Set for an *implicit* judgment
+        /// (spec #253) — whose outcome IS a step's `satisfied` verdict —
+        /// AND for an *explicit* `assertions:` entry that references
+        /// exactly one `$steps.<id>` (e.g. `$steps.update.outputs.status
+        /// == 200` folds onto the `update` step). `None` when the
+        /// assertion references zero or many steps. Additive and
         /// backward compatible: an event predating this field
         /// deserializes with `None`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         step_index: Option<u32>,
+        /// The human-authored assertion line this outcome evaluated —
+        /// e.g. `$steps.update.outputs.status == 200`. Lets a reporter
+        /// show *what* was asserted, not just the `detail`'s observed
+        /// vs expected values. `None` for an implicit judgment (there is
+        /// no authored line) and on events predating this field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expr: Option<String>,
     },
     CheckFinished {
         check_id: String,

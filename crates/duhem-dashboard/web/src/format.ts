@@ -51,6 +51,21 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+/**
+ * The human line for an assertion outcome — the authored expression AND
+ * the observed-vs-expected detail (#279 follow-up), e.g.
+ * `$steps.update.outputs.status == 200 — actual 500, expected 200`. Shows
+ * *what* was asserted, not just the values. Falls back to whichever is
+ * present (implicit judgments carry only a semantic `detail`; a passing
+ * explicit assertion carries only the `expr`).
+ */
+export function assertionText(evt: TraceEvent): string {
+  const expr = str(evt.expr);
+  const detail = str(evt.detail);
+  if (expr && detail) return `${expr} — ${detail}`;
+  return detail || expr || "";
+}
+
 /** Compact one-line value for an inline observation or arg scalar. */
 export function compactValue(v: unknown): string {
   if (v === null) return "null";
@@ -263,7 +278,7 @@ export function summarizeCheck(detail: CheckDetail): CheckSummaryModel {
   const assertions = detail.timeline.filter((e) => e.kind === "assertion_evaluated");
   const failing = assertions
     .filter((e) => str(e.state) !== "pass")
-    .map((e) => str(e.detail) || str(e.state) || "no detail recorded");
+    .map((e) => assertionText(e) || str(e.state) || "no detail recorded");
 
   const v = detail.verdict;
   let headline: string;
@@ -365,7 +380,14 @@ function foldImplicitJudgments(nodes: TimelineNode[]): TimelineNode[] {
       if (typeof si === "number") {
         const target = stepByIndex.get(si);
         if (target) {
-          target.judgment = n.event;
+          // A step may own several assertions (an explicit check can
+          // assert two things about one call). A failing one wins for the
+          // step's status/reason; otherwise keep the first.
+          const prev = target.judgment;
+          const isFail = str(n.event.state) !== "pass";
+          if (!prev || (isFail && str(prev.state) === "pass")) {
+            target.judgment = n.event;
+          }
           target.events.push(n.event);
           continue;
         }
@@ -392,7 +414,7 @@ export function stepStatus(node: StepNode): {
   failed: boolean;
 } {
   const jstate = node.judgment ? (str(node.judgment.state) ?? "") : "";
-  const reason = node.judgment ? (str(node.judgment.detail) ?? "") : "";
+  const reason = node.judgment ? assertionText(node.judgment) : "";
   if (jstate === "fail") {
     return { icon: "fail", label: "step failed", tone: "fail", reason, failed: true };
   }

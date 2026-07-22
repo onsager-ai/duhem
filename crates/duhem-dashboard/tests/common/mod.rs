@@ -168,6 +168,7 @@ pub async fn write_passing_run(
         detail: None,
         expr: None,
         step_index: None,
+        expr: None,
     })
     .await
     .unwrap();
@@ -224,6 +225,7 @@ pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition
         detail: Some("status 500 != 200".into()),
         expr: None,
         step_index: None,
+        expr: None,
     })
     .await
     .unwrap();

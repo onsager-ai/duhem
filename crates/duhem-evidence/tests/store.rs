@@ -62,6 +62,7 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
         detail: None,
         expr: None,
         step_index: None,
+        expr: None,
     })
     .await
     .unwrap();
@@ -157,6 +158,7 @@ async fn dropped_writer_loses_nothing_and_run_stays_unfinished() {
                 detail: None,
                 expr: None,
                 step_index: None,
+                expr: None,
             })
             .await
             .unwrap();

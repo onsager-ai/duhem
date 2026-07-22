@@ -607,6 +607,10 @@ li.ev.step-group > details > summary:hover { background: var(--row-hover); }
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 li.ev.step-group.tone-inconclusive .step-reason { color: var(--inconclusive); }
+/* #279 follow-up: the HTTP response status on an api/call step row. */
+.api-status { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.82rem; white-space: nowrap; }
+.api-status.ok { color: var(--pass); }
+.api-status.bad { color: var(--fail); font-weight: 600; }
 li.ev.step-group.tone-fail > details > summary { box-shadow: inset 2px 0 0 var(--fail); }
 li.ev.step-group.tone-inconclusive > details > summary { box-shadow: inset 2px 0 0 var(--inconclusive); }
 /* Only the step's OWN label takes the fail/inconclusive colour — a

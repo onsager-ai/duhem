@@ -200,6 +200,17 @@ pub enum EventPayload {
         state: VerdictState,
         #[serde(default)]
         detail: Option<String>,
+        /// The step this assertion is derived from, when the link is
+        /// known — set for an *implicit* judgment (spec #253), whose
+        /// outcome IS a step's `satisfied` verdict, so a reporter can
+        /// fold the assertion into its step and propagate its status
+        /// (a judging step whose implicit assertion failed is a failed
+        /// step, not a green one). `None` for an explicit `assertions:`
+        /// entry, which may reference zero or many steps. Additive and
+        /// backward compatible: an event predating this field
+        /// deserializes with `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        step_index: Option<u32>,
     },
     CheckFinished {
         check_id: String,

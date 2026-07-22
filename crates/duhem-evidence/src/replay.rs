@@ -115,6 +115,7 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                 assertion_index,
                 state,
                 detail,
+                ..
             } => {
                 assertions_by_check
                     .entry(check_id.clone())

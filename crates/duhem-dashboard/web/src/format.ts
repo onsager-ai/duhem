@@ -238,10 +238,21 @@ export function summarizeCheck(detail: CheckDetail): CheckSummaryModel {
  * observations → `step_finished`) into one collapsible block; every
  * other event (assertions, the verdict, trailing captures) stays a
  * standalone row so the signal is never hidden inside a step.
+ *
+ * `judgment` is the implicit-judgment `assertion_evaluated` folded back
+ * onto this step (#280): its verdict IS the step's `satisfied` outcome,
+ * so it propagates the step's status (a failed judgment makes a failed
+ * step) instead of floating as an orphan row below. Explicit
+ * `assertions:` (no `step_index`) stay standalone.
  */
-export type TimelineNode =
-  | { kind: "step"; key: string; stepIndex: number; events: TraceEvent[] }
-  | { kind: "event"; key: string; event: TraceEvent };
+export type StepNode = {
+  kind: "step";
+  key: string;
+  stepIndex: number;
+  events: TraceEvent[];
+  judgment?: TraceEvent;
+};
+export type TimelineNode = StepNode | { kind: "event"; key: string; event: TraceEvent };
 
 const STEP_STARTED = new Set(["step_started", "setup_step_started"]);
 const STEP_INNER = new Set([
@@ -259,7 +270,7 @@ const STEP_INNER = new Set([
  */
 export function groupTimeline(events: TraceEvent[]): TimelineNode[] {
   const nodes: TimelineNode[] = [];
-  let group: { kind: "step"; key: string; stepIndex: number; events: TraceEvent[] } | null = null;
+  let group: StepNode | null = null;
   const flush = () => {
     if (group) {
       nodes.push(group);
@@ -282,5 +293,71 @@ export function groupTimeline(events: TraceEvent[]): TimelineNode[] {
     nodes.push({ kind: "event", key: `e${evt.seq}`, event: evt });
   }
   flush();
-  return nodes;
+  return foldImplicitJudgments(nodes);
+}
+
+/**
+ * Second pass (#280): fold each implicit-judgment assertion — an
+ * `assertion_evaluated` carrying a numeric `step_index` — back onto its
+ * step node, so the step propagates the verdict (Allure-style status
+ * bubbling) and the assertion isn't an orphan row. The event stays
+ * reachable inside the step (its raw is one click away). An explicit
+ * assertion (no `step_index`) or one whose step can't be found stays a
+ * standalone row.
+ */
+function foldImplicitJudgments(nodes: TimelineNode[]): TimelineNode[] {
+  const stepByIndex = new Map<number, StepNode>();
+  for (const n of nodes) if (n.kind === "step") stepByIndex.set(n.stepIndex, n);
+  const out: TimelineNode[] = [];
+  for (const n of nodes) {
+    if (n.kind === "event" && n.event.kind === "assertion_evaluated") {
+      const si = n.event.step_index;
+      if (typeof si === "number") {
+        const target = stepByIndex.get(si);
+        if (target) {
+          target.judgment = n.event;
+          target.events.push(n.event);
+          continue;
+        }
+      }
+    }
+    out.push(n);
+  }
+  return out;
+}
+
+/**
+ * A step's effective status, propagating a folded implicit judgment
+ * (#280). A judging step whose `satisfied` verdict failed is a *failed*
+ * step — not a green "step ok" — and carries the semantic reason; the
+ * judgment's verdict wins over the action's own "it ran" outcome.
+ * Without a failing judgment, falls back to the `step_finished`
+ * outcome, exactly as before.
+ */
+export function stepStatus(node: StepNode): {
+  icon: string;
+  label: string;
+  tone: Tone;
+  reason: string;
+  failed: boolean;
+} {
+  const jstate = node.judgment ? (str(node.judgment.state) ?? "") : "";
+  const reason = node.judgment ? (str(node.judgment.detail) ?? "") : "";
+  if (jstate === "fail") {
+    return { icon: "✗", label: "step failed", tone: "fail", reason, failed: true };
+  }
+  if (jstate.startsWith("inconclusive")) {
+    return { icon: "✗", label: "step inconclusive", tone: "inconclusive", reason, failed: true };
+  }
+  const finished = node.events.find(
+    (e) => e.kind === "step_finished" || e.kind === "setup_step_finished",
+  );
+  const outcome = str(finished?.outcome) ?? "ok";
+  const map: Record<string, { icon: string; label: string; tone: Tone }> = {
+    ok: { icon: "✓", label: "step ok", tone: "ok" },
+    error: { icon: "✗", label: "step error", tone: "fail" },
+    timeout: { icon: "⏱", label: "step timed out", tone: "inconclusive" },
+  };
+  const m = map[outcome] ?? { icon: "·", label: `step ${outcome}`, tone: "muted" as Tone };
+  return { ...m, reason: "", failed: m.tone === "fail" || m.tone === "inconclusive" };
 }

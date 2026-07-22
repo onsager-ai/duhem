@@ -7,7 +7,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { fetchCheck, type ArtifactRef, type CheckDetail, type SpanModel, type TraceEvent } from "../api";
 import { VerdictBadge, isImageArtifact } from "../ui";
-import { formatEvent, groupTimeline, summarizeCheck, type TimelineNode } from "../format";
+import { formatEvent, groupTimeline, stepStatus, summarizeCheck, type TimelineNode } from "../format";
 
 // Plain-language "what happened", derived mechanically from the
 // recorded timeline (never re-judged, never LLM-authored).
@@ -69,10 +69,14 @@ function TimelineRow({
   );
 }
 
-// A step's lifecycle collapsed into one row: the action + its outcome
-// + observation count as the summary, its observations one click away.
-// The check-level signal (assertions, verdict, captures) stays outside
-// any group, so nothing load-bearing is hidden.
+// A step's lifecycle collapsed into one row: the action + its
+// status-propagated outcome + observation count as the summary, its
+// observations one click away. A judging step's implicit verdict (#280)
+// is folded in via `stepStatus`, so a failed judgment paints the step
+// red and surfaces its reason inline — never a green "step ok" wrapping
+// a red failure. Failed steps auto-expand (Allure-style). The
+// check-level signal (explicit assertions, verdict, captures) stays
+// outside any group, so nothing load-bearing is hidden.
 function StepGroup({
   node,
   prevOf,
@@ -83,17 +87,14 @@ function StepGroup({
   artifacts: ArtifactRef[];
 }) {
   const started = node.events[0];
-  const finished = node.events.find(
-    (e) => e.kind === "step_finished" || e.kind === "setup_step_finished",
-  );
   const observations = node.events.filter(
     (e) => e.kind === "step_observation" || e.kind === "setup_step_observation",
   );
   const fe = formatEvent(started, prevOf(started));
-  const outcome = finished ? formatEvent(finished) : null;
+  const status = stepStatus(node);
   return (
-    <li className="ev step-group" data-testid="step-group">
-      <details>
+    <li className={`ev step-group tone-${status.tone}`} data-testid="step-group">
+      <details open={status.failed}>
         <summary>
           <span className="ev-icon" aria-hidden="true">
             {fe.icon}
@@ -105,13 +106,16 @@ function StepGroup({
                 {fe.detail}
               </span>
             )}
-            {outcome && (
-              <span className={`step-outcome tone-${outcome.tone}`}>
-                {outcome.icon} {outcome.label}
-              </span>
-            )}
+            <span className={`step-outcome tone-${status.tone}`} data-testid="step-outcome">
+              {status.icon} {status.label}
+            </span>
             {observations.length > 0 && (
               <span className="obs-count">{observations.length} obs</span>
+            )}
+            {status.reason && (
+              <span className="step-reason" data-testid="step-reason">
+                {status.reason}
+              </span>
             )}
           </span>
           <span className="ev-time" title={started.ts}>
@@ -120,8 +124,9 @@ function StepGroup({
         </summary>
         <ol className="timeline step-inner">
           {/* The full step detail — started (with its args), each
-              observation, and finished (with its outcome) — each row
-              keeps its own raw toggle, so nothing is unreachable. */}
+              observation, finished (with its outcome), and the folded
+              implicit judgment — each row keeps its own raw toggle, so
+              nothing is unreachable. */}
           {node.events.map((e) => (
             <TimelineRow key={e.seq} evt={e} prev={prevOf(e)} artifacts={artifacts} />
           ))}

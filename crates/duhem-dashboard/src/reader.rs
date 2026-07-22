@@ -712,6 +712,7 @@ fn project_run(run: &RunEvidence) -> RunProjection {
                 assertion_index,
                 state,
                 detail,
+                ..
             } => {
                 if let Some(pos) = checks.iter().position(|c| &c.check_id == check_id) {
                     checks[pos]

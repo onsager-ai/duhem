@@ -1,7 +1,8 @@
 // Unit tests for the pure event/summary formatters (#206).
 
 import { describe, expect, it } from "vitest";
-import { describeWith, formatEvent, groupTimeline, summarizeCheck } from "../format";
+import { describeWith, formatEvent, groupTimeline, stepStatus, summarizeCheck } from "../format";
+import type { StepNode } from "../format";
 import type { CheckDetail, TraceEvent } from "../api";
 
 const ev = (kind: string, extra: Record<string, unknown> = {}, seq = 1): TraceEvent => ({
@@ -153,6 +154,94 @@ describe("groupTimeline", () => {
     const nodes = groupTimeline([ev("check_finished", { verdict: "pass" })]);
     expect(nodes).toHaveLength(1);
     expect(nodes[0].kind).toBe("event");
+  });
+
+  it("folds an implicit judgment (step_index) into its step, not an orphan row (#280)", () => {
+    const events: TraceEvent[] = [
+      ev("step_started", { step_index: 1, uses: "ui/assert-element" }, 3),
+      ev("step_observation", { step_index: 1, output_name: "satisfied", value: false }, 4),
+      ev("step_observation", { step_index: 1, output_name: "count", value: 1 }, 5),
+      ev("step_finished", { step_index: 1, outcome: "ok" }, 6),
+      ev(
+        "assertion_evaluated",
+        { state: "fail", detail: 'expected text "Manager" to be absent', step_index: 1 },
+        7,
+      ),
+      ev("check_finished", { verdict: "fail" }, 8),
+    ];
+    const nodes = groupTimeline(events);
+    // The assertion is folded away — only the step and the verdict remain.
+    expect(nodes.map((n) => n.kind)).toEqual(["step", "event"]);
+    const step = nodes[0];
+    if (step.kind !== "step") throw new Error("expected step");
+    expect(step.judgment?.seq).toBe(7);
+    // …but stays reachable inside the step (its raw is one click away).
+    expect(step.events.some((e) => e.seq === 7)).toBe(true);
+  });
+
+  it("keeps an explicit assertion (no step_index) standalone (#280)", () => {
+    const events: TraceEvent[] = [
+      ev("step_started", { step_index: 0, uses: "api/call" }, 1),
+      ev("step_finished", { step_index: 0, outcome: "ok" }, 2),
+      ev("assertion_evaluated", { state: "fail", detail: "actual 500, expected 200" }, 3),
+    ];
+    const nodes = groupTimeline(events);
+    expect(nodes.map((n) => n.kind)).toEqual(["step", "event"]);
+    const step = nodes[0];
+    if (step.kind !== "step") throw new Error("expected step");
+    expect(step.judgment).toBeUndefined();
+  });
+});
+
+describe("stepStatus (#280 status propagation)", () => {
+  const node = (judgment?: TraceEvent, outcome = "ok"): StepNode => ({
+    kind: "step",
+    key: "s1",
+    stepIndex: 0,
+    events: [
+      ev("step_started", { step_index: 0, uses: "ui/assert-element" }, 1),
+      ev("step_finished", { step_index: 0, outcome }, 2),
+    ],
+    judgment,
+  });
+
+  it("propagates a failed judgment to a failed step, carrying the reason", () => {
+    const s = stepStatus(
+      node(
+        ev("assertion_evaluated", {
+          state: "fail",
+          detail: 'expected text "Manager" to be absent within 5s, but 1 still matched',
+          step_index: 0,
+        }),
+      ),
+    );
+    expect(s.label).toBe("step failed");
+    expect(s.tone).toBe("fail");
+    expect(s.failed).toBe(true);
+    expect(s.reason).toContain("Manager");
+  });
+
+  it("keeps a passing judging step green with no reason", () => {
+    const s = stepStatus(node(ev("assertion_evaluated", { state: "pass", step_index: 0 })));
+    expect(s.label).toBe("step ok");
+    expect(s.tone).toBe("ok");
+    expect(s.failed).toBe(false);
+    expect(s.reason).toBe("");
+  });
+
+  it("propagates an inconclusive judgment", () => {
+    const s = stepStatus(
+      node(ev("assertion_evaluated", { state: "inconclusive:missing_observation", step_index: 0 })),
+    );
+    expect(s.label).toBe("step inconclusive");
+    expect(s.tone).toBe("inconclusive");
+    expect(s.failed).toBe(true);
+  });
+
+  it("falls back to the step_finished outcome with no judgment", () => {
+    expect(stepStatus(node(undefined, "ok")).label).toBe("step ok");
+    expect(stepStatus(node(undefined, "error")).label).toBe("step error");
+    expect(stepStatus(node(undefined, "error")).tone).toBe("fail");
   });
 });
 

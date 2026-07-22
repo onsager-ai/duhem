@@ -149,6 +149,52 @@ describe("Timeline", () => {
     expect(raws.length).toBeGreaterThanOrEqual(2);
     expect(raws.some((p) => p.textContent?.includes("actual false"))).toBe(true);
   });
+
+  it("propagates a failed implicit judgment onto its step — red, reason inline, auto-expanded (#280)", () => {
+    const events: TraceEvent[] = [
+      {
+        seq: 1,
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "step_started",
+        step_index: 0,
+        uses: "ui/assert-element",
+        layer: "ui",
+        with: { locator: { text: "Manager" }, expected: "not_exists", within: "5s" },
+      },
+      { seq: 2, ts: "2026-01-01T00:00:00.100Z", kind: "step_observation", step_index: 0, output_name: "satisfied", value: false },
+      { seq: 3, ts: "2026-01-01T00:00:00.150Z", kind: "step_observation", step_index: 0, output_name: "count", value: 1 },
+      { seq: 4, ts: "2026-01-01T00:00:00.200Z", kind: "step_finished", step_index: 0, outcome: "ok" },
+      {
+        seq: 5,
+        ts: "2026-01-01T00:00:00.300Z",
+        kind: "assertion_evaluated",
+        check_id: "AC-5.1",
+        assertion_index: 0,
+        state: "fail",
+        detail: 'expected text "Manager" to be absent within 5s, but 1 still matched',
+        step_index: 0,
+      },
+      { seq: 6, ts: "2026-01-01T00:00:00.400Z", kind: "check_finished", verdict: "fail" },
+    ];
+    const { container, getByTestId } = render(<Timeline events={events} />);
+    const group = getByTestId("step-group");
+    // The judging step reads *failed*, not a green "step ok".
+    expect(group.className).toContain("tone-fail");
+    expect(getByTestId("step-outcome").textContent).toContain("step failed");
+    expect(getByTestId("step-outcome").textContent).not.toContain("step ok");
+    // The semantic reason is surfaced inline on the step.
+    expect(getByTestId("step-reason").textContent).toContain(
+      'expected text "Manager" to be absent',
+    );
+    // Failed steps auto-expand (Allure-style).
+    expect(group.querySelector("details")?.hasAttribute("open")).toBe(true);
+    // The assertion is no longer a standalone orphan row — only the step
+    // and the verdict remain at the top level.
+    const topLabels = [...container.querySelectorAll(".ev-label")]
+      .filter((e) => !e.closest(".step-inner"))
+      .map((e) => e.textContent);
+    expect(topLabels).toEqual(["assert-element", "verdict: fail"]);
+  });
 });
 
 describe("Artifacts", () => {
@@ -418,5 +464,43 @@ describe("Sparkline (②)", () => {
     expect(dots[1].className).toContain("verdict-fail");
     expect(dots[2].className).toContain("dot-absent");
     expect(dots[3].className).toContain("verdict-inconclusive");
+  });
+});
+
+// ---- #280: run status roll-up (donut + counts) ----------------------
+
+import { StatusDonut, tallyChecks } from "../views/RunPage";
+
+describe("run status roll-up (#280)", () => {
+  const crit = (id: string, checks: { id: string; verdict: string | null }[]) => ({
+    id,
+    verdict: null,
+    checks,
+  });
+
+  it("tallies check verdicts across criteria, bucketing pending and inconclusive", () => {
+    const t = tallyChecks([
+      crit("AC-1", [
+        { id: "a", verdict: "pass" },
+        { id: "b", verdict: "fail" },
+      ]),
+      crit("AC-2", [
+        { id: "c", verdict: "inconclusive:timeout" },
+        { id: "d", verdict: null },
+      ]),
+    ]);
+    expect(t).toEqual({ pass: 1, fail: 1, inconclusive: 1, pending: 1, total: 4 });
+  });
+
+  it("renders a donut with the total in the middle, one arc per non-zero status", () => {
+    const { getByTestId } = render(
+      <StatusDonut tally={{ pass: 3, fail: 1, inconclusive: 0, pending: 0, total: 4 }} />,
+    );
+    const summary = getByTestId("status-summary");
+    expect(getByTestId("count-pass").textContent).toContain("3");
+    expect(getByTestId("count-fail").textContent).toContain("1");
+    expect(summary.querySelector(".donut-center")?.textContent).toBe("4");
+    // Only pass + fail are non-zero → two arcs drawn.
+    expect(summary.querySelectorAll(".donut-seg")).toHaveLength(2);
   });
 });

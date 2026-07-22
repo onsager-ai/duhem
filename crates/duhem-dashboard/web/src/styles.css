@@ -439,6 +439,54 @@ li.ev.step-group > details > summary:hover { background: rgba(255, 255, 255, 0.0
 .step-outcome.tone-ok { color: var(--pass); }
 .step-outcome.tone-fail { color: var(--fail); }
 .step-outcome.tone-inconclusive { color: var(--inconclusive); }
+/* #280: a judging step whose implicit verdict failed reads red at the
+   row level (Allure-style status propagation), with the semantic reason
+   dropped onto its own line under the intent. `inset` box-shadow, so the
+   accent doesn't shift the summary grid out of alignment with the rows
+   below it. */
+.step-reason {
+  display: block;
+  color: var(--fail);
+  font-size: 0.82rem;
+  margin-top: 0.15rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+li.ev.step-group.tone-inconclusive .step-reason { color: var(--inconclusive); }
+li.ev.step-group.tone-fail > details > summary { box-shadow: inset 2px 0 0 var(--fail); }
+li.ev.step-group.tone-inconclusive > details > summary { box-shadow: inset 2px 0 0 var(--inconclusive); }
+li.ev.step-group.tone-fail .ev-label { color: var(--fail); }
+li.ev.step-group.tone-inconclusive .ev-label { color: var(--inconclusive); }
+
+/* -- #280: run status roll-up (donut + counts, Allure-style) --------- */
+.status-summary { display: flex; align-items: center; gap: 1.4rem; }
+.donut { flex: none; }
+.donut-track { fill: none; stroke: var(--border); stroke-width: 11; }
+/* Arcs start at 12 o'clock and run clockwise; rotate the whole ring. */
+.donut-seg {
+  fill: none;
+  stroke-width: 11;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: stroke-dasharray 0.3s ease;
+}
+.donut .seg-pass { stroke: var(--pass); }
+.donut .seg-fail { stroke: var(--fail); }
+.donut .seg-inconclusive { stroke: var(--inconclusive); }
+.donut .seg-pending { stroke: var(--muted); }
+.donut-center { fill: var(--text); font-size: 22px; font-weight: 700; }
+.status-counts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.2rem;
+}
+.status-counts .count { font-size: 0.85rem; color: var(--muted); white-space: nowrap; }
+.status-counts .count-n { font-weight: 700; font-size: 1rem; margin-right: 0.15rem; }
+.status-counts .count.seg-pass .count-n { color: var(--pass); }
+.status-counts .count.seg-fail .count-n { color: var(--fail); }
+.status-counts .count.seg-inconclusive .count-n { color: var(--inconclusive); }
 ol.timeline.step-inner {
   margin: 0.1rem 0 0.3rem 1.6rem;
   border-left: 1px solid var(--border);

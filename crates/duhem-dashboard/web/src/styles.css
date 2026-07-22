@@ -487,6 +487,56 @@ li.ev.step-group.tone-inconclusive .ev-label { color: var(--inconclusive); }
 .status-counts .count.seg-pass .count-n { color: var(--pass); }
 .status-counts .count.seg-fail .count-n { color: var(--fail); }
 .status-counts .count.seg-inconclusive .count-n { color: var(--inconclusive); }
+
+/* -- #280: run-scoped report shell (top tab bar + tab bodies) -------- */
+.run-title { margin: 1rem 0 0.2rem; font-size: 1.05rem; }
+.run-title code { color: var(--muted); }
+.run-tabs { display: flex; gap: 0.15rem; border-bottom: 1px solid var(--border); margin: 0.55rem 0 0.2rem; }
+.run-tab {
+  padding: 0.5rem 0.9rem;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.run-tab:hover { color: var(--text); }
+.run-tab.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.meta-line { margin-top: 1rem; }
+/* Suites filter chips (button form of the run-list `.filters .chip`). */
+.chips { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 1rem 0 0.6rem; }
+.chips .chip {
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  border-radius: 999px;
+  padding: 0.16rem 0.65rem;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+}
+.chips .chip:hover { color: var(--text); }
+.chips .chip.on { color: var(--text); border-color: var(--accent); background: rgba(124, 136, 255, 0.12); }
+.chips .chip .n { font-weight: 700; }
+.chips .chip .n.ok { color: var(--pass); }
+.chips .chip .n.bad { color: var(--fail); }
+.chips .chip .n.inc { color: var(--inconclusive); }
+/* Categories tab */
+.panelh { font-size: 0.95rem; margin: 0 0 0.7rem; font-weight: 600; }
+.dim { color: var(--muted); font-weight: 400; }
+.catgroup { margin: 0 0 1.1rem; }
+.catgroup h3 { font-size: 0.9rem; margin: 0 0 0.2rem; }
+.catgroup h3 .cnt { color: var(--muted); font-weight: 400; }
+.cat-sub { color: var(--muted); font-size: 0.78rem; margin: 0 0 0.4rem; }
+.catgroup ul { margin: 0.2rem 0 0; padding-left: 1.3rem; font-size: 0.86rem; }
+.catgroup li { margin: 0.22rem 0; color: var(--muted); }
+.cat-detail { color: var(--fail); font-size: 0.82rem; }
+/* Timeline tab — one delivery-web chain per check */
+.span-row { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.span-row:first-of-type { border-top: none; }
+.span-row-head { margin-bottom: 0.25rem; }
+.span-row-head a { color: var(--accent); text-decoration: none; }
+
 ol.timeline.step-inner {
   margin: 0.1rem 0 0.3rem 1.6rem;
   border-left: 1px solid var(--border);

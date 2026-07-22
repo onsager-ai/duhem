@@ -23,6 +23,11 @@ export default function App() {
         <Routes>
           <Route path="/" element={<RunsList />} />
           <Route path="/run/:runId" element={<RunPage />} />
+          {/* Run-scoped report tabs (#280) — each a deep-linkable route
+              rendering the same RunPage shell with a different tab. */}
+          <Route path="/run/:runId/suites" element={<RunPage />} />
+          <Route path="/run/:runId/categories" element={<RunPage />} />
+          <Route path="/run/:runId/timeline" element={<RunPage />} />
           <Route path="/run/:runId/check/:pair" element={<CheckPage />} />
           <Route path="/run/:runId/diff" element={<DiffPage />} />
           <Route path="/verification/:name" element={<VerificationPage />} />

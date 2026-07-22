@@ -16,6 +16,91 @@ import {
 import { foldRun } from "../fold";
 import { VerdictBadge, formatStartedAt } from "../ui";
 
+// #280 Phase 2/3: an Allure-style status roll-up for a run — a donut of
+// the check verdicts plus a count legend. Mechanically derived from the
+// recorded criterion → check verdicts, never re-judged.
+export interface StatusTally {
+  pass: number;
+  fail: number;
+  inconclusive: number;
+  pending: number;
+  total: number;
+}
+
+export function tallyChecks(criteria: RunDetail["criteria"]): StatusTally {
+  const t: StatusTally = { pass: 0, fail: 0, inconclusive: 0, pending: 0, total: 0 };
+  for (const c of criteria) {
+    for (const chk of c.checks) {
+      t.total++;
+      const v = chk.verdict;
+      if (v === "pass") t.pass += 1;
+      else if (v === "fail") t.fail += 1;
+      else if (v && v.startsWith("inconclusive")) t.inconclusive += 1;
+      else t.pending += 1;
+    }
+  }
+  return t;
+}
+
+const DONUT_SEGMENTS: { key: keyof Omit<StatusTally, "total">; cls: string; label: string }[] = [
+  { key: "pass", cls: "seg-pass", label: "passed" },
+  { key: "fail", cls: "seg-fail", label: "failed" },
+  { key: "inconclusive", cls: "seg-inconclusive", label: "inconclusive" },
+  { key: "pending", cls: "seg-pending", label: "pending" },
+];
+
+// A pure-SVG donut: each status is an arc whose length is its share of
+// the total, stacked by advancing the dash offset. Total in the middle.
+export function StatusDonut({ tally }: { tally: StatusTally }) {
+  const total = tally.total || 1;
+  const r = 42;
+  const circ = 2 * Math.PI * r;
+  let offset = 0;
+  const arcs = DONUT_SEGMENTS.map((s) => {
+    const n = tally[s.key];
+    if (n === 0) return null;
+    const len = (n / total) * circ;
+    const arc = (
+      <circle
+        key={s.key}
+        className={`donut-seg ${s.cls}`}
+        cx="50"
+        cy="50"
+        r={r}
+        strokeDasharray={`${len} ${circ - len}`}
+        strokeDashoffset={-offset}
+      />
+    );
+    offset += len;
+    return arc;
+  });
+  return (
+    <div className="panel status-summary" data-testid="status-summary">
+      <svg
+        className="donut"
+        viewBox="0 0 100 100"
+        width="88"
+        height="88"
+        role="img"
+        aria-label={`${tally.pass} passed, ${tally.fail} failed, ${tally.inconclusive} inconclusive of ${tally.total} checks`}
+      >
+        <circle className="donut-track" cx="50" cy="50" r={r} />
+        {arcs}
+        <text className="donut-center" x="50" y="52" textAnchor="middle">
+          {tally.total}
+        </text>
+      </svg>
+      <ul className="status-counts">
+        {DONUT_SEGMENTS.map((s) => (
+          <li key={s.key} className={`count ${s.cls}`} data-testid={`count-${s.key}`}>
+            <span className="count-n">{tally[s.key]}</span> {s.label}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function useRun(runId: string): { run: RunDetail | null; error: string | null } {
   const [run, setRun] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +188,7 @@ export default function RunPage() {
           artifact.
         </p>
       )}
+      {run.criteria.length > 0 && <StatusDonut tally={tallyChecks(run.criteria)} />}
       {run.criteria.length === 0 ? (
         <p className="muted">No criteria recorded{run.live ? " yet" : ""}.</p>
       ) : (

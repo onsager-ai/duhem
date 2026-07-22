@@ -466,3 +466,41 @@ describe("Sparkline (②)", () => {
     expect(dots[3].className).toContain("verdict-inconclusive");
   });
 });
+
+// ---- #280: run status roll-up (donut + counts) ----------------------
+
+import { StatusDonut, tallyChecks } from "../views/RunPage";
+
+describe("run status roll-up (#280)", () => {
+  const crit = (id: string, checks: { id: string; verdict: string | null }[]) => ({
+    id,
+    verdict: null,
+    checks,
+  });
+
+  it("tallies check verdicts across criteria, bucketing pending and inconclusive", () => {
+    const t = tallyChecks([
+      crit("AC-1", [
+        { id: "a", verdict: "pass" },
+        { id: "b", verdict: "fail" },
+      ]),
+      crit("AC-2", [
+        { id: "c", verdict: "inconclusive:timeout" },
+        { id: "d", verdict: null },
+      ]),
+    ]);
+    expect(t).toEqual({ pass: 1, fail: 1, inconclusive: 1, pending: 1, total: 4 });
+  });
+
+  it("renders a donut with the total in the middle, one arc per non-zero status", () => {
+    const { getByTestId } = render(
+      <StatusDonut tally={{ pass: 3, fail: 1, inconclusive: 0, pending: 0, total: 4 }} />,
+    );
+    const summary = getByTestId("status-summary");
+    expect(getByTestId("count-pass").textContent).toContain("3");
+    expect(getByTestId("count-fail").textContent).toContain("1");
+    expect(summary.querySelector(".donut-center")?.textContent).toBe("4");
+    // Only pass + fail are non-zero → two arcs drawn.
+    expect(summary.querySelectorAll(".donut-seg")).toHaveLength(2);
+  });
+});

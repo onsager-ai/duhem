@@ -125,6 +125,47 @@ impl Locator {
         }
         Ok(())
     }
+
+    /// A compact, human phrase for this locator — the legible
+    /// counterpart to [`crate::playwright::to_selector`] (which yields
+    /// a Playwright selector, not prose). Used to say *what* an
+    /// assertion looked for in a failure message and the dashboard
+    /// timeline, e.g. `text "Manager"` or `role=button "Create" in
+    /// {role=dialog}`. Mirrors the dashboard's `describeLocator`
+    /// (`web/src/format.ts`) so the CLI and the UI read the same.
+    pub fn describe(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(role) = &self.role {
+            let mut r = format!("role={role}");
+            if let Some(name) = &self.name {
+                r.push_str(&format!(" \"{name}\""));
+            }
+            parts.push(r);
+        }
+        if let Some(label) = &self.label {
+            parts.push(format!("label \"{label}\""));
+        }
+        if let Some(testid) = &self.testid {
+            parts.push(format!("testid \"{testid}\""));
+        }
+        if let Some(placeholder) = &self.placeholder {
+            parts.push(format!("placeholder \"{placeholder}\""));
+        }
+        if let Some(css) = &self.css {
+            parts.push(format!("css {css}"));
+        }
+        if let Some(text) = &self.text {
+            parts.push(format!("text \"{text}\""));
+        }
+        if let Some(scope) = &self.scope {
+            parts.push(format!("in {{{}}}", scope.describe()));
+        }
+        if parts.is_empty() {
+            "element".to_string()
+        } else {
+            parts.join(" ")
+        }
+    }
 }
 
 impl TryFrom<LocatorWire> for Locator {
@@ -276,6 +317,23 @@ scope:
     fn rejects_unknown_field() {
         let err = serde_yml::from_str::<Locator>(r#"{ role: button, color: red }"#).unwrap_err();
         assert!(format!("{err}").contains("unknown field"), "got: {err}");
+    }
+
+    #[test]
+    fn describe_renders_a_human_phrase_per_strategy() {
+        let role: Locator = serde_yml::from_str(r#"{ role: button, name: Create }"#).unwrap();
+        assert_eq!(role.describe(), "role=button \"Create\"");
+        let text: Locator = serde_yml::from_str(r#"{ text: "Manager" }"#).unwrap();
+        assert_eq!(text.describe(), "text \"Manager\"");
+        let label: Locator = serde_yml::from_str(r#"{ label: Password }"#).unwrap();
+        assert_eq!(label.describe(), "label \"Password\"");
+        let ph: Locator = serde_yml::from_str(r#"{ placeholder: "Enter email" }"#).unwrap();
+        assert_eq!(ph.describe(), "placeholder \"Enter email\"");
+        // A scoped role composes: primary then `in {scope}`.
+        let scoped: Locator =
+            serde_yml::from_str(r#"{ role: button, name: Save, scope: { role: dialog } }"#)
+                .unwrap();
+        assert_eq!(scoped.describe(), "role=button \"Save\" in {role=dialog}");
     }
 
     #[test]

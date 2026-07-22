@@ -27,6 +27,8 @@ needs more than a bullet.
 
 ## Unreleased
 
+- [additive] Allure-grade failure legibility (#280): an implicit-judgment `assertion_evaluated` event now carries the `step_index` it was derived from, linking a judging step's `satisfied` verdict back to its step so a reporter can fold the assertion into that step and propagate its status (a judging step whose implicit assertion failed is a *failed* step, not a green "step ok"). The failure detail for a judging step is now semantic — `expected text "Manager" to be absent within 5s, but 1 still matched` (locator + expectation + deadline + observed `count`) for `ui/assert-element`, and an endpoint/condition summary for `ui/assert-url` / `ui/assert-state` / `api/poll` — instead of the opaque `actual false, expected true`. Additive and backward compatible: `step_index` is `None` on explicit `assertions:` and absent on events predating the field; the plain wording remains the fallback when a step's `with:` can't be read. `schema/duhem.schema.json` unchanged (evidence-wire only). (#280)
+
 ## v0.1.4 — 2026-07-21
 
 - [additive] `outputs:` renames and derived extractions are now functional — a `local: extraction` binding records `$steps.<id>.outputs.<local>` (and `$setup.…` for setup steps) as the value at `extraction`, a dotted path into the step's raw result (object keys and `[N]` array indices). A rename (`http_code: status`) or a deep alias (`project_id: body.data._id`) now resolves at run time instead of silently to nothing; identity `foo: foo` stays a redundant no-op (the #267 lint flags it). A miss records nothing, surfacing as `inconclusive` on reference. No schema-shape change (only the `outputs` field description in `schema/duhem.schema.json` updated). (#273)

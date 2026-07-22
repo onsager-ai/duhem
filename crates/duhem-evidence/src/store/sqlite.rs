@@ -209,6 +209,11 @@ impl Store for SqliteStore {
                 assertion_index,
                 state,
                 detail,
+                // `step_index` (the implicit-judgment → step link) rides
+                // the raw event JSON; the read side folds it from there.
+                // The `assertions` projection stays index-keyed, so no
+                // migration is needed for it here.
+                ..
             } => {
                 sqlx::query(
                     "INSERT INTO assertions \

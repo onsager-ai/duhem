@@ -40,7 +40,8 @@ pub use crate::engine::outcome::{
     CapturedArtifact, CheckFailure, CheckFilter, EngineError, FailedAssertion, RunOutcome,
 };
 pub(crate) use crate::engine::outcome::{
-    append_implicit_judgment, evaluate_explicit_assertions, implicit_judgment_outcomes, step_label,
+    StepEvidence, append_implicit_judgment, evaluate_explicit_assertions,
+    implicit_judgment_outcomes, step_label,
 };
 
 use crate::engine::capture::{CapturePolicy, TargetLocator, finalize_capture, target_from_step};
@@ -677,10 +678,9 @@ impl Engine {
         // what the engine got around to invoking.
         let mut step_aborted = false;
         let mut targets: Vec<TargetLocator> = Vec::new();
-        // Per-step `satisfied` observations, for implicit judgment
-        // (spec #253). `None` = the step didn't run or its result
-        // carried no boolean `satisfied`.
-        let mut step_satisfied: Vec<Option<bool>> = vec![None; check.steps.len()];
+        // Per-step evidence (resolved `with:` + outputs) for implicit
+        // judgment (#280). Empty = the step didn't run.
+        let mut step_evidence = vec![StepEvidence::empty(); check.steps.len()];
         for (idx, step) in check.steps.iter().enumerate() {
             // Resolve template references in `with:` against whatever
             // context we have. Cheap and same-shape for every code
@@ -752,9 +752,6 @@ impl Engine {
                 };
 
                 if let Ok(r) = &result {
-                    if let Some(serde_json::Value::Bool(b)) = r.outputs.get("satisfied") {
-                        step_satisfied[idx] = Some(*b);
-                    }
                     // Bind raw fields + `outputs:` aliases (spec #273);
                     // see `engine::extract`.
                     if let Some(id) = step.id.as_deref() {
@@ -769,6 +766,12 @@ impl Engine {
                             .append_observation(idx as u32, name.clone(), value.clone())
                             .await?;
                     }
+                    // Retain intent + outputs so implicit judgment
+                    // (#280) can speak the reason.
+                    step_evidence[idx] = StepEvidence {
+                        with: resolved_with.clone(),
+                        outputs: r.outputs.clone(),
+                    };
                 }
 
                 outcome
@@ -812,7 +815,7 @@ impl Engine {
         let implicit = implicit_judgment_outcomes(
             check,
             |uses| self.registry.get(uses).map(|d| d.judges()).unwrap_or(false),
-            &step_satisfied,
+            &step_evidence,
             any_unknown,
             environment_failed,
             browser_missing,

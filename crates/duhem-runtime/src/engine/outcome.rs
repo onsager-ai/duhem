@@ -1,7 +1,9 @@
 //! Engine-facing outcome + error types (split from `runner.rs` for
 //! the file-token budget).
 
-use duhem_actions::ActionError;
+use std::collections::BTreeMap;
+
+use duhem_actions::{ActionError, ExistenceState, Locator};
 use duhem_evidence::{EventPayload, EvidenceWriter, StoreError, VerdictState, WriterError};
 use duhem_judge::{AssertionOutcome, InconclusiveCause, RunVerdict};
 use thiserror::Error;
@@ -72,10 +74,46 @@ impl From<ActionError> for EngineError {
 /// `<uses> #<index>`. Used to name a step in an
 /// [`EngineError::UnresolvedReference`] so the author can locate the
 /// offending `with:` reference even in an anonymous step.
+/// What the runner observed at one step, retained so the implicit
+/// judgment can speak the *reason* a step's verdict came out the way it
+/// did — the authored intent (resolved `with:`, carrying the locator /
+/// expectation / deadline) plus the action's recorded outputs (e.g.
+/// `ui/assert-element`'s `count`). Empty (`with: Null`, no outputs) for
+/// a step that never ran.
+#[derive(Clone)]
+pub(crate) struct StepEvidence {
+    /// The step's resolved `with:` payload — references substituted, as
+    /// the action actually saw it.
+    pub with: serde_yml::Value,
+    /// The action's outputs (`satisfied`, `count`, …) for this step.
+    pub outputs: BTreeMap<String, serde_json::Value>,
+}
+
+impl StepEvidence {
+    /// An empty record for a step that produced no observation (didn't
+    /// run, or errored before returning outputs).
+    pub fn empty() -> Self {
+        StepEvidence {
+            with: serde_yml::Value::Null,
+            outputs: BTreeMap::new(),
+        }
+    }
+
+    /// The step's `satisfied` output as a bool, when it recorded one.
+    fn satisfied(&self) -> Option<bool> {
+        self.outputs.get("satisfied").and_then(|v| v.as_bool())
+    }
+}
+
 /// One synthesized implicit-judgment outcome (spec #253) for a judging
 /// step, ready for the runner to emit as an `AssertionEvaluated` event.
 pub(crate) struct ImplicitOutcome {
     pub label: String,
+    /// The 0-based index of the step this judgment is derived from, so
+    /// the emitted `AssertionEvaluated` carries the step link (a
+    /// reporter folds the assertion into its step and propagates its
+    /// status).
+    pub step_index: usize,
     pub state: VerdictState,
     pub detail: Option<String>,
 }
@@ -90,7 +128,7 @@ pub(crate) struct ImplicitOutcome {
 pub(crate) fn implicit_judgment_outcomes(
     check: &duhem_schema::Check,
     is_judging: impl Fn(&str) -> bool,
-    step_satisfied: &[Option<bool>],
+    step_evidence: &[StepEvidence],
     any_unknown: bool,
     environment_failed: bool,
     browser_missing: bool,
@@ -121,13 +159,16 @@ pub(crate) fn implicit_judgment_outcomes(
                 }),
             )
         } else {
-            match step_satisfied[idx] {
+            let ev = &step_evidence[idx];
+            match ev.satisfied() {
                 Some(true) => (VerdictState::Pass, None),
+                // The step ran and judged the artifact *not* satisfied.
+                // Speak the reason — the authored intent plus what was
+                // observed — so the reporter shows why, not a bare
+                // `actual false, expected true`.
                 Some(false) => (
                     VerdictState::Fail,
-                    Some(format!(
-                        "actual false, expected true (implicit `satisfied` of step `{label}`)"
-                    )),
+                    Some(judging_fail_detail(step, ev, &label)),
                 ),
                 None => (
                     VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
@@ -139,11 +180,118 @@ pub(crate) fn implicit_judgment_outcomes(
         };
         out.push(ImplicitOutcome {
             label,
+            step_index: idx,
             state,
             detail,
         });
     }
     out
+}
+
+/// A human, semantic failure detail for a judging step whose implicit
+/// `satisfied` came back false — the counterpart to
+/// `describe_comparison` on the explicit-assertion path. Names the
+/// authored intent (locator / expectation / deadline) and what was
+/// observed, so a reporter shows *why* rather than the opaque
+/// `actual false, expected true`. Falls back to that plain form when
+/// the step's `with:` can't be read (a `$`-ref that never resolved, an
+/// action we don't specially humanize).
+fn judging_fail_detail(step: &duhem_schema::Step, ev: &StepEvidence, label: &str) -> String {
+    let specialized = match step.uses.as_str() {
+        "ui/assert-element" => assert_element_fail_detail(ev),
+        _ => intent_fail_detail(step, ev),
+    };
+    specialized.unwrap_or_else(|| generic_fail_detail(label))
+}
+
+/// The pre-#280 wording, kept as the last-resort fallback.
+fn generic_fail_detail(label: &str) -> String {
+    format!("actual false, expected true (implicit `satisfied` of step `{label}`)")
+}
+
+/// Optional ` within 5s` suffix, read from the step's resolved `with:`.
+fn within_suffix(ev: &StepEvidence) -> String {
+    ev.with
+        .get("within")
+        .and_then(|v| v.as_str())
+        .map(|s| format!(" within {s}"))
+        .unwrap_or_default()
+}
+
+/// `ui/assert-element`: "expected text \"Manager\" to be absent within
+/// 5s, but 1 still matched". Reads the locator / `expected` / `within`
+/// from the resolved `with:` and the observed `count` from the outputs.
+fn assert_element_fail_detail(ev: &StepEvidence) -> Option<String> {
+    let loc: Locator = serde_yml::from_value(ev.with.get("locator")?.clone()).ok()?;
+    let expected: ExistenceState = serde_yml::from_value(ev.with.get("expected")?.clone()).ok()?;
+    let desc = loc.describe();
+    let within = within_suffix(ev);
+    let count = ev.outputs.get("count").and_then(|v| v.as_u64());
+    Some(match expected {
+        ExistenceState::NotExists => match count {
+            Some(n) => format!("expected {desc} to be absent{within}, but {n} still matched"),
+            None => format!("expected {desc} to be absent{within}, but it was present"),
+        },
+        ExistenceState::Hidden => match count {
+            Some(n) => {
+                format!("expected {desc} to be hidden{within}, but it stayed visible ({n} present)")
+            }
+            None => format!("expected {desc} to be hidden{within}, but it stayed visible"),
+        },
+        ExistenceState::Exists => {
+            format!("expected {desc} to appear{within}, but none was found")
+        }
+        ExistenceState::Visible => match count {
+            Some(n) if n > 0 => {
+                format!("expected {desc} to be visible{within}, but it stayed hidden ({n} present)")
+            }
+            _ => format!("expected {desc} to be visible{within}, but it never appeared"),
+        },
+    })
+}
+
+/// Generic humanizer for the other judging actions (`ui/assert-url`,
+/// `ui/assert-state`, `api/poll`, …): compose a short "what was
+/// expected" line from the well-known `with:` fields, plus the last
+/// observed HTTP status when the action recorded one. `None` when
+/// there's nothing legible to say — the caller falls back to the plain
+/// form.
+fn intent_fail_detail(step: &duhem_schema::Step, ev: &StepEvidence) -> Option<String> {
+    let s = |k: &str| ev.with.get(k).and_then(|v| v.as_str()).map(str::to_string);
+    let mut intent: Vec<String> = Vec::new();
+    if let Some(m) = s("method") {
+        intent.push(m);
+    }
+    if let Some(u) = s("url") {
+        intent.push(u);
+    }
+    if let Some(exp) = s("expected") {
+        intent.push(exp);
+    }
+    if let Some(until) = s("until") {
+        intent.push(format!("until {until}"));
+    }
+    if let Some(eq) = s("equals") {
+        intent.push(format!("equals \"{eq}\""));
+    }
+    if let Some(re) = s("matches") {
+        intent.push(format!("matches /{re}/"));
+    }
+    if intent.is_empty() {
+        return None;
+    }
+    let within = within_suffix(ev);
+    let observed = ev
+        .outputs
+        .get("status")
+        .and_then(|v| v.as_u64())
+        .map(|st| format!(" — last status {st}"))
+        .unwrap_or_default();
+    Some(format!(
+        "`{}`: expected {}{within}, but it did not hold{observed}",
+        step.uses,
+        intent.join(" ")
+    ))
 }
 
 /// Evaluate a check's explicit `assertions:` into outcomes + evidence
@@ -198,6 +346,9 @@ pub(crate) async fn evaluate_explicit_assertions(
                 assertion_index: i as u32,
                 state,
                 detail: detail.clone(),
+                // Explicit `assertions:` may reference zero or many
+                // steps — no single owning step to link.
+                step_index: None,
             })
             .await?;
         if !matches!(state, VerdictState::Pass) {
@@ -237,6 +388,10 @@ pub(crate) async fn append_implicit_judgment(
                 assertion_index: index as u32,
                 state: imp.state,
                 detail: imp.detail.clone(),
+                // The implicit judgment IS this step's `satisfied`
+                // verdict — carry the link so the reporter folds it into
+                // the step and propagates the status (#280).
+                step_index: Some(imp.step_index as u32),
             })
             .await?;
         if !matches!(imp.state, VerdictState::Pass) {
@@ -329,4 +484,127 @@ pub struct CheckFailure {
 pub struct CapturedArtifact {
     pub kind: String,
     pub sha256: String,
+}
+
+#[cfg(test)]
+mod fail_detail_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn step(uses: &str) -> duhem_schema::Step {
+        serde_yml::from_str(&format!("uses: {uses}\n")).expect("step")
+    }
+
+    fn ev(with_yaml: &str, outputs: &[(&str, serde_json::Value)]) -> StepEvidence {
+        StepEvidence {
+            with: serde_yml::from_str(with_yaml).expect("with"),
+            outputs: outputs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn assert_element_not_exists_names_locator_and_count() {
+        // The reported case (#280): a `not_exists` assertion that fired
+        // because the element WAS present. The message must say what it
+        // looked for and how many it found — not `actual false`.
+        let e = ev(
+            r#"{ locator: { text: "Manager" }, expected: not_exists, within: "5s" }"#,
+            &[("satisfied", json!(false)), ("count", json!(1))],
+        );
+        assert_eq!(
+            assert_element_fail_detail(&e).as_deref(),
+            Some("expected text \"Manager\" to be absent within 5s, but 1 still matched"),
+        );
+    }
+
+    #[test]
+    fn assert_element_exists_reports_none_found() {
+        let e = ev(
+            r##"{ locator: { css: "#email" }, expected: exists }"##,
+            &[("satisfied", json!(false)), ("count", json!(0))],
+        );
+        assert_eq!(
+            assert_element_fail_detail(&e).as_deref(),
+            Some("expected css #email to appear, but none was found"),
+        );
+    }
+
+    #[test]
+    fn assert_element_visible_distinguishes_present_from_absent() {
+        let present = ev(
+            r#"{ locator: { role: button, name: Go }, expected: visible, within: "2s" }"#,
+            &[("satisfied", json!(false)), ("count", json!(3))],
+        );
+        assert_eq!(
+            assert_element_fail_detail(&present).as_deref(),
+            Some(
+                "expected role=button \"Go\" to be visible within 2s, but it stayed hidden (3 present)"
+            ),
+        );
+        let absent = ev(
+            r#"{ locator: { role: button, name: Go }, expected: visible }"#,
+            &[("satisfied", json!(false)), ("count", json!(0))],
+        );
+        assert_eq!(
+            assert_element_fail_detail(&absent).as_deref(),
+            Some("expected role=button \"Go\" to be visible, but it never appeared"),
+        );
+    }
+
+    #[test]
+    fn assert_element_hidden_reports_still_visible() {
+        let e = ev(
+            r#"{ locator: { testid: banner }, expected: hidden, within: "1s" }"#,
+            &[("satisfied", json!(false)), ("count", json!(1))],
+        );
+        assert_eq!(
+            assert_element_fail_detail(&e).as_deref(),
+            Some(
+                "expected testid \"banner\" to be hidden within 1s, but it stayed visible (1 present)"
+            ),
+        );
+    }
+
+    #[test]
+    fn poll_intent_names_endpoint_and_last_status() {
+        let s = step("api/poll");
+        let e = ev(
+            r#"{ method: GET, url: "http://x/job", until: "$response.body.done == true", within: "30s" }"#,
+            &[("satisfied", json!(false)), ("status", json!(500))],
+        );
+        assert_eq!(
+            judging_fail_detail(&s, &e, "api/poll #0"),
+            "`api/poll`: expected GET http://x/job until $response.body.done == true within 30s, but it did not hold — last status 500",
+        );
+    }
+
+    #[test]
+    fn unrecognized_action_falls_back_to_generic() {
+        // No known `with:` fields → nothing legible → the plain form,
+        // still keyed to the step label so it localizes.
+        let s = step("custom/thing");
+        let e = ev("{}", &[("satisfied", json!(false))]);
+        assert_eq!(
+            judging_fail_detail(&s, &e, "custom/thing #2"),
+            "actual false, expected true (implicit `satisfied` of step `custom/thing #2`)",
+        );
+    }
+
+    #[test]
+    fn assert_element_with_unresolved_locator_falls_back() {
+        // A `$`-ref that never resolved leaves a non-locator `with:`;
+        // rather than emit garbage, fall back to the generic form.
+        let s = step("ui/assert-element");
+        let e = ev(
+            r#"{ expected: not_exists }"#,
+            &[("satisfied", json!(false))],
+        );
+        assert_eq!(
+            judging_fail_detail(&s, &e, "ui/assert-element #7"),
+            "actual false, expected true (implicit `satisfied` of step `ui/assert-element #7`)",
+        );
+    }
 }

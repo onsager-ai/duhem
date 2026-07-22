@@ -140,6 +140,73 @@ function TimelineRow({
   );
 }
 
+// Pretty-print a value for the request/response inspector: JSON strings
+// and objects are re-indented; anything else is shown as-is.
+function pretty(v: unknown): string {
+  if (typeof v === "string") {
+    try {
+      return JSON.stringify(JSON.parse(v), null, 2);
+    } catch {
+      return v;
+    }
+  }
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
+}
+
+// Request/response inspector for an `api/*` (or `db/*`) step — the method
+// · url · response status on one line, with the request and response
+// bodies pretty-printed and collapsible (the response opens on a 4xx/5xx
+// so the failure body — often the root cause — is right there). Reads the
+// request from the step's `with:` and the response from its observations;
+// returns null for a step that isn't an HTTP exchange.
+function ApiExchange({ node }: { node: Extract<TimelineNode, { kind: "step" }> }) {
+  const started = node.events[0];
+  const w =
+    started.with && typeof started.with === "object"
+      ? (started.with as Record<string, unknown>)
+      : {};
+  const obs = (name: string): unknown =>
+    node.events.find(
+      (e) =>
+        (e.kind === "step_observation" || e.kind === "setup_step_observation") &&
+        e.output_name === name,
+    )?.value;
+  const method = typeof w.method === "string" ? w.method : undefined;
+  const url = typeof w.url === "string" ? w.url : undefined;
+  const reqBody = w.body;
+  const status = obs("status");
+  const respBody = obs("body") ?? obs("body_text");
+  if (url === undefined && status === undefined) return null;
+  const bad = typeof status === "number" && status >= 400;
+  return (
+    <div className="api-exchange" data-testid="api-exchange">
+      <div className="ax-line">
+        {method && <span className="ax-method">{method}</span>}{" "}
+        {url && <span className="ax-url">{url}</span>}
+        {status !== undefined && (
+          <span className={`ax-status ${bad ? "bad" : "ok"}`}>{String(status)}</span>
+        )}
+      </div>
+      {reqBody !== undefined && reqBody !== null && reqBody !== "" && (
+        <details className="ax-body">
+          <summary>request body</summary>
+          <pre>{pretty(reqBody)}</pre>
+        </details>
+      )}
+      {respBody !== undefined && respBody !== null && respBody !== "" && (
+        <details className="ax-body" open={bad}>
+          <summary>response body</summary>
+          <pre>{pretty(respBody)}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
 // A step's lifecycle collapsed into one row: the action + its
 // status-propagated outcome + observation count as the summary, its
 // observations one click away. A judging step's implicit verdict (#280)
@@ -246,6 +313,10 @@ function StepGroup({
             </span>
           )}
         </summary>
+        {/* For an api/db step, a legible request/response inspector —
+            method · url · status + pretty-printed bodies — nested under
+            the step (the api analogue of a screenshot attachment). */}
+        <ApiExchange node={node} />
         <ol className="timeline step-inner">
           {/* The full step detail — started (with its args), each
               observation, finished (with its outcome), and the folded

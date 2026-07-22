@@ -208,6 +208,38 @@ describe("Timeline", () => {
       .map((e) => e.textContent);
     expect(topLabels).toEqual(["assert-element", "verdict: fail"]);
   });
+
+  it("nests a request/response inspector under an api step, response open on 5xx (#280 follow-up)", () => {
+    const events: TraceEvent[] = [
+      {
+        seq: 1,
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "step_started",
+        step_index: 0,
+        uses: "api/call",
+        layer: "api",
+        with: { method: "PUT", url: "http://x/api/roles/1", body: { name: "r" } },
+      },
+      { seq: 2, ts: "2026-01-01T00:00:00.100Z", kind: "step_observation", step_index: 0, output_name: "status", value: 500 },
+      {
+        seq: 3,
+        ts: "2026-01-01T00:00:00.150Z",
+        kind: "step_observation",
+        step_index: 0,
+        output_name: "body",
+        value: { error: "write exception: immutable field" },
+      },
+      { seq: 4, ts: "2026-01-01T00:00:00.200Z", kind: "step_finished", step_index: 0, outcome: "ok" },
+    ];
+    const { getByTestId } = render(<Timeline events={events} />);
+    const ax = getByTestId("api-exchange");
+    expect(ax.textContent).toContain("PUT");
+    expect(ax.textContent).toContain("http://x/api/roles/1");
+    expect(ax.querySelector(".ax-status")?.textContent).toBe("500");
+    expect(ax.querySelector(".ax-status")?.className).toContain("bad");
+    // The response body opens automatically on a 5xx — the error is right there.
+    expect(ax.textContent).toContain("write exception: immutable field");
+  });
 });
 
 describe("Artifacts", () => {

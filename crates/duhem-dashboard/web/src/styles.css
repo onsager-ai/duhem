@@ -611,6 +611,26 @@ li.ev.step-group.tone-inconclusive .step-reason { color: var(--inconclusive); }
 .api-status { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.82rem; white-space: nowrap; }
 .api-status.ok { color: var(--pass); }
 .api-status.bad { color: var(--fail); font-weight: 600; }
+/* #280 follow-up: request/response inspector nested under an api/db step. */
+.api-exchange { margin: 0.2rem 0 0.5rem 1.6rem; font-size: 0.84rem; }
+.ax-line { font-family: ui-monospace, SFMono-Regular, monospace; }
+.ax-method { color: var(--accent); font-weight: 700; }
+.ax-url { color: var(--muted); word-break: break-all; }
+.ax-status { margin-left: 0.5rem; font-weight: 700; }
+.ax-status.ok { color: var(--pass); }
+.ax-status.bad { color: var(--fail); }
+.ax-body { margin-top: 0.3rem; }
+.ax-body > summary { cursor: pointer; color: var(--muted); font-size: 0.8rem; }
+.ax-body pre {
+  margin: 0.25rem 0 0;
+  padding: 0.5rem 0.6rem;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: auto;
+  max-height: 22rem;
+  font-size: 0.8rem;
+}
 li.ev.step-group.tone-fail > details > summary { box-shadow: inset 2px 0 0 var(--fail); }
 li.ev.step-group.tone-inconclusive > details > summary { box-shadow: inset 2px 0 0 var(--inconclusive); }
 /* Only the step's OWN label takes the fail/inconclusive colour — a

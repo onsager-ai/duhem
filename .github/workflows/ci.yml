@@ -65,6 +65,13 @@ jobs:
       - name: action-reference drift check
         run: cargo run -p xtask --quiet -- action-reference --check
 
+      # The user-facing authoring skill published under
+      # templates/product-repo/.claude/skills/ is a sanitized sibling of
+      # Duhem's internal dev skills; it must not leak internal dev context
+      # (dogfood framing, seam/trust internals, dev-skill names). (#287)
+      - name: skill-scrub (published skills ↔ no internal vocab)
+        run: cargo run -p xtask --quiet -- skill-scrub
+
       - name: changelog touch check
         if: github.event_name == 'pull_request'
         env:

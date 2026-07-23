@@ -44,6 +44,7 @@ lint:
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo run -p xtask --quiet -- check-file-budget --mode=fail
+    cargo run -p xtask --quiet -- skill-scrub
 
 # Cheap pre-push gate: lint + test.
 check: lint test

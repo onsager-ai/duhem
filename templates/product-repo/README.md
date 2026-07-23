@@ -4,7 +4,8 @@ Drop-in skeleton for **co-locating Duhem Verification Definitions with
 the product they verify** — the concrete form of Pattern D
 (`docs/duhem-spec.md` §10.1). Duhem is used here as a *tool*: your
 repo owns its checks, next to the code they exercise. Copy the
-`.duhem/` tree and the `CODEOWNERS` stanza into your product repo.
+`.duhem/` tree, the `.claude/skills/` skill, and the `CODEOWNERS`
+stanza into your product repo.
 
 ```
 your-product/
@@ -12,6 +13,8 @@ your-product/
 │   ├── duhem.yml                # root manifest — aggregates the suite
 │   └── factory-cli/
 │       └── duhem.yml            # a leaf Verification Definition
+├── .claude/skills/
+│   └── verification-authoring/  # teaches your coding agent to author VDs
 ├── CODEOWNERS                   # routes /.duhem/ edits to a verifier
 └── … your product code …
 ```
@@ -36,6 +39,15 @@ writes there — add this to your `.gitignore`:
 duhem validate .duhem/duhem.yml    # schema-check the suite
 duhem run .duhem/duhem.yml         # run it; exit 0 == pass
 ```
+
+## Author with an AI agent
+
+`.claude/skills/verification-authoring/` is a Claude Code skill that
+teaches a coding agent to write Verification Definitions for your
+product — the criteria-vs-checks split, the terse authoring form, and
+the retrieval loop (`duhem actions` / `describe` / `validate`, or
+`duhem mcp`). Keep it in your repo so any agent working here authors
+against the version-exact contract instead of guessing.
 
 ## Mode A — self-gate on your own PRs
 

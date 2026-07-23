@@ -945,6 +945,28 @@ mod tests {
         );
     }
 
+    /// The generated `criteria.md` is implementation-neutral: a criterion
+    /// states intent, not mechanism. It must not carry browser/locator
+    /// prose — that both violates the criteria-vs-checks discipline and
+    /// is false for the default browser-free `api` scaffold (#293).
+    #[test]
+    fn criteria_md_is_implementation_neutral() {
+        let tmp = tempfile::tempdir().unwrap();
+        run_with_prompt(
+            args(tmp.path(), Some("smoke"), Pattern::A, false),
+            ok_prompt,
+        )
+        .expect("init ok");
+        let md = std::fs::read_to_string(tmp.path().join("criteria.md")).unwrap();
+        let low = md.to_lowercase();
+        for term in ["browser", "locator", "renders"] {
+            assert!(
+                !low.contains(term),
+                "criteria.md must be implementation-neutral; found `{term}`: {md}"
+            );
+        }
+    }
+
     /// The `--kind ui` scaffold is opt-in but still schema-valid and
     /// actually browser-driven.
     #[test]

@@ -12,17 +12,16 @@ sibling Verification Definitions.
 
 ## AC-1
 
-The example.com landing page renders its canonical heading.
+The example.com landing page is reachable and serves its content.
 
 > Replace this criterion before flipping your spec issue to
-> `planned`. See `docs/duhem-spec.md` §7.2 / §7.3 for the
-> criteria-vs-checks discipline.
+> `planned`. A good criterion reads as intent, not procedure —
+> no mechanism (browser, endpoint, table), just the commitment.
 
 ## Identity-commitment notes
 
-- **Holistic.** Skeleton check exercises a real public URL via a
-  real browser. No mocks at the web boundary
-  (`docs/duhem-spec.md` §8).
+- **Holistic.** Skeleton check exercises a real, deployed system
+  end-to-end. No mocks at the web boundary.
 - **Mechanical judgment.** Assertions are structural; no LLM
   interprets the verdict.
 - **Two-document discipline.** `criteria.md` is the human

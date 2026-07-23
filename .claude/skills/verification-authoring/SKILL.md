@@ -178,6 +178,9 @@ keys or output names from memory. Retrieve the version-exact contract:
 - or read the generated
   [`docs/action-reference.md`](../../../docs/action-reference.md), the
   same contract for every action in one page.
+- `duhem mcp` — exposes `describe` / `actions` / `validate` to a coding
+  agent over MCP, so AI-assisted authoring retrieves the same contract
+  programmatically (#252).
 
 Then let **`duhem validate` close the loop**: it field-checks each step's
 `with:` keys, `outputs:` action-fields, and closed-enum values against the
@@ -189,7 +192,24 @@ Use the existing catalog; if you genuinely need a new action type, that's
 an `area:schema` spec — see `issue-spec`. Do not silently mint new
 `uses:` strings.
 
-Common shape:
+**Terse by default** (#267 / #253). Duhem infers the ceremony, so author
+the minimal form:
+
+- **`outputs:` is optional.** Reference any output an action declares
+  directly as `$steps.<id>.outputs.<name>`, including nested paths
+  (`…outputs.body.data._id`). Add `outputs:` only to *rename* a field
+  (`outputs: { code: status }`) or bind a *deep extraction* to a short
+  alias (`outputs: { project_id: body.data._id }`, #273). An identity
+  binding `outputs: { foo: foo }` is a redundant no-op — `validate`
+  flags it.
+- **`assertions:` is optional for a judging step.** A `ui/assert-*` or
+  `api/poll` step *is* the judgment (it emits `satisfied`, implicitly
+  asserted `== true`), so an all-assert check needs no `assertions:`
+  block. Bind `satisfied` and assert it yourself only for manual control.
+  A check with neither `assertions:` nor a judging step is rejected at
+  validate time.
+
+Common shape (terse):
 
 ```yaml
 - id: AC-1.1
@@ -203,24 +223,21 @@ Common shape:
         method: POST
         path: /workspaces
         within: 3s
-      outputs:
-        status: response.status
-        workspace_id: response.body.id
+      # no outputs: block — status / body resolve directly; add a binding
+      # only to alias a deep path, e.g. outputs: { workspace_id: body.id }
   assertions:
     - $steps.api_call.outputs.status == 200
     - type_check:
-        value: $steps.api_call.outputs.workspace_id
+        value: $steps.api_call.outputs.body.id
         is: uuid
 ```
 
 Authoring rules:
 
-- Every step that produces output gets an `id:` so assertions can
-  reference it.
-- Outputs are explicit — `outputs: { name: <expression> }` —
-  never implicit.
-- Assertions reference outputs by their fully-qualified path:
-  `$steps.<id>.outputs.<name>`.
+- Every step whose output an assertion reads gets an `id:`.
+- Reference outputs by their fully-qualified path,
+  `$steps.<id>.outputs.<name>`; `outputs:` blocks are only for a rename
+  or a deep-extraction alias, not for re-declaring native fields.
 - Timeouts (`within:`) are explicit on steps that observe
   something asynchronous.
 - Use role-based locators (`{role: "button", name: "..."}`)
@@ -302,9 +319,11 @@ Before saving, walk through:
 - [ ] Each criterion appears verbatim under `criteria:` with an
       `id:` (`AC-1`, `AC-2`, …)
 - [ ] Each criterion has at least one check
-- [ ] Each check has a non-empty `steps:` and a non-empty
-      `assertions:` block
-- [ ] Every step output that's referenced is actually declared
+- [ ] Each check has a non-empty `steps:` and a verdict — an
+      `assertions:` block **or** a judging step (`ui/assert-*`,
+      `api/poll`)
+- [ ] Every referenced output is one the action declares (or bound via
+      `outputs:` for a rename/extraction)
 - [ ] Every assertion is one of the six allowed forms
 - [ ] No mock action types
 - [ ] No LLM-grading anywhere
@@ -373,10 +392,11 @@ criteria:
   Rewrite as "User can create a workspace from the dashboard."
 - **A check with no assertions.** It's a recording, not a check.
   Add the assertion or delete the check.
-- **Implicit outputs.** `outputs:` is mandatory for any value an
-  assertion reads. Magic field access like
-  `$steps.api_call.response.body.id` without a declared output is
-  a bug; the schema validator should reject it.
+- **Redundant identity bindings.** `outputs: { foo: foo }` does nothing
+  now that `outputs:` is optional (#267) — reference
+  `$steps.<id>.outputs.foo` directly. Reserve `outputs:` for a *rename*
+  (`{ code: status }`) or a *deep extraction* (`{ id: body.data._id }`);
+  `validate` flags the identity no-op.
 - **Mocks anywhere.** No `api/mock`, no `db/stub`, no
   `time/freeze` short-circuits. The web Duhem verifies is the
   real one.

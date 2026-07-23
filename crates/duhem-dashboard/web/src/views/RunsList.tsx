@@ -1,16 +1,51 @@
-// Runs list (#86): verification / verdict / date filters held in URL
-// state (bookmarkable), run-set rows expanding to their leaves (#49),
-// "● live" badges on in-progress runs (#84), list kept fresh by
-// visibility-aware polling (#298) so in-flight runs appear and
-// verdicts resolve without a manual reload.
+// Runs list (#86, reskinned #284): faceted filters held in URL state
+// (bookmarkable), run-set rows expanding to their leaves (#49), "live"
+// badges on in-progress runs (#84) — now on TanStack Table + shadcn.
+// Data comes from the shell's shared, visibility-polled runs context
+// (#298/#303), so the list stays live without its own fetch.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsUpDown,
+  ChevronUp,
+  Inbox,
+  X,
+} from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
-import { type RunsListEntry } from "../api";
-import { usePolledRuns } from "../hooks/use-polled-runs";
-import { VerdictBadge, formatDuration, formatStartedAt } from "../ui";
+import {
+  flexRender,
+  getCoreRowModel,
+  getExpandedRowModel,
+  getSortedRowModel,
+  useReactTable,
+  type Column,
+  type ColumnDef,
+  type ExpandedState,
+  type SortingState,
+} from "@tanstack/react-table";
+
+import { PageHeader } from "@/components/layout/PageHeader";
+import { EmptyState, ErrorState } from "@/components/states";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+import { useRunsData } from "@/runs-context";
+import { flatLeaves } from "@/stats";
+import { formatDuration, formatStartedAt, VerdictBadge } from "@/ui";
+import type { RunsListEntry } from "../api";
 
 const VERDICT_CHIPS = ["pass", "fail", "inconclusive", "live"] as const;
+const ALL = "__all__";
 
 export function matchesFilters(
   entry: RunsListEntry,
@@ -25,7 +60,9 @@ export function matchesFilters(
     const hit =
       (verdicts.includes("live") && entry.live) ||
       (v !== null &&
-        verdicts.some((w) => w !== "live" && (v === w || v.startsWith(`${w}:`))));
+        verdicts.some(
+          (w) => w !== "live" && (v === w || v.startsWith(`${w}:`)),
+        ));
     if (!hit) return false;
   }
   if (entry.started_at) {
@@ -38,37 +75,197 @@ export function matchesFilters(
   return true;
 }
 
-function Row({ entry, nested }: { entry: RunsListEntry; nested?: boolean }) {
-  const name =
-    entry.kind === "leaf" ? (
-      <Link to={`/run/${encodeURIComponent(entry.run_id)}`}>{entry.run_id}</Link>
-    ) : (
-      <strong>{entry.verification}</strong>
-    );
+type Meta = { className?: string };
+
+function SortHeader({
+  column,
+  children,
+}: {
+  column: Column<RunsListEntry, unknown>;
+  children: React.ReactNode;
+}) {
+  const sorted = column.getIsSorted();
   return (
-    <>
-      <tr className={nested ? "nested" : undefined}>
-        <td>{name}</td>
-        <td>
-          <Link to={`/verification/${encodeURIComponent(entry.verification)}`}>
-            {entry.verification}
+    <button
+      type="button"
+      onClick={() => column.toggleSorting(sorted === "asc")}
+      className="inline-flex items-center gap-1 hover:text-foreground"
+    >
+      {children}
+      {sorted === "asc" ? (
+        <ChevronUp className="size-3.5" />
+      ) : sorted === "desc" ? (
+        <ChevronDown className="size-3.5" />
+      ) : (
+        <ChevronsUpDown className="size-3.5 opacity-50" />
+      )}
+    </button>
+  );
+}
+
+const columns: ColumnDef<RunsListEntry>[] = [
+  {
+    id: "run",
+    header: "Run",
+    enableSorting: false,
+    cell: ({ row }) => {
+      const e = row.original;
+      const pad = { paddingLeft: `${row.depth * 1.25}rem` };
+      if (e.kind === "run-set") {
+        return (
+          <div className="flex items-center gap-1.5" style={pad}>
+            <button
+              type="button"
+              onClick={row.getToggleExpandedHandler()}
+              aria-label={row.getIsExpanded() ? "Collapse" : "Expand"}
+              aria-expanded={row.getIsExpanded()}
+              className="grid size-5 place-items-center rounded text-muted-foreground hover:bg-muted"
+            >
+              <ChevronRight
+                className={cn(
+                  "size-4 transition-transform",
+                  row.getIsExpanded() && "rotate-90",
+                )}
+              />
+            </button>
+            <span className="font-semibold">{e.verification}</span>
+            <span className="text-xs text-muted-foreground">
+              {e.children?.length ?? 0} runs
+            </span>
+          </div>
+        );
+      }
+      return (
+        <div style={pad}>
+          <Link
+            to={`/run/${encodeURIComponent(e.run_id)}`}
+            className="block max-w-[22ch] truncate font-mono text-xs hover:underline sm:max-w-[30ch]"
+            title={e.run_id}
+          >
+            {e.run_id}
           </Link>
-        </td>
-        <td>{formatStartedAt(entry.started_at)}</td>
-        <td>{formatDuration(entry.duration_ms)}</td>
-        <td>
-          <VerdictBadge verdict={entry.verdict} live={entry.live} />
-        </td>
-      </tr>
-      {entry.children?.map((child) => (
-        <Row key={child.run_id} entry={child} nested />
-      ))}
-    </>
+        </div>
+      );
+    },
+  },
+  {
+    id: "verification",
+    accessorFn: (r) => r.verification,
+    header: ({ column }) => <SortHeader column={column}>Verification</SortHeader>,
+    cell: ({ row }) => (
+      <Link
+        to={`/verification/${encodeURIComponent(row.original.verification)}`}
+        className="block max-w-[24ch] truncate hover:underline"
+        title={row.original.verification}
+      >
+        {row.original.verification}
+      </Link>
+    ),
+  },
+  {
+    id: "started",
+    accessorFn: (r) => (r.started_at ? Date.parse(r.started_at) || 0 : 0),
+    header: ({ column }) => <SortHeader column={column}>Started</SortHeader>,
+    cell: ({ row }) => (
+      <span className="text-muted-foreground">
+        {formatStartedAt(row.original.started_at)}
+      </span>
+    ),
+    meta: { className: "hidden md:table-cell" } satisfies Meta,
+  },
+  {
+    id: "duration",
+    accessorFn: (r) => r.duration_ms ?? -1,
+    header: ({ column }) => <SortHeader column={column}>Duration</SortHeader>,
+    cell: ({ row }) => (
+      <span className="text-muted-foreground tabular-nums">
+        {formatDuration(row.original.duration_ms)}
+      </span>
+    ),
+    meta: { className: "hidden sm:table-cell" } satisfies Meta,
+  },
+  {
+    id: "verdict",
+    header: "Verdict",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <VerdictBadge verdict={row.original.verdict} live={row.original.live} />
+    ),
+  },
+];
+
+function RunsTable({ data }: { data: RunsListEntry[] }) {
+  const [sorting, setSorting] = useState<SortingState>([
+    { id: "started", desc: true },
+  ]);
+  const [expanded, setExpanded] = useState<ExpandedState>(true);
+
+  const table = useReactTable({
+    data,
+    columns,
+    state: { sorting, expanded },
+    onSortingChange: setSorting,
+    onExpandedChange: setExpanded,
+    getSubRows: (row) => (row.kind === "run-set" ? row.children : undefined),
+    getRowId: (row, index, parent) =>
+      `${parent ? `${parent.id}.` : ""}${row.kind}:${row.run_id}:${index}`,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
+  });
+
+  return (
+    <div className="rounded-xl border">
+      <table className="w-full caption-bottom text-sm">
+        <thead>
+          {table.getHeaderGroups().map((hg) => (
+            <tr key={hg.id}>
+              {hg.headers.map((h) => (
+                <th
+                  key={h.id}
+                  className={cn(
+                    "sticky top-14 z-20 h-10 border-b bg-background/95 px-3 text-left align-middle text-xs font-medium text-muted-foreground backdrop-blur",
+                    (h.column.columnDef.meta as Meta | undefined)?.className,
+                  )}
+                >
+                  {h.isPlaceholder
+                    ? null
+                    : flexRender(h.column.columnDef.header, h.getContext())}
+                </th>
+              ))}
+            </tr>
+          ))}
+        </thead>
+        <tbody>
+          {table.getRowModel().rows.map((row) => (
+            <tr
+              key={row.id}
+              className={cn(
+                "border-b transition-colors last:border-0 hover:bg-muted/40",
+                row.depth > 0 && "bg-muted/10",
+              )}
+            >
+              {row.getVisibleCells().map((cell) => (
+                <td
+                  key={cell.id}
+                  className={cn(
+                    "px-3 py-2.5 align-middle",
+                    (cell.column.columnDef.meta as Meta | undefined)?.className,
+                  )}
+                >
+                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
 export default function RunsList() {
-  const { runs, error } = usePolledRuns();
+  const { runs, error } = useRunsData();
   const [params, setParams] = useSearchParams();
 
   const verification = params.get("verification") ?? "";
@@ -77,8 +274,23 @@ export default function RunsList() {
   const to = params.get("to") ?? "";
 
   const verifications = useMemo(
-    () => [...new Set((runs ?? []).map((r) => r.verification))].sort(),
+    () =>
+      runs
+        ? [...new Set(flatLeaves(runs).map((r) => r.verification))].sort()
+        : [],
     [runs],
+  );
+
+  const filtered = useMemo(
+    () =>
+      (runs ?? []).filter((r) =>
+        r.kind === "run-set"
+          ? (r.children ?? []).some((c) =>
+              matchesFilters(c, verification, verdicts, from, to),
+            )
+          : matchesFilters(r, verification, verdicts, from, to),
+      ),
+    [runs, verification, verdicts, from, to],
   );
 
   const update = (mutate: (p: URLSearchParams) => void) => {
@@ -87,91 +299,131 @@ export default function RunsList() {
     setParams(next, { replace: true });
   };
 
-  if (error) return <p className="error">{error}</p>;
-  if (runs === null) return <p className="muted">Loading…</p>;
+  const clearAll = () => setParams(new URLSearchParams(), { replace: true });
+  const hasFilters =
+    Boolean(verification) || verdicts.length > 0 || Boolean(from) || Boolean(to);
 
-  const visible = runs.filter((r) =>
-    r.kind === "run-set"
-      ? (r.children ?? []).some((c) => matchesFilters(c, verification, verdicts, from, to))
-      : matchesFilters(r, verification, verdicts, from, to),
-  );
+  if (error) return <ErrorState error={error} />;
 
   return (
-    <>
-      <div className="filters">
-        <select
-          aria-label="verification"
-          value={verification}
-          onChange={(e) =>
+    <div className="space-y-6">
+      <PageHeader
+        title="Runs"
+        description="Every recorded run, newest first. Filters are bookmarkable."
+      />
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Select
+          value={verification || ALL}
+          onValueChange={(v) =>
             update((p) =>
-              e.target.value
-                ? p.set("verification", e.target.value)
-                : p.delete("verification"),
+              v === ALL ? p.delete("verification") : p.set("verification", v),
             )
           }
         >
-          <option value="">all verifications</option>
-          {verifications.map((v) => (
-            <option key={v} value={v}>
-              {v}
-            </option>
-          ))}
-        </select>
-        {VERDICT_CHIPS.map((chip) => (
-          <button
-            key={chip}
-            className={`chip ${verdicts.includes(chip) ? "on" : ""}`}
-            onClick={() =>
-              update((p) => {
-                const current = p.getAll("verdict");
-                p.delete("verdict");
-                const next = current.includes(chip)
-                  ? current.filter((c) => c !== chip)
-                  : [...current, chip];
-                next.forEach((c) => p.append("verdict", c));
-              })
-            }
+          <SelectTrigger
+            size="sm"
+            className="w-[13rem]"
+            aria-label="verification"
           >
-            {chip}
-          </button>
-        ))}
-        <input
+            <SelectValue placeholder="All verifications" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>All verifications</SelectItem>
+            {verifications.map((v) => (
+              <SelectItem key={v} value={v}>
+                {v}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <div className="flex items-center gap-1">
+          {VERDICT_CHIPS.map((chip) => {
+            const on = verdicts.includes(chip);
+            return (
+              <Button
+                key={chip}
+                type="button"
+                size="sm"
+                variant={on ? "default" : "outline"}
+                className="capitalize"
+                onClick={() =>
+                  update((p) => {
+                    const current = p.getAll("verdict");
+                    p.delete("verdict");
+                    const nextChips = current.includes(chip)
+                      ? current.filter((c) => c !== chip)
+                      : [...current, chip];
+                    nextChips.forEach((c) => p.append("verdict", c));
+                  })
+                }
+              >
+                {chip}
+              </Button>
+            );
+          })}
+        </div>
+
+        <Input
           type="date"
           aria-label="from"
           value={from}
+          className="h-8 w-[9.5rem]"
           onChange={(e) =>
-            update((p) => (e.target.value ? p.set("from", e.target.value) : p.delete("from")))
+            update((p) =>
+              e.target.value ? p.set("from", e.target.value) : p.delete("from"),
+            )
           }
         />
-        <input
+        <Input
           type="date"
           aria-label="to"
           value={to}
+          className="h-8 w-[9.5rem]"
           onChange={(e) =>
-            update((p) => (e.target.value ? p.set("to", e.target.value) : p.delete("to")))
+            update((p) =>
+              e.target.value ? p.set("to", e.target.value) : p.delete("to"),
+            )
           }
         />
+
+        {hasFilters && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
+            onClick={clearAll}
+          >
+            <X className="size-4" />
+            Clear
+          </Button>
+        )}
       </div>
-      {visible.length === 0 ? (
-        <p className="muted">No runs{runs.length > 0 ? " match the filters" : " yet"}.</p>
+
+      {runs === null ? (
+        <Skeleton className="h-64 rounded-xl" />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={Inbox}
+          title={runs.length > 0 ? "No runs match the filters" : "No runs yet"}
+          hint={
+            runs.length > 0
+              ? "Try clearing a filter to widen the results."
+              : "Run a verification to populate this list."
+          }
+          action={
+            hasFilters ? (
+              <Button variant="outline" size="sm" onClick={clearAll}>
+                Clear filters
+              </Button>
+            ) : undefined
+          }
+        />
       ) : (
-        <table className="runs">
-          <thead>
-            <tr>
-              <th>run</th>
-              <th>verification</th>
-              <th>started</th>
-              <th>duration</th>
-              <th>verdict</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map((entry) => (
-              <Row key={entry.run_id} entry={entry} />
-            ))}
-          </tbody>
-        </table>
+        <RunsTable data={filtered} />
       )}
-    </>
+    </div>
   );
 }

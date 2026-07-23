@@ -6,6 +6,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RunsList from "../views/RunsList";
+import { RunsProvider } from "../runs-context";
 import { POLL_INTERVAL_MS } from "../hooks/use-polled-runs";
 import type { RunsListEntry } from "../api";
 
@@ -60,7 +61,9 @@ describe("RunsList polling (#298)", () => {
 
     render(
       <MemoryRouter>
-        <RunsList />
+        <RunsProvider>
+          <RunsList />
+        </RunsProvider>
       </MemoryRouter>,
     );
 
@@ -72,12 +75,18 @@ describe("RunsList polling (#298)", () => {
     // One interval later the in-flight run has appeared, live.
     await act(() => vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS));
     expect(screen.getByText("new-run")).toBeTruthy();
-    expect(document.querySelector(".badge.live")?.textContent ?? "live").toContain("live");
+    const liveBadge = [...document.querySelectorAll('[data-slot="badge"]')].find(
+      (b) => b.textContent?.trim() === "live",
+    );
+    expect(liveBadge).toBeTruthy();
 
     // Another interval and its verdict resolved — still no reload.
     await act(() => vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS));
     expect(calls()).toBe(3);
-    expect(document.querySelectorAll(".badge.verdict-pass").length).toBe(2);
+    const passBadges = [...document.querySelectorAll('[data-slot="badge"]')].filter(
+      (b) => b.textContent?.trim() === "pass",
+    );
+    expect(passBadges.length).toBe(2);
   });
 
   it("a hidden tab stops polling; returning refreshes immediately", async () => {
@@ -87,7 +96,9 @@ describe("RunsList polling (#298)", () => {
 
     render(
       <MemoryRouter>
-        <RunsList />
+        <RunsProvider>
+          <RunsList />
+        </RunsProvider>
       </MemoryRouter>,
     );
     await act(() => vi.advanceTimersByTimeAsync(0));
@@ -122,7 +133,9 @@ describe("RunsList polling (#298)", () => {
 
     render(
       <MemoryRouter>
-        <RunsList />
+        <RunsProvider>
+          <RunsList />
+        </RunsProvider>
       </MemoryRouter>,
     );
     await act(() => vi.advanceTimersByTimeAsync(0));
@@ -132,6 +145,6 @@ describe("RunsList polling (#298)", () => {
     expect(calls).toBe(2);
     // Still the data, not an error flash.
     expect(screen.getByText("kept-run")).toBeTruthy();
-    expect(document.querySelector(".error")).toBeNull();
+    expect(screen.queryByText(/went away/)).toBeNull();
   });
 });

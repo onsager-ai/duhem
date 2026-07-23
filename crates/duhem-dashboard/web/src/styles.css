@@ -1,50 +1,36 @@
+/* All evidence-view (legacy) rules live in Tailwind's `components` layer so
+   the reskinned shell / overview / runs — which style shared elements like
+   <a> with `utilities`-layer classes — win the cascade. Unlayered legacy
+   rules would otherwise beat every Tailwind utility. Whole block removed at
+   #285 once these views are reskinned. */
+@layer components {
+
+/* ==========================================================================
+   Evidence-view (legacy) styles for the not-yet-reskinned run / check / diff
+   / verification pages. #285 migrates these onto the design system; until
+   then they render as a self-consistent dark canvas inside the themed app
+   shell. Their tokens live in an --lg-* namespace so they never collide with
+   the shadcn tokens in globals.css; verdict colors (--pass / --fail /
+   --inconclusive / --live) are shared from globals so they stay theme-aware.
+   ========================================================================== */
 :root {
   --bg: #0b0d13;
   --panel: #13161f;
   --panel-2: #191d28;
-  --border: #232733;
-  --border-strong: #333a4b;
   --text: #e7e9f0;
-  --muted: #868da0;
-  --pass: #3fb950;
-  --fail: #f85149;
-  --inconclusive: #d29922;
-  --live: #58a6ff;
-  --accent: #7c88ff;
-  --radius: 8px;
-  --radius-lg: 14px;
+  --lg-border: #232733;
+  --lg-border-strong: #333a4b;
+  --lg-muted: #868da0;
+  --lg-accent: #7c88ff;
+  --lg-radius: 8px;
+  --lg-radius-lg: 14px;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(0, 0, 0, 0.22);
-  --ring: 0 0 0 3px rgba(124, 136, 255, 0.28);
-  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+  --lg-ring: 0 0 0 3px rgba(124, 136, 255, 0.28);
 }
 
-* { box-sizing: border-box; }
-
-body {
-  margin: 0;
-  min-height: 100vh;
-  background: radial-gradient(1100px 520px at 50% -8%, #141826 0%, var(--bg) 55%) fixed;
-  color: var(--text);
-}
-
+/* Bare links inside the legacy evidence views (reskinned links carry their
+   own Tailwind color/decoration utilities, which win from the higher layer). */
 a { color: var(--live); text-decoration: none; }
-a:hover { text-decoration: underline; }
-
-header.app {
-  display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-  padding: 1rem 1.75rem;
-  border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.015);
-  backdrop-filter: blur(6px);
-}
-header.app h1 { font-size: 1.05rem; margin: 0; letter-spacing: -0.01em; }
-header.app .sub { color: var(--muted); font-size: 0.85rem; }
-
-main { padding: 1rem 1.5rem; max-width: 70rem; margin: 0 auto; }
 
 table.runs {
   width: 100%;
@@ -54,9 +40,9 @@ table.runs {
 table.runs th, table.runs td {
   text-align: left;
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--lg-border);
 }
-table.runs th { color: var(--muted); font-weight: 500; }
+table.runs th { color: var(--lg-muted); font-weight: 500; }
 tr.nested td:first-child { padding-left: 2rem; }
 
 .badge {
@@ -72,7 +58,7 @@ tr.nested td:first-child { padding-left: 2rem; }
 .verdict-pass { color: var(--pass); background: rgba(63, 185, 80, 0.12); border-color: rgba(63, 185, 80, 0.35); }
 .verdict-fail { color: var(--fail); background: rgba(248, 81, 73, 0.13); border-color: rgba(248, 81, 73, 0.38); }
 .verdict-inconclusive { color: var(--inconclusive); background: rgba(210, 153, 34, 0.12); border-color: rgba(210, 153, 34, 0.35); }
-.verdict-none { color: var(--muted); border-color: var(--border); }
+.verdict-none { color: var(--lg-muted); border-color: var(--lg-border); }
 .badge-live { color: var(--live); background: rgba(88, 166, 255, 0.12); border-color: rgba(88, 166, 255, 0.35); }
 
 .filters {
@@ -86,24 +72,24 @@ tr.nested td:first-child { padding-left: 2rem; }
 .filters select, .filters input {
   background: var(--panel);
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 1px solid var(--lg-border);
   border-radius: 6px;
   padding: 0.3rem 0.5rem;
 }
 .filters .chip {
   cursor: pointer;
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid var(--lg-border);
   border-radius: 999px;
   padding: 0.2rem 0.7rem;
-  color: var(--muted);
+  color: var(--lg-muted);
 }
 .filters .chip.on { color: var(--text); border-color: var(--live); }
 
 .panel {
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--lg-border);
+  border-radius: var(--lg-radius-lg);
   padding: 1.25rem 1.4rem;
   margin-bottom: 1.25rem;
   box-shadow: var(--shadow);
@@ -115,7 +101,7 @@ tr.nested td:first-child { padding-left: 2rem; }
   letter-spacing: -0.01em;
 }
 
-.kv { color: var(--muted); font-size: 0.85rem; }
+.kv { color: var(--lg-muted); font-size: 0.85rem; }
 .kv code { color: var(--text); }
 
 .notice {
@@ -131,16 +117,16 @@ tr.nested td:first-child { padding-left: 2rem; }
 .check-summary {
   margin: 0.9rem 0 1.1rem;
   padding: 0.85rem 1.1rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--lg-border);
   border-left-width: 3px;
-  border-radius: var(--radius);
+  border-radius: var(--lg-radius);
   background: var(--panel-2);
 }
 .check-summary.tone-ok { border-left-color: var(--pass); }
 .check-summary.tone-fail { border-left-color: var(--fail); }
 .check-summary.tone-inconclusive { border-left-color: var(--inconclusive); }
 .summary-headline { margin: 0; font-size: 0.95rem; }
-.summary-failing { margin: 0.55rem 0 0; padding-left: 1.1rem; color: var(--muted); }
+.summary-failing { margin: 0.55rem 0 0; padding-left: 1.1rem; color: var(--lg-muted); }
 .summary-failing li { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.82rem; }
 
 /* -- #206/#210: aligned event timeline ------------------------------- */
@@ -155,17 +141,17 @@ ol.timeline li.ev {
   gap: 0.5rem 0.85rem;
   align-items: baseline;
   padding: 0.4rem 0.4rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--lg-border);
 }
 ol.timeline > li.ev:last-child { border-bottom: none; }
-.ev-icon { text-align: center; color: var(--muted); font-size: 0.85rem; }
+.ev-icon { text-align: center; color: var(--lg-muted); font-size: 0.85rem; }
 .ev-label {
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.ev-detail { color: var(--muted); min-width: 0; }
+.ev-detail { color: var(--lg-muted); min-width: 0; }
 .ev-detail-text {
   display: inline-block;
   max-width: 100%;
@@ -176,7 +162,7 @@ ol.timeline > li.ev:last-child { border-bottom: none; }
 }
 .ev-artifact { margin-left: 0.55rem; font-size: 0.8rem; }
 .ev-time {
-  color: var(--muted);
+  color: var(--lg-muted);
   font-size: 0.76rem;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -188,24 +174,24 @@ ol.timeline > li.ev:last-child { border-bottom: none; }
 .ev.tone-anchor { background: rgba(255, 255, 255, 0.025); border-radius: 6px; }
 .ev.tone-anchor .ev-label { font-weight: 700; }
 .ev-raw { display: inline-block; margin-left: 0.55rem; }
-.ev-raw summary { color: var(--muted); cursor: pointer; font-size: 0.76rem; }
+.ev-raw summary { color: var(--lg-muted); cursor: pointer; font-size: 0.76rem; }
 .ev-raw[open] { display: block; }
 .ev-raw pre {
   margin: 0.4rem 0 0;
   padding: 0.5rem 0.6rem;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--lg-border);
   border-radius: 6px;
   white-space: pre-wrap;
   word-break: break-word;
-  color: var(--muted);
+  color: var(--lg-muted);
   font-size: 0.78rem;
 }
 .obs-count {
   font-size: 0.72rem;
-  color: var(--muted);
+  color: var(--lg-muted);
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--lg-border);
   border-radius: 999px;
   padding: 0.02rem 0.5rem;
 }
@@ -219,8 +205,8 @@ ol.timeline > li.ev:last-child { border-bottom: none; }
   margin-top: 0.5rem;
   max-width: 100%;
   width: 480px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: 1px solid var(--lg-border);
+  border-radius: var(--lg-radius);
   background: #000;
 }
 
@@ -230,15 +216,15 @@ ol.timeline > li.ev:last-child { border-bottom: none; }
   display: block;
   margin-top: 0.5rem;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: 1px solid var(--lg-border);
+  border-radius: var(--lg-radius);
   background: var(--panel-2);
   overflow: hidden;
   cursor: zoom-in;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.shot-btn:hover { border-color: var(--border-strong); box-shadow: var(--shadow); }
-.shot-btn:focus-visible { outline: none; box-shadow: var(--ring); border-color: var(--accent); }
+.shot-btn:hover { border-color: var(--lg-border-strong); box-shadow: var(--shadow); }
+.shot-btn:focus-visible { outline: none; box-shadow: var(--lg-ring); border-color: var(--lg-accent); }
 .shot-btn img { display: block; }
 .shot-collapsed { width: 260px; }
 .shot-collapsed img { width: 100%; height: 150px; object-fit: cover; object-position: top center; }
@@ -288,11 +274,11 @@ table.har {
 table.har th, table.har td {
   text-align: left;
   padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--lg-border);
   vertical-align: top;
 }
 table.har th {
-  color: var(--muted);
+  color: var(--lg-muted);
   font-weight: 500;
   font-size: 0.72rem;
   text-transform: uppercase;
@@ -327,17 +313,17 @@ table.har td.har-url {
 .diff-empty {
   margin: 0.75rem 0 0;
   padding: 0.75rem 1rem;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius);
-  color: var(--muted);
+  border: 1px dashed var(--lg-border-strong);
+  border-radius: var(--lg-radius);
+  color: var(--lg-muted);
   font-size: 0.9rem;
 }
 .diff-criterion h2 { display: flex; align-items: center; gap: 0.5rem; }
 .diff-check {
   margin: 0.75rem 0;
   padding: 0.75rem 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: 1px solid var(--lg-border);
+  border-radius: var(--lg-radius);
   background: var(--panel-2);
 }
 .diff-check.unchanged { opacity: 0.7; }
@@ -345,7 +331,7 @@ table.har td.har-url {
 .diff-check-head { margin: 0; }
 .diff-assertions { margin: 0.5rem 0 0.25rem; padding-left: 1.1rem; font-size: 0.85rem; }
 .diff-assertions li { margin: 0.15rem 0; }
-.diff-detail { color: var(--muted); font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.82rem; }
+.diff-detail { color: var(--lg-muted); font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.82rem; }
 .detail-was { text-decoration: line-through; opacity: 0.65; }
 
 .shot-diff { margin-top: 0.6rem; }
@@ -359,7 +345,7 @@ table.har td.har-url {
 }
 .shot-diff-pair img, .shot-diff-overlay img {
   width: 100%;
-  border: 1px solid var(--border);
+  border: 1px solid var(--lg-border);
   border-radius: 6px;
   background: var(--bg);
 }
@@ -376,21 +362,21 @@ table.har td.har-url {
 .linkish:hover { text-decoration: underline; }
 
 table.net-delta { margin-top: 0.6rem; }
-table.net-delta .net-kind { text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.03em; color: var(--muted); white-space: nowrap; }
+table.net-delta .net-kind { text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.03em; color: var(--lg-muted); white-space: nowrap; }
 table.net-delta tr.har-bad .net-kind { color: var(--fail); }
 
 /* -- #210: expandable HAR rows -------------------------------------- */
 table.har tr.har-row { cursor: pointer; }
 table.har tr.har-row:hover { background: rgba(255, 255, 255, 0.03); }
 table.har tr.har-row:focus-visible { outline: 2px solid var(--live); outline-offset: -2px; }
-.har-caret { color: var(--muted); display: inline-block; width: 0.9rem; }
+.har-caret { color: var(--lg-muted); display: inline-block; width: 0.9rem; }
 table.har tr.har-detail td { background: rgba(255, 255, 255, 0.02); }
 .har-kv h4, .har-body h4 {
   margin: 0.5rem 0 0.25rem;
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: var(--muted);
+  color: var(--lg-muted);
   font-weight: 600;
 }
 .har-kv dl {
@@ -401,13 +387,13 @@ table.har tr.har-detail td { background: rgba(255, 255, 255, 0.02); }
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: 0.78rem;
 }
-.har-kv dt { color: var(--muted); }
+.har-kv dt { color: var(--lg-muted); }
 .har-kv dd { margin: 0; word-break: break-all; }
 .har-body pre {
   margin: 0;
   padding: 0.4rem 0.5rem;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--lg-border);
   border-radius: 4px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -460,7 +446,7 @@ li.ev.step-group.tone-inconclusive .ev-label { color: var(--inconclusive); }
 /* -- #280: run status roll-up (donut + counts, Allure-style) --------- */
 .status-summary { display: flex; align-items: center; gap: 1.4rem; }
 .donut { flex: none; }
-.donut-track { fill: none; stroke: var(--border); stroke-width: 11; }
+.donut-track { fill: none; stroke: var(--lg-border); stroke-width: 11; }
 /* Arcs start at 12 o'clock and run clockwise; rotate the whole ring. */
 .donut-seg {
   fill: none;
@@ -472,7 +458,7 @@ li.ev.step-group.tone-inconclusive .ev-label { color: var(--inconclusive); }
 .donut .seg-pass { stroke: var(--pass); }
 .donut .seg-fail { stroke: var(--fail); }
 .donut .seg-inconclusive { stroke: var(--inconclusive); }
-.donut .seg-pending { stroke: var(--muted); }
+.donut .seg-pending { stroke: var(--lg-muted); }
 .donut-center { fill: var(--text); font-size: 22px; font-weight: 700; }
 .status-counts {
   list-style: none;
@@ -482,7 +468,7 @@ li.ev.step-group.tone-inconclusive .ev-label { color: var(--inconclusive); }
   flex-wrap: wrap;
   gap: 0.35rem 1.2rem;
 }
-.status-counts .count { font-size: 0.85rem; color: var(--muted); white-space: nowrap; }
+.status-counts .count { font-size: 0.85rem; color: var(--lg-muted); white-space: nowrap; }
 .status-counts .count-n { font-weight: 700; font-size: 1rem; margin-right: 0.15rem; }
 .status-counts .count.seg-pass .count-n { color: var(--pass); }
 .status-counts .count.seg-fail .count-n { color: var(--fail); }
@@ -490,56 +476,56 @@ li.ev.step-group.tone-inconclusive .ev-label { color: var(--inconclusive); }
 
 /* -- #280: run-scoped report shell (top tab bar + tab bodies) -------- */
 .run-title { margin: 1rem 0 0.2rem; font-size: 1.05rem; }
-.run-title code { color: var(--muted); }
-.run-tabs { display: flex; gap: 0.15rem; border-bottom: 1px solid var(--border); margin: 0.55rem 0 0.2rem; }
+.run-title code { color: var(--lg-muted); }
+.run-tabs { display: flex; gap: 0.15rem; border-bottom: 1px solid var(--lg-border); margin: 0.55rem 0 0.2rem; }
 .run-tab {
   padding: 0.5rem 0.9rem;
-  color: var(--muted);
+  color: var(--lg-muted);
   text-decoration: none;
   font-size: 0.9rem;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
 }
 .run-tab:hover { color: var(--text); }
-.run-tab.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.run-tab.on { color: var(--text); border-bottom-color: var(--lg-accent); font-weight: 600; }
 .meta-line { margin-top: 1rem; }
 /* Suites filter chips (button form of the run-list `.filters .chip`). */
 .chips { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 1rem 0 0.6rem; }
 .chips .chip {
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--lg-border-strong);
   background: transparent;
   border-radius: 999px;
   padding: 0.16rem 0.65rem;
-  color: var(--muted);
+  color: var(--lg-muted);
   cursor: pointer;
   font: inherit;
   font-size: 0.82rem;
 }
 .chips .chip:hover { color: var(--text); }
-.chips .chip.on { color: var(--text); border-color: var(--accent); background: rgba(124, 136, 255, 0.12); }
+.chips .chip.on { color: var(--text); border-color: var(--lg-accent); background: rgba(124, 136, 255, 0.12); }
 .chips .chip .n { font-weight: 700; }
 .chips .chip .n.ok { color: var(--pass); }
 .chips .chip .n.bad { color: var(--fail); }
 .chips .chip .n.inc { color: var(--inconclusive); }
 /* Categories tab */
 .panelh { font-size: 0.95rem; margin: 0 0 0.7rem; font-weight: 600; }
-.dim { color: var(--muted); font-weight: 400; }
+.dim { color: var(--lg-muted); font-weight: 400; }
 .catgroup { margin: 0 0 1.1rem; }
 .catgroup h3 { font-size: 0.9rem; margin: 0 0 0.2rem; }
-.catgroup h3 .cnt { color: var(--muted); font-weight: 400; }
-.cat-sub { color: var(--muted); font-size: 0.78rem; margin: 0 0 0.4rem; }
+.catgroup h3 .cnt { color: var(--lg-muted); font-weight: 400; }
+.cat-sub { color: var(--lg-muted); font-size: 0.78rem; margin: 0 0 0.4rem; }
 .catgroup ul { margin: 0.2rem 0 0; padding-left: 1.3rem; font-size: 0.86rem; }
-.catgroup li { margin: 0.22rem 0; color: var(--muted); }
+.catgroup li { margin: 0.22rem 0; color: var(--lg-muted); }
 .cat-detail { color: var(--fail); font-size: 0.82rem; }
 /* Timeline tab — one delivery-web chain per check */
-.span-row { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.span-row { padding: 0.5rem 0; border-top: 1px solid var(--lg-border); }
 .span-row:first-of-type { border-top: none; }
 .span-row-head { margin-bottom: 0.25rem; }
-.span-row-head a { color: var(--accent); text-decoration: none; }
+.span-row-head a { color: var(--lg-accent); text-decoration: none; }
 
 ol.timeline.step-inner {
   margin: 0.1rem 0 0.3rem 1.6rem;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--lg-border);
   padding-left: 0.25rem;
 }
 ol.timeline.step-inner li.ev { font-size: 0.84rem; }
@@ -552,7 +538,7 @@ ol.timeline.step-inner li.ev { font-size: 0.84rem; }
   max-width: 24rem;
   background: var(--bg);
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 1px solid var(--lg-border);
   border-radius: 6px;
   padding: 0.3rem 0.5rem;
   font-size: 0.85rem;
@@ -561,14 +547,14 @@ ol.timeline.step-inner li.ev { font-size: 0.84rem; }
   width: 100%;
   height: 24rem;
   background: #fff;
-  border: 1px solid var(--border);
+  border: 1px solid var(--lg-border);
   border-radius: 8px;
 }
 .dom-note { margin: 0.35rem 0 0; font-size: 0.78rem; }
 .dom-toggle {
   background: var(--panel);
   color: var(--live);
-  border: 1px solid var(--border);
+  border: 1px solid var(--lg-border);
   border-radius: 6px;
   padding: 0.25rem 0.6rem;
   font-size: 0.8rem;
@@ -577,7 +563,7 @@ ol.timeline.step-inner li.ev { font-size: 0.84rem; }
 .dom-toggle:hover { border-color: var(--live); }
 
 .error { color: var(--fail); }
-.muted { color: var(--muted); }
+.muted { color: var(--lg-muted); }
 
 /* -- #193: ④ delivery-web span chain + ② history sparkline -------- */
 
@@ -605,3 +591,5 @@ ol.timeline.step-inner li.ev { font-size: 0.84rem; }
 
 .checks-note { font-size: 0.8rem; margin-top: 0.15rem; }
 tr.assertion td { font-size: 0.85rem; padding-left: 2.4rem; }
+
+} /* @layer components — end evidence-view (legacy) styles */

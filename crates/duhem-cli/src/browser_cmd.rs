@@ -14,6 +14,7 @@ use std::process::{Command, ExitCode};
 use clap::{Args, Subcommand};
 
 use duhem_actions::browser::{materialize_sidecar, sidecar_dir};
+use duhem_actions::browser_provision::{HOST_PLATFORM_OVERRIDE_ENV, HOST_PLATFORM_OVERRIDE_VALUE};
 
 /// `duhem browser …` clap surface.
 #[derive(Debug, Args)]
@@ -77,8 +78,22 @@ fn install(with_deps: bool) -> ExitCode {
         if with_deps { " --with-deps" } else { "" }
     );
     if !run_in("npx", &pw_args, &dir) {
-        eprintln!("browser install: npx playwright install chromium failed");
-        return ExitCode::FAILURE;
+        // A pinned Playwright older than the host distro refuses with
+        // `does not support chromium on <distro>`, though the prebuilt
+        // ubuntu24.04 Chromium runs fine on newer releases. Retry once
+        // forcing that build before giving up (#295).
+        eprintln!(
+            "  Chromium install failed; retrying with a compatible-OS override ({HOST_PLATFORM_OVERRIDE_ENV}={HOST_PLATFORM_OVERRIDE_VALUE})…"
+        );
+        if !run_in_env(
+            "npx",
+            &pw_args,
+            &dir,
+            &[(HOST_PLATFORM_OVERRIDE_ENV, HOST_PLATFORM_OVERRIDE_VALUE)],
+        ) {
+            eprintln!("browser install: npx playwright install chromium failed");
+            return ExitCode::FAILURE;
+        }
     }
 
     println!("✓ Browser ready — `ui/*` checks can now run.");
@@ -131,10 +146,14 @@ fn check_node() -> Result<(), ExitCode> {
 }
 
 fn run_in(program: &str, args: &[&str], dir: &Path) -> bool {
-    Command::new(program)
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    run_in_env(program, args, dir, &[])
+}
+
+fn run_in_env(program: &str, args: &[&str], dir: &Path, envs: &[(&str, &str)]) -> bool {
+    let mut cmd = Command::new(program);
+    cmd.args(args).current_dir(dir);
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    cmd.status().map(|s| s.success()).unwrap_or(false)
 }

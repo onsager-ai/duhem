@@ -71,6 +71,30 @@ pins your choice. If nothing is found, the launch error names both
 `npx playwright install chromium` and the `DUHEM_BROWSER_EXECUTABLE`
 override.
 
+### Auto-provision on `duhem run` (spec [#295](https://github.com/onsager-ai/duhem/issues/295))
+
+When a `ui/*` check needs a browser and none is discoverable, `duhem run`
+installs Chromium **once** into this directory (binary only — never
+`--with-deps`, so system libraries and sudo stay an explicit `duhem
+browser install` choice), then retries the launch. It prints a one-line
+notice to stderr and takes a directory lock so parallel runs don't race
+the install. Opt out with `DUHEM_NO_BROWSER_INSTALL=1` (the `1` / `true`
+truthiness rule), which restores the fail-with-hint behavior. `api/*` /
+`db/*` / `cli/*` verifications never launch a browser, so they never
+trigger it.
+
+### Supported OS + pin contract
+
+The `playwright` version is pinned in `package.json` / `package-lock.json`
+so the Chromium revision is reproducible (verdict determinism). Keep it
+**maintained**: a stale pin eventually predates the host distro and
+`playwright install` refuses (`does not support chromium on <distro>`).
+Both `duhem browser install` and `run`'s auto-provision retry once with
+`PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64` — the nearest
+supported-LTS build, which runs on newer releases — so a not-yet-tabled
+LTS still provisions. Bumping the pin is the durable fix; the override is
+the backstop.
+
 ## Type-checking
 
 `index.mjs` is plain ESM (Node runs it with no build step), but it is

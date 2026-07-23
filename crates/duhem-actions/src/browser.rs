@@ -42,6 +42,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::Mutex;
 
+use crate::browser_provision::{
+    auto_install_disabled, is_missing_browser_error, provision_browser,
+};
 use crate::error::ActionError;
 
 /// The Playwright sidecar source (`index.mjs` + its package manifest),
@@ -361,6 +364,15 @@ pub(crate) fn humanize_launch_error(raw: &str) -> String {
     }
 }
 
+/// Humanize a Playwright [`ActionError`], passing other variants through
+/// unchanged — used on the post-auto-provision retry (#295).
+fn humanize_action_error(e: ActionError) -> ActionError {
+    match e {
+        ActionError::Playwright(raw) => ActionError::Playwright(humanize_launch_error(&raw)),
+        other => other,
+    }
+}
+
 /// Sidecar process + browser shared for the lifetime of a `duhem run`.
 /// Drop kills the sidecar.
 pub struct RunBrowser {
@@ -377,7 +389,36 @@ impl RunBrowser {
     /// Spawn the sidecar and launch chromium. `headed = false` (the
     /// default) runs headless. Fails fast on missing Node, missing
     /// sidecar, or missing browser binary, each with a clear hint.
+    ///
+    /// When the launch fails because no Chromium is installed (and the
+    /// sidecar's discovery fallback found none), `duhem run` provisions
+    /// one once and retries — unless `DUHEM_NO_BROWSER_INSTALL` opts out,
+    /// in which case the actionable error stands (#295).
     pub async fn launch(headed: bool) -> Result<Self, ActionError> {
+        match Self::launch_once(headed).await {
+            Ok(browser) => Ok(browser),
+            Err(ActionError::Playwright(raw)) => {
+                if is_missing_browser_error(&raw) && !auto_install_disabled() {
+                    match provision_browser().await {
+                        Ok(()) => Self::launch_once(headed)
+                            .await
+                            .map_err(humanize_action_error),
+                        Err(why) => Err(ActionError::Playwright(format!(
+                            "{}\n(auto-install was attempted and failed: {why})",
+                            humanize_launch_error(&raw)
+                        ))),
+                    }
+                } else {
+                    Err(ActionError::Playwright(humanize_launch_error(&raw)))
+                }
+            }
+            Err(other) => Err(other),
+        }
+    }
+
+    /// One spawn+launch attempt. Returns the *raw* launch error so the
+    /// caller can humanize it or decide to auto-provision (#295).
+    async fn launch_once(headed: bool) -> Result<Self, ActionError> {
         let node = node_command();
         check_node_version(&node).await?;
 
@@ -419,7 +460,7 @@ impl RunBrowser {
 
         conn.request("launch", json!({ "headless": !headed }))
             .await
-            .map_err(|e| ActionError::Playwright(humanize_launch_error(&e.to_string())))?;
+            .map_err(|e| ActionError::Playwright(e.to_string()))?;
 
         Ok(Self {
             child,

@@ -1,15 +1,15 @@
 # Example leaf Verification Definition — a page-free CLI check.
 #
-# A leaf is identified by the top-level `criteria:` key (§10.2). This
-# one drives a real CLI with `cli/invoke` and judges its exit code +
-# output — no browser, no server, so it needs no Chromium (browser-skip:
-# `cli/*` is page-free). Copy the shape, swap the command + assertions
-# for your product's headline path. See §7 (criteria/checks) and the
-# `cli/invoke` action reference on onsager-ai/duhem.
+# A leaf is identified by the top-level `criteria:` key. This one drives
+# a real CLI with `cli/invoke` and judges its exit code + output — no
+# browser, no server, so it needs no Chromium (`cli/*` is page-free).
+# Copy the shape, swap the command + assertions for your product's
+# headline path. Run `duhem describe cli/invoke` for the action's exact
+# `with:` fields and outputs.
 #
 # Criteria are the stable human commitment about what "done" means;
-# checks are the derivative mechanical proof (§7.2/§7.3). Keep the
-# criterion prose product-facing and let the check carry the wiring.
+# checks are the derivative mechanical proof. Keep the criterion prose
+# product-facing and let the check carry the wiring.
 
 verification: Example product — the CLI ships an app
 
@@ -44,10 +44,9 @@ criteria:
               command: [echo, "shipped → http://127.0.0.1:0/"]
               cwd: $inputs.repo_dir
               within: 180s
-            outputs:
-              exit_code: exit_code
-              stdout: stdout
         assertions:
+          # No `outputs:` block needed — `exit_code` and `stdout` are
+          # native `cli/invoke` outputs and resolve directly.
           - $steps.ship.outputs.exit_code == 0
           - matches:
               value: $steps.ship.outputs.stdout

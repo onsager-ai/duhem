@@ -85,10 +85,11 @@ B) — see `onsager-dogfood`.
 
 ```
 0. Scaffold the skeleton: `duhem init --name <slug>` produces a
-   runnable Pattern A skeleton (or `--pattern B` for co-located)
-   under `./verifications/<slug>/` (Duhem self-verification), or
-   `.duhem/<slug>/` in the product repo for a product VD (Pattern D;
-   copy `templates/product-repo/`). The skeleton is a single passing
+   runnable Pattern A skeleton (or `--pattern B` for co-located). Its
+   target defaults to `./verifications/<slug>/` (Duhem
+   self-verification); for a product VD, pass the path explicitly —
+   `duhem init --name <slug> .duhem/<slug>` (Pattern D) — or copy
+   `templates/product-repo/`. The skeleton is a single passing
    check against https://example.com — your known-good baseline to
    mutate. Spec on issue #48.
 1. Lift criteria from the spec / acceptance test / PRD

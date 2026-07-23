@@ -51,8 +51,11 @@ Verification Definitions live **in your product repo**, co-located with
 the product under a `.duhem/` suite. Scaffold one with:
 
 ```bash
-duhem init --name <slug>      # runnable skeleton under .duhem/<slug>/
+duhem init --name <slug> .duhem/<slug>   # runnable skeleton in .duhem/
 ```
+
+(`duhem init` defaults its target to `./verifications/<slug>/`, so pass
+the `.duhem/<slug>` path explicitly to land it in your co-located suite.)
 
 The skeleton is a single passing check against a known-good baseline —
 mutate it toward your feature. `duhem run` discovers the `.duhem/`
@@ -85,8 +88,10 @@ verbatim and translate mechanically — don't re-author it.
 ## Authoring loop
 
 ```
-0. Scaffold: `duhem init --name <slug>` → a runnable skeleton under
-   .duhem/<slug>/ (a single passing baseline check to mutate).
+0. Scaffold: `duhem init --name <slug> .duhem/<slug>` → a runnable
+   skeleton in `.duhem/` (a single passing baseline check to mutate).
+   Pass the path explicitly — `init`'s default target is
+   `./verifications/<slug>/`.
 1. Lift criteria from the spec / acceptance test / PRD.
 2. Validate the criteria are stable, intent-bearing, one-commitment-each.
 3. Translate each criterion into one or more checks (steps + assertions).
@@ -325,6 +330,9 @@ criteria:
   catalog and per-action contract. Author against these, not memory.
 - `duhem validate <dir>` — field-checks your VD and names valid options
   on a miss.
+- `duhem run <dir>` — runs the suite (exit 0 == pass). Add
+  `--reporter json` for a per-criterion verdict breakdown; the default
+  reporter prints only the overall pass/fail.
 - `duhem mcp` — exposes describe/actions/validate to your coding agent
   over MCP for AI-assisted authoring.
 - The Duhem documentation for the Holistic Verification Principle, the

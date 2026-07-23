@@ -1,12 +1,24 @@
 // Component tests (#86): runs list (empty / one / many), timeline
 // ordering, artifact rendering.
 
+import type { ReactElement } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RunsList, { matchesFilters } from "../views/RunsList";
+import { RunsProvider } from "../runs-context";
 import { Artifacts, DomViewer, HarTable, ScreenshotArtifact, Timeline } from "../views/CheckPage";
 import type { RunsListEntry, TraceEvent } from "../api";
+
+// RunsList now reads the shared runs context; the provider fetches via the
+// stubbed global fetch, so wrapping it feeds the same entries.
+function renderRuns(ui: ReactElement) {
+  return render(
+    <MemoryRouter>
+      <RunsProvider>{ui}</RunsProvider>
+    </MemoryRouter>,
+  );
+}
 
 afterEach(() => {
   cleanup();
@@ -35,23 +47,18 @@ function leaf(id: string, verdict: string | null, live = false): RunsListEntry {
 describe("RunsList", () => {
   it("renders the empty state", async () => {
     stubRuns([]);
-    render(
-      <MemoryRouter>
-        <RunsList />
-      </MemoryRouter>,
-    );
+    renderRuns(<RunsList />);
     await waitFor(() => expect(screen.getByText(/No runs/)).toBeTruthy());
   });
 
   it("renders a single leaf row", async () => {
     stubRuns([leaf("01JRUNA", "pass")]);
-    const { container } = render(
-      <MemoryRouter>
-        <RunsList />
-      </MemoryRouter>,
-    );
+    const { container } = renderRuns(<RunsList />);
     await waitFor(() => expect(screen.getByText("01JRUNA")).toBeTruthy());
-    expect(container.querySelector(".badge.verdict-pass")?.textContent).toBe("pass");
+    // The verdict renders as a shadcn Badge carrying the verdict text.
+    expect(container.querySelector('[data-slot="badge"]')?.textContent).toBe(
+      "pass",
+    );
   });
 
   it("renders many rows including nested run-set leaves and a live badge", async () => {
@@ -63,15 +70,15 @@ describe("RunsList", () => {
       },
       leaf("01JRUNC", null, true),
     ]);
-    render(
-      <MemoryRouter>
-        <RunsList />
-      </MemoryRouter>,
-    );
+    const { container } = renderRuns(<RunsList />);
+    // Run-set children are expanded by default (#49).
     await waitFor(() => expect(screen.getByText("01JRUNA")).toBeTruthy());
     expect(screen.getByText("01JRUNB")).toBeTruthy();
     expect(screen.getByText("01JRUNC")).toBeTruthy();
-    expect(screen.getByText("● live")).toBeTruthy();
+    // The in-progress run shows a "live" verdict badge — distinct from the
+    // "live" filter chip in the toolbar, so scope to badge elements.
+    const badges = [...container.querySelectorAll('[data-slot="badge"]')];
+    expect(badges.some((b) => b.textContent?.trim() === "live")).toBe(true);
   });
 });
 

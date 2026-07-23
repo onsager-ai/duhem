@@ -1,12 +1,23 @@
 // Small shared presentation helpers.
 
+import { Badge } from "@/components/ui/badge";
 import type { Verdict } from "./api";
 
+// Verdict "family" collapses "inconclusive:<cause>" to "inconclusive".
+export function verdictFamily(
+  verdict: Verdict | null,
+): "pass" | "fail" | "inconclusive" | null {
+  if (verdict === null) return null;
+  if (verdict === "pass") return "pass";
+  if (verdict === "fail") return "fail";
+  return "inconclusive";
+}
+
+// Legacy class hook — still used by the not-yet-reskinned evidence views
+// (sparkline dots, diff rows). The badge itself is now a shadcn Badge.
 export function verdictClass(verdict: Verdict | null): string {
-  if (verdict === null) return "verdict-none";
-  if (verdict === "pass") return "verdict-pass";
-  if (verdict === "fail") return "verdict-fail";
-  return "verdict-inconclusive";
+  const fam = verdictFamily(verdict);
+  return fam ? `verdict-${fam}` : "verdict-none";
 }
 
 export function VerdictBadge({
@@ -17,12 +28,17 @@ export function VerdictBadge({
   live?: boolean;
 }) {
   if (verdict === null && live) {
-    return <span className="badge badge-live">● live</span>;
+    return (
+      <Badge variant="live" className="gap-1.5">
+        <span className="size-1.5 rounded-full bg-live motion-safe:animate-pulse" />
+        live
+      </Badge>
+    );
   }
   if (verdict === null) {
-    return <span className="badge verdict-none">—</span>;
+    return <Badge variant="none">—</Badge>;
   }
-  return <span className={`badge ${verdictClass(verdict)}`}>{verdict}</span>;
+  return <Badge variant={verdictFamily(verdict) ?? "none"}>{verdict}</Badge>;
 }
 
 export function formatStartedAt(iso: string | null): string {
@@ -42,7 +58,6 @@ export function formatDuration(ms: number | null): string {
 
 export function isImageArtifact(kind: string, url: string): boolean {
   return (
-    kind.toLowerCase().includes("screenshot") ||
-    /\.(png|jpe?g)$/i.test(url)
+    kind.toLowerCase().includes("screenshot") || /\.(png|jpe?g)$/i.test(url)
   );
 }

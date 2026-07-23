@@ -13,6 +13,7 @@
 pub mod action;
 pub mod api;
 pub mod browser;
+pub mod browser_provision;
 pub mod cli;
 pub mod db;
 pub mod error;

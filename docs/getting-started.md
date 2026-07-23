@@ -17,11 +17,18 @@ duhem --version
 
 That's everything for browser-free checks (`api/*`, `db/*`, `cli/*`).
 Browser-driven `ui/*` checks additionally need Node ≥ 20 and a Chromium
-sidecar, installed once:
+sidecar. `duhem run` provisions it automatically the first time a `ui/*`
+check needs it, so this step is **optional** — run it to pre-warm the
+download (e.g. in a CI image), or to add the OS libraries with
+`--with-deps`:
 
 ```bash
-duhem browser install          # add --with-deps in CI images
+duhem browser install          # optional pre-warm; add --with-deps in CI images
 ```
+
+To manage the browser yourself (air-gapped hosts, a pinned system
+Chromium), set `DUHEM_NO_BROWSER_INSTALL=1` to turn auto-provision off and
+`DUHEM_BROWSER_EXECUTABLE=/path/to/chrome` to point at your binary.
 
 ## 2. Scaffold your first Verification Definition
 

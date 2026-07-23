@@ -124,3 +124,76 @@ jobs:
       # Both ignored suites in one invocation; mirrors `just test-ui`.
       - name: cargo test (ignored browser suites)
         run: cargo test -p duhem-actions --test ui_smoke --test api_observe_smoke -- --ignored
+
+  # Exercises `duhem run`'s auto-provision (#295): install the sidecar's
+  # npm deps + Chromium *system libraries* but NOT the browser binary, so
+  # a `ui/*` run must fetch Chromium itself instead of hard-failing (the
+  # regression this lane guards). Distinct from `ui-smoke`, which
+  # pre-installs the browser and so never takes the auto-provision path.
+  browser-autoprovision-smoke:
+    name: browser-autoprovision-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Show toolchain
+        run: rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      # Sidecar npm deps + Chromium's OS libraries only — deliberately NO
+      # `playwright install chromium`, so the browser binary is absent and
+      # the run has to auto-provision it.
+      - name: Install sidecar deps + Chromium system libs (no browser)
+        working-directory: crates/duhem-actions/sidecar
+        run: |
+          npm ci
+          npx --yes playwright install-deps chromium
+
+      - name: Ensure no Chromium binary is pre-installed
+        run: rm -rf ~/.cache/ms-playwright/chromium* || true
+
+      - name: Write a browser-needing VD (known-good example.com baseline)
+        run: |
+          cat > "${RUNNER_TEMP}/autoprovision.duhem.yml" <<'YAML'
+          verification: browser auto-provision smoke (#295)
+          criteria:
+            - id: AP
+              description: A ui/* run auto-provisions Chromium when none is installed.
+              checks:
+                - id: AP.1
+                  description: Load example.com and confirm its canonical heading is visible.
+                  steps:
+                    - uses: ui/navigate
+                      with:
+                        url: https://example.com
+                    - uses: ui/assert-element
+                      with:
+                        locator: { role: heading, name: "Example Domain" }
+                        expected: visible
+                        within: 15s
+          YAML
+
+      - name: Run — expect auto-provision, then pass
+        run: |
+          set -o pipefail
+          cargo run -p duhem-cli --quiet -- run "${RUNNER_TEMP}/autoprovision.duhem.yml" 2> >(tee "${RUNNER_TEMP}/run.stderr" >&2)
+          grep -q "Chromium not found — installing it once" "${RUNNER_TEMP}/run.stderr" \
+            || { echo "::error::auto-provision notice not emitted — the run found a pre-existing browser, so this lane proved nothing"; exit 1; }
+
+      - name: Opt-out (DUHEM_NO_BROWSER_INSTALL=1) must fail fast with the hint
+        run: |
+          rm -rf ~/.cache/ms-playwright/chromium* || true
+          set +e
+          DUHEM_NO_BROWSER_INSTALL=1 cargo run -p duhem-cli --quiet -- run "${RUNNER_TEMP}/autoprovision.duhem.yml" 2> "${RUNNER_TEMP}/optout.stderr"
+          code=$?
+          set -e
+          cat "${RUNNER_TEMP}/optout.stderr"
+          test "$code" -ne 0 || { echo "::error::opt-out still succeeded — auto-provision was not suppressed"; exit 1; }
+          grep -q "duhem browser install" "${RUNNER_TEMP}/optout.stderr" \
+            || { echo "::error::opt-out did not surface the actionable install hint"; exit 1; }

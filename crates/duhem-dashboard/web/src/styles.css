@@ -6,26 +6,32 @@
 @layer components {
 
 /* ==========================================================================
-   Evidence-view (legacy) styles for the not-yet-reskinned run / check / diff
-   / verification pages. #285 migrates these onto the design system; until
-   then they render as a self-consistent dark canvas inside the themed app
-   shell. Their tokens live in an --lg-* namespace so they never collide with
-   the shadcn tokens in globals.css; verdict colors (--pass / --fail /
-   --inconclusive / --live) are shared from globals so they stay theme-aware.
+   Evidence-view styles for the run / check / diff / verification pages.
+   The --lg-* namespace is kept, but the surface tokens now RESOLVE to the
+   theme-aware shadcn tokens (globals.css) so the evidence panels follow the
+   app theme — light on light, dark on dark — instead of a hard-dark canvas
+   (#285). Because each token is `var(--shadcn-token)` (not a fixed colour),
+   it re-resolves live when `.dark` flips on <html>. Verdict colours
+   (--pass / --fail / --inconclusive / --live) are still shared from globals.
    ========================================================================== */
 :root {
-  --bg: #0b0d13;
-  --panel: #13161f;
-  --panel-2: #191d28;
-  --text: #e7e9f0;
-  --lg-border: #232733;
-  --lg-border-strong: #333a4b;
-  --lg-muted: #868da0;
-  --lg-accent: #7c88ff;
+  --bg: var(--muted);
+  --panel: var(--card);
+  --panel-2: var(--muted);
+  --text: var(--foreground);
+  --lg-border: var(--border);
+  --lg-border-strong: var(--border);
+  --lg-muted: var(--muted-foreground);
+  --lg-accent: var(--primary);
   --lg-radius: 8px;
   --lg-radius-lg: 14px;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(0, 0, 0, 0.22);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 4px 14px rgba(0, 0, 0, 0.08);
   --lg-ring: 0 0 0 3px rgba(124, 136, 255, 0.28);
+  /* Row hover / anchor tints that follow the theme: a foreground-tinted
+     overlay darkens on light and lightens on dark (the old fixed
+     rgba(255,255,255,…) only worked on the dark canvas). */
+  --row-hover: color-mix(in oklab, var(--foreground) 6%, transparent);
+  --row-anchor: color-mix(in oklab, var(--foreground) 5%, transparent);
 }
 
 /* Bare links inside the legacy evidence views (reskinned links carry their
@@ -88,6 +94,11 @@ tr.nested td:first-child { padding-left: 2rem; }
 
 .panel {
   background: var(--panel);
+  /* The panel is a hard-dark canvas in BOTH themes, so it must set its
+     own light foreground — otherwise un-coloured text (h2, the summary
+     headline) inherits the light theme's dark text and vanishes
+     dark-on-dark. Elements with their own colour (.kv, tones) override. */
+  color: var(--text);
   border: 1px solid var(--lg-border);
   border-radius: var(--lg-radius-lg);
   padding: 1.25rem 1.4rem;
@@ -103,6 +114,11 @@ tr.nested td:first-child { padding-left: 2rem; }
 
 .kv { color: var(--lg-muted); font-size: 0.85rem; }
 .kv code { color: var(--text); }
+
+/* #302: authored intent overlaid from the recorded VD snapshot — the
+   check's description under its heading, the criterion's below it. */
+.check-intent { margin: 0 0 0.5rem; font-size: 0.95rem; color: var(--text); }
+.crit-intent { margin: 0 0 0.7rem; }
 
 .notice {
   border: 1px solid var(--inconclusive);
@@ -133,18 +149,59 @@ tr.nested td:first-child { padding-left: 2rem; }
 /* icon | label | detail | time — a fixed label column so every row's
    detail starts at the same x (auto = width of the widest label). */
 ol.timeline { list-style: none; margin: 0; padding: 0; font-size: 0.88rem; }
+/* Each row is now a <details> whose <summary> is the whole clickable
+   line (raw JSON one click *anywhere on the row* away, #284 follow-up).
+   The row's grid lives on `.ev-row`; the <li> is just the divider. */
+ol.timeline li.ev { border-bottom: 1px solid var(--lg-border); }
+ol.timeline > li.ev:last-child { border-bottom: none; }
+li.ev > .ev-raw > summary.ev-summary {
+  cursor: pointer;
+  list-style: none;
+  border-radius: 6px;
+}
+li.ev > .ev-raw > summary.ev-summary::-webkit-details-marker { display: none; }
+li.ev > .ev-raw > summary.ev-summary:hover { background: var(--row-hover); }
 /* A FIXED label column (not auto) so every independent row grid aligns
-   to the same x — auto sizes per-row and the labels drift. */
-ol.timeline li.ev {
+   to the same x — auto sizes per-row and the labels drift. Trailing
+   column holds the disclosure caret. */
+.ev-row {
   display: grid;
-  grid-template-columns: 1.4rem 10.5rem minmax(0, 1fr) auto;
+  grid-template-columns: 1.4rem 10.5rem minmax(0, 1fr) auto 1.1rem;
   gap: 0.5rem 0.85rem;
   align-items: baseline;
   padding: 0.4rem 0.4rem;
-  border-bottom: 1px solid var(--lg-border);
 }
-ol.timeline > li.ev:last-child { border-bottom: none; }
-.ev-icon { text-align: center; color: var(--lg-muted); font-size: 0.85rem; }
+.ev-caret {
+  width: 0.9rem;
+  height: 0.9rem;
+  align-self: center;
+  color: var(--lg-muted);
+  transition: transform 0.15s ease;
+}
+li.ev > .ev-raw[open] > summary .ev-caret,
+li.ev.step-group > details[open] > summary .ev-caret {
+  transform: rotate(90deg);
+}
+/* The icon cell holds a lucide SVG (#284 follow-up) sized to the row.
+   `align-self: center` overrides the row grid's baseline so the glyph
+   sits centred on the label, and the status tone flows in as
+   `currentColor` — a green ✓, a red ✗ — clearer than the former muted
+   emoji. */
+.ev-icon {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--lg-muted);
+}
+.ev-glyph { width: 0.95rem; height: 0.95rem; flex-shrink: 0; }
+.ev.tone-ok .ev-icon { color: var(--pass); }
+.ev.tone-fail .ev-icon { color: var(--fail); }
+.ev.tone-inconclusive .ev-icon { color: var(--inconclusive); }
+/* The check-verdict row's tone is "anchor" (not ok/fail), so colour its
+   icon from the icon's own key instead — a green result, a red block. */
+.ev-glyph-verdict-pass { color: var(--pass); }
+.ev-glyph-verdict-fail { color: var(--fail); }
 .ev-label {
   font-weight: 500;
   white-space: nowrap;
@@ -171,13 +228,13 @@ ol.timeline > li.ev:last-child { border-bottom: none; }
 .ev.tone-fail .ev-label { color: var(--fail); }
 .ev.tone-ok .ev-label { color: var(--pass); }
 .ev.tone-inconclusive .ev-label { color: var(--inconclusive); }
-.ev.tone-anchor { background: rgba(255, 255, 255, 0.025); border-radius: 6px; }
+.ev.tone-anchor > .ev-raw > summary { background: var(--row-anchor); }
 .ev.tone-anchor .ev-label { font-weight: 700; }
-.ev-raw { display: inline-block; margin-left: 0.55rem; }
-.ev-raw summary { color: var(--lg-muted); cursor: pointer; font-size: 0.76rem; }
-.ev-raw[open] { display: block; }
-.ev-raw pre {
-  margin: 0.4rem 0 0;
+li.ev.tone-fail > .ev-raw > summary { box-shadow: inset 2px 0 0 var(--fail); }
+li.ev.tone-inconclusive > .ev-raw > summary { box-shadow: inset 2px 0 0 var(--inconclusive); }
+.ev-raw pre,
+.ev-raw-pre {
+  margin: 0 0.4rem 0.5rem;
   padding: 0.5rem 0.6rem;
   background: var(--bg);
   border: 1px solid var(--lg-border);
@@ -186,6 +243,79 @@ ol.timeline > li.ev:last-child { border-bottom: none; }
   word-break: break-word;
   color: var(--lg-muted);
   font-size: 0.78rem;
+}
+
+/* -- #284 follow-up: rich assertion detail (rule + expected/actual) -- */
+/* The assertion row surfaces *what was asserted* — the recorded rule
+   (`assert-expr`) — then the observed result: a failed comparison's
+   expected/actual operands as a labelled pair (the `actual` carries the
+   fail accent), or the verbatim reason. All aligned under the label
+   column and always visible, so the mismatch reads without opening raw. */
+.assert-detail { display: block; padding: 0.15rem 0.4rem 0.55rem 3rem; }
+.assert-expr {
+  display: inline-block;
+  max-width: 100%;
+  margin-bottom: 0.45rem;
+  padding: 0.18rem 0.55rem;
+  background: var(--bg);
+  border: 1px solid var(--lg-border);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.82rem;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.assert-cmp { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.assert-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--lg-border);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+.assert-k {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.66rem;
+  color: var(--lg-muted);
+}
+.assert-v {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+.assert-actual { border-color: color-mix(in oklab, var(--fail) 45%, var(--lg-border)); }
+.assert-actual .assert-v { color: var(--fail); }
+.assert-reason {
+  display: block;
+  color: var(--lg-muted);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  word-break: break-word;
+}
+
+/* -- #284 follow-up: inline screenshot in the timeline --------------- */
+.ev-shot { padding: 0.1rem 0.4rem 0.6rem 3rem; }
+
+/* -- #302: recorded VD source snapshot ------------------------------- */
+.vd-yaml {
+  margin: 0.5rem 0 0;
+  padding: 0.85rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--lg-border);
+  border-radius: var(--lg-radius);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 70vh;
+  overflow-y: auto;
 }
 .obs-count {
   font-size: 0.72rem;
@@ -243,6 +373,9 @@ ol.timeline > li.ev:last-child { border-bottom: none; }
 .shot-btn:hover .shot-overlay,
 .shot-btn:focus-visible .shot-overlay { opacity: 1; }
 .shot-cue {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 0.76rem;
   font-weight: 600;
   color: #fff;
@@ -252,6 +385,7 @@ ol.timeline > li.ev:last-child { border-bottom: none; }
   border-radius: 999px;
   backdrop-filter: blur(3px);
 }
+.shot-cue svg { width: 0.85rem; height: 0.85rem; }
 .shot-expanded .shot-overlay { align-items: flex-start; justify-content: flex-end; padding: 0.6rem; }
 /* #214: element-highlight — where the assertion looked, on the shot. */
 .target-box {
@@ -264,12 +398,17 @@ ol.timeline > li.ev:last-child { border-bottom: none; }
 .target-note { margin: 0.35rem 0 0; font-size: 0.8rem; }
 
 /* -- #206: network HAR request table --------------------------------- */
+/* Overflow guard: a long URL / body scrolls inside this block rather
+   than widening the panel and the page (#284 follow-up). */
+.har-wrap { max-width: 100%; overflow-x: auto; }
 table.har {
   width: 100%;
   border-collapse: collapse;
   margin-top: 0.5rem;
   font-size: 0.82rem;
-  table-layout: auto;
+  /* Fixed layout so the URL column takes the remaining width and
+     ellipsizes, instead of an unbreakable URL forcing the table wide. */
+  table-layout: fixed;
 }
 table.har th, table.har td {
   text-align: left;
@@ -367,10 +506,10 @@ table.net-delta tr.har-bad .net-kind { color: var(--fail); }
 
 /* -- #210: expandable HAR rows -------------------------------------- */
 table.har tr.har-row { cursor: pointer; }
-table.har tr.har-row:hover { background: rgba(255, 255, 255, 0.03); }
+table.har tr.har-row:hover { background: var(--row-hover); }
 table.har tr.har-row:focus-visible { outline: 2px solid var(--live); outline-offset: -2px; }
-.har-caret { color: var(--lg-muted); display: inline-block; width: 0.9rem; }
-table.har tr.har-detail td { background: rgba(255, 255, 255, 0.02); }
+.har-caret { color: var(--lg-muted); width: 0.85rem; height: 0.85rem; vertical-align: -0.12em; }
+table.har tr.har-detail td { background: var(--row-anchor); }
 .har-kv h4, .har-body h4 {
   margin: 0.5rem 0 0.25rem;
   font-size: 0.72rem;
@@ -406,22 +545,52 @@ table.har tr.har-detail td { background: rgba(255, 255, 255, 0.02); }
 /* Must out-specify `ol.timeline li.ev { display: grid }` (0,2,2), or the
    whole <details> gets crammed into the grid's first column. */
 ol.timeline li.ev.step-group { display: block; padding: 0; }
-/* The summary reuses the same 4-column grid as a standalone row, so the
-   step rows align pixel-for-pixel with the events below them. */
+/* The summary is a block wrapper: its primary line is a shared `.ev-row`
+   grid (so step rows align pixel-for-pixel with the events below them),
+   with an optional `.step-detail` second line under it. */
 li.ev.step-group > details > summary {
-  display: grid;
-  grid-template-columns: 1.4rem 10.5rem minmax(0, 1fr) auto;
-  gap: 0.5rem 0.85rem;
-  align-items: baseline;
-  padding: 0.4rem 0.4rem;
+  display: block;
+  padding: 0;
   cursor: pointer;
   list-style: none;
   border-radius: 6px;
 }
+/* What the step observed + why it failed — each on its own line under
+   the primary row, aligned to the label column, never crammed inline
+   with the action text (#284 follow-up). */
+.step-detail { display: block; padding: 0 0.4rem 0.5rem 3rem; }
+.step-obs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.25rem; }
+.obs-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.12rem 0.5rem;
+  border: 1px solid var(--lg-border);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+.obs-k {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--lg-muted);
+}
+.obs-v { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.8rem; color: var(--text); }
+.obs-chip.tone-ok { border-color: color-mix(in oklab, var(--pass) 40%, var(--lg-border)); }
+.obs-chip.tone-ok .obs-v { color: var(--pass); }
+.obs-chip.tone-fail { border-color: color-mix(in oklab, var(--fail) 45%, var(--lg-border)); }
+.obs-chip.tone-fail .obs-v { color: var(--fail); }
 /* Suppress the native disclosure marker — the caret is the ▶ icon. */
 li.ev.step-group > details > summary::-webkit-details-marker { display: none; }
-li.ev.step-group > details > summary:hover { background: rgba(255, 255, 255, 0.03); }
-.step-outcome { font-size: 0.82rem; white-space: nowrap; }
+li.ev.step-group > details > summary:hover { background: var(--row-hover); }
+.step-outcome {
+  font-size: 0.82rem;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.step-outcome .ev-glyph { width: 0.85rem; height: 0.85rem; }
 .step-outcome.tone-ok { color: var(--pass); }
 .step-outcome.tone-fail { color: var(--fail); }
 .step-outcome.tone-inconclusive { color: var(--inconclusive); }
@@ -440,8 +609,12 @@ li.ev.step-group > details > summary:hover { background: rgba(255, 255, 255, 0.0
 li.ev.step-group.tone-inconclusive .step-reason { color: var(--inconclusive); }
 li.ev.step-group.tone-fail > details > summary { box-shadow: inset 2px 0 0 var(--fail); }
 li.ev.step-group.tone-inconclusive > details > summary { box-shadow: inset 2px 0 0 var(--inconclusive); }
-li.ev.step-group.tone-fail .ev-label { color: var(--fail); }
-li.ev.step-group.tone-inconclusive .ev-label { color: var(--inconclusive); }
+/* Only the step's OWN label takes the fail/inconclusive colour — a
+   descendant selector here would blindly redden every passing inner row
+   (the action that ran ok, its observations) inside a failed step. The
+   inner rows keep their own per-row tone (#284 follow-up). */
+li.ev.step-group.tone-fail > details > summary .ev-label { color: var(--fail); }
+li.ev.step-group.tone-inconclusive > details > summary .ev-label { color: var(--inconclusive); }
 
 /* -- #280: run status roll-up (donut + counts, Allure-style) --------- */
 .status-summary { display: flex; align-items: center; gap: 1.4rem; }
@@ -576,6 +749,21 @@ ol.timeline.step-inner li.ev { font-size: 0.84rem; }
 }
 .span-ok { color: #4ade80; border-color: #4ade8055; }
 .span-fail { color: #f87171; border-color: #f8717155; }
+/* The chain's connector + fail marker are lucide SVGs (#284 follow-up),
+   sized to sit on the layer-pill text baseline. */
+.span-sep {
+  width: 0.85rem;
+  height: 0.85rem;
+  vertical-align: -0.14em;
+  margin: 0 0.15rem;
+  color: var(--lg-muted);
+}
+.span-x {
+  width: 0.8rem;
+  height: 0.8rem;
+  vertical-align: -0.12em;
+  margin: 0 0.15rem;
+}
 
 .sparkline { display: inline-flex; gap: 4px; align-items: center; }
 .sparkline .dot {

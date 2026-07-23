@@ -15,7 +15,7 @@ const ev = (kind: string, extra: Record<string, unknown> = {}, seq = 1): TraceEv
 describe("formatEvent", () => {
   it("renders a navigate step as a verb + url, muted", () => {
     const f = formatEvent(ev("step_started", { uses: "ui/navigate", layer: "ui", with: { url: "http://x/" } }));
-    expect(f.icon).toBe("▶");
+    expect(f.icon).toBe("action");
     expect(f.label).toBe("navigate");
     expect(f.detail).toBe("ui · http://x/");
     expect(f.tone).toBe("muted");
@@ -42,14 +42,14 @@ describe("formatEvent", () => {
 
   it("renders a capture blob observation with a friendly label + sha", () => {
     const f = formatEvent(ev("step_observation", { output_name: "capture/screenshot", blob_sha256: "abc123" }));
-    expect(f.icon).toBe("📷");
+    expect(f.icon).toBe("screenshot");
     expect(f.label).toBe("screenshot captured");
     expect(f.blobSha).toBe("abc123");
   });
 
   it("labels a capture/video observation (#215)", () => {
     const f = formatEvent(ev("step_observation", { output_name: "capture/video", blob_sha256: "vid1" }));
-    expect(f.icon).toBe("🎬");
+    expect(f.icon).toBe("video");
     expect(f.label).toBe("video recorded");
     expect(f.blobSha).toBe("vid1");
   });
@@ -62,7 +62,7 @@ describe("formatEvent", () => {
 
   it("emphasizes a failing assertion with its recorded detail", () => {
     const f = formatEvent(ev("assertion_evaluated", { state: "fail", detail: "actual false, expected true" }));
-    expect(f.icon).toBe("✗");
+    expect(f.icon).toBe("fail");
     expect(f.label).toBe("assertion failed");
     expect(f.detail).toBe("actual false, expected true");
     expect(f.tone).toBe("fail");
@@ -85,10 +85,10 @@ describe("formatEvent", () => {
 
   it("anchors the final verdict", () => {
     const fail = formatEvent(ev("check_finished", { verdict: "fail" }));
-    expect(fail.icon).toBe("⛔");
+    expect(fail.icon).toBe("verdict-fail");
     expect(fail.label).toBe("verdict: fail");
     expect(fail.tone).toBe("anchor");
-    expect(formatEvent(ev("check_finished", { verdict: "pass" })).icon).toBe("✓");
+    expect(formatEvent(ev("check_finished", { verdict: "pass" })).icon).toBe("verdict-pass");
   });
 
   it("falls back to a titled label for an unknown kind, never throwing", () => {

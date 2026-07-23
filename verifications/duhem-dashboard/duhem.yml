@@ -86,16 +86,13 @@ inputs:
     type: string
     default: http://127.0.0.1:7878/api/runs/dashboard-fixture-run/live
   # Hash-routed SPA deep link to the run detail page (#86 uses hash
-  # routing so a static export deep-links on a dumb file host).
+  # routing so a static export deep-links on a dumb file host). The run
+  # report is a tree master–detail (#284): the criterion → check tree
+  # renders in the rail on this one page — there is no separate tab
+  # route — with the run summary in the panel beside it.
   run_page_url:
     type: string
     default: http://127.0.0.1:7878/#/run/dashboard-fixture-run
-  # The Suites tab of the run report shell (#280) — where the
-  # criterion → check tree now lives (the Overview tab is the status
-  # donut + metadata).
-  run_suites_url:
-    type: string
-    default: http://127.0.0.1:7878/#/run/dashboard-fixture-run/suites
 
 criteria:
   - id: AC-1
@@ -153,8 +150,8 @@ criteria:
         description: |
           Navigate a real browser to the run detail deep link and
           observe the rendered DOM: the `Duhem` app-shell heading, the
-          run header showing the `pass` verdict, and — on the Suites tab
-          of the report shell (#280) — the criterion's check (`AC-1.1`)
+          run header showing the `pass` verdict, and — in the run
+          report's tree rail (#284) — the criterion's check (`AC-1.1`)
           listed as a link into the check page.
         # Each `ui/assert-element` below carries the verdict implicitly
         # (#253): a judging step that doesn't bind `satisfied` asserts
@@ -183,17 +180,14 @@ criteria:
               locator: { role: heading, text: pass }
               expected: visible
               within: 15s
-          # The criterion → check tree lives under the Suites tab of the
-          # report shell (#280); navigate there before asserting the link.
-          - uses: ui/navigate
-            with:
-              url: $inputs.run_suites_url
+          # The criterion → check tree renders in the run report's rail on
+          # the same run page (#284) — no separate tab to navigate to. Each
+          # check is a link to its check page whose accessible name is the
+          # check id; the `AC-1.1` link existing proves the criterion →
+          # check tree was built from the live run detail.
           - id: check_listed
             uses: ui/assert-element
             with:
-              # Each check renders as a link to its check page. The
-              # `AC-1.1` link existing proves the criterion → check table
-              # was built from the live run detail.
               locator: { role: link, name: AC-1.1 }
               expected: visible
               within: 15s

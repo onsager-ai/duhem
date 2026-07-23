@@ -1,10 +1,13 @@
-// Run-scoped report shell (#280): tab routing, the Suites status
-// filter, Categories cause-grouping, and the per-check Timeline spans.
+// Run report shell (#284 tree redesign): the run header verdict, the
+// criteria → check tree rail (each check a link named by its check id),
+// the summary roll-up tiles, and the active-check highlight when a check
+// is open. Replaces the former per-run tab-bar tests.
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import RunPage, { activeTab } from "../views/RunPage";
+import RunPage from "../views/RunPage";
+import CheckPage from "../views/CheckPage";
 
 afterEach(() => {
   cleanup();
@@ -74,77 +77,56 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/run/:runId" element={<RunPage />} />
-        <Route path="/run/:runId/suites" element={<RunPage />} />
-        <Route path="/run/:runId/categories" element={<RunPage />} />
-        <Route path="/run/:runId/timeline" element={<RunPage />} />
+        <Route path="/run/:runId/check/:pair" element={<CheckPage />} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
-describe("activeTab", () => {
-  it("reads the tab from the trailing path segment, else Overview", () => {
-    expect(activeTab("/run/R1")).toBe("overview");
-    expect(activeTab("/run/R1/suites")).toBe("suites");
-    expect(activeTab("/run/R1/categories")).toBe("categories");
-    expect(activeTab("/run/R1/timeline")).toBe("timeline");
-    // Non-tab sub-routes (diff, check) are Overview as far as the tabs go.
-    expect(activeTab("/run/R1/diff")).toBe("overview");
-  });
-});
-
-describe("run report shell", () => {
-  it("Overview shows the donut, and the active tab is marked", async () => {
-    stub();
-    renderAt("/run/R1/suites");
-    await waitFor(() => expect(screen.getByTestId("run-tabs")).toBeTruthy());
-    const on = screen.getByTestId("run-tabs").querySelector(".run-tab.on");
-    expect(on?.textContent).toBe("Suites");
-  });
-
-  it("Overview donut totals the run's checks", async () => {
+describe("run report tree", () => {
+  it("renders the run verdict inside a heading", async () => {
     stub();
     renderAt("/run/R1");
-    await waitFor(() => expect(screen.getByTestId("status-summary")).toBeTruthy());
-    expect(screen.getByTestId("status-summary").querySelector(".donut-center")?.textContent).toBe(
-      "4",
-    );
-    expect(screen.getByTestId("count-pass").textContent).toContain("2");
-    expect(screen.getByTestId("count-fail").textContent).toContain("1");
-  });
-
-  it("Suites filter chips narrow the tree to a verdict family", async () => {
-    stub();
-    renderAt("/run/R1/suites");
-    await waitFor(() => expect(screen.getByTestId("suite-filter")).toBeTruthy());
-    // All four checks visible initially — a passing one is present.
-    expect(screen.getByText("AC-5.2")).toBeTruthy();
-    // Click "✗ fail" → only failing checks remain.
-    fireEvent.click(screen.getByTestId("chip-fail"));
-    expect(screen.queryByText("AC-5.2")).toBeNull();
-    expect(screen.queryByText("AC-6.1")).toBeNull();
-    expect(screen.getByText("AC-5.1")).toBeTruthy();
-  });
-
-  it("Categories groups non-passing checks by mechanical cause, with lazy detail", async () => {
-    stub();
-    renderAt("/run/R1/categories");
-    await waitFor(() => expect(screen.getByTestId("cat-fail")).toBeTruthy());
-    const failGroup = screen.getByTestId("cat-fail");
-    expect(failGroup.textContent).toContain("the artifact is wrong");
-    expect(failGroup.textContent).toContain("(1)");
-    // The inconclusive cause is its own bucket, not lumped with fail.
-    expect(screen.getByTestId("cat-inconclusive:environment_error")).toBeTruthy();
-    // The lazily-fetched semantic reason lands on the fail item.
-    await waitFor(() => expect(failGroup.textContent).toContain('text "Manager"'));
-  });
-
-  it("Timeline lists a delivery-web chain per check", async () => {
-    stub();
-    renderAt("/run/R1/timeline");
-    await waitFor(() => expect(screen.getAllByTestId("span-row").length).toBe(4));
+    // The run header is a heading carrying the verification, run id, and
+    // the verdict badge text — the self-verification VD asserts the
+    // verdict is rendered inside a heading.
     await waitFor(() =>
-      expect(screen.getAllByTestId("spanchain").length).toBeGreaterThan(0),
+      expect(
+        screen.getByRole("heading", { name: /pegasus-register.*fail/s }),
+      ).toBeTruthy(),
     );
+  });
+
+  it("expands criteria by default and names each check link by its id", async () => {
+    stub();
+    renderAt("/run/R1");
+    const tree = await screen.findByTestId("run-tree");
+    // Every check link is present without interaction, and its accessible
+    // name is exactly the check id (no verdict text bleeding in).
+    expect(within(tree).getByRole("link", { name: "AC-5.1" })).toBeTruthy();
+    expect(within(tree).getByRole("link", { name: "AC-5.2" })).toBeTruthy();
+    expect(within(tree).getByRole("link", { name: "AC-7.1" })).toBeTruthy();
+    expect(within(tree).getByRole("link", { name: "AC-6.1" })).toBeTruthy();
+  });
+
+  it("totals the run's checks by verdict family in the summary tiles", async () => {
+    stub();
+    renderAt("/run/R1");
+    await waitFor(() => expect(screen.getByTestId("run-summary")).toBeTruthy());
+    expect(screen.getByTestId("tile-pass").textContent).toContain("2");
+    expect(screen.getByTestId("tile-fail").textContent).toContain("1");
+    expect(screen.getByTestId("tile-inconclusive").textContent).toContain("1");
+  });
+
+  it("marks the open check active in the rail on the check page", async () => {
+    stub();
+    renderAt("/run/R1/check/AC-5%3A%3AAC-5.1");
+    const tree = await screen.findByTestId("run-tree");
+    const active = within(tree).getByRole("link", { name: "AC-5.1" });
+    expect(active.getAttribute("aria-current")).toBe("page");
+    // A sibling check is not marked active.
+    expect(
+      within(tree).getByRole("link", { name: "AC-5.2" }).getAttribute("aria-current"),
+    ).toBeNull();
   });
 });

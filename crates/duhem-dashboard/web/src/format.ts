@@ -7,8 +7,31 @@ import type { CheckDetail, TraceEvent } from "./api";
 
 export type Tone = "ok" | "fail" | "inconclusive" | "muted" | "anchor";
 
+/**
+ * A semantic icon key, not a glyph. `format.ts` stays pure (no JSX):
+ * it names *what the row is* and the view layer (`EventIcon`) maps each
+ * key to a lucide SVG. This replaced the former inline emoji (#284
+ * follow-up) so every timeline icon is a real, theme-aware vector.
+ */
+export type IconName =
+  | "action" // a step / the run beginning
+  | "observed" // a scalar output pulled from the web
+  | "pass" // a step ok / an assertion held
+  | "fail" // a step error / an assertion failed
+  | "inconclusive" // an assertion that could not be decided
+  | "timeout" // a step that timed out
+  | "verdict-pass" // the check's final pass verdict
+  | "verdict-fail" // the check's final fail verdict
+  | "screenshot"
+  | "dom"
+  | "network"
+  | "target"
+  | "video"
+  | "attachment"
+  | "unknown"; // forward-compatible fallback
+
 export interface FormattedEvent {
-  icon: string;
+  icon: IconName;
   label: string;
   detail: string;
   tone: Tone;
@@ -18,6 +41,10 @@ export interface FormattedEvent {
   raw: string;
   /** Set for a blob observation so the row can link the artifact. */
   blobSha?: string;
+  /** The assertion expression this outcome evaluated (`assertion_evaluated`
+   *  events only) — *what was asserted*, distinct from the observed
+   *  operands in `detail`. Absent on runs recorded before #284. */
+  expr?: string;
 }
 
 function str(v: unknown): string | undefined {
@@ -25,7 +52,7 @@ function str(v: unknown): string | undefined {
 }
 
 /** Compact one-line value for an inline observation or arg scalar. */
-function compactValue(v: unknown): string {
+export function compactValue(v: unknown): string {
   if (v === null) return "null";
   if (typeof v === "string") return v.length > 80 ? `${v.slice(0, 80)}…` : v;
   if (typeof v === "object") {
@@ -78,20 +105,20 @@ function actionVerb(uses: string): string {
 }
 
 /** Friendly label for a `capture/*` (or other) blob observation. */
-function blobLabel(outputName: string): { icon: string; label: string } {
+function blobLabel(outputName: string): { icon: IconName; label: string } {
   switch (outputName) {
     case "capture/screenshot":
-      return { icon: "📷", label: "screenshot captured" };
+      return { icon: "screenshot", label: "screenshot captured" };
     case "capture/dom":
-      return { icon: "📄", label: "DOM captured" };
+      return { icon: "dom", label: "DOM captured" };
     case "capture/network":
-      return { icon: "🌐", label: "network captured" };
+      return { icon: "network", label: "network captured" };
     case "capture/target-rect":
-      return { icon: "🎯", label: "target highlighted" };
+      return { icon: "target", label: "target highlighted" };
     case "capture/video":
-      return { icon: "🎬", label: "video recorded" };
+      return { icon: "video", label: "video recorded" };
     default:
-      return { icon: "📎", label: `${outputName} captured` };
+      return { icon: "attachment", label: `${outputName} captured` };
   }
 }
 
@@ -134,7 +161,7 @@ export function formatEvent(
       const layer = str(evt.layer);
       const args = describeWith(evt.with);
       const detail = [layer, args].filter(Boolean).join(" · ");
-      return { ...base, icon: "▶", label: actionVerb(uses), detail, tone: "muted" };
+      return { ...base, icon: "action", label: actionVerb(uses), detail, tone: "muted" };
     }
     case "step_observation":
     case "setup_step_observation": {
@@ -145,7 +172,7 @@ export function formatEvent(
       }
       return {
         ...base,
-        icon: "·",
+        icon: "observed",
         label: "observed",
         detail: `${name} = ${compactValue(evt.value)}`,
         tone: "muted",
@@ -154,46 +181,69 @@ export function formatEvent(
     case "step_finished":
     case "setup_step_finished": {
       const outcome = str(evt.outcome) ?? "ok";
-      const map: Record<string, { icon: string; label: string; tone: Tone }> = {
-        ok: { icon: "✓", label: "step ok", tone: "ok" },
-        error: { icon: "✗", label: "step error", tone: "fail" },
-        timeout: { icon: "⏱", label: "step timed out", tone: "inconclusive" },
+      const map: Record<string, { icon: IconName; label: string; tone: Tone }> = {
+        ok: { icon: "pass", label: "step ok", tone: "ok" },
+        error: { icon: "fail", label: "step error", tone: "fail" },
+        timeout: { icon: "timeout", label: "step timed out", tone: "inconclusive" },
       };
-      const m = map[outcome] ?? { icon: "·", label: `step ${outcome}`, tone: "muted" as Tone };
+      const m = map[outcome] ?? { icon: "unknown" as IconName, label: `step ${outcome}`, tone: "muted" as Tone };
       return { ...base, ...m, detail: "" };
     }
     case "assertion_evaluated": {
       const state = str(evt.state) ?? "";
       const detail = str(evt.detail) ?? "";
+      // `expr` (the human-authored rule) rides the raw event since #284;
+      // it is `undefined` on older runs, and the row falls back to the
+      // operands alone.
+      const ab = { ...base, expr: str(evt.expr) };
       if (state === "pass") {
-        return { ...base, icon: "✓", label: "assertion held", detail, tone: "ok" };
+        return { ...ab, icon: "pass", label: "assertion held", detail, tone: "ok" };
       }
       if (state === "fail") {
-        return { ...base, icon: "✗", label: "assertion failed", detail, tone: "fail" };
+        return { ...ab, icon: "fail", label: "assertion failed", detail, tone: "fail" };
       }
       if (state.startsWith("inconclusive")) {
-        return { ...base, icon: "✗", label: "assertion inconclusive", detail, tone: "inconclusive" };
+        return { ...ab, icon: "inconclusive", label: "assertion inconclusive", detail, tone: "inconclusive" };
       }
       // Missing or unknown future state — record it, don't call it a
       // failure (a forward-compatible trace must not be mislabeled).
-      return { ...base, icon: "·", label: "assertion evaluated", detail: detail || state, tone: "muted" };
+      return { ...ab, icon: "unknown", label: "assertion evaluated", detail: detail || state, tone: "muted" };
     }
     case "check_finished": {
       const verdict = str(evt.verdict) ?? "";
       const pass = verdict === "pass";
       return {
         ...base,
-        icon: pass ? "✓" : "⛔",
+        icon: pass ? "verdict-pass" : "verdict-fail",
         label: `verdict: ${verdict}`,
         detail: "",
         tone: "anchor",
       };
     }
     case "run_started":
-      return { ...base, icon: "▶", label: "run started", detail: str(evt.verification_path) ?? "", tone: "muted" };
+      return { ...base, icon: "action", label: "run started", detail: str(evt.verification_path) ?? "", tone: "muted" };
     default:
-      return { ...base, icon: "·", label: evt.kind.replace(/_/g, " "), detail: "", tone: "muted" };
+      return { ...base, icon: "unknown", label: evt.kind.replace(/_/g, " "), detail: "", tone: "muted" };
   }
+}
+
+/**
+ * Split a failed-comparison assertion detail — the runtime emits
+ * `actual <lhs>, expected <rhs>` for a `false` comparison (see
+ * `duhem-runtime` `describe_comparison`) — into its two observed
+ * operands, so the check page can render an expected/actual pair
+ * instead of a sentence. Returns `null` for any other detail shape (an
+ * inconclusive cause, a freeform judgment message), which the caller
+ * shows verbatim. The values are already display-formatted by the
+ * runtime (strings quoted), so they travel through untouched.
+ */
+export function parseComparison(
+  detail: string | undefined,
+): { expected: string; actual: string } | null {
+  if (!detail) return null;
+  const m = /^actual (.+), expected (.+)$/s.exec(detail);
+  if (!m) return null;
+  return { actual: m[1], expected: m[2] };
 }
 
 export interface CheckSummaryModel {
@@ -335,7 +385,7 @@ function foldImplicitJudgments(nodes: TimelineNode[]): TimelineNode[] {
  * outcome, exactly as before.
  */
 export function stepStatus(node: StepNode): {
-  icon: string;
+  icon: IconName;
   label: string;
   tone: Tone;
   reason: string;
@@ -344,20 +394,20 @@ export function stepStatus(node: StepNode): {
   const jstate = node.judgment ? (str(node.judgment.state) ?? "") : "";
   const reason = node.judgment ? (str(node.judgment.detail) ?? "") : "";
   if (jstate === "fail") {
-    return { icon: "✗", label: "step failed", tone: "fail", reason, failed: true };
+    return { icon: "fail", label: "step failed", tone: "fail", reason, failed: true };
   }
   if (jstate.startsWith("inconclusive")) {
-    return { icon: "✗", label: "step inconclusive", tone: "inconclusive", reason, failed: true };
+    return { icon: "inconclusive", label: "step inconclusive", tone: "inconclusive", reason, failed: true };
   }
   const finished = node.events.find(
     (e) => e.kind === "step_finished" || e.kind === "setup_step_finished",
   );
   const outcome = str(finished?.outcome) ?? "ok";
-  const map: Record<string, { icon: string; label: string; tone: Tone }> = {
-    ok: { icon: "✓", label: "step ok", tone: "ok" },
-    error: { icon: "✗", label: "step error", tone: "fail" },
-    timeout: { icon: "⏱", label: "step timed out", tone: "inconclusive" },
+  const map: Record<string, { icon: IconName; label: string; tone: Tone }> = {
+    ok: { icon: "pass", label: "step ok", tone: "ok" },
+    error: { icon: "fail", label: "step error", tone: "fail" },
+    timeout: { icon: "timeout", label: "step timed out", tone: "inconclusive" },
   };
-  const m = map[outcome] ?? { icon: "·", label: `step ${outcome}`, tone: "muted" as Tone };
+  const m = map[outcome] ?? { icon: "unknown" as IconName, label: `step ${outcome}`, tone: "muted" as Tone };
   return { ...m, reason: "", failed: m.tone === "fail" || m.tone === "inconclusive" };
 }

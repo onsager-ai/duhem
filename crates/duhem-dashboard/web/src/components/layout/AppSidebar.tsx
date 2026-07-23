@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 import { cn } from "@/lib/utils";
 import { BrandMark } from "./BrandMark";
@@ -14,6 +14,10 @@ export function AppSidebar({
   brandHeading?: boolean;
   onNavigate?: () => void;
 }) {
+  // Active state is derived from the item's own `match` predicate, not a
+  // `to`-prefix — so `/run/:id` and `/run/:id/check/...` keep "Runs" lit
+  // even though the nav target is `/runs` (plural). See nav.ts.
+  const { pathname } = useLocation();
   return (
     <div className="flex h-full w-60 flex-col bg-sidebar text-sidebar-foreground">
       <div className="flex h-14 items-center border-b px-4">
@@ -21,25 +25,26 @@ export function AppSidebar({
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-        {NAV.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            onClick={onNavigate}
-            className={({ isActive }) =>
-              cn(
+        {NAV.map((item) => {
+          const active = item.match(pathname);
+          return (
+            <Link
+              key={item.to}
+              to={item.to}
+              onClick={onNavigate}
+              aria-current={active ? "page" : undefined}
+              className={cn(
                 "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                isActive
+                active
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                   : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
-              )
-            }
-          >
-            <item.icon className="size-4 shrink-0" />
-            {item.label}
-          </NavLink>
-        ))}
+              )}
+            >
+              <item.icon className="size-4 shrink-0" />
+              {item.label}
+            </Link>
+          );
+        })}
       </nav>
 
       <div className="border-t px-4 py-3 text-xs text-muted-foreground">

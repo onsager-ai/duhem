@@ -1,4 +1,4 @@
-import { Menu, Search } from "lucide-react";
+import { Maximize2, Menu, Minimize2, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { BrandMark } from "./BrandMark";
@@ -9,9 +9,13 @@ import { ThemeToggle } from "./ThemeToggle";
 export function TopBar({
   onMenu,
   onSearch,
+  wide,
+  onToggleWidth,
 }: {
   onMenu: () => void;
   onSearch: () => void;
+  wide: boolean;
+  onToggleWidth: () => void;
 }) {
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background/80 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:px-6">
@@ -48,6 +52,17 @@ export function TopBar({
           </kbd>
         </Button>
         <LiveIndicator />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="hidden md:inline-flex"
+          onClick={onToggleWidth}
+          aria-pressed={wide}
+          aria-label={wide ? "Use centered width" : "Use full width"}
+          title={wide ? "Centered width" : "Full width"}
+        >
+          {wide ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+        </Button>
         <ThemeToggle />
       </div>
     </header>

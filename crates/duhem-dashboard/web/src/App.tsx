@@ -8,8 +8,12 @@
 // #284: wrapped in the design-system app shell (sidebar + top bar +
 // ⌘K), with Overview at `/`, the runs table at `/runs`, and a
 // verifications index at `/verifications`. The evidence views
-// (run/check/diff/verification) render inside the shell and are
-// reskinned in #285.
+// (run/check/diff/verification) render inside the shell.
+//
+// The run report is a tree master–detail (criteria → checks in a rail,
+// the selected node's evidence in the panel) — not the former per-run
+// tab bar. RunPage and CheckPage share the `RunScaffold` spine, so the
+// rail and run header persist while you drill from run to check.
 
 import { HashRouter, Route, Routes } from "react-router-dom";
 
@@ -18,6 +22,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { RunsProvider } from "@/runs-context";
 import { ThemeProvider } from "@/theme";
 import CheckPage from "./views/CheckPage";
+import DefinitionPage from "./views/DefinitionPage";
 import DiffPage from "./views/DiffPage";
 import Overview from "./views/Overview";
 import RunPage from "./views/RunPage";
@@ -36,12 +41,8 @@ export default function App() {
               <Route path="/runs" element={<RunsList />} />
               <Route path="/verifications" element={<VerificationsList />} />
               <Route path="/run/:runId" element={<RunPage />} />
-              {/* Run-scoped report tabs (#280) — each a deep-linkable route
-                  rendering the same RunPage shell with a different tab. */}
-              <Route path="/run/:runId/suites" element={<RunPage />} />
-              <Route path="/run/:runId/categories" element={<RunPage />} />
-              <Route path="/run/:runId/timeline" element={<RunPage />} />
               <Route path="/run/:runId/check/:pair" element={<CheckPage />} />
+              <Route path="/run/:runId/definition" element={<DefinitionPage />} />
               <Route path="/run/:runId/diff" element={<DiffPage />} />
               <Route path="/verification/:name" element={<VerificationPage />} />
             </Routes>

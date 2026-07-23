@@ -14,6 +14,9 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
     verdict: null,
     live: true,
     setup_aborted: false,
+    // A live fold doesn't surface the definition; the authoritative
+    // re-fetch on `run_finished` fills this in (#302).
+    has_definition: false,
     criteria: [],
   };
   const criteria = new Map<string, CriterionDetail>();

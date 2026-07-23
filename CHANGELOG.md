@@ -27,6 +27,7 @@ needs more than a bullet.
 
 ## Unreleased
 
+- [additive] Live-dashboard rendezvous: a serving `duhem dashboard` advertises its base URL in a `dashboard.addr` file next to the store DB (new `duhem_evidence::dashboard_addr_path` helper; written on bind, removed on graceful shutdown incl. SIGTERM/Ctrl-C), and `duhem run` reads + probes it (or `DUHEM_DASHBOARD_URL`) to print the run's live deep link on stderr before the run starts. Evidence wire format and `schema/duhem.schema.json` unchanged. (#298)
 - [additive] Allure-grade failure legibility (#280): an implicit-judgment `assertion_evaluated` event now carries the `step_index` it was derived from, linking a judging step's `satisfied` verdict back to its step so a reporter can fold the assertion into that step and propagate its status (a judging step whose implicit assertion failed is a *failed* step, not a green "step ok"). The failure detail for a judging step is now semantic — `expected text "Manager" to be absent within 5s, but 1 still matched` (locator + expectation + deadline + observed `count`) for `ui/assert-element`, and an endpoint/condition summary for `ui/assert-url` / `ui/assert-state` / `api/poll` — instead of the opaque `actual false, expected true`. Additive and backward compatible: `step_index` is `None` on explicit `assertions:` and absent on events predating the field; the plain wording remains the fallback when a step's `with:` can't be read. `schema/duhem.schema.json` unchanged (evidence-wire only). (#280)
 
 ## v0.1.4 — 2026-07-21

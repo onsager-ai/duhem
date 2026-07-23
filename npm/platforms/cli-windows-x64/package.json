@@ -1,6 +1,6 @@
 {
   "name": "@duhem/cli-windows-x64",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Prebuilt `duhem` binary for windows-x64.",
   "license": "Apache-2.0",
   "os": [

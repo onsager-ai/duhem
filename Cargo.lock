@@ -743,6 +743,7 @@ name = "duhem-cli"
 version = "0.1.4"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "duhem-actions",
  "duhem-evidence",

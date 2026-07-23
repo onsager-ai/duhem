@@ -68,6 +68,12 @@ A `fail` names the assertion that broke; an `inconclusive` means Duhem
 couldn't observe cleanly (a timeout, an environment that wouldn't come
 up) and deliberately refuses to call that a pass.
 
+**Watch it in the terminal.** On a TTY, `duhem run` narrates progress
+on stderr while the run executes — each criterion announces itself
+(`▶ AC-1 (1/2)…`) and reports its verdict (`✔ AC-1 pass (1.2s)`) as it
+happens. Piped or CI output is untouched (stdout carries only the
+reporter); `--live` / `--no-live` force it either way.
+
 **Watch it live.** If `duhem dashboard` is serving the same store (or
 `DUHEM_DASHBOARD_URL` points at one), `duhem run` prints the run's
 dashboard deep link on stderr *before* the run starts:

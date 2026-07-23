@@ -24,6 +24,11 @@ use std::time::Duration;
 
 pub const URL_ENV_OVERRIDE: &str = "DUHEM_DASHBOARD_URL";
 
+/// Env override for the `--watch` opener binary (#305) — the test
+/// seam, and an escape hatch for exotic desktops. The URL is passed
+/// as the single argument.
+pub const OPENER_ENV_OVERRIDE: &str = "DUHEM_OPENER";
+
 /// How long a `dashboard.addr` liveness probe may take. Local
 /// loopback connects resolve in microseconds; this only bounds the
 /// pathological case (firewalled port, half-dead peer).
@@ -49,6 +54,41 @@ pub fn resolve_dashboard_base(db_path: &Path) -> Option<String> {
 /// link works on a static export).
 pub fn run_page_url(base: &str, run_id: &str) -> String {
     format!("{base}/#/run/{run_id}")
+}
+
+/// Open `url` in the operator's browser, best-effort (`--watch`,
+/// #305). Detached and silent: a missing or failing opener must
+/// never disturb the run.
+pub fn open_in_browser(url: &str) {
+    let (program, args) = opener_command();
+    let _ = std::process::Command::new(program)
+        .args(args)
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+/// The platform opener, unless `DUHEM_OPENER` overrides it.
+fn opener_command() -> (String, Vec<String>) {
+    if let Ok(o) = std::env::var(OPENER_ENV_OVERRIDE)
+        && !o.trim().is_empty()
+    {
+        return (o.trim().to_string(), Vec::new());
+    }
+    if cfg!(target_os = "macos") {
+        ("open".to_string(), Vec::new())
+    } else if cfg!(target_os = "windows") {
+        // `start` is a cmd built-in; the empty string fills the
+        // window-title slot so the URL isn't consumed as the title.
+        (
+            "cmd".to_string(),
+            vec!["/c".to_string(), "start".to_string(), String::new()],
+        )
+    } else {
+        ("xdg-open".to_string(), Vec::new())
+    }
 }
 
 /// `true` iff something is listening at the advertised base. The file
@@ -131,5 +171,18 @@ mod tests {
             run_page_url("http://127.0.0.1:7878", "01HXYZ"),
             "http://127.0.0.1:7878/#/run/01HXYZ"
         );
+    }
+
+    /// #305: `DUHEM_OPENER` replaces the platform opener wholesale —
+    /// the test seam `--watch` integration tests rely on.
+    #[test]
+    fn opener_env_override_wins_over_platform_default() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        // SAFETY: guarded by ENV_LOCK; no other test mutates this var.
+        unsafe { std::env::set_var(OPENER_ENV_OVERRIDE, "/usr/bin/false") };
+        let (program, args) = opener_command();
+        unsafe { std::env::remove_var(OPENER_ENV_OVERRIDE) };
+        assert_eq!(program, "/usr/bin/false");
+        assert!(args.is_empty());
     }
 }

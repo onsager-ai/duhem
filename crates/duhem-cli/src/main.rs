@@ -224,6 +224,13 @@ enum Cmd {
         /// Suppress live progress even on a TTY (spec #299).
         #[arg(long = "no-live", default_value_t = false)]
         no_live: bool,
+        /// Open the dashboard's live run page in a browser (spec
+        /// #305), once per invocation. Needs a resolvable dashboard —
+        /// a serving `duhem dashboard` on this store, or
+        /// DUHEM_DASHBOARD_URL; without one it warns and the run
+        /// proceeds. DUHEM_OPENER overrides the platform opener.
+        #[arg(long = "watch", default_value_t = false)]
+        watch: bool,
         /// Also record a screencast video of each ui check (spec #215),
         /// kept under the same `--capture` policy as the screenshot/DOM.
         /// Opt-in and off by default: video blobs are large and ship to
@@ -350,6 +357,7 @@ fn main() -> ExitCode {
             keep_env,
             live,
             no_live,
+            watch,
             capture,
             capture_video,
         }) => {
@@ -404,6 +412,7 @@ fn main() -> ExitCode {
                     (_, true) => Some(false),
                     _ => None,
                 },
+                watch,
                 capture,
                 capture_video,
             }))

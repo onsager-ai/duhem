@@ -1,0 +1,16 @@
+# #305 live-coverage fixture: a two-verification suite with a shared
+# (trivial) environment and one deliberately held step. Driven by the
+# duhem-cli self-VD's AC-13 under a nested `duhem run --live` so the
+# captured stderr must carry suite `env:` narration (A),
+# per-verification headers (B), and a slow-step heartbeat (C).
+# The 12s hold in `held/` is the point — it must cross the renderer's
+# 10s heartbeat threshold.
+manifest_version: 1
+
+environment:
+  up: ./scripts/up.sh
+  down: ./scripts/down.sh
+
+verifications:
+  - path: quick/duhem.yml
+  - path: held/duhem.yml

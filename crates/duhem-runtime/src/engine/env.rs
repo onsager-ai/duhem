@@ -215,12 +215,16 @@ impl SuiteEnvironment {
     /// Provision the shared environment. `manifest_dir` anchors relative
     /// `up:` / `down:` script paths; `store` is where the suite-level
     /// evidence run lands. `skip_env_up` is the manifest-level
-    /// `--no-env-up`.
+    /// `--no-env-up`. `progress` (#305) mirrors the suite run's events
+    /// to a live subscriber — the same post-commit tee as
+    /// `Engine::with_progress`, covering `tear_down` too since the
+    /// writer carries it; `None` is byte-for-byte the prior behavior.
     pub async fn provision(
         env: &Environment,
         manifest_dir: Option<&Path>,
         store: std::sync::Arc<dyn duhem_evidence::Store>,
         skip_env_up: bool,
+        progress: Option<tokio::sync::mpsc::UnboundedSender<duhem_evidence::Event>>,
     ) -> Result<Self, EngineError> {
         let run = RunState::new(std::collections::BTreeMap::new());
         // The suite's shared-environment evidence is its own run row,
@@ -232,6 +236,9 @@ impl SuiteEnvironment {
             std::collections::BTreeMap::new(),
         )
         .await?;
+        if let Some(tx) = progress {
+            writer = writer.with_tee(tx);
+        }
         let up = bring_environment_up(&mut writer, env, manifest_dir, &run, skip_env_up).await?;
         Ok(Self {
             env: env.clone(),
@@ -557,7 +564,7 @@ mod tests {
             .unwrap();
 
         let session =
-            SuiteEnvironment::provision(&env, Some(&base), std::sync::Arc::new(store), false)
+            SuiteEnvironment::provision(&env, Some(&base), std::sync::Arc::new(store), false, None)
                 .await
                 .expect("provision");
         assert!(session.aborted_cause().is_none(), "suite should be up");
@@ -566,6 +573,60 @@ mod tests {
         let log = std::fs::read_to_string(&marker).unwrap();
         assert_eq!(log.matches("up").count(), 1, "up ran once: {log:?}");
         assert_eq!(log.matches("down").count(), 1, "down ran once: {log:?}");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// #305: the suite-environment run mirrors its evidence events to
+    /// a subscribed progress sink, in order, through teardown — the
+    /// seam the CLI's suite-scope live narration folds over.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn suite_tee_mirrors_env_lifecycle_in_order() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("duhem-suite-tee-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        for name in ["up.sh", "down.sh"] {
+            let p = base.join(name);
+            std::fs::write(&p, "#!/bin/sh\nexit 0\n").unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let env = Environment {
+            up: PathBuf::from("up.sh"),
+            down: Some(PathBuf::from("down.sh")),
+            ready: None,
+        };
+        let store = duhem_evidence::SqliteStore::open(base.join("duhem.db"))
+            .await
+            .unwrap();
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let session = SuiteEnvironment::provision(
+            &env,
+            Some(&base),
+            std::sync::Arc::new(store),
+            false,
+            Some(tx),
+        )
+        .await
+        .expect("provision");
+        assert!(session.aborted_cause().is_none(), "suite should be up");
+        session.tear_down(false).await.expect("tear down");
+
+        let mut kinds = Vec::new();
+        while let Ok(evt) = rx.try_recv() {
+            kinds.push(evt.payload.kind().to_string());
+        }
+        assert_eq!(
+            kinds,
+            vec![
+                "env_up_started",
+                "env_up_finished",
+                "env_down_started",
+                "env_down_finished"
+            ]
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }

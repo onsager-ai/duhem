@@ -69,10 +69,17 @@ couldn't observe cleanly (a timeout, an environment that wouldn't come
 up) and deliberately refuses to call that a pass.
 
 **Watch it in the terminal.** On a TTY, `duhem run` narrates progress
-on stderr while the run executes — each criterion announces itself
-(`▶ AC-1 (1/2)…`) and reports its verdict (`✔ AC-1 pass (1.2s)`) as it
-happens. Piped or CI output is untouched (stdout carries only the
-reporter); `--live` / `--no-live` force it either way.
+on stderr while the run executes. Each criterion holds a single
+in-place line — `▶ AC-2 (2/3) … ui/assert-element 8s`, the current
+action and elapsed time ticking on it — replaced by its verdict
+(`✔ AC-2 pass (1.4s)`) when it settles, so the final transcript shows
+each criterion once. On a manifest run, a header separates each
+verification (`── login (2/5) ──`) and the shared environment's
+bring-up and teardown narrate too (`env: up…` / `env: ready (2.5s)` /
+`env: down…`). Piped or CI output is untouched (stdout carries only
+the reporter); `--live` / `--no-live` force it either way — a forced
+capture keeps plain append lines, plus a `… still in cli/invoke (12s)`
+heartbeat once a step is stuck past 10s, so logs stay grep-able.
 
 **Watch it live.** If `duhem dashboard` is serving the same store (or
 `DUHEM_DASHBOARD_URL` points at one), `duhem run` prints the run's
@@ -84,7 +91,9 @@ live: http://127.0.0.1:7878/#/run/01JC…
 
 Open it while the run executes — the run page streams each step as it
 happens, and the runs list refreshes itself, so an in-flight run shows
-up (marked `● live`) without a reload.
+up (marked `● live`) without a reload. Or skip the copy-paste: `duhem
+run --watch` opens that page in your browser automatically (once per
+invocation; `DUHEM_OPENER` overrides the platform opener).
 
 ## 4. The anatomy of a VD
 

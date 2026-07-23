@@ -1357,3 +1357,77 @@ fn live_and_no_live_conflict() {
         "clap conflict expected"
     );
 }
+
+/// #305: `--watch` hands the live URL to the opener named by
+/// `DUHEM_OPENER` (the test seam for the platform opener).
+#[cfg(unix)]
+#[test]
+fn watch_spawns_opener_with_the_live_url() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ONE_CRITERION);
+    let db = tmp.path().join("duhem.db");
+    let sink = tmp.path().join("opened-url.txt");
+    let opener = tmp.path().join("opener.sh");
+    std::fs::write(
+        &opener,
+        format!("#!/bin/sh\nprintf '%s' \"$1\" > {}\n", sink.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--db")
+        .arg(&db)
+        .arg("--watch")
+        .env("DUHEM_DASHBOARD_URL", "http://127.0.0.1:7878")
+        .env("DUHEM_OPENER", &opener)
+        .output()
+        .expect("spawn duhem");
+
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"pass\n", "stdout stays machine-stable");
+    // The opener is spawned detached; wait for its write to land.
+    let mut url = String::new();
+    for _ in 0..50 {
+        if let Ok(s) = std::fs::read_to_string(&sink)
+            && !s.is_empty()
+        {
+            url = s;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(
+        url.starts_with("http://127.0.0.1:7878/#/run/"),
+        "opener should receive the live deep link, got: {url:?}"
+    );
+}
+
+/// #305 flip side: `--watch` with no resolvable dashboard base warns
+/// on stderr and the run itself proceeds untouched.
+#[test]
+fn watch_without_dashboard_base_warns_and_runs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ONE_CRITERION);
+    let db = tmp.path().join("duhem.db");
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--db")
+        .arg(&db)
+        .arg("--watch")
+        .env_remove("DUHEM_DASHBOARD_URL")
+        .output()
+        .expect("spawn duhem");
+
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"pass\n");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("--watch: no dashboard"),
+        "expected the no-base warning"
+    );
+}

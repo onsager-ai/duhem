@@ -40,6 +40,10 @@ pub struct RunArgs {
     /// `Some(false)` from `--live` / `--no-live`; `None` = auto
     /// (on iff stderr is a TTY).
     pub live: Option<bool>,
+    /// Open the dashboard's live run page in a browser (#305),
+    /// once per invocation. Warns and continues when no dashboard
+    /// base resolves.
+    pub watch: bool,
     pub capture: duhem_runtime::CapturePolicy,
     pub capture_video: bool,
 }
@@ -58,6 +62,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         no_env_up,
         keep_env,
         live,
+        watch,
         capture,
         capture_video,
     } = args;
@@ -66,6 +71,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // `--live`/`--no-live`, else on iff stderr is a terminal (a piped
     // or CI stderr stays clean without asking).
     let live_progress = live.unwrap_or_else(|| std::io::stderr().is_terminal());
+    // Presentation + heartbeat cadence (#305): in-place single-line
+    // rewriting on a real terminal, plain append lines into a capture.
+    let render_cfg = crate::live_progress::RenderConfig::detect();
 
     // Recording is enabled at context-open time, so it's a run-level
     // decision (#215). Only record when the user asked *and* captures
@@ -186,7 +194,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         Loaded::Leaf { path, definition } => {
             if requested_environment.is_some() {
                 eprintln!(
-                    "warning: --environment has no effect on a single-leaf run (no manifest with an `environments:` block)"
+                    "warning: --environment has no effect when running a single verification (no manifest with an `environments:` block)"
                 );
             }
             (vec![LoadedLeaf { path, definition }], Scope::SingleLeaf)
@@ -421,25 +429,73 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // deep link is printed before its run starts. Resolved once per
     // invocation; None costs nothing downstream.
     let dashboard_base = crate::live_link::resolve_dashboard_base(&db_path);
+    // #305: `--watch` needs somewhere to point the browser; without a
+    // base it degrades to a warning, never a failed run.
+    if watch && dashboard_base.is_none() {
+        eprintln!(
+            "warning: --watch: no dashboard is serving this store — start `duhem dashboard` or set DUHEM_DASHBOARD_URL"
+        );
+    }
 
     // Manifest-level shared environment (spec #131): provision the whole
     // suite's stack once, here, instead of each leaf standing up its own.
     // While it's up, leaves run with per-leaf provisioning suppressed
     // (`suite_managed`) and target the shared stack.
     let mut suite_env: Option<SuiteEnvironment> = None;
+    // #305 A: while the suite environment provisions (and later tears
+    // down), its evidence tee narrates on stderr — the often-slowest
+    // minute of a manifest run, like leaf-level env blocks already
+    // do. Rendering is driven inline (select + drain) rather than by
+    // a spawned task so `env:` lines order deterministically against
+    // run_cmd's own stderr lines (headers, live links).
+    let mut suite_progress: Option<tokio::sync::mpsc::UnboundedReceiver<duhem_evidence::Event>> =
+        None;
     if let Scope::Manifest {
         environment: Some(env),
         manifest_dir,
         ..
     } = &scope
     {
-        match SuiteEnvironment::provision(env, manifest_dir.as_deref(), store.clone(), no_env_up)
-            .await
-        {
+        let progress = if live_progress {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            suite_progress = Some(rx);
+            Some(tx)
+        } else {
+            None
+        };
+        let provision = SuiteEnvironment::provision(
+            env,
+            manifest_dir.as_deref(),
+            store.clone(),
+            no_env_up,
+            progress,
+        );
+        let outcome = match suite_progress.as_mut() {
+            Some(rx) => {
+                let mut fut = std::pin::pin!(provision);
+                let res = loop {
+                    tokio::select! {
+                        biased;
+                        Some(evt) = rx.recv() => {
+                            crate::live_progress::narrate_env_event_to_stderr(&evt);
+                        }
+                        res = &mut fut => break res,
+                    }
+                };
+                // Events sent during the future's final poll are still
+                // queued; drain them before anything else prints.
+                while let Ok(evt) = rx.try_recv() {
+                    crate::live_progress::narrate_env_event_to_stderr(&evt);
+                }
+                res
+            }
+            None => provision.await,
+        };
+        match outcome {
             Ok(session) => {
                 if let Some(cause) = session.aborted_cause() {
                     eprintln!("suite environment did not come up: {cause:?}");
-                    let _ = session.tear_down(keep_env).await;
+                    let _ = tear_down_suite(session, keep_env, &mut suite_progress).await;
                     return ExitCode::FAILURE;
                 }
                 suite_env = Some(session);
@@ -453,15 +509,19 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     let suite_managed = suite_env.is_some();
 
     if pinned_run_id.is_some() && (is_manifest || resolved.len() > 1) {
-        eprintln!("--run-id applies to a single-leaf run; a manifest run has several leaves");
+        eprintln!(
+            "--run-id applies to a single-verification run; a manifest expands to several verifications"
+        );
         if let Some(s) = suite_env.take() {
-            let _ = s.tear_down(keep_env).await;
+            let _ = tear_down_suite(s, keep_env, &mut suite_progress).await;
         }
         return ExitCode::FAILURE;
     }
 
     let mut leaf_outcomes: Vec<(String, RunOutcome)> = Vec::with_capacity(resolved.len());
-    for (name, leaf_path, def, inputs) in resolved {
+    let total = resolved.len();
+    let mut watch_opened = false;
+    for (idx, (name, leaf_path, def, inputs)) in resolved.into_iter().enumerate() {
         // Per-leaf filter: every leaf is narrowed by name regardless
         // of `is_manifest`, so a `<verification>::<criterion>::<check>`
         // pattern behaves identically against a single leaf and a
@@ -483,6 +543,14 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             }
             None => None,
         };
+
+        // #305 B: on a live manifest run, a header separates each
+        // verification's narration. The name is the same path-derived
+        // slug the evidence namespace, set summary, and dashboard
+        // already use.
+        if live_progress && is_manifest {
+            eprintln!("── {name} ({}/{total}) ──", idx + 1);
+        }
 
         // Only launch the Playwright sidecar when the leaf actually
         // drives a page. A pure `api/*` + `db/*` + `cli/*` verification
@@ -506,7 +574,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 Err(e) => {
                     eprintln!("browser: {e}");
                     if let Some(s) = suite_env.take() {
-                        let _ = s.tear_down(keep_env).await;
+                        let _ = tear_down_suite(s, keep_env, &mut suite_progress).await;
                     }
                     return ExitCode::FAILURE;
                 }
@@ -547,7 +615,15 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // for machine reporters, and the operator can click in while
         // the run is still executing — the run page streams live.
         if let (Some(base), Some(id)) = (dashboard_base.as_deref(), run_id.as_deref()) {
-            eprintln!("live: {}", crate::live_link::run_page_url(base, id));
+            let url = crate::live_link::run_page_url(base, id);
+            eprintln!("live: {url}");
+            // #305 D: `--watch` opens the page once per invocation —
+            // the first verification's page; the dashboard links the
+            // rest of the suite from there.
+            if watch && !watch_opened {
+                crate::live_link::open_in_browser(&url);
+                watch_opened = true;
+            }
         }
         // Target identity (#191): the declared `project:` (leaf wins
         // over manifest) enters the resolution ladder; the VD's
@@ -575,7 +651,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             let plan = crate::live_progress::Plan::from_def(&def);
             engine = engine.with_progress(tx);
             Some(tokio::spawn(crate::live_progress::render_to_stderr(
-                rx, plan,
+                rx, plan, render_cfg,
             )))
         } else {
             None
@@ -588,7 +664,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 }
                 eprintln!("engine ({}): {e}", leaf_path.display());
                 if let Some(s) = suite_env.take() {
-                    let _ = s.tear_down(keep_env).await;
+                    let _ = tear_down_suite(s, keep_env, &mut suite_progress).await;
                 }
                 return ExitCode::FAILURE;
             }
@@ -605,7 +681,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // Tear the shared suite stack down once, after the last leaf
     // (best-effort; `--keep-env` leaves it up for triage).
     if let Some(session) = suite_env.take()
-        && let Err(e) = session.tear_down(keep_env).await
+        && let Err(e) = tear_down_suite(session, keep_env, &mut suite_progress).await
     {
         eprintln!("suite teardown: {e}");
     }
@@ -662,6 +738,38 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         VerdictState::Pass => ExitCode::SUCCESS,
         _ => ExitCode::FAILURE,
     }
+}
+
+/// Tear the suite environment down, narrating its `env:` events live
+/// when a suite progress receiver exists (#305 A). Consumes the
+/// receiver: teardown drops the suite writer, closing the channel,
+/// so the final drain is bounded.
+async fn tear_down_suite(
+    session: SuiteEnvironment,
+    keep_env: bool,
+    progress: &mut Option<tokio::sync::mpsc::UnboundedReceiver<duhem_evidence::Event>>,
+) -> Result<(), duhem_runtime::EngineError> {
+    let res = match progress.as_mut() {
+        Some(rx) => {
+            let mut fut = std::pin::pin!(session.tear_down(keep_env));
+            let res = loop {
+                tokio::select! {
+                    biased;
+                    Some(evt) = rx.recv() => {
+                        crate::live_progress::narrate_env_event_to_stderr(&evt);
+                    }
+                    res = &mut fut => break res,
+                }
+            };
+            while let Ok(evt) = rx.try_recv() {
+                crate::live_progress::narrate_env_event_to_stderr(&evt);
+            }
+            res
+        }
+        None => session.tear_down(keep_env).await,
+    };
+    *progress = None;
+    res
 }
 
 /// Read the `DUHEM_HEADED` env var and decide whether to launch a

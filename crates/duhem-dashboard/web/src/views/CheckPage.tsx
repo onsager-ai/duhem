@@ -5,9 +5,18 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { fetchCheck, type ArtifactRef, type CheckDetail, type SpanModel, type TraceEvent } from "../api";
+import {
+  fetchCheck,
+  fetchRun,
+  type ArtifactRef,
+  type CheckDetail,
+  type RunDetail,
+  type SpanModel,
+  type TraceEvent,
+} from "../api";
 import { VerdictBadge, isImageArtifact } from "../ui";
 import { formatEvent, groupTimeline, stepStatus, summarizeCheck, type TimelineNode } from "../format";
+import { RunTabs } from "./RunPage";
 
 // Plain-language "what happened", derived mechanically from the
 // recorded timeline (never re-judged, never LLM-authored).
@@ -626,6 +635,10 @@ export function Artifacts({ artifacts }: { artifacts: CheckDetail["artifacts"] }
 export default function CheckPage() {
   const { runId = "", pair = "" } = useParams();
   const [check, setCheck] = useState<CheckDetail | null>(null);
+  // The run is fetched only for the shell header (verification + verdict);
+  // the check page keeps the run-scoped tab bar so drilling into a check
+  // doesn't drop you out of the report shell.
+  const [run, setRun] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -635,6 +648,7 @@ export default function CheckPage() {
       return;
     }
     fetchCheck(runId, criterionId, checkId).then(setCheck, (e) => setError(String(e)));
+    fetchRun(runId).then(setRun, () => {});
   }, [runId, pair]);
 
   if (error) return <p className="error">{error}</p>;
@@ -643,9 +657,21 @@ export default function CheckPage() {
   return (
     <>
       <p className="kv">
-        <Link to={`/run/${encodeURIComponent(runId)}`}>← run {runId}</Link>
+        <Link to="/">← runs</Link>
       </p>
+      <h2 className="run-title">
+        {run ? `${run.verification} · ` : ""}
+        <code>{runId}</code>{" "}
+        {run && <VerdictBadge verdict={run.verdict} live={run.live} />}
+      </h2>
+      {/* Keep the run-scoped tabs on the check page (Suites is where a
+          check is reached from), so the report shell persists. */}
+      <RunTabs runId={runId} active="suites" />
       <div className="panel">
+        <p className="kv check-crumb">
+          <Link to={`/run/${encodeURIComponent(runId)}/suites`}>Suites</Link> ›{" "}
+          {check.criterion_id}
+        </p>
         <h2>
           {check.criterion_id} :: {check.check_id}{" "}
           <VerdictBadge verdict={check.verdict} />

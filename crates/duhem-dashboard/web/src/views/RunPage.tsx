@@ -167,7 +167,7 @@ export function activeTab(pathname: string): string {
   return (TAB_KEYS as readonly string[]).includes(last) ? last : "overview";
 }
 
-function RunTabs({ runId, active }: { runId: string; active: string }) {
+export function RunTabs({ runId, active }: { runId: string; active: string }) {
   const base = `/run/${encodeURIComponent(runId)}`;
   return (
     <nav className="run-tabs" data-testid="run-tabs">

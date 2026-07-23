@@ -526,6 +526,8 @@ li.ev.step-group.tone-inconclusive .ev-label { color: var(--inconclusive); }
 }
 .run-tab:hover { color: var(--text); }
 .run-tab.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.check-crumb { font-size: 0.82rem; color: var(--muted); margin: 0 0 0.4rem; }
+.check-crumb a { color: var(--accent); text-decoration: none; }
 .meta-line { margin-top: 1rem; }
 /* Suites filter chips (button form of the run-list `.filters .chip`). */
 .chips { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 1rem 0 0.6rem; }

@@ -1,0 +1,21 @@
+# #305 fixture leaf: holds a single cli/invoke step past the
+# renderer's 10s heartbeat threshold, so a live (non-TTY) run must
+# emit at least one `… still in cli/invoke (NNs)` line.
+verification: slow-suite held verification (fixture for #305)
+
+criteria:
+  - id: AC-1
+    description: |
+      A criterion whose only step sleeps 12s — long enough to cross
+      the 10s heartbeat threshold once, short enough to keep the
+      regression lane cheap.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: hold
+            uses: cli/invoke
+            with:
+              command: [sleep, '12']
+              within: 60s
+        assertions:
+          - $steps.hold.outputs.exit_code == 0

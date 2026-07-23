@@ -629,3 +629,74 @@ criteria:
           - matches:
               value: $steps.run_live.outputs.stdout
               pattern: '"verdict":"pass"'
+
+  # ==========================================================================
+  # #305 — live coverage for the slow paths. One nested `duhem run --live`
+  # against the committed `fixtures/slow-suite` manifest (shared trivial
+  # environment + two verifications, one holding a step 12s) proves, off the
+  # captured stderr of a single invocation: (A) the suite environment's
+  # bring-up/teardown narrate, (B) each verification gets a
+  # `── <name> (k/n) ──` header carrying the same path-derived slug the
+  # evidence namespace uses, and (C) a step in flight past the 10s threshold
+  # emits a `… still in <action> (NNs)` heartbeat. Captured stderr is
+  # non-TTY, so this also pins the forced-`--live` append mode (no control
+  # sequences). Page-free throughout; the 12s hold is the lane's cost.
+  # ==========================================================================
+  - id: AC-13
+    description: |
+      An operator watching a suite run live is never staring at a
+      silent terminal during its slowest stretches: the shared
+      environment's bring-up and teardown narrate, each verification
+      announces itself with a named header, and a step stuck inside
+      one action heartbeats instead of going dark.
+    checks:
+      - id: AC-13.1
+        description: |
+          `duhem run --live verifications/duhem-cli/fixtures/slow-suite
+          --reporter json` — captured stderr carries the suite `env:`
+          lifecycle (`env: up…` / `env: up ok` / `env: down…`), both
+          verification headers with incrementing ordinals
+          (`── quick (1/2) ──`, `── held (2/2) ──`), and at least one
+          heartbeat for the held step (`… still in cli/invoke (NNs)`),
+          while stdout is still exactly the one-line JSON summary with
+          the top-level `pass`.
+        steps:
+          - id: run_slow_suite
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - run
+                - verifications/duhem-cli/fixtures/slow-suite
+                - --live
+                - --reporter
+                - json
+              cwd: $inputs.repo_dir
+              within: 120s
+        assertions:
+          - $steps.run_slow_suite.outputs.exit_code == 0
+          # A: suite environment bring-up + teardown narrate.
+          - matches:
+              value: $steps.run_slow_suite.outputs.stderr
+              pattern: 'env: up…'
+          - matches:
+              value: $steps.run_slow_suite.outputs.stderr
+              pattern: 'env: up ok'
+          - matches:
+              value: $steps.run_slow_suite.outputs.stderr
+              pattern: 'env: down…'
+          # B: per-verification headers, path-derived names, k/n.
+          - matches:
+              value: $steps.run_slow_suite.outputs.stderr
+              pattern: '── quick \(1/2\) ──'
+          - matches:
+              value: $steps.run_slow_suite.outputs.stderr
+              pattern: '── held \(2/2\) ──'
+          # C: the held step heartbeats past the 10s threshold.
+          - matches:
+              value: $steps.run_slow_suite.outputs.stderr
+              pattern: '… still in cli/invoke \(\d+s\)'
+          # stdout: still exactly the machine reporter's summary.
+          - matches:
+              value: $steps.run_slow_suite.outputs.stdout
+              pattern: '"verdict":"pass"'

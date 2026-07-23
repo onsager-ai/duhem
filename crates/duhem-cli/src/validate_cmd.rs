@@ -99,7 +99,13 @@ pub(crate) fn run_validate(path: Option<&Path>) -> Result<String, String> {
                 }
             }
             let n = leaves.len();
-            let plural = if n == 1 { "leaf" } else { "leaves" };
+            // User-facing vocabulary is "verification", never the
+            // internal manifest-tree "leaf" (#305 ride-along).
+            let plural = if n == 1 {
+                "verification"
+            } else {
+                "verifications"
+            };
             Ok(format!(
                 "OK — validated manifest {} + {n} {plural}",
                 manifest_path.display()
@@ -216,7 +222,10 @@ criteria:
         .unwrap();
         let msg = run_validate(Some(tmp.path())).unwrap();
         assert!(msg.starts_with("OK"), "got: {msg}");
-        assert!(msg.contains("1 leaf"), "names the leaf count: {msg}");
+        assert!(
+            msg.contains("1 verification"),
+            "names the verification count: {msg}"
+        );
         // The pre-#150 mis-parse symptom must be gone.
         assert!(!msg.contains("manifest_version"), "got: {msg}");
     }

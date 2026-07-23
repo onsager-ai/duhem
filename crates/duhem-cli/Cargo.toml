@@ -32,3 +32,5 @@ toml.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+# `start_paused` renderer tests (#305) need tokio's paused clock.
+tokio = { version = "1", features = ["full", "test-util"] }

@@ -1,0 +1,20 @@
+# #305 fixture leaf: instant and page-free, so the suite has a fast
+# first verification — its live header reads `── quick (1/2) ──`.
+verification: slow-suite quick verification (fixture for #305)
+
+criteria:
+  - id: AC-1
+    description: |
+      A trivially green criterion that finishes instantly, giving the
+      suite a first verification whose narration completes before the
+      held one starts.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: instant
+            uses: cli/invoke
+            with:
+              command: ['true']
+              within: 30s
+        assertions:
+          - $steps.instant.outputs.exit_code == 0

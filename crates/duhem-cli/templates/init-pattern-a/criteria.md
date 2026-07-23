@@ -6,13 +6,13 @@ criterion with one that describes a real commitment of your
 feature.
 
 Criteria are stable across implementation churn: they describe
-what *done* means, not how the UI happens to be wired today. The
-mechanical translation into checks lives next door in `duhem.yml`
-(`docs/duhem-spec.md` §7.2 / §7.3).
+what *done* means, not how the feature happens to be wired today.
+The mechanical translation into checks lives next door in
+`duhem.yml`.
 
 ## AC-1
 
-The example.com landing page renders its canonical heading.
+The example.com landing page is reachable and serves its content.
 
 > Replace this criterion before flipping your spec issue to
 > `planned`. A good criterion:
@@ -26,13 +26,12 @@ The example.com landing page renders its canonical heading.
 
 ## Identity-commitment notes
 
-- **Holistic.** The skeleton's check exercises a real public URL
-  through a real browser — no mocks at the web boundary
-  (`docs/duhem-spec.md` §8). Your replacement should preserve
-  this posture.
-- **Mechanical judgment.** Assertions are structural (role +
-  name locators, equality on observed outputs). No LLM in the
-  loop interprets the verdict.
+- **Holistic.** The skeleton's check exercises a real, deployed
+  system end-to-end — no mocks at the web boundary. Your
+  replacement should preserve this posture.
+- **Mechanical judgment.** Assertions are structural — equality
+  and predicates over observed outputs. No LLM in the loop
+  interprets the verdict.
 - **Two-document discipline.** This file is the human commitment
   (`criteria.md`); `duhem.yml` is its mechanical translation.
   Keep them separate from the first commit — conflating the two

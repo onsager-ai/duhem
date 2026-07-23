@@ -6,6 +6,7 @@
 //!     cargo run -p xtask -- schema-changelog-check   # CHANGELOG.md touch gate
 //!     cargo run -p xtask -- schema-json [--check]    # emit/verify JSON Schema
 //!     cargo run -p xtask -- skill-scrub              # published skills ↔ no internal vocab
+//!     cargo run -p xtask -- dx-drift [--mode=warn|fail]  # DX surfaces ↔ product currency
 //!
 //! `check-file-budget` enforces a per-file token budget on every `.rs`
 //! file under `crates/` and `xtask/src/`. The vocab is `tiktoken`'s
@@ -19,6 +20,7 @@
 
 mod action_reference;
 mod check_file_budget;
+mod dx_drift;
 mod schema_changelog_check;
 mod schema_drift;
 mod schema_json;
@@ -40,9 +42,10 @@ fn main() -> ExitCode {
         Some("schema-json") => schema_json::run(args.collect()),
         Some("action-reference") => action_reference::run(args.collect()),
         Some("skill-scrub") => skill_scrub::run(args.collect()),
+        Some("dx-drift") => dx_drift::run(args.collect()),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage:\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- schema-drift\n  cargo run -p xtask -- schema-changelog-check\n  cargo run -p xtask -- schema-json [--check]\n  cargo run -p xtask -- action-reference [--check]\n  cargo run -p xtask -- skill-scrub"
+            "usage:\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- schema-drift\n  cargo run -p xtask -- schema-changelog-check\n  cargo run -p xtask -- schema-json [--check]\n  cargo run -p xtask -- action-reference [--check]\n  cargo run -p xtask -- skill-scrub\n  cargo run -p xtask -- dx-drift [--mode=warn|fail]"
         )),
     };
 

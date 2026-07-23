@@ -147,6 +147,46 @@ setting `DUHEM_CHANGELOG_CLARIFYING=1` (CI sets it when the PR body
 carries an explicit `clarifying` annotation). Don't use the escape
 hatch to dodge tracking a real schema event.
 
+**DX-currency discipline.** User-facing surfaces drift when the product
+changes and the docs that teach it don't (that's how the authoring skill
+sat stale behind the terse-authoring epic — spec #288). Any change to
+user-visible surface — a new/changed action type, a new CLI command or
+flag, a new schema field, a changed authoring form — carries a
+`## DX impact` section in the spec, the DX analogue of `## Schema
+impact`:
+
+```markdown
+## DX impact
+
+- **Surfaces touched:** [public authoring skill | adoption template |
+  README | docs/getting-started | docs/duhem-spec | CLI --help/describe |
+  action-reference | CHANGELOG]
+- **Updates landing with this change:** [per surface, or "none (rationale)"]
+```
+
+Default is *not* "none": if you added an action, changed the authoring
+form, or added a CLI flag, the matching DX surface updates in the same
+PR, or the callout says why not. Label the spec `dx-impact` when this
+section is non-empty (like `schema-impact`).
+
+The `cargo xtask dx-drift` gate is the mechanical backstop. It fires
+when a *surface-declaring* file changes (`crates/duhem-schema/src/**`,
+the action catalog / `with:` params, the CLI command defs, or the
+generated `docs/action-reference.md`) with no DX doc touched. It's narrow
+by design — internal refactors of those crates don't trip it — and ships
+**warn-only** for now (flip to `--mode=fail` after a bake). A deliberate
+no-op is declared with a `<!-- dx:none -->` marker in the PR body (CI
+reads it into `DUHEM_DX_IMPACT_NONE`).
+
+Separately, `cargo xtask skill-scrub` and `dx-drift`'s readme-framing
+check are **hard** content gates: the published authoring skill
+(`templates/product-repo/.claude/skills/`) and the adoption README must
+never carry internal dev vocabulary (dogfood / customer names / seam /
+dev-skill names). That's the firewall for user-facing artifacts — a
+user should never read how Duhem is *built*. This is distinct from the
+docs-site drift gate (#279 = docs↔site sourcing; this = product↔DX
+content currency).
+
 ### 4. Pre-push
 
 Trigger the global `pre-push` skill (or say "ready to push"). It owns
@@ -252,6 +292,15 @@ are manual; `pr-lifecycle` covers the mechanics.
 - **Schema change without `## Schema impact` callout.** The pre-1.0
   schema's breaking-change rate is what determines when we OSS the
   spec; mis-tracking a change skews that signal.
+- **Product-surface change without a `## DX impact` callout.** A new
+  action / flag / schema field whose authoring skill, README, or
+  getting-started stays stale ships a surface users can't learn. The
+  `dx-drift` gate reminds you; the callout records the decision.
+- **Internal vocabulary in a user-facing artifact.** A `dogfood` /
+  customer name / `seam` / dev-skill reference in the published skill or
+  adoption README leaks how Duhem is built to someone using it.
+  `skill-scrub` / `dx-drift` readme-framing hard-fail on it — fix, don't
+  annotate.
 - **Skipping `pre-push`.** Even a thin checklist catches the
   cheap mistakes.
 - **Shipping a CLI / schema feature without a worked example.** A
@@ -292,7 +341,8 @@ The default pre-push gate (exactly what reviewers and CI run) is:
 
 ```bash
 just check        # = just lint (fmt-check + clippy -D warnings +
-                  #   xtask check-file-budget) then just test
+                  #   xtask check-file-budget + skill-scrub +
+                  #   dx-drift --mode=warn) then just test
                   #   (cargo test --workspace)
 ```
 
@@ -339,6 +389,9 @@ past it.
 | Schema validator rejects a VD fixture | Fixture authored against an older schema. Update it or document a migration. |
 | `CHANGELOG.md` lint fails | Schema-impact PR with no CHANGELOG entry. Add one before re-running. |
 | Doc-link check fails | A relative `docs/` link points outside the repo. Resolve to a full URL or fix the path. |
+| `skill-scrub` fails | Internal vocabulary in a published skill under `templates/product-repo/.claude/skills/`. Cut or generalize it. Hard gate. |
+| `dx-drift` readme-framing fails | Internal framing (dogfood / customer name / `seam` / `docs/duhem-spec.md` ref) in `templates/product-repo/README.md`. Rewrite it user-facing. Hard gate. |
+| `dx-drift` warns (surface, no DX doc) | Product surface changed with no DX doc updated. Update one, or add `<!-- dx:none -->` to the PR body. Warn-only today. |
 
 ### Schema-impact in the PR body
 
@@ -346,3 +399,14 @@ If the linked spec is labeled `schema-impact`, the PR body must include a
 `## Schema impact` subsection (copy the spec's verbatim), and a breaking
 change must touch `CHANGELOG.md`. See the schema-stability discipline in
 §3 above.
+
+### DX-impact in the PR body
+
+If the linked spec is labeled `dx-impact`, the PR body copies the spec's
+`## DX impact` subsection. When the change touches user-visible surface
+but deliberately updates no DX doc, add a `<!-- dx:none -->` marker so
+CI's `dx-drift` currency check treats it as declared (warn-only today).
+`skill-scrub` and `dx-drift`'s readme-framing are hard gates with no such
+escape — a published skill or adoption README that leaks internal
+vocabulary must be fixed, not annotated. See the DX-currency discipline
+in §3 above.

@@ -7,11 +7,20 @@ import { ChevronDown, ChevronRight, Maximize2, Minimize2, X } from "lucide-react
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { fetchCheck, type ArtifactRef, type CheckDetail, type SpanModel, type TraceEvent } from "../api";
-import { VerdictBadge, isImageArtifact } from "../ui";
+import { VerdictBadge, formatDuration, isImageArtifact } from "../ui";
 import { compactValue, formatEvent, groupTimeline, parseComparison, stepStatus, summarizeCheck, type TimelineNode } from "../format";
 import { EventIcon } from "../components/EventIcon";
 import { RunScaffold } from "./RunScaffold";
 import { useVd } from "./definition-context";
+
+// The check's wall-clock span — first recorded event to last.
+function checkDurationMs(timeline: TraceEvent[]): number | null {
+  if (timeline.length < 2) return null;
+  const a = Date.parse(timeline[0].ts);
+  const b = Date.parse(timeline[timeline.length - 1].ts);
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  return b - a;
+}
 
 // Plain-language "what happened", derived mechanically from the
 // recorded timeline (never re-judged, never LLM-authored).
@@ -207,6 +216,60 @@ function ApiExchange({ node }: { node: Extract<TimelineNode, { kind: "step" }> }
   );
 }
 
+// Evidence captured on this step (#280 polish): screenshot / DOM /
+// network / video blobs recorded as `capture/*` observations, nested
+// under the step that produced them (Allure-style) instead of a side
+// panel — reusing the same viewers.
+function StepCaptures({
+  node,
+  artifacts,
+}: {
+  node: Extract<TimelineNode, { kind: "step" }>;
+  artifacts: ArtifactRef[];
+}) {
+  const caps = node.events
+    .filter(
+      (e) =>
+        (e.kind === "step_observation" || e.kind === "setup_step_observation") &&
+        typeof e.blob_sha256 === "string" &&
+        typeof e.output_name === "string" &&
+        (e.output_name as string).startsWith("capture/"),
+    )
+    .map((e) => ({
+      kind: e.output_name as string,
+      art: artifacts.find((a) => a.id === e.blob_sha256),
+    }))
+    .filter((c): c is { kind: string; art: ArtifactRef } => c.art !== undefined);
+  if (caps.length === 0) return null;
+  // The target-rect capture is an overlay input for the screenshot, not a
+  // row of its own (mirrors the old Artifacts panel).
+  const shot = caps.find((c) => isImageArtifact(c.art.kind, c.art.url));
+  const rectsUrl = shot
+    ? caps.find((c) => c.kind === "capture/target-rect")?.art.url
+    : undefined;
+  const shown = shot ? caps.filter((c) => c.kind !== "capture/target-rect") : caps;
+  return (
+    <div className="step-captures" data-testid="step-captures">
+      {shown.map((c) => (
+        <div className="artifact" key={c.art.id}>
+          <p className="kv">
+            <strong>{artifactLabel(c.art.kind)}</strong> ·{" "}
+            <a href={c.art.url} target="_blank" rel="noreferrer">
+              open
+            </a>
+          </p>
+          {isImageArtifact(c.art.kind, c.art.url) && (
+            <ScreenshotArtifact artifact={c.art} rectsUrl={rectsUrl} />
+          )}
+          {c.kind === "capture/network" && <HarTable url={c.art.url} />}
+          {c.kind === "capture/dom" && <DomViewer url={c.art.url} />}
+          {c.kind === "capture/video" && <VideoArtifact artifact={c.art} />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // A step's lifecycle collapsed into one row: the action + its
 // status-propagated outcome + observation count as the summary, its
 // observations one click away. A judging step's implicit verdict (#280)
@@ -317,6 +380,9 @@ function StepGroup({
             method · url · status + pretty-printed bodies — nested under
             the step (the api analogue of a screenshot attachment). */}
         <ApiExchange node={node} />
+        {/* ui evidence (screenshot / DOM / network / video) nested under
+            the step that captured it, not a side panel. */}
+        <StepCaptures node={node} artifacts={artifacts} />
         <ol className="timeline step-inner">
           {/* The full step detail — started (with its args), each
               observation, finished (with its outcome), and the folded
@@ -802,11 +868,24 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
             {critDesc}
           </p>
         )}
+        <p className="kv check-meta" data-testid="check-meta">
+          {(() => {
+            const duration = checkDurationMs(check.timeline);
+            const steps = check.timeline.filter((event) => event.kind === "step_started").length;
+            const layers = check.spans.length;
+            return [
+              duration !== null ? `⏱ ${formatDuration(duration)}` : null,
+              `${steps} step${steps === 1 ? "" : "s"}`,
+              layers > 0 ? `${layers} layer${layers === 1 ? "" : "s"}` : null,
+            ].filter(Boolean).join(" · ");
+          })()}
+        </p>
         <SpanChain spans={check.spans} />
         <CheckSummary detail={check} />
+        {/* Captures now nest under the step that produced them (see
+            StepCaptures); no separate Artifacts panel. */}
         <Timeline events={check.timeline} artifacts={check.artifacts} />
       </div>
-      <Artifacts artifacts={check.artifacts} />
     </>
   );
 }

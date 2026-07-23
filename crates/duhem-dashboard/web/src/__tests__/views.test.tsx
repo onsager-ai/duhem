@@ -240,6 +240,36 @@ describe("Timeline", () => {
     // The response body opens automatically on a 5xx — the error is right there.
     expect(ax.textContent).toContain("write exception: immutable field");
   });
+
+  it("nests a screenshot capture under its step, not a side panel (#280 polish)", () => {
+    const sha = "a".repeat(64);
+    const events: TraceEvent[] = [
+      {
+        seq: 1,
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "step_started",
+        step_index: 0,
+        uses: "ui/assert-element",
+        with: { locator: { text: "x" }, expected: "visible" },
+      },
+      { seq: 2, ts: "2026-01-01T00:00:00.100Z", kind: "step_finished", step_index: 0, outcome: "ok" },
+      // Emitted after the step closed, but carries step_index → nests back.
+      {
+        seq: 3,
+        ts: "2026-01-01T00:00:00.200Z",
+        kind: "step_observation",
+        step_index: 0,
+        output_name: "capture/screenshot",
+        blob_sha256: sha,
+      },
+    ];
+    const artifacts = [{ id: sha, kind: "capture/screenshot", url: `run/r/artifact/${sha}` }];
+    const { getByTestId } = render(<Timeline events={events} artifacts={artifacts} />);
+    const caps = getByTestId("step-captures");
+    // The screenshot renders as an image, inside the step group.
+    expect(caps.closest('[data-testid="step-group"]')).not.toBeNull();
+    expect(caps.querySelector("img")?.getAttribute("src")).toBe(`run/r/artifact/${sha}`);
+  });
 });
 
 describe("Artifacts", () => {

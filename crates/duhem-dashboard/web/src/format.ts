@@ -358,37 +358,49 @@ export function groupTimeline(events: TraceEvent[]): TimelineNode[] {
     nodes.push({ kind: "event", key: `e${evt.seq}`, event: evt });
   }
   flush();
-  return foldImplicitJudgments(nodes);
+  return foldOntoSteps(nodes);
 }
 
 /**
- * Second pass (#280): fold each implicit-judgment assertion — an
- * `assertion_evaluated` carrying a numeric `step_index` — back onto its
- * step node, so the step propagates the verdict (Allure-style status
- * bubbling) and the assertion isn't an orphan row. The event stays
- * reachable inside the step (its raw is one click away). An explicit
- * assertion (no `step_index`) or one whose step can't be found stays a
- * standalone row.
+ * Second pass (#280): fold each step-owned event back onto its step node
+ * — an `assertion_evaluated` carrying a numeric `step_index` (so the step
+ * propagates the verdict, Allure-style), and a trailing `capture/*` blob
+ * observation (so its screenshot / DOM / network evidence nests under the
+ * step that produced it, not in a side panel). Folded events stay
+ * reachable inside the step; an event with no `step_index`, or whose step
+ * can't be found, stays a standalone row.
  */
-function foldImplicitJudgments(nodes: TimelineNode[]): TimelineNode[] {
+function foldOntoSteps(nodes: TimelineNode[]): TimelineNode[] {
   const stepByIndex = new Map<number, StepNode>();
   for (const n of nodes) if (n.kind === "step") stepByIndex.set(n.stepIndex, n);
   const out: TimelineNode[] = [];
   for (const n of nodes) {
-    if (n.kind === "event" && n.event.kind === "assertion_evaluated") {
-      const si = n.event.step_index;
-      if (typeof si === "number") {
-        const target = stepByIndex.get(si);
+    if (n.kind === "event") {
+      const e = n.event;
+      if (e.kind === "assertion_evaluated" && typeof e.step_index === "number") {
+        const target = stepByIndex.get(e.step_index);
         if (target) {
           // A step may own several assertions (an explicit check can
           // assert two things about one call). A failing one wins for the
           // step's status/reason; otherwise keep the first.
           const prev = target.judgment;
-          const isFail = str(n.event.state) !== "pass";
+          const isFail = str(e.state) !== "pass";
           if (!prev || (isFail && str(prev.state) === "pass")) {
-            target.judgment = n.event;
+            target.judgment = e;
           }
-          target.events.push(n.event);
+          target.events.push(e);
+          continue;
+        }
+      }
+      // A trailing capture blob observation nests under its step.
+      if (
+        (e.kind === "step_observation" || e.kind === "setup_step_observation") &&
+        typeof e.blob_sha256 === "string" &&
+        typeof e.step_index === "number"
+      ) {
+        const target = stepByIndex.get(e.step_index);
+        if (target) {
+          target.events.push(e);
           continue;
         }
       }

@@ -631,6 +631,10 @@ li.ev.step-group.tone-inconclusive .step-reason { color: var(--inconclusive); }
   max-height: 22rem;
   font-size: 0.8rem;
 }
+/* #280 polish: capture evidence nested under its step. */
+.step-captures { margin: 0.2rem 0 0.4rem 1.6rem; }
+.step-captures .artifact { margin: 0.5rem 0; }
+.step-captures .artifact:first-of-type { margin-top: 0.2rem; }
 li.ev.step-group.tone-fail > details > summary { box-shadow: inset 2px 0 0 var(--fail); }
 li.ev.step-group.tone-inconclusive > details > summary { box-shadow: inset 2px 0 0 var(--inconclusive); }
 /* Only the step's OWN label takes the fail/inconclusive colour — a
@@ -685,6 +689,7 @@ li.ev.step-group.tone-inconclusive > details > summary .ev-label { color: var(--
 }
 .run-tab:hover { color: var(--text); }
 .run-tab.on { color: var(--text); border-bottom-color: var(--lg-accent); font-weight: 600; }
+.check-meta { margin: -0.4rem 0 0.7rem; display: flex; gap: 0.6rem; }
 .meta-line { margin-top: 1rem; }
 /* Suites filter chips (button form of the run-list `.filters .chip`). */
 .chips { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 1rem 0 0.6rem; }

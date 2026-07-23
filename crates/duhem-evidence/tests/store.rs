@@ -962,3 +962,53 @@ async fn setup_phase_spans_carry_no_check_id() {
         detail: None,
     };
 }
+
+/// #299: a writer with a live tee sends every event to the channel —
+/// stamped, in `seq` order, identical to what the store persisted —
+/// and a dropped receiver never disturbs the run's appends.
+#[tokio::test]
+async fn writer_tee_mirrors_persisted_events_in_order() {
+    let (_tmp, store) = open_store().await;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
+
+    let mut w = EvidenceWriter::begin(store.clone(), RUN_ID, "v.yml", BTreeMap::new())
+        .await
+        .unwrap()
+        .with_tee(tx);
+    w.append(run_started("v.yml", BTreeMap::new()))
+        .await
+        .unwrap();
+    w.append(EventPayload::CheckFinished {
+        check_id: "AC-1.1".into(),
+        verdict: VerdictState::Pass,
+    })
+    .await
+    .unwrap();
+    w.append(EventPayload::RunFinished {
+        verdict: VerdictState::Pass,
+    })
+    .await
+    .unwrap();
+
+    // The tee saw the stamped events, in seq order, matching the store.
+    let mut teed = Vec::new();
+    while let Ok(evt) = rx.try_recv() {
+        teed.push(evt);
+    }
+    let persisted = Trace::from_store(store.as_ref(), RUN_ID).await.unwrap();
+    assert_eq!(teed.len(), 3);
+    assert_eq!(
+        teed.iter().map(|e| e.seq).collect::<Vec<_>>(),
+        vec![0, 1, 2]
+    );
+    assert_eq!(teed, persisted.events());
+
+    // Receiver gone → appends keep succeeding (send failure ignored).
+    drop(rx);
+    w.append(EventPayload::CheckFinished {
+        check_id: "AC-1.2".into(),
+        verdict: VerdictState::Pass,
+    })
+    .await
+    .expect_err("run is sealed after run_finished — the store, not the tee, rejects");
+}

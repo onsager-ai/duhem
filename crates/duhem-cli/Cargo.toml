@@ -13,6 +13,8 @@ path = "src/main.rs"
 [dependencies]
 duhem-schema = { path = "../duhem-schema" }
 duhem-judge = { path = "../duhem-judge" }
+# Live progress renderer (#299) computes durations off evidence `ts`.
+chrono.workspace = true
 duhem-runtime = { path = "../duhem-runtime" }
 duhem-actions = { path = "../duhem-actions" }
 duhem-evidence = { path = "../duhem-evidence" }

@@ -20,6 +20,7 @@ mod filter;
 mod init;
 mod inputs;
 mod live_link;
+mod live_progress;
 mod mcp_cmd;
 mod reporter;
 mod reporter_config;
@@ -214,6 +215,15 @@ enum Cmd {
             default_value = "on-failure"
         )]
         capture: duhem_runtime::CapturePolicy,
+        /// Force live per-criterion progress on stderr (spec #299),
+        /// regardless of whether stderr is a TTY. Auto-detected by
+        /// default: on when stderr is a terminal, off when piped/CI.
+        /// stdout is never touched — reporters stay machine-stable.
+        #[arg(long = "live", default_value_t = false, conflicts_with = "no_live")]
+        live: bool,
+        /// Suppress live progress even on a TTY (spec #299).
+        #[arg(long = "no-live", default_value_t = false)]
+        no_live: bool,
         /// Also record a screencast video of each ui check (spec #215),
         /// kept under the same `--capture` policy as the screenshot/DOM.
         /// Opt-in and off by default: video blobs are large and ship to
@@ -338,6 +348,8 @@ fn main() -> ExitCode {
             dry_run,
             no_env_up,
             keep_env,
+            live,
+            no_live,
             capture,
             capture_video,
         }) => {
@@ -386,6 +398,12 @@ fn main() -> ExitCode {
                 dry_run,
                 no_env_up,
                 keep_env,
+                // Tri-state: forced on / forced off / auto (TTY).
+                live: match (live, no_live) {
+                    (true, _) => Some(true),
+                    (_, true) => Some(false),
+                    _ => None,
+                },
                 capture,
                 capture_video,
             }))

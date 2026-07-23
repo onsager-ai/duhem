@@ -54,6 +54,13 @@ pub struct EvidenceWriter {
     store: Arc<dyn Store>,
     run_id: String,
     next_seq: u64,
+    /// Optional live tee (#299): every successfully persisted event is
+    /// also sent here, stamped, in `seq` order. This is the runtime's
+    /// in-process progress seam — a live terminal renderer (or any
+    /// same-process observer) subscribes without polling the store.
+    /// Send failures are ignored: a dropped receiver must never affect
+    /// the run or the evidence.
+    tee: Option<tokio::sync::mpsc::UnboundedSender<Event>>,
 }
 
 impl EvidenceWriter {
@@ -97,7 +104,17 @@ impl EvidenceWriter {
             store,
             run_id,
             next_seq: 0,
+            tee: None,
         })
+    }
+
+    /// Attach a live tee (#299): every event appended from here on is
+    /// also sent to `tx` after it committed to the store. Evidence
+    /// stays the single source of truth — the tee only ever sees what
+    /// the store already accepted.
+    pub fn with_tee(mut self, tx: tokio::sync::mpsc::UnboundedSender<Event>) -> Self {
+        self.tee = Some(tx);
+        self
     }
 
     /// The run this writer is appending to.
@@ -120,6 +137,11 @@ impl EvidenceWriter {
             payload,
         };
         self.store.append_event(&self.run_id, &evt).await?;
+        // Tee after the commit (#299): observers only see persisted
+        // events, and a gone receiver is silently ignored.
+        if let Some(tx) = &self.tee {
+            let _ = tx.send(evt);
+        }
         let seq = self.next_seq;
         self.next_seq += 1;
         Ok(seq)

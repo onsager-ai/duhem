@@ -575,3 +575,57 @@ criteria:
           - matches:
               value: $steps.validate_manifest_dir.outputs.stdout
               pattern: 'OK'
+
+  # ==========================================================================
+  # #299 — live terminal progress. `duhem run` renders per-criterion progress
+  # on stderr while the run executes (auto on a TTY; `--live` forces it for
+  # captured-stderr consumers like this check). stdout keeps the reporter's
+  # byte-stable contract. The inner run reuses AC-5's offline
+  # `defaults-example` target, so the whole check stays page-free.
+  # ==========================================================================
+  - id: AC-12
+    description: |
+      An operator watching a run in the terminal sees progress while it
+      executes — each criterion announces itself and reports its
+      verdict as it happens — and machine consumers see no change: the
+      progress narration rides stderr, never the reporter's stdout.
+    checks:
+      - id: AC-12.1
+        description: |
+          `duhem run --live verifications/defaults-example --reporter
+          json` — the captured stderr carries the live renderer's
+          criterion start lines with INCREMENTING ordinals (`▶ … (1/2)`
+          then `▶ … (2/2)`, defaults-example's leaf has two criteria)
+          and a `✔ … pass` verdict line, while stdout is still exactly
+          the one-line JSON summary with the top-level `pass` (same
+          assertion as AC-5). One invocation proves both halves of the
+          contract.
+        steps:
+          - id: run_live
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - run
+                - verifications/defaults-example
+                - --live
+                - --reporter
+                - json
+              cwd: $inputs.repo_dir
+              within: 120s
+        assertions:
+          - $steps.run_live.outputs.exit_code == 0
+          # stderr: the live narration happened, ordinals incrementing.
+          - matches:
+              value: $steps.run_live.outputs.stderr
+              pattern: '▶ .+ \(1/2\)'
+          - matches:
+              value: $steps.run_live.outputs.stderr
+              pattern: '▶ .+ \(2/2\)'
+          - matches:
+              value: $steps.run_live.outputs.stderr
+              pattern: '✔ .+ pass'
+          # stdout: still exactly the machine reporter's summary.
+          - matches:
+              value: $steps.run_live.outputs.stdout
+              pattern: '"verdict":"pass"'

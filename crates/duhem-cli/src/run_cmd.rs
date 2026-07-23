@@ -2,7 +2,7 @@
 //! the file-token budget; the clap surface stays in `main.rs`).
 
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -36,6 +36,10 @@ pub struct RunArgs {
     pub dry_run: bool,
     pub no_env_up: bool,
     pub keep_env: bool,
+    /// Live per-criterion progress on stderr (#299): `Some(true)` /
+    /// `Some(false)` from `--live` / `--no-live`; `None` = auto
+    /// (on iff stderr is a TTY).
+    pub live: Option<bool>,
     pub capture: duhem_runtime::CapturePolicy,
     pub capture_video: bool,
 }
@@ -53,9 +57,15 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         dry_run,
         no_env_up,
         keep_env,
+        live,
         capture,
         capture_video,
     } = args;
+
+    // Live progress posture (#299), resolved once: forced by
+    // `--live`/`--no-live`, else on iff stderr is a terminal (a piped
+    // or CI stderr stays clean without asking).
+    let live_progress = live.unwrap_or_else(|| std::io::stderr().is_terminal());
 
     // Recording is enabled at context-open time, so it's a run-level
     // decision (#215). Only record when the user asked *and* captures
@@ -555,9 +565,27 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         if let Some(f) = leaf_filter {
             engine = engine.with_filter(f);
         }
+        // Live terminal progress (#299): subscribe a renderer to the
+        // engine's progress sink. It folds the same evidence events
+        // the store persists onto stderr and returns at
+        // `run_finished`; on the engine-error path (no `run_finished`
+        // arrives) it is aborted rather than awaited.
+        let renderer = if live_progress {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            let plan = crate::live_progress::Plan::from_def(&def);
+            engine = engine.with_progress(tx);
+            Some(tokio::spawn(crate::live_progress::render_to_stderr(
+                rx, plan,
+            )))
+        } else {
+            None
+        };
         let outcome = match engine.run_with_metadata(&def, inputs).await {
             Ok(o) => o,
             Err(e) => {
+                if let Some(r) = renderer {
+                    r.abort();
+                }
                 eprintln!("engine ({}): {e}", leaf_path.display());
                 if let Some(s) = suite_env.take() {
                     let _ = s.tear_down(keep_env).await;
@@ -565,6 +593,12 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
+        if let Some(r) = renderer {
+            // Returns as soon as the renderer consumed `run_finished`
+            // (already sent — the run is over), so no reporter output
+            // interleaves with a late progress line.
+            let _ = r.await;
+        }
         leaf_outcomes.push((name, outcome));
     }
 

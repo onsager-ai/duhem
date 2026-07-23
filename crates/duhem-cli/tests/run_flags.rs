@@ -1283,3 +1283,77 @@ fn no_dashboard_base_means_no_live_line() {
         "no base → no live line"
     );
 }
+
+/// #299: `--live` forces per-criterion progress onto stderr even
+/// without a TTY (the flag exists exactly for captured-stderr
+/// consumers like the self-verification VD), while stdout keeps the
+/// default reporter's byte-stable `pass\n`.
+#[test]
+fn live_flag_renders_per_criterion_progress_on_stderr() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ONE_CRITERION);
+    let db = tmp.path().join("duhem.db");
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--db")
+        .arg(&db)
+        .arg("--live")
+        .output()
+        .expect("spawn duhem");
+
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"pass\n", "stdout stays machine-stable");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("▶ AC-1 (1/1)…"),
+        "criterion start line expected: {stderr}"
+    );
+    assert!(
+        stderr.contains("✔ AC-1 pass"),
+        "criterion verdict line expected: {stderr}"
+    );
+}
+
+/// #299 default posture: stderr is not a TTY under `Command`, so
+/// without `--live` no progress renders — piped/CI output is
+/// byte-identical to the pre-#299 CLI.
+#[test]
+fn no_tty_and_no_flag_means_no_progress_lines() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ONE_CRITERION);
+    let db = tmp.path().join("duhem.db");
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--db")
+        .arg(&db)
+        .output()
+        .expect("spawn duhem");
+
+    assert!(out.status.success());
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("▶"),
+        "auto mode must stay silent without a TTY"
+    );
+}
+
+/// #299: `--live --no-live` is a clap conflict, rejected before any
+/// work happens.
+#[test]
+fn live_and_no_live_conflict() {
+    let out = Command::new(bin())
+        .arg("run")
+        .arg("whatever.yml")
+        .arg("--live")
+        .arg("--no-live")
+        .output()
+        .expect("spawn duhem");
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("cannot be used with"),
+        "clap conflict expected"
+    );
+}

@@ -17,7 +17,7 @@
 mod location;
 mod sqlite;
 
-pub use location::{project_db_path, project_slug, state_root};
+pub use location::{dashboard_addr_path, project_db_path, project_slug, state_root};
 pub use sqlite::SqliteStore;
 
 use std::collections::BTreeMap;

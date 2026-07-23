@@ -1,0 +1,26 @@
+# The IN-FLIGHT run behind AC-4 (#298): `scripts/up.sh` starts this VD
+# backgrounded (`--run-id dashboard-live-run`) and it deliberately
+# holds its single step open (sleep) for the whole regression run, so
+# the dashboard's runs list has a genuinely live run to show —
+# `verdict: null`, `live: true` — while AC-4 asserts against it.
+# `scripts/down.sh` kills it; it is never expected to finish, and its
+# verdict is irrelevant to the suite.
+verification: dashboard-live-fixture
+
+criteria:
+  - id: AC-1
+    description: |
+      Holds a real run in-flight long enough for the dashboard
+      regression suite to observe it live.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: hold
+            uses: cli/invoke
+            with:
+              # Far longer than the suite's worst-case wall clock; the
+              # run is killed by down.sh, never awaited.
+              command: [sleep, "600"]
+              within: 900s
+        assertions:
+          - $steps.hold.outputs.exit_code == 0

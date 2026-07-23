@@ -57,7 +57,23 @@ fi
 rm -rf "$WORK"
 mkdir -p "$WORK"
 
-# --- 1. Produce a real run --------------------------------------------
+# --- 1a. Start a real IN-FLIGHT run (#298, AC-4) -----------------------
+# Backgrounded FIRST so its `started_at` predates the finished fixture
+# run below — the list orders newest-first, keeping the finished run at
+# body[0] (AC-1's anchor) and this live one at body[1]. It holds a
+# `sleep` step open far longer than the suite's wall clock; `down.sh`
+# kills the group. Same store, safe concurrently (WAL + busy timeout).
+LIVE_RUN_ID="dashboard-live-run"
+LIVE_PID_FILE="${WORK}/live-run.pid"
+echo "up.sh: starting in-flight run '$LIVE_RUN_ID' (backgrounded sleep VD)"
+setsid "$DUHEM_BIN" run fixture/live-fixture.yml --db "$DB" --run-id "$LIVE_RUN_ID" \
+  >"${WORK}/live-run.log" 2>&1 &
+echo $! > "$LIVE_PID_FILE"
+# Let its run header commit before the fixture run starts, so the
+# newest-first ordering between the two is deterministic.
+sleep 2
+
+# --- 1b. Produce a real FINISHED run -----------------------------------
 echo "up.sh: producing fixture run with '$DUHEM_BIN run fixture/dashboard-fixture.yml'"
 "$DUHEM_BIN" run fixture/dashboard-fixture.yml --db "$DB" --run-id "$RUN_ID"
 echo "up.sh: fixture run recorded as run id '$RUN_ID' in $DB"

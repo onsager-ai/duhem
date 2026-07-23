@@ -406,6 +406,12 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         }
     };
 
+    // Live on-ramp (#298): if a dashboard is serving this store (or
+    // the operator exported DUHEM_DASHBOARD_URL), each leaf's live
+    // deep link is printed before its run starts. Resolved once per
+    // invocation; None costs nothing downstream.
+    let dashboard_base = crate::live_link::resolve_dashboard_base(&db_path);
+
     // Manifest-level shared environment (spec #131): provision the whole
     // suite's stack once, here, instead of each leaf standing up its own.
     // While it's up, leaves run with per-leaf provisioning suppressed
@@ -515,8 +521,23 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             engine = engine.with_browser(b);
         }
         engine = engine.with_store(store.clone());
-        if let Some(id) = pinned_run_id.as_deref() {
+        // Run-id pinning: an operator `--run-id` wins; otherwise, when
+        // a live link is printable, mint the id here (the same ULID
+        // mint the engine would run) so the URL exists before the run
+        // does. With no dashboard in sight the engine mints as before.
+        let run_id: Option<String> = match pinned_run_id.as_deref() {
+            Some(id) => Some(id.to_string()),
+            None if dashboard_base.is_some() => Some(duhem_evidence::new_run_id()),
+            None => None,
+        };
+        if let Some(id) = run_id.as_deref() {
             engine = engine.with_run_id(id);
+        }
+        // stderr, before the (blocking) run: stdout stays byte-stable
+        // for machine reporters, and the operator can click in while
+        // the run is still executing — the run page streams live.
+        if let (Some(base), Some(id)) = (dashboard_base.as_deref(), run_id.as_deref()) {
+            eprintln!("live: {}", crate::live_link::run_page_url(base, id));
         }
         // Target identity (#191): the declared `project:` (leaf wins
         // over manifest) enters the resolution ladder; the VD's

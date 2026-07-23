@@ -1,11 +1,10 @@
 # Adopt Duhem in a product repo (`.duhem/` template)
 
 Drop-in skeleton for **co-locating Duhem Verification Definitions with
-the product they verify** — the concrete form of Pattern D
-(`docs/duhem-spec.md` §10.1). Duhem is used here as a *tool*: your
-repo owns its checks, next to the code they exercise. Copy the
-`.duhem/` tree, the `.claude/skills/` skill, and the `CODEOWNERS`
-stanza into your product repo.
+the product they verify**. Duhem is used here as a *tool*: your repo
+owns its checks, next to the code they exercise. Copy the `.duhem/`
+tree, the `.claude/skills/` skill, and the `CODEOWNERS` stanza into
+your product repo.
 
 ```
 your-product/
@@ -21,8 +20,8 @@ your-product/
 
 `.duhem/` is hidden and tool-namespaced (like `.github/`), so it reads
 as "this repo adopts the Duhem tool" and never collides with your own
-`verifications/` or test folders. Inside it, the normal manifest +
-leaf shape applies (§10.1 Pattern B/C, §10.4).
+`verifications/` or test folders. Inside it, a root manifest
+(`duhem.yml`) aggregates one or more leaf Verification Definitions.
 
 Commit the `.duhem/` VDs, but ignore the evidence DB `duhem run`
 writes there — add this to your `.gitignore`:
@@ -97,20 +96,18 @@ jobs:
 
 Then add the `duhem` check as required in branch protection.
 
-## Mode B — Duhem monitors drift (nothing to set up here)
+## Mode B — Duhem monitors compatibility (nothing to set up here)
 
-Duhem's own CI checks your repo out at a ref and runs your `.duhem/`
-suite with a freshly-built `duhem`, so a Duhem change that would break
-your VD turns red on the *Duhem* side before it ships. This is the
-reframed dogfood — drift monitoring, not a trust seam (§11.2). You
-don't configure it; the Duhem maintainers point their drift lane at
-your repo (see `.github/workflows/drift-chreode.yml` for the shape).
+The Duhem project can run your `.duhem/` suite against a freshly-built
+`duhem` in its own CI, so a change to Duhem that would break your VD
+surfaces on the *Duhem* side before it ships. You don't configure this;
+it's arranged with the Duhem maintainers.
 
 ## Guard against silent self-weakening
 
 Because you own your VD, a PR could in principle weaken a check to dodge
-a failing verdict. Two lightweight guards (§11.2 — review/evidence
-discipline, not a structural boundary):
+a failing verdict. Two lightweight guards (review and evidence
+discipline):
 
 1. **CODEOWNERS on `/.duhem/`** (the `CODEOWNERS` file here) routes VD
    edits to a verifier reviewer. Needs branch protection with "Require
@@ -119,6 +116,5 @@ discipline, not a structural boundary):
    `(verifier_repo/sha, target_repo/sha)` provenance the product PR
    can't rewrite.
 
-The trust that makes a `pass` meaningful is mechanical judgment (no LLM
-in the judge) plus a self-consistent Duhem contract — not where the VD
-lives. See the §11.2 Duhem-as-tool Alignment note.
+What makes a `pass` meaningful is mechanical judgment (no LLM in the
+judge) plus a self-consistent Duhem contract — not where the VD lives.

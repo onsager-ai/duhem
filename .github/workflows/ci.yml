@@ -72,6 +72,15 @@ jobs:
       - name: skill-scrub (published skills ↔ no internal vocab)
         run: cargo run -p xtask --quiet -- skill-scrub
 
+      # DX-currency gate (#288). readme-framing hard-fails; the currency
+      # check is warn-only for now (flip to --mode=fail after a bake).
+      # A PR that changes user-visible surface with no DX-doc update can
+      # declare it deliberate with a `<!-- dx:none -->` marker in the body.
+      - name: dx-drift (DX surfaces ↔ product currency)
+        env:
+          DUHEM_DX_IMPACT_NONE: ${{ contains(github.event.pull_request.body, '<!-- dx:none -->') && '1' || '' }}
+        run: cargo run -p xtask --quiet -- dx-drift --mode=warn
+
       - name: changelog touch check
         if: github.event_name == 'pull_request'
         env:

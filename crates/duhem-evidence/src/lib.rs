@@ -38,7 +38,9 @@ pub use store::{
     StoreError, TargetStatus, dashboard_addr_path, project_db_path, project_slug, state_root,
     verification_name,
 };
-pub use writer::{EvidenceWriter, Sha256Hex, WriterError, run_started};
+pub use writer::{
+    EvidenceWriter, Sha256Hex, WriterError, run_started, run_started_with_definition,
+};
 
 /// Generate a new run id — a ULID (sortable, opaque, time-prefixed).
 pub fn new_run_id() -> String {

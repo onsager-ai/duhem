@@ -27,7 +27,7 @@ use duhem_actions::Page;
 use duhem_actions::{Outcome, RunBrowser};
 use duhem_evidence::{
     EventPayload, EvidenceWriter, RunScope, SqliteStore, Store, StoreError, VerdictState,
-    new_run_id, project_db_path, run_started,
+    new_run_id, project_db_path, run_started_with_definition,
 };
 use duhem_judge::{
     AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusivePolicy, RunVerdict,
@@ -75,6 +75,11 @@ pub struct Engine {
     /// [`Engine::with_definition_path`]; falls back to
     /// `def.verification` when absent.
     definition_path: Option<String>,
+    /// Snapshot of the Verification Definition *source* (raw YAML),
+    /// recorded on `run_started` so the run is self-describing (spec
+    /// #302). Set via [`Engine::with_definition_source`]; `None` records
+    /// no snapshot.
+    definition_source: Option<String>,
     /// Optional check-level filter (spec on issue #23). When set, only
     /// matching checks execute; non-matching checks are skipped with
     /// no evidence emission.
@@ -145,6 +150,7 @@ impl Engine {
             store: None,
             browser: None,
             definition_path: None,
+            definition_source: None,
             filter: None,
             seed: None,
             run_id: None,
@@ -265,7 +271,11 @@ impl Engine {
         }
 
         writer
-            .append(run_started(evidence_path.clone(), inputs.clone()))
+            .append(run_started_with_definition(
+                evidence_path.clone(),
+                inputs.clone(),
+                self.definition_source.clone(),
+            ))
             .await?;
 
         // Resolve the Verification Definition's directory so relative
@@ -840,6 +850,7 @@ mod tests {
             store: Some(Arc::new(store)),
             browser: None,
             definition_path: None,
+            definition_source: None,
             filter: None,
             seed: None,
             run_id: None,

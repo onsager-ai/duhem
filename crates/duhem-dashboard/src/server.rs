@@ -38,6 +38,8 @@ pub fn router(reader: EvidenceReader) -> Router {
         .route("/api/runs/{run_id}/failure.json", get(failure_envelope))
         .route("/api/runs/{run_id}/failure/{pair}", get(failing_check))
         .route("/api/runs/{run_id}/trace.jsonl", get(raw_trace))
+        .route("/api/runs/{run_id}/definition", get(run_definition))
+        .route("/api/runs/{run_id}/definition.yml", get(run_definition))
         .route("/api/runs/{run_id}/artifact/{artifact_id}", get(artifact))
         .route("/api/runs/{run_id}/live", get(live))
         .route(
@@ -178,6 +180,25 @@ async fn raw_trace(State(reader): State<EvidenceReader>, Path(run_id): Path<Stri
             ([(header::CONTENT_TYPE, "application/x-ndjson")], jsonl).into_response()
         }
         Ok(None) => not_found("run"),
+        Err(e) => e.into_response(),
+    }
+}
+
+/// `GET /api/runs/:run_id/definition` (#302): the recorded VD source
+/// snapshot as raw YAML, so a client can show *what was verified*. `404`
+/// when the run is unknown or predates the snapshot (the SPA only asks
+/// when run detail reports `has_definition`).
+async fn run_definition(
+    State(reader): State<EvidenceReader>,
+    Path(run_id): Path<String>,
+) -> Response {
+    match reader.run_definition(&run_id).await {
+        Ok(Some(yaml)) => (
+            [(header::CONTENT_TYPE, "application/x-yaml; charset=utf-8")],
+            yaml,
+        )
+            .into_response(),
+        Ok(None) => not_found("definition"),
         Err(e) => e.into_response(),
     }
 }

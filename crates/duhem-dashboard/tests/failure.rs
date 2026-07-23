@@ -90,6 +90,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, network: Option
         assertion_index: 0,
         state,
         detail,
+        expr: None,
         step_index: None,
     })
     .await

@@ -125,10 +125,11 @@ jobs:
       - name: cargo test (ignored browser suites)
         run: cargo test -p duhem-actions --test ui_smoke --test api_observe_smoke -- --ignored
 
-  # Exercises `duhem run`'s auto-provision (#295): install the sidecar's
-  # npm deps + Chromium *system libraries* but NOT the browser binary, so
-  # a `ui/*` run must fetch Chromium itself instead of hard-failing (the
-  # regression this lane guards). Distinct from `ui-smoke`, which
+  # Exercises `duhem run`'s auto-provision (#295): a `ui/*` run with no
+  # usable sidecar must fetch Chromium itself instead of hard-failing (the
+  # regression this lane guards). It runs against a node_modules-less
+  # sidecar copy so the #105 discovery fallback can't satisfy the launch
+  # from the runner's system Chrome. Distinct from `ui-smoke`, which
   # pre-installs the browser and so never takes the auto-provision path.
   browser-autoprovision-smoke:
     name: browser-autoprovision-smoke
@@ -146,17 +147,11 @@ jobs:
         with:
           node-version: '24'
 
-      # Sidecar npm deps + Chromium's OS libraries only — deliberately NO
-      # `playwright install chromium`, so the browser binary is absent and
-      # the run has to auto-provision it.
-      - name: Install sidecar deps + Chromium system libs (no browser)
-        working-directory: crates/duhem-actions/sidecar
-        run: |
-          npm ci
-          npx --yes playwright install-deps chromium
-
-      - name: Ensure no Chromium binary is pre-installed
-        run: rm -rf ~/.cache/ms-playwright/chromium* || true
+      # Chromium's OS libraries, so the browser the run auto-provisions can
+      # actually launch. No browser binary and no sidecar node_modules — the
+      # run below installs Chromium itself.
+      - name: Install Chromium system libs
+        run: npx --yes playwright@1.61.1 install-deps chromium
 
       - name: Write a browser-needing VD (known-good example.com baseline)
         run: |
@@ -179,18 +174,28 @@ jobs:
                         within: 15s
           YAML
 
+      # Force the auto-provision path deterministically. GitHub runners ship
+      # /usr/bin/google-chrome, which the sidecar's discovery fallback (#105)
+      # would use instead of installing anything. Point DUHEM_SIDECAR_DIR at a
+      # copy with NO node_modules: that sidecar can't even import Playwright,
+      # so launch fails regardless of any system browser and `duhem run` must
+      # auto-provision. (Removing the ms-playwright cache is not enough — the
+      # #105 discovery ladder also searches PATH.)
       - name: Run — expect auto-provision, then pass
         run: |
           set -o pipefail
-          cargo run -p duhem-cli --quiet -- run "${RUNNER_TEMP}/autoprovision.duhem.yml" 2> >(tee "${RUNNER_TEMP}/run.stderr" >&2)
+          SC="${RUNNER_TEMP}/sidecar"; mkdir -p "$SC"
+          cp crates/duhem-actions/sidecar/{index.mjs,package.json,package-lock.json,jsconfig.json} "$SC"/
+          DUHEM_SIDECAR_DIR="$SC" cargo run -p duhem-cli --quiet -- run "${RUNNER_TEMP}/autoprovision.duhem.yml" 2> >(tee "${RUNNER_TEMP}/run.stderr" >&2)
           grep -q "Chromium not found — installing it once" "${RUNNER_TEMP}/run.stderr" \
-            || { echo "::error::auto-provision notice not emitted — the run found a pre-existing browser, so this lane proved nothing"; exit 1; }
+            || { echo "::error::auto-provision notice not emitted — the run did not take the install path"; exit 1; }
 
       - name: Opt-out (DUHEM_NO_BROWSER_INSTALL=1) must fail fast with the hint
         run: |
-          rm -rf ~/.cache/ms-playwright/chromium* || true
+          SC="${RUNNER_TEMP}/sidecar-optout"; mkdir -p "$SC"
+          cp crates/duhem-actions/sidecar/{index.mjs,package.json,package-lock.json,jsconfig.json} "$SC"/
           set +e
-          DUHEM_NO_BROWSER_INSTALL=1 cargo run -p duhem-cli --quiet -- run "${RUNNER_TEMP}/autoprovision.duhem.yml" 2> "${RUNNER_TEMP}/optout.stderr"
+          DUHEM_NO_BROWSER_INSTALL=1 DUHEM_SIDECAR_DIR="$SC" cargo run -p duhem-cli --quiet -- run "${RUNNER_TEMP}/autoprovision.duhem.yml" 2> "${RUNNER_TEMP}/optout.stderr"
           code=$?
           set -e
           cat "${RUNNER_TEMP}/optout.stderr"

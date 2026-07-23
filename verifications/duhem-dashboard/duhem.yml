@@ -253,3 +253,39 @@ criteria:
           # stream to the same `pass` the API and SPA surface), read via
           # nested navigation into the parsed event data (#104).
           - $steps.sse.outputs.last_event.data.verdict == "pass"
+
+  - id: AC-4
+    description: |
+      An operator watching the runs list sees in-flight work: a run
+      that is still executing is already present in the list, marked
+      live, before any verdict exists — the list is an on-ramp to the
+      live run page, not just an archive of finished runs (#298).
+    checks:
+      - id: AC-4.1
+        description: |
+          `scripts/up.sh` backgrounds a second, deliberately held-open
+          run (`dashboard-live-run`, a sleeping `cli/invoke` — see
+          `fixture/live-fixture.yml`) that is still executing while
+          this suite runs. The runs list must carry it alongside the
+          finished fixture run, flagged `live: true` with no verdict,
+          while the finished run stays `live: false` — the exact
+          discrimination the SPA's "● live" badge and the CLI's live
+          link depend on.
+        steps:
+          - id: list
+            uses: api/call
+            with:
+              method: GET
+              url: $inputs.runs_url
+              within: 15s
+        assertions:
+          - $steps.list.outputs.status == 200
+          # Newest-first ordering: the finished fixture run (started
+          # last) anchors body[0]; the older, still-running one is
+          # body[1] — in the list while mid-flight, marked live.
+          - $steps.list.outputs.body[1].run_id == "dashboard-live-run"
+          - $steps.list.outputs.body[1].live == true
+          # The finished run is NOT flagged live: the flag genuinely
+          # discriminates in-flight from finished, rather than being
+          # always-on.
+          - $steps.list.outputs.body[0].live == false

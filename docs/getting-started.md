@@ -68,6 +68,18 @@ A `fail` names the assertion that broke; an `inconclusive` means Duhem
 couldn't observe cleanly (a timeout, an environment that wouldn't come
 up) and deliberately refuses to call that a pass.
 
+**Watch it live.** If `duhem dashboard` is serving the same store (or
+`DUHEM_DASHBOARD_URL` points at one), `duhem run` prints the run's
+dashboard deep link on stderr *before* the run starts:
+
+```
+live: http://127.0.0.1:7878/#/run/01JC…
+```
+
+Open it while the run executes — the run page streams each step as it
+happens, and the runs list refreshes itself, so an in-flight run shows
+up (marked `● live`) without a reload.
+
 ## 4. The anatomy of a VD
 
 ```yaml

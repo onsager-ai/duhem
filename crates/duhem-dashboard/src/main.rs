@@ -133,11 +133,52 @@ async fn serve(
         "duhem dashboard listening on http://{addr}/ (store: {})",
         db_path.display()
     );
-    match axum::serve(listener, router(reader)).await {
+
+    // Advertise the base URL next to the store (#298): `duhem run`
+    // against the same DB reads this to print a clickable live-run
+    // URL. Best-effort — a dashboard that can't write the file still
+    // serves; a stale file after a crash is defused by the CLI's
+    // connect probe.
+    let addr_file = duhem_evidence::dashboard_addr_path(db_path);
+    if !addr.is_empty()
+        && let Err(e) = std::fs::write(&addr_file, format!("http://{addr}"))
+    {
+        eprintln!("advertise {}: {e}", addr_file.display());
+    }
+
+    let result = axum::serve(listener, router(reader))
+        .with_graceful_shutdown(shutdown_signal())
+        .await;
+    // Withdraw the advertisement on the way out (best-effort).
+    let _ = std::fs::remove_file(&addr_file);
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("serve: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Resolve on Ctrl-C or SIGTERM so serve() unwinds normally and the
+/// `dashboard.addr` advertisement is removed instead of left stale.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        () = ctrl_c => {},
+        () = terminate => {},
     }
 }

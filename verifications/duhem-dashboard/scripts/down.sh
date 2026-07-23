@@ -11,6 +11,21 @@ set -u
 PORT="${DUHEM_DASHBOARD_PORT:-7878}"
 WORK="${TMPDIR:-/tmp}/duhem-dashboard-vd-${PORT}"
 PID_FILE="${WORK}/dashboard.pid"
+LIVE_PID_FILE="${WORK}/live-run.pid"
+
+# Kill the deliberately in-flight AC-4 run first (#298): `up.sh`
+# started it via `setsid`, so signal the whole group (the `duhem run`
+# wrapper AND its sleeping `cli/invoke` child die together).
+if [ -f "$LIVE_PID_FILE" ]; then
+  LIVE_PID=$(cat "$LIVE_PID_FILE" 2>/dev/null || true)
+  if [ -n "${LIVE_PID:-}" ]; then
+    echo "down.sh: stopping in-flight live-run process group (pid $LIVE_PID)"
+    kill -TERM -- -"$LIVE_PID" 2>/dev/null || kill -TERM "$LIVE_PID" 2>/dev/null || true
+    sleep 1
+    kill -KILL -- -"$LIVE_PID" 2>/dev/null || kill -KILL "$LIVE_PID" 2>/dev/null || true
+  fi
+  rm -f "$LIVE_PID_FILE"
+fi
 
 if [ -f "$PID_FILE" ]; then
   PID=$(cat "$PID_FILE" 2>/dev/null || true)

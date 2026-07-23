@@ -1229,3 +1229,57 @@ criteria:
         "stderr should name the rule: {stderr}"
     );
 }
+
+/// #298: with a dashboard base configured, `duhem run` prints the live
+/// deep link on STDERR before the run — and stdout stays byte-stable
+/// (the default reporter's `pass\n` contract above). Not `#[ignore]`d:
+/// the fixture is page-free, and page-free runs skip the browser
+/// launch entirely (`needs_browser` in `run_cmd.rs`).
+#[test]
+fn live_link_prints_on_stderr_when_dashboard_base_is_set() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ONE_CRITERION);
+    let db = tmp.path().join("duhem.db");
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--db")
+        .arg(&db)
+        .env("DUHEM_DASHBOARD_URL", "http://127.0.0.1:7878")
+        .output()
+        .expect("spawn duhem");
+
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"pass\n", "stdout stays machine-stable");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("live: http://127.0.0.1:7878/#/run/"),
+        "stderr should carry the live deep link: {stderr}"
+    );
+}
+
+/// #298 flip side: no dashboard base resolvable → no live line, no
+/// stderr noise at all.
+#[test]
+fn no_dashboard_base_means_no_live_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ONE_CRITERION);
+    let db = tmp.path().join("duhem.db");
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--db")
+        .arg(&db)
+        .env_remove("DUHEM_DASHBOARD_URL")
+        .output()
+        .expect("spawn duhem");
+
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"pass\n");
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("live:"),
+        "no base → no live line"
+    );
+}

@@ -103,6 +103,20 @@ pub fn project_db_path(workdir: &Path) -> Result<PathBuf, StoreError> {
         .join("duhem.db"))
 }
 
+/// Where a serving dashboard advertises its base URL for the store at
+/// `db_path` (#298): a `dashboard.addr` file next to the DB. The
+/// dashboard writes `http://<host>:<port>` on bind and removes it on
+/// shutdown; `duhem run` reads it (and probes the address, so a stale
+/// file after a crash is harmless) to print a clickable live-run URL.
+/// Keyed by DB location because that is the rendezvous the two
+/// processes already share.
+pub fn dashboard_addr_path(db_path: &Path) -> PathBuf {
+    match db_path.parent() {
+        Some(dir) => dir.join("dashboard.addr"),
+        None => PathBuf::from("dashboard.addr"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

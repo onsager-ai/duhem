@@ -1,10 +1,13 @@
 // Runs list (#86): verification / verdict / date filters held in URL
 // state (bookmarkable), run-set rows expanding to their leaves (#49),
-// "● live" badges on in-progress runs (#84).
+// "● live" badges on in-progress runs (#84), list kept fresh by
+// visibility-aware polling (#298) so in-flight runs appear and
+// verdicts resolve without a manual reload.
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { fetchRuns, type RunsListEntry } from "../api";
+import { type RunsListEntry } from "../api";
+import { usePolledRuns } from "../hooks/use-polled-runs";
 import { VerdictBadge, formatDuration, formatStartedAt } from "../ui";
 
 const VERDICT_CHIPS = ["pass", "fail", "inconclusive", "live"] as const;
@@ -65,13 +68,8 @@ function Row({ entry, nested }: { entry: RunsListEntry; nested?: boolean }) {
 }
 
 export default function RunsList() {
-  const [runs, setRuns] = useState<RunsListEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { runs, error } = usePolledRuns();
   const [params, setParams] = useSearchParams();
-
-  useEffect(() => {
-    fetchRuns().then(setRuns, (e) => setError(String(e)));
-  }, []);
 
   const verification = params.get("verification") ?? "";
   const verdicts = params.getAll("verdict");

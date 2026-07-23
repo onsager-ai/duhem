@@ -19,6 +19,7 @@ mod export_cmd;
 mod filter;
 mod init;
 mod inputs;
+mod live_link;
 mod mcp_cmd;
 mod reporter;
 mod reporter_config;

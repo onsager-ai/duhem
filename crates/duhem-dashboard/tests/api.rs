@@ -4,10 +4,14 @@
 
 mod common;
 
+use std::collections::BTreeMap;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use duhem_dashboard::{EvidenceReader, events_to_jsonl, router};
-use duhem_evidence::{Store, Trace, replay};
+use duhem_evidence::{
+    EventPayload, EvidenceWriter, Store, Trace, VerdictState, replay, run_started_with_definition,
+};
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -263,6 +267,58 @@ async fn raw_trace_is_served_as_the_wire_format_stream() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, expected.as_bytes());
     assert_eq!(content_type, "application/x-ndjson");
+}
+
+#[tokio::test]
+async fn run_definition_is_served_verbatim_and_flagged_on_run_detail() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let yaml = "verification: t\ncriteria: []\n";
+    let mut w = EvidenceWriter::begin(
+        rw,
+        "01J0000000000000000000000A",
+        "verifications/x.yml",
+        BTreeMap::new(),
+    )
+    .await
+    .expect("writer");
+    w.append(run_started_with_definition(
+        "verifications/x.yml",
+        BTreeMap::new(),
+        Some(yaml.to_string()),
+    ))
+    .await
+    .unwrap();
+    w.append(EventPayload::RunFinished {
+        verdict: VerdictState::Pass,
+    })
+    .await
+    .unwrap();
+    w.finish().await.unwrap();
+    let reader = EvidenceReader::new(ro);
+
+    let (status, json) = get_json(reader.clone(), "/api/runs/01J0000000000000000000000A").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["has_definition"], true);
+
+    let (status, body, content_type) =
+        get(reader, "/api/runs/01J0000000000000000000000A/definition").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, yaml.as_bytes());
+    assert_eq!(content_type, "application/x-yaml; charset=utf-8");
+}
+
+#[tokio::test]
+async fn run_definition_absent_is_404_and_flagged_false_on_run_detail() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    common::write_passing_run(rw, "01J0000000000000000000000A", "verifications/x.yml").await;
+    let reader = EvidenceReader::new(ro);
+
+    let (status, json) = get_json(reader.clone(), "/api/runs/01J0000000000000000000000A").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["has_definition"], false);
+
+    let (status, _, _) = get(reader, "/api/runs/01J0000000000000000000000A/definition").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

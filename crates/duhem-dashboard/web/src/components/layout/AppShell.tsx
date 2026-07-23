@@ -1,15 +1,18 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { useWidthMode } from "@/hooks/use-width-mode";
+import { cn } from "@/lib/utils";
 import { AppSidebar } from "./AppSidebar";
 import { CommandMenu } from "./CommandMenu";
 import { TopBar } from "./TopBar";
 
 // The persistent app frame: fixed sidebar (desktop) / drawer (mobile),
-// sticky top bar, and a centered content column. Wraps every route.
+// sticky top bar, and a content column. Wraps every route.
 export function AppShell({ children }: { children: ReactNode }) {
   const [mobileNav, setMobileNav] = useState(false);
   const [cmdkOpen, setCmdkOpen] = useState(false);
+  const { wide, toggle: toggleWidth } = useWidthMode();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -39,8 +42,15 @@ export function AppShell({ children }: { children: ReactNode }) {
         <TopBar
           onMenu={() => setMobileNav(true)}
           onSearch={() => setCmdkOpen(true)}
+          wide={wide}
+          onToggleWidth={toggleWidth}
         />
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8 md:py-8">
+        <main
+          className={cn(
+            "mx-auto w-full flex-1 px-4 py-6 md:px-8 md:py-8",
+            wide ? "max-w-none" : "max-w-6xl",
+          )}
+        >
           {children}
         </main>
       </div>

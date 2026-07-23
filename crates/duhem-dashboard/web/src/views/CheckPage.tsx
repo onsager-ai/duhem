@@ -3,11 +3,15 @@
 // detail · Δ) with the raw JSON one click away, and a rich artifacts
 // panel (screenshots inline, network HAR as a request table).
 
+import { ChevronDown, ChevronRight, Maximize2, Minimize2, X } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { fetchCheck, type ArtifactRef, type CheckDetail, type SpanModel, type TraceEvent } from "../api";
 import { VerdictBadge, isImageArtifact } from "../ui";
-import { formatEvent, groupTimeline, stepStatus, summarizeCheck, type TimelineNode } from "../format";
+import { compactValue, formatEvent, groupTimeline, parseComparison, stepStatus, summarizeCheck, type TimelineNode } from "../format";
+import { EventIcon } from "../components/EventIcon";
+import { RunScaffold } from "./RunScaffold";
+import { useVd } from "./definition-context";
 
 // Plain-language "what happened", derived mechanically from the
 // recorded timeline (never re-judged, never LLM-authored).
@@ -29,6 +33,47 @@ export function CheckSummary({ detail }: { detail: CheckDetail }) {
   );
 }
 
+// The full detail of one assertion (#284 follow-up): *what was asserted*
+// (the recorded `expr` — the human-authored rule, e.g.
+// `$steps.ok.outputs.exit_code == 1`), then the observed result — a
+// failed comparison's `expected`/`actual` operands as a labelled pair
+// (the `actual` carries the fail accent), or the verbatim detail for a
+// non-comparison outcome (an inconclusive cause, a freeform judgment).
+function AssertionDetail({ expr, detail }: { expr?: string; detail: string }) {
+  const cmp = parseComparison(detail);
+  return (
+    <span className="assert-detail">
+      {expr && (
+        <code className="assert-expr" data-testid="assert-expr">
+          {expr}
+        </code>
+      )}
+      {cmp ? (
+        <span className="assert-cmp" data-testid="assert-cmp">
+          <span className="assert-cell assert-expected">
+            <span className="assert-k">expected</span>
+            <code className="assert-v">{cmp.expected}</code>
+          </span>
+          <span className="assert-cell assert-actual">
+            <span className="assert-k">actual</span>
+            <code className="assert-v">{cmp.actual}</code>
+          </span>
+        </span>
+      ) : detail ? (
+        <span className="assert-reason" data-testid="assert-reason">
+          {detail}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+// One trace event as a legible, self-contained row. The whole row is
+// the disclosure control (#284 follow-up): a `<details>` whose
+// `<summary>` is the entire icon·label·detail·time line plus a rotating
+// caret, so the raw JSON is one click *anywhere on the row* away — not a
+// pixel-hunt for a tiny "raw" link. A failed assertion also renders its
+// expected/actual pair inline, always visible above the raw.
 function TimelineRow({
   evt,
   prev,
@@ -40,31 +85,57 @@ function TimelineRow({
 }) {
   const fe = formatEvent(evt, prev);
   const art = fe.blobSha ? artifacts.find((a) => a.id === fe.blobSha) : undefined;
+  const isAssertion = evt.kind === "assertion_evaluated";
   return (
-    <li className={`ev tone-${fe.tone}`}>
-      <span className="ev-icon" aria-hidden="true">
-        {fe.icon}
-      </span>
-      <span className="ev-label">{fe.label}</span>
-      <span className="ev-detail">
-        {fe.detail && (
-          <span className="ev-detail-text" title={fe.detail}>
-            {fe.detail}
+    <li
+      className={`ev tone-${fe.tone}${isAssertion ? " ev-assertion" : ""}`}
+      data-testid={isAssertion ? "assertion-row" : undefined}
+    >
+      <details className="ev-raw">
+        <summary className="ev-summary">
+          <span className="ev-row">
+            <span className="ev-icon">
+              <EventIcon name={fe.icon} />
+            </span>
+            <span className="ev-label">{fe.label}</span>
+            <span className="ev-detail">
+              {!isAssertion && fe.detail && (
+                <span className="ev-detail-text" title={fe.detail}>
+                  {fe.detail}
+                </span>
+              )}
+              {art && (
+                <a
+                  className="ev-artifact"
+                  href={art.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  open
+                </a>
+              )}
+            </span>
+            <span className="ev-time" title={evt.ts}>
+              {fe.delta ?? ""}
+            </span>
+            <ChevronRight className="ev-caret" aria-hidden="true" />
           </span>
-        )}
-        {art && (
-          <a className="ev-artifact" href={art.url} target="_blank" rel="noreferrer">
-            open
-          </a>
-        )}
-        <details className="ev-raw">
-          <summary>raw</summary>
-          <pre>{fe.raw}</pre>
-        </details>
-      </span>
-      <span className="ev-time" title={evt.ts}>
-        {fe.delta ?? ""}
-      </span>
+          {isAssertion && (fe.expr || fe.detail) && (
+            <AssertionDetail expr={fe.expr} detail={fe.detail} />
+          )}
+        </summary>
+        <pre className="ev-raw-pre">{fe.raw}</pre>
+      </details>
+      {/* #284 follow-up: a captured screenshot renders inline in the
+          timeline (a thumbnail that expands), so the failure evidence is
+          right at the step that produced it — not only in the Artifacts
+          panel below. */}
+      {art && isImageArtifact(art.kind, art.url) && (
+        <div className="ev-shot" data-testid="ev-shot">
+          <ScreenshotArtifact artifact={art} />
+        </div>
+      )}
     </li>
   );
 }
@@ -87,40 +158,84 @@ function StepGroup({
   artifacts: ArtifactRef[];
 }) {
   const started = node.events[0];
-  const observations = node.events.filter(
-    (e) => e.kind === "step_observation" || e.kind === "setup_step_observation",
-  );
+  // Scalar (non-blob) observations — the outputs the action pulled from
+  // the live web (e.g. `satisfied`, `count`, `status`). Surfaced inline
+  // so a step is as legible as an assertion (#284 follow-up); blob
+  // captures are excluded (they render as their own rows / thumbnails).
+  const scalarObs = node.events
+    .filter(
+      (e) =>
+        (e.kind === "step_observation" || e.kind === "setup_step_observation") &&
+        typeof e.blob_sha256 !== "string",
+    )
+    .map((e) => ({
+      name: typeof e.output_name === "string" ? e.output_name : "output",
+      value: e.value,
+      seq: e.seq,
+    }));
   const fe = formatEvent(started, prevOf(started));
   const status = stepStatus(node);
+  // Overlay the authored step `id` from the recorded VD snapshot (#302):
+  // a named step reads by its intent (`refund`), with the action verb
+  // demoted into the detail. Anonymous steps keep the verb as the label.
+  const vd = useVd();
+  const cid = typeof started.criterion_id === "string" ? started.criterion_id : "";
+  const chid = typeof started.check_id === "string" ? started.check_id : "";
+  const stepId = vd?.stepId(cid, chid, node.stepIndex);
+  const label = stepId ?? fe.label;
+  const detailText = stepId ? [fe.label, fe.detail].filter(Boolean).join(" · ") : fe.detail;
   return (
     <li className={`ev step-group tone-${status.tone}`} data-testid="step-group">
       <details open={status.failed}>
         <summary>
-          <span className="ev-icon" aria-hidden="true">
-            {fe.icon}
-          </span>
-          <span className="ev-label">{fe.label}</span>
-          <span className="ev-detail">
-            {fe.detail && (
-              <span className="ev-detail-text" title={fe.detail}>
-                {fe.detail}
-              </span>
-            )}
-            <span className={`step-outcome tone-${status.tone}`} data-testid="step-outcome">
-              {status.icon} {status.label}
+          {/* Primary line: what the step did + whether it ran ok. */}
+          <span className="ev-row">
+            <span className="ev-icon">
+              <EventIcon name={fe.icon} />
             </span>
-            {observations.length > 0 && (
-              <span className="obs-count">{observations.length} obs</span>
-            )}
-            {status.reason && (
-              <span className="step-reason" data-testid="step-reason">
-                {status.reason}
+            <span className="ev-label">{label}</span>
+            <span className="ev-detail">
+              {detailText && (
+                <span className="ev-detail-text" title={detailText}>
+                  {detailText}
+                </span>
+              )}
+              <span className={`step-outcome tone-${status.tone}`} data-testid="step-outcome">
+                <EventIcon name={status.icon} />
+                {status.label}
               </span>
-            )}
+            </span>
+            <span className="ev-time" title={started.ts}>
+              {fe.delta ?? ""}
+            </span>
+            <ChevronRight className="ev-caret" aria-hidden="true" />
           </span>
-          <span className="ev-time" title={started.ts}>
-            {fe.delta ?? ""}
-          </span>
+          {/* Secondary block: what it observed + (for a failed judgment)
+              the reason — each on its own line, never crammed inline with
+              the action text (#284 follow-up). */}
+          {(scalarObs.length > 0 || status.reason) && (
+            <span className="step-detail">
+              {scalarObs.length > 0 && (
+                <span className="step-obs" data-testid="step-obs">
+                  {scalarObs.map((o) => {
+                    const judged = o.name === "satisfied";
+                    const tone = judged ? (o.value === true ? "ok" : "fail") : "";
+                    return (
+                      <span key={o.seq} className={`obs-chip${tone ? ` tone-${tone}` : ""}`}>
+                        <span className="obs-k">{o.name}</span>
+                        <code className="obs-v">{compactValue(o.value)}</code>
+                      </span>
+                    );
+                  })}
+                </span>
+              )}
+              {status.reason && (
+                <span className="step-reason" data-testid="step-reason">
+                  {status.reason}
+                </span>
+              )}
+            </span>
+          )}
         </summary>
         <ol className="timeline step-inner">
           {/* The full step detail — started (with its args), each
@@ -176,13 +291,14 @@ export function SpanChain({ spans }: { spans: SpanModel[] }) {
       <span className="muted">delivery web: </span>
       {spans.map((s, i) => (
         <span key={s.seq}>
-          {i > 0 && <span className="muted"> → </span>}
+          {i > 0 && <ChevronRight className="span-sep" aria-hidden="true" />}
           <span
             className={`span-node ${s.ok ? "span-ok" : "span-fail"}`}
             title={`step evidence #${s.seq}${s.detail ? ` — ${s.detail}` : ""}`}
           >
             {s.layer}
-            {!s.ok && s.detail ? ` ✕ ${s.detail}` : !s.ok ? " ✕" : ""}
+            {!s.ok && <X className="span-x" aria-hidden="true" />}
+            {!s.ok && s.detail ? s.detail : ""}
           </span>
         </span>
       ))}
@@ -265,9 +381,11 @@ function HarRow({ entry }: { entry: HarEntry }) {
         data-testid="har-row"
       >
         <td>
-          <span className="har-caret" aria-hidden="true">
-            {open ? "▾" : "▸"}
-          </span>{" "}
+          {open ? (
+            <ChevronDown className="har-caret" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="har-caret" aria-hidden="true" />
+          )}{" "}
           {entry.request.method}
         </td>
         <td className="har-url" title={entry.request.url}>
@@ -319,21 +437,26 @@ export function HarTable({ url }: { url: string }) {
   if (err) return <p className="muted">could not load HAR: {err}</p>;
   if (entries === null) return <p className="muted">loading requests…</p>;
   if (entries.length === 0) return <p className="muted">no requests recorded</p>;
+  // Wrapped so a long request URL / body scrolls *within the block*
+  // instead of stretching the evidence panel and the whole page (#284
+  // follow-up).
   return (
-    <table className="har" data-testid="har-table">
-      <thead>
-        <tr>
-          <th>method</th>
-          <th>URL</th>
-          <th>status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {entries.map((e, i) => (
-          <HarRow key={i} entry={e} />
-        ))}
-      </tbody>
-    </table>
+    <div className="har-wrap">
+      <table className="har" data-testid="har-table">
+        <thead>
+          <tr>
+            <th>method</th>
+            <th>URL</th>
+            <th>status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((e, i) => (
+            <HarRow key={i} entry={e} />
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -473,7 +596,17 @@ export function ScreenshotArtifact({
             />
           ))}
         <span className="shot-overlay">
-          <span className="shot-cue">{expanded ? "Collapse" : "⤢  Expand"}</span>
+          <span className="shot-cue">
+            {expanded ? (
+              <>
+                <Minimize2 aria-hidden="true" /> Collapse
+              </>
+            ) : (
+              <>
+                <Maximize2 aria-hidden="true" /> Expand
+              </>
+            )}
+          </span>
         </span>
       </button>
       {notFound.length > 0 && (
@@ -540,6 +673,17 @@ export function Artifacts({ artifacts }: { artifacts: CheckDetail["artifacts"] }
 
 export default function CheckPage() {
   const { runId = "", pair = "" } = useParams();
+  // The check evidence renders inside the shared run tree, with this
+  // check's node active in the rail. No back link — the rail (and the
+  // breadcrumb) carry the way back.
+  return (
+    <RunScaffold runId={runId} activePair={pair}>
+      {() => <CheckEvidence runId={runId} pair={pair} />}
+    </RunScaffold>
+  );
+}
+
+function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
   const [check, setCheck] = useState<CheckDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -549,22 +693,35 @@ export default function CheckPage() {
       setError(`bad check reference: ${pair}`);
       return;
     }
+    setCheck(null);
+    setError(null);
     fetchCheck(runId, criterionId, checkId).then(setCheck, (e) => setError(String(e)));
   }, [runId, pair]);
+
+  const vd = useVd();
 
   if (error) return <p className="error">{error}</p>;
   if (check === null) return <p className="muted">Loading…</p>;
 
+  // The authored intent for this check + its criterion, from the recorded
+  // VD snapshot (#302) — *what* this check verifies, not just its id.
+  const checkDesc = vd?.check(check.criterion_id, check.check_id)?.description;
+  const critDesc = vd?.criterion(check.criterion_id)?.description;
+
   return (
     <>
-      <p className="kv">
-        <Link to={`/run/${encodeURIComponent(runId)}`}>← run {runId}</Link>
-      </p>
       <div className="panel">
         <h2>
           {check.criterion_id} :: {check.check_id}{" "}
           <VerdictBadge verdict={check.verdict} />
         </h2>
+        {checkDesc && <p className="check-intent" data-testid="check-intent">{checkDesc}</p>}
+        {critDesc && (
+          <p className="kv crit-intent">
+            <span className="muted">{check.criterion_id}: </span>
+            {critDesc}
+          </p>
+        )}
         <SpanChain spans={check.spans} />
         <CheckSummary detail={check} />
         <Timeline events={check.timeline} artifacts={check.artifacts} />

@@ -39,6 +39,9 @@ export interface RunDetail {
   verdict: Verdict | null;
   live: boolean;
   setup_aborted: boolean;
+  /** `true` when the run recorded its VD source snapshot (#302); the
+   *  client then fetches it from `definitionUrl`. */
+  has_definition: boolean;
   criteria: CriterionDetail[];
 }
 
@@ -167,6 +170,18 @@ export function fetchDiff(runId: string, baseline?: string): Promise<RunDiff> {
 
 export function traceUrl(runId: string): string {
   return `api/runs/${encodeURIComponent(runId)}/trace.jsonl`;
+}
+
+export function definitionUrl(runId: string): string {
+  return `api/runs/${encodeURIComponent(runId)}/definition`;
+}
+
+/** The recorded VD source snapshot (raw YAML, #302). Throws on a run
+ *  that has no snapshot (older runs) — callers gate on `has_definition`. */
+export async function fetchDefinition(runId: string): Promise<string> {
+  const res = await fetch(definitionUrl(runId));
+  if (!res.ok) throw new Error(`GET definition: ${res.status}`);
+  return res.text();
 }
 
 export function liveUrl(runId: string): string {

@@ -26,6 +26,9 @@ use crate::model::{
     HistoryRun, RunDetail, RunDiff, RunSide, RunsListEntry, SpanModel, VerificationHistory,
 };
 
+mod mime;
+pub use mime::{extension_for, sniff_content_type};
+
 #[derive(Debug, Error)]
 pub enum ReaderError {
     #[error("store error: {0}")]
@@ -417,6 +420,22 @@ impl EvidenceReader {
         Ok(Some(events_to_jsonl(&events)))
     }
 
+    /// The recorded Verification Definition source snapshot for a run
+    /// (raw YAML, spec #302), read from its `run_started` event.
+    /// `None` when the run doesn't exist or predates the snapshot field
+    /// (both surface as `404` on the API — the client only requests it
+    /// when run detail reports `has_definition`).
+    pub async fn run_definition(&self, run_id: &str) -> Result<Option<String>, ReaderError> {
+        if self.store.get_run(run_id).await?.is_none() {
+            return Ok(None);
+        }
+        let events = self.store.run_events(run_id).await?;
+        Ok(events.iter().find_map(|e| match &e.payload {
+            EventPayload::RunStarted { definition, .. } => definition.clone(),
+            _ => None,
+        }))
+    }
+
     /// Raw artifact bytes by content address, with a sniffed
     /// content-type. The hex guard mirrors the store's own.
     pub async fn artifact(
@@ -506,6 +525,7 @@ fn group_entry(name: String, children: Vec<RunsListEntry>) -> RunsListEntry {
 fn build_run_detail(run: &RunEvidence) -> RunDetail {
     let mut inputs = serde_json::Map::new();
     let mut setup_aborted = false;
+    let mut has_definition = false;
     // First-seen orderings from the event stream itself.
     let mut criterion_order: Vec<String> = Vec::new();
     let mut checks_by_criterion: Vec<(String, Vec<CheckRef>)> = Vec::new();
@@ -544,8 +564,13 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
 
     for evt in &run.events {
         match &evt.payload {
-            EventPayload::RunStarted { inputs: i, .. } => {
+            EventPayload::RunStarted {
+                inputs: i,
+                definition,
+                ..
+            } => {
                 inputs = i.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                has_definition = definition.is_some();
             }
             EventPayload::SetupFinished { aborted } => setup_aborted = *aborted,
             EventPayload::StepStarted {
@@ -628,6 +653,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         verdict: run_verdict,
         live: !run.finished(),
         setup_aborted,
+        has_definition,
         criteria,
     }
 }
@@ -939,34 +965,5 @@ fn is_valid_sha256_hex(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-/// Cheap content sniff for artifact serving and export extensions.
-/// Blobs carry no media type in the stream (the observation's
-/// `output_name` is a label, not a MIME), so the bytes decide.
-pub fn sniff_content_type(bytes: &[u8]) -> &'static str {
-    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
-        "image/png"
-    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        "image/jpeg"
-    } else if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
-        // EBML header — Matroska/WebM. Playwright records WebM (#215).
-        "video/webm"
-    } else if serde_json::from_slice::<serde_json::Value>(bytes).is_ok() {
-        "application/json"
-    } else if std::str::from_utf8(bytes).is_ok() {
-        "text/plain; charset=utf-8"
-    } else {
-        "application/octet-stream"
-    }
-}
-
-/// Export-side file extension for a sniffed content type.
-pub fn extension_for(mime: &str) -> &'static str {
-    match mime {
-        "image/png" => "png",
-        "image/jpeg" => "jpg",
-        "video/webm" => "webm",
-        "application/json" => "json",
-        m if m.starts_with("text/plain") => "txt",
-        _ => "bin",
-    }
-}
+// `sniff_content_type` / `extension_for` moved to the `mime` submodule
+// (re-exported above) to keep this file within the prod-token budget.

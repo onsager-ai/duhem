@@ -241,9 +241,6 @@ export default function DiffPage() {
 
   return (
     <>
-      <p className="kv">
-        <Link to={`/run/${encodeURIComponent(runId)}`}>← run {runId}</Link>
-      </p>
       <div className="panel">
         <h2>Regression diff</h2>
         <div className="diff-heads">

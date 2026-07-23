@@ -186,14 +186,28 @@ impl EvidenceWriter {
 }
 
 /// Helper for building a `run_started` payload without hand-rolling
-/// `BTreeMap` everywhere.
+/// `BTreeMap` everywhere. Records no definition snapshot (used by tests
+/// and any caller without the source in hand); the real run path uses
+/// [`run_started_with_definition`].
 pub fn run_started(
     verification_path: impl Into<String>,
     inputs: BTreeMap<String, serde_json::Value>,
+) -> EventPayload {
+    run_started_with_definition(verification_path, inputs, None)
+}
+
+/// [`run_started`] carrying the Verification Definition source snapshot
+/// (spec #302) — the raw YAML the run was judged against, so evidence is
+/// self-describing. `None` records no snapshot (backward compatible).
+pub fn run_started_with_definition(
+    verification_path: impl Into<String>,
+    inputs: BTreeMap<String, serde_json::Value>,
+    definition: Option<String>,
 ) -> EventPayload {
     EventPayload::RunStarted {
         verification_path: verification_path.into(),
         inputs,
         schema_version: SCHEMA_VERSION.to_string(),
+        definition,
     }
 }

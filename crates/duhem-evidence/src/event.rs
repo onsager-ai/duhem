@@ -105,6 +105,16 @@ pub enum EventPayload {
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         inputs: BTreeMap<String, serde_json::Value>,
         schema_version: String,
+        /// Snapshot of the Verification Definition source (raw YAML) as
+        /// it was when this run was judged (spec #302). Makes a run
+        /// self-describing — the criteria/check descriptions, step ids,
+        /// and assertion rules travel *with* the evidence, so a reader
+        /// (the dashboard, an export on a dumb host) can show *what was
+        /// verified* without the source file. Additive and backward
+        /// compatible: a run predating this field deserializes with
+        /// `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        definition: Option<String>,
     },
     EnvUpStarted {
         command: String,
@@ -200,6 +210,16 @@ pub enum EventPayload {
         state: VerdictState,
         #[serde(default)]
         detail: Option<String>,
+        /// The human-readable assertion *expression* this outcome
+        /// evaluated — the explicit `assertions:` line as rendered by
+        /// `Assertion::display` (e.g. `$steps.ok.outputs.exit_code ==
+        /// 1`), or `step `<id>` satisfied == true` for an implicit
+        /// judgment (spec #253). Recorded so a reporter can show *what
+        /// was asserted*, not only the observed operands carried in
+        /// `detail`. Additive and backward compatible: an event
+        /// predating this field deserializes with `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expr: Option<String>,
         /// The step this assertion is derived from, when the link is
         /// known — set for an *implicit* judgment (spec #253), whose
         /// outcome IS a step's `satisfied` verdict, so a reporter can
@@ -290,6 +310,7 @@ mod tests {
                 verification_path: "create-workspace.yml".into(),
                 inputs,
                 schema_version: SCHEMA_VERSION.into(),
+                definition: None,
             },
         };
         let line = serde_json::to_string(&evt).unwrap();

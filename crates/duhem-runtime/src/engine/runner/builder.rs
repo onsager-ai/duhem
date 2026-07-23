@@ -65,6 +65,14 @@ impl Engine {
         self
     }
 
+    /// Record the Verification Definition source snapshot (raw YAML) on
+    /// `run_started`, making the run self-describing (spec #302). The CLI
+    /// threads the leaf's on-disk source here; `None` records nothing.
+    pub fn with_definition_source(mut self, source: impl Into<String>) -> Self {
+        self.definition_source = Some(source.into());
+        self
+    }
+
     /// Attach a [`CheckFilter`]. With a filter set, checks for which
     /// `matches(criterion_id, check_id)` returns `false` are skipped
     /// entirely — no events, no verdict slot. Spec on issue #23.

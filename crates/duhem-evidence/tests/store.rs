@@ -60,6 +60,7 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
         assertion_index: 0,
         state: VerdictState::Pass,
         detail: None,
+        expr: None,
         step_index: None,
     })
     .await
@@ -154,6 +155,7 @@ async fn dropped_writer_loses_nothing_and_run_stays_unfinished() {
                 assertion_index: 0,
                 state: VerdictState::Pass,
                 detail: None,
+                expr: None,
                 step_index: None,
             })
             .await

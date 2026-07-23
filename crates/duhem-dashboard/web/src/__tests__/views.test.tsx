@@ -127,6 +127,7 @@ describe("Timeline", () => {
         assertion_index: 0,
         state: "fail",
         detail: "actual false, expected true",
+        expr: "$steps.load.outputs.ok == true",
       },
       {
         seq: 6,
@@ -146,10 +147,15 @@ describe("Timeline", () => {
       .filter((el) => !el.closest(".step-inner"))
       .map((el) => el.textContent);
     expect(labels).toEqual(["navigate", "assertion failed", "verdict: fail"]);
-    // The failing assertion row carries its recorded detail and fail tone.
-    expect(container.querySelector(".ev.tone-fail .ev-detail")?.textContent).toContain(
-      "actual false",
-    );
+    // The failing assertion row surfaces its recorded operands as an
+    // expected/actual pair (not a raw sentence) and carries the fail tone.
+    const cmp = container.querySelector(".ev.tone-fail [data-testid='assert-cmp']");
+    expect(cmp?.textContent).toContain("false"); // actual
+    expect(cmp?.textContent).toContain("true"); // expected
+    // And it surfaces *what was asserted* — the recorded rule (#284).
+    expect(
+      container.querySelector(".ev.tone-fail [data-testid='assert-expr']")?.textContent,
+    ).toContain("$steps.load.outputs.ok == true");
     // Raw JSON is preserved behind a per-row <details> toggle on the
     // standalone events.
     const raws = [...container.querySelectorAll(".ev-raw pre")];
@@ -446,8 +452,11 @@ describe("SpanChain (④)", () => {
     const chain = screen.getByTestId("spanchain");
     expect(chain.textContent).toContain("ui");
     expect(chain.textContent).toContain("api");
-    // The broken layer carries its detail inline.
-    expect(chain.textContent).toContain("data ✕ timeout");
+    // The broken layer carries its detail inline (the ✕ is now a lucide
+    // SVG, so it's a fail-classed node rather than glyph text).
+    const failNode = chain.querySelector(".span-fail");
+    expect(failNode?.textContent).toContain("data");
+    expect(failNode?.textContent).toContain("timeout");
   });
 
   it("says layer unknown for a pre-tag run instead of guessing", () => {

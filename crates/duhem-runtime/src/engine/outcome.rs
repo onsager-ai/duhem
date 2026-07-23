@@ -346,6 +346,9 @@ pub(crate) async fn evaluate_explicit_assertions(
                 assertion_index: i as u32,
                 state,
                 detail: detail.clone(),
+                // The human-authored rule this outcome evaluated, so a
+                // reporter can show *what was asserted* (#284 follow-up).
+                expr: Some(assertion.display()),
                 // Explicit `assertions:` may reference zero or many
                 // steps — no single owning step to link.
                 step_index: None,
@@ -388,6 +391,10 @@ pub(crate) async fn append_implicit_judgment(
                 assertion_index: index as u32,
                 state: imp.state,
                 detail: imp.detail.clone(),
+                // The implicit judgment's rule: this step's `satisfied`
+                // verdict (#284 follow-up), mirroring the label used for
+                // the CLI reporter's `FailedAssertion`.
+                expr: Some(format!("step `{}` satisfied == true", imp.label)),
                 // The implicit judgment IS this step's `satisfied`
                 // verdict — carry the link so the reporter folds it into
                 // the step and propagates the status (#280).

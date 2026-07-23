@@ -40,7 +40,13 @@ export function crumbsFor(pathname: string): Crumb[] {
       title: b,
       to: `/run/${encodeURIComponent(b)}`,
     };
-    if (c === "check") return [runs, run, { label: `check ${d ?? ""}` }];
+    if (c === "check") {
+      // The pair is `criterion::check`; show just the check id as the
+      // leaf — the run crumb already carries the run, and the criterion
+      // is visible in the run's tree rail.
+      const checkId = (d ?? "").split("::").pop() ?? d ?? "";
+      return [runs, run, { label: checkId, title: d }];
+    }
     if (c === "diff") return [runs, run, { label: "diff" }];
     return [runs, { label: truncId(b), title: b }];
   }

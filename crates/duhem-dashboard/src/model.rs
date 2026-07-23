@@ -55,6 +55,11 @@ pub struct RunDetail {
     /// `true` when the trace carries `setup_finished { aborted: true }`
     /// (#20) — the run never reached its checks.
     pub setup_aborted: bool,
+    /// `true` when the run recorded its Verification Definition source
+    /// snapshot (#302) — the client fetches it from
+    /// `GET /api/runs/:id/definition`. `false` for runs predating the
+    /// snapshot field.
+    pub has_definition: bool,
     pub criteria: Vec<CriterionDetail>,
 }
 

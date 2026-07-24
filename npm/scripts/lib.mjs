@@ -44,7 +44,7 @@ export function mainDir() {
   return join(ROOT, config.mainPackage.dir);
 }
 
-/** Binary filename for a platform (handles the Windows .exe extension). */
-export function binaryName(platform) {
-  return `${config.binaryName}${platform.ext}`;
+/** Binary filenames for a platform (handles the Windows .exe extension). */
+export function binaryNames(platform) {
+  return config.binaryNames.map((name) => `${name}${platform.ext}`);
 }

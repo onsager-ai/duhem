@@ -1,22 +1,21 @@
 # rust-cross-build — composite action.
 #
-# Build one Cargo package for a target triple in release mode and upload just
-# the resulting binary as a `binary-<platform>` artifact for the publish job
-# to copy into its npm platform package. rust-node-ci skill pattern, trimmed
-# to a single binary + single-file upload (the matrix builds natively per
-# runner, so no cross-linker setup is needed).
+# Build Cargo packages for a target triple in release mode and upload the
+# resulting binaries as a `binary-<platform>` artifact for the publish job to
+# copy into its npm platform package. The matrix builds natively per runner,
+# so no cross-linker setup is needed.
 name: rust-cross-build
-description: Build a Rust binary for a target platform and upload it as an artifact.
+description: Build Rust binaries for a target platform and upload them as an artifact.
 
 inputs:
   target:
     description: Rust target triple (e.g. aarch64-apple-darwin).
     required: true
-  package:
-    description: Cargo package to build (e.g. duhem-cli).
+  packages:
+    description: Comma-separated Cargo packages to build, paired with binaries (e.g. duhem-cli,duhem-dashboard).
     required: true
-  binary:
-    description: Binary filename, including any extension (e.g. duhem or duhem.exe).
+  binaries:
+    description: Comma-separated binary filenames, including extensions, paired with packages (e.g. duhem,duhem-dashboard).
     required: true
   platform:
     description: Platform key for artifact naming (e.g. darwin-arm64).
@@ -35,20 +34,30 @@ runs:
       with:
         shared-key: release-${{ inputs.platform }}
 
-    - name: Build ${{ inputs.package }} (${{ inputs.target }})
-      shell: bash
-      run: cargo build --release --locked --package "${{ inputs.package }}" --target "${{ inputs.target }}"
-
-    - name: Stage binary
+    - name: Build and stage binaries
       shell: bash
       run: |
+        set -euo pipefail
+        IFS=',' read -r -a packages <<< "${{ inputs.packages }}"
+        IFS=',' read -r -a binaries <<< "${{ inputs.binaries }}"
+        if [ "${#packages[@]}" -ne "${#binaries[@]}" ]; then
+          echo "::error::packages and binaries must have the same number of entries"
+          exit 1
+        fi
+        package_args=()
+        for package in "${packages[@]}"; do
+          package_args+=(--package "$package")
+        done
+        cargo build --release --locked "${package_args[@]}" --target "${{ inputs.target }}"
         mkdir -p "dist/${{ inputs.platform }}"
-        cp "target/${{ inputs.target }}/release/${{ inputs.binary }}" "dist/${{ inputs.platform }}/${{ inputs.binary }}"
+        for binary in "${binaries[@]}"; do
+          cp "target/${{ inputs.target }}/release/$binary" "dist/${{ inputs.platform }}/$binary"
+        done
 
     - name: Upload binary artifact
       uses: actions/upload-artifact@v7
       with:
         name: binary-${{ inputs.platform }}
-        path: dist/${{ inputs.platform }}/${{ inputs.binary }}
+        path: dist/${{ inputs.platform }}/
         if-no-files-found: error
         retention-days: 3

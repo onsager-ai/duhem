@@ -586,6 +586,7 @@ describe("in-page inspection (#210)", () => {
     // hidden behind a second nested click.
     expect(groups[0].querySelectorAll("details")).toHaveLength(1);
     expect(groups[0].querySelector('[data-testid="step-raw"]')).not.toBeNull();
+    expect(groups[0].querySelector("summary")?.className).toContain("md:sticky");
     // The verdict is a standalone row, never folded into a step group.
     const labels = [...container.querySelectorAll(".ev-label")]
       .filter((e) => !e.closest(".step-inner"))

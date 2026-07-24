@@ -235,7 +235,7 @@ function RunSummary({ run }: { run: RunDetail }) {
 
       {inputs.length > 0 && (
         <details className="min-w-0 max-w-full overflow-hidden border-y text-sm">
-          <summary className="cursor-pointer select-none py-3 font-medium hover:text-foreground">
+          <summary className="select-none py-3 font-medium hover:text-foreground">
             Run configuration
             <span className="ml-2 text-xs font-normal text-muted-foreground">
               {inputs.length} input{inputs.length === 1 ? "" : "s"}

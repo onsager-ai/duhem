@@ -442,7 +442,7 @@ function StepGroup({
   return (
     <li className={`ev step-group tone-${status.tone}`} data-testid="step-group">
       <details open={status.failed}>
-        <summary>
+        <summary className="step-summary md:sticky md:top-0 md:z-20 md:border-b md:bg-background/95 md:backdrop-blur">
           {/* Primary line: status icon + action. Successful steps rely on
               the green check alone; only exceptional outcomes need text. */}
           <span className="ev-row">

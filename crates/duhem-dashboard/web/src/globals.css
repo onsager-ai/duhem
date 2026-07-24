@@ -147,6 +147,12 @@
   * {
     border-color: var(--border);
   }
+  :where(button, [role="button"], summary):not(
+      :disabled,
+      [aria-disabled="true"]
+    ) {
+    cursor: pointer;
+  }
   html {
     font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;

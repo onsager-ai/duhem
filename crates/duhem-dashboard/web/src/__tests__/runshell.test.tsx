@@ -122,6 +122,11 @@ describe("run report tree", () => {
         group.className.includes("ml-8"),
       ),
     ).toBe(true);
+    expect(
+      screen.getAllByTestId("criterion-parent").every((parent) =>
+        parent.className.includes("md:sticky"),
+      ),
+    ).toBe(true);
   });
 
   it("gives Summary and Definition full width without the Results tree", async () => {
@@ -230,7 +235,7 @@ describe("run report tree", () => {
     renderAt("/run/R1/check/AC-5%3A%3AAC-5.1");
     const tree = await screen.findByTestId("run-tree");
     expect(tree.className).toContain("max-w-full");
-    expect(tree.className).toContain("overflow-x-hidden");
+    expect(tree.className).toContain("overflow-x-clip");
     const active = within(tree).getByRole("link", { name: "AC-5.1" });
     expect(active.getAttribute("aria-current")).toBe("page");
     // A sibling check is not marked active.

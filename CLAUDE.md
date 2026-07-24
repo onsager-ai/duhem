@@ -155,6 +155,32 @@ exercises it. A surface with no example is a surface we cannot
 dogfood, which means we cannot ship it on Onsager, which means we
 cannot validate it. See `verification-authoring`.
 
+## Workspace isolation (all coding agents)
+
+Treat the repository's primary checkout as a `main`-only parking
+checkout. Never run `git switch`, `git checkout <branch>`, or create a
+task branch in that directory. Start every branch task in a dedicated
+worktree instead:
+
+```sh
+just worktree add <branch>
+cd ../duhem-wt/<branch-with-/-as-+>
+just dev  # or: just build / just lint / just test
+```
+
+Run the agent session from the new worktree and keep one session per
+worktree. Before changing files, check `git status --short --branch`
+and `git worktree list`. If the primary checkout is already off
+`main` or has uncommitted changes, preserve it exactly as found:
+do not switch it back, move its changes, or reuse it for another task.
+Create a separate worktree from the intended base and report the
+primary-checkout condition to the user.
+
+Claude Code additionally enforces in-place branch-switch blocking with
+`.claude/hooks/guard-branch-switch.py`. Codex does not load
+`.claude/settings.json`; for Codex, this section in `AGENTS.md` is the
+enforcement surface.
+
 ## File editing (Claude Code tools)
 
 Prefer `Edit` over `Write` for any change to an existing file. Full

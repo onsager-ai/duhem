@@ -121,7 +121,8 @@ jobs:
           npm ci
           npx --yes playwright install --with-deps chromium
 
-      # Both ignored suites in one invocation; mirrors `just test-ui`.
+      # Both ignored suites in one invocation; mirrors
+      # `just test browser-actions`.
       - name: cargo test (ignored browser suites)
         run: cargo test -p duhem-actions --test ui_smoke --test api_observe_smoke -- --ignored
 

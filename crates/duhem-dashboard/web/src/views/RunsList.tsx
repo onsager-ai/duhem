@@ -198,7 +198,7 @@ function RunsTable({ data }: { data: RunsListEntry[] }) {
   const [sorting, setSorting] = useState<SortingState>([
     { id: "started", desc: true },
   ]);
-  const [expanded, setExpanded] = useState<ExpandedState>(true);
+  const [expanded, setExpanded] = useState<ExpandedState>({});
 
   const table = useReactTable({
     data,

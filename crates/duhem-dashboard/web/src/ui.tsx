@@ -1,6 +1,7 @@
 // Small shared presentation helpers.
 
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import type { Verdict } from "./api";
 
 // Verdict "family" collapses "inconclusive:<cause>" to "inconclusive".
@@ -23,22 +24,38 @@ export function verdictClass(verdict: Verdict | null): string {
 export function VerdictBadge({
   verdict,
   live,
+  className,
+  compact = false,
 }: {
   verdict: Verdict | null;
   live?: boolean;
+  className?: string;
+  compact?: boolean;
 }) {
   if (verdict === null && live) {
     return (
-      <Badge variant="live" className="gap-1.5">
+      <Badge variant="live" className={cn("gap-1.5", className)}>
         <span className="size-1.5 rounded-full bg-live motion-safe:animate-pulse" />
         live
       </Badge>
     );
   }
   if (verdict === null) {
-    return <Badge variant="none">—</Badge>;
+    return (
+      <Badge variant="none" className={className}>
+        —
+      </Badge>
+    );
   }
-  return <Badge variant={verdictFamily(verdict) ?? "none"}>{verdict}</Badge>;
+  return (
+    <Badge
+      variant={verdictFamily(verdict) ?? "none"}
+      className={className}
+      title={verdict}
+    >
+      {compact ? verdictFamily(verdict) : verdict}
+    </Badge>
+  );
 }
 
 export function formatStartedAt(iso: string | null): string {

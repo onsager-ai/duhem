@@ -359,10 +359,10 @@ alone. Then add the gates the diff calls for:
 
 - **VD-touching**: run each modified Verification Definition through
   `cargo run -p duhem-cli -- validate <path>`.
-- **UI-touching** (`crates/duhem-actions/**` `ui/*` or the Playwright
-  sidecar): `just test-ui` (the `#[ignore]`'d browser smoke suites;
-  `just check` skips them). Requires `npx playwright install chromium`
-  once per host.
+- **Browser-action-touching** (`crates/duhem-actions/**` `ui/*` or the
+  Playwright sidecar): `just test browser-actions` (the `#[ignore]`'d
+  browser smoke suites; `just check` skips them). Requires
+  `npx playwright install chromium` once per host.
 
 Treat any warning as a blocker; don't `#[allow(dead_code)]` / `@ts-ignore`
 past it.

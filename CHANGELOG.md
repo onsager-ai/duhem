@@ -27,6 +27,8 @@ needs more than a bullet.
 
 ## Unreleased
 
+- [additive] add step-level screenshot storyboards and synchronized browser replay evidence. (#337)
+
 ## v0.1.8 — 2026-07-24
 
 ## v0.1.7 — 2026-07-24

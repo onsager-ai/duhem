@@ -27,6 +27,7 @@ use crate::model::{
 };
 
 mod mime;
+mod replay;
 pub use mime::{extension_for, sniff_content_type};
 
 #[derive(Debug, Error)]
@@ -163,7 +164,11 @@ impl EvidenceReader {
                 detail: s.detail,
             })
             .collect();
-        Ok(build_check_detail(&run, criterion_id, check_id, spans))
+        let Some(mut detail) = build_check_detail(&run, criterion_id, check_id, spans) else {
+            return Ok(None);
+        };
+        detail.replay = replay::model(&self.store, run_id, &detail.artifacts).await?;
+        Ok(Some(detail))
     }
 
     /// `GET /api/verifications/:name/history` (② VD-over-time, #193):
@@ -958,6 +963,7 @@ fn build_check_detail(
         spans,
         timeline,
         artifacts,
+        replay: None,
     })
 }
 

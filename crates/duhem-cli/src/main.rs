@@ -203,12 +203,12 @@ enum Cmd {
         /// without an `environment:` block. Spec on issue #50.
         #[arg(long = "keep-env", default_value_t = false)]
         keep_env: bool,
-        /// Failure-evidence capture for ui checks (spec #202):
-        /// `on-failure` (the default) records a full-page screenshot
-        /// and a DOM snapshot when a ui check ends with any non-pass
-        /// assertion; `always` also captures the final state of
-        /// passing ui checks; `off` disables capture. Captures land
-        /// as `capture/*` artifacts on the check's evidence.
+        /// Browser evidence retention for ui checks: every executed
+        /// step temporarily records a post-step screenshot plus
+        /// synchronized network/performance timing. `on-failure` (the
+        /// default) retains the complete storyboard for non-passing
+        /// checks; `always` retains it for every browser check; `off`
+        /// retains none. Capture warnings never change the verdict.
         #[arg(
             long = "capture",
             value_name = "on-failure|always|off",

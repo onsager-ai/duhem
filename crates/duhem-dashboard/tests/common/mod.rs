@@ -192,6 +192,134 @@ pub async fn write_passing_run(
     sha.as_str().to_string()
 }
 
+/// A passing browser check carrying one retained storyboard frame and a
+/// versioned session-evidence document (#337).
+pub async fn write_replay_run(store: Arc<SqliteStore>, run_id: &str) -> (String, String) {
+    use duhem_evidence::{
+        SESSION_EVIDENCE_OBSERVATION, STEP_SCREENSHOT_OBSERVATION, SessionEvidence,
+        SessionNetworkEntry, SessionPerformanceObservation, SessionStep, SessionVideo,
+    };
+
+    let mut w = EvidenceWriter::begin(store, run_id, "replay.yml", BTreeMap::new())
+        .await
+        .unwrap();
+    w.append(run_started("replay.yml", BTreeMap::new()))
+        .await
+        .unwrap();
+    w.append(EventPayload::StepStarted {
+        criterion_id: "AC-1".into(),
+        check_id: "AC-1.1".into(),
+        step_index: 0,
+        uses: "ui/navigate".into(),
+        layer: Some("ui".into()),
+        with: BTreeMap::new(),
+    })
+    .await
+    .unwrap();
+    w.append(EventPayload::StepFinished {
+        step_index: 0,
+        outcome: StepOutcome::Ok,
+    })
+    .await
+    .unwrap();
+    let shot = w.write_blob(&png_bytes()).await.unwrap();
+    w.append(EventPayload::StepObservation {
+        step_index: 0,
+        output_name: STEP_SCREENSHOT_OBSERVATION.into(),
+        value: ObservationValue::Blob {
+            blob_sha256: shot.0.clone(),
+        },
+    })
+    .await
+    .unwrap();
+    let video = w
+        .write_blob(&[0x1A, 0x45, 0xDF, 0xA3, 0, 0, 0, 0])
+        .await
+        .unwrap();
+    w.append(EventPayload::StepObservation {
+        step_index: 0,
+        output_name: "capture/video".into(),
+        value: ObservationValue::Blob {
+            blob_sha256: video.0.clone(),
+        },
+    })
+    .await
+    .unwrap();
+    let mut session = SessionEvidence::v1(25.0);
+    session.steps.push(SessionStep {
+        step_index: 0,
+        started_ms: 1.0,
+        finished_ms: 20.0,
+        screenshot_sha256: Some(shot.0.clone()),
+        screenshot_ms: Some(20.0),
+        frame_error: None,
+    });
+    session.network.push(SessionNetworkEntry {
+        method: "GET".into(),
+        url: "http://sut/".into(),
+        status: 200,
+        started_ms: 2.0,
+        duration_ms: 5.0,
+        wait_ms: 4.0,
+        receive_ms: 1.0,
+    });
+    session.performance.push(SessionPerformanceObservation {
+        kind: "navigation".into(),
+        name: "document".into(),
+        started_ms: 1.5,
+        duration_ms: 6.0,
+        value: None,
+        unit: None,
+    });
+    session.video = Some(SessionVideo {
+        started_ms: 0.0,
+        finished_ms: 25.0,
+        blob_sha256: video.0.clone(),
+    });
+    let session_blob = w
+        .write_blob(&serde_json::to_vec(&session).unwrap())
+        .await
+        .unwrap();
+    w.append(EventPayload::StepObservation {
+        step_index: 0,
+        output_name: SESSION_EVIDENCE_OBSERVATION.into(),
+        value: ObservationValue::Blob {
+            blob_sha256: session_blob.0.clone(),
+        },
+    })
+    .await
+    .unwrap();
+    w.append(EventPayload::AssertionEvaluated {
+        check_id: "AC-1.1".into(),
+        assertion_index: 0,
+        state: VerdictState::Pass,
+        detail: None,
+        expr: Some("true".into()),
+        step_index: None,
+    })
+    .await
+    .unwrap();
+    w.append(EventPayload::CheckFinished {
+        check_id: "AC-1.1".into(),
+        verdict: VerdictState::Pass,
+    })
+    .await
+    .unwrap();
+    w.append(EventPayload::CriterionFinished {
+        criterion_id: "AC-1".into(),
+        verdict: VerdictState::Pass,
+    })
+    .await
+    .unwrap();
+    w.append(EventPayload::RunFinished {
+        verdict: VerdictState::Pass,
+    })
+    .await
+    .unwrap();
+    w.finish().await.unwrap();
+    (shot.0, video.0)
+}
+
 /// A finished failing run: one criterion, one check, one failing
 /// assertion.
 pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition_path: &str) {

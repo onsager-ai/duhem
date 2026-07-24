@@ -4,7 +4,7 @@
 // is open. Replaces the former per-run tab-bar tests.
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RunPage from "../views/RunPage";
 import CheckPage from "../views/CheckPage";
@@ -45,31 +45,59 @@ const RUN = {
   ],
 };
 
-function stub(run = RUN) {
+const CHECK = {
+  criterion_id: "AC-5",
+  check_id: "AC-5.1",
+  verdict: "fail",
+  spans: [{ seq: 1, layer: "ui", ok: false, detail: "text present" }],
+  timeline: [
+    {
+      seq: 1,
+      ts: "2026-07-22T14:03:00.000Z",
+      kind: "step_started",
+      criterion_id: "AC-5",
+      check_id: "AC-5.1",
+      step_index: 0,
+      uses: "ui/navigate",
+    },
+    {
+      seq: 2,
+      ts: "2026-07-22T14:03:00.010Z",
+      kind: "step_finished",
+      step_index: 0,
+      outcome: "ok",
+    },
+    {
+      seq: 3,
+      ts: "2026-07-22T14:03:00.020Z",
+      kind: "assertion_evaluated",
+      state: "fail",
+      detail: 'expected text "Manager" to be absent within 5s, but 1 still matched',
+      step_index: 0,
+    },
+  ],
+  artifacts: [],
+};
+
+function stub(run = RUN, check: Record<string, unknown> = CHECK) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
       if (String(url).includes("/checks/")) {
-        return new Response(
-          JSON.stringify({
-            criterion_id: "AC-5",
-            check_id: "AC-5.1",
-            verdict: "fail",
-            spans: [{ seq: 1, layer: "ui", ok: false, detail: "text present" }],
-            timeline: [
-              {
-                seq: 1,
-                ts: "t",
-                kind: "assertion_evaluated",
-                state: "fail",
-                detail: 'expected text "Manager" to be absent within 5s, but 1 still matched',
-                step_index: 0,
-              },
-            ],
-            artifacts: [],
-          }),
-          { status: 200 },
-        );
+        return new Response(JSON.stringify(check), { status: 200 });
+      }
+      if (String(url).endsWith("/definition")) {
+        return new Response(`
+criteria:
+  - id: AC-5
+    checks:
+      - id: AC-5.1
+        steps:
+          - id: open-page
+            uses: ui/navigate
+          - id: submit-form
+            uses: ui/click
+`);
       }
       return new Response(JSON.stringify(run), { status: 200 });
     }),
@@ -79,6 +107,7 @@ function stub(run = RUN) {
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
+      <LocationProbe />
       <Routes>
         <Route path="/run/:runId" element={<RunPage />} />
         <Route path="/run/:runId/results" element={<ResultsPage />} />
@@ -88,6 +117,11 @@ function renderAt(path: string) {
       </Routes>
     </MemoryRouter>,
   );
+}
+
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location-search">{location.search}</output>;
 }
 
 describe("run report tree", () => {
@@ -232,16 +266,169 @@ describe("run report tree", () => {
 
   it("marks the open check active in the rail on the check page", async () => {
     stub();
-    renderAt("/run/R1/check/AC-5%3A%3AAC-5.1");
+    const { container } = renderAt("/run/R1/check/AC-5%3A%3AAC-5.1");
     const tree = await screen.findByTestId("run-tree");
     expect(tree.className).toContain("max-w-full");
     expect(tree.className).toContain("overflow-x-hidden");
     expect(tree.className).toContain("overflow-x-clip");
+    const grid = container.querySelector(".run-results-grid") as HTMLElement;
+    const rail = container.querySelector(".run-results-rail") as HTMLElement;
+    const detail = container.querySelector(".run-results-detail") as HTMLElement;
+    // Mobile-first: one-column source order. Desktop adds two columns and
+    // independently scrollable panes without introducing fixed-width overflow.
+    expect(grid.className).toContain("min-w-0");
+    expect(grid.className).toContain("md:grid-cols-[17rem_minmax(0,1fr)]");
+    expect(rail.className).toContain("md:overflow-y-auto");
+    expect(detail.className).toContain("md:overflow-y-auto");
     const active = within(tree).getByRole("link", { name: "AC-5.1" });
     expect(active.getAttribute("aria-current")).toBe("page");
     // A sibling check is not marked active.
     expect(
       within(tree).getByRole("link", { name: "AC-5.2" }).getAttribute("aria-current"),
     ).toBeNull();
+  });
+
+  it("expands only the active check into status-propagated step links", async () => {
+    stub();
+    renderAt("/run/R1/check/AC-5%3A%3AAC-5.1?step=open-page");
+    const tree = await screen.findByTestId("run-tree");
+    await waitFor(() => expect(within(tree).getByRole("link", { name: "open-page" })).toBeTruthy());
+    expect(screen.getAllByTestId("step-children")).toHaveLength(1);
+    const step = within(tree).getByRole("link", { name: "open-page" });
+    expect(step.getAttribute("aria-current")).toBe("step");
+    expect(step.textContent).toContain("fail");
+  });
+
+  it("renders a video-relative step timeline that seeks and selects markers", async () => {
+    const shot = "a".repeat(64);
+    const video = "b".repeat(64);
+    stub(RUN, {
+      ...CHECK,
+      timeline: [
+        ...CHECK.timeline,
+        {
+          seq: 4,
+          ts: "2026-07-22T14:03:00.021Z",
+          kind: "step_started",
+          criterion_id: "AC-5",
+          check_id: "AC-5.1",
+          step_index: 1,
+          uses: "ui/click",
+        },
+        {
+          seq: 5,
+          ts: "2026-07-22T14:03:00.030Z",
+          kind: "step_finished",
+          step_index: 1,
+          outcome: "ok",
+        },
+      ],
+      replay: {
+        version: 1,
+        clock: "monotonic",
+        duration_ms: 4_000,
+        steps: [
+          {
+            step_index: 1,
+            started_ms: 3_000,
+            finished_ms: 4_000,
+          },
+          {
+            step_index: 0,
+            started_ms: 1_200,
+            finished_ms: 2_000,
+            screenshot: { id: shot, kind: "capture/step-screenshot", url: "shot.png" },
+          },
+        ],
+        network: [
+          { method: "GET", url: "/inside", status: 200, started_ms: 1_300, duration_ms: 200, wait_ms: 100, receive_ms: 100 },
+          { method: "GET", url: "/outside", status: 200, started_ms: 4_500, duration_ms: 100, wait_ms: 100, receive_ms: 0 },
+        ],
+        performance: [
+          { kind: "navigation", name: "document", started_ms: 1_300, duration_ms: 300 },
+          { kind: "resource", name: "late", started_ms: 4_500, duration_ms: 100 },
+        ],
+        video: {
+          started_ms: 1_000,
+          finished_ms: 5_000,
+          artifact: { id: video, kind: "capture/video", url: "replay.webm" },
+        },
+      },
+    });
+    renderAt(
+      "/run/R1/check/AC-5%3A%3AAC-5.1?step=open-page&view=replay&inspector=performance",
+    );
+    const replay = await screen.findByTestId("replay");
+    expect(within(replay).getByRole("img", { name: "Step open-page screenshot" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Replay" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Performance" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    expect(within(screen.getByTestId("replay-performance")).getByText("document")).toBeTruthy();
+    expect(within(replay).queryByText("late")).toBeNull();
+
+    fireEvent.click(within(replay).getByRole("button", { name: "Video" }));
+    const replayVideo = replay.querySelector("video.replay-video") as HTMLVideoElement;
+    expect(replayVideo).toBeTruthy();
+    expect(replayVideo.getAttribute("src")).toBe("replay.webm");
+    // The selected step starts 200ms after the video, not at absolute
+    // monotonic clock 1.2s.
+    expect(replayVideo.currentTime).toBeCloseTo(0.2);
+
+    const timeline = within(replay).getByTestId("replay-step-timeline");
+    const markers = within(timeline).getAllByRole("button");
+    expect(markers.map((marker) => marker.getAttribute("aria-label"))).toEqual([
+      "Seek to step open-page",
+      "Seek to step submit-form",
+    ]);
+    expect(parseFloat(markers[0].style.left)).toBeCloseTo(5);
+    expect(parseFloat(markers[0].style.width)).toBeCloseTo(20);
+    expect(markers[0].classList.contains("on")).toBe(true);
+    expect(markers[0].getAttribute("aria-pressed")).toBe("true");
+
+    // Loaded media duration is the more accurate pixel scale: 200ms into
+    // a real 5s video maps to 4%, rather than the model span's 5%.
+    Object.defineProperty(replayVideo, "duration", { configurable: true, value: 5 });
+    fireEvent.loadedMetadata(replayVideo);
+    await waitFor(() => expect(parseFloat(markers[0].style.left)).toBeCloseTo(4));
+    expect(parseFloat(markers[0].style.width)).toBeCloseTo(16);
+
+    fireEvent.click(markers[1]);
+    expect(replayVideo.currentTime).toBeCloseTo(2);
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search").textContent).toContain("step=submit-form"),
+    );
+    expect(markers[1].classList.contains("on")).toBe(true);
+    expect(markers[0].classList.contains("on")).toBe(false);
+
+    // Playback follows the clock window locally without rewriting the
+    // addressable selection or adding navigation churn.
+    replayVideo.currentTime = 0.5;
+    fireEvent.timeUpdate(replayVideo);
+    await waitFor(() => expect(markers[0].classList.contains("on")).toBe(true));
+    expect(within(replay).getByText("Step open-page")).toBeTruthy();
+    expect(screen.getByTestId("location-search").textContent).toContain("step=submit-form");
+
+    // In the gap after open-page and before submit-form, playback holds
+    // the last step that started instead of reverting to the selection.
+    replayVideo.currentTime = 1.5;
+    fireEvent.timeUpdate(replayVideo);
+    await waitFor(() => expect(markers[0].getAttribute("aria-pressed")).toBe("true"));
+    expect(markers[0].classList.contains("on")).toBe(true);
+    expect(markers[1].classList.contains("on")).toBe(false);
+
+    fireEvent.click(markers[0]);
+    // After the final step finishes, playback keeps the highest-index
+    // marker active through the video's trailing dead-time.
+    replayVideo.currentTime = 4.5;
+    fireEvent.timeUpdate(replayVideo);
+    await waitFor(() => expect(markers[1].getAttribute("aria-pressed")).toBe("true"));
+    expect(markers[1].classList.contains("on")).toBe(true);
+    expect(markers[0].classList.contains("on")).toBe(false);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Network" }));
+    const network = await screen.findByTestId("replay-network");
+    expect(within(network).getByText("/inside")).toBeTruthy();
+    expect(within(network).queryByText("/outside")).toBeNull();
   });
 });

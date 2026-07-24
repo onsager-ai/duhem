@@ -5,15 +5,18 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { ChevronRight, FileText, ListChecks, LayoutList } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import {
+  fetchCheck,
   fetchRun,
   liveUrl,
+  type CheckDetail,
   type RunDetail,
   type TraceEvent,
 } from "../api";
 import { foldRun } from "../fold";
+import { groupTimeline, stepStatus } from "../format";
 import { cn } from "@/lib/utils";
 import { VerdictBadge } from "../ui";
 import { DefinitionProvider, useVd } from "./definition-context";
@@ -94,17 +97,38 @@ function TreeGroup({
   criterion,
   activePair,
   activeCriterion,
+  activeStep,
 }: {
   runId: string;
   criterion: RunDetail["criteria"][number];
   activePair?: string;
   activeCriterion?: string;
+  activeStep?: string;
 }) {
   const hasChecks = criterion.checks.length > 0;
   const [open, setOpen] = useState(hasChecks);
   const vd = useVd();
+  const [search] = useSearchParams();
   const critDesc = vd?.criterion(criterion.id)?.description;
   const active = activeCriterion === criterion.id;
+  const [activeCheck, setActiveCheck] = useState<CheckDetail | null>(null);
+  useEffect(() => {
+    const pair = criterion.checks.find(
+      (check) => activePair === `${criterion.id}::${check.id}`,
+    );
+    if (!pair) {
+      setActiveCheck(null);
+      return;
+    }
+    let live = true;
+    fetchCheck(runId, criterion.id, pair.id).then(
+      (detail) => live && setActiveCheck(detail),
+      () => live && setActiveCheck(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [activePair, criterion.checks, criterion.id, runId]);
   const label = (
     <>
       <span className="min-w-0 flex-1">
@@ -168,9 +192,12 @@ function TreeGroup({
           {criterion.checks.map((chk) => {
             const active = activePair === `${criterion.id}::${chk.id}`;
             const chkDesc = vd?.check(criterion.id, chk.id)?.description;
+            const steps = active && activeCheck
+              ? groupTimeline(activeCheck.timeline).filter((node) => node.kind === "step")
+              : [];
             return (
+              <div key={chk.id}>
               <Link
-                key={chk.id}
                 to={checkHref(runId, criterion.id, chk.id)}
                 // The accessible name must be exactly the check id — the
                 // self-verification VD locates `role: link, name: <id>`.
@@ -198,6 +225,50 @@ function TreeGroup({
                   className="max-w-24 truncate"
                 />
               </Link>
+              {active && steps.length > 0 && (
+                <div className="ml-3 border-l pl-2" data-testid="step-children">
+                  {steps.map((node) => {
+                    if (node.kind !== "step") return null;
+                    const started = node.events[0];
+                    const uses = typeof started.uses === "string" ? started.uses : "step";
+                    const authored = vd?.stepId(criterion.id, chk.id, node.stepIndex);
+                    const label = authored ?? uses.split("/").pop() ?? uses;
+                    const key = authored ?? String(node.stepIndex);
+                    const stepSearch = new URLSearchParams(search);
+                    stepSearch.set("step", key);
+                    const status = stepStatus(node);
+                    const verdict =
+                      status.tone === "ok"
+                        ? "pass"
+                        : status.tone === "fail"
+                          ? "fail"
+                          : status.tone === "inconclusive"
+                            ? "inconclusive:step"
+                            : null;
+                    return (
+                      <Link
+                        key={node.stepIndex}
+                        to={{
+                          pathname: checkHref(runId, criterion.id, chk.id),
+                          search: `?${stepSearch.toString()}`,
+                        }}
+                        aria-label={label}
+                        aria-current={activeStep === key ? "step" : undefined}
+                        className={cn(
+                          "flex min-w-0 items-center gap-2 rounded px-2 py-1 text-xs",
+                          activeStep === key
+                            ? "bg-accent font-medium text-accent-foreground"
+                            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                        )}
+                      >
+                        <span className="min-w-0 flex-1 truncate">{label}</span>
+                        <VerdictBadge verdict={verdict} compact />
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+              </div>
             );
           })}
         </div>
@@ -212,10 +283,12 @@ function RunTree({
   run,
   activePair,
   activeCriterion,
+  activeStep,
 }: {
   run: RunDetail;
   activePair?: string;
   activeCriterion?: string;
+  activeStep?: string;
 }) {
   return (
     <nav
@@ -230,6 +303,7 @@ function RunTree({
           criterion={c}
           activePair={activePair}
           activeCriterion={activeCriterion}
+          activeStep={activeStep}
         />
       ))}
     </nav>
@@ -312,6 +386,7 @@ export function RunScaffold({
   runId,
   activePair,
   activeCriterion,
+  activeStep,
   activeDefinition,
   activeResults,
   children,
@@ -319,6 +394,7 @@ export function RunScaffold({
   runId: string;
   activePair?: string;
   activeCriterion?: string;
+  activeStep?: string;
   activeDefinition?: boolean;
   activeResults?: boolean;
   children: (run: RunDetail) => ReactNode;
@@ -364,6 +440,7 @@ export function RunScaffold({
                 run={run}
                 activePair={activePair}
                 activeCriterion={activeCriterion}
+                activeStep={activeStep}
               />
             </aside>
             <section className="run-results-detail min-w-0 py-3 md:max-h-[calc(100vh-10.5rem)] md:overflow-y-auto md:py-0 md:pl-4">

@@ -7,7 +7,7 @@ mod common;
 use std::collections::BTreeMap;
 
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::http::{Request, StatusCode, header};
 use duhem_dashboard::{EvidenceReader, events_to_jsonl, router};
 use duhem_evidence::{
     EventPayload, EvidenceWriter, Store, Trace, VerdictState, replay, run_started_with_definition,
@@ -233,6 +233,35 @@ async fn check_detail_timeline_matches_stream_order_and_lists_artifacts() {
 }
 
 #[tokio::test]
+async fn check_detail_exposes_versioned_replay_and_old_runs_degrade() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let (shot, video) = common::write_replay_run(rw.clone(), "01J0000000000000000000000R").await;
+    common::write_passing_run(rw, "01J0000000000000000000000O", "old.yml").await;
+    let reader = EvidenceReader::new(ro);
+
+    let (_, replay) = get_json(
+        reader.clone(),
+        "/api/runs/01J0000000000000000000000R/checks/AC-1::AC-1.1",
+    )
+    .await;
+    assert_eq!(replay["replay"]["version"], 1);
+    assert_eq!(replay["replay"]["clock"], "monotonic");
+    assert_eq!(replay["replay"]["steps"][0]["screenshot"]["id"], shot);
+    assert_eq!(replay["replay"]["network"][0]["duration_ms"], 5.0);
+    assert_eq!(replay["replay"]["performance"][0]["kind"], "navigation");
+    assert_eq!(replay["replay"]["video"]["artifact"]["id"], video);
+    assert_eq!(replay["replay"]["video"]["started_ms"], 0.0);
+    assert_eq!(replay["replay"]["video"]["finished_ms"], 25.0);
+
+    let (_, old) = get_json(
+        reader,
+        "/api/runs/01J0000000000000000000000O/checks/AC-1::AC-1.1",
+    )
+    .await;
+    assert!(old.get("replay").is_none(), "old runs omit replay");
+}
+
+#[tokio::test]
 async fn check_detail_unknown_pair_is_404_and_bad_pair_is_400() {
     let (_tmp, rw, ro) = common::open_stores().await;
     common::write_passing_run(rw, "01J0000000000000000000000A", "verifications/x.yml").await;
@@ -352,6 +381,94 @@ async fn artifact_serves_bytes_with_sniffed_content_type() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn artifact_supports_video_seek_byte_ranges() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let sha =
+        common::write_passing_run(rw, "01J0000000000000000000000A", "verifications/x.yml").await;
+    let path = format!("/api/runs/01J0000000000000000000000A/artifact/{sha}");
+    let bytes = common::png_bytes();
+    let reader = EvidenceReader::new(ro);
+
+    let full = router(reader.clone())
+        .oneshot(Request::get(&path).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(full.status(), StatusCode::OK);
+    assert_eq!(full.headers()[header::ACCEPT_RANGES], "bytes");
+    assert_eq!(
+        full.headers()[header::CONTENT_LENGTH],
+        bytes.len().to_string()
+    );
+
+    let partial = router(reader.clone())
+        .oneshot(
+            Request::get(&path)
+                .header(header::RANGE, "bytes=0-3")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(partial.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(
+        partial.headers()[header::CONTENT_RANGE],
+        format!("bytes 0-3/{}", bytes.len())
+    );
+    assert_eq!(
+        partial.into_body().collect().await.unwrap().to_bytes(),
+        &bytes[..4]
+    );
+
+    let suffix = router(reader.clone())
+        .oneshot(
+            Request::get(&path)
+                .header(header::RANGE, "bytes=-4")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(suffix.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(
+        suffix.headers()[header::CONTENT_RANGE],
+        format!(
+            "bytes {}-{}/{}",
+            bytes.len() - 4,
+            bytes.len() - 1,
+            bytes.len()
+        )
+    );
+    assert_eq!(
+        suffix.into_body().collect().await.unwrap().to_bytes(),
+        &bytes[bytes.len() - 4..]
+    );
+
+    let unsatisfiable = router(reader)
+        .oneshot(
+            Request::get(&path)
+                .header(header::RANGE, format!("bytes={}-", bytes.len()))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unsatisfiable.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+    assert_eq!(
+        unsatisfiable.headers()[header::CONTENT_RANGE],
+        format!("bytes */{}", bytes.len())
+    );
+    assert!(
+        unsatisfiable
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .is_empty()
+    );
 }
 
 #[tokio::test]

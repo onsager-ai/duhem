@@ -79,6 +79,39 @@ async fn export_produces_a_self_contained_tree() {
     assert_eq!(check["artifacts"][0]["url"], artifact_rel);
 }
 
+#[tokio::test]
+async fn export_rewrites_replay_media_and_round_trips_metadata() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let (shot, video) = common::write_replay_run(rw, "01J0000000000000000000000R").await;
+    let out = tempfile::tempdir().unwrap();
+    export(&EvidenceReader::new(ro), out.path()).await.unwrap();
+    let check: Value = serde_json::from_slice(
+        &std::fs::read(
+            out.path()
+                .join("api/runs/01J0000000000000000000000R/checks/AC-1::AC-1.1.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let url = check["replay"]["steps"][0]["screenshot"]["url"]
+        .as_str()
+        .unwrap();
+    assert_eq!(
+        url,
+        format!("run/01J0000000000000000000000R/artifact/{shot}.png")
+    );
+    assert!(out.path().join(url).is_file());
+    assert_eq!(check["replay"]["network"][0]["wait_ms"], 4.0);
+    let video_url = check["replay"]["video"]["artifact"]["url"]
+        .as_str()
+        .unwrap();
+    assert_eq!(
+        video_url,
+        format!("run/01J0000000000000000000000R/artifact/{video}.webm")
+    );
+    assert!(out.path().join(video_url).is_file());
+}
+
 /// A stream whose criterion / check ids carry path separators or `..`
 /// must not be able to write outside the export root (PR #88 review).
 #[tokio::test]

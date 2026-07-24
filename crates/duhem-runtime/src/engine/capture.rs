@@ -10,8 +10,12 @@
 
 use std::time::Duration;
 
-use duhem_actions::{CheckBrowser, Page, Rect};
-use duhem_evidence::{EventPayload, EvidenceWriter, ObservationValue};
+use duhem_actions::{BrowserSessionEvidence, CheckBrowser, Page, Rect};
+use duhem_evidence::{
+    EventPayload, EvidenceWriter, ObservationValue, SESSION_EVIDENCE_OBSERVATION,
+    STEP_SCREENSHOT_OBSERVATION, SessionEvidence, SessionNetworkEntry,
+    SessionPerformanceObservation, SessionStep, SessionVideo,
+};
 use tracing::{debug, warn};
 
 use crate::engine::har;
@@ -67,6 +71,92 @@ const CAPTURE_SCREENSHOT: &str = "capture/screenshot";
 const CAPTURE_DOM: &str = "capture/dom";
 const CAPTURE_TARGET_RECT: &str = "capture/target-rect";
 const CAPTURE_VIDEO: &str = "capture/video";
+
+/// Storyboards are buffered until the check verdict selects retention.
+/// These bounds cap temporary memory just as the video cap bounds disk.
+const STORYBOARD_MAX_STEPS: usize = 200;
+const STORYBOARD_MAX_FRAME_BYTES: usize = 10 * 1024 * 1024;
+const STORYBOARD_MAX_TOTAL_BYTES: usize = 50 * 1024 * 1024;
+
+struct PendingFrame {
+    step_index: u32,
+    started_ms: f64,
+    finished_ms: f64,
+    screenshot_ms: Option<f64>,
+    png: Option<Vec<u8>>,
+    frame_error: Option<String>,
+}
+
+/// Temporary per-check storyboard. It is deliberately not judge-visible:
+/// the runner only hands it a page and later asks it to retain or discard.
+#[derive(Default)]
+pub(crate) struct Storyboard {
+    frames: Vec<PendingFrame>,
+    total_bytes: usize,
+    last_ms: f64,
+}
+
+impl Storyboard {
+    pub(crate) async fn step_started(&mut self, page: &Page) -> f64 {
+        match bounded("session clock", CAPTURE_DEADLINE, page.session_time_ms()).await {
+            Some(Ok(ms)) => {
+                self.last_ms = ms;
+                ms
+            }
+            Some(Err(e)) => {
+                warn!(error = %e, "session clock read failed; replay timing may be partial");
+                self.last_ms
+            }
+            None => self.last_ms,
+        }
+    }
+
+    /// Capture one post-step frame, including after error/timeout outcomes.
+    /// Capture failure is represented in the retained session document and
+    /// never returned as a runner error.
+    pub(crate) async fn capture_step(&mut self, page: &Page, step_index: u32, started_ms: f64) {
+        if self.frames.len() >= STORYBOARD_MAX_STEPS {
+            warn!("storyboard step cap reached; later frames skipped (verdict unaffected)");
+            return;
+        }
+        let shot = bounded(
+            "step screenshot",
+            CAPTURE_DEADLINE,
+            page.screenshot(CAPTURE_TIMEOUT_MS),
+        )
+        .await;
+        let finished_ms = self.step_started(page).await;
+        let (png, screenshot_ms, frame_error) = match shot {
+            Some(Ok(png))
+                if png.len() <= STORYBOARD_MAX_FRAME_BYTES
+                    && self.total_bytes.saturating_add(png.len()) <= STORYBOARD_MAX_TOTAL_BYTES =>
+            {
+                self.total_bytes += png.len();
+                (Some(png), Some(finished_ms), None)
+            }
+            Some(Ok(png)) => {
+                warn!(
+                    bytes = png.len(),
+                    "step screenshot over storyboard limit; skipped (verdict unaffected)"
+                );
+                (None, None, Some("capture_limit".to_string()))
+            }
+            Some(Err(e)) => {
+                warn!(error = %e, "step screenshot capture failed; verdict unaffected");
+                (None, None, Some("capture_failed".to_string()))
+            }
+            None => (None, None, Some("capture_timeout".to_string())),
+        };
+        self.frames.push(PendingFrame {
+            step_index,
+            started_ms,
+            finished_ms,
+            screenshot_ms,
+            png,
+            frame_error,
+        });
+    }
+}
 
 /// Upper bound on a kept video blob (#215). Recording is opt-in
 /// (`--capture-video`) and the video ships to the hosted hub, so a
@@ -233,6 +323,7 @@ pub(crate) async fn finalize_capture(
     wants_capture: bool,
     last_step: u32,
     targets: &[TargetLocator],
+    storyboard: Storyboard,
 ) -> Vec<CapturedArtifact> {
     let mut captured = Vec::new();
     if wants_capture {
@@ -241,20 +332,130 @@ pub(crate) async fn finalize_capture(
             captured.push(c);
         }
     }
+    // Sample the session last, immediately before context close, so its
+    // duration/network/performance facts align as closely as possible with
+    // the optional video's retained end.
+    let session = if wants_capture {
+        match bounded(
+            "session evidence",
+            CAPTURE_DEADLINE,
+            cb.page.session_evidence(),
+        )
+        .await
+        {
+            Some(Ok(session)) => Some(session),
+            Some(Err(e)) => {
+                warn!(error = %e, "session evidence capture failed; verdict unaffected");
+                None
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
     // Closing the context finalizes any recorded video (#215) and hands
     // its bytes back. `wants_capture` gates the read at the sidecar, so
     // a discarded video is never marshalled; `VIDEO_MAX_BYTES` caps it
     // on disk before the transfer.
+    let mut video_ref = None;
     match cb.close(wants_capture, VIDEO_MAX_BYTES).await {
         Ok(Some(video)) => {
             if let Some(c) = capture_video(writer, last_step, &video).await {
+                video_ref = Some(c.clone());
                 captured.push(c);
             }
         }
         Ok(None) => {}
         Err(e) => debug!(error = %e, "check context close failed; verdict unaffected"),
     }
+    if wants_capture
+        && let Some(c) =
+            retain_storyboard(writer, storyboard, session, video_ref.as_ref(), last_step).await
+    {
+        captured.push(c);
+    }
     captured
+}
+
+async fn retain_storyboard(
+    writer: &mut EvidenceWriter,
+    storyboard: Storyboard,
+    browser: Option<BrowserSessionEvidence>,
+    video: Option<&CapturedArtifact>,
+    last_step: u32,
+) -> Option<CapturedArtifact> {
+    let duration_ms = browser
+        .as_ref()
+        .map(|s| s.elapsed_ms)
+        .unwrap_or(storyboard.last_ms);
+    let mut document = SessionEvidence::v1(duration_ms);
+    for frame in storyboard.frames {
+        let mut frame_error = frame.frame_error;
+        let screenshot_sha256 = match frame.png {
+            Some(png) => {
+                match append_capture(writer, frame.step_index, STEP_SCREENSHOT_OBSERVATION, &png)
+                    .await
+                {
+                    Some(artifact) => Some(artifact.sha256),
+                    None => {
+                        frame_error = Some("retention_failed".to_string());
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
+        document.steps.push(SessionStep {
+            step_index: frame.step_index,
+            started_ms: frame.started_ms,
+            finished_ms: frame.finished_ms,
+            screenshot_sha256,
+            screenshot_ms: frame.screenshot_ms,
+            frame_error,
+        });
+    }
+    if let Some(browser) = browser {
+        document.network = browser
+            .network
+            .into_iter()
+            .map(|e| SessionNetworkEntry {
+                method: e.method,
+                url: e.url,
+                status: e.status,
+                started_ms: e.started_ms,
+                duration_ms: e.duration_ms,
+                wait_ms: e.wait_ms,
+                receive_ms: e.receive_ms,
+            })
+            .collect();
+        document.performance = browser
+            .performance
+            .into_iter()
+            .map(|e| SessionPerformanceObservation {
+                kind: e.kind,
+                name: e.name,
+                started_ms: e.started_ms,
+                duration_ms: e.duration_ms,
+                value: e.value,
+                unit: e.unit,
+            })
+            .collect();
+    }
+    if let Some(video) = video {
+        document.video = Some(SessionVideo {
+            started_ms: 0.0,
+            finished_ms: duration_ms,
+            blob_sha256: video.sha256.clone(),
+        });
+    }
+    let bytes = match serde_json::to_vec(&document) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            warn!(error = %e, "session evidence serialization failed; verdict unaffected");
+            return None;
+        }
+    };
+    append_capture(writer, last_step, SESSION_EVIDENCE_OBSERVATION, &bytes).await
 }
 
 /// Record a check's recorded video (#215) as a `capture/video` blob.

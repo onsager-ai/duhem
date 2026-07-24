@@ -1,7 +1,7 @@
 # Fixture run source for the duhem-dashboard regression VD (part of #148).
 #
 # This is NOT the dashboard VD itself — it is the tiny, offline,
-# page-free Verification Definition that `scripts/up.sh` executes to
+# browser Verification Definition that `scripts/up.sh` executes to
 # PRODUCE a real run for the dashboard to serve. Running it through the
 # real `duhem run` pipeline writes a genuine `trace.jsonl` in the
 # production evidence format (the same `EvidenceWriter` output the
@@ -9,35 +9,69 @@
 # evidence — no hand-written trace, no mock.
 #
 # It must stay:
-#   - page-free  — one `cli/invoke` step (no browser), so producing the
-#                  fixture needs no Playwright.
-#   - offline    — `echo` only; no network, no SUT.
-#   - green      — verdict `pass`, one criterion (AC-1) holding one
-#                  check (AC-1.1), so the dashboard renders a verdict +
-#                  a criteria/check table the VD can assert against.
+#   - real-browser — navigates Chromium to the fixture's local HTTP server,
+#                    producing a genuine retained step storyboard.
+#   - offline      — loopback only; no external network.
+#   - green        — verdict `pass`, one criterion (AC-1) holding one
+#                    check (AC-1.1), so the dashboard renders a verdict +
+#                    a criteria/check table the VD can assert against.
 #
 # `up.sh` renames the produced run directory to the fixed run id
 # `dashboard-fixture-run` so the dashboard VD's URLs are deterministic.
 
 verification: duhem-dashboard fixture run
 
+environment:
+  up: ./serve-up.sh
+  down: ./serve-down.sh
+  ready:
+    http:
+      url: http://127.0.0.1:7979/
+      timeout: 15s
+
 criteria:
   - id: AC-1
     description: |
-      A passing criterion that produces a rendered check in the
-      dashboard — one real step plus one mechanical assertion, so the
-      served run has a verdict and a criterion/check row to display.
+      A passing criterion that produces a rendered browser check and
+      retained replay evidence in the dashboard.
     checks:
       - id: AC-1.1
         description: |
-          Invoke a trivial offline command and assert it exits cleanly.
-          The `cli/invoke` step emits a real `step_started` so the
-          dashboard lists the check under its criterion.
+          Navigate the loopback app, move into its activity view, reveal
+          its evidence summary, and mechanically assert each real UI state.
         steps:
-          - id: ok
-            uses: cli/invoke
+          - id: open-app
+            uses: ui/navigate
             with:
-              command: [echo, duhem-dashboard-fixture]
+              url: http://127.0.0.1:7979/
               within: 15s
-        assertions:
-          - $steps.ok.outputs.exit_code == 0
+          - id: overview-visible
+            uses: ui/assert-element
+            with:
+              locator: {role: heading, name: Verification workspace}
+              expected: visible
+              within: 15s
+          - id: open-activity
+            uses: ui/click
+            with:
+              role: link
+              name: Activity
+              within: 15s
+          - id: activity-visible
+            uses: ui/assert-element
+            with:
+              locator: {role: heading, name: Recent verification activity}
+              expected: visible
+              within: 15s
+          - id: show-evidence
+            uses: ui/click
+            with:
+              role: button
+              name: Show evidence summary
+              within: 15s
+          - id: evidence-visible
+            uses: ui/assert-element
+            with:
+              locator: {role: heading, name: Replay evidence ready}
+              expected: visible
+              within: 15s

@@ -159,6 +159,17 @@ pub struct NetworkEvent {
     pub body_base64: Option<String>,
     #[serde(default)]
     pub body_error: Option<String>,
+    /// Real request/body timing on the check browser's monotonic clock.
+    #[serde(default)]
+    pub started_ms: f64,
+    #[serde(default)]
+    pub duration_ms: f64,
+    #[serde(default)]
+    pub wait_ms: f64,
+    #[serde(default)]
+    pub receive_ms: f64,
+    #[serde(default)]
+    pub started_date_time: String,
 }
 
 /// A `pollNetwork` batch: recorded events from the requested cursor
@@ -168,6 +179,30 @@ pub struct NetworkEvent {
 pub struct NetworkBatch {
     pub events: Vec<NetworkEvent>,
     pub cursor: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserPerformanceObservation {
+    pub kind: String,
+    pub name: String,
+    pub started_ms: f64,
+    pub duration_ms: f64,
+    #[serde(default)]
+    pub value: Option<f64>,
+    #[serde(default)]
+    pub unit: Option<String>,
+}
+
+/// Investigation-only browser facts aligned to the check session clock.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserSessionEvidence {
+    pub elapsed_ms: f64,
+    #[serde(default)]
+    pub network: Vec<NetworkEvent>,
+    #[serde(default)]
+    pub performance: Vec<BrowserPerformanceObservation>,
 }
 
 #[derive(Deserialize)]
@@ -739,6 +774,20 @@ impl Page {
         req["cursor"] = json!(cursor);
         let v = self.conn.request("pollNetwork", req).await?;
         serde_json::from_value(v).map_err(|e| PwError(format!("pollNetwork decode: {e}")))
+    }
+
+    /// Current position on the per-check monotonic browser-session clock.
+    pub async fn session_time_ms(&self) -> Result<f64, PwError> {
+        let v = self.conn.request("sessionTime", self.p()).await?;
+        v.as_f64()
+            .ok_or_else(|| PwError("sessionTime: non-number reply".into()))
+    }
+
+    /// Network and performance facts aligned to the same clock as
+    /// [`Page::session_time_ms`]. These facts never enter action outputs.
+    pub async fn session_evidence(&self) -> Result<BrowserSessionEvidence, PwError> {
+        let v = self.conn.request("sessionEvidence", self.p()).await?;
+        serde_json::from_value(v).map_err(|e| PwError(format!("session evidence decode: {e}")))
     }
 }
 

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#171a2b">
+    <title>Duhem Replay Lab</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#overview" aria-label="Replay Lab home">
+        <span class="brand-mark" aria-hidden="true">D</span>
+        <span>Replay Lab</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="#overview" data-view-link="overview" aria-current="page">Overview</a>
+        <a href="#activity" data-view-link="activity">Activity</a>
+      </nav>
+      <span class="status"><span aria-hidden="true"></span> Local system healthy</span>
+    </header>
+
+    <main>
+      <section class="hero" data-view="overview">
+        <p class="eyebrow">Dashboard replay fixture</p>
+        <h1>Verification workspace</h1>
+        <p class="lede">
+          A deterministic loopback app with real navigation, assets, and UI state for
+          synchronized browser evidence.
+        </p>
+        <div class="metrics" aria-label="Verification summary">
+          <article>
+            <span>Verdict</span>
+            <strong class="pass">Pass</strong>
+          </article>
+          <article>
+            <span>Checks</span>
+            <strong>6 / 6</strong>
+          </article>
+          <article>
+            <span>Evidence</span>
+            <strong>Ready</strong>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" data-view="activity" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Live run · dashboard-fixture-run</p>
+            <h1>Recent verification activity</h1>
+          </div>
+          <span class="run-pill">Completed in 1.2s</span>
+        </div>
+
+        <div class="activity-grid">
+          <article class="timeline-card">
+            <h2>Delivery web</h2>
+            <ol class="timeline">
+              <li><span class="step-dot"></span><div><strong>App opened</strong><small>Document and local assets loaded</small></div></li>
+              <li><span class="step-dot"></span><div><strong>Activity selected</strong><small>Navigation state updated</small></div></li>
+              <li><span class="step-dot"></span><div><strong>Evidence retained</strong><small>Storyboard and timings synchronized</small></div></li>
+            </ol>
+          </article>
+
+          <article class="evidence-card">
+            <p class="eyebrow">Investigation evidence</p>
+            <h2>Inspect the captured session</h2>
+            <p>Reveal the summary to produce a distinct, meaningful replay frame.</p>
+            <button type="button" id="show-evidence">Show evidence summary</button>
+            <div class="evidence-summary" id="evidence-summary" hidden>
+              <span class="evidence-icon" aria-hidden="true">✓</span>
+              <div>
+                <h3>Replay evidence ready</h3>
+                <p>Step screenshots, network timings, performance entries, and video share one clock.</p>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>Offline fixture</span>
+      <span>127.0.0.1:7979</span>
+    </footer>
+  </body>
+</html>

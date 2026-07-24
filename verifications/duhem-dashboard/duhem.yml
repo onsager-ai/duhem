@@ -286,3 +286,61 @@ criteria:
           # discriminates in-flight from finished, rather than being
           # always-on.
           - $steps.list.outputs.body[0].live == false
+
+  - id: AC-5
+    description: |
+      An operator can move from a recorded check to any executed step and inspect
+      the visual and browser evidence for that moment without losing run or check
+      context.
+    checks:
+      - id: AC-5.1
+        description: Open a captured run, select one step, and inspect its replay evidence.
+        steps:
+          - id: open-run
+            uses: ui/navigate
+            with: {url: $inputs.run_page_url}
+          - id: open-results
+            uses: ui/click
+            with: {role: tab, name: Results}
+          - id: open-check
+            uses: ui/click
+            with: {role: link, name: AC-1.1}
+          - id: select-step
+            uses: ui/click
+            with: {role: link, name: show-evidence}
+          - id: open-replay
+            uses: ui/click
+            with: {role: tab, name: Replay}
+          - id: screenshot-visible
+            uses: ui/assert-element
+            with:
+              locator: {role: img, name: "Step show-evidence screenshot"}
+              expected: visible
+              within: 15s
+          - id: video-available
+            uses: ui/assert-element
+            with:
+              locator: {role: button, name: Video}
+              expected: visible
+              within: 15s
+          - id: open-video
+            uses: ui/click
+            with: {role: button, name: Video}
+          - id: video-visible
+            uses: ui/assert-element
+            with:
+              locator: {css: "video.replay-video"}
+              expected: visible
+              within: 15s
+          - id: step-marker-visible
+            uses: ui/assert-element
+            with:
+              locator: {role: button, name: "Seek to step show-evidence"}
+              expected: visible
+              within: 15s
+          - id: seek-with-step-marker
+            uses: ui/click
+            with:
+              role: button
+              name: "Seek to step show-evidence"
+              within: 15s

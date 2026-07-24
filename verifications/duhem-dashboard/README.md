@@ -29,6 +29,8 @@ trust role.
 | **AC-1**  | `GET /api/runs` + `GET /api/runs/<id>` serve the recorded verdict and the criterion→check tree in shape. | JSON API |
 | **AC-2**  | The browser renders the SPA shell, the run's `pass` verdict, and the criterion's check as a link. | SPA (real Chromium) |
 | **AC-3**  | The live SSE stream replays the trace through the recorded `run_finished` verdict. | SSE |
+| **AC-4**  | In-flight runs appear live before their verdict lands. | JSON API |
+| **AC-5**  | A selected step restores and synchronizes its screenshot and replay evidence. | SPA Replay |
 
 No mocks at the boundary (`docs/duhem-spec.md` §8): `environment.up`
 runs the offline `fixture/dashboard-fixture.yml` through the real
@@ -39,10 +41,11 @@ store (#189), then launches the real `duhem dashboard` over it.
 
 `scripts/up.sh`:
 
-1. Runs `fixture/dashboard-fixture.yml` (one offline, page-free
-   `cli/invoke` step → verdict `pass`) through `duhem run --db
-   <scratch>/duhem.db --run-id dashboard-fixture-run`, recording a real
-   run in the production store under a deterministic id.
+1. Runs `fixture/dashboard-fixture.yml` (a loopback page driven through
+   real Chromium with `--capture always --capture-video` → verdict
+   `pass`) through `duhem run --db <scratch>/duhem.db --run-id
+   dashboard-fixture-run`, recording a real run and synchronized
+   screenshot/video replay evidence under a deterministic id.
 2. Launches `duhem dashboard --db <scratch>/duhem.db --port <port>`
    (serve mode), backgrounded in its own process group.
 
@@ -122,5 +125,5 @@ streaming would need a new action type (its own `area:schema` spec).
 ## Status
 
 Proven green end-to-end against a locally built binary: `verdict: pass`,
-all three criteria pass (AC-2 via real Chromium). Provisions, serves,
+all criteria pass (browser checks via real Chromium). Provisions, serves,
 asserts, and tears down in well under a minute.

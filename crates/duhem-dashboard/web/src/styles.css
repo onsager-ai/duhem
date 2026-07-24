@@ -685,6 +685,14 @@ li.ev.step-group.tone-inconclusive .step-reason { color: var(--inconclusive); }
 .step-captures { margin: 0 0 0.6rem; }
 .step-captures .artifact { margin: 0.5rem 0; }
 .step-captures .artifact:first-of-type { margin-top: 0.2rem; }
+.step-blob-events {
+  margin: 0 0 0.6rem;
+  padding: 0;
+  list-style: none;
+}
+.step-blob-events .ev {
+  background: var(--panel);
+}
 li.ev.step-group.tone-fail {
   border-color: color-mix(in oklab, var(--fail) 42%, var(--lg-border));
 }

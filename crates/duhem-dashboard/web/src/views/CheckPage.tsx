@@ -339,6 +339,16 @@ function StepGroup({
       value: e.value,
       seq: e.seq,
     }));
+  // Non-capture blob observations (for example a large api/call body)
+  // still need a route to their artifact. Keep those event rows inside
+  // the expanded diagnostic subtree; capture/* blobs use the richer
+  // viewers below.
+  const blobObs = node.events.filter(
+    (e) =>
+      (e.kind === "step_observation" || e.kind === "setup_step_observation") &&
+      typeof e.blob_sha256 === "string" &&
+      !(typeof e.output_name === "string" && e.output_name.startsWith("capture/")),
+  );
   const fe = formatEvent(started, prevOf(started));
   const status = stepStatus(node);
   // Overlay the authored step `id` from the recorded VD snapshot (#302):
@@ -433,6 +443,18 @@ function StepGroup({
           {/* ui evidence (screenshot / DOM / network / video) nested under
               the step that captured it, not a side panel. */}
           <StepCaptures node={node} artifacts={artifacts} />
+          {blobObs.length > 0 && (
+            <ol className="step-blob-events" data-testid="step-blob-events">
+              {blobObs.map((event) => (
+                <TimelineRow
+                  key={event.seq}
+                  evt={event}
+                  prev={prevOf(event)}
+                  artifacts={artifacts}
+                />
+              ))}
+            </ol>
+          )}
           {/* Lifecycle events are one diagnostic subtree, not a repeated
               started/observed/finished mini-timeline. */}
           <details className="step-raw">

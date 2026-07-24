@@ -312,6 +312,43 @@ describe("Timeline", () => {
     expect(caps.closest('[data-testid="step-group"]')).not.toBeNull();
     expect(caps.querySelector("img")?.getAttribute("src")).toBe(`run/r/artifact/${sha}`);
   });
+
+  it("keeps artifact-backed outputs reachable inside the step diagnostics", () => {
+    const sha = "b".repeat(64);
+    const events: TraceEvent[] = [
+      {
+        seq: 1,
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "step_started",
+        step_index: 0,
+        uses: "api/call",
+        with: { method: "GET", url: "http://x/api/large" },
+      },
+      {
+        seq: 2,
+        ts: "2026-01-01T00:00:00.100Z",
+        kind: "step_observation",
+        step_index: 0,
+        output_name: "body",
+        blob_sha256: sha,
+      },
+      {
+        seq: 3,
+        ts: "2026-01-01T00:00:00.200Z",
+        kind: "step_finished",
+        step_index: 0,
+        outcome: "ok",
+      },
+    ];
+    const artifacts = [{ id: sha, kind: "body", url: `run/r/artifact/${sha}` }];
+    const { getByTestId } = render(<Timeline events={events} artifacts={artifacts} />);
+    const blobs = getByTestId("step-blob-events");
+    const link = blobs.querySelector<HTMLAnchorElement>(".ev-artifact");
+
+    expect(blobs.closest('[data-testid="step-group"]')).not.toBeNull();
+    expect(link?.textContent).toBe("open");
+    expect(link?.getAttribute("href")).toBe(`run/r/artifact/${sha}`);
+  });
 });
 
 describe("Artifacts", () => {

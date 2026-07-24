@@ -1,0 +1,93 @@
+verification: rolling-tui
+
+criteria:
+  - id: AC-1
+    description: First completed criterion remains compact.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: command
+            uses: cli/invoke
+            with: {command: ["true"]}
+        assertions: [$steps.command.outputs.exit_code == 0]
+  - id: AC-2
+    description: Second completed criterion remains compact.
+    checks:
+      - id: AC-2.1
+        steps:
+          - id: command
+            uses: cli/invoke
+            with: {command: ["true"]}
+        assertions: [$steps.command.outputs.exit_code == 0]
+  - id: AC-3
+    description: Third completed criterion remains compact.
+    checks:
+      - id: AC-3.1
+        steps:
+          - id: command
+            uses: cli/invoke
+            with: {command: ["true"]}
+        assertions: [$steps.command.outputs.exit_code == 0]
+  - id: AC-4
+    description: Fourth completed criterion remains compact.
+    checks:
+      - id: AC-4.1
+        steps:
+          - id: command
+            uses: cli/invoke
+            with: {command: ["true"]}
+        assertions: [$steps.command.outputs.exit_code == 0]
+  - id: AC-5
+    description: Fifth completed criterion remains compact.
+    checks:
+      - id: AC-5.1
+        steps:
+          - id: command
+            uses: cli/invoke
+            with: {command: ["true"]}
+        assertions: [$steps.command.outputs.exit_code == 0]
+  - id: AC-6
+    description: Sixth completed criterion remains compact.
+    checks:
+      - id: AC-6.1
+        steps:
+          - id: command
+            uses: cli/invoke
+            with: {command: ["true"]}
+        assertions: [$steps.command.outputs.exit_code == 0]
+  - id: AC-7
+    description: Seventh completed criterion remains compact.
+    checks:
+      - id: AC-7.1
+        steps:
+          - id: command
+            uses: cli/invoke
+            with: {command: ["true"]}
+        assertions: [$steps.command.outputs.exit_code == 0]
+  - id: AC-8
+    description: Eighth completed criterion remains compact.
+    checks:
+      - id: AC-8.1
+        steps:
+          - id: command
+            uses: cli/invoke
+            with: {command: ["true"]}
+        assertions: [$steps.command.outputs.exit_code == 0]
+  - id: AC-9
+    description: Ninth completed criterion remains compact.
+    checks:
+      - id: AC-9.1
+        steps:
+          - id: command
+            uses: cli/invoke
+            with: {command: ["true"]}
+        assertions: [$steps.command.outputs.exit_code == 0]
+  - id: AC-10
+    description: The active criterion stays visible during a wait.
+    checks:
+      - id: AC-10.1
+        steps:
+          - id: command
+            uses: cli/invoke
+            with: {command: ["sh", "-c", "sleep 1"]}
+        assertions: [$steps.command.outputs.exit_code == 0]

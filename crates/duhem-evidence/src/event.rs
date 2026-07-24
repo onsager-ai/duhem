@@ -233,13 +233,6 @@ pub enum EventPayload {
         /// deserializes with `None`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         step_index: Option<u32>,
-        /// The human-authored assertion line this outcome evaluated —
-        /// e.g. `$steps.update.outputs.status == 200`. Lets a reporter
-        /// show *what* was asserted, not just the `detail`'s observed
-        /// vs expected values. `None` for an implicit judgment (there is
-        /// no authored line) and on events predating this field.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        expr: Option<String>,
     },
     CheckFinished {
         check_id: String,

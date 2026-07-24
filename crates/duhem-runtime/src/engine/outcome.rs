@@ -457,9 +457,6 @@ pub(crate) async fn append_implicit_judgment(
                 // verdict — carry the link so the reporter folds it into
                 // the step and propagates the status (#280).
                 step_index: Some(imp.step_index as u32),
-                // No authored line for an implicit judgment; the semantic
-                // reason lives in `detail`.
-                expr: None,
             })
             .await?;
         if !matches!(imp.state, VerdictState::Pass) {

@@ -27,6 +27,8 @@ needs more than a bullet.
 
 ## Unreleased
 
+## v0.1.7 — 2026-07-24
+
 - [additive] Legible failures for explicit `assertions:` too (#280 follow-up): the `assertion_evaluated` event now carries the authored `expr` (e.g. `$steps.update.outputs.status == 200`), and an explicit assertion that references exactly one `$steps.<id>` now sets `step_index` — so a reporter folds it onto that step and propagates status, exactly like an implicit judgment. The dashboard check page uses this to make `api`/`db` regression checks read like the `ui` ones: the failing call goes red ("step failed"), shows its HTTP response status inline (`→ 500`), and carries the assertion expression + observed-vs-expected as its reason, instead of green "step ok" rows beside disconnected assertion lines. Additive and backward compatible: `expr` is `None` for implicit judgments and absent on prior events; `step_index` stays `None` when an assertion touches zero or many steps. `schema/duhem.schema.json` unchanged (evidence-wire only). (#280)
 
 ## v0.1.5 — 2026-07-24

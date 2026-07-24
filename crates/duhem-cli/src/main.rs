@@ -215,10 +215,11 @@ enum Cmd {
             default_value = "on-failure"
         )]
         capture: duhem_runtime::CapturePolicy,
-        /// Force live per-criterion progress on stderr (spec #299),
-        /// regardless of whether stderr is a TTY. Auto-detected by
-        /// default: on when stderr is a terminal, off when piped/CI.
-        /// stdout is never touched — reporters stay machine-stable.
+        /// Force live progress on stderr (spec #299). Terminals show
+        /// the active check, step, expectation, and timeout budget;
+        /// piped/CI output stays append-only. Auto-detected by default:
+        /// on when stderr is a terminal, off when piped/CI. stdout is
+        /// never touched — reporters stay machine-stable.
         #[arg(long = "live", default_value_t = false, conflicts_with = "no_live")]
         live: bool,
         /// Suppress live progress even on a TTY (spec #299).

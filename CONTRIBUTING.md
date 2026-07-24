@@ -39,7 +39,12 @@ Browser-backed (`ui/*`) test lanes need Node ≥ 20 plus the Playwright sidecar'
 (cd crates/duhem-actions/sidecar && npm ci && npx playwright install chromium)
 ```
 
-`just test-ui` and `just test-dashboard` exercise those lanes; the core `just check` gate does not require them.
+`just test browser-actions` exercises the generic `ui/*` and `api/observe` action lane. `just dashboard test` exercises the dashboard frontend, crate, and CLI lane. The core `just check` gate does not require either one.
+
+For dashboard development, `just dashboard dev` starts the Rust API on
+port 7878 and the Vite frontend with hot reload on port 5173. Dashboard
+server options are forwarded, for example `just dashboard dev --db
+path/to/duhem.db`.
 
 ## Schema-impact discipline
 

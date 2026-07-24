@@ -609,8 +609,9 @@ impl<W: Write> Renderer<'_, W> {
         let hide_cursor = !self.board.cursor_hidden();
         let frame = compose_board_frame(&lines, old_height, hide_cursor);
 
-        // One complete frame per write keeps terminals from painting
-        // the intermediate clear/rewrite states that caused flashing.
+        // Submit one complete frame buffer instead of application-level
+        // row-by-row writes, keeping ordinary terminal writers from
+        // painting the intermediate clear/rewrite states that flashed.
         if self.out.write_all(frame.as_bytes()).is_ok() {
             let _ = self.out.flush();
             self.board.set_cursor_hidden(true);
@@ -684,9 +685,9 @@ fn verdict_mark(verdict: &duhem_judge::VerdictState) -> &'static str {
     }
 }
 
-/// Build a complete cursor move + row rewrite transaction. Keeping
-/// composition pure makes it possible to verify that a refresh reaches
-/// the writer atomically.
+/// Build one complete cursor move + row rewrite buffer. Keeping
+/// composition pure makes it possible to verify that the writer receives
+/// a whole refresh together instead of one application-level row at a time.
 fn compose_board_frame(lines: &[String], old_height: usize, hide_cursor: bool) -> String {
     let surplus = old_height.saturating_sub(lines.len());
     let row_bytes = lines.iter().map(|line| line.len() + 6).sum::<usize>();
@@ -1265,7 +1266,7 @@ criteria:
     }
 
     #[tokio::test(start_paused = true)]
-    async fn tty_board_refresh_is_atomic_and_unchanged_frames_are_skipped() {
+    async fn tty_board_refresh_uses_one_buffer_and_skips_unchanged_frames() {
         let mut out = RecordingWriter::default();
         let mut renderer = renderer(&mut out, tty_cfg());
         let redraw = evt(

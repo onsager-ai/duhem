@@ -590,6 +590,7 @@ impl<W: Write> Renderer<'_, W> {
                     .unwrap_or(0.0);
                 // One final durable line per criterion (#305 E).
                 let _ = writeln!(self.out, "{mark} {criterion_id} {verdict} ({secs:.1}s)");
+                let _ = self.out.flush();
                 self.running = None;
             }
             EventPayload::RunFinished { .. } => return true,
@@ -634,6 +635,7 @@ impl<W: Write> Renderer<'_, W> {
         });
         let n = self.n;
         let _ = writeln!(self.out, "{INDICATOR_ACTIVE} {criterion_id} ({k}/{n})…");
+        let _ = self.out.flush();
     }
 }
 
@@ -1172,6 +1174,25 @@ criteria:
         assert!(
             completed.contains("✓ 1 passed   ✗ 1 failed"),
             "{completed:?}"
+        );
+    }
+
+    #[test]
+    fn active_completed_step_summary_reflects_non_ok_outcomes() {
+        let mut board = TtyBoard::new("outcomes".into(), plan().criteria);
+        let with = std::collections::BTreeMap::new();
+
+        board.start_step("AC-1", "AC-1.1", 0, "cli/invoke", &with);
+        board.finish_step(&duhem_evidence::StepOutcome::Error);
+        let error = board.lines(120, 12).join("\n");
+        assert!(error.contains("✗ 1 completed step"), "{error}");
+
+        board.start_step("AC-1", "AC-1.1", 1, "cli/invoke", &with);
+        board.finish_step(&duhem_evidence::StepOutcome::Timeout);
+        let mixed = board.lines(120, 12).join("\n");
+        assert!(
+            mixed.contains("✗ 2 completed steps"),
+            "failure must take priority over timeout: {mixed}"
         );
     }
 

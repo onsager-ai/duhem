@@ -357,9 +357,15 @@ impl TtyBoard {
             }
             let child_prefix = if last { "     " } else { "  │  " };
             if !check_state.steps.is_empty() {
+                let branch = if self.active_step.is_some() {
+                    "├─"
+                } else {
+                    "└─"
+                };
+                let mark = completed_steps_mark(&check_state.steps);
                 rows.push(fit(
                     format!(
-                        "{child_prefix}├─ {INDICATOR_PASS} {} completed step{}",
+                        "{child_prefix}{branch} {mark} {} completed step{}",
                         check_state.steps.len(),
                         if check_state.steps.len() == 1 {
                             ""
@@ -623,4 +629,17 @@ fn step_mark(step: &CompletedStep) -> &'static str {
         duhem_evidence::StepOutcome::Error => INDICATOR_FAIL,
         duhem_evidence::StepOutcome::Timeout => INDICATOR_INCONCLUSIVE,
     }
+}
+
+fn completed_steps_mark(steps: &[CompletedStep]) -> &'static str {
+    if steps.iter().any(|step| step_mark(step) == INDICATOR_FAIL) {
+        return INDICATOR_FAIL;
+    }
+    if steps
+        .iter()
+        .any(|step| step_mark(step) == INDICATOR_INCONCLUSIVE)
+    {
+        return INDICATOR_INCONCLUSIVE;
+    }
+    INDICATOR_PASS
 }

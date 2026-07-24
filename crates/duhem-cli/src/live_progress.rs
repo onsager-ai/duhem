@@ -14,8 +14,10 @@
 //!
 //! - **TTY** — a width-bounded live board redraws in place. It shows
 //!   every criterion, expands started criteria into check and step
-//!   branches, retains completed pass/fail state, and ticks the active
-//!   leaf's timeout bar (`████░░  26s / 60s`).
+//!   branches, retains completed pass/fail state, and animates the
+//!   active leaf with a spinner and fractional timeout bar
+//!   (`⠹ █████▎──────────  26s/60s`). Semantic color is disabled by
+//!   `NO_COLOR` and `TERM=dumb`.
 //! - **forced non-TTY** (`--live` into a capture: CI, the self-VD) —
 //!   plain append lines, control-sequence-free, plus an explicit
 //!   heartbeat line (`… still in cli/invoke (12s)`) once a single
@@ -155,7 +157,7 @@ pub fn narrate_env_event_to_stderr(evt: &Event) {
 
 /// How often the renderer wakes without an event — the TTY redraw
 /// cadence and the granularity of non-TTY heartbeat checks.
-const TICK_PERIOD: Duration = Duration::from_secs(1);
+const TICK_PERIOD: Duration = Duration::from_millis(100);
 
 /// Presentation posture + heartbeat cadence (#305).
 #[derive(Clone, Copy)]
@@ -165,6 +167,10 @@ pub struct RenderConfig {
     /// sequences would garble the log, so `false` keeps plain
     /// append-only lines.
     pub tty: bool,
+    /// ANSI semantic color. Kept separate from `tty` so tests and
+    /// embedding callers can request in-place redraws without escape
+    /// codes.
+    pub color: bool,
     /// Maximum terminal columns used by the in-place renderer. A live
     /// line must never wrap: `CSI 2K` clears one physical row only.
     pub terminal_width: usize,
@@ -179,6 +185,7 @@ impl Default for RenderConfig {
     fn default() -> Self {
         Self {
             tty: false,
+            color: false,
             terminal_width: 80,
             heartbeat_threshold: Duration::from_secs(10),
             heartbeat_period: Duration::from_secs(10),
@@ -191,8 +198,13 @@ impl RenderConfig {
     /// is a terminal — independent of *why* live mode is on, so a
     /// `--live` in CI still gets clean append lines.
     pub fn detect() -> Self {
+        let tty = std::io::stderr().is_terminal();
+        let color = tty
+            && std::env::var_os("NO_COLOR").is_none()
+            && !std::env::var("TERM").is_ok_and(|term| term.eq_ignore_ascii_case("dumb"));
         Self {
-            tty: std::io::stderr().is_terminal(),
+            tty,
+            color,
             terminal_width: std::env::var("COLUMNS")
                 .ok()
                 .and_then(|value| value.parse().ok())
@@ -218,7 +230,12 @@ pub async fn render<W: Write>(
     cfg: RenderConfig,
     out: &mut W,
 ) {
-    let board = TtyBoard::new(plan.verification, plan.criteria, cfg.terminal_width);
+    let board = TtyBoard::new(
+        plan.verification,
+        plan.criteria,
+        cfg.terminal_width,
+        cfg.color,
+    );
     let mut r = Renderer {
         out,
         cfg,
@@ -278,7 +295,9 @@ struct TtyBoard {
     active_check: Option<String>,
     active_step: Option<ActiveStep>,
     terminal_width: usize,
+    color: bool,
     frame_height: usize,
+    cursor_hidden: bool,
     since: Instant,
 }
 
@@ -326,7 +345,12 @@ struct Renderer<'a, W: Write> {
 }
 
 impl TtyBoard {
-    fn new(verification: String, criteria: Vec<CriterionPlan>, terminal_width: usize) -> Self {
+    fn new(
+        verification: String,
+        criteria: Vec<CriterionPlan>,
+        terminal_width: usize,
+        color: bool,
+    ) -> Self {
         let states = criteria
             .iter()
             .map(|criterion| (criterion.id.clone(), CriterionState::default()))
@@ -339,7 +363,9 @@ impl TtyBoard {
             active_check: None,
             active_step: None,
             terminal_width,
+            color,
             frame_height: 0,
+            cursor_hidden: false,
             since: Instant::now(),
         }
     }
@@ -450,9 +476,11 @@ impl TtyBoard {
 
     fn lines(&self) -> Vec<String> {
         let elapsed = self.since.elapsed().as_secs();
+        let activity = spinner(self.since.elapsed());
+        let run_mark = self.run_mark(activity);
         let mut lines = vec![
             self.fit(format!(
-                "Duhem  {}  ·  elapsed {:02}:{:02}",
+                "{run_mark} Duhem  {}  ·  elapsed {:02}:{:02}",
                 self.verification,
                 elapsed / 60,
                 elapsed % 60
@@ -466,7 +494,7 @@ impl TtyBoard {
                 .verdict
                 .as_ref()
                 .map(verdict_mark)
-                .unwrap_or(if active { "▶" } else { "○" });
+                .unwrap_or(if active { activity } else { "○" });
             lines.push(self.fit(format!(
                 "{mark} {}  {}",
                 criterion.id,
@@ -491,7 +519,7 @@ impl TtyBoard {
                 let check_mark = check_state
                     .and_then(|state| state.verdict.as_ref())
                     .map(verdict_mark)
-                    .unwrap_or(if check_active { "▶" } else { "○" });
+                    .unwrap_or(if check_active { activity } else { "○" });
                 let check_branch = if last_check { "└─" } else { "├─" };
                 let summary = check
                     .description
@@ -528,7 +556,7 @@ impl TtyBoard {
                         .unwrap_or_default();
                     let progress = match step.timeout {
                         Some(timeout) => format!(
-                            "  {}  {}s / {}s",
+                            "  {}  {}s/{}s",
                             progress_bar(step.since.elapsed(), timeout),
                             step.since.elapsed().as_secs(),
                             timeout.as_secs()
@@ -536,7 +564,7 @@ impl TtyBoard {
                         None => format!("  {}s", step.since.elapsed().as_secs()),
                     };
                     lines.push(self.fit(format!(
-                        "{child_prefix}└─ ◐ {}/{} {}{expectation}{progress}",
+                        "{child_prefix}└─ {activity} {}/{} {}{expectation}{progress}",
                         step.index + 1,
                         check.step_count,
                         step.uses
@@ -544,11 +572,76 @@ impl TtyBoard {
                 }
             }
         }
+        lines.push(String::new());
+        lines.push(self.fit(self.summary(activity)));
         lines
     }
 
+    fn run_mark<'a>(&self, activity: &'a str) -> &'a str {
+        if self
+            .criteria
+            .iter()
+            .any(|criterion| self.states[&criterion.id].verdict.is_none())
+        {
+            return activity;
+        }
+        if self.criteria.iter().any(|criterion| {
+            matches!(
+                self.states[&criterion.id].verdict,
+                Some(duhem_judge::VerdictState::Fail)
+            )
+        }) {
+            return "✘";
+        }
+        if self.criteria.iter().any(|criterion| {
+            matches!(
+                self.states[&criterion.id].verdict,
+                Some(duhem_judge::VerdictState::Inconclusive(_))
+            )
+        }) {
+            return "◐";
+        }
+        "✔"
+    }
+
+    fn summary(&self, activity: &str) -> String {
+        let mut passed = 0;
+        let mut failed = 0;
+        let mut inconclusive = 0;
+        let mut pending = 0;
+        for criterion in &self.criteria {
+            match self.states[&criterion.id].verdict {
+                Some(duhem_judge::VerdictState::Pass) => passed += 1,
+                Some(duhem_judge::VerdictState::Fail) => failed += 1,
+                Some(duhem_judge::VerdictState::Inconclusive(_)) => inconclusive += 1,
+                None if self.active_criterion.as_deref() != Some(criterion.id.as_str()) => {
+                    pending += 1;
+                }
+                None => {}
+            }
+        }
+        let mut parts = Vec::new();
+        if passed > 0 {
+            parts.push(format!("✔ {passed} passed"));
+        }
+        if failed > 0 {
+            parts.push(format!("✘ {failed} failed"));
+        }
+        if inconclusive > 0 {
+            parts.push(format!("◐ {inconclusive} inconclusive"));
+        }
+        if self.active_criterion.is_some() {
+            parts.push(format!("{activity} 1 running"));
+        }
+        if pending > 0 {
+            parts.push(format!("○ {pending} pending"));
+        }
+        parts.join("   ")
+    }
+
     fn fit(&self, line: String) -> String {
-        shorten_to_width(&line, self.terminal_width)
+        let plain = shorten_to_width(&line, self.terminal_width);
+        if self.color { colorize(&plain) } else { plain }
     }
 }
 
@@ -841,6 +934,10 @@ impl<W: Write> Renderer<'_, W> {
     }
 
     fn draw_board(&mut self) {
+        if !self.board.cursor_hidden {
+            let _ = write!(self.out, "\x1b[?25l");
+            self.board.cursor_hidden = true;
+        }
         let lines = self.board.lines();
         let old_height = self.board.frame_height;
         if old_height > 0 {
@@ -909,6 +1006,11 @@ impl<W: Write> Renderer<'_, W> {
             let _ = self.out.flush();
             self.line_open = false;
         }
+        if self.board.cursor_hidden {
+            let _ = write!(self.out, "\x1b[?25h");
+            let _ = self.out.flush();
+            self.board.cursor_hidden = false;
+        }
     }
 }
 
@@ -959,13 +1061,61 @@ fn timeout(with: &std::collections::BTreeMap<String, serde_json::Value>) -> Opti
         .map(Duration::from_millis)
 }
 
-/// A compact twelve-cell timeout bar for an in-place TTY line. Saturating
-/// progress keeps a late redraw meaningful instead of overflowing the view.
+/// A smooth sixteen-cell timeout bar. Eighth-cell glyphs keep short waits
+/// visibly moving without making the bar jitter in width.
 fn progress_bar(elapsed: Duration, timeout: Duration) -> String {
-    const WIDTH: usize = 12;
+    const WIDTH: usize = 16;
+    const PARTIAL: [&str; 8] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
     let total = timeout.as_millis().max(1);
-    let filled = ((elapsed.as_millis().min(total) * WIDTH as u128) / total) as usize;
-    format!("{}{}", "█".repeat(filled), "░".repeat(WIDTH - filled))
+    let units = ((elapsed.as_millis().min(total) * (WIDTH * 8) as u128) / total) as usize;
+    let full = units / 8;
+    let remainder = units % 8;
+    let partial = PARTIAL[remainder];
+    let track = WIDTH - full - usize::from(remainder > 0);
+    format!("{}{}{}", "█".repeat(full), partial, "─".repeat(track))
+}
+
+const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+fn spinner(elapsed: Duration) -> &'static str {
+    let frame = (elapsed.as_millis() / TICK_PERIOD.as_millis()) as usize;
+    SPINNER[frame % SPINNER.len()]
+}
+
+fn colorize(text: &str) -> String {
+    const RESET: &str = "\x1b[0m";
+    const CYAN: &str = "\x1b[36m";
+    const GREEN: &str = "\x1b[32m";
+    const RED: &str = "\x1b[31m";
+    const YELLOW: &str = "\x1b[33m";
+    const DIM: &str = "\x1b[2m";
+    const HEADER: &str = "\x1b[1;36m";
+
+    let header = SPINNER.iter().any(|frame| text.starts_with(frame)) && text.contains(" Duhem  ");
+    if header {
+        return format!("{HEADER}{text}{RESET}");
+    }
+
+    let mut out = String::with_capacity(text.len() + 32);
+    for ch in text.chars() {
+        let style = match ch {
+            '✓' | '✔' => Some(GREEN),
+            '✘' => Some(RED),
+            '◐' => Some(YELLOW),
+            '○' | '│' | '├' | '└' | '─' => Some(DIM),
+            '█' | '▏' | '▎' | '▍' | '▌' | '▋' | '▊' | '▉' => Some(CYAN),
+            ch if SPINNER.iter().any(|frame| frame.starts_with(ch)) => Some(CYAN),
+            _ => None,
+        };
+        if let Some(style) = style {
+            out.push_str(style);
+            out.push(ch);
+            out.push_str(RESET);
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 /// Keep an authored check summary useful on a narrow terminal without
@@ -1308,13 +1458,29 @@ criteria:
             tty_cfg(),
         )
         .await;
-        assert!(out.contains("▶ AC-1  one"), "{out:?}");
-        assert!(out.contains("  └─ ▶ AC-1.1  one check"), "{out:?}");
-        assert!(out.contains("     └─ ◐ 1/2 cli/invoke"), "{out:?}");
+        assert!(
+            SPINNER
+                .iter()
+                .any(|frame| out.contains(&format!("{frame} AC-1  one"))),
+            "{out:?}"
+        );
+        assert!(
+            SPINNER
+                .iter()
+                .any(|frame| out.contains(&format!("  └─ {frame} AC-1.1  one check"))),
+            "{out:?}"
+        );
+        assert!(
+            SPINNER
+                .iter()
+                .any(|frame| out.contains(&format!("     └─ {frame} 1/2 cli/invoke"))),
+            "{out:?}"
+        );
         assert!(out.contains("     └─ ✓ 1/2 cli/invoke"), "{out:?}");
         assert!(out.contains("  └─ ✔ AC-1.1  one check"), "{out:?}");
         assert!(out.contains("✔ AC-1  one"), "{out:?}");
         assert!(out.contains("✘ AC-2  two"), "{out:?}");
+        assert!(out.contains("✔ 1 passed   ✘ 1 failed"), "{out:?}");
     }
 
     #[tokio::test]
@@ -1341,13 +1507,54 @@ criteria:
             tty_cfg(),
         )
         .await;
-        assert!(out.contains("  └─ ▶ AC-1.1  one check"), "{out:?}");
         assert!(
-            out.contains("     └─ ◐ 1/2 ui/assert-element · expect visible"),
+            SPINNER
+                .iter()
+                .any(|frame| out.contains(&format!("  └─ {frame} AC-1.1  one check"))),
             "{out:?}"
         );
-        assert!(out.contains("0s / 60s"), "{out:?}");
-        assert!(out.contains("░░░░░░░░░░░░"), "{out:?}");
+        assert!(
+            SPINNER.iter().any(|frame| out.contains(&format!(
+                "     └─ {frame} 1/2 ui/assert-element · expect visible"
+            ))),
+            "{out:?}"
+        );
+        assert!(out.contains("0s/60s"), "{out:?}");
+        assert!(out.contains("────────────────"), "{out:?}");
+        assert!(out.contains("1 running   ○ 1 pending"), "{out:?}");
+    }
+
+    #[test]
+    fn spinner_and_fractional_progress_animate_smoothly() {
+        assert_eq!(spinner(Duration::ZERO), "⠋");
+        assert_eq!(spinner(Duration::from_millis(100)), "⠙");
+        assert_eq!(
+            progress_bar(Duration::from_secs(20), Duration::from_secs(60)),
+            "█████▎──────────"
+        );
+    }
+
+    #[test]
+    fn semantic_color_is_ansi_and_plain_width_safe() {
+        let plain = "└─ ⠹ running  █▌──  ✔ pass  ✘ fail  ○ pending";
+        let colored = colorize(plain);
+        assert!(colored.contains("\x1b[36m⠹\x1b[0m"));
+        assert!(colored.contains("\x1b[32m✔\x1b[0m"));
+        assert!(colored.contains("\x1b[31m✘\x1b[0m"));
+        assert!(colored.contains("\x1b[2m○\x1b[0m"));
+        let mut stripped = colored;
+        for escape in [
+            "\x1b[0m",
+            "\x1b[36m",
+            "\x1b[32m",
+            "\x1b[31m",
+            "\x1b[33m",
+            "\x1b[2m",
+            "\x1b[1;36m",
+        ] {
+            stripped = stripped.replace(escape, "");
+        }
+        assert_eq!(stripped, plain);
     }
 
     #[test]

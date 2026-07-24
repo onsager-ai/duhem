@@ -120,6 +120,10 @@ dev *args:
     if (( $# == 0 )); then
         set -- --help
     fi
+    if [[ "$1" == "dashboard" ]]; then
+        (cd crates/duhem-dashboard/web && npm ci && npm run build)
+        cargo build -p duhem-dashboard
+    fi
     exec cargo run -p duhem-cli -- "$@"
 
 # Run workspace tests or the browser-action integration lane.

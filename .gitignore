@@ -5,6 +5,7 @@
 .DS_Store
 .idea/
 .vscode/
+tmp/
 
 # Local Duhem run evidence (written by `duhem run`). Root-anchored so a
 # committed `.duhem/` VD suite (Pattern D, `templates/product-repo/`) is

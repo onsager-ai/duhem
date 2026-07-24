@@ -44,20 +44,39 @@ use tokio::time::Instant;
 pub struct Plan {
     criterion_ids: Vec<String>,
     check_owner: HashMap<String, String>,
+    checks: HashMap<String, CheckPlan>,
+}
+
+/// Presentation-only metadata collected from the authored definition.
+/// It stays in the CLI: evidence remains the runtime's generic event
+/// stream, while the terminal can still say where an event sits in a
+/// check and use the human check summary when one exists.
+struct CheckPlan {
+    description: Option<String>,
+    step_count: usize,
 }
 
 impl Plan {
     pub fn from_def(def: &duhem_schema::VerificationDefinition) -> Self {
         let criterion_ids = def.criteria.iter().map(|c| c.id.clone()).collect();
         let mut check_owner = HashMap::new();
+        let mut checks = HashMap::new();
         for c in &def.criteria {
             for ch in &c.checks {
                 check_owner.insert(ch.id.clone(), c.id.clone());
+                checks.insert(
+                    ch.id.clone(),
+                    CheckPlan {
+                        description: ch.description.clone(),
+                        step_count: ch.steps.len(),
+                    },
+                );
             }
         }
         Self {
             criterion_ids,
             check_owner,
+            checks,
         }
     }
 }
@@ -128,6 +147,9 @@ pub struct RenderConfig {
     /// sequences would garble the log, so `false` keeps plain
     /// append-only lines.
     pub tty: bool,
+    /// Maximum terminal columns used by the in-place renderer. A live
+    /// line must never wrap: `CSI 2K` clears one physical row only.
+    pub terminal_width: usize,
     /// Non-TTY: how long one step must be in flight before the first
     /// `… still in <uses>` heartbeat line.
     pub heartbeat_threshold: Duration,
@@ -139,6 +161,7 @@ impl Default for RenderConfig {
     fn default() -> Self {
         Self {
             tty: false,
+            terminal_width: 80,
             heartbeat_threshold: Duration::from_secs(10),
             heartbeat_period: Duration::from_secs(10),
         }
@@ -152,6 +175,11 @@ impl RenderConfig {
     pub fn detect() -> Self {
         Self {
             tty: std::io::stderr().is_terminal(),
+            terminal_width: std::env::var("COLUMNS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .filter(|width: &usize| *width >= 20)
+                .unwrap_or(80),
             ..Self::default()
         }
     }
@@ -177,6 +205,7 @@ pub async fn render<W: Write>(
         cfg,
         n: plan.criterion_ids.len(),
         check_owner: plan.check_owner,
+        checks: plan.checks,
         started: HashMap::new(),
         running: None,
         line_open: false,
@@ -211,6 +240,12 @@ struct Running {
     ordinal: usize,
     since: Instant,
     step_uses: Option<String>,
+    check_id: Option<String>,
+    check_description: Option<String>,
+    step_index: Option<u32>,
+    step_count: usize,
+    expectation: Option<String>,
+    timeout: Option<Duration>,
     step_since: Instant,
     beats: u32,
 }
@@ -220,6 +255,7 @@ struct Renderer<'a, W: Write> {
     cfg: RenderConfig,
     n: usize,
     check_owner: HashMap<String, String>,
+    checks: HashMap<String, CheckPlan>,
     /// criterion id → (ordinal shown at start, first-event timestamp)
     started: HashMap<String, (usize, chrono::DateTime<chrono::Utc>)>,
     running: Option<Running>,
@@ -238,13 +274,26 @@ impl<W: Write> Renderer<'_, W> {
         }
         match &evt.payload {
             EventPayload::StepStarted {
-                criterion_id, uses, ..
+                criterion_id,
+                check_id,
+                step_index,
+                uses,
+                with,
+                ..
             } => {
                 self.begin(criterion_id, ts);
                 if let Some(run) = &mut self.running
                     && run.criterion_id == *criterion_id
                 {
                     run.step_uses = Some(uses.clone());
+                    run.check_id = Some(check_id.clone());
+                    if let Some(check) = self.checks.get(check_id) {
+                        run.check_description = check.description.clone();
+                        run.step_count = check.step_count;
+                    }
+                    run.step_index = Some(*step_index);
+                    run.expectation = expectation(with);
+                    run.timeout = timeout(with);
                     run.step_since = Instant::now();
                     run.beats = 0;
                 }
@@ -252,20 +301,30 @@ impl<W: Write> Renderer<'_, W> {
                     self.draw_running();
                 }
             }
-            EventPayload::StepFinished { .. } => {
-                if let Some(run) = &mut self.running {
+            EventPayload::StepFinished { outcome, .. } => {
+                if self.cfg.tty {
+                    self.finish_step(outcome);
+                } else if let Some(run) = &mut self.running {
                     run.step_uses = None;
                     run.beats = 0;
                 }
-                if self.cfg.tty {
-                    self.draw_running();
-                }
             }
-            EventPayload::AssertionEvaluated { check_id, .. }
-            | EventPayload::CheckFinished { check_id, .. } => {
+            EventPayload::AssertionEvaluated { check_id, .. } => {
                 if let Some(cid) = self.check_owner.get(check_id) {
                     let owner = cid.clone();
                     self.begin(&owner, ts);
+                }
+            }
+            EventPayload::CheckFinished { check_id, verdict } => {
+                if let Some(cid) = self.check_owner.get(check_id) {
+                    let owner = cid.clone();
+                    self.begin(&owner, ts);
+                }
+                if self.cfg.tty {
+                    self.line(&format!(
+                        "  └─ {} {check_id} {verdict}",
+                        verdict_mark(verdict)
+                    ));
                 }
             }
             EventPayload::CriterionFinished {
@@ -276,11 +335,7 @@ impl<W: Write> Renderer<'_, W> {
                 // stepless-and-instant) may finish without a start
                 // line; give it one so every verdict line has context.
                 self.begin(criterion_id, ts);
-                let mark = match verdict {
-                    duhem_judge::VerdictState::Pass => "✔",
-                    duhem_judge::VerdictState::Fail => "✘",
-                    duhem_judge::VerdictState::Inconclusive(_) => "◐",
-                };
+                let mark = verdict_mark(verdict);
                 let secs = self
                     .started
                     .get(criterion_id)
@@ -335,11 +390,18 @@ impl<W: Write> Renderer<'_, W> {
             ordinal: k,
             since: Instant::now(),
             step_uses: None,
+            check_id: None,
+            check_description: None,
+            step_index: None,
+            step_count: 0,
+            expectation: None,
+            timeout: None,
             step_since: Instant::now(),
             beats: 0,
         });
         if self.cfg.tty {
-            self.draw_running();
+            let n = self.n;
+            self.line(&format!("▶ {criterion_id} ({k}/{n})"));
         } else {
             let n = self.n;
             let _ = writeln!(self.out, "▶ {criterion_id} ({k}/{n})…");
@@ -353,7 +415,61 @@ impl<W: Write> Renderer<'_, W> {
         let Some(run) = &self.running else { return };
         let head = format!("▶ {} ({}/{})", run.criterion_id, run.ordinal, self.n);
         let text = match &run.step_uses {
-            Some(uses) => format!("{head} … {uses} {}s", run.step_since.elapsed().as_secs()),
+            Some(uses) => {
+                let step = run
+                    .step_index
+                    .map(|index| match run.step_count {
+                        0 => format!("step {}", index + 1),
+                        total => format!("step {}/{}", index + 1, total),
+                    })
+                    .unwrap_or_else(|| "step".to_string());
+                let check = match (run.check_id.as_deref(), run.check_description.as_deref()) {
+                    (Some(id), Some(description)) => {
+                        format!("{id} ({})", shorten(description, 36))
+                    }
+                    (Some(id), None) => id.to_string(),
+                    _ => "check".to_string(),
+                };
+                let expectation = run
+                    .expectation
+                    .as_deref()
+                    .map(|value| format!(" • {value}"))
+                    .unwrap_or_default();
+                let elapsed = run.step_since.elapsed();
+                let timer = match run.timeout {
+                    Some(timeout) => format!(
+                        "  {}  {}s / {}s",
+                        progress_bar(elapsed, timeout),
+                        elapsed.as_secs(),
+                        timeout.as_secs()
+                    ),
+                    None => format!(" {}s", elapsed.as_secs()),
+                };
+                let full = format!("  └─ ▶ {check} · {step} · {uses}{expectation}{timer}");
+                let without_summary = format!(
+                    "  └─ ▶ {} · {step} · {uses}{expectation}{timer}",
+                    run.check_id.as_deref().unwrap_or("check")
+                );
+                // This compact shape deliberately preserves the useful
+                // live facts (check, position, action, timer/bar) on an
+                // 80-column terminal. The longer variants are used only
+                // when they fit a single physical terminal row.
+                let compact_step = run
+                    .step_index
+                    .map(|index| match run.step_count {
+                        0 => (index + 1).to_string(),
+                        total => format!("{}/{}", index + 1, total),
+                    })
+                    .unwrap_or_else(|| "step".to_string());
+                let compact = format!(
+                    "  └─ ▶ {} · {compact_step} {uses}{timer}",
+                    run.check_id.as_deref().unwrap_or("check"),
+                );
+                [full, without_summary, compact.clone()]
+                    .into_iter()
+                    .find(|candidate| display_width(candidate) <= self.cfg.terminal_width)
+                    .unwrap_or_else(|| shorten_to_width(&compact, self.cfg.terminal_width))
+            }
             None => {
                 let secs = run.since.elapsed().as_secs();
                 if secs == 0 {
@@ -366,6 +482,35 @@ impl<W: Write> Renderer<'_, W> {
         let _ = write!(self.out, "\r\x1b[2K{text}");
         let _ = self.out.flush();
         self.line_open = true;
+    }
+
+    /// Turn the active redraw into a durable tree branch. This reports
+    /// action completion only; the later check verdict remains the
+    /// authoritative pass/fail judgment for assertion actions.
+    fn finish_step(&mut self, outcome: &duhem_evidence::StepOutcome) {
+        let Some(run) = &self.running else { return };
+        let mark = match outcome {
+            duhem_evidence::StepOutcome::Ok => "✓",
+            duhem_evidence::StepOutcome::Error => "✘",
+            duhem_evidence::StepOutcome::Timeout => "◐",
+        };
+        let check = run.check_id.as_deref().unwrap_or("check");
+        let step = run
+            .step_index
+            .map(|index| match run.step_count {
+                0 => format!("step {}", index + 1),
+                total => format!("step {}/{}", index + 1, total),
+            })
+            .unwrap_or_else(|| "step".to_string());
+        let uses = run.step_uses.as_deref().unwrap_or("action");
+        let elapsed = run.step_since.elapsed().as_secs_f64();
+        self.line(&format!(
+            "  ├─ {mark} {check} · {step} · {uses} ({elapsed:.1}s)"
+        ));
+        if let Some(run) = &mut self.running {
+            run.step_uses = None;
+            run.beats = 0;
+        }
     }
 
     /// Write one durable line. On a TTY an open running line is
@@ -391,6 +536,102 @@ impl<W: Write> Renderer<'_, W> {
     }
 }
 
+fn verdict_mark(verdict: &duhem_judge::VerdictState) -> &'static str {
+    match verdict {
+        duhem_judge::VerdictState::Pass => "✔",
+        duhem_judge::VerdictState::Fail => "✘",
+        duhem_judge::VerdictState::Inconclusive(_) => "◐",
+    }
+}
+
+/// Render the useful, non-sensitive part of an action's immediate goal.
+/// The action name remains the source of truth; this is only the small
+/// operator-facing cue that explains why a long wait is happening.
+fn expectation(with: &std::collections::BTreeMap<String, serde_json::Value>) -> Option<String> {
+    if let Some(expected) = with.get("expected").and_then(serde_json::Value::as_str) {
+        return Some(format!("expect {expected}"));
+    }
+    if let Some(state) = with.get("state").and_then(serde_json::Value::as_str) {
+        return Some(format!("wait for {state}"));
+    }
+    None
+}
+
+/// `within:` is shared by the action families and reaches evidence as a
+/// resolved JSON scalar. Keep the parser deliberately narrow: an unknown
+/// value merely omits the bar, never affects execution or rendering.
+fn timeout(with: &std::collections::BTreeMap<String, serde_json::Value>) -> Option<Duration> {
+    let raw = with.get("within")?;
+    if let Some(ms) = raw.as_u64() {
+        return Some(Duration::from_millis(ms));
+    }
+    let raw = raw.as_str()?.trim();
+    let (number, multiplier) = if let Some(value) = raw.strip_suffix("ms") {
+        (value, 1_u64)
+    } else if let Some(value) = raw.strip_suffix('s') {
+        (value, 1_000)
+    } else if let Some(value) = raw.strip_suffix('m') {
+        (value, 60_000)
+    } else {
+        return None;
+    };
+    number
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .and_then(|value| value.checked_mul(multiplier))
+        .map(Duration::from_millis)
+}
+
+/// A compact twelve-cell timeout bar for an in-place TTY line. Saturating
+/// progress keeps a late redraw meaningful instead of overflowing the view.
+fn progress_bar(elapsed: Duration, timeout: Duration) -> String {
+    const WIDTH: usize = 12;
+    let total = timeout.as_millis().max(1);
+    let filled = ((elapsed.as_millis().min(total) * WIDTH as u128) / total) as usize;
+    format!("{}{}", "█".repeat(filled), "░".repeat(WIDTH - filled))
+}
+
+/// Keep an authored check summary useful on a narrow terminal without
+/// slicing a UTF-8 code point or letting the redraw consume the whole row.
+fn shorten(text: &str, width: usize) -> String {
+    let mut chars = text.chars();
+    let prefix: String = chars.by_ref().take(width).collect();
+    if chars.next().is_some() {
+        format!("{prefix}…")
+    } else {
+        prefix
+    }
+}
+
+/// ANSI escapes are not part of these strings, so a small local width
+/// model is enough to prevent redraw wrapping without adding a terminal UI
+/// dependency. Treat non-ASCII scalar values conservatively as two cells.
+fn display_width(text: &str) -> usize {
+    text.chars()
+        .map(|ch| if ch.is_ascii() { 1 } else { 2 })
+        .sum()
+}
+
+fn shorten_to_width(text: &str, width: usize) -> String {
+    if display_width(text) <= width {
+        return text.to_string();
+    }
+    let ellipsis_width = 2;
+    let budget = width.saturating_sub(ellipsis_width);
+    let mut used = 0;
+    let mut out = String::new();
+    for ch in text.chars() {
+        let ch_width = if ch.is_ascii() { 1 } else { 2 };
+        if used + ch_width > budget {
+            break;
+        }
+        out.push(ch);
+        used += ch_width;
+    }
+    format!("{out}…")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,6 +647,10 @@ criteria:
     description: one
     checks:
       - id: AC-1.1
+        description: one check
+        steps:
+          - uses: cli/invoke
+          - uses: cli/invoke
         assertions: ["true"]
   - id: AC-2
     description: two
@@ -438,6 +683,7 @@ criteria:
     fn tty_cfg() -> RenderConfig {
         RenderConfig {
             tty: true,
+            terminal_width: 200,
             ..RenderConfig::default()
         }
     }
@@ -621,10 +867,9 @@ criteria:
         drop(tx);
     }
 
-    /// #305 E: on a TTY each criterion is exactly ONE line — the
-    /// running line is erased (`\r` + `ESC[2K`) and replaced by its
-    /// verdict line, so the final transcript shows each criterion
-    /// once. Paused clock so elapsed displays are deterministic.
+    /// TTYs retain a criterion root and redraw only the active leaf.
+    /// The verdict closes that visible branch without duplicating the
+    /// in-flight line. Paused clock keeps elapsed displays deterministic.
     #[tokio::test(start_paused = true)]
     async fn tty_running_line_is_replaced_by_the_verdict_line() {
         let out = rendered(
@@ -644,6 +889,14 @@ criteria:
                 ),
                 evt(
                     2,
+                    200,
+                    EventPayload::StepFinished {
+                        step_index: 0,
+                        outcome: duhem_evidence::StepOutcome::Ok,
+                    },
+                ),
+                evt(
+                    3,
                     1600,
                     EventPayload::CriterionFinished {
                         criterion_id: "AC-1".into(),
@@ -651,7 +904,7 @@ criteria:
                     },
                 ),
                 evt(
-                    3,
+                    4,
                     1700,
                     EventPayload::CriterionFinished {
                         criterion_id: "AC-2".into(),
@@ -659,7 +912,7 @@ criteria:
                     },
                 ),
                 evt(
-                    4,
+                    5,
                     1800,
                     EventPayload::RunFinished {
                         verdict: VerdictState::Fail,
@@ -673,14 +926,62 @@ criteria:
         // (with the in-flight action on it), then erased and replaced
         // by the verdict line.
         assert!(out.contains("▶ AC-1 (1/2)"), "{out:?}");
-        assert!(out.contains("… cli/invoke 0s"), "{out:?}");
-        assert!(out.contains("\r\u{1b}[2K✔ AC-1 pass (1.5s)\n"), "{out:?}");
-        // What a terminal ultimately shows: one line per criterion,
-        // no start/finish duplication.
+        assert!(out.contains("step 1/2 · cli/invoke"), "{out:?}");
+        assert!(
+            out.contains("\r\u{1b}[2K  ├─ ✓ AC-1.1 · step 1/2 · cli/invoke (0.0s)\n"),
+            "{out:?}"
+        );
+        // What a terminal ultimately shows: criterion roots plus their
+        // durable verdicts, with no duplicate in-flight leaf.
         assert_eq!(
             visible(&out),
-            vec!["✔ AC-1 pass (1.5s)", "✘ AC-2 fail (0.0s)"]
+            vec![
+                "▶ AC-1 (1/2)",
+                "  ├─ ✓ AC-1.1 · step 1/2 · cli/invoke (0.0s)",
+                "✔ AC-1 pass (1.5s)",
+                "▶ AC-2 (2/2)",
+                "✘ AC-2 fail (0.0s)",
+            ]
         );
+    }
+
+    #[tokio::test]
+    async fn tty_line_shows_check_step_expectation_and_timeout_budget() {
+        let mut with = std::collections::BTreeMap::new();
+        with.insert("expected".into(), serde_json::json!("visible"));
+        with.insert("within".into(), serde_json::json!("60s"));
+        let out = rendered(
+            vec![
+                evt(0, 0, duhem_evidence::run_started("t", Default::default())),
+                evt(
+                    1,
+                    10,
+                    EventPayload::StepStarted {
+                        criterion_id: "AC-1".into(),
+                        check_id: "AC-1.1".into(),
+                        step_index: 0,
+                        uses: "ui/assert-element".into(),
+                        layer: Some("ui".into()),
+                        with,
+                    },
+                ),
+            ],
+            tty_cfg(),
+        )
+        .await;
+        assert!(
+            out.contains("AC-1.1 (one check) · step 1/2 · ui/assert-element"),
+            "{out:?}"
+        );
+        assert!(out.contains("• expect visible  "), "{out:?}");
+        assert!(out.contains("0s / 60s"), "{out:?}");
+        assert!(out.contains("░░░░░░░░░░░░"), "{out:?}");
+    }
+
+    #[test]
+    fn check_summary_truncation_is_utf8_safe() {
+        assert_eq!(shorten("short", 5), "short");
+        assert_eq!(shorten("回答问题", 2), "回答…");
     }
 
     /// #305 C: without a TTY, a step in flight past the threshold
@@ -713,6 +1014,7 @@ criteria:
             tty: false,
             heartbeat_threshold: Duration::from_secs(2),
             heartbeat_period: Duration::from_secs(2),
+            ..RenderConfig::default()
         };
         let handle = tokio::spawn(async move {
             let mut out = Vec::new();

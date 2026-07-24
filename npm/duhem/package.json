@@ -1,6 +1,6 @@
 {
   "name": "duhem",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Holistic verification platform for AI-delivered software — the `duhem` CLI.",
   "license": "Apache-2.0",
   "bin": {
@@ -30,10 +30,10 @@
     "url": "git+https://github.com/onsager-ai/duhem.git"
   },
   "optionalDependencies": {
-    "@duhem/cli-linux-x64": "0.1.5",
-    "@duhem/cli-linux-arm64": "0.1.5",
-    "@duhem/cli-darwin-x64": "0.1.5",
-    "@duhem/cli-darwin-arm64": "0.1.5",
-    "@duhem/cli-windows-x64": "0.1.5"
+    "@duhem/cli-linux-x64": "0.1.6",
+    "@duhem/cli-linux-arm64": "0.1.6",
+    "@duhem/cli-darwin-x64": "0.1.6",
+    "@duhem/cli-darwin-arm64": "0.1.6",
+    "@duhem/cli-windows-x64": "0.1.6"
   }
 }

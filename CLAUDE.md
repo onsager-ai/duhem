@@ -163,7 +163,7 @@ task branch in that directory. Start every branch task in a dedicated
 worktree instead:
 
 ```sh
-just worktree-add <branch>
+just worktree add <branch>
 cd ../duhem-wt/<branch-with-/-as-+>
 just dev  # or: just build / just lint / just test
 ```

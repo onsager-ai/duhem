@@ -26,8 +26,8 @@ at runtime.
 ### Start branch work in a worktree
 
 ```sh
-just worktree-add <branch>
-# `worktree-add` prints the path; enter it, then use the normal commands:
+just worktree add <branch>
+# `worktree add` prints the path; enter it, then use the normal commands:
 just dev  # or: just build / just lint / just test
 # open an agent session in that directory
 # when done:  git worktree remove ../<repo>-wt/<branch>

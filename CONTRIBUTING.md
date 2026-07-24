@@ -39,7 +39,7 @@ Browser-backed (`ui/*`) test lanes need Node ≥ 20 plus the Playwright sidecar'
 (cd crates/duhem-actions/sidecar && npm ci && npx playwright install chromium)
 ```
 
-`just test-ui` and `just test-dashboard` exercise those lanes; the core `just check` gate does not require them.
+`just test browser-actions` exercises the generic `ui/*` and `api/observe` action lane. `just test dashboard` exercises the dashboard frontend, crate, and CLI lane. The core `just check` gate does not require either one.
 
 ## Schema-impact discipline
 

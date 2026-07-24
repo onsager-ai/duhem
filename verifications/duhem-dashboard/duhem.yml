@@ -38,7 +38,7 @@
 # it.
 #
 # Run it (from the repo root, against a locally built binary):
-#   just dashboard-build            # SPA bundle embedded into the binary
+#   just build dashboard            # SPA bundle embedded into the binary
 #   cargo build -p duhem-cli
 #   cd crates/duhem-actions/sidecar && npm ci && npx playwright install chromium && cd -
 #   DUHEM_BIN="$PWD/target/debug/duhem" \

@@ -4,7 +4,7 @@
 //!
 //! Ignored in CI by default — running these requires
 //! `npx playwright install chromium` (multi-hundred-MB download).
-//! The `just test-ui` recipe runs them locally.
+//! `just test browser-actions` runs them locally.
 //!
 //! Cases (per spec Plan on #12 and #37):
 //!

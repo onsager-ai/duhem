@@ -54,11 +54,11 @@ a child, so the wrapper pid alone is not enough.
 ## Operator setup
 
 A Rust toolchain, the **SPA bundle embedded into the dashboard binary**
-(`just dashboard-build`), and **Playwright Chromium** for AC-2's
+(`just build dashboard`), and **Playwright Chromium** for AC-2's
 browser:
 
 ```sh
-just dashboard-build                       # SPA bundle → duhem-dashboard
+just build dashboard                       # SPA bundle → duhem-dashboard
 cargo build -p duhem-cli                   # the `duhem` CLI under test
 cd crates/duhem-actions/sidecar && npm ci && npx playwright install chromium && cd -
 ```

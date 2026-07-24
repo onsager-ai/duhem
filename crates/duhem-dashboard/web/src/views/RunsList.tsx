@@ -11,6 +11,9 @@ import {
   ChevronsUpDown,
   ChevronUp,
   Inbox,
+  Layers3,
+  List,
+  Siren,
   X,
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -41,11 +44,34 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useRunsData } from "@/runs-context";
 import { flatLeaves } from "@/stats";
-import { formatDuration, formatStartedAt, VerdictBadge } from "@/ui";
+import {
+  formatDuration,
+  formatStartedAt,
+  verdictFamily,
+  VerdictBadge,
+} from "@/ui";
 import type { RunsListEntry } from "../api";
 
 const VERDICT_CHIPS = ["pass", "fail", "inconclusive", "live"] as const;
 const ALL = "__all__";
+type RunsView = "runs" | "verification" | "triage";
+
+function runsView(value: string | null): RunsView {
+  return value === "verification" || value === "triage" ? value : "runs";
+}
+
+function startedMs(entry: RunsListEntry): number {
+  return entry.started_at ? Date.parse(entry.started_at) || 0 : 0;
+}
+
+export function triageRank(entry: RunsListEntry): number {
+  if (entry.live) return 0;
+  const family = verdictFamily(entry.verdict);
+  if (family === "fail") return 1;
+  if (family === "inconclusive") return 2;
+  if (family === null) return 2;
+  return 3;
+}
 
 export function matchesFilters(
   entry: RunsListEntry,
@@ -189,15 +215,25 @@ const columns: ColumnDef<RunsListEntry>[] = [
     header: "Verdict",
     enableSorting: false,
     cell: ({ row }) => (
-      <VerdictBadge verdict={row.original.verdict} live={row.original.live} />
+      <VerdictBadge
+        verdict={row.original.verdict}
+        live={row.original.live}
+        compact
+      />
     ),
   },
 ];
 
-function RunsTable({ data }: { data: RunsListEntry[] }) {
-  const [sorting, setSorting] = useState<SortingState>([
-    { id: "started", desc: true },
-  ]);
+function RunsTable({
+  data,
+  label,
+  initialSorting = [{ id: "started", desc: true }],
+}: {
+  data: RunsListEntry[];
+  label: string;
+  initialSorting?: SortingState;
+}) {
+  const [sorting, setSorting] = useState<SortingState>(initialSorting);
   const [expanded, setExpanded] = useState<ExpandedState>({});
 
   const table = useReactTable({
@@ -215,8 +251,8 @@ function RunsTable({ data }: { data: RunsListEntry[] }) {
   });
 
   return (
-    <div className="rounded-xl border">
-      <table className="w-full caption-bottom text-sm">
+    <div className="min-w-0 border-y" data-testid="runs-table">
+      <table className="w-full table-fixed caption-bottom text-sm" aria-label={label}>
         <thead>
           {table.getHeaderGroups().map((hg) => (
             <tr key={hg.id}>
@@ -224,7 +260,7 @@ function RunsTable({ data }: { data: RunsListEntry[] }) {
                 <th
                   key={h.id}
                   className={cn(
-                    "sticky top-14 z-20 h-10 border-b bg-background/95 px-3 text-left align-middle text-xs font-medium text-muted-foreground backdrop-blur",
+                    "sticky top-[5.75rem] z-20 h-10 border-b bg-background/95 px-3 text-left align-middle text-xs font-medium text-muted-foreground backdrop-blur",
                     (h.column.columnDef.meta as Meta | undefined)?.className,
                   )}
                 >
@@ -264,6 +300,52 @@ function RunsTable({ data }: { data: RunsListEntry[] }) {
   );
 }
 
+function TriageView({ leaves }: { leaves: RunsListEntry[] }) {
+  const ordered = [...leaves].sort(
+    (a, b) => triageRank(a) - triageRank(b) || startedMs(b) - startedMs(a),
+  );
+  const actionable = ordered.filter((entry) => triageRank(entry) < 3);
+  const passing = ordered.filter((entry) => triageRank(entry) === 3);
+  return (
+    <div className="space-y-8" data-testid="triage-view">
+      <section aria-labelledby="needs-attention">
+        <div className="mb-2 flex items-baseline justify-between gap-3">
+          <h3 id="needs-attention" className="text-sm font-semibold">
+            Needs attention
+          </h3>
+          <span className="text-xs text-muted-foreground">
+            live · failed · inconclusive
+          </span>
+        </div>
+        {actionable.length > 0 ? (
+          <RunsTable
+            data={actionable}
+            label="Runs needing attention"
+            initialSorting={[]}
+          />
+        ) : (
+          <p className="border-y py-5 text-sm text-muted-foreground">
+            No live, failed, or inconclusive runs match the filters.
+          </p>
+        )}
+      </section>
+      {passing.length > 0 && (
+        <section aria-labelledby="passing-history">
+          <div className="mb-2 flex items-baseline justify-between gap-3">
+            <h3 id="passing-history" className="text-sm font-semibold">
+              Passing history
+            </h3>
+            <span className="text-xs text-muted-foreground">
+              {passing.length} run{passing.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <RunsTable data={passing} label="Passing run history" />
+        </section>
+      )}
+    </div>
+  );
+}
+
 export default function RunsList() {
   const { runs, error } = useRunsData();
   const [params, setParams] = useSearchParams();
@@ -272,6 +354,7 @@ export default function RunsList() {
   const verdicts = params.getAll("verdict");
   const from = params.get("from") ?? "";
   const to = params.get("to") ?? "";
+  const view = runsView(params.get("view"));
 
   const verifications = useMemo(
     () =>
@@ -281,15 +364,26 @@ export default function RunsList() {
     [runs],
   );
 
-  const filtered = useMemo(
+  const filteredLeaves = useMemo(
     () =>
-      (runs ?? []).filter((r) =>
-        r.kind === "run-set"
-          ? (r.children ?? []).some((c) =>
-              matchesFilters(c, verification, verdicts, from, to),
-            )
-          : matchesFilters(r, verification, verdicts, from, to),
+      flatLeaves(runs ?? []).filter((entry) =>
+        matchesFilters(entry, verification, verdicts, from, to),
       ),
+    [runs, verification, verdicts, from, to],
+  );
+  const filteredGroups = useMemo(
+    () =>
+      (runs ?? []).flatMap((entry) => {
+        if (entry.kind !== "run-set") {
+          return matchesFilters(entry, verification, verdicts, from, to)
+            ? [entry]
+            : [];
+        }
+        const children = (entry.children ?? []).filter((child) =>
+          matchesFilters(child, verification, verdicts, from, to),
+        );
+        return children.length > 0 ? [{ ...entry, children }] : [];
+      }),
     [runs, verification, verdicts, from, to],
   );
 
@@ -299,7 +393,11 @@ export default function RunsList() {
     setParams(next, { replace: true });
   };
 
-  const clearAll = () => setParams(new URLSearchParams(), { replace: true });
+  const clearAll = () => {
+    const next = new URLSearchParams();
+    if (view !== "runs") next.set("view", view);
+    setParams(next, { replace: true });
+  };
   const hasFilters =
     Boolean(verification) || verdicts.length > 0 || Boolean(from) || Boolean(to);
 
@@ -309,8 +407,40 @@ export default function RunsList() {
     <div className="space-y-6">
       <PageHeader
         title="Runs"
-        description="Every recorded run, newest first. Filters are bookmarkable."
+        description="Review runs chronologically, by verification, or by attention needed."
       />
+
+      <nav
+        aria-label="run list views"
+        className="sticky top-14 z-20 -mx-4 flex gap-5 border-b bg-background/95 px-4 backdrop-blur md:-mx-8 md:px-8"
+      >
+        {([
+          ["runs", "Runs", List],
+          ["verification", "By verification", Layers3],
+          ["triage", "Triage", Siren],
+        ] as const).map(([id, label, Icon]) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={view === id}
+            onClick={() =>
+              update((next) => {
+                if (id === "runs") next.delete("view");
+                else next.set("view", id);
+              })
+            }
+            className={cn(
+              "relative inline-flex h-10 items-center gap-1.5 border-b-2 px-0.5 text-sm font-medium transition-colors",
+              view === id
+                ? "border-foreground text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Icon className="size-3.5" aria-hidden="true" />
+            {label}
+          </button>
+        ))}
+      </nav>
 
       <div className="flex flex-wrap items-center gap-2">
         <Select
@@ -404,7 +534,7 @@ export default function RunsList() {
 
       {runs === null ? (
         <Skeleton className="h-64 rounded-xl" />
-      ) : filtered.length === 0 ? (
+      ) : filteredLeaves.length === 0 ? (
         <EmptyState
           icon={Inbox}
           title={runs.length > 0 ? "No runs match the filters" : "No runs yet"}
@@ -422,7 +552,18 @@ export default function RunsList() {
           }
         />
       ) : (
-        <RunsTable data={filtered} />
+        view === "triage" ? (
+          <TriageView leaves={filteredLeaves} />
+        ) : (
+          <RunsTable
+            data={view === "verification" ? filteredGroups : filteredLeaves}
+            label={
+              view === "verification"
+                ? "Runs grouped by verification"
+                : "Runs newest first"
+            }
+          />
+        )
       )}
     </div>
   );

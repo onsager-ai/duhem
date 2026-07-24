@@ -202,6 +202,69 @@ function pretty(v: unknown): string {
   }
 }
 
+function StructuredOutputs({
+  outputs,
+}: {
+  outputs: { name: string; value: unknown; seq: number }[];
+}) {
+  if (outputs.length === 0) return null;
+  return (
+    <div className="structured-outputs" data-testid="structured-outputs">
+      {outputs.map((output) => {
+        const rows = Array.isArray(output.value) ? output.value : null;
+        const records =
+          rows &&
+          rows.every(
+            (row) => row !== null && typeof row === "object" && !Array.isArray(row),
+          )
+            ? (rows as Record<string, unknown>[])
+            : null;
+        const columns = records
+          ? [...new Set(records.flatMap((row) => Object.keys(row)))]
+          : [];
+        return (
+          <section key={output.seq} className="structured-output">
+            <div className="structured-output-title">
+              <strong>{output.name}</strong>
+              {rows && (
+                <span>
+                  {rows.length} row{rows.length === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
+            {records && columns.length > 0 ? (
+              <div className="structured-table-wrap">
+                <table className="structured-table">
+                  <thead>
+                    <tr>
+                      {columns.map((column) => (
+                        <th key={column}>{column}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {records.map((row, index) => (
+                      <tr key={index}>
+                        {columns.map((column) => (
+                          <td key={column}>
+                            <code>{compactValue(row[column])}</code>
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <pre>{pretty(output.value)}</pre>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 // Request/response inspector for an `api/*` (or `db/*`) step — the method
 // · url · response status on one line, with the request and response
 // bodies pretty-printed and collapsible (the response opens on a 4xx/5xx
@@ -339,6 +402,14 @@ function StepGroup({
       value: e.value,
       seq: e.seq,
     }));
+  const structuredObs = scalarObs.filter(
+    (observation) =>
+      observation.value !== null && typeof observation.value === "object",
+  );
+  const inlineObs = scalarObs.filter(
+    (observation) =>
+      observation.value === null || typeof observation.value !== "object",
+  );
   // Non-capture blob observations (for example a large api/call body)
   // still need a route to their artifact. Keep those event rows inside
   // the expanded diagnostic subtree; capture/* blobs use the richer
@@ -407,11 +478,11 @@ function StepGroup({
           {/* Secondary block: what it observed + (for a failed judgment)
               the reason — each on its own line, never crammed inline with
               the action text (#284 follow-up). */}
-          {(scalarObs.length > 0 || status.reason) && (
+          {(inlineObs.length > 0 || status.reason) && (
             <span className="step-detail">
-              {scalarObs.length > 0 && (
+              {inlineObs.length > 0 && (
                 <span className="step-obs" data-testid="step-obs">
-                  {scalarObs.map((o) => {
+                  {inlineObs.map((o) => {
                     const judged = o.name === "satisfied";
                     const tone = judged ? (o.value === true ? "ok" : "fail") : "";
                     return (
@@ -440,6 +511,7 @@ function StepGroup({
               method · url · status + pretty-printed bodies — nested under
               the step (the api analogue of a screenshot attachment). */}
           <ApiExchange node={node} />
+          <StructuredOutputs outputs={structuredObs} />
           {/* ui evidence (screenshot / DOM / network / video) nested under
               the step that captured it, not a side panel. */}
           <StepCaptures node={node} artifacts={artifacts} />
@@ -457,10 +529,12 @@ function StepGroup({
           )}
           {/* Lifecycle events are one diagnostic subtree, not a repeated
               started/observed/finished mini-timeline. */}
-          <details className="step-raw">
-            <summary>Raw step data · {node.events.length} events</summary>
+          <section className="step-raw" data-testid="step-raw">
+            <div className="step-raw-title">
+              Raw step data · {node.events.length} events
+            </div>
             <pre>{JSON.stringify(node.events, null, 2)}</pre>
-          </details>
+          </section>
         </div>
       </details>
     </li>
@@ -595,8 +669,8 @@ function HarBody({ title, text }: { title: string; text?: string }) {
 // One request row that expands to its redacted headers + bodies (the
 // data is already in the fetched blob — a real inspector, no new fetch).
 function HarRow({ entry }: { entry: HarEntry }) {
-  const [open, setOpen] = useState(false);
   const ok = entry.response.status < 400;
+  const [open, setOpen] = useState(!ok);
   return (
     <>
       <tr
@@ -943,30 +1017,34 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
 
   return (
     <>
-      <div className="panel">
-        <h2>
-          {check.criterion_id} :: {check.check_id}{" "}
-          <VerdictBadge verdict={check.verdict} />
-        </h2>
-        {checkDesc && <p className="check-intent" data-testid="check-intent">{checkDesc}</p>}
-        {critDesc && (
-          <p className="kv crit-intent">
-            <span className="muted">{check.criterion_id}: </span>
-            {critDesc}
+      <div className="run-detail-surface">
+        <div className="check-context sticky top-0 z-10 -mx-2 mb-3 border-b bg-background/95 px-2 pb-3 backdrop-blur">
+          <h2 className="flex flex-wrap items-center gap-2 text-base font-semibold">
+            <span>{check.criterion_id}</span>
+            <span className="text-muted-foreground">/</span>
+            <span>{check.check_id}</span>
+            <VerdictBadge verdict={check.verdict} />
+          </h2>
+          {checkDesc && <p className="check-intent" data-testid="check-intent">{checkDesc}</p>}
+          {critDesc && (
+            <p className="kv crit-intent">
+              <span className="muted">{check.criterion_id}: </span>
+              {critDesc}
+            </p>
+          )}
+          <p className="kv check-meta" data-testid="check-meta">
+            {(() => {
+              const duration = checkDurationMs(check.timeline);
+              const steps = check.timeline.filter((event) => event.kind === "step_started").length;
+              const layers = new Set(check.spans.map((span) => span.layer)).size;
+              return [
+                duration !== null ? `⏱ ${formatDuration(duration)}` : null,
+                `${steps} step${steps === 1 ? "" : "s"}`,
+                layers > 0 ? `${layers} layer${layers === 1 ? "" : "s"}` : null,
+              ].filter(Boolean).join(" · ");
+            })()}
           </p>
-        )}
-        <p className="kv check-meta" data-testid="check-meta">
-          {(() => {
-            const duration = checkDurationMs(check.timeline);
-            const steps = check.timeline.filter((event) => event.kind === "step_started").length;
-            const layers = new Set(check.spans.map((span) => span.layer)).size;
-            return [
-              duration !== null ? `⏱ ${formatDuration(duration)}` : null,
-              `${steps} step${steps === 1 ? "" : "s"}`,
-              layers > 0 ? `${layers} layer${layers === 1 ? "" : "s"}` : null,
-            ].filter(Boolean).join(" · ");
-          })()}
-        </p>
+        </div>
         <SpanChain spans={check.spans} />
         <CheckSummary detail={check} />
         {/* Captures now nest under the step that produced them (see

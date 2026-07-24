@@ -40,6 +40,18 @@ describe("formatEvent", () => {
     expect(f.detail).toBe('ui · role=status, text "Payment complete" · visible · within 4s');
   });
 
+  it("normalizes ui/click's inline locator into the action detail", () => {
+    const f = formatEvent(
+      ev("step_started", {
+        uses: "ui/click",
+        layer: "ui",
+        with: { role: "button", name: "Save", within: "3s" },
+      }),
+    );
+    expect(f.label).toBe("click");
+    expect(f.detail).toBe('ui · role=button, name "Save" · within 3s');
+  });
+
   it("renders an inline observation as name = value", () => {
     const f = formatEvent(ev("step_observation", { output_name: "satisfied", value: false }));
     expect(f.label).toBe("observed");

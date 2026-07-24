@@ -25,8 +25,8 @@ function CriterionEvidence({
   const description = vd?.criterion(criterion.id)?.description;
 
   return (
-    <div className="panel criterion-detail" data-testid="criterion-detail">
-      <h2>
+    <div className="run-detail-surface criterion-detail" data-testid="criterion-detail">
+      <h2 className="mb-3 flex flex-wrap items-center gap-2 text-base font-semibold">
         {criterion.id} <VerdictBadge verdict={criterion.verdict} />
       </h2>
       {description && <p className="check-intent">{description}</p>}

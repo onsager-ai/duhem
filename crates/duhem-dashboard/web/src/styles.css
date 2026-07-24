@@ -132,11 +132,12 @@ tr.nested td:first-child { padding-left: 2rem; }
 /* -- #206: plain-language check summary ------------------------------ */
 .check-summary {
   margin: 0.9rem 0 1.1rem;
-  padding: 0.85rem 1.1rem;
-  border: 1px solid var(--lg-border);
+  padding: 0.85rem 0 0.85rem 1rem;
+  border: 0;
   border-left-width: 3px;
-  border-radius: var(--lg-radius);
-  background: var(--panel-2);
+  border-left-style: solid;
+  border-radius: 0;
+  background: transparent;
 }
 .check-summary.tone-ok { border-left-color: var(--pass); }
 .check-summary.tone-fail { border-left-color: var(--fail); }
@@ -150,10 +151,10 @@ tr.nested td:first-child { padding-left: 2rem; }
   padding: 0;
 }
 .failure-card {
-  padding: 0.65rem 0.75rem;
-  border: 1px solid color-mix(in oklab, var(--fail) 24%, var(--lg-border));
-  border-radius: 8px;
-  background: var(--panel);
+  padding: 0.65rem 0;
+  border-top: 1px solid color-mix(in oklab, var(--fail) 24%, var(--lg-border));
+  border-radius: 0;
+  background: transparent;
 }
 .failure-index {
   display: block;
@@ -220,7 +221,7 @@ ol.timeline {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0;
   margin: 0;
   padding: 0;
   font-size: 0.88rem;
@@ -230,14 +231,15 @@ ol.timeline {
    The row's grid lives on `.ev-row`; the <li> is just the divider. */
 ol.timeline > li.ev {
   overflow: hidden;
-  border: 1px solid var(--lg-border);
-  border-radius: 8px;
-  background: var(--panel);
+  border: 0;
+  border-bottom: 1px solid var(--lg-border);
+  border-radius: 0;
+  background: transparent;
 }
 li.ev > .ev-raw > summary.ev-summary {
   cursor: pointer;
   list-style: none;
-  border-radius: 6px;
+  border-radius: 0;
 }
 li.ev > .ev-raw > summary.ev-summary::-webkit-details-marker { display: none; }
 li.ev > .ev-raw > summary.ev-summary:hover { background: var(--row-hover); }
@@ -600,7 +602,7 @@ li.ev.step-group > details > summary {
   padding: 0;
   cursor: pointer;
   list-style: none;
-  border-radius: 6px;
+  border-radius: 0;
 }
 /* What the step observed + why it failed — each on its own line under
    the primary row, aligned to the label column, never crammed inline
@@ -714,11 +716,9 @@ li.ev.step-group.tone-inconclusive > details > summary .ev-label { color: var(--
 .step-body {
   padding: 0.65rem 0.85rem 0.75rem 3rem;
   border-top: 1px solid var(--lg-border);
-  background: var(--panel-2);
+  background: color-mix(in oklab, var(--muted) 55%, transparent);
 }
-.step-raw > summary {
-  width: max-content;
-  cursor: pointer;
+.step-raw-title {
   color: var(--lg-muted);
   font-size: 0.76rem;
 }
@@ -732,6 +732,53 @@ li.ev.step-group.tone-inconclusive > details > summary .ev-label { color: var(--
   background: var(--bg);
   color: var(--lg-muted);
   font-size: 0.76rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Structured action outputs (notably db/query rows) read like evidence,
+   not a truncated observation chip. The table scrolls inside the step so
+   a wide result set never widens the whole run workspace. */
+.structured-outputs { display: grid; gap: 0.75rem; margin: 0 0 0.75rem; }
+.structured-output {
+  min-width: 0;
+  border-top: 1px solid var(--lg-border);
+  padding-top: 0.5rem;
+}
+.structured-output-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.35rem;
+  color: var(--lg-muted);
+  font-size: 0.76rem;
+}
+.structured-output-title strong { color: var(--text); font-weight: 600; }
+.structured-table-wrap { max-width: 100%; max-height: 22rem; overflow: auto; }
+.structured-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.structured-table th,
+.structured-table td {
+  border-bottom: 1px solid var(--lg-border);
+  padding: 0.35rem 0.55rem;
+  text-align: left;
+  vertical-align: top;
+}
+.structured-table th {
+  position: sticky;
+  top: 0;
+  background: var(--panel-2);
+  color: var(--lg-muted);
+  font-weight: 600;
+}
+.structured-output > pre {
+  max-height: 22rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  border-left: 2px solid var(--lg-border);
+  color: var(--text);
+  font-size: 0.78rem;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -770,7 +817,7 @@ li.ev.step-group.tone-inconclusive > details > summary .ev-label { color: var(--
 /* -- #280: run-scoped report shell (top tab bar + tab bodies) -------- */
 .run-title { margin: 1rem 0 0.2rem; font-size: 1.05rem; }
 .run-title code { color: var(--lg-muted); }
-.run-tabs { display: flex; gap: 0.15rem; border-bottom: 1px solid var(--lg-border); margin: 0.55rem 0 0.2rem; }
+.run-tabs { display: flex; margin: 0; border-bottom: 0; }
 .run-tab {
   padding: 0.5rem 0.9rem;
   color: var(--lg-muted);
@@ -782,6 +829,10 @@ li.ev.step-group.tone-inconclusive > details > summary .ev-label { color: var(--
 .run-tab:hover { color: var(--text); }
 .run-tab.on { color: var(--text); border-bottom-color: var(--lg-accent); font-weight: 600; }
 .check-meta { margin: -0.4rem 0 0.7rem; display: flex; gap: 0.6rem; }
+.run-detail-surface {
+  min-width: 0;
+  color: var(--text);
+}
 .meta-line { margin-top: 1rem; }
 /* Suites filter chips (button form of the run-list `.filters .chip`). */
 .chips { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 1rem 0 0.6rem; }

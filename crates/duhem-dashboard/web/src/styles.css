@@ -83,7 +83,6 @@ tr.nested td:first-child { padding-left: 2rem; }
   padding: 0.3rem 0.5rem;
 }
 .filters .chip {
-  cursor: pointer;
   background: var(--panel);
   border: 1px solid var(--lg-border);
   border-radius: 999px;
@@ -237,7 +236,6 @@ ol.timeline > li.ev {
   background: transparent;
 }
 li.ev > .ev-raw > summary.ev-summary {
-  cursor: pointer;
   list-style: none;
   border-radius: 0;
 }
@@ -543,7 +541,6 @@ table.har td.har-url {
   background: none;
   border: 0;
   color: var(--live);
-  cursor: pointer;
   font-size: 0.85rem;
   padding: 0;
 }
@@ -554,7 +551,6 @@ table.net-delta .net-kind { text-transform: uppercase; font-size: 0.72rem; lette
 table.net-delta tr.har-bad .net-kind { color: var(--fail); }
 
 /* -- #210: expandable HAR rows -------------------------------------- */
-table.har tr.har-row { cursor: pointer; }
 table.har tr.har-row:hover { background: var(--row-hover); }
 table.har tr.har-row:focus-visible { outline: 2px solid var(--live); outline-offset: -2px; }
 .har-caret { color: var(--lg-muted); width: 0.85rem; height: 0.85rem; vertical-align: -0.12em; }
@@ -593,14 +589,17 @@ table.har tr.har-detail td { background: var(--row-anchor); }
 /* -- #210: step-grouped timeline ------------------------------------ */
 /* Must out-specify `ol.timeline li.ev { display: grid }` (0,2,2), or the
    whole <details> gets crammed into the grid's first column. */
-ol.timeline li.ev.step-group { display: block; padding: 0; }
+ol.timeline li.ev.step-group {
+  display: block;
+  overflow: visible;
+  padding: 0;
+}
 /* The summary is a block wrapper: its primary line is a shared `.ev-row`
    grid (so step rows align pixel-for-pixel with the events below them),
    with an optional `.step-detail` second line under it. */
 li.ev.step-group > details > summary {
   display: block;
   padding: 0;
-  cursor: pointer;
   list-style: none;
   border-radius: 0;
 }
@@ -672,7 +671,7 @@ li.ev.step-group.tone-inconclusive .step-reason { color: var(--inconclusive); }
 .ax-status.ok { color: var(--pass); }
 .ax-status.bad { color: var(--fail); }
 .ax-body { margin-top: 0.3rem; }
-.ax-body > summary { cursor: pointer; color: var(--muted); font-size: 0.8rem; }
+.ax-body > summary { color: var(--muted); font-size: 0.8rem; }
 .ax-body pre {
   margin: 0.25rem 0 0;
   padding: 0.5rem 0.6rem;
@@ -842,7 +841,6 @@ li.ev.step-group.tone-inconclusive > details > summary .ev-label { color: var(--
   border-radius: 999px;
   padding: 0.16rem 0.65rem;
   color: var(--lg-muted);
-  cursor: pointer;
   font: inherit;
   font-size: 0.82rem;
 }
@@ -896,7 +894,6 @@ li.ev.step-group.tone-inconclusive > details > summary .ev-label { color: var(--
   border-radius: 6px;
   padding: 0.25rem 0.6rem;
   font-size: 0.8rem;
-  cursor: pointer;
 }
 .dom-toggle:hover { border-color: var(--live); }
 

@@ -124,7 +124,10 @@ function TreeGroup({
   );
   return (
     <div>
-      <div className="flex min-w-0 items-start gap-0.5">
+      <div
+        className="criterion-tree-parent flex min-w-0 items-start gap-0.5 md:sticky md:top-0 md:z-10 md:bg-background/95 md:backdrop-blur"
+        data-testid="criterion-parent"
+      >
         {hasChecks ? (
           <button
             type="button"
@@ -218,7 +221,7 @@ function RunTree({
     <nav
       aria-label="criteria and checks"
       data-testid="run-tree"
-      className="run-results-nav min-w-0 max-w-full space-y-0.5 overflow-x-hidden py-2 pr-3"
+      className="run-results-nav min-w-0 max-w-full space-y-0.5 overflow-x-hidden py-2 pr-3 supports-[overflow:clip]:overflow-x-clip"
     >
       {run.criteria.map((c) => (
         <TreeGroup

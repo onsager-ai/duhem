@@ -12,6 +12,7 @@
   "main": "duhem",
   "files": [
     "duhem",
+    "duhem-dashboard",
     "postinstall.js"
   ],
   "scripts": {

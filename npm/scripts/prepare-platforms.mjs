@@ -3,7 +3,7 @@
  * and validate them before publish.
  *
  * Expects the release matrix to have downloaded artifacts laid out as:
- *   <artifacts>/binary-<nodeKey>/<duhem|duhem.exe>
+ *   <artifacts>/binary-<platform>/<duhem|duhem-dashboard>[.exe]
  * (matching the `binary-<platform>` artifact names uploaded by the build job).
  *
  * Usage:
@@ -15,7 +15,7 @@
 
 import { chmodSync, copyFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { binaryName, config, platformDir, ROOT } from './lib.mjs';
+import { binaryNames, config, platformDir, ROOT } from './lib.mjs';
 
 const args = process.argv.slice(2);
 const aIdx = args.indexOf('--artifacts');
@@ -40,36 +40,37 @@ function headerOk(filePath, os) {
 let errors = 0;
 
 for (const p of config.platforms) {
-  const file = binaryName(p);
-  const src = join(artifactsDir, `binary-${p.platform}`, file);
-  const dest = join(platformDir(p), file);
+  for (const file of binaryNames(p)) {
+    const src = join(artifactsDir, `binary-${p.platform}`, file);
+    const dest = join(platformDir(p), file);
 
-  if (!existsSync(src)) {
-    console.error(`  MISSING artifact: ${src}`);
-    errors++;
-    continue;
-  }
-  copyFileSync(src, dest);
-  if (p.os !== 'win32') {
-    try {
-      chmodSync(dest, 0o755);
-    } catch {
-      /* ignore */
+    if (!existsSync(src)) {
+      console.error(`  MISSING artifact: ${src}`);
+      errors++;
+      continue;
     }
-  }
+    copyFileSync(src, dest);
+    if (p.os !== 'win32') {
+      try {
+        chmodSync(dest, 0o755);
+      } catch {
+        /* ignore */
+      }
+    }
 
-  const size = statSync(dest).size;
-  if (size === 0) {
-    console.error(`  EMPTY: ${dest}`);
-    errors++;
-    continue;
+    const size = statSync(dest).size;
+    if (size === 0) {
+      console.error(`  EMPTY: ${dest}`);
+      errors++;
+      continue;
+    }
+    if (!headerOk(dest, p.os)) {
+      console.error(`  BAD HEADER: ${dest} (expected ${p.os} binary)`);
+      errors++;
+      continue;
+    }
+    console.log(`  ok ${p.package}: ${file} (${(size / 1024 / 1024).toFixed(1)} MB)`);
   }
-  if (!headerOk(dest, p.os)) {
-    console.error(`  BAD HEADER: ${dest} (expected ${p.os} binary)`);
-    errors++;
-    continue;
-  }
-  console.log(`  ok ${p.package}: ${file} (${(size / 1024 / 1024).toFixed(1)} MB)`);
 }
 
 if (errors > 0) {

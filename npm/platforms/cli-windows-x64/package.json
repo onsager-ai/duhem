@@ -12,6 +12,7 @@
   "main": "duhem.exe",
   "files": [
     "duhem.exe",
+    "duhem-dashboard.exe",
     "postinstall.js"
   ],
   "scripts": {

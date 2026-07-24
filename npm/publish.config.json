@@ -1,8 +1,7 @@
 {
   "$comment": "Single source of truth for the npm distribution pipeline. Consumed by the scripts under npm/scripts/*.mjs and mirrored by the build matrix in .github/workflows/release.yml. The rust-npm-publish skill's publish.config.ts, expressed as plain JSON so the pipeline needs no TS toolchain.",
   "scope": "@duhem",
-  "binaryName": "duhem",
-  "cargoPackage": "duhem-cli",
+  "binaryNames": ["duhem", "duhem-dashboard"],
   "cargoWorkspace": "Cargo.toml",
   "repositoryUrl": "git+https://github.com/onsager-ai/duhem.git",
   "mainPackage": {

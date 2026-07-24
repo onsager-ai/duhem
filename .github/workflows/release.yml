@@ -1,6 +1,7 @@
-# Release — cross-build the `duhem` CLI, attach binaries to a GitHub Release,
-# and publish the npm packages (platform packages first, then the main
-# `duhem` wrapper). Architecture: rust-node-ci + rust-npm-publish skills.
+# Release — cross-build the `duhem` CLI and dashboard companion, attach both
+# binaries to a GitHub Release, and publish the npm packages (platform
+# packages first, then the main `duhem` wrapper). Architecture: rust-node-ci
+# + rust-npm-publish skills.
 #
 # Triggers:
 #   push tag v*        — real release: build, attach to GitHub Release, and
@@ -64,19 +65,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  platform: linux-x64,     binary: duhem }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, platform: linux-arm64,   binary: duhem }
-          - { os: macos-15-intel,   target: x86_64-apple-darwin,       platform: darwin-x64,    binary: duhem }
-          - { os: macos-14,         target: aarch64-apple-darwin,      platform: darwin-arm64,  binary: duhem }
-          - { os: windows-latest,   target: x86_64-pc-windows-msvc,    platform: windows-x64,   binary: duhem.exe }
+          - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  platform: linux-x64,     binaries: "duhem,duhem-dashboard" }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, platform: linux-arm64,   binaries: "duhem,duhem-dashboard" }
+          - { os: macos-15-intel,   target: x86_64-apple-darwin,       platform: darwin-x64,    binaries: "duhem,duhem-dashboard" }
+          - { os: macos-14,         target: aarch64-apple-darwin,      platform: darwin-arm64,  binaries: "duhem,duhem-dashboard" }
+          - { os: windows-latest,   target: x86_64-pc-windows-msvc,    platform: windows-x64,   binaries: "duhem.exe,duhem-dashboard.exe" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/rust-cross-build
         with:
           target: ${{ matrix.target }}
-          package: duhem-cli
-          binary: ${{ matrix.binary }}
+          packages: duhem-cli,duhem-dashboard
+          binaries: ${{ matrix.binaries }}
           platform: ${{ matrix.platform }}
 
   github-release:
@@ -100,25 +101,27 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          # platform -> binary filename (windows ships .exe)
-          declare -A BIN=(
-            [linux-x64]=duhem [linux-arm64]=duhem
-            [darwin-x64]=duhem [darwin-arm64]=duhem
-            [windows-x64]=duhem.exe
+          # platform -> binary filenames (windows ships .exe files)
+          declare -A BINS=(
+            [linux-x64]="duhem duhem-dashboard" [linux-arm64]="duhem duhem-dashboard"
+            [darwin-x64]="duhem duhem-dashboard" [darwin-arm64]="duhem duhem-dashboard"
+            [windows-x64]="duhem.exe duhem-dashboard.exe"
           )
-          for plat in "${!BIN[@]}"; do
-            bin="${BIN[$plat]}"
-            src="artifacts/binary-${plat}/${bin}"
-            if [ ! -f "$src" ]; then echo "::error::missing $src"; exit 1; fi
+          for plat in "${!BINS[@]}"; do
             stage="duhem-${VERSION}-${plat}"
             mkdir -p "$stage"
-            cp "$src" "$stage/$bin"
+            read -r -a bins <<< "${BINS[$plat]}"
+            for bin in "${bins[@]}"; do
+              src="artifacts/binary-${plat}/${bin}"
+              if [ ! -f "$src" ]; then echo "::error::missing $src"; exit 1; fi
+              cp "$src" "$stage/$bin"
+              if [ "$plat" != "windows-x64" ]; then chmod +x "$stage/$bin"; fi
+            done
             cp LICENSE "$stage/LICENSE" 2>/dev/null || true
             cp README.md "$stage/README.md" 2>/dev/null || true
             if [ "$plat" = "windows-x64" ]; then
               (cd "$stage" && zip -qr "../release/${stage}.zip" .)
             else
-              chmod +x "$stage/$bin"
               tar -czf "release/${stage}.tar.gz" -C "$stage" .
             fi
           done

@@ -7,7 +7,7 @@ export default function ResultsPage() {
   return (
     <RunScaffold runId={runId} activeResults>
       {() => (
-        <div className="py-8 text-sm text-muted-foreground">
+        <div className="py-6 text-sm text-muted-foreground">
           Select a criterion or check to inspect its result.
         </div>
       )}

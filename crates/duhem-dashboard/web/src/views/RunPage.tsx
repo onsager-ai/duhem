@@ -141,7 +141,7 @@ function StatusBreakdown({
   const id = `status-${label.toLowerCase()}`;
   return (
     <section aria-labelledby={id}>
-      <div className="mb-4 flex items-baseline justify-between gap-4">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
         <h3 id={id} className="text-sm font-semibold">
           {label}
         </h3>
@@ -149,7 +149,7 @@ function StatusBreakdown({
           {tally.total} total
         </span>
       </div>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {SUMMARY_TILES.map((tile) => (
           <div key={tile.key} data-testid={`${label.toLowerCase()}-${tile.key}`}>
             <div className={`text-2xl font-semibold tabular-nums ${tile.tone}`}>
@@ -160,7 +160,7 @@ function StatusBreakdown({
         ))}
       </div>
       <div
-        className="mt-4 flex h-2 overflow-hidden rounded-full bg-muted"
+        className="mt-3 flex h-2 overflow-hidden rounded-full bg-muted"
         role="img"
         aria-label={`${label}: ${tally.pass} passed, ${tally.fail} failed, ${tally.inconclusive} inconclusive, ${tally.pending} pending`}
       >
@@ -183,7 +183,7 @@ function RunSummary({ run }: { run: RunDetail }) {
   const criteria = tallyCriteria(run.criteria);
   const inputs = Object.entries(run.inputs);
   return (
-    <div className="min-w-0 max-w-full space-y-7" data-testid="run-summary">
+    <div className="min-w-0 max-w-full space-y-5" data-testid="run-summary">
       {run.setup_aborted && (
         <div className="border-l-2 border-fail bg-fail/5 px-4 py-3 text-sm text-fail">
           Setup aborted — no checks ran. The verdict reflects the abort, not the
@@ -194,14 +194,14 @@ function RunSummary({ run }: { run: RunDetail }) {
       {/* Checks and criteria use different denominators. Keep both explicit:
           criteria without checks must remain visible instead of disappearing
           into the executable-check roll-up. */}
-      <div className="space-y-5 border-y py-5">
+      <div className="space-y-4 border-y py-4">
         <StatusBreakdown label="Checks" tally={checks} />
-        <div className="border-t pt-5">
+        <div className="border-t pt-4">
           <StatusBreakdown label="Criteria" tally={criteria} />
         </div>
       </div>
 
-      <p className="border-l-2 border-muted-foreground/30 px-4 py-1 text-sm text-muted-foreground">
+      <p className="border-l-2 border-muted-foreground/30 px-3 py-1 text-sm text-muted-foreground">
         Select a check in the criteria navigator to inspect its failed steps,
         assertions, and evidence.
       </p>
@@ -235,7 +235,7 @@ function RunSummary({ run }: { run: RunDetail }) {
 
       {inputs.length > 0 && (
         <details className="min-w-0 max-w-full overflow-hidden border-y text-sm">
-          <summary className="select-none py-3 font-medium hover:text-foreground">
+          <summary className="select-none py-2.5 font-medium hover:text-foreground">
             Run configuration
             <span className="ml-2 text-xs font-normal text-muted-foreground">
               {inputs.length} input{inputs.length === 1 ? "" : "s"}

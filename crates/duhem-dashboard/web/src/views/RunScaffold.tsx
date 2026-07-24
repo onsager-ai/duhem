@@ -335,8 +335,8 @@ export function RunScaffold({
       : "summary";
   return (
     <DefinitionProvider runId={runId} enabled={run.has_definition}>
-      <div className="run-workspace min-w-0 max-w-full">
-        <header className="run-workspace-header sticky top-14 z-30 -mx-4 mb-4 border-b bg-background/95 px-4 pt-2 backdrop-blur md:-mx-8 md:px-8">
+      <div className="run-workspace -mt-4 min-w-0 max-w-full md:-mt-6">
+        <header className="run-workspace-header sticky top-14 z-30 -mx-4 mb-2 border-b bg-background/95 px-4 pt-2 backdrop-blur md:-mx-8 md:px-8">
           <h2 className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-base font-semibold tracking-tight">
             <span className="min-w-0 truncate">
               {run.verification}
@@ -366,7 +366,7 @@ export function RunScaffold({
                 activeCriterion={activeCriterion}
               />
             </aside>
-            <section className="run-results-detail min-w-0 py-4 md:max-h-[calc(100vh-10.5rem)] md:overflow-y-auto md:py-0 md:pl-6">
+            <section className="run-results-detail min-w-0 py-3 md:max-h-[calc(100vh-10.5rem)] md:overflow-y-auto md:py-0 md:pl-4">
               {children(run)}
             </section>
           </div>

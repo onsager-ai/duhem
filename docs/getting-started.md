@@ -69,12 +69,11 @@ couldn't observe cleanly (a timeout, an environment that wouldn't come
 up) and deliberately refuses to call that a pass.
 
 **Watch it in the terminal.** On a TTY, `duhem run` narrates progress
-on stderr while the run executes. Each criterion holds a single
-in-place line — `▶ AC-2 (2/3) … ui/assert-element 8s`, the current
-action and elapsed time ticking on it — replaced by its verdict
-(`✔ AC-2 pass (1.4s)`) when it settles, so the final transcript shows
-each criterion once. On a manifest run, a header separates each
-verification (`── login (2/5) ──`) and the shared environment's
+on stderr while the run executes. A live criterion/check/step board
+uses aligned one-cell text indicators — `✓` pass, `✗` fail, `◐`
+inconclusive, `○` pending — while the active action gets a spinner,
+elapsed time, and any timeout budget. On a manifest run, a header
+separates each verification (`── login (2/5) ──`) and the shared environment's
 bring-up and teardown narrate too (`env: up…` / `env: ready (2.5s)` /
 `env: down…`). Piped or CI output is untouched (stdout carries only
 the reporter); `--live` / `--no-live` force it either way — a forced

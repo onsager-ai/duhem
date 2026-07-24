@@ -1307,11 +1307,11 @@ fn live_flag_renders_per_criterion_progress_on_stderr() {
     assert_eq!(out.stdout, b"pass\n", "stdout stays machine-stable");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("▶ AC-1 (1/1)…"),
+        stderr.contains("› AC-1 (1/1)…"),
         "criterion start line expected: {stderr}"
     );
     assert!(
-        stderr.contains("✔ AC-1 pass"),
+        stderr.contains("✓ AC-1 pass"),
         "criterion verdict line expected: {stderr}"
     );
 }
@@ -1335,7 +1335,7 @@ fn no_tty_and_no_flag_means_no_progress_lines() {
 
     assert!(out.status.success());
     assert!(
-        !String::from_utf8_lossy(&out.stderr).contains("▶"),
+        !String::from_utf8_lossy(&out.stderr).contains("›"),
         "auto mode must stay silent without a TTY"
     );
 }

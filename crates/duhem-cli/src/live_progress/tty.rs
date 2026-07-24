@@ -6,8 +6,8 @@ use std::time::Duration;
 use tokio::time::Instant;
 
 use super::{
-    CriterionPlan, colorize, expectation, progress_bar, shorten_to_width, spinner, timeout,
-    verdict_mark,
+    CriterionPlan, INDICATOR_FAIL, INDICATOR_INCONCLUSIVE, INDICATOR_PASS, INDICATOR_PENDING,
+    colorize, expectation, progress_bar, shorten_to_width, spinner, timeout, verdict_mark,
 };
 
 pub(super) struct TtyBoard {
@@ -226,7 +226,7 @@ impl TtyBoard {
                 .verdict
                 .as_ref()
                 .map(verdict_mark)
-                .unwrap_or(if active { activity } else { "○" });
+                .unwrap_or(if active { activity } else { INDICATOR_PENDING });
             lines.push(self.fit(format!(
                 "{mark} {}  {}",
                 criterion.id,
@@ -251,7 +251,11 @@ impl TtyBoard {
                 let check_mark = check_state
                     .and_then(|state| state.verdict.as_ref())
                     .map(verdict_mark)
-                    .unwrap_or(if check_active { activity } else { "○" });
+                    .unwrap_or(if check_active {
+                        activity
+                    } else {
+                        INDICATOR_PENDING
+                    });
                 let check_branch = if last_check { "└─" } else { "├─" };
                 let summary = check
                     .description
@@ -323,7 +327,7 @@ impl TtyBoard {
                 Some(duhem_judge::VerdictState::Fail)
             )
         }) {
-            return "✘";
+            return INDICATOR_FAIL;
         }
         if self.criteria.iter().any(|criterion| {
             matches!(
@@ -331,9 +335,9 @@ impl TtyBoard {
                 Some(duhem_judge::VerdictState::Inconclusive(_))
             )
         }) {
-            return "◐";
+            return INDICATOR_INCONCLUSIVE;
         }
-        "✔"
+        INDICATOR_PASS
     }
 
     fn summary(&self, activity: &str) -> String {
@@ -354,19 +358,21 @@ impl TtyBoard {
         }
         let mut parts = Vec::new();
         if passed > 0 {
-            parts.push(format!("✔ {passed} passed"));
+            parts.push(format!("{INDICATOR_PASS} {passed} passed"));
         }
         if failed > 0 {
-            parts.push(format!("✘ {failed} failed"));
+            parts.push(format!("{INDICATOR_FAIL} {failed} failed"));
         }
         if inconclusive > 0 {
-            parts.push(format!("◐ {inconclusive} inconclusive"));
+            parts.push(format!(
+                "{INDICATOR_INCONCLUSIVE} {inconclusive} inconclusive"
+            ));
         }
         if self.active_criterion.is_some() {
             parts.push(format!("{activity} 1 running"));
         }
         if pending > 0 {
-            parts.push(format!("○ {pending} pending"));
+            parts.push(format!("{INDICATOR_PENDING} {pending} pending"));
         }
         parts.join("   ")
     }
@@ -386,8 +392,8 @@ fn step_mark(step: &CompletedStep) -> &'static str {
         return verdict_mark(judgment);
     }
     match step.outcome {
-        duhem_evidence::StepOutcome::Ok => "✓",
-        duhem_evidence::StepOutcome::Error => "✘",
-        duhem_evidence::StepOutcome::Timeout => "◐",
+        duhem_evidence::StepOutcome::Ok => INDICATOR_PASS,
+        duhem_evidence::StepOutcome::Error => INDICATOR_FAIL,
+        duhem_evidence::StepOutcome::Timeout => INDICATOR_INCONCLUSIVE,
     }
 }

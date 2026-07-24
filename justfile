@@ -5,11 +5,12 @@ set positional-arguments
 default:
     @printf 'Duhem development\n\n'
     @printf '  just dev [args]  Run the CLI locally\n'
-    @printf '  just build [dashboard]                 Build locally\n'
-    @printf '  just lint                              Run static checks\n'
-    @printf '  just test [browser-actions|dashboard]  Run tests\n'
-    @printf '  just check                             Run lint + test before pushing\n\n'
-    @printf '  just worktree [add|list]               Manage task worktrees\n'
+    @printf '  just build                   Build the workspace\n'
+    @printf '  just lint                    Run static checks\n'
+    @printf '  just test [browser-actions]  Run tests\n'
+    @printf '  just check                   Run lint + test before pushing\n\n'
+    @printf '  just dashboard [build|test]  Manage the dashboard\n'
+    @printf '  just worktree [add|list]     Manage task worktrees\n'
 
 # Manage isolated task worktrees (`add <branch> [base]` or `list`).
 worktree action="help" *args:
@@ -60,21 +61,31 @@ worktree action="help" *args:
             ;;
     esac
 
-# Build the workspace or the dashboard bundle.
-build target="workspace":
+# Build the whole workspace.
+build:
+    cargo build --workspace
+
+# Build or test the dashboard application.
+dashboard action="help":
     #!/usr/bin/env bash
     set -euo pipefail
     case "$1" in
-        workspace)
-            exec cargo build --workspace
-            ;;
-        dashboard)
+        build)
             (cd crates/duhem-dashboard/web && npm ci && npm run build)
             exec cargo build -p duhem-dashboard
             ;;
+        test)
+            (cd crates/duhem-dashboard/web && npm ci && npm test && npm run build)
+            cargo test -p duhem-dashboard
+            cargo build -p duhem-dashboard -p duhem-cli
+            exec cargo test -p duhem-cli --test dashboard_cmd -- --ignored
+            ;;
+        help|-h|--help)
+            printf 'usage: just dashboard <build|test>\n'
+            ;;
         *)
-            printf 'unknown build target: %s\n' "$1" >&2
-            printf 'usage: just build [dashboard]\n' >&2
+            printf 'unknown dashboard action: %s\n' "$1" >&2
+            printf 'usage: just dashboard <build|test>\n' >&2
             exit 2
             ;;
     esac
@@ -88,7 +99,7 @@ dev *args:
     fi
     exec cargo run -p duhem-cli -- "$@"
 
-# Run workspace tests or a specialized integration lane.
+# Run workspace tests or the browser-action integration lane.
 test target="workspace":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -99,15 +110,9 @@ test target="workspace":
         browser-actions)
             exec cargo test -p duhem-actions --test ui_smoke --test api_observe_smoke -- --ignored
             ;;
-        dashboard)
-            (cd crates/duhem-dashboard/web && npm ci && npm test && npm run build)
-            cargo test -p duhem-dashboard
-            cargo build -p duhem-dashboard -p duhem-cli
-            exec cargo test -p duhem-cli --test dashboard_cmd -- --ignored
-            ;;
         *)
             printf 'unknown test target: %s\n' "$1" >&2
-            printf 'usage: just test [browser-actions|dashboard]\n' >&2
+            printf 'usage: just test [browser-actions]\n' >&2
             exit 2
             ;;
     esac

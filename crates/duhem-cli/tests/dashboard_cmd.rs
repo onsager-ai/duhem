@@ -109,7 +109,7 @@ fn missing_binary_fails_with_guidance() {
 /// (CI dashboard lane); resolution uses the target-dir sibling of the
 /// `duhem` test binary's target dir.
 #[test]
-#[ignore = "needs the duhem-dashboard binary built (CI dashboard lane / just test dashboard)"]
+#[ignore = "needs the duhem-dashboard binary built (CI dashboard lane / just dashboard test)"]
 fn dashboard_serve_end_to_end() {
     // CARGO_BIN_EXE_duhem lives in target/debug/deps-adjacent layout;
     // the dashboard binary lands in the same target/debug dir.

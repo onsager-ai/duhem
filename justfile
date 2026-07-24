@@ -1,15 +1,47 @@
 # Duhem dev task runner.
 
+set positional-arguments
+
 default:
     @just --list
+
+# Create an isolated task worktree. Slashes in the branch name become `+`
+# only in the directory name (for example, `fix/foo` -> `fix+foo`).
+worktree-add branch base="main":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    branch="$1"
+    base="$2"
+    git check-ref-format --branch "$branch" >/dev/null
+    git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+    primary_root="$(dirname "$git_common_dir")"
+    repo_name="$(basename "$primary_root")"
+    worktree_parent="$(dirname "$primary_root")/${repo_name}-wt"
+    worktree_name="${branch//\//+}"
+    worktree_path="$worktree_parent/$worktree_name"
+    mkdir -p "$worktree_parent"
+    git worktree add "$worktree_path" -b "$branch" "$base"
+    printf 'Worktree ready: %s\n\n' "$worktree_path"
+    printf 'Next:\n  cd %q\n' "$worktree_path"
+    printf '  just dev     # run the CLI locally\n'
+    printf '  just build\n  just lint\n  just test\n'
+
+# List active worktrees and their branches.
+worktree-list:
+    git worktree list
 
 # Build the whole workspace.
 build:
     cargo build --workspace
 
-# Show the CLI's top-level help (`init` / `run` / `validate` / etc.).
-dev:
-    cargo run -p duhem-cli -- --help
+# Run the CLI locally; arguments are forwarded (`just dev run ...`).
+dev *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if (( $# == 0 )); then
+        set -- --help
+    fi
+    exec cargo run -p duhem-cli -- "$@"
 
 # Run all unit + integration tests (skips `#[ignore]`'d tests).
 test:

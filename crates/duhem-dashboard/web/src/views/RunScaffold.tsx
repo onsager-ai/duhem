@@ -221,7 +221,7 @@ function RunTree({
     <nav
       aria-label="criteria and checks"
       data-testid="run-tree"
-      className="run-results-nav min-w-0 max-w-full space-y-0.5 overflow-x-clip py-2 pr-3"
+      className="run-results-nav min-w-0 max-w-full space-y-0.5 overflow-x-hidden py-2 pr-3 supports-[overflow:clip]:overflow-x-clip"
     >
       {run.criteria.map((c) => (
         <TreeGroup

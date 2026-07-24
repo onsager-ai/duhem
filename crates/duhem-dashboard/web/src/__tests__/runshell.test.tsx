@@ -235,6 +235,7 @@ describe("run report tree", () => {
     renderAt("/run/R1/check/AC-5%3A%3AAC-5.1");
     const tree = await screen.findByTestId("run-tree");
     expect(tree.className).toContain("max-w-full");
+    expect(tree.className).toContain("overflow-x-hidden");
     expect(tree.className).toContain("overflow-x-clip");
     const active = within(tree).getByRole("link", { name: "AC-5.1" });
     expect(active.getAttribute("aria-current")).toBe("page");

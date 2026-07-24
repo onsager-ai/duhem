@@ -20,6 +20,7 @@ duhem-actions = { path = "../duhem-actions" }
 duhem-evidence = { path = "../duhem-evidence" }
 duhem-summary = { path = "../duhem-summary" }
 clap.workspace = true
+ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 reqwest.workspace = true
 tokio.workspace = true
 anyhow.workspace = true

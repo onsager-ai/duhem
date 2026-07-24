@@ -577,11 +577,13 @@ criteria:
               pattern: 'OK'
 
   # ==========================================================================
-  # #299 — live terminal progress. `duhem run` renders per-criterion progress
-  # on stderr while the run executes (auto on a TTY; `--live` forces it for
-  # captured-stderr consumers like this check). stdout keeps the reporter's
-  # byte-stable contract. The inner run reuses AC-5's offline
-  # `defaults-example` target, so the whole check stays page-free.
+  # #299 / #325 — live terminal progress. `duhem run` renders per-criterion
+  # progress on stderr while the run executes (auto on a TTY; `--live` forces
+  # it for captured-stderr consumers like this check). stdout keeps the
+  # reporter's byte-stable contract. AC-12.2 allocates a real PTY over a
+  # ten-criterion offline fixture to prove the bounded, cell-diffed rolling
+  # presentation; passing history collapses while the reporter stream stays
+  # clean.
   # ==========================================================================
   - id: AC-12
     description: |
@@ -628,6 +630,34 @@ criteria:
           # stdout: still exactly the machine reporter's summary.
           - matches:
               value: $steps.run_live.outputs.stdout
+              pattern: '"verdict":"pass"'
+      - id: AC-12.2
+        description: |
+          A real 100×12 PTY runs the shipped CLI over ten criteria. The
+          fixture helper mechanically reports success only when passing
+          history reaches the collapsed rolling row, the terminal stream
+          contains no whole-line clear/redraw sequence, and the JSON
+          reporter begins cleanly with no cursor-query bytes.
+        steps:
+          - id: run_live_pty
+            uses: cli/invoke
+            with:
+              command:
+                - verifications/duhem-cli/fixtures/run-rolling-tui-pty.sh
+                - $inputs.duhem_bin
+                - $inputs.repo_dir
+              cwd: $inputs.repo_dir
+              within: 120s
+        assertions:
+          - $steps.run_live_pty.outputs.exit_code == 0
+          - matches:
+              value: $steps.run_live_pty.outputs.stdout
+              pattern: 'TUI_BOUNDED_DIFF=yes'
+          - matches:
+              value: $steps.run_live_pty.outputs.stdout
+              pattern: 'REPORTER_STDOUT_CLEAN=yes'
+          - matches:
+              value: $steps.run_live_pty.outputs.stdout
               pattern: '"verdict":"pass"'
 
   # ==========================================================================

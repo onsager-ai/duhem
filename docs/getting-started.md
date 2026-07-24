@@ -69,13 +69,17 @@ couldn't observe cleanly (a timeout, an environment that wouldn't come
 up) and deliberately refuses to call that a pass.
 
 **Watch it in the terminal.** On a TTY, `duhem run` narrates progress
-on stderr while the run executes. A live criterion/check/step board
-uses aligned one-cell text indicators — `✓` pass, `✗` fail, `◐`
-inconclusive, `○` pending — while the active action gets a spinner,
-elapsed time, and any timeout budget. On a manifest run, a header
-separates each verification (`── login (2/5) ──`) and the shared environment's
-bring-up and teardown narrate too (`env: up…` / `env: ready (2.5s)` /
-`env: down…`). Piped or CI output is untouched (stdout carries only
+on stderr while the run executes. A bounded rolling board uses
+cell-level updates instead of repainting completed history: the active
+criterion/check/step stays expanded, completed passes collapse to one
+row, failures and inconclusive details stay visible, and older passing
+rows roll into an aggregate count. Aligned one-cell indicators show
+`✓` pass, `✗` fail, `◐` inconclusive, and `○` pending, while the active
+action gets a spinner, elapsed time, and any timeout budget. On a
+manifest run, a header separates each verification (`── login (2/5) ──`)
+and the shared environment's bring-up and teardown narrate too
+(`env: up…` / `env: ready (2.5s)` / `env: down…`). Piped or CI output
+is untouched (stdout carries only
 the reporter); `--live` / `--no-live` force it either way — a forced
 capture keeps plain append lines, plus a `… still in cli/invoke (12s)`
 heartbeat once a step is stuck past 10s, so logs stay grep-able.

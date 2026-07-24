@@ -594,9 +594,9 @@ criteria:
         description: |
           `duhem run --live verifications/defaults-example --reporter
           json` — the captured stderr carries the live renderer's
-          criterion start lines with INCREMENTING ordinals (`▶ … (1/2)`
-          then `▶ … (2/2)`, defaults-example's leaf has two criteria)
-          and a `✔ … pass` verdict line, while stdout is still exactly
+          criterion start lines with INCREMENTING ordinals (`› … (1/2)`
+          then `› … (2/2)`, defaults-example's leaf has two criteria)
+          and a `✓ … pass` verdict line, while stdout is still exactly
           the one-line JSON summary with the top-level `pass` (same
           assertion as AC-5). One invocation proves both halves of the
           contract.
@@ -618,13 +618,13 @@ criteria:
           # stderr: the live narration happened, ordinals incrementing.
           - matches:
               value: $steps.run_live.outputs.stderr
-              pattern: '▶ .+ \(1/2\)'
+              pattern: '› .+ \(1/2\)'
           - matches:
               value: $steps.run_live.outputs.stderr
-              pattern: '▶ .+ \(2/2\)'
+              pattern: '› .+ \(2/2\)'
           - matches:
               value: $steps.run_live.outputs.stderr
-              pattern: '✔ .+ pass'
+              pattern: '✓ .+ pass'
           # stdout: still exactly the machine reporter's summary.
           - matches:
               value: $steps.run_live.outputs.stdout

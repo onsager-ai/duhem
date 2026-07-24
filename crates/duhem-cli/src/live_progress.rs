@@ -37,6 +37,7 @@ use std::time::Duration;
 use duhem_evidence::{Event, EventPayload};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 mod tty;
 
@@ -159,9 +160,19 @@ pub fn narrate_env_event_to_stderr(evt: &Event) {
     }
 }
 
-/// How often the renderer wakes without an event — the TTY redraw
-/// cadence and the granularity of non-TTY heartbeat checks.
-const TICK_PERIOD: Duration = Duration::from_millis(100);
+/// How often the renderer wakes without an event — the TTY animation
+/// cadence and the granularity of non-TTY heartbeat checks. Evidence
+/// events still render immediately.
+const TICK_PERIOD: Duration = Duration::from_millis(250);
+
+/// Text-presentation status vocabulary. These deliberately avoid
+/// emoji-capable dingbats such as `✔` / `✘`; every indicator occupies
+/// exactly one terminal cell under Unicode's terminal-width rules.
+pub(super) const INDICATOR_PASS: &str = "✓";
+pub(super) const INDICATOR_FAIL: &str = "✗";
+pub(super) const INDICATOR_INCONCLUSIVE: &str = "◐";
+pub(super) const INDICATOR_PENDING: &str = "○";
+pub(super) const INDICATOR_ACTIVE: &str = "›";
 
 /// Presentation posture + heartbeat cadence (#305).
 #[derive(Clone, Copy)]
@@ -250,6 +261,7 @@ pub async fn render<W: Write>(
         started: HashMap::new(),
         running: None,
         line_open: false,
+        last_board_lines: Vec::new(),
     };
     let mut tick = tokio::time::interval(TICK_PERIOD);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -304,6 +316,10 @@ struct Renderer<'a, W: Write> {
     /// TTY: an in-place running line is currently displayed,
     /// unterminated.
     line_open: bool,
+    /// Fully rendered rows from the last TTY board refresh. Event
+    /// folds may request a redraw without changing visible state; do
+    /// not touch the terminal in that case.
+    last_board_lines: Vec<String>,
 }
 
 impl<W: Write> Renderer<'_, W> {
@@ -496,10 +512,10 @@ impl<W: Write> Renderer<'_, W> {
         });
         if self.cfg.tty {
             let n = self.n;
-            self.line(&format!("▶ {criterion_id} ({k}/{n})"));
+            self.line(&format!("{INDICATOR_ACTIVE} {criterion_id} ({k}/{n})"));
         } else {
             let n = self.n;
-            let _ = writeln!(self.out, "▶ {criterion_id} ({k}/{n})…");
+            let _ = writeln!(self.out, "{INDICATOR_ACTIVE} {criterion_id} ({k}/{n})…");
         }
     }
 
@@ -508,7 +524,10 @@ impl<W: Write> Renderer<'_, W> {
     /// line later replaces it via [`Renderer::line`].
     fn draw_running(&mut self) {
         let Some(run) = &self.running else { return };
-        let head = format!("▶ {} ({}/{})", run.criterion_id, run.ordinal, self.n);
+        let head = format!(
+            "{INDICATOR_ACTIVE} {} ({}/{})",
+            run.criterion_id, run.ordinal, self.n
+        );
         let text = match &run.step_uses {
             Some(uses) => {
                 let step = run
@@ -540,9 +559,11 @@ impl<W: Write> Renderer<'_, W> {
                     ),
                     None => format!(" {}s", elapsed.as_secs()),
                 };
-                let full = format!("  └─ ▶ {check} · {step} · {uses}{expectation}{timer}");
+                let full = format!(
+                    "  └─ {INDICATOR_ACTIVE} {check} · {step} · {uses}{expectation}{timer}"
+                );
                 let without_summary = format!(
-                    "  └─ ▶ {} · {step} · {uses}{expectation}{timer}",
+                    "  └─ {INDICATOR_ACTIVE} {} · {step} · {uses}{expectation}{timer}",
                     run.check_id.as_deref().unwrap_or("check")
                 );
                 // This compact shape deliberately preserves the useful
@@ -557,7 +578,7 @@ impl<W: Write> Renderer<'_, W> {
                     })
                     .unwrap_or_else(|| "step".to_string());
                 let compact = format!(
-                    "  └─ ▶ {} · {compact_step} {uses}{timer}",
+                    "  └─ {INDICATOR_ACTIVE} {} · {compact_step} {uses}{timer}",
                     run.check_id.as_deref().unwrap_or("check"),
                 );
                 [full, without_summary, compact.clone()]
@@ -580,27 +601,22 @@ impl<W: Write> Renderer<'_, W> {
     }
 
     fn draw_board(&mut self) {
-        if !self.board.cursor_hidden() {
-            let _ = write!(self.out, "\x1b[?25l");
-            self.board.set_cursor_hidden(true);
-        }
         let lines = self.board.lines();
+        if lines == self.last_board_lines {
+            return;
+        }
         let old_height = self.board.frame_height();
-        if old_height > 0 {
-            let _ = write!(self.out, "\x1b[{old_height}A");
+        let hide_cursor = !self.board.cursor_hidden();
+        let frame = compose_board_frame(&lines, old_height, hide_cursor);
+
+        // One complete frame per write keeps terminals from painting
+        // the intermediate clear/rewrite states that caused flashing.
+        if self.out.write_all(frame.as_bytes()).is_ok() {
+            let _ = self.out.flush();
+            self.board.set_cursor_hidden(true);
+            self.board.set_frame_height(lines.len());
+            self.last_board_lines = lines;
         }
-        for line in &lines {
-            let _ = write!(self.out, "\r\x1b[2K{line}\n");
-        }
-        if old_height > lines.len() {
-            let surplus = old_height - lines.len();
-            for _ in 0..surplus {
-                let _ = write!(self.out, "\r\x1b[2K\n");
-            }
-            let _ = write!(self.out, "\x1b[{surplus}A");
-        }
-        self.board.set_frame_height(lines.len());
-        let _ = self.out.flush();
     }
 
     /// Turn the active redraw into a durable tree branch. This reports
@@ -609,9 +625,9 @@ impl<W: Write> Renderer<'_, W> {
     fn finish_step(&mut self, outcome: &duhem_evidence::StepOutcome) {
         let Some(run) = &self.running else { return };
         let mark = match outcome {
-            duhem_evidence::StepOutcome::Ok => "✓",
-            duhem_evidence::StepOutcome::Error => "✘",
-            duhem_evidence::StepOutcome::Timeout => "◐",
+            duhem_evidence::StepOutcome::Ok => INDICATOR_PASS,
+            duhem_evidence::StepOutcome::Error => INDICATOR_FAIL,
+            duhem_evidence::StepOutcome::Timeout => INDICATOR_INCONCLUSIVE,
         };
         let check = run.check_id.as_deref().unwrap_or("check");
         let step = run
@@ -662,10 +678,37 @@ impl<W: Write> Renderer<'_, W> {
 
 fn verdict_mark(verdict: &duhem_judge::VerdictState) -> &'static str {
     match verdict {
-        duhem_judge::VerdictState::Pass => "✔",
-        duhem_judge::VerdictState::Fail => "✘",
-        duhem_judge::VerdictState::Inconclusive(_) => "◐",
+        duhem_judge::VerdictState::Pass => INDICATOR_PASS,
+        duhem_judge::VerdictState::Fail => INDICATOR_FAIL,
+        duhem_judge::VerdictState::Inconclusive(_) => INDICATOR_INCONCLUSIVE,
     }
+}
+
+/// Build a complete cursor move + row rewrite transaction. Keeping
+/// composition pure makes it possible to verify that a refresh reaches
+/// the writer atomically.
+fn compose_board_frame(lines: &[String], old_height: usize, hide_cursor: bool) -> String {
+    let surplus = old_height.saturating_sub(lines.len());
+    let row_bytes = lines.iter().map(|line| line.len() + 6).sum::<usize>();
+    let mut frame = String::with_capacity(row_bytes + surplus * 6 + 32);
+    if hide_cursor {
+        frame.push_str("\x1b[?25l");
+    }
+    if old_height > 0 {
+        frame.push_str(&format!("\x1b[{old_height}A"));
+    }
+    for line in lines {
+        frame.push_str("\r\x1b[2K");
+        frame.push_str(line);
+        frame.push('\n');
+    }
+    if surplus > 0 {
+        for _ in 0..surplus {
+            frame.push_str("\r\x1b[2K\n");
+        }
+        frame.push_str(&format!("\x1b[{surplus}A"));
+    }
+    frame
 }
 
 /// Render the useful, non-sensitive part of an action's immediate goal.
@@ -745,8 +788,8 @@ fn colorize(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 32);
     for ch in text.chars() {
         let style = match ch {
-            '✓' | '✔' => Some(GREEN),
-            '✘' => Some(RED),
+            '✓' => Some(GREEN),
+            '✗' => Some(RED),
             '◐' => Some(YELLOW),
             '○' | '│' | '├' | '└' | '─' => Some(DIM),
             '█' | '▏' | '▎' | '▍' | '▌' | '▋' | '▊' | '▉' => Some(CYAN),
@@ -776,25 +819,23 @@ fn shorten(text: &str, width: usize) -> String {
     }
 }
 
-/// ANSI escapes are not part of these strings, so a small local width
-/// model is enough to prevent redraw wrapping without adding a terminal UI
-/// dependency. Treat non-ASCII scalar values conservatively as two cells.
+/// ANSI escapes are not part of these strings. Use Unicode terminal-cell
+/// width so text indicators, braille animation, CJK content, and ASCII
+/// all share the same fit calculation.
 fn display_width(text: &str) -> usize {
-    text.chars()
-        .map(|ch| if ch.is_ascii() { 1 } else { 2 })
-        .sum()
+    UnicodeWidthStr::width(text)
 }
 
 fn shorten_to_width(text: &str, width: usize) -> String {
     if display_width(text) <= width {
         return text.to_string();
     }
-    let ellipsis_width = 2;
+    let ellipsis_width = display_width("…");
     let budget = width.saturating_sub(ellipsis_width);
     let mut used = 0;
     let mut out = String::new();
     for ch in text.chars() {
-        let ch_width = if ch.is_ascii() { 1 } else { 2 };
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
         if used + ch_width > budget {
             break;
         }
@@ -871,6 +912,49 @@ criteria:
         String::from_utf8(out).unwrap()
     }
 
+    #[derive(Default)]
+    struct RecordingWriter {
+        writes: Vec<Vec<u8>>,
+        flushes: usize,
+    }
+
+    impl Write for RecordingWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.writes.push(buf.to_vec());
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushes += 1;
+            Ok(())
+        }
+    }
+
+    fn renderer<'a>(
+        out: &'a mut RecordingWriter,
+        cfg: RenderConfig,
+    ) -> Renderer<'a, RecordingWriter> {
+        let plan = plan();
+        let board = TtyBoard::new(
+            plan.verification,
+            plan.criteria,
+            cfg.terminal_width,
+            cfg.color,
+        );
+        Renderer {
+            out,
+            cfg,
+            n: plan.criterion_ids.len(),
+            check_owner: plan.check_owner,
+            checks: plan.checks,
+            board,
+            started: HashMap::new(),
+            running: None,
+            line_open: false,
+            last_board_lines: Vec::new(),
+        }
+    }
+
     #[tokio::test]
     async fn per_criterion_lines_with_ordinals_verdicts_and_durations() {
         let out = rendered(
@@ -931,10 +1015,10 @@ criteria:
         assert_eq!(
             lines,
             vec![
-                "▶ AC-1 (1/2)…",
-                "✔ AC-1 pass (1.5s)",
-                "▶ AC-2 (2/2)…",
-                "✘ AC-2 fail (0.2s)",
+                "› AC-1 (1/2)…",
+                "✓ AC-1 pass (1.5s)",
+                "› AC-2 (2/2)…",
+                "✗ AC-2 fail (0.2s)",
             ]
         );
     }
@@ -1123,10 +1207,10 @@ criteria:
             "{out:?}"
         );
         assert!(out.contains("     └─ ✓ 1/2 cli/invoke"), "{out:?}");
-        assert!(out.contains("  └─ ✔ AC-1.1  one check"), "{out:?}");
-        assert!(out.contains("✔ AC-1  one"), "{out:?}");
-        assert!(out.contains("✘ AC-2  two"), "{out:?}");
-        assert!(out.contains("✔ 1 passed   ✘ 1 failed"), "{out:?}");
+        assert!(out.contains("  └─ ✓ AC-1.1  one check"), "{out:?}");
+        assert!(out.contains("✓ AC-1  one"), "{out:?}");
+        assert!(out.contains("✗ AC-2  two"), "{out:?}");
+        assert!(out.contains("✓ 1 passed   ✗ 1 failed"), "{out:?}");
     }
 
     #[tokio::test]
@@ -1173,20 +1257,81 @@ criteria:
     #[test]
     fn spinner_and_fractional_progress_animate_smoothly() {
         assert_eq!(spinner(Duration::ZERO), "⠋");
-        assert_eq!(spinner(Duration::from_millis(100)), "⠙");
+        assert_eq!(spinner(Duration::from_millis(250)), "⠙");
         assert_eq!(
             progress_bar(Duration::from_secs(20), Duration::from_secs(60)),
             "█████▎──────────"
         );
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn tty_board_refresh_is_atomic_and_unchanged_frames_are_skipped() {
+        let mut out = RecordingWriter::default();
+        let mut renderer = renderer(&mut out, tty_cfg());
+        let redraw = evt(
+            1,
+            0,
+            EventPayload::StepStarted {
+                criterion_id: "AC-1".into(),
+                check_id: "AC-1.1".into(),
+                step_index: 0,
+                uses: "cli/invoke".into(),
+                layer: None,
+                with: Default::default(),
+            },
+        );
+
+        assert!(!renderer.event(redraw));
+        assert_eq!(renderer.out.writes.len(), 1);
+        assert_eq!(renderer.out.flushes, 1);
+        let frame = String::from_utf8_lossy(&renderer.out.writes[0]);
+        assert!(frame.starts_with("\x1b[?25l\r\x1b[2K"), "{frame:?}");
+        assert!(frame.matches("\r\x1b[2K").count() > 3, "{frame:?}");
+
+        renderer.draw_board();
+        assert_eq!(renderer.out.writes.len(), 1);
+        assert_eq!(renderer.out.flushes, 1);
+    }
+
+    #[test]
+    fn status_indicators_are_single_cell_and_rows_stay_aligned() {
+        let indicators = [
+            INDICATOR_PASS,
+            INDICATOR_FAIL,
+            INDICATOR_INCONCLUSIVE,
+            INDICATOR_PENDING,
+            INDICATOR_ACTIVE,
+        ];
+        for indicator in indicators.into_iter().chain(SPINNER) {
+            assert_eq!(
+                display_width(indicator),
+                1,
+                "{indicator:?} must occupy one terminal cell"
+            );
+            assert!(
+                !indicator.contains('\u{fe0f}'),
+                "{indicator:?} must not request emoji presentation"
+            );
+        }
+
+        let widths: Vec<_> = indicators
+            .into_iter()
+            .chain(SPINNER)
+            .map(|indicator| display_width(&format!("{indicator} AC-1  description")))
+            .collect();
+        assert!(
+            widths.windows(2).all(|pair| pair[0] == pair[1]),
+            "status rows must align: {widths:?}"
+        );
+    }
+
     #[test]
     fn semantic_color_is_ansi_and_plain_width_safe() {
-        let plain = "└─ ⠹ running  █▌──  ✔ pass  ✘ fail  ○ pending";
+        let plain = "└─ ⠹ running  █▌──  ✓ pass  ✗ fail  ○ pending";
         let colored = colorize(plain);
         assert!(colored.contains("\x1b[36m⠹\x1b[0m"));
-        assert!(colored.contains("\x1b[32m✔\x1b[0m"));
-        assert!(colored.contains("\x1b[31m✘\x1b[0m"));
+        assert!(colored.contains("\x1b[32m✓\x1b[0m"));
+        assert!(colored.contains("\x1b[31m✗\x1b[0m"));
         assert!(colored.contains("\x1b[2m○\x1b[0m"));
         let mut stripped = colored;
         for escape in [
@@ -1269,6 +1414,6 @@ criteria:
         let out = handle.await.unwrap();
         assert!(out.contains("… still in cli/invoke (2s)"), "{out}");
         assert!(out.contains("… still in cli/invoke (4s)"), "{out}");
-        assert!(out.contains("✔ AC-1 pass"), "{out}");
+        assert!(out.contains("✓ AC-1 pass"), "{out}");
     }
 }

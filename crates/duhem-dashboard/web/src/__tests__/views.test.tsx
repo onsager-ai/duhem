@@ -7,7 +7,15 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RunsList, { matchesFilters } from "../views/RunsList";
 import { RunsProvider } from "../runs-context";
-import { Artifacts, DomViewer, HarTable, ScreenshotArtifact, Timeline } from "../views/CheckPage";
+import {
+  Artifacts,
+  CheckSummary,
+  DomViewer,
+  HarTable,
+  ScreenshotArtifact,
+  SpanChain,
+  Timeline,
+} from "../views/CheckPage";
 import type { RunsListEntry, TraceEvent } from "../api";
 
 // RunsList now reads the shared runs context; the provider fetches via the
@@ -98,6 +106,38 @@ describe("matchesFilters", () => {
     expect(matchesFilters(leaf("a", "pass"), "other", [], "", "")).toBe(false);
     expect(matchesFilters(leaf("a", "pass"), "", [], "2026-06-01", "2026-06-30")).toBe(true);
     expect(matchesFilters(leaf("a", "pass"), "", [], "2026-06-11", "")).toBe(false);
+  });
+});
+
+describe("CheckSummary", () => {
+  it("separates each failed assertion into expected and observed values", () => {
+    render(
+      <CheckSummary
+        detail={{
+          criterion_id: "AC-1",
+          check_id: "AC-1.1",
+          verdict: "fail",
+          spans: [],
+          artifacts: [],
+          timeline: [
+            {
+              seq: 1,
+              ts: "t",
+              kind: "assertion_evaluated",
+              state: "fail",
+              detail:
+                'expected text "component" to be visible within 60s, but it never appeared',
+            },
+          ],
+        }}
+      />,
+    );
+    const summary = screen.getByTestId("check-summary");
+    expect(summary.textContent).toContain("Assertion 1");
+    expect(summary.textContent).toContain("Expected");
+    expect(summary.textContent).toContain('text "component" to be visible within 60s');
+    expect(summary.textContent).toContain("Observed");
+    expect(summary.textContent).toContain("it never appeared");
   });
 });
 
@@ -194,12 +234,13 @@ describe("Timeline", () => {
     const group = getByTestId("step-group");
     // The judging step reads *failed*, not a green "step ok".
     expect(group.className).toContain("tone-fail");
-    expect(getByTestId("step-outcome").textContent).toContain("step failed");
+    expect(getByTestId("step-outcome").textContent).toBe("failed");
     expect(getByTestId("step-outcome").textContent).not.toContain("step ok");
     // The semantic reason is surfaced inline on the step.
     expect(getByTestId("step-reason").textContent).toContain(
-      'expected text "Manager" to be absent',
+      'text "Manager" to be absent',
     );
+    expect(group.querySelector(".ev-icon .ev-glyph-fail")).not.toBeNull();
     // Failed steps auto-expand (Allure-style).
     expect(group.querySelector("details")?.hasAttribute("open")).toBe(true);
     // The assertion is no longer a standalone orphan row — only the step
@@ -208,6 +249,105 @@ describe("Timeline", () => {
       .filter((e) => !e.closest(".step-inner"))
       .map((e) => e.textContent);
     expect(topLabels).toEqual(["assert-element", "verdict: fail"]);
+  });
+
+  it("nests a request/response inspector under an api step, response open on 5xx (#280 follow-up)", () => {
+    const events: TraceEvent[] = [
+      {
+        seq: 1,
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "step_started",
+        step_index: 0,
+        uses: "api/call",
+        layer: "api",
+        with: { method: "PUT", url: "http://x/api/roles/1", body: { name: "r" } },
+      },
+      { seq: 2, ts: "2026-01-01T00:00:00.100Z", kind: "step_observation", step_index: 0, output_name: "status", value: 500 },
+      {
+        seq: 3,
+        ts: "2026-01-01T00:00:00.150Z",
+        kind: "step_observation",
+        step_index: 0,
+        output_name: "body",
+        value: { error: "write exception: immutable field" },
+      },
+      { seq: 4, ts: "2026-01-01T00:00:00.200Z", kind: "step_finished", step_index: 0, outcome: "ok" },
+    ];
+    const { getByTestId } = render(<Timeline events={events} />);
+    const ax = getByTestId("api-exchange");
+    expect(ax.textContent).toContain("PUT");
+    expect(ax.textContent).toContain("http://x/api/roles/1");
+    expect(ax.querySelector(".ax-status")?.textContent).toBe("500");
+    expect(ax.querySelector(".ax-status")?.className).toContain("bad");
+    // The response body opens automatically on a 5xx — the error is right there.
+    expect(ax.textContent).toContain("write exception: immutable field");
+  });
+
+  it("nests a screenshot capture under its step, not a side panel (#280 polish)", () => {
+    const sha = "a".repeat(64);
+    const events: TraceEvent[] = [
+      {
+        seq: 1,
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "step_started",
+        step_index: 0,
+        uses: "ui/assert-element",
+        with: { locator: { text: "x" }, expected: "visible" },
+      },
+      { seq: 2, ts: "2026-01-01T00:00:00.100Z", kind: "step_finished", step_index: 0, outcome: "ok" },
+      // Emitted after the step closed, but carries step_index → nests back.
+      {
+        seq: 3,
+        ts: "2026-01-01T00:00:00.200Z",
+        kind: "step_observation",
+        step_index: 0,
+        output_name: "capture/screenshot",
+        blob_sha256: sha,
+      },
+    ];
+    const artifacts = [{ id: sha, kind: "capture/screenshot", url: `run/r/artifact/${sha}` }];
+    const { getByTestId } = render(<Timeline events={events} artifacts={artifacts} />);
+    const caps = getByTestId("step-captures");
+    // The screenshot renders as an image, inside the step group.
+    expect(caps.closest('[data-testid="step-group"]')).not.toBeNull();
+    expect(caps.querySelector("img")?.getAttribute("src")).toBe(`run/r/artifact/${sha}`);
+  });
+
+  it("keeps artifact-backed outputs reachable inside the step diagnostics", () => {
+    const sha = "b".repeat(64);
+    const events: TraceEvent[] = [
+      {
+        seq: 1,
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "step_started",
+        step_index: 0,
+        uses: "api/call",
+        with: { method: "GET", url: "http://x/api/large" },
+      },
+      {
+        seq: 2,
+        ts: "2026-01-01T00:00:00.100Z",
+        kind: "step_observation",
+        step_index: 0,
+        output_name: "body",
+        blob_sha256: sha,
+      },
+      {
+        seq: 3,
+        ts: "2026-01-01T00:00:00.200Z",
+        kind: "step_finished",
+        step_index: 0,
+        outcome: "ok",
+      },
+    ];
+    const artifacts = [{ id: sha, kind: "body", url: `run/r/artifact/${sha}` }];
+    const { getByTestId } = render(<Timeline events={events} artifacts={artifacts} />);
+    const blobs = getByTestId("step-blob-events");
+    const link = blobs.querySelector<HTMLAnchorElement>(".ev-artifact");
+
+    expect(blobs.closest('[data-testid="step-group"]')).not.toBeNull();
+    expect(link?.textContent).toBe("open");
+    expect(link?.getAttribute("href")).toBe(`run/r/artifact/${sha}`);
   });
 });
 
@@ -376,10 +516,14 @@ describe("in-page inspection (#210)", () => {
     const groups = container.querySelectorAll('[data-testid="step-group"]');
     expect(groups).toHaveLength(1);
     expect(groups[0].textContent).toContain("navigate");
-    expect(groups[0].textContent).toContain("step ok");
-    // The step's own started/finished raws stay reachable inside the group.
-    const innerRaw = groups[0].querySelectorAll(".step-inner .ev-raw pre");
-    expect([...innerRaw].some((p) => p.textContent?.includes("ui/navigate"))).toBe(true);
+    expect(groups[0].textContent).not.toContain("step ok");
+    // A green status icon communicates success without redundant prose.
+    expect(groups[0].querySelector(".ev-icon .ev-glyph-pass")).not.toBeNull();
+    expect(groups[0].querySelector('[data-testid="step-outcome"]')).toBeNull();
+    // The lifecycle stays reachable as one diagnostic subtree instead
+    // of repeating started / observed / finished rows.
+    const raw = groups[0].querySelector(".step-raw pre");
+    expect(raw?.textContent).toContain("ui/navigate");
     // The verdict is a standalone row, never folded into a step group.
     const labels = [...container.querySelectorAll(".ev-label")]
       .filter((e) => !e.closest(".step-inner"))
@@ -438,7 +582,6 @@ describe("element-highlight (#214)", () => {
 
 // ---- #193: ④ delivery-web span chain --------------------------------
 
-import { SpanChain } from "../views/CheckPage";
 import { Sparkline } from "../views/VerificationPage";
 import type { SpanModel } from "../api";
 
@@ -453,11 +596,27 @@ describe("SpanChain (④)", () => {
     const chain = screen.getByTestId("spanchain");
     expect(chain.textContent).toContain("ui");
     expect(chain.textContent).toContain("api");
-    // The broken layer carries its detail inline (the ✕ is now a lucide
-    // SVG, so it's a fail-classed node rather than glyph text).
+    // Failure detail stays in the tooltip; the horizontal path remains compact.
     const failNode = chain.querySelector(".span-fail");
     expect(failNode?.textContent).toContain("data");
-    expect(failNode?.textContent).toContain("timeout");
+    expect(failNode?.getAttribute("title")).toContain("timeout");
+  });
+
+  it("collapses adjacent steps in the same delivery layer", () => {
+    render(
+      <SpanChain
+        spans={Array.from({ length: 12 }, (_, i) => ({
+          seq: i + 1,
+          layer: "ui",
+          ok: i !== 6,
+          detail: i === 6 ? "target absent" : undefined,
+        }))}
+      />,
+    );
+    const chain = screen.getByTestId("spanchain");
+    expect(chain.querySelectorAll(".span-node")).toHaveLength(1);
+    expect(chain.textContent).toContain("12 steps");
+    expect(chain.querySelector(".span-node")?.className).toContain("span-fail");
   });
 
   it("says layer unknown for a pre-tag run instead of guessing", () => {

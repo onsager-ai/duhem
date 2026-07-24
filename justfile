@@ -28,7 +28,16 @@ test-ui:
 # placeholder index and the JSON API only.
 dashboard-build:
     cd crates/duhem-dashboard/web && npm ci && npm run build
-    cargo build -p duhem-dashboard
+    cargo build -p duhem-dashboard -p duhem-cli
+
+# Build and serve the dashboard against the default local evidence store.
+dashboard-serve: dashboard-build
+    target/debug/duhem dashboard
+
+# Build and serve the dashboard against a specific evidence store.
+# Usage: just dashboard-serve-db /path/to/duhem.db [port]
+dashboard-serve-db db port="7878": dashboard-build
+    target/debug/duhem dashboard --db {{db}} --port {{port}}
 
 # Dashboard test lane: SPA component tests + crate tests with the
 # real bundle + the `duhem dashboard` end-to-end. Mirrors CI's

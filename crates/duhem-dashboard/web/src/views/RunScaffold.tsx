@@ -87,34 +87,57 @@ function TreeGroup({
   criterion: RunDetail["criteria"][number];
   activePair?: string;
 }) {
-  const [open, setOpen] = useState(true);
+  const hasChecks = criterion.checks.length > 0;
+  const [open, setOpen] = useState(hasChecks);
   const vd = useVd();
   const critDesc = vd?.criterion(criterion.id)?.description;
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        title={critDesc}
-        className="flex w-full items-start gap-1.5 rounded-md px-2 py-1.5 text-left text-sm font-medium text-foreground transition-colors hover:bg-accent/60"
-      >
+  const label = (
+    <>
+      {hasChecks ? (
         <ChevronRight
           className={cn(
             "mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform",
             open && "rotate-90",
           )}
         />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate">{criterion.id}</span>
-          {critDesc && (
-            <span className="block truncate text-xs font-normal text-muted-foreground">
-              {critDesc}
-            </span>
-          )}
-        </span>
-        <VerdictBadge verdict={criterion.verdict} />
-      </button>
+      ) : (
+        <span className="size-3.5 shrink-0" aria-hidden="true" />
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{criterion.id}</span>
+        {critDesc && (
+          <span className="block truncate text-xs font-normal text-muted-foreground">
+            {critDesc}
+          </span>
+        )}
+      </span>
+      <VerdictBadge
+        verdict={criterion.verdict}
+        compact
+        className="max-w-28 truncate"
+      />
+    </>
+  );
+  return (
+    <div>
+      {hasChecks ? (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          title={critDesc}
+          className="flex w-full min-w-0 items-start gap-1.5 rounded-md px-2 py-1.5 text-left text-sm font-medium text-foreground transition-colors hover:bg-accent/60"
+        >
+          {label}
+        </button>
+      ) : (
+        <div
+          title={critDesc}
+          className="flex w-full min-w-0 items-start gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium text-foreground"
+        >
+          {label}
+        </div>
+      )}
       {open && (
         <div className="ml-3 space-y-0.5 border-l pl-2 pt-0.5">
           {criterion.checks.map((chk) => {
@@ -144,7 +167,11 @@ function TreeGroup({
                     </span>
                   )}
                 </span>
-                <VerdictBadge verdict={chk.verdict} />
+                <VerdictBadge
+                  verdict={chk.verdict}
+                  compact
+                  className="max-w-24 truncate"
+                />
               </Link>
             );
           })}
@@ -171,7 +198,7 @@ function RunTree({
     <nav
       aria-label="criteria and checks"
       data-testid="run-tree"
-      className="space-y-0.5 rounded-lg border bg-card p-2"
+      className="min-w-0 max-w-full space-y-0.5 overflow-hidden rounded-lg border bg-card p-2"
     >
       <Link
         to={`/run/${encodeURIComponent(run.run_id)}`}
@@ -235,30 +262,34 @@ export function RunScaffold({
   const empty = run.criteria.length === 0;
   return (
     <DefinitionProvider runId={runId} enabled={run.has_definition}>
-      <div>
+      <div className="min-w-0 max-w-full">
         <header className="mb-6 border-b pb-4">
-        <h2 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xl font-semibold tracking-tight">
-          <span>{run.verification}</span>
-          <span className="text-muted-foreground">·</span>
-          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm font-normal">
-            {run.run_id}
-          </code>
-          <VerdictBadge verdict={run.verdict} live={run.live} />
-        </h2>
-      </header>
+          <h2 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xl font-semibold tracking-tight">
+            <span>{run.verification}</span>
+            <span className="text-muted-foreground">·</span>
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm font-normal">
+              {run.run_id}
+            </code>
+            <VerdictBadge verdict={run.verdict} live={run.live} />
+          </h2>
+        </header>
 
-      {empty ? (
-        <p className="text-sm text-muted-foreground">
-          No criteria recorded{run.live ? " yet" : ""}.
-        </p>
-      ) : (
-        <div className="grid gap-6 md:grid-cols-[16rem_minmax(0,1fr)]">
-          <aside className="md:sticky md:top-20 md:self-start">
-            <RunTree run={run} activePair={activePair} activeDefinition={activeDefinition} />
-          </aside>
-          <section className="min-w-0">{children(run)}</section>
-        </div>
-      )}
+        {empty ? (
+          <p className="text-sm text-muted-foreground">
+            No criteria recorded{run.live ? " yet" : ""}.
+          </p>
+        ) : (
+          <div className="grid min-w-0 max-w-full gap-6 md:grid-cols-[16rem_minmax(0,1fr)]">
+            <aside className="min-w-0 max-w-full md:sticky md:top-20 md:self-start">
+              <RunTree
+                run={run}
+                activePair={activePair}
+                activeDefinition={activeDefinition}
+              />
+            </aside>
+            <section className="min-w-0">{children(run)}</section>
+          </div>
+        )}
       </div>
     </DefinitionProvider>
   );

@@ -71,10 +71,11 @@ describe("RunsList", () => {
       leaf("01JRUNC", null, true),
     ]);
     const { container } = renderRuns(<RunsList />);
-    // Run-set children are expanded by default (#49).
-    await waitFor(() => expect(screen.getByText("01JRUNA")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("01JRUNC")).toBeTruthy());
+    expect(screen.queryByText("01JRUNA")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expect(screen.getByText("01JRUNA")).toBeTruthy();
     expect(screen.getByText("01JRUNB")).toBeTruthy();
-    expect(screen.getByText("01JRUNC")).toBeTruthy();
     // The in-progress run shows a "live" verdict badge — distinct from the
     // "live" filter chip in the toolbar, so scope to badge elements.
     const badges = [...container.querySelectorAll('[data-slot="badge"]')];
@@ -485,7 +486,7 @@ describe("Sparkline (②)", () => {
 
 // ---- #280: run status roll-up (donut + counts) ----------------------
 
-import { StatusDonut, tallyChecks } from "../views/RunPage";
+import { StatusDonut, tallyChecks, tallyCriteria } from "../views/RunPage";
 
 describe("run status roll-up (#280)", () => {
   const crit = (id: string, checks: { id: string; verdict: string | null }[]) => ({
@@ -506,6 +507,24 @@ describe("run status roll-up (#280)", () => {
       ]),
     ]);
     expect(t).toEqual({ pass: 1, fail: 1, inconclusive: 1, pending: 1, total: 4 });
+  });
+
+  it("tallies criteria independently from their executable checks", () => {
+    const t = tallyCriteria([
+      { id: "AC-1", verdict: "pass", checks: [{ id: "a", verdict: "pass" }] },
+      {
+        id: "AC-2",
+        verdict: "inconclusive:empty_aggregation",
+        checks: [],
+      },
+    ]);
+    expect(t).toEqual({
+      pass: 1,
+      fail: 0,
+      inconclusive: 1,
+      pending: 0,
+      total: 2,
+    });
   });
 
   it("renders a donut with the total in the middle, one arc per non-zero status", () => {

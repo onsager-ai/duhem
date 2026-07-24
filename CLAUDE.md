@@ -91,12 +91,14 @@ Changes to those four bullets are spec-level changes to
 5. **`.claude/skills/`** — dev process under Claude Code. Start with
    `duhem-dev-process`; it delegates to the rest.
 
-## Onsager — the first customer
+## Onsager — the first dogfood customer (paused)
 
-Duhem's first dogfood customer is
-[`onsager-ai/onsager`](https://github.com/onsager-ai/onsager). The
-two repos move together because the same person is building both,
-but they are **parallel, not shared**:
+Duhem's first dogfood customer was
+[`onsager-ai/onsager`](https://github.com/onsager-ai/onsager).
+**Onsager work is currently paused** (epic #225 P4), so the active
+dogfood now runs against Chreode and Crawlab; Onsager re-homes when
+its work resumes. The two repos move together because the same
+person is building both, but they are **parallel, not shared**:
 
 - Each repo has its own `.claude/skills/` and its own SDD loop.
 - Duhem's schema, CLI, runtime, judge, dashboard, and integrations
@@ -114,11 +116,12 @@ but they are **parallel, not shared**:
 - Cross-repo work is two specs (one on each repo) with a contract in
   both, never one PR straddling both repos.
 
-Onsager is the **workload** Duhem verifies. Onsager is not (yet) the
-production line that builds Duhem — that's a Phase 4+ future state
-in `docs/duhem-spec.md` §14. Today, Onsager has features that need
-verifying and Duhem has the verifier; the dogfood pair is how we
-exercise Duhem at real complexity from day one.
+Onsager is the **workload** Duhem verifies — the dogfood pair is how
+Duhem gets exercised at real complexity. With Onsager paused, that
+role is carried by the active dogfood products (Chreode, Crawlab)
+until Onsager work resumes. Onsager is not (yet) the production line
+that builds Duhem either — that's a Phase 4+ future state in
+`docs/duhem-spec.md` §14.
 
 When in doubt about which side of the seam owns a change, invoke
 the `onsager-dogfood` skill — it has the decision rule and the

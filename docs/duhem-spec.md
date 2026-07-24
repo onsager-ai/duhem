@@ -878,7 +878,7 @@ The CLI binary is free to download and use across all tiers. It is open-source (
 
 ## 14. Roadmap
 
-The roadmap reflects a solo founder building with Claude Code as the primary development assistant, with Onsager as the first dogfooding customer. It is not a typical funded startup roadmap; it is intentionally calibrated to a single-builder reality.
+The roadmap reflects a solo founder building with Claude Code as the primary development assistant, with Onsager as the first dogfooding customer (now paused — the active dogfood runs against Chreode and Crawlab; see Appendix D). It is not a typical funded startup roadmap; it is intentionally calibrated to a single-builder reality.
 
 ### Phase 0 — Foundation (months 0–3)
 
@@ -1013,7 +1013,7 @@ This phase is contingent on Onsager’s own roadmap. It is not blocking for Duhe
 |UI testing scope (MVP)  |DOM-level + behavioral                    |Covers most user-visible failure modes; visual-baseline post-MVP           |
 |Source posture          |Open source (Apache-2.0), open-core       |Adoption via the open engine; commercial moat is the hosted cloud, not source|
 |Schema/engine OSS       |Open (Apache-2.0) from v0.1.0             |Pulled forward from the old Phase-2 gate; ecosystem adoption beats proprietary IP|
-|First customer          |Onsager (dogfood)                         |Real complexity, real urgency, continuous use, free testimonial            |
+|First customer          |Onsager (dogfood; paused) → Chreode, Crawlab|Real complexity, real urgency, continuous use, free testimonial            |
 |Pricing anchor          |$30/seat/month                            |Validated by adjacent products (Qodo, CodeRabbit)                          |
 |Build approach          |Solo founder + Claude Code                |Realistic given Sydney migration and parallel Onsager work                 |
 
@@ -1029,7 +1029,7 @@ Duhem the platform is named in honor of the man whose thesis tells us why we are
 
 ## Appendix D — Why Onsager dogfoods Duhem
 
-Onsager is Duhem’s first customer. This is not a placeholder relationship until “real customers” arrive; it is a strategically chosen dogfooding arrangement that gives Duhem capabilities no other early-stage validation could provide.
+Onsager was Duhem’s first dogfooding customer. **Onsager work is currently paused** (epic #225 P4), so the active dogfood now runs against Chreode and Crawlab, and Onsager re-homes when its work resumes. This appendix is retained because the *reasoning* below — why a real product makes a valuable dogfood — was never a placeholder relationship until “real customers” arrive, and it now applies directly to the active dogfood products. It is a strategically chosen arrangement that gives Duhem capabilities no other early-stage validation could provide.
 
 ### What Onsager provides Duhem
 
@@ -1055,4 +1055,4 @@ A naive reading might worry that Onsager and Duhem cannot both be early simultan
 
 What Onsager provides Duhem is not infrastructure but customer use. Onsager is the workload Duhem verifies, not the production line that builds Duhem.
 
-The factory paradigm — Onsager producing other products — is a future state (Phase 4+) where Duhem’s role becomes that of the production line’s quality gate. In the present, Onsager is Duhem’s most valuable customer, and Duhem is built the conventional way.
+The factory paradigm — Onsager producing other products — is a future state (Phase 4+) where Duhem’s role becomes that of the production line’s quality gate. Onsager was Duhem’s most valuable early customer; with Onsager paused, that role is carried by the active dogfood products (Chreode, Crawlab) while Duhem is built the conventional way.

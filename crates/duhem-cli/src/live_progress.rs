@@ -12,12 +12,10 @@
 //!
 //! Two presentations (#305):
 //!
-//! - **TTY** — each criterion occupies exactly ONE line: the running
-//!   line (`▶ AC-2 (2/3) … ui/assert-element 8s`) rewrites in place,
-//!   with elapsed time and the current action ticking on it, and is
-//!   REPLACED by its verdict line (`✔ AC-2 pass (1.4s)`) when the
-//!   criterion settles — the final transcript shows each criterion
-//!   once.
+//! - **TTY** — a width-bounded live board redraws in place. It shows
+//!   every criterion, expands started criteria into check and step
+//!   branches, retains completed pass/fail state, and ticks the active
+//!   leaf's timeout bar (`████░░  26s / 60s`).
 //! - **forced non-TTY** (`--live` into a capture: CI, the self-VD) —
 //!   plain append lines, control-sequence-free, plus an explicit
 //!   heartbeat line (`… still in cli/invoke (12s)`) once a single
@@ -42,18 +40,29 @@ use tokio::time::Instant;
 /// ordered criterion ids (for "k/n") and each check's owning
 /// criterion (several event kinds carry only a `check_id`).
 pub struct Plan {
+    verification: String,
     criterion_ids: Vec<String>,
     check_owner: HashMap<String, String>,
     checks: HashMap<String, CheckPlan>,
+    criteria: Vec<CriterionPlan>,
 }
 
 /// Presentation-only metadata collected from the authored definition.
 /// It stays in the CLI: evidence remains the runtime's generic event
 /// stream, while the terminal can still say where an event sits in a
 /// check and use the human check summary when one exists.
+#[derive(Clone)]
 struct CheckPlan {
+    id: String,
     description: Option<String>,
     step_count: usize,
+}
+
+#[derive(Clone)]
+struct CriterionPlan {
+    id: String,
+    description: String,
+    checks: Vec<CheckPlan>,
 }
 
 impl Plan {
@@ -61,22 +70,31 @@ impl Plan {
         let criterion_ids = def.criteria.iter().map(|c| c.id.clone()).collect();
         let mut check_owner = HashMap::new();
         let mut checks = HashMap::new();
+        let mut criteria = Vec::new();
         for c in &def.criteria {
+            let mut criterion_checks = Vec::new();
             for ch in &c.checks {
                 check_owner.insert(ch.id.clone(), c.id.clone());
-                checks.insert(
-                    ch.id.clone(),
-                    CheckPlan {
-                        description: ch.description.clone(),
-                        step_count: ch.steps.len(),
-                    },
-                );
+                let check = CheckPlan {
+                    id: ch.id.clone(),
+                    description: ch.description.clone(),
+                    step_count: ch.steps.len(),
+                };
+                checks.insert(ch.id.clone(), check.clone());
+                criterion_checks.push(check);
             }
+            criteria.push(CriterionPlan {
+                id: c.id.clone(),
+                description: c.description.clone(),
+                checks: criterion_checks,
+            });
         }
         Self {
+            verification: def.verification.clone(),
             criterion_ids,
             check_owner,
             checks,
+            criteria,
         }
     }
 }
@@ -200,12 +218,14 @@ pub async fn render<W: Write>(
     cfg: RenderConfig,
     out: &mut W,
 ) {
+    let board = TtyBoard::new(plan.verification, plan.criteria, cfg.terminal_width);
     let mut r = Renderer {
         out,
         cfg,
         n: plan.criterion_ids.len(),
         check_owner: plan.check_owner,
         checks: plan.checks,
+        board,
         started: HashMap::new(),
         running: None,
         line_open: false,
@@ -250,18 +270,301 @@ struct Running {
     beats: u32,
 }
 
+struct TtyBoard {
+    verification: String,
+    criteria: Vec<CriterionPlan>,
+    states: HashMap<String, CriterionState>,
+    active_criterion: Option<String>,
+    active_check: Option<String>,
+    active_step: Option<ActiveStep>,
+    terminal_width: usize,
+    frame_height: usize,
+    since: Instant,
+}
+
+#[derive(Default)]
+struct CriterionState {
+    verdict: Option<duhem_judge::VerdictState>,
+    checks: HashMap<String, CheckState>,
+}
+
+#[derive(Default)]
+struct CheckState {
+    verdict: Option<duhem_judge::VerdictState>,
+    steps: Vec<CompletedStep>,
+}
+
+struct ActiveStep {
+    index: u32,
+    uses: String,
+    expectation: Option<String>,
+    timeout: Option<Duration>,
+    since: Instant,
+}
+
+struct CompletedStep {
+    index: u32,
+    uses: String,
+    outcome: duhem_evidence::StepOutcome,
+    judgment: Option<duhem_judge::VerdictState>,
+    duration: Duration,
+}
+
 struct Renderer<'a, W: Write> {
     out: &'a mut W,
     cfg: RenderConfig,
     n: usize,
     check_owner: HashMap<String, String>,
     checks: HashMap<String, CheckPlan>,
+    board: TtyBoard,
     /// criterion id → (ordinal shown at start, first-event timestamp)
     started: HashMap<String, (usize, chrono::DateTime<chrono::Utc>)>,
     running: Option<Running>,
     /// TTY: an in-place running line is currently displayed,
     /// unterminated.
     line_open: bool,
+}
+
+impl TtyBoard {
+    fn new(verification: String, criteria: Vec<CriterionPlan>, terminal_width: usize) -> Self {
+        let states = criteria
+            .iter()
+            .map(|criterion| (criterion.id.clone(), CriterionState::default()))
+            .collect();
+        Self {
+            verification,
+            criteria,
+            states,
+            active_criterion: None,
+            active_check: None,
+            active_step: None,
+            terminal_width,
+            frame_height: 0,
+            since: Instant::now(),
+        }
+    }
+
+    fn start_step(
+        &mut self,
+        criterion_id: &str,
+        check_id: &str,
+        index: u32,
+        uses: &str,
+        with: &std::collections::BTreeMap<String, serde_json::Value>,
+    ) {
+        self.active_criterion = Some(criterion_id.to_string());
+        self.active_check = Some(check_id.to_string());
+        self.active_step = Some(ActiveStep {
+            index,
+            uses: uses.to_string(),
+            expectation: expectation(with),
+            timeout: timeout(with),
+            since: Instant::now(),
+        });
+        self.states
+            .entry(criterion_id.to_string())
+            .or_default()
+            .checks
+            .entry(check_id.to_string())
+            .or_default();
+    }
+
+    fn finish_step(&mut self, outcome: &duhem_evidence::StepOutcome) {
+        let (Some(criterion_id), Some(check_id), Some(step)) = (
+            self.active_criterion.as_deref(),
+            self.active_check.as_deref(),
+            self.active_step.take(),
+        ) else {
+            return;
+        };
+        self.states
+            .entry(criterion_id.to_string())
+            .or_default()
+            .checks
+            .entry(check_id.to_string())
+            .or_default()
+            .steps
+            .push(CompletedStep {
+                index: step.index,
+                uses: step.uses,
+                outcome: outcome.clone(),
+                judgment: None,
+                duration: step.since.elapsed(),
+            });
+    }
+
+    fn assertion(
+        &mut self,
+        check_id: &str,
+        step_index: Option<u32>,
+        state: &duhem_judge::VerdictState,
+    ) {
+        let Some(criterion_id) = self.owner(check_id).map(str::to_string) else {
+            return;
+        };
+        self.active_criterion = Some(criterion_id.clone());
+        self.active_check = Some(check_id.to_string());
+        if let Some(index) = step_index
+            && let Some(step) = self
+                .states
+                .get_mut(&criterion_id)
+                .and_then(|criterion| criterion.checks.get_mut(check_id))
+                .and_then(|check| check.steps.iter_mut().find(|step| step.index == index))
+        {
+            step.judgment = Some(*state);
+        }
+    }
+
+    fn finish_check(&mut self, check_id: &str, verdict: &duhem_judge::VerdictState) {
+        let Some(criterion_id) = self.owner(check_id).map(str::to_string) else {
+            return;
+        };
+        self.states
+            .entry(criterion_id.clone())
+            .or_default()
+            .checks
+            .entry(check_id.to_string())
+            .or_default()
+            .verdict = Some(*verdict);
+        self.active_criterion = Some(criterion_id);
+        self.active_check = None;
+        self.active_step = None;
+    }
+
+    fn finish_criterion(&mut self, criterion_id: &str, verdict: &duhem_judge::VerdictState) {
+        self.states
+            .entry(criterion_id.to_string())
+            .or_default()
+            .verdict = Some(*verdict);
+        self.active_criterion = None;
+        self.active_check = None;
+        self.active_step = None;
+    }
+
+    fn owner(&self, check_id: &str) -> Option<&str> {
+        self.criteria
+            .iter()
+            .find(|criterion| criterion.checks.iter().any(|check| check.id == check_id))
+            .map(|criterion| criterion.id.as_str())
+    }
+
+    fn lines(&self) -> Vec<String> {
+        let elapsed = self.since.elapsed().as_secs();
+        let mut lines = vec![
+            self.fit(format!(
+                "Duhem  {}  ·  elapsed {:02}:{:02}",
+                self.verification,
+                elapsed / 60,
+                elapsed % 60
+            )),
+            String::new(),
+        ];
+        for criterion in &self.criteria {
+            let state = &self.states[&criterion.id];
+            let active = self.active_criterion.as_deref() == Some(criterion.id.as_str());
+            let mark = state
+                .verdict
+                .as_ref()
+                .map(verdict_mark)
+                .unwrap_or(if active { "▶" } else { "○" });
+            lines.push(self.fit(format!(
+                "{mark} {}  {}",
+                criterion.id,
+                single_line(&criterion.description)
+            )));
+
+            let started = state.verdict.is_some()
+                || active
+                || criterion
+                    .checks
+                    .iter()
+                    .any(|check| state.checks.contains_key(&check.id));
+            if !started {
+                continue;
+            }
+
+            for (check_pos, check) in criterion.checks.iter().enumerate() {
+                let last_check = check_pos + 1 == criterion.checks.len();
+                let check_state = state.checks.get(&check.id);
+                let check_active =
+                    active && self.active_check.as_deref() == Some(check.id.as_str());
+                let check_mark = check_state
+                    .and_then(|state| state.verdict.as_ref())
+                    .map(verdict_mark)
+                    .unwrap_or(if check_active { "▶" } else { "○" });
+                let check_branch = if last_check { "└─" } else { "├─" };
+                let summary = check
+                    .description
+                    .as_deref()
+                    .map(single_line)
+                    .unwrap_or_default();
+                lines.push(self.fit(format!(
+                    "  {check_branch} {check_mark} {}  {summary}",
+                    check.id
+                )));
+
+                let Some(check_state) = check_state else {
+                    continue;
+                };
+                let child_prefix = if last_check { "     " } else { "  │  " };
+                let has_active_step = check_active && self.active_step.is_some();
+                for (step_pos, step) in check_state.steps.iter().enumerate() {
+                    let mark = step_mark(step);
+                    let last_step = step_pos + 1 == check_state.steps.len() && !has_active_step;
+                    let branch = if last_step { "└─" } else { "├─" };
+                    lines.push(self.fit(format!(
+                        "{child_prefix}{branch} {mark} {}/{} {}  {:.1}s",
+                        step.index + 1,
+                        check.step_count,
+                        step.uses,
+                        step.duration.as_secs_f64()
+                    )));
+                }
+                if check_active && let Some(step) = &self.active_step {
+                    let expectation = step
+                        .expectation
+                        .as_deref()
+                        .map(|value| format!(" · {value}"))
+                        .unwrap_or_default();
+                    let progress = match step.timeout {
+                        Some(timeout) => format!(
+                            "  {}  {}s / {}s",
+                            progress_bar(step.since.elapsed(), timeout),
+                            step.since.elapsed().as_secs(),
+                            timeout.as_secs()
+                        ),
+                        None => format!("  {}s", step.since.elapsed().as_secs()),
+                    };
+                    lines.push(self.fit(format!(
+                        "{child_prefix}└─ ◐ {}/{} {}{expectation}{progress}",
+                        step.index + 1,
+                        check.step_count,
+                        step.uses
+                    )));
+                }
+            }
+        }
+        lines
+    }
+
+    fn fit(&self, line: String) -> String {
+        shorten_to_width(&line, self.terminal_width)
+    }
+}
+
+fn single_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn step_mark(step: &CompletedStep) -> &'static str {
+    if let Some(judgment) = &step.judgment {
+        return verdict_mark(judgment);
+    }
+    match step.outcome {
+        duhem_evidence::StepOutcome::Ok => "✓",
+        duhem_evidence::StepOutcome::Error => "✘",
+        duhem_evidence::StepOutcome::Timeout => "◐",
+    }
 }
 
 impl<W: Write> Renderer<'_, W> {
@@ -271,6 +574,9 @@ impl<W: Write> Renderer<'_, W> {
         if let Some(text) = env_line(&evt.payload) {
             self.line(&text);
             return false;
+        }
+        if self.cfg.tty {
+            return self.event_tty(evt);
         }
         match &evt.payload {
             EventPayload::StepStarted {
@@ -352,14 +658,64 @@ impl<W: Write> Renderer<'_, W> {
         false
     }
 
+    fn event_tty(&mut self, evt: Event) -> bool {
+        let (done, redraw) = match &evt.payload {
+            EventPayload::StepStarted {
+                criterion_id,
+                check_id,
+                step_index,
+                uses,
+                with,
+                ..
+            } => {
+                self.board
+                    .start_step(criterion_id, check_id, *step_index, uses, with);
+                (false, true)
+            }
+            EventPayload::StepFinished { outcome, .. } => {
+                self.board.finish_step(outcome);
+                (false, true)
+            }
+            EventPayload::AssertionEvaluated {
+                check_id,
+                step_index,
+                state,
+                ..
+            } => {
+                self.board.assertion(check_id, *step_index, state);
+                (false, true)
+            }
+            EventPayload::CheckFinished { check_id, verdict } => {
+                self.board.finish_check(check_id, verdict);
+                (false, true)
+            }
+            EventPayload::CriterionFinished {
+                criterion_id,
+                verdict,
+            } => {
+                self.board.finish_criterion(criterion_id, verdict);
+                (false, true)
+            }
+            EventPayload::RunFinished { .. } => (true, true),
+            _ => (false, false),
+        };
+        if redraw {
+            self.draw_board();
+        }
+        done
+    }
+
     /// Periodic wake with no event: redraw the running line (TTY) or
     /// consider a heartbeat line (non-TTY).
     fn tick(&mut self) {
         if self.running.is_none() {
+            if self.cfg.tty && self.board.active_step.is_some() {
+                self.draw_board();
+            }
             return;
         }
         if self.cfg.tty {
-            self.draw_running();
+            self.draw_board();
             return;
         }
         let Some(run) = &self.running else { return };
@@ -482,6 +838,26 @@ impl<W: Write> Renderer<'_, W> {
         let _ = write!(self.out, "\r\x1b[2K{text}");
         let _ = self.out.flush();
         self.line_open = true;
+    }
+
+    fn draw_board(&mut self) {
+        let lines = self.board.lines();
+        let old_height = self.board.frame_height;
+        if old_height > 0 {
+            let _ = write!(self.out, "\x1b[{old_height}A");
+        }
+        for line in &lines {
+            let _ = write!(self.out, "\r\x1b[2K{line}\n");
+        }
+        if old_height > lines.len() {
+            let surplus = old_height - lines.len();
+            for _ in 0..surplus {
+                let _ = write!(self.out, "\r\x1b[2K\n");
+            }
+            let _ = write!(self.out, "\x1b[{surplus}A");
+        }
+        self.board.frame_height = lines.len();
+        let _ = self.out.flush();
     }
 
     /// Turn the active redraw into a durable tree branch. This reports
@@ -699,22 +1075,6 @@ criteria:
         String::from_utf8(out).unwrap()
     }
 
-    /// Interpret `\r` + erase-line the way a terminal would: what
-    /// survives on screen per row.
-    fn visible(raw: &str) -> Vec<String> {
-        raw.split('\n')
-            .map(|row| {
-                let after_erase = row.rsplit("\u{1b}[2K").next().unwrap_or(row);
-                after_erase
-                    .rsplit('\r')
-                    .next()
-                    .unwrap_or(after_erase)
-                    .to_string()
-            })
-            .filter(|row| !row.is_empty())
-            .collect()
-    }
-
     #[tokio::test]
     async fn per_criterion_lines_with_ordinals_verdicts_and_durations() {
         let out = rendered(
@@ -867,9 +1227,7 @@ criteria:
         drop(tx);
     }
 
-    /// TTYs retain a criterion root and redraw only the active leaf.
-    /// The verdict closes that visible branch without duplicating the
-    /// in-flight line. Paused clock keeps elapsed displays deterministic.
+    /// TTYs redraw one comprehensive criterion → check → step board.
     #[tokio::test(start_paused = true)]
     async fn tty_running_line_is_replaced_by_the_verdict_line() {
         let out = rendered(
@@ -897,6 +1255,26 @@ criteria:
                 ),
                 evt(
                     3,
+                    300,
+                    EventPayload::AssertionEvaluated {
+                        check_id: "AC-1.1".into(),
+                        assertion_index: 0,
+                        state: VerdictState::Pass,
+                        detail: None,
+                        expr: None,
+                        step_index: Some(0),
+                    },
+                ),
+                evt(
+                    4,
+                    400,
+                    EventPayload::CheckFinished {
+                        check_id: "AC-1.1".into(),
+                        verdict: VerdictState::Pass,
+                    },
+                ),
+                evt(
+                    5,
                     1600,
                     EventPayload::CriterionFinished {
                         criterion_id: "AC-1".into(),
@@ -904,7 +1282,15 @@ criteria:
                     },
                 ),
                 evt(
-                    4,
+                    6,
+                    1650,
+                    EventPayload::CheckFinished {
+                        check_id: "AC-2.1".into(),
+                        verdict: VerdictState::Fail,
+                    },
+                ),
+                evt(
+                    7,
                     1700,
                     EventPayload::CriterionFinished {
                         criterion_id: "AC-2".into(),
@@ -912,7 +1298,7 @@ criteria:
                     },
                 ),
                 evt(
-                    5,
+                    8,
                     1800,
                     EventPayload::RunFinished {
                         verdict: VerdictState::Fail,
@@ -922,27 +1308,13 @@ criteria:
             tty_cfg(),
         )
         .await;
-        // Raw control-sequence contract: a running line was drawn
-        // (with the in-flight action on it), then erased and replaced
-        // by the verdict line.
-        assert!(out.contains("▶ AC-1 (1/2)"), "{out:?}");
-        assert!(out.contains("step 1/2 · cli/invoke"), "{out:?}");
-        assert!(
-            out.contains("\r\u{1b}[2K  ├─ ✓ AC-1.1 · step 1/2 · cli/invoke (0.0s)\n"),
-            "{out:?}"
-        );
-        // What a terminal ultimately shows: criterion roots plus their
-        // durable verdicts, with no duplicate in-flight leaf.
-        assert_eq!(
-            visible(&out),
-            vec![
-                "▶ AC-1 (1/2)",
-                "  ├─ ✓ AC-1.1 · step 1/2 · cli/invoke (0.0s)",
-                "✔ AC-1 pass (1.5s)",
-                "▶ AC-2 (2/2)",
-                "✘ AC-2 fail (0.0s)",
-            ]
-        );
+        assert!(out.contains("▶ AC-1  one"), "{out:?}");
+        assert!(out.contains("  └─ ▶ AC-1.1  one check"), "{out:?}");
+        assert!(out.contains("     └─ ◐ 1/2 cli/invoke"), "{out:?}");
+        assert!(out.contains("     └─ ✓ 1/2 cli/invoke"), "{out:?}");
+        assert!(out.contains("  └─ ✔ AC-1.1  one check"), "{out:?}");
+        assert!(out.contains("✔ AC-1  one"), "{out:?}");
+        assert!(out.contains("✘ AC-2  two"), "{out:?}");
     }
 
     #[tokio::test]
@@ -969,11 +1341,11 @@ criteria:
             tty_cfg(),
         )
         .await;
+        assert!(out.contains("  └─ ▶ AC-1.1  one check"), "{out:?}");
         assert!(
-            out.contains("AC-1.1 (one check) · step 1/2 · ui/assert-element"),
+            out.contains("     └─ ◐ 1/2 ui/assert-element · expect visible"),
             "{out:?}"
         );
-        assert!(out.contains("• expect visible  "), "{out:?}");
         assert!(out.contains("0s / 60s"), "{out:?}");
         assert!(out.contains("░░░░░░░░░░░░"), "{out:?}");
     }

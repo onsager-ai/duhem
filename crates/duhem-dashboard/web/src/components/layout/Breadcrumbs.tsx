@@ -47,6 +47,9 @@ export function crumbsFor(pathname: string): Crumb[] {
       const checkId = (d ?? "").split("::").pop() ?? d ?? "";
       return [runs, run, { label: checkId, title: d }];
     }
+    if (c === "criterion") {
+      return [runs, run, { label: d ?? "", title: d }];
+    }
     if (c === "diff") return [runs, run, { label: "diff" }];
     return [runs, { label: truncId(b), title: b }];
   }

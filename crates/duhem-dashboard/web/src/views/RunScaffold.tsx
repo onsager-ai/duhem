@@ -75,6 +75,10 @@ function checkHref(runId: string, criterionId: string, checkId: string): string 
   )}`;
 }
 
+function criterionHref(runId: string, criterionId: string): string {
+  return `/run/${encodeURIComponent(runId)}/criterion/${encodeURIComponent(criterionId)}`;
+}
+
 // One criterion group in the rail: a collapse toggle + its check links.
 // Criteria are expanded by default so the whole run is legible at a
 // glance (and every check link is in the DOM without interaction).
@@ -82,27 +86,20 @@ function TreeGroup({
   runId,
   criterion,
   activePair,
+  activeCriterion,
 }: {
   runId: string;
   criterion: RunDetail["criteria"][number];
   activePair?: string;
+  activeCriterion?: string;
 }) {
   const hasChecks = criterion.checks.length > 0;
   const [open, setOpen] = useState(hasChecks);
   const vd = useVd();
   const critDesc = vd?.criterion(criterion.id)?.description;
+  const active = activeCriterion === criterion.id;
   const label = (
     <>
-      {hasChecks ? (
-        <ChevronRight
-          className={cn(
-            "mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-90",
-          )}
-        />
-      ) : (
-        <span className="size-3.5 shrink-0" aria-hidden="true" />
-      )}
       <span className="min-w-0 flex-1">
         <span className="block truncate">{criterion.id}</span>
         {critDesc && (
@@ -120,24 +117,39 @@ function TreeGroup({
   );
   return (
     <div>
-      {hasChecks ? (
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
+      <div className="flex min-w-0 items-start gap-0.5">
+        {hasChecks ? (
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+            aria-label={`${open ? "Collapse" : "Expand"} ${criterion.id}`}
+            className="mt-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+          >
+            <ChevronRight
+              className={cn(
+                "size-3.5 transition-transform",
+                open && "rotate-90",
+              )}
+            />
+          </button>
+        ) : (
+          <span className="mt-1 size-6 shrink-0" aria-hidden="true" />
+        )}
+        <Link
+          to={criterionHref(runId, criterion.id)}
+          aria-current={active ? "page" : undefined}
           title={critDesc}
-          className="flex w-full min-w-0 items-start gap-1.5 rounded-md px-2 py-1.5 text-left text-sm font-medium text-foreground transition-colors hover:bg-accent/60"
+          className={cn(
+            "flex min-w-0 flex-1 items-start gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium transition-colors",
+            active
+              ? "bg-accent text-accent-foreground"
+              : "text-foreground hover:bg-accent/60",
+          )}
         >
           {label}
-        </button>
-      ) : (
-        <div
-          title={critDesc}
-          className="flex w-full min-w-0 items-start gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium text-foreground"
-        >
-          {label}
-        </div>
-      )}
+        </Link>
+      </div>
       {open && (
         <div className="ml-3 space-y-0.5 border-l pl-2 pt-0.5">
           {criterion.checks.map((chk) => {
@@ -187,13 +199,15 @@ function TreeGroup({
 function RunTree({
   run,
   activePair,
+  activeCriterion,
   activeDefinition,
 }: {
   run: RunDetail;
   activePair?: string;
+  activeCriterion?: string;
   activeDefinition?: boolean;
 }) {
-  const summaryActive = !activePair && !activeDefinition;
+  const summaryActive = !activePair && !activeCriterion && !activeDefinition;
   return (
     <nav
       aria-label="criteria and checks"
@@ -219,6 +233,7 @@ function RunTree({
           runId={run.run_id}
           criterion={c}
           activePair={activePair}
+          activeCriterion={activeCriterion}
         />
       ))}
       {/* The recorded VD source snapshot (#302), when the run carries one. */}
@@ -246,11 +261,13 @@ function RunTree({
 export function RunScaffold({
   runId,
   activePair,
+  activeCriterion,
   activeDefinition,
   children,
 }: {
   runId: string;
   activePair?: string;
+  activeCriterion?: string;
   activeDefinition?: boolean;
   children: (run: RunDetail) => ReactNode;
 }) {
@@ -284,6 +301,7 @@ export function RunScaffold({
               <RunTree
                 run={run}
                 activePair={activePair}
+                activeCriterion={activeCriterion}
                 activeDefinition={activeDefinition}
               />
             </aside>

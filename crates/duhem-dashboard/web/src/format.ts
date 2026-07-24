@@ -265,8 +265,8 @@ export interface CheckSummaryModel {
   verdict: CheckDetail["verdict"];
   /** Plain-language "what happened" line. */
   headline: string;
-  /** For a non-pass, the recorded failing-assertion detail lines. */
-  failing: string[];
+  /** For a non-pass, each recorded rule and its mechanical outcome. */
+  failing: { expr?: string; detail: string }[];
 }
 
 /**
@@ -278,7 +278,10 @@ export function summarizeCheck(detail: CheckDetail): CheckSummaryModel {
   const assertions = detail.timeline.filter((e) => e.kind === "assertion_evaluated");
   const failing = assertions
     .filter((e) => str(e.state) !== "pass")
-    .map((e) => assertionText(e) || str(e.state) || "no detail recorded");
+    .map((e) => ({
+      expr: str(e.expr),
+      detail: str(e.detail) || str(e.state) || "no detail recorded",
+    }));
 
   const v = detail.verdict;
   let headline: string;

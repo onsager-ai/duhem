@@ -7,7 +7,15 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RunsList, { matchesFilters } from "../views/RunsList";
 import { RunsProvider } from "../runs-context";
-import { Artifacts, DomViewer, HarTable, ScreenshotArtifact, Timeline } from "../views/CheckPage";
+import {
+  Artifacts,
+  CheckSummary,
+  DomViewer,
+  HarTable,
+  ScreenshotArtifact,
+  SpanChain,
+  Timeline,
+} from "../views/CheckPage";
 import type { RunsListEntry, TraceEvent } from "../api";
 
 // RunsList now reads the shared runs context; the provider fetches via the
@@ -98,6 +106,38 @@ describe("matchesFilters", () => {
     expect(matchesFilters(leaf("a", "pass"), "other", [], "", "")).toBe(false);
     expect(matchesFilters(leaf("a", "pass"), "", [], "2026-06-01", "2026-06-30")).toBe(true);
     expect(matchesFilters(leaf("a", "pass"), "", [], "2026-06-11", "")).toBe(false);
+  });
+});
+
+describe("CheckSummary", () => {
+  it("separates each failed assertion into expected and observed values", () => {
+    render(
+      <CheckSummary
+        detail={{
+          criterion_id: "AC-1",
+          check_id: "AC-1.1",
+          verdict: "fail",
+          spans: [],
+          artifacts: [],
+          timeline: [
+            {
+              seq: 1,
+              ts: "t",
+              kind: "assertion_evaluated",
+              state: "fail",
+              detail:
+                'expected text "component" to be visible within 60s, but it never appeared',
+            },
+          ],
+        }}
+      />,
+    );
+    const summary = screen.getByTestId("check-summary");
+    expect(summary.textContent).toContain("Assertion 1");
+    expect(summary.textContent).toContain("Expected");
+    expect(summary.textContent).toContain('text "component" to be visible within 60s');
+    expect(summary.textContent).toContain("Observed");
+    expect(summary.textContent).toContain("it never appeared");
   });
 });
 
@@ -194,12 +234,13 @@ describe("Timeline", () => {
     const group = getByTestId("step-group");
     // The judging step reads *failed*, not a green "step ok".
     expect(group.className).toContain("tone-fail");
-    expect(getByTestId("step-outcome").textContent).toContain("step failed");
+    expect(getByTestId("step-outcome").textContent).toBe("failed");
     expect(getByTestId("step-outcome").textContent).not.toContain("step ok");
     // The semantic reason is surfaced inline on the step.
     expect(getByTestId("step-reason").textContent).toContain(
-      'expected text "Manager" to be absent',
+      'text "Manager" to be absent',
     );
+    expect(group.querySelector(".ev-icon .ev-glyph-fail")).not.toBeNull();
     // Failed steps auto-expand (Allure-style).
     expect(group.querySelector("details")?.hasAttribute("open")).toBe(true);
     // The assertion is no longer a standalone orphan row — only the step
@@ -438,10 +479,14 @@ describe("in-page inspection (#210)", () => {
     const groups = container.querySelectorAll('[data-testid="step-group"]');
     expect(groups).toHaveLength(1);
     expect(groups[0].textContent).toContain("navigate");
-    expect(groups[0].textContent).toContain("step ok");
-    // The step's own started/finished raws stay reachable inside the group.
-    const innerRaw = groups[0].querySelectorAll(".step-inner .ev-raw pre");
-    expect([...innerRaw].some((p) => p.textContent?.includes("ui/navigate"))).toBe(true);
+    expect(groups[0].textContent).not.toContain("step ok");
+    // A green status icon communicates success without redundant prose.
+    expect(groups[0].querySelector(".ev-icon .ev-glyph-pass")).not.toBeNull();
+    expect(groups[0].querySelector('[data-testid="step-outcome"]')).toBeNull();
+    // The lifecycle stays reachable as one diagnostic subtree instead
+    // of repeating started / observed / finished rows.
+    const raw = groups[0].querySelector(".step-raw pre");
+    expect(raw?.textContent).toContain("ui/navigate");
     // The verdict is a standalone row, never folded into a step group.
     const labels = [...container.querySelectorAll(".ev-label")]
       .filter((e) => !e.closest(".step-inner"))
@@ -500,7 +545,6 @@ describe("element-highlight (#214)", () => {
 
 // ---- #193: ④ delivery-web span chain --------------------------------
 
-import { SpanChain } from "../views/CheckPage";
 import { Sparkline } from "../views/VerificationPage";
 import type { SpanModel } from "../api";
 
@@ -515,11 +559,27 @@ describe("SpanChain (④)", () => {
     const chain = screen.getByTestId("spanchain");
     expect(chain.textContent).toContain("ui");
     expect(chain.textContent).toContain("api");
-    // The broken layer carries its detail inline (the ✕ is now a lucide
-    // SVG, so it's a fail-classed node rather than glyph text).
+    // Failure detail stays in the tooltip; the horizontal path remains compact.
     const failNode = chain.querySelector(".span-fail");
     expect(failNode?.textContent).toContain("data");
-    expect(failNode?.textContent).toContain("timeout");
+    expect(failNode?.getAttribute("title")).toContain("timeout");
+  });
+
+  it("collapses adjacent steps in the same delivery layer", () => {
+    render(
+      <SpanChain
+        spans={Array.from({ length: 12 }, (_, i) => ({
+          seq: i + 1,
+          layer: "ui",
+          ok: i !== 6,
+          detail: i === 6 ? "target absent" : undefined,
+        }))}
+      />,
+    );
+    const chain = screen.getByTestId("spanchain");
+    expect(chain.querySelectorAll(".span-node")).toHaveLength(1);
+    expect(chain.textContent).toContain("12 steps");
+    expect(chain.querySelector(".span-node")?.className).toContain("span-fail");
   });
 
   it("says layer unknown for a pre-tag run instead of guessing", () => {

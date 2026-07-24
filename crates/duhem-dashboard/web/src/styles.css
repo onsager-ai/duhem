@@ -141,19 +141,99 @@ tr.nested td:first-child { padding-left: 2rem; }
 .check-summary.tone-ok { border-left-color: var(--pass); }
 .check-summary.tone-fail { border-left-color: var(--fail); }
 .check-summary.tone-inconclusive { border-left-color: var(--inconclusive); }
-.summary-headline { margin: 0; font-size: 0.95rem; }
-.summary-failing { margin: 0.55rem 0 0; padding-left: 1.1rem; color: var(--lg-muted); }
-.summary-failing li { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.82rem; }
+.summary-headline { margin: 0; font-size: 0.95rem; font-weight: 600; }
+.summary-failing {
+  list-style: none;
+  display: grid;
+  gap: 0.6rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+}
+.failure-card {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid color-mix(in oklab, var(--fail) 24%, var(--lg-border));
+  border-radius: 8px;
+  background: var(--panel);
+}
+.failure-index {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: var(--fail);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.failure-rule {
+  display: block;
+  margin-bottom: 0.45rem;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.failure-values {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.55rem;
+  margin: 0;
+}
+.failure-values > div {
+  min-width: 0;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+.failure-values dt {
+  margin-bottom: 0.2rem;
+  color: var(--lg-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.failure-values dd {
+  margin: 0;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.failure-values .failure-observed {
+  background: color-mix(in oklab, var(--fail) 7%, var(--panel-2));
+}
+.failure-values .failure-observed dd { color: var(--fail); }
+.failure-reason {
+  margin: 0;
+  color: var(--lg-muted);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
 
 /* -- #206/#210: aligned event timeline ------------------------------- */
 /* icon | label | detail | time — a fixed label column so every row's
    detail starts at the same x (auto = width of the widest label). */
-ol.timeline { list-style: none; margin: 0; padding: 0; font-size: 0.88rem; }
+ol.timeline {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  font-size: 0.88rem;
+}
 /* Each row is now a <details> whose <summary> is the whole clickable
    line (raw JSON one click *anywhere on the row* away, #284 follow-up).
    The row's grid lives on `.ev-row`; the <li> is just the divider. */
-ol.timeline li.ev { border-bottom: 1px solid var(--lg-border); }
-ol.timeline > li.ev:last-child { border-bottom: none; }
+ol.timeline > li.ev {
+  overflow: hidden;
+  border: 1px solid var(--lg-border);
+  border-radius: 8px;
+  background: var(--panel);
+}
 li.ev > .ev-raw > summary.ev-summary {
   cursor: pointer;
   list-style: none;
@@ -230,8 +310,12 @@ li.ev.step-group > details[open] > summary .ev-caret {
 .ev.tone-inconclusive .ev-label { color: var(--inconclusive); }
 .ev.tone-anchor > .ev-raw > summary { background: var(--row-anchor); }
 .ev.tone-anchor .ev-label { font-weight: 700; }
-li.ev.tone-fail > .ev-raw > summary { box-shadow: inset 2px 0 0 var(--fail); }
-li.ev.tone-inconclusive > .ev-raw > summary { box-shadow: inset 2px 0 0 var(--inconclusive); }
+li.ev.tone-fail > .ev-raw > summary {
+  background: color-mix(in oklab, var(--fail) 5%, var(--panel));
+}
+li.ev.tone-inconclusive > .ev-raw > summary {
+  background: color-mix(in oklab, var(--inconclusive) 5%, var(--panel));
+}
 .ev-raw pre,
 .ev-raw-pre {
   margin: 0 0.4rem 0.5rem;
@@ -251,51 +335,14 @@ li.ev.tone-inconclusive > .ev-raw > summary { box-shadow: inset 2px 0 0 var(--in
    expected/actual operands as a labelled pair (the `actual` carries the
    fail accent), or the verbatim reason. All aligned under the label
    column and always visible, so the mismatch reads without opening raw. */
-.assert-detail { display: block; padding: 0.15rem 0.4rem 0.55rem 3rem; }
-.assert-expr {
-  display: inline-block;
-  max-width: 100%;
-  margin-bottom: 0.45rem;
-  padding: 0.18rem 0.55rem;
-  background: var(--bg);
+.assert-detail { display: block; padding: 0.2rem 0.4rem 0.65rem 3rem; }
+.assert-detail .failure-breakdown {
+  padding: 0.55rem 0.65rem;
   border: 1px solid var(--lg-border);
-  border-radius: 6px;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 0.82rem;
-  color: var(--text);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.assert-cmp { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.assert-cell {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.2rem 0.6rem;
-  border: 1px solid var(--lg-border);
-  border-radius: 6px;
+  border-radius: 7px;
   background: var(--panel-2);
 }
-.assert-k {
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 0.66rem;
-  color: var(--lg-muted);
-}
-.assert-v {
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 0.82rem;
-  color: var(--text);
-}
-.assert-actual { border-color: color-mix(in oklab, var(--fail) 45%, var(--lg-border)); }
-.assert-actual .assert-v { color: var(--fail); }
-.assert-reason {
-  display: block;
-  color: var(--lg-muted);
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 0.8rem;
-  word-break: break-word;
-}
+.assert-detail .failure-values > div { background: var(--panel); }
 
 /* -- #284 follow-up: inline screenshot in the timeline --------------- */
 .ev-shot { padding: 0.1rem 0.4rem 0.6rem 3rem; }
@@ -590,7 +637,6 @@ li.ev.step-group > details > summary:hover { background: var(--row-hover); }
   align-items: center;
   gap: 0.3rem;
 }
-.step-outcome .ev-glyph { width: 0.85rem; height: 0.85rem; }
 .step-outcome.tone-ok { color: var(--pass); }
 .step-outcome.tone-fail { color: var(--fail); }
 .step-outcome.tone-inconclusive { color: var(--inconclusive); }
@@ -601,18 +647,22 @@ li.ev.step-group > details > summary:hover { background: var(--row-hover); }
    below it. */
 .step-reason {
   display: block;
-  color: var(--fail);
-  font-size: 0.82rem;
   margin-top: 0.15rem;
-  font-family: ui-monospace, SFMono-Regular, monospace;
 }
 li.ev.step-group.tone-inconclusive .step-reason { color: var(--inconclusive); }
+.step-reason .failure-breakdown {
+  max-width: 100%;
+  padding: 0.55rem 0.65rem;
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--fail) 6%, var(--panel-2));
+}
+.step-reason .failure-values > div { background: var(--panel); }
 /* #279 follow-up: the HTTP response status on an api/call step row. */
 .api-status { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.82rem; white-space: nowrap; }
 .api-status.ok { color: var(--pass); }
 .api-status.bad { color: var(--fail); font-weight: 600; }
 /* #280 follow-up: request/response inspector nested under an api/db step. */
-.api-exchange { margin: 0.2rem 0 0.5rem 1.6rem; font-size: 0.84rem; }
+.api-exchange { margin: 0 0 0.6rem; font-size: 0.84rem; }
 .ax-line { font-family: ui-monospace, SFMono-Regular, monospace; }
 .ax-method { color: var(--accent); font-weight: 700; }
 .ax-url { color: var(--muted); word-break: break-all; }
@@ -632,17 +682,51 @@ li.ev.step-group.tone-inconclusive .step-reason { color: var(--inconclusive); }
   font-size: 0.8rem;
 }
 /* #280 polish: capture evidence nested under its step. */
-.step-captures { margin: 0.2rem 0 0.4rem 1.6rem; }
+.step-captures { margin: 0 0 0.6rem; }
 .step-captures .artifact { margin: 0.5rem 0; }
 .step-captures .artifact:first-of-type { margin-top: 0.2rem; }
-li.ev.step-group.tone-fail > details > summary { box-shadow: inset 2px 0 0 var(--fail); }
-li.ev.step-group.tone-inconclusive > details > summary { box-shadow: inset 2px 0 0 var(--inconclusive); }
+li.ev.step-group.tone-fail {
+  border-color: color-mix(in oklab, var(--fail) 42%, var(--lg-border));
+}
+li.ev.step-group.tone-fail > details > summary {
+  background: color-mix(in oklab, var(--fail) 5%, var(--panel));
+}
+li.ev.step-group.tone-inconclusive {
+  border-color: color-mix(in oklab, var(--inconclusive) 42%, var(--lg-border));
+}
+li.ev.step-group.tone-inconclusive > details > summary {
+  background: color-mix(in oklab, var(--inconclusive) 5%, var(--panel));
+}
 /* Only the step's OWN label takes the fail/inconclusive colour — a
    descendant selector here would blindly redden every passing inner row
    (the action that ran ok, its observations) inside a failed step. The
    inner rows keep their own per-row tone (#284 follow-up). */
 li.ev.step-group.tone-fail > details > summary .ev-label { color: var(--fail); }
 li.ev.step-group.tone-inconclusive > details > summary .ev-label { color: var(--inconclusive); }
+.step-body {
+  padding: 0.65rem 0.85rem 0.75rem 3rem;
+  border-top: 1px solid var(--lg-border);
+  background: var(--panel-2);
+}
+.step-raw > summary {
+  width: max-content;
+  cursor: pointer;
+  color: var(--lg-muted);
+  font-size: 0.76rem;
+}
+.step-raw pre {
+  max-height: 24rem;
+  margin: 0.5rem 0 0;
+  padding: 0.65rem 0.75rem;
+  overflow: auto;
+  border: 1px solid var(--lg-border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--lg-muted);
+  font-size: 0.76rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 /* -- #280: run status roll-up (donut + counts, Allure-style) --------- */
 .status-summary { display: flex; align-items: center; gap: 1.4rem; }
@@ -725,13 +809,6 @@ li.ev.step-group.tone-inconclusive > details > summary .ev-label { color: var(--
 .span-row-head { margin-bottom: 0.25rem; }
 .span-row-head a { color: var(--lg-accent); text-decoration: none; }
 
-ol.timeline.step-inner {
-  margin: 0.1rem 0 0.3rem 1.6rem;
-  border-left: 1px solid var(--lg-border);
-  padding-left: 0.25rem;
-}
-ol.timeline.step-inner li.ev { font-size: 0.84rem; }
-
 /* -- #210: inline DOM snapshot viewer ------------------------------- */
 .dom-viewer { margin-top: 0.5rem; }
 .dom-search { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.4rem; }
@@ -769,12 +846,40 @@ ol.timeline.step-inner li.ev { font-size: 0.84rem; }
 
 /* -- #193: ④ delivery-web span chain + ② history sparkline -------- */
 
-.spanchain { margin: 0.4rem 0 0.8rem; }
+.spanchain {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  max-width: 100%;
+  margin: 0.4rem 0 0.8rem;
+  overflow-x: auto;
+  padding-bottom: 0.15rem;
+}
+.span-label {
+  flex: none;
+  color: var(--lg-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.span-path,
+.span-segment {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
 .span-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
   border: 1px solid;
   font-size: 0.85rem;
+}
+.span-count {
+  color: currentColor;
+  font-size: 0.68rem;
+  opacity: 0.72;
 }
 .span-ok { color: #4ade80; border-color: #4ade8055; }
 .span-fail { color: #f87171; border-color: #f8717155; }
@@ -794,6 +899,34 @@ ol.timeline.step-inner li.ev { font-size: 0.84rem; }
   margin: 0 0.15rem;
 }
 
+.criterion-empty {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px dashed var(--lg-border-strong);
+  border-radius: 9px;
+  background: var(--panel-2);
+  color: var(--lg-muted);
+}
+.criterion-empty p { margin: 0; }
+.criterion-empty-title {
+  margin-bottom: 0.3rem !important;
+  color: var(--text);
+  font-weight: 600;
+}
+.criterion-checks { margin-top: 1rem; }
+.criterion-check-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0;
+  border-top: 1px solid var(--lg-border);
+  color: var(--text);
+  text-decoration: none;
+}
+.criterion-check-link:hover { color: var(--live); }
+.criterion-check-end { display: inline-flex; align-items: center; gap: 0.6rem; }
+
 .sparkline { display: inline-flex; gap: 4px; align-items: center; }
 .sparkline .dot {
   width: 12px;
@@ -808,5 +941,16 @@ ol.timeline.step-inner li.ev { font-size: 0.84rem; }
 
 .checks-note { font-size: 0.8rem; margin-top: 0.15rem; }
 tr.assertion td { font-size: 0.85rem; padding-left: 2.4rem; }
+
+@media (max-width: 640px) {
+  .failure-values { grid-template-columns: 1fr; }
+  .ev-row {
+    grid-template-columns: 1.2rem minmax(7rem, 0.8fr) minmax(0, 1.4fr) auto 0.8rem;
+    gap: 0.35rem 0.45rem;
+  }
+  .step-detail,
+  .assert-detail { padding-left: 2.05rem; }
+  .step-body { padding-left: 2.05rem; }
+}
 
 } /* @layer components — end evidence-view (legacy) styles */

@@ -323,7 +323,9 @@ describe("summarizeCheck", () => {
       check("fail", [ev("assertion_evaluated", { state: "fail", detail: "actual false, expected true" })]),
     );
     expect(s.headline).toContain("failed");
-    expect(s.failing).toEqual(["actual false, expected true"]);
+    expect(s.failing).toEqual([
+      { expr: undefined, detail: "actual false, expected true" },
+    ]);
   });
 
   it("names the cause on an inconclusive", () => {

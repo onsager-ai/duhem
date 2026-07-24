@@ -2,7 +2,7 @@
 // while the tab is visible — an in-flight run appears and its verdict
 // resolves without a manual reload — and a hidden tab stops polling.
 
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RunsList from "../views/RunsList";
@@ -50,6 +50,38 @@ function setVisibility(state: DocumentVisibilityState) {
 }
 
 describe("RunsList polling (#298)", () => {
+  it("keeps verification groups collapsed until the user expands one", async () => {
+    const child = leaf("child-run", "fail");
+    stubRunsSequence([
+      [
+        {
+          run_id: "login",
+          verification: "login",
+          started_at: child.started_at,
+          duration_ms: child.duration_ms,
+          verdict: "fail",
+          kind: "run-set",
+          live: false,
+          children: [child],
+        },
+      ],
+    ]);
+
+    render(
+      <MemoryRouter>
+        <RunsProvider>
+          <RunsList />
+        </RunsProvider>
+      </MemoryRouter>,
+    );
+
+    const expand = await screen.findByRole("button", { name: "Expand" });
+    expect(screen.queryByText("child-run")).toBeNull();
+    fireEvent.click(expand);
+    expect(screen.getByText("child-run")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Collapse" })).toBeTruthy();
+  });
+
   it("an in-flight run appears and resolves without a reload", async () => {
     vi.useFakeTimers();
     setVisibility("visible");

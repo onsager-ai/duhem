@@ -41,7 +41,7 @@ const RUN = {
   ],
 };
 
-function stub() {
+function stub(run = RUN) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
@@ -67,7 +67,7 @@ function stub() {
           { status: 200 },
         );
       }
-      return new Response(JSON.stringify(RUN), { status: 200 });
+      return new Response(JSON.stringify(run), { status: 200 });
     }),
   );
 }
@@ -113,15 +113,60 @@ describe("run report tree", () => {
     stub();
     renderAt("/run/R1");
     await waitFor(() => expect(screen.getByTestId("run-summary")).toBeTruthy());
-    expect(screen.getByTestId("tile-pass").textContent).toContain("2");
-    expect(screen.getByTestId("tile-fail").textContent).toContain("1");
-    expect(screen.getByTestId("tile-inconclusive").textContent).toContain("1");
+    expect(screen.getByTestId("checks-pass").textContent).toContain("2");
+    expect(screen.getByTestId("checks-fail").textContent).toContain("1");
+    expect(screen.getByTestId("checks-inconclusive").textContent).toContain("1");
+  });
+
+  it("labels criterion counts separately when a criterion has no checks", async () => {
+    stub({
+      ...RUN,
+      criteria: [
+        ...RUN.criteria,
+        {
+          id: "AC-8",
+          verdict: "inconclusive:empty_aggregation",
+          checks: [],
+        },
+      ],
+    });
+    renderAt("/run/R1");
+    await waitFor(() => expect(screen.getByTestId("run-summary")).toBeTruthy());
+
+    expect(screen.getByTestId("checks-inconclusive").textContent).toContain("1");
+    expect(screen.getByTestId("criteria-inconclusive").textContent).toContain(
+      "2",
+    );
+    const criteria = screen.getByRole("region", { name: "Criteria" });
+    expect(within(criteria).getByText("4 total")).toBeTruthy();
+  });
+
+  it("keeps long run inputs in a closed, wrapping disclosure", async () => {
+    const longSelector =
+      "body > div.min-w-0 > div.transition-all:nth-of-type(2)";
+    stub({
+      ...RUN,
+      inputs: { assistant_message_css: longSelector },
+    });
+    renderAt("/run/R1");
+    const summary = await screen.findByTestId("run-summary");
+    const details = within(summary)
+      .getByText("Run configuration")
+      .closest("details");
+
+    expect(details?.open).toBe(false);
+    const value = within(details as HTMLElement).getByText(
+      JSON.stringify(longSelector),
+    );
+    expect(value.className).toContain("break-all");
   });
 
   it("marks the open check active in the rail on the check page", async () => {
     stub();
     renderAt("/run/R1/check/AC-5%3A%3AAC-5.1");
     const tree = await screen.findByTestId("run-tree");
+    expect(tree.className).toContain("max-w-full");
+    expect(tree.className).toContain("overflow-hidden");
     const active = within(tree).getByRole("link", { name: "AC-5.1" });
     expect(active.getAttribute("aria-current")).toBe("page");
     // A sibling check is not marked active.

@@ -19,19 +19,28 @@ export interface StatusTally {
   total: number;
 }
 
-export function tallyChecks(criteria: RunDetail["criteria"]): StatusTally {
+function tallyVerdicts(verdicts: (string | null)[]): StatusTally {
   const t: StatusTally = { pass: 0, fail: 0, inconclusive: 0, pending: 0, total: 0 };
-  for (const c of criteria) {
-    for (const chk of c.checks) {
-      t.total++;
-      const v = chk.verdict;
-      if (v === "pass") t.pass += 1;
-      else if (v === "fail") t.fail += 1;
-      else if (v && v.startsWith("inconclusive")) t.inconclusive += 1;
-      else t.pending += 1;
-    }
+  for (const v of verdicts) {
+    t.total++;
+    if (v === "pass") t.pass += 1;
+    else if (v === "fail") t.fail += 1;
+    else if (v && v.startsWith("inconclusive")) t.inconclusive += 1;
+    else t.pending += 1;
   }
   return t;
+}
+
+export function tallyChecks(criteria: RunDetail["criteria"]): StatusTally {
+  return tallyVerdicts(
+    criteria.flatMap((criterion) =>
+      criterion.checks.map((check) => check.verdict),
+    ),
+  );
+}
+
+export function tallyCriteria(criteria: RunDetail["criteria"]): StatusTally {
+  return tallyVerdicts(criteria.map((criterion) => criterion.verdict));
 }
 
 const DONUT_SEGMENTS: { key: keyof Omit<StatusTally, "total">; cls: string; label: string }[] = [
@@ -121,12 +130,60 @@ const BAR_SEGMENTS: { key: keyof Omit<StatusTally, "total">; cls: string }[] = [
   { key: "pending", cls: "bg-foreground/25" },
 ];
 
+function StatusBreakdown({
+  label,
+  tally,
+}: {
+  label: "Checks" | "Criteria";
+  tally: StatusTally;
+}) {
+  const total = tally.total || 1;
+  const id = `status-${label.toLowerCase()}`;
+  return (
+    <section aria-labelledby={id}>
+      <div className="mb-4 flex items-baseline justify-between gap-4">
+        <h3 id={id} className="text-sm font-semibold">
+          {label}
+        </h3>
+        <span className="text-xs text-muted-foreground">
+          {tally.total} total
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        {SUMMARY_TILES.map((tile) => (
+          <div key={tile.key} data-testid={`${label.toLowerCase()}-${tile.key}`}>
+            <div className={`text-2xl font-semibold tabular-nums ${tile.tone}`}>
+              {tally[tile.key]}
+            </div>
+            <div className="text-xs text-muted-foreground">{tile.label}</div>
+          </div>
+        ))}
+      </div>
+      <div
+        className="mt-4 flex h-2 overflow-hidden rounded-full bg-muted"
+        role="img"
+        aria-label={`${label}: ${tally.pass} passed, ${tally.fail} failed, ${tally.inconclusive} inconclusive, ${tally.pending} pending`}
+      >
+        {BAR_SEGMENTS.map((seg) =>
+          tally[seg.key] > 0 ? (
+            <div
+              key={seg.key}
+              className={seg.cls}
+              style={{ width: `${(tally[seg.key] / total) * 100}%` }}
+            />
+          ) : null,
+        )}
+      </div>
+    </section>
+  );
+}
+
 function RunSummary({ run }: { run: RunDetail }) {
-  const t = tallyChecks(run.criteria);
-  const total = t.total || 1;
+  const checks = tallyChecks(run.criteria);
+  const criteria = tallyCriteria(run.criteria);
   const inputs = Object.entries(run.inputs);
   return (
-    <div className="space-y-6" data-testid="run-summary">
+    <div className="min-w-0 max-w-full space-y-6" data-testid="run-summary">
       {run.setup_aborted && (
         <div className="rounded-md border border-fail/30 bg-fail/10 px-4 py-3 text-sm text-fail">
           Setup aborted — no checks ran. The verdict reflects the abort, not the
@@ -134,34 +191,20 @@ function RunSummary({ run }: { run: RunDetail }) {
         </div>
       )}
 
-      {/* Check roll-up: a tile per verdict family + a proportion bar. */}
-      <div className="rounded-lg border bg-card p-5">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          {SUMMARY_TILES.map((tile) => (
-            <div key={tile.key} data-testid={`tile-${tile.key}`}>
-              <div className={`text-2xl font-semibold tabular-nums ${tile.tone}`}>
-                {t[tile.key]}
-              </div>
-              <div className="text-xs text-muted-foreground">{tile.label}</div>
-            </div>
-          ))}
+      {/* Checks and criteria use different denominators. Keep both explicit:
+          criteria without checks must remain visible instead of disappearing
+          into the executable-check roll-up. */}
+      <div className="space-y-5 rounded-lg border bg-card p-5">
+        <StatusBreakdown label="Checks" tally={checks} />
+        <div className="border-t pt-5">
+          <StatusBreakdown label="Criteria" tally={criteria} />
         </div>
-        <div className="mt-4 flex h-2 overflow-hidden rounded-full bg-muted">
-          {BAR_SEGMENTS.map((seg) =>
-            t[seg.key] > 0 ? (
-              <div
-                key={seg.key}
-                className={seg.cls}
-                style={{ width: `${(t[seg.key] / total) * 100}%` }}
-              />
-            ) : null,
-          )}
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          {t.total} check{t.total === 1 ? "" : "s"} across {run.criteria.length}{" "}
-          criteri{run.criteria.length === 1 ? "on" : "a"}
-        </p>
       </div>
+
+      <p className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+        Select a check in the criteria navigator to inspect its failed steps,
+        assertions, and evidence.
+      </p>
 
       {/* Provenance + evidence links. */}
       <dl className="grid gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
@@ -191,24 +234,34 @@ function RunSummary({ run }: { run: RunDetail }) {
       </dl>
 
       {inputs.length > 0 && (
-        <div className="text-sm">
-          <p className="mb-1.5 text-xs text-muted-foreground">Inputs</p>
-          <div className="flex flex-wrap gap-2">
-            {inputs.map(([k, v]) => (
-              <code
-                key={k}
-                className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs"
-              >
-                {k}={JSON.stringify(v)}
-              </code>
-            ))}
+        <details className="min-w-0 max-w-full overflow-hidden rounded-lg border bg-card text-sm">
+          <summary className="cursor-pointer select-none px-4 py-3 font-medium hover:bg-muted/40">
+            Run configuration
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              {inputs.length} input{inputs.length === 1 ? "" : "s"}
+            </span>
+          </summary>
+          <div className="min-w-0 space-y-4 border-t p-4">
+            <p className="text-xs text-muted-foreground">
+              Exact recorded inputs for debugging and reproduction.
+            </p>
+            <dl className="min-w-0 space-y-3">
+              {inputs.map(([key, value]) => (
+                <div key={key} className="min-w-0">
+                  <dt className="break-all font-mono text-xs font-semibold">
+                    {key}
+                  </dt>
+                  <dd className="mt-1 min-w-0">
+                    <code className="block max-w-full whitespace-pre-wrap break-all rounded bg-muted px-2 py-1.5 font-mono text-xs">
+                      {JSON.stringify(value)}
+                    </code>
+                  </dd>
+                </div>
+              ))}
+            </dl>
           </div>
-        </div>
+        </details>
       )}
-
-      <p className="text-sm text-muted-foreground">
-        Select a check in the tree to inspect its steps, assertions, and evidence.
-      </p>
     </div>
   );
 }

@@ -23,6 +23,7 @@ pub mod bundle;
 pub mod event;
 pub mod reader;
 pub mod replay;
+pub mod session;
 pub mod store;
 pub mod writer;
 
@@ -33,6 +34,10 @@ pub use event::{
 };
 pub use reader::{ReadError, Trace};
 pub use replay::{ReplayDivergence, ReplayError, ReplayedRun, replay};
+pub use session::{
+    SESSION_EVIDENCE_OBSERVATION, SESSION_EVIDENCE_VERSION, STEP_SCREENSHOT_OBSERVATION,
+    SessionEvidence, SessionNetworkEntry, SessionPerformanceObservation, SessionStep, SessionVideo,
+};
 pub use store::{
     CriterionHistoryEntry, ProjectSummary, RunMeta, RunRecord, RunScope, Span, SqliteStore, Store,
     StoreError, TargetStatus, dashboard_addr_path, project_db_path, project_slug, state_root,

@@ -44,7 +44,9 @@ pub(crate) use crate::engine::outcome::{
     implicit_judgment_outcomes, step_label,
 };
 
-use crate::engine::capture::{CapturePolicy, TargetLocator, finalize_capture, target_from_step};
+use crate::engine::capture::{
+    CapturePolicy, Storyboard, TargetLocator, finalize_capture, target_from_step,
+};
 use crate::engine::context::{RunContext, RunState, json_to_value};
 use crate::engine::registry::{ActionRegistry, default_registry};
 use crate::engine::template::substitute_with;
@@ -579,6 +581,7 @@ impl Engine {
         // what the engine got around to invoking.
         let mut step_aborted = false;
         let mut targets: Vec<TargetLocator> = Vec::new();
+        let mut storyboard = Storyboard::default();
         // Per-step evidence (resolved `with:` + outputs) for implicit
         // judgment (#280). Empty = the step didn't run.
         let mut step_evidence = vec![StepEvidence::empty(); check.steps.len()];
@@ -634,6 +637,14 @@ impl Engine {
                 .await?;
 
             let known = self.registry.contains_key(step.uses.as_str());
+            let step_started_ms = if will_run && !matches!(self.capture, CapturePolicy::Off) {
+                match check_browser.as_ref() {
+                    Some(cb) => Some(storyboard.step_started(&cb.page).await),
+                    None => None,
+                }
+            } else {
+                None
+            };
             let outcome = if !known || environment_failed || step_aborted {
                 // Step can't run — emit a synthetic Error so evidence
                 // carries the "not executed" signal alongside the
@@ -685,6 +696,16 @@ impl Engine {
                 })
                 .await?;
 
+            // Post-step storyboard frame (#337): the page remains available
+            // after Ok/Error/Timeout, so capture every executed step before
+            // an Error aborts later steps. The policy decision happens after
+            // judgment; this is temporary bounded memory until then.
+            if let (Some(started_ms), Some(cb)) = (step_started_ms, check_browser.as_ref()) {
+                storyboard
+                    .capture_step(&cb.page, idx as u32, started_ms)
+                    .await;
+            }
+
             if matches!(outcome, Outcome::Error) {
                 step_aborted = true;
             }
@@ -731,6 +752,15 @@ impl Engine {
         )
         .await?;
 
+        // Judge first, from action observations and assertions only. Replay
+        // evidence is retained from the resulting state and can therefore
+        // never become a judgment input.
+        let outcome = CheckOutcome {
+            check_id: check.id.clone(),
+            assertions: assertion_outcomes,
+        };
+        let verdict = aggregate_check(&outcome);
+
         // Failure-evidence capture (spec #202): the browser is still
         // open and the failure set is known, so this is the one spot
         // where "what did the page look like" can be recorded. Rides
@@ -742,17 +772,13 @@ impl Engine {
             let wants_capture = match self.capture {
                 CapturePolicy::Off => false,
                 CapturePolicy::Always => true,
-                CapturePolicy::OnFailure => !failed.is_empty(),
+                CapturePolicy::OnFailure => !matches!(verdict.state, VerdictState::Pass),
             };
             let last_step = check.steps.len().saturating_sub(1) as u32;
-            captures = finalize_capture(writer, cb, wants_capture, last_step, &targets).await;
+            captures =
+                finalize_capture(writer, cb, wants_capture, last_step, &targets, storyboard).await;
         }
 
-        let outcome = CheckOutcome {
-            check_id: check.id.clone(),
-            assertions: assertion_outcomes,
-        };
-        let verdict = aggregate_check(&outcome);
         // Surface this check's failing assertions only when the check
         // itself didn't pass (a check can pass with some inconclusive
         // assertions aggregated away; we don't cry wolf on those).
@@ -1049,6 +1075,83 @@ criteria:
             .await
             .unwrap()
             .into_events()
+    }
+
+    /// Real-browser integration for #337. Ignored in the ordinary offline
+    /// gate because it requires the Playwright sidecar + Chromium; the
+    /// `browser-actions` gate runs ignored browser suites explicitly.
+    #[tokio::test]
+    #[ignore = "requires Playwright Chromium; run with just test browser-actions"]
+    async fn browser_storyboard_retention_matches_capture_policy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteStore::open(tmp.path().join("storyboard.db"))
+                .await
+                .unwrap(),
+        );
+        let browser = RunBrowser::launch(false).await.unwrap();
+        let mut engine = Engine::new()
+            .with_store(store.clone())
+            .with_browser(browser);
+        let cases = [
+            (CapturePolicy::Always, true, 2usize),
+            (CapturePolicy::OnFailure, true, 0usize),
+            (CapturePolicy::OnFailure, false, 2usize),
+            (CapturePolicy::Off, false, 0usize),
+        ];
+        for (case, (policy, passes, expected_frames)) in cases.into_iter().enumerate() {
+            engine.capture = policy;
+            engine.run_id = Some(format!("storyboard-{case}"));
+            let assertion = if passes { "true" } else { "false" };
+            let v = def(&format!(
+                r#"
+verification: storyboard
+criteria:
+  - id: AC-1
+    description: real browser storyboard
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: open-page
+            uses: ui/navigate
+            with: {{ url: "data:text/html,<button>Go</button>" }}
+          - id: click
+            uses: ui/click
+            with: {{ role: button, name: Go }}
+        assertions:
+          - "{assertion}"
+"#
+            ));
+            let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+            assert_eq!(matches!(verdict.state, VerdictState::Pass), passes);
+            let events =
+                duhem_evidence::Trace::from_store(store.as_ref(), &format!("storyboard-{case}"))
+                    .await
+                    .unwrap()
+                    .into_events();
+            let frames = events
+                .iter()
+                .filter(|event| {
+                    matches!(
+                        &event.payload,
+                        EventPayload::StepObservation { output_name, .. }
+                            if output_name == duhem_evidence::STEP_SCREENSHOT_OBSERVATION
+                    )
+                })
+                .count();
+            assert_eq!(frames, expected_frames, "policy {policy:?}");
+            let sessions = events
+                .iter()
+                .filter(|event| {
+                    matches!(
+                        &event.payload,
+                        EventPayload::StepObservation { output_name, .. }
+                            if output_name == duhem_evidence::SESSION_EVIDENCE_OBSERVATION
+                    )
+                })
+                .count();
+            assert_eq!(sessions, usize::from(expected_frames > 0));
+        }
     }
 
     #[tokio::test]

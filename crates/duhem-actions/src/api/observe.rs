@@ -456,6 +456,11 @@ mod tests {
             response_headers: BTreeMap::new(),
             body_base64: Some(String::new()),
             body_error: None,
+            started_ms: 0.0,
+            duration_ms: 0.0,
+            wait_ms: 0.0,
+            receive_ms: 0.0,
+            started_date_time: String::new(),
         }
     }
 

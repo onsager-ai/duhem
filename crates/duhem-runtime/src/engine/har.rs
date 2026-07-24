@@ -3,12 +3,10 @@
 //! Turns the browser page's recorded [`NetworkEvent`] buffer into a
 //! valid HAR 1.2 log so a failing `ui/*` check's traffic opens in any
 //! browser devtools / HAR viewer. The recorder (`api/observe`'s
-//! source) captures method / url / status / headers / bodies but no
-//! per-request timing or on-wire byte counts, so the fields HAR
-//! requires and we don't record (`startedDateTime`, `timings`,
-//! `headersSize`, `bodySize`) are emitted as honest stubs (epoch /
-//! `-1`) rather than fabricated. Response `content.size` is the real
-//! decoded body length.
+//! source) captures method / url / status / headers / bodies plus real
+//! request/response/body timing from the Playwright sidecar. Unknown
+//! on-wire byte counts remain honest HAR `-1` sentinels. Response
+//! `content.size` is the real decoded body length.
 //!
 //! Redaction is not optional here: network events reliably carry
 //! secrets (`Authorization` / `Cookie` headers, credentials in auth
@@ -173,14 +171,13 @@ fn response_json(evt: &NetworkEvent, cap: usize) -> Value {
 
 fn entry_json(evt: &NetworkEvent, cap: usize) -> Value {
     json!({
-        // We record no per-request start time; a fixed epoch stub keeps
-        // the HAR valid without fabricating timing.
-        "startedDateTime": "1970-01-01T00:00:00.000Z",
-        "time": -1,
+        "startedDateTime": evt.started_date_time,
+        "time": evt.duration_ms,
         "request": request_json(evt, cap),
         "response": response_json(evt, cap),
         "cache": {},
-        "timings": { "send": -1, "wait": -1, "receive": -1 },
+        "timings": { "send": 0, "wait": evt.wait_ms, "receive": evt.receive_ms },
+        "_duhem": { "startedMs": evt.started_ms },
     })
 }
 
@@ -219,6 +216,11 @@ mod tests {
             response_headers: BTreeMap::new(),
             body_base64: None,
             body_error: None,
+            started_ms: 12.0,
+            duration_ms: 8.0,
+            wait_ms: 5.0,
+            receive_ms: 3.0,
+            started_date_time: "2026-07-24T00:00:00.000Z".into(),
         }
     }
 
@@ -234,6 +236,9 @@ mod tests {
         assert_eq!(v["log"]["creator"]["name"], "duhem");
         assert_eq!(v["log"]["entries"].as_array().unwrap().len(), 1);
         assert_eq!(v["log"]["entries"][0]["response"]["status"], 200);
+        assert_eq!(v["log"]["entries"][0]["time"], 8.0);
+        assert_eq!(v["log"]["entries"][0]["timings"]["wait"], 5.0);
+        assert_eq!(v["log"]["entries"][0]["_duhem"]["startedMs"], 12.0);
     }
 
     #[test]

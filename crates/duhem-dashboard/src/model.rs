@@ -93,6 +93,42 @@ pub struct CheckDetail {
     /// a filter over it.
     pub timeline: Vec<Event>,
     pub artifacts: Vec<ArtifactRef>,
+    /// Synchronized browser evidence when the run carries the #337
+    /// session document. `None` is the explicit old-run degradation path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replay: Option<ReplayModel>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReplayModel {
+    pub version: u32,
+    pub clock: String,
+    pub duration_ms: f64,
+    pub steps: Vec<ReplayStep>,
+    pub network: Vec<duhem_evidence::SessionNetworkEntry>,
+    pub performance: Vec<duhem_evidence::SessionPerformanceObservation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video: Option<ReplayVideo>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReplayStep {
+    pub step_index: u32,
+    pub started_ms: f64,
+    pub finished_ms: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub screenshot: Option<ArtifactRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub screenshot_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReplayVideo {
+    pub started_ms: f64,
+    pub finished_ms: f64,
+    pub artifact: ArtifactRef,
 }
 
 /// One delivery-web span (④): a layer the check crossed, with the

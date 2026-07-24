@@ -41,3 +41,15 @@ The dashboard's live stream replays a run's evidence to a connecting
 client over Server-Sent Events, ending the stream once the run has
 finished — so an operator watching a run receives the trace events and
 the final recorded verdict, in the documented SSE shape.
+
+## AC-4
+
+An operator watching the runs list sees in-flight work: a run that is
+still executing is already present in the list, marked live, before any
+verdict exists.
+
+## AC-5
+
+An operator can move from a recorded check to any executed step and inspect
+the visual and browser evidence for that moment without losing run or check
+context.

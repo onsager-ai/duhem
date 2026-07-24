@@ -72,6 +72,49 @@ export interface CheckDetail {
   spans: SpanModel[];
   timeline: TraceEvent[];
   artifacts: ArtifactRef[];
+  replay?: ReplayModel;
+}
+
+export interface ReplayStep {
+  step_index: number;
+  started_ms: number;
+  finished_ms: number;
+  screenshot?: ArtifactRef;
+  screenshot_ms?: number;
+  frame_error?: string;
+}
+
+export interface ReplayNetworkEntry {
+  method: string;
+  url: string;
+  status: number;
+  started_ms: number;
+  duration_ms: number;
+  wait_ms: number;
+  receive_ms: number;
+}
+
+export interface ReplayPerformanceObservation {
+  kind: string;
+  name: string;
+  started_ms: number;
+  duration_ms: number;
+  value?: number;
+  unit?: string;
+}
+
+export interface ReplayModel {
+  version: number;
+  clock: string;
+  duration_ms: number;
+  steps: ReplayStep[];
+  network: ReplayNetworkEntry[];
+  performance: ReplayPerformanceObservation[];
+  video?: {
+    started_ms: number;
+    finished_ms: number;
+    artifact: ArtifactRef;
+  };
 }
 
 export interface HistoryRun {

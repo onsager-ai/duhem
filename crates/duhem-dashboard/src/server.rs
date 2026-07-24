@@ -8,8 +8,9 @@
 //! judge.
 
 use axum::Router;
+use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::{StatusCode, Uri, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::sse::{KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -206,12 +207,82 @@ async fn run_definition(
 async fn artifact(
     State(reader): State<EvidenceReader>,
     Path((run_id, artifact_id)): Path<(String, String)>,
+    headers: HeaderMap,
 ) -> Response {
     match reader.artifact(&run_id, &artifact_id).await {
-        Ok(Some((bytes, mime))) => ([(header::CONTENT_TYPE, mime)], bytes).into_response(),
+        Ok(Some((bytes, mime))) => artifact_response(bytes, mime, headers.get(header::RANGE)),
         Ok(None) => not_found("artifact"),
         Err(e) => e.into_response(),
     }
+}
+
+/// Serve content-addressed artifacts with single-byte-range support.
+///
+/// Screenshots and JSON keep receiving the same full `200` response.
+/// Native video controls may additionally request a byte range so a
+/// selected replay step can seek into a finalized WebM without loading
+/// it through any verdict-bearing path.
+fn artifact_response(bytes: Vec<u8>, mime: &'static str, range: Option<&HeaderValue>) -> Response {
+    let len = bytes.len();
+    match parse_byte_range(range, len) {
+        Ok(Some((start, end))) => Response::builder()
+            .status(StatusCode::PARTIAL_CONTENT)
+            .header(header::CONTENT_TYPE, mime)
+            .header(header::ACCEPT_RANGES, "bytes")
+            .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{len}"))
+            .header(header::CONTENT_LENGTH, end - start + 1)
+            .body(Body::from(bytes[start..=end].to_vec()))
+            .expect("valid artifact partial response"),
+        Ok(None) => Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, mime)
+            .header(header::ACCEPT_RANGES, "bytes")
+            .header(header::CONTENT_LENGTH, len)
+            .body(Body::from(bytes))
+            .expect("valid artifact response"),
+        Err(()) => Response::builder()
+            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+            .header(header::ACCEPT_RANGES, "bytes")
+            .header(header::CONTENT_RANGE, format!("bytes */{len}"))
+            .body(Body::empty())
+            .expect("valid artifact range error"),
+    }
+}
+
+fn parse_byte_range(range: Option<&HeaderValue>, len: usize) -> Result<Option<(usize, usize)>, ()> {
+    let Some(range) = range else {
+        return Ok(None);
+    };
+    if len == 0 {
+        return Err(());
+    }
+    let value = range.to_str().map_err(|_| ())?;
+    let value = value.strip_prefix("bytes=").ok_or(())?;
+    if value.contains(',') {
+        return Err(());
+    }
+    let (start, end) = value.split_once('-').ok_or(())?;
+    if start.is_empty() {
+        let suffix = end.parse::<usize>().map_err(|_| ())?;
+        if suffix == 0 {
+            return Err(());
+        }
+        return Ok(Some((len.saturating_sub(suffix), len - 1)));
+    }
+
+    let start = start.parse::<usize>().map_err(|_| ())?;
+    if start >= len {
+        return Err(());
+    }
+    let end = if end.is_empty() {
+        len - 1
+    } else {
+        end.parse::<usize>().map_err(|_| ())?.min(len - 1)
+    };
+    if end < start {
+        return Err(());
+    }
+    Ok(Some((start, end)))
 }
 
 /// `GET /api/verifications/:name/history` (#193 ② VD-over-time).

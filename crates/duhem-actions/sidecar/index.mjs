@@ -113,6 +113,11 @@ function discoverChromium() {
  * @property {Record<string, string>} responseHeaders
  * @property {string | null} bodyBase64
  * @property {string | null} bodyError
+ * @property {number} startedMs
+ * @property {number} durationMs
+ * @property {number} waitMs
+ * @property {number} receiveMs
+ * @property {string} startedDateTime
  */
 
 /** @type {Browser | null} */
@@ -123,6 +128,8 @@ const contexts = new Map()
 const pages = new Map()
 /** @type {Map<string, NetworkRecord[]>} */
 const networkBuffers = new Map()
+/** @type {Map<string, number>} */
+const sessionStarts = new Map()
 // Video recording (#215) is per-context and finalized only on
 // context close. When a context is opened with `recordVideo`, we keep
 // its scratch dir (to clean up) and the page's `Video` handle (to read
@@ -165,9 +172,19 @@ function page(req) {
  * @param {Page} p
  * @param {NetworkRecord[]} buf
  */
-function attachNetworkRecorder(p, buf) {
+function attachNetworkRecorder(p, buf, sessionStart) {
+  /** @type {WeakMap<import('playwright').Request, { mono: number, wall: string }>} */
+  const starts = new WeakMap()
+  p.on('request', (request) => {
+    starts.set(request, { mono: performance.now(), wall: new Date().toISOString() })
+  })
   p.on('response', async (response) => {
     const request = response.request()
+    const start = starts.get(request) || {
+      mono: performance.now(),
+      wall: new Date().toISOString(),
+    }
+    const responseAt = performance.now()
     /** @type {NetworkRecord} */
     const rec = {
       method: request.method(),
@@ -180,6 +197,11 @@ function attachNetworkRecorder(p, buf) {
       responseHeaders: response.headers(),
       bodyBase64: null,
       bodyError: null,
+      startedMs: Math.max(0, start.mono - sessionStart),
+      durationMs: 0,
+      waitMs: Math.max(0, responseAt - start.mono),
+      receiveMs: 0,
+      startedDateTime: start.wall,
     }
     const pd = request.postDataBuffer()
     if (pd) rec.requestBodyBase64 = pd.toString('base64')
@@ -189,9 +211,32 @@ function attachNetworkRecorder(p, buf) {
     } catch (e) {
       rec.bodyError = errMsg(e)
     }
+    const finishedAt = performance.now()
+    rec.receiveMs = Math.max(0, finishedAt - responseAt)
+    rec.durationMs = Math.max(0, finishedAt - start.mono)
     buf.push(rec)
   })
 }
+
+// Buffered observers are installed before navigation. Unsupported entry types
+// simply remain absent; missing performance facts are never invented.
+const performanceInit = `(() => {
+  const d = { longTasks: [], lcp: [], layoutShifts: [], events: [] };
+  Object.defineProperty(window, "__duhemPerformance", { value: d });
+  const watch = (type, key) => {
+    try {
+      new PerformanceObserver(list => d[key].push(...list.getEntries().map(e => ({
+        name: e.name, startTime: e.startTime, duration: e.duration,
+        value: typeof e.value === "number" ? e.value : undefined,
+        hadRecentInput: e.hadRecentInput === true
+      })))).observe({ type, buffered: true });
+    } catch {}
+  };
+  watch("longtask", "longTasks");
+  watch("largest-contentful-paint", "lcp");
+  watch("layout-shift", "layoutShifts");
+  watch("event", "events");
+})()`
 
 /** @param {any} req */
 async function dispatch(req) {
@@ -276,6 +321,7 @@ async function dispatch(req) {
       const ctx = contexts.get(req.contextId)
       if (!ctx) throw new Error(`unknown contextId: ${req.contextId}`)
       const p = await ctx.newPage()
+      await p.addInitScript(performanceInit)
       const id = 'p' + nextHandle++
       pages.set(id, p)
       // Grab the page's `Video` handle now; its file only exists once
@@ -288,7 +334,9 @@ async function dispatch(req) {
       /** @type {NetworkRecord[]} */
       const buf = []
       networkBuffers.set(id, buf)
-      attachNetworkRecorder(p, buf)
+      const sessionStart = performance.now()
+      sessionStarts.set(id, sessionStart)
+      attachNetworkRecorder(p, buf, sessionStart)
       return { pageId: id }
     }
 
@@ -386,6 +434,72 @@ async function dispatch(req) {
       if (!buf) throw new Error(`unknown pageId: ${req.pageId}`)
       const from = req.cursor || 0
       return { events: buf.slice(from), cursor: buf.length }
+    }
+
+    case 'sessionTime': {
+      const start = sessionStarts.get(req.pageId)
+      if (start === undefined) throw new Error(`unknown pageId: ${req.pageId}`)
+      return Math.max(0, performance.now() - start)
+    }
+
+    case 'sessionEvidence': {
+      const p = page(req)
+      const start = sessionStarts.get(req.pageId)
+      const network = networkBuffers.get(req.pageId)
+      if (start === undefined || !network) throw new Error(`unknown pageId: ${req.pageId}`)
+      const elapsedMs = Math.max(0, performance.now() - start)
+      const raw = await p.evaluate(() => {
+        const d = window.__duhemPerformance || {
+          longTasks: [], lcp: [], layoutShifts: [], events: [],
+        }
+        const basic = ['navigation', 'resource', 'paint'].flatMap(type =>
+          performance.getEntriesByType(type).map(e => ({
+            kind: type,
+            name: e.name,
+            startTime: e.startTime,
+            duration: e.duration,
+            value: type === 'paint' ? e.startTime : undefined,
+            unit: 'ms',
+          }))
+        )
+        const longTasks = d.longTasks.map(e => ({
+          kind: 'long-task', name: e.name || 'long-task',
+          startTime: e.startTime, duration: e.duration,
+        }))
+        const lcp = d.lcp.length ? [d.lcp[d.lcp.length - 1]].map(e => ({
+          kind: 'web-vital', name: 'LCP', startTime: e.startTime,
+          duration: e.duration, value: e.startTime, unit: 'ms',
+        })) : []
+        const clsValue = d.layoutShifts
+          .filter(e => !e.hadRecentInput)
+          .reduce((sum, e) => sum + (e.value || 0), 0)
+        const cls = d.layoutShifts.length ? [{
+          kind: 'web-vital', name: 'CLS', startTime: 0,
+          duration: 0, value: clsValue, unit: 'score',
+        }] : []
+        const inpEntry = d.events.reduce(
+          (max, e) => e.duration > (max?.duration || 0) ? e : max,
+          null,
+        )
+        const inp = inpEntry ? [{
+          kind: 'web-vital', name: 'INP', startTime: inpEntry.startTime,
+          duration: inpEntry.duration, value: inpEntry.duration, unit: 'ms',
+        }] : []
+        return {
+          now: performance.now(),
+          entries: [...basic, ...longTasks, ...lcp, ...cls, ...inp],
+        }
+      })
+      const offset = elapsedMs - raw.now
+      const perf = raw.entries.map(e => ({
+        kind: e.kind,
+        name: e.name,
+        startedMs: Math.max(0, offset + e.startTime),
+        durationMs: Math.max(0, e.duration || 0),
+        value: typeof e.value === 'number' ? e.value : null,
+        unit: e.unit || null,
+      }))
+      return { elapsedMs, network, performance: perf }
     }
 
     case 'closeContext': {

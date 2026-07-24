@@ -6,7 +6,7 @@
 # (onsager-ai/duhem#50). Two jobs:
 #
 #   1. Produce a REAL run for the dashboard to serve. We run the tiny
-#      offline, page-free `fixture/dashboard-fixture.yml` through the
+#      offline, real-browser `fixture/dashboard-fixture.yml` through the
 #      real `duhem run` pipeline, which records a genuine run in the
 #      production evidence store (#189), pinned to the fixed id
 #      `dashboard-fixture-run` via `--run-id` so the VD's API/SPA/SSE
@@ -34,6 +34,9 @@
 # so `fixture/` and the pid/log paths resolve from here.
 
 set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$SCRIPT_DIR/.."
 
 DUHEM_BIN="${DUHEM_BIN:-duhem}"
 PORT="${DUHEM_DASHBOARD_PORT:-7878}"
@@ -75,7 +78,8 @@ sleep 2
 
 # --- 1b. Produce a real FINISHED run -----------------------------------
 echo "up.sh: producing fixture run with '$DUHEM_BIN run fixture/dashboard-fixture.yml'"
-"$DUHEM_BIN" run fixture/dashboard-fixture.yml --db "$DB" --run-id "$RUN_ID"
+"$DUHEM_BIN" run fixture/dashboard-fixture.yml --db "$DB" --run-id "$RUN_ID" \
+  --capture always --capture-video
 echo "up.sh: fixture run recorded as run id '$RUN_ID' in $DB"
 
 # --- 2. Launch the dashboard (serve mode) -----------------------------

@@ -4,8 +4,8 @@
 // panel (screenshots inline, network HAR as a request table).
 
 import { ChevronDown, ChevronRight, Maximize2, Minimize2, X } from "lucide-react";
-import { Fragment, useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { fetchCheck, type ArtifactRef, type CheckDetail, type SpanModel, type TraceEvent } from "../api";
 import { VerdictBadge, formatDuration, isImageArtifact } from "../ui";
 import { compactValue, formatEvent, groupTimeline, parseComparison, stepStatus, summarizeCheck, type TimelineNode } from "../format";
@@ -332,7 +332,8 @@ function StepCaptures({
         (e.kind === "step_observation" || e.kind === "setup_step_observation") &&
         typeof e.blob_sha256 === "string" &&
         typeof e.output_name === "string" &&
-        (e.output_name as string).startsWith("capture/"),
+        (e.output_name as string).startsWith("capture/") &&
+        e.output_name !== "capture/session-evidence",
     )
     .map((e) => ({
       kind: e.output_name as string,
@@ -381,10 +382,12 @@ function StepGroup({
   node,
   prevOf,
   artifacts,
+  selected,
 }: {
   node: Extract<TimelineNode, { kind: "step" }>;
   prevOf: (evt: TraceEvent) => TraceEvent | undefined;
   artifacts: ArtifactRef[];
+  selected?: boolean;
 }) {
   const started = node.events[0];
   // Scalar (non-blob) observations — the outputs the action pulled from
@@ -440,8 +443,12 @@ function StepGroup({
   const judgmentDetail =
     typeof node.judgment?.detail === "string" ? node.judgment.detail : status.reason;
   return (
-    <li className={`ev step-group tone-${status.tone}`} data-testid="step-group">
-      <details open={status.failed}>
+    <li
+      id={`step-${node.stepIndex}`}
+      className={`ev step-group tone-${status.tone}${selected ? " step-selected" : ""}`}
+      data-testid="step-group"
+    >
+      <details open={status.failed || selected}>
         <summary className="step-summary md:sticky md:top-0 md:z-20 md:border-b md:bg-background/95 md:backdrop-blur">
           {/* Primary line: status icon + action. Successful steps rely on
               the green check alone; only exceptional outcomes need text. */}
@@ -544,9 +551,11 @@ function StepGroup({
 export function Timeline({
   events,
   artifacts = [],
+  selectedStep,
 }: {
   events: TraceEvent[];
   artifacts?: ArtifactRef[];
+  selectedStep?: number;
 }) {
   const nodes = groupTimeline(events);
   const idx = new Map(events.map((e, i) => [e.seq, i]));
@@ -555,7 +564,13 @@ export function Timeline({
     <ol className="timeline">
       {nodes.map((n) =>
         n.kind === "step" ? (
-          <StepGroup key={n.key} node={n} prevOf={prevOf} artifacts={artifacts} />
+          <StepGroup
+            key={n.key}
+            node={n}
+            prevOf={prevOf}
+            artifacts={artifacts}
+            selected={selectedStep === n.stepIndex}
+          />
         ) : (
           <TimelineRow key={n.key} evt={n.event} prev={prevOf(n.event)} artifacts={artifacts} />
         ),
@@ -617,6 +632,8 @@ function artifactLabel(kind: string): string {
   switch (kind) {
     case "capture/screenshot":
       return "Screenshot";
+    case "capture/step-screenshot":
+      return "Step screenshot";
     case "capture/dom":
       return "DOM snapshot";
     case "capture/network":
@@ -978,13 +995,297 @@ export function Artifacts({ artifacts }: { artifacts: CheckDetail["artifacts"] }
   );
 }
 
+function queryWith(
+  current: URLSearchParams,
+  changes: Record<string, string | undefined>,
+): string {
+  const next = new URLSearchParams(current);
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === undefined) next.delete(key);
+    else next.set(key, value);
+  }
+  const query = next.toString();
+  return query ? `?${query}` : "";
+}
+
+function ReplayView({
+  check,
+  selectedStep,
+  selectedLabel,
+  stepNavigation,
+  params,
+}: {
+  check: CheckDetail;
+  selectedStep?: number;
+  selectedLabel?: string;
+  stepNavigation: ReadonlyMap<number, { key: string; label: string }>;
+  params: URLSearchParams;
+}) {
+  const replay = check.replay;
+  const inspector = params.get("inspector") === "performance" ? "performance" : "network";
+  const selected = selectedStep === undefined
+    ? undefined
+    : replay?.steps.find((step) => step.step_index === selectedStep);
+  const frame = selected ?? replay?.steps.find((step) => step.screenshot);
+  const [media, setMedia] = useState<"screenshot" | "video">("screenshot");
+  const [videoDurationSec, setVideoDurationSec] = useState<number>();
+  const [playbackStepIndex, setPlaybackStepIndex] = useState<number>();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const navigate = useNavigate();
+  const videoStart = replay?.video?.started_ms ?? 0;
+  const videoSpan = Math.max(
+    1e-6,
+    (replay?.video?.finished_ms ?? videoStart) - videoStart,
+  );
+  const stepToVideoSec = (ms: number) => Math.max(0, (ms - videoStart) / 1000);
+  const stepToFraction = (ms: number) =>
+    Math.min(1, Math.max(0, (ms - videoStart) / videoSpan));
+  const markerFraction = (ms: number) => {
+    if (videoDurationSec === undefined) return stepToFraction(ms);
+    return Math.min(1, Math.max(0, stepToVideoSec(ms) / videoDurationSec));
+  };
+  const markerSteps = [...(replay?.steps ?? [])]
+    .sort((a, b) => a.step_index - b.step_index)
+    .map((step) => {
+      const navigation = stepNavigation.get(step.step_index);
+      return {
+        ...step,
+        key: navigation?.key ?? String(step.step_index),
+        label: navigation?.label ?? String(step.step_index),
+      };
+    });
+  const activeStepIndex = media === "video"
+    ? playbackStepIndex ?? selectedStep
+    : selectedStep;
+  const activeLabel = activeStepIndex === undefined
+    ? undefined
+    : stepNavigation.get(activeStepIndex)?.label ??
+      markerSteps.find((step) => step.step_index === activeStepIndex)?.label ??
+      (activeStepIndex === selectedStep ? selectedLabel : undefined);
+
+  useEffect(() => {
+    setVideoDurationSec(undefined);
+    setPlaybackStepIndex(undefined);
+  }, [replay?.video?.artifact.url]);
+
+  useEffect(() => {
+    if (media === "video" && selected && videoRef.current && replay?.video) {
+      videoRef.current.currentTime = stepToVideoSec(selected.started_ms);
+      setPlaybackStepIndex(selected.step_index);
+    }
+  }, [media, replay?.video, selected, videoStart]);
+
+  if (!replay) {
+    return (
+      <div className="replay-empty" data-testid="replay-unavailable">
+        <p>Replay evidence is unavailable for this run.</p>
+        <p className="muted">The recorded timeline and artifacts remain available in Steps.</p>
+      </div>
+    );
+  }
+
+  const windowStart = selected?.started_ms;
+  const windowEnd = selected?.finished_ms;
+  const inWindow = (start: number, duration = 0) =>
+    windowStart === undefined ||
+    windowEnd === undefined ||
+    (start <= windowEnd && start + duration >= windowStart);
+  const network = replay.network.filter((entry) => inWindow(entry.started_ms, entry.duration_ms));
+  const performance = replay.performance.filter((entry) =>
+    inWindow(entry.started_ms, entry.duration_ms),
+  );
+  const updatePlaybackStep = (video: HTMLVideoElement) => {
+    const clockMs = videoStart + video.currentTime * 1000;
+    let current: (typeof markerSteps)[number] | undefined;
+    for (const step of markerSteps) {
+      if (step.started_ms <= clockMs) current = step;
+      else break;
+    }
+    setPlaybackStepIndex(current?.step_index);
+  };
+  const selectMarker = (step: (typeof markerSteps)[number]) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = stepToVideoSec(step.started_ms);
+    }
+    setPlaybackStepIndex(step.step_index);
+    navigate({ search: queryWith(params, { step: step.key }) });
+  };
+
+  return (
+    <div className="replay" data-testid="replay">
+      <section
+        className={`replay-media${media === "video" ? " video-mode" : ""}`}
+        aria-label="Replay media"
+      >
+        <div className="replay-toolbar">
+          <span>
+            {activeStepIndex === undefined
+              ? "Whole check session"
+              : `Step ${activeLabel ?? activeStepIndex}`}
+          </span>
+          <div role="group" aria-label="Replay media type">
+            <button
+              type="button"
+              className={media === "screenshot" ? "on" : ""}
+              onClick={() => setMedia("screenshot")}
+              disabled={!frame?.screenshot}
+            >
+              Screenshot
+            </button>
+            {replay.video && (
+              <button
+                type="button"
+                className={media === "video" ? "on" : ""}
+                onClick={() => setMedia("video")}
+              >
+                Video
+              </button>
+            )}
+          </div>
+        </div>
+        {media === "video" && replay.video ? (
+          <>
+            <video
+              ref={videoRef}
+              className="replay-video"
+              src={replay.video.artifact.url}
+              controls
+              preload="metadata"
+              onLoadedMetadata={(event) => {
+                const duration = event.currentTarget.duration;
+                setVideoDurationSec(Number.isFinite(duration) && duration > 0
+                  ? duration
+                  : undefined);
+              }}
+              onPlay={(event) => updatePlaybackStep(event.currentTarget)}
+              onTimeUpdate={(event) => updatePlaybackStep(event.currentTarget)}
+            />
+            <div
+              className="replay-step-timeline"
+              data-testid="replay-step-timeline"
+              role="group"
+              aria-label="Video step timeline"
+            >
+              {markerSteps.map((step) => {
+                const left = markerFraction(step.started_ms);
+                const right = markerFraction(step.finished_ms);
+                return (
+                  <button
+                    key={step.step_index}
+                    type="button"
+                    className={`replay-step-marker${
+                      step.step_index === activeStepIndex ? " on" : ""
+                    }`}
+                    style={{
+                      left: `${left * 100}%`,
+                      width: `${Math.max(0, right - left) * 100}%`,
+                    }}
+                    aria-label={`Seek to step ${step.label}`}
+                    aria-pressed={step.step_index === activeStepIndex}
+                    title={`Seek to step ${step.label}`}
+                    onClick={() => selectMarker(step)}
+                  >
+                    <span className="replay-step-tick" aria-hidden="true" />
+                    <span className="replay-step-label">{step.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : frame?.screenshot ? (
+          <img
+            className="replay-screenshot"
+            src={frame.screenshot.url}
+            alt={`Step ${selectedLabel ?? frame.step_index} screenshot`}
+          />
+        ) : (
+          <p className="replay-no-frame">
+            {frame?.frame_error
+              ? "The post-step browser frame could not be captured."
+              : "No browser frame exists for this selection."}
+          </p>
+        )}
+      </section>
+
+      <section className="replay-inspector">
+        <nav role="tablist" aria-label="Replay inspector" className="replay-inspector-tabs">
+          {(["network", "performance"] as const).map((name) => (
+            <Link
+              key={name}
+              to={{ search: queryWith(params, { inspector: name }) }}
+              role="tab"
+              aria-selected={inspector === name}
+              className={inspector === name ? "on" : ""}
+            >
+              {name[0].toUpperCase() + name.slice(1)}
+            </Link>
+          ))}
+        </nav>
+        {inspector === "network" ? (
+          network.length === 0 ? (
+            <p className="muted">No network entries recorded for this selection.</p>
+          ) : (
+            <div className="replay-table-wrap">
+              <table className="replay-table" data-testid="replay-network">
+                <thead>
+                  <tr><th>Method</th><th>URL</th><th>Status</th><th>Time</th></tr>
+                </thead>
+                <tbody>
+                  {network.map((entry, index) => (
+                    <tr key={`${entry.started_ms}-${index}`}>
+                      <td>{entry.method}</td>
+                      <td title={entry.url}>{entry.url}</td>
+                      <td>{entry.status}</td>
+                      <td>{entry.duration_ms.toFixed(1)} ms</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        ) : performance.length === 0 ? (
+          <p className="muted">
+            Performance metrics are unknown for this selection; no score or threshold is inferred.
+          </p>
+        ) : (
+          <div className="replay-table-wrap">
+            <table className="replay-table" data-testid="replay-performance">
+              <thead>
+                <tr><th>Kind</th><th>Observation</th><th>Start</th><th>Value</th></tr>
+              </thead>
+              <tbody>
+                {performance.map((entry, index) => (
+                  <tr key={`${entry.kind}-${entry.name}-${index}`}>
+                    <td>{entry.kind}</td>
+                    <td>{entry.name}</td>
+                    <td>{entry.started_ms.toFixed(1)} ms</td>
+                    <td>
+                      {entry.value === undefined
+                        ? entry.duration_ms > 0
+                          ? `${entry.duration_ms.toFixed(1)} ms`
+                          : "recorded"
+                        : `${entry.value.toFixed(2)}${entry.unit ? ` ${entry.unit}` : ""}`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 export default function CheckPage() {
   const { runId = "", pair = "" } = useParams();
+  const [params] = useSearchParams();
+  const activeStep = params.get("step") ?? undefined;
   // The check evidence renders inside the shared run tree, with this
   // check's node active in the rail. No back link — the rail (and the
   // breadcrumb) carry the way back.
   return (
-    <RunScaffold runId={runId} activePair={pair}>
+    <RunScaffold runId={runId} activePair={pair} activeStep={activeStep}>
       {() => <CheckEvidence runId={runId} pair={pair} />}
     </RunScaffold>
   );
@@ -1006,6 +1307,7 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
   }, [runId, pair]);
 
   const vd = useVd();
+  const [params] = useSearchParams();
 
   if (error) return <p className="error">{error}</p>;
   if (check === null) return <p className="muted">Loading…</p>;
@@ -1014,6 +1316,34 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
   // VD snapshot (#302) — *what* this check verifies, not just its id.
   const checkDesc = vd?.check(check.criterion_id, check.check_id)?.description;
   const critDesc = vd?.criterion(check.criterion_id)?.description;
+  const stepNodes = groupTimeline(check.timeline).filter((node) => node.kind === "step");
+  const stepNavigation = new Map(
+    stepNodes.flatMap((node) => {
+      if (node.kind !== "step") return [];
+      const started = node.events[0];
+      const uses = typeof started.uses === "string" ? started.uses : "step";
+      const authored = vd?.stepId(check.criterion_id, check.check_id, node.stepIndex);
+      return [[
+        node.stepIndex,
+        {
+          key: authored ?? String(node.stepIndex),
+          label: authored ?? uses.split("/").pop() ?? uses,
+        },
+      ] as const];
+    }),
+  );
+  const stepParam = params.get("step") ?? undefined;
+  const selectedNode = stepParam === undefined
+    ? undefined
+    : stepNodes.find((node) => {
+        if (node.kind !== "step") return false;
+        return stepParam === stepNavigation.get(node.stepIndex)?.key;
+      });
+  const selectedStep = selectedNode?.kind === "step" ? selectedNode.stepIndex : undefined;
+  const selectedLabel = selectedNode?.kind === "step"
+    ? stepNavigation.get(selectedNode.stepIndex)?.label
+    : undefined;
+  const view = params.get("view") === "replay" ? "replay" : "steps";
 
   return (
     <>
@@ -1044,12 +1374,42 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
               ].filter(Boolean).join(" · ");
             })()}
           </p>
+          <nav className="check-view-tabs" role="tablist" aria-label="Check evidence views">
+            <Link
+              to={{ search: queryWith(params, { view: undefined }) }}
+              role="tab"
+              aria-selected={view === "steps"}
+            >
+              Steps
+            </Link>
+            <Link
+              to={{ search: queryWith(params, { view: "replay" }) }}
+              role="tab"
+              aria-selected={view === "replay"}
+            >
+              Replay
+            </Link>
+          </nav>
         </div>
-        <SpanChain spans={check.spans} />
-        <CheckSummary detail={check} />
-        {/* Captures now nest under the step that produced them (see
-            StepCaptures); no separate Artifacts panel. */}
-        <Timeline events={check.timeline} artifacts={check.artifacts} />
+        {view === "steps" ? (
+          <>
+            <SpanChain spans={check.spans} />
+            <CheckSummary detail={check} />
+            <Timeline
+              events={check.timeline}
+              artifacts={check.artifacts}
+              selectedStep={selectedStep}
+            />
+          </>
+        ) : (
+          <ReplayView
+            check={check}
+            selectedStep={selectedStep}
+            selectedLabel={selectedLabel}
+            stepNavigation={stepNavigation}
+            params={params}
+          />
+        )}
       </div>
     </>
   );

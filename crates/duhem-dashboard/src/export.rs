@@ -119,6 +119,28 @@ async fn export_run(
                 artifact.url = rel;
                 stats.artifacts += 1;
             }
+            // Replay embeds resolved media refs in addition to the flat
+            // artifact list. Rewrite both so static exports are as complete
+            // as serve mode and never retain `/api/...` URLs.
+            if let Some(replay) = &mut check_detail.replay {
+                let urls: std::collections::BTreeMap<_, _> = check_detail
+                    .artifacts
+                    .iter()
+                    .map(|a| (a.id.clone(), a.url.clone()))
+                    .collect();
+                for step in &mut replay.steps {
+                    if let Some(shot) = &mut step.screenshot
+                        && let Some(url) = urls.get(&shot.id)
+                    {
+                        shot.url = url.clone();
+                    }
+                }
+                if let Some(video) = &mut replay.video
+                    && let Some(url) = urls.get(&video.artifact.id)
+                {
+                    video.artifact.url = url.clone();
+                }
+            }
             write_file(
                 out,
                 &format!(

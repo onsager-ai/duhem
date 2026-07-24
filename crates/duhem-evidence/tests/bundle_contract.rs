@@ -10,8 +10,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use duhem_evidence::{
-    BUNDLE_VERSION, BundleArtifact, BundleRun, Event, EventPayload, EvidenceWriter, RunBundle,
-    SqliteStore, VerdictState, run_started,
+    BUNDLE_VERSION, BundleArtifact, BundleRun, Event, EventPayload, EvidenceWriter,
+    ObservationValue, RunBundle, SESSION_EVIDENCE_OBSERVATION, STEP_SCREENSHOT_OBSERVATION,
+    SessionEvidence, SessionStep, SqliteStore, VerdictState, run_started,
 };
 
 fn fixed_bundle() -> RunBundle {
@@ -97,6 +98,40 @@ async fn store_to_bundle_round_trips_through_the_export_directory() {
     w.append_observation(0, "payload", serde_json::json!(big))
         .await
         .unwrap();
+    // A referenced storyboard PNG plus the versioned session document.
+    // Both must survive the same bundle round-trip as ordinary blobs.
+    let shot = w.write_blob(b"\x89PNG\r\n\x1a\nframe").await.unwrap();
+    w.append(EventPayload::StepObservation {
+        step_index: 0,
+        output_name: STEP_SCREENSHOT_OBSERVATION.into(),
+        value: ObservationValue::Blob {
+            blob_sha256: shot.0.clone(),
+        },
+    })
+    .await
+    .unwrap();
+    let mut session = SessionEvidence::v1(10.0);
+    session.steps.push(SessionStep {
+        step_index: 0,
+        started_ms: 1.0,
+        finished_ms: 9.0,
+        screenshot_sha256: Some(shot.0),
+        screenshot_ms: Some(9.0),
+        frame_error: None,
+    });
+    let session_blob = w
+        .write_blob(&serde_json::to_vec(&session).unwrap())
+        .await
+        .unwrap();
+    w.append(EventPayload::StepObservation {
+        step_index: 0,
+        output_name: SESSION_EVIDENCE_OBSERVATION.into(),
+        value: ObservationValue::Blob {
+            blob_sha256: session_blob.0.clone(),
+        },
+    })
+    .await
+    .unwrap();
     w.append(EventPayload::RunFinished {
         verdict: VerdictState::Pass,
     })
@@ -104,7 +139,7 @@ async fn store_to_bundle_round_trips_through_the_export_directory() {
     .unwrap();
 
     let bundle = RunBundle::from_store(store.as_ref(), "01RT").await.unwrap();
-    assert_eq!(bundle.artifacts.len(), 1);
+    assert_eq!(bundle.artifacts.len(), 3);
 
     let out = tmp.path().join("export");
     bundle.write_dir(&out).unwrap();
@@ -121,5 +156,18 @@ async fn store_to_bundle_round_trips_through_the_export_directory() {
     assert_eq!(
         again.content_hash().unwrap(),
         bundle.content_hash().unwrap()
+    );
+    let encoded = back
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.sha256 == session_blob.0)
+        .unwrap();
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&encoded.bytes_base64)
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<SessionEvidence>(&bytes).unwrap(),
+        session
     );
 }

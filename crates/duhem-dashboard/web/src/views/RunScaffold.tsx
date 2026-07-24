@@ -291,6 +291,7 @@ function RunTabs({ run, active }: { run: RunDetail; active: RunTab }) {
             role="tab"
             aria-selected="false"
             aria-disabled="true"
+            tabIndex={0}
             className="inline-flex h-9 items-center gap-1.5 border-b-2 border-transparent px-0.5 text-sm text-muted-foreground/50"
           >
             <Icon className="size-3.5" aria-hidden="true" />

@@ -142,6 +142,16 @@ describe("run report tree", () => {
     ).toBe("true");
   });
 
+  it("keeps an unavailable Definition tab keyboard discoverable", async () => {
+    stub({ ...RUN, has_definition: false });
+    renderAt("/run/R1");
+    await screen.findByTestId("run-summary");
+
+    const definition = screen.getByRole("tab", { name: "Definition" });
+    expect(definition.getAttribute("aria-disabled")).toBe("true");
+    expect(definition.getAttribute("tabindex")).toBe("0");
+  });
+
   it("makes an inconclusive criterion with no checks navigable", async () => {
     stub({
       ...RUN,

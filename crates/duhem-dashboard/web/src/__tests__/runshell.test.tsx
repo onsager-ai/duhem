@@ -3,11 +3,12 @@
 // the summary roll-up tiles, and the active-check highlight when a check
 // is open. Replaces the former per-run tab-bar tests.
 
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RunPage from "../views/RunPage";
 import CheckPage from "../views/CheckPage";
+import CriterionPage from "../views/CriterionPage";
 
 afterEach(() => {
   cleanup();
@@ -77,6 +78,7 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/run/:runId" element={<RunPage />} />
+        <Route path="/run/:runId/criterion/:criterionId" element={<CriterionPage />} />
         <Route path="/run/:runId/check/:pair" element={<CheckPage />} />
       </Routes>
     </MemoryRouter>,
@@ -107,6 +109,27 @@ describe("run report tree", () => {
     expect(within(tree).getByRole("link", { name: "AC-5.2" })).toBeTruthy();
     expect(within(tree).getByRole("link", { name: "AC-7.1" })).toBeTruthy();
     expect(within(tree).getByRole("link", { name: "AC-6.1" })).toBeTruthy();
+  });
+
+  it("makes an inconclusive criterion with no checks navigable", async () => {
+    stub({
+      ...RUN,
+      criteria: [
+        ...RUN.criteria,
+        {
+          id: "AC-8",
+          verdict: "inconclusive:empty_aggregation",
+          checks: [],
+        },
+      ],
+    });
+    renderAt("/run/R1");
+    const tree = await screen.findByTestId("run-tree");
+    const criterion = within(tree).getByRole("link", { name: /AC-8/ });
+    fireEvent.click(criterion);
+    const detail = await screen.findByTestId("criterion-detail");
+    expect(detail.textContent).toContain("No checks were recorded");
+    expect(detail.textContent).toContain("empty aggregation");
   });
 
   it("totals the run's checks by verdict family in the summary tiles", async () => {

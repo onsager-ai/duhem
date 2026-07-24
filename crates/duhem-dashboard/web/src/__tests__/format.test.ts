@@ -1,7 +1,14 @@
 // Unit tests for the pure event/summary formatters (#206).
 
 import { describe, expect, it } from "vitest";
-import { describeWith, formatEvent, groupTimeline, stepStatus, summarizeCheck } from "../format";
+import {
+  assertionText,
+  describeWith,
+  formatEvent,
+  groupTimeline,
+  stepStatus,
+  summarizeCheck,
+} from "../format";
 import type { StepNode } from "../format";
 import type { CheckDetail, TraceEvent } from "../api";
 
@@ -126,7 +133,7 @@ const check = (verdict: CheckDetail["verdict"], timeline: TraceEvent[]): CheckDe
 });
 
 describe("groupTimeline", () => {
-  it("folds a step's lifecycle into one node, keeps check-level events standalone", () => {
+  it("folds a step's lifecycle + its trailing capture into one node; check-level events standalone", () => {
     const events: TraceEvent[] = [
       ev("step_started", { step_index: 0, uses: "ui/navigate" }, 1),
       ev("step_finished", { step_index: 0, outcome: "ok" }, 2),
@@ -134,20 +141,22 @@ describe("groupTimeline", () => {
       ev("step_observation", { step_index: 1, output_name: "satisfied", value: false }, 4),
       ev("step_finished", { step_index: 1, outcome: "ok" }, 5),
       ev("assertion_evaluated", { state: "fail", detail: "x" }, 6),
-      // Capture observations are emitted after the assertion, once the
-      // step group has closed — they must stay standalone.
+      // A capture blob observation is emitted after the step closed, but
+      // carries a step_index → it nests back onto step 1 (#280 polish).
       ev("step_observation", { step_index: 1, output_name: "capture/screenshot", blob_sha256: "abc" }, 7),
       ev("check_finished", { verdict: "fail" }, 8),
     ];
     const nodes = groupTimeline(events);
-    expect(nodes.map((n) => n.kind)).toEqual(["step", "step", "event", "event", "event"]);
+    // The capture (seq 7) folds onto step 1; the assertion (no
+    // step_index) and the verdict stay standalone.
+    expect(nodes.map((n) => n.kind)).toEqual(["step", "step", "event", "event"]);
     const step1 = nodes[1];
     if (step1.kind !== "step") throw new Error("expected step");
     expect(step1.stepIndex).toBe(1);
-    expect(step1.events.map((e) => e.seq)).toEqual([3, 4, 5]);
-    const trailingCapture = nodes[3];
-    if (trailingCapture.kind !== "event") throw new Error("expected event");
-    expect(trailingCapture.event.seq).toBe(7);
+    expect(step1.events.map((e) => e.seq)).toEqual([3, 4, 5, 7]);
+    // The first standalone event is the un-indexed assertion, not a capture.
+    if (nodes[2].kind !== "event") throw new Error("expected event");
+    expect(nodes[2].event.seq).toBe(6);
   });
 
   it("returns a flat list when there are no steps", () => {
@@ -245,6 +254,60 @@ describe("stepStatus (#280 status propagation)", () => {
   });
 });
 
+describe("assertionText (#279 follow-up)", () => {
+  it("combines the authored expression and the observed detail", () => {
+    expect(
+      assertionText(
+        ev("assertion_evaluated", {
+          expr: "$steps.update.outputs.status == 200",
+          detail: "actual 500, expected 200",
+        }),
+      ),
+    ).toBe("$steps.update.outputs.status == 200 — actual 500, expected 200");
+  });
+  it("falls back to detail alone (an implicit judgment has no authored line)", () => {
+    expect(assertionText(ev("assertion_evaluated", { detail: 'expected text "Manager" to be absent' }))).toBe(
+      'expected text "Manager" to be absent',
+    );
+  });
+  it("falls back to expr alone (a passing explicit assertion has no detail)", () => {
+    expect(assertionText(ev("assertion_evaluated", { expr: "$steps.q.outputs.status == 200" }))).toBe(
+      "$steps.q.outputs.status == 200",
+    );
+  });
+});
+
+describe("explicit assertion folds onto its step (#279 follow-up)", () => {
+  it("paints an api step red and shows the expression as the reason", () => {
+    const events: TraceEvent[] = [
+      ev("step_started", { step_index: 0, uses: "api/call" }, 1),
+      ev("step_observation", { step_index: 0, output_name: "status", value: 500 }, 2),
+      ev("step_finished", { step_index: 0, outcome: "ok" }, 3),
+      ev(
+        "assertion_evaluated",
+        {
+          state: "fail",
+          expr: "$steps.update.outputs.status == 200",
+          detail: "actual 500, expected 200",
+          step_index: 0,
+        },
+        4,
+      ),
+      ev("check_finished", { verdict: "fail" }, 5),
+    ];
+    const nodes = groupTimeline(events);
+    // The assertion folded away; only the step + verdict remain at top.
+    expect(nodes.map((n) => n.kind)).toEqual(["step", "event"]);
+    const step = nodes[0];
+    if (step.kind !== "step") throw new Error("expected step");
+    const s = stepStatus(step);
+    // The api call "ran" (step ok) but its assertion failed → step failed.
+    expect(s.label).toBe("step failed");
+    expect(s.tone).toBe("fail");
+    expect(s.reason).toBe("$steps.update.outputs.status == 200 — actual 500, expected 200");
+  });
+});
+
 describe("summarizeCheck", () => {
   it("states a pass with the assertion count", () => {
     const s = summarizeCheck(
@@ -260,7 +323,9 @@ describe("summarizeCheck", () => {
       check("fail", [ev("assertion_evaluated", { state: "fail", detail: "actual false, expected true" })]),
     );
     expect(s.headline).toContain("failed");
-    expect(s.failing).toEqual(["actual false, expected true"]);
+    expect(s.failing).toEqual([
+      { expr: undefined, detail: "actual false, expected true" },
+    ]);
   });
 
   it("names the cause on an inconclusive", () => {

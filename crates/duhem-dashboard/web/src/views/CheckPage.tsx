@@ -7,14 +7,77 @@ import { ChevronDown, ChevronRight, Maximize2, Minimize2, X } from "lucide-react
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { fetchCheck, type ArtifactRef, type CheckDetail, type SpanModel, type TraceEvent } from "../api";
-import { VerdictBadge, isImageArtifact } from "../ui";
+import { VerdictBadge, formatDuration, isImageArtifact } from "../ui";
 import { compactValue, formatEvent, groupTimeline, parseComparison, stepStatus, summarizeCheck, type TimelineNode } from "../format";
 import { EventIcon } from "../components/EventIcon";
 import { RunScaffold } from "./RunScaffold";
 import { useVd } from "./definition-context";
 
+// The check's wall-clock span — first recorded event to last.
+function checkDurationMs(timeline: TraceEvent[]): number | null {
+  if (timeline.length < 2) return null;
+  const a = Date.parse(timeline[0].ts);
+  const b = Date.parse(timeline[timeline.length - 1].ts);
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  return b - a;
+}
+
 // Plain-language "what happened", derived mechanically from the
 // recorded timeline (never re-judged, never LLM-authored).
+function failureParts(detail: string): {
+  expected?: string;
+  observed?: string;
+  reason?: string;
+} {
+  const comparison = parseComparison(detail);
+  if (comparison) {
+    return { expected: comparison.expected, observed: comparison.actual };
+  }
+  const semantic = /^expected (.+?)(?:,\s+but|\s+but)\s+(.+)$/s.exec(detail);
+  if (semantic) {
+    return { expected: semantic[1], observed: semantic[2] };
+  }
+  return { reason: detail };
+}
+
+function FailureBreakdown({
+  detail,
+  expr,
+  compact = false,
+}: {
+  detail: string;
+  expr?: string;
+  compact?: boolean;
+}) {
+  const parts = failureParts(detail);
+  return (
+    <div className={`failure-breakdown${compact ? " compact" : ""}`}>
+      {expr && (
+        <code className="failure-rule" data-testid="assert-expr">
+          {expr}
+        </code>
+      )}
+      {parts.expected !== undefined && (
+        <dl className="failure-values" data-testid="assert-cmp">
+          <div>
+            <dt>Expected</dt>
+            <dd>{parts.expected}</dd>
+          </div>
+          <div className="failure-observed">
+            <dt>Observed</dt>
+            <dd>{parts.observed}</dd>
+          </div>
+        </dl>
+      )}
+      {parts.reason && (
+        <p className="failure-reason" data-testid="assert-reason">
+          {parts.reason}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function CheckSummary({ detail }: { detail: CheckDetail }) {
   const s = summarizeCheck(detail);
   const tone =
@@ -23,11 +86,14 @@ export function CheckSummary({ detail }: { detail: CheckDetail }) {
     <div className={`check-summary tone-${tone}`} data-testid="check-summary">
       <p className="summary-headline">{s.headline}</p>
       {s.failing.length > 0 && (
-        <ul className="summary-failing">
-          {s.failing.map((line, i) => (
-            <li key={i}>{line}</li>
+        <ol className="summary-failing">
+          {s.failing.map((failure, i) => (
+            <li key={i} className="failure-card">
+              <span className="failure-index">Assertion {i + 1}</span>
+              <FailureBreakdown detail={failure.detail} expr={failure.expr} />
+            </li>
           ))}
-        </ul>
+        </ol>
       )}
     </div>
   );
@@ -40,31 +106,10 @@ export function CheckSummary({ detail }: { detail: CheckDetail }) {
 // (the `actual` carries the fail accent), or the verbatim detail for a
 // non-comparison outcome (an inconclusive cause, a freeform judgment).
 function AssertionDetail({ expr, detail }: { expr?: string; detail: string }) {
-  const cmp = parseComparison(detail);
   return (
-    <span className="assert-detail">
-      {expr && (
-        <code className="assert-expr" data-testid="assert-expr">
-          {expr}
-        </code>
-      )}
-      {cmp ? (
-        <span className="assert-cmp" data-testid="assert-cmp">
-          <span className="assert-cell assert-expected">
-            <span className="assert-k">expected</span>
-            <code className="assert-v">{cmp.expected}</code>
-          </span>
-          <span className="assert-cell assert-actual">
-            <span className="assert-k">actual</span>
-            <code className="assert-v">{cmp.actual}</code>
-          </span>
-        </span>
-      ) : detail ? (
-        <span className="assert-reason" data-testid="assert-reason">
-          {detail}
-        </span>
-      ) : null}
-    </span>
+    <div className="assert-detail" data-testid="assert-detail">
+      <FailureBreakdown detail={detail} expr={expr} compact />
+    </div>
   );
 }
 
@@ -140,6 +185,127 @@ function TimelineRow({
   );
 }
 
+// Pretty-print a value for the request/response inspector: JSON strings
+// and objects are re-indented; anything else is shown as-is.
+function pretty(v: unknown): string {
+  if (typeof v === "string") {
+    try {
+      return JSON.stringify(JSON.parse(v), null, 2);
+    } catch {
+      return v;
+    }
+  }
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
+}
+
+// Request/response inspector for an `api/*` (or `db/*`) step — the method
+// · url · response status on one line, with the request and response
+// bodies pretty-printed and collapsible (the response opens on a 4xx/5xx
+// so the failure body — often the root cause — is right there). Reads the
+// request from the step's `with:` and the response from its observations;
+// returns null for a step that isn't an HTTP exchange.
+function ApiExchange({ node }: { node: Extract<TimelineNode, { kind: "step" }> }) {
+  const started = node.events[0];
+  const w =
+    started.with && typeof started.with === "object"
+      ? (started.with as Record<string, unknown>)
+      : {};
+  const obs = (name: string): unknown =>
+    node.events.find(
+      (e) =>
+        (e.kind === "step_observation" || e.kind === "setup_step_observation") &&
+        e.output_name === name,
+    )?.value;
+  const method = typeof w.method === "string" ? w.method : undefined;
+  const url = typeof w.url === "string" ? w.url : undefined;
+  const reqBody = w.body;
+  const status = obs("status");
+  const respBody = obs("body") ?? obs("body_text");
+  if (url === undefined && status === undefined) return null;
+  const bad = typeof status === "number" && status >= 400;
+  return (
+    <div className="api-exchange" data-testid="api-exchange">
+      <div className="ax-line">
+        {method && <span className="ax-method">{method}</span>}{" "}
+        {url && <span className="ax-url">{url}</span>}
+        {status !== undefined && (
+          <span className={`ax-status ${bad ? "bad" : "ok"}`}>{String(status)}</span>
+        )}
+      </div>
+      {reqBody !== undefined && reqBody !== null && reqBody !== "" && (
+        <details className="ax-body">
+          <summary>request body</summary>
+          <pre>{pretty(reqBody)}</pre>
+        </details>
+      )}
+      {respBody !== undefined && respBody !== null && respBody !== "" && (
+        <details className="ax-body" open={bad}>
+          <summary>response body</summary>
+          <pre>{pretty(respBody)}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+// Evidence captured on this step (#280 polish): screenshot / DOM /
+// network / video blobs recorded as `capture/*` observations, nested
+// under the step that produced them (Allure-style) instead of a side
+// panel — reusing the same viewers.
+function StepCaptures({
+  node,
+  artifacts,
+}: {
+  node: Extract<TimelineNode, { kind: "step" }>;
+  artifacts: ArtifactRef[];
+}) {
+  const caps = node.events
+    .filter(
+      (e) =>
+        (e.kind === "step_observation" || e.kind === "setup_step_observation") &&
+        typeof e.blob_sha256 === "string" &&
+        typeof e.output_name === "string" &&
+        (e.output_name as string).startsWith("capture/"),
+    )
+    .map((e) => ({
+      kind: e.output_name as string,
+      art: artifacts.find((a) => a.id === e.blob_sha256),
+    }))
+    .filter((c): c is { kind: string; art: ArtifactRef } => c.art !== undefined);
+  if (caps.length === 0) return null;
+  // The target-rect capture is an overlay input for the screenshot, not a
+  // row of its own (mirrors the old Artifacts panel).
+  const shot = caps.find((c) => isImageArtifact(c.art.kind, c.art.url));
+  const rectsUrl = shot
+    ? caps.find((c) => c.kind === "capture/target-rect")?.art.url
+    : undefined;
+  const shown = shot ? caps.filter((c) => c.kind !== "capture/target-rect") : caps;
+  return (
+    <div className="step-captures" data-testid="step-captures">
+      {shown.map((c) => (
+        <div className="artifact" key={c.art.id}>
+          <p className="kv">
+            <strong>{artifactLabel(c.art.kind)}</strong> ·{" "}
+            <a href={c.art.url} target="_blank" rel="noreferrer">
+              open
+            </a>
+          </p>
+          {isImageArtifact(c.art.kind, c.art.url) && (
+            <ScreenshotArtifact artifact={c.art} rectsUrl={rectsUrl} />
+          )}
+          {c.kind === "capture/network" && <HarTable url={c.art.url} />}
+          {c.kind === "capture/dom" && <DomViewer url={c.art.url} />}
+          {c.kind === "capture/video" && <VideoArtifact artifact={c.art} />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // A step's lifecycle collapsed into one row: the action + its
 // status-propagated outcome + observation count as the summary, its
 // observations one click away. A judging step's implicit verdict (#280)
@@ -173,6 +339,16 @@ function StepGroup({
       value: e.value,
       seq: e.seq,
     }));
+  // Non-capture blob observations (for example a large api/call body)
+  // still need a route to their artifact. Keep those event rows inside
+  // the expanded diagnostic subtree; capture/* blobs use the richer
+  // viewers below.
+  const blobObs = node.events.filter(
+    (e) =>
+      (e.kind === "step_observation" || e.kind === "setup_step_observation") &&
+      typeof e.blob_sha256 === "string" &&
+      !(typeof e.output_name === "string" && e.output_name.startsWith("capture/")),
+  );
   const fe = formatEvent(started, prevOf(started));
   const status = stepStatus(node);
   // Overlay the authored step `id` from the recorded VD snapshot (#302):
@@ -184,14 +360,23 @@ function StepGroup({
   const stepId = vd?.stepId(cid, chid, node.stepIndex);
   const label = stepId ?? fe.label;
   const detailText = stepId ? [fe.label, fe.detail].filter(Boolean).join(" · ") : fe.detail;
+  const statusObs = scalarObs.find(
+    (observation) => observation.name === "status" && typeof observation.value === "number",
+  );
+  const httpStatus = statusObs?.value as number | undefined;
+  const judgmentExpr =
+    typeof node.judgment?.expr === "string" ? node.judgment.expr : undefined;
+  const judgmentDetail =
+    typeof node.judgment?.detail === "string" ? node.judgment.detail : status.reason;
   return (
     <li className={`ev step-group tone-${status.tone}`} data-testid="step-group">
       <details open={status.failed}>
         <summary>
-          {/* Primary line: what the step did + whether it ran ok. */}
+          {/* Primary line: status icon + action. Successful steps rely on
+              the green check alone; only exceptional outcomes need text. */}
           <span className="ev-row">
             <span className="ev-icon">
-              <EventIcon name={fe.icon} />
+              <EventIcon name={status.icon} />
             </span>
             <span className="ev-label">{label}</span>
             <span className="ev-detail">
@@ -200,10 +385,19 @@ function StepGroup({
                   {detailText}
                 </span>
               )}
-              <span className={`step-outcome tone-${status.tone}`} data-testid="step-outcome">
-                <EventIcon name={status.icon} />
-                {status.label}
-              </span>
+              {httpStatus !== undefined && (
+                <span
+                  className={`api-status ${httpStatus >= 400 ? "bad" : "ok"}`}
+                  data-testid="api-status"
+                >
+                  → {httpStatus}
+                </span>
+              )}
+              {status.tone !== "ok" && (
+                <span className={`step-outcome tone-${status.tone}`} data-testid="step-outcome">
+                  {status.label.replace(/^step /, "")}
+                </span>
+              )}
             </span>
             <span className="ev-time" title={started.ts}>
               {fe.delta ?? ""}
@@ -231,21 +425,43 @@ function StepGroup({
               )}
               {status.reason && (
                 <span className="step-reason" data-testid="step-reason">
-                  {status.reason}
+                  <FailureBreakdown
+                    detail={judgmentDetail}
+                    expr={judgmentExpr}
+                    compact
+                  />
                 </span>
               )}
             </span>
           )}
         </summary>
-        <ol className="timeline step-inner">
-          {/* The full step detail — started (with its args), each
-              observation, finished (with its outcome), and the folded
-              implicit judgment — each row keeps its own raw toggle, so
-              nothing is unreachable. */}
-          {node.events.map((e) => (
-            <TimelineRow key={e.seq} evt={e} prev={prevOf(e)} artifacts={artifacts} />
-          ))}
-        </ol>
+        <div className="step-body">
+          {/* For an api/db step, a legible request/response inspector —
+              method · url · status + pretty-printed bodies — nested under
+              the step (the api analogue of a screenshot attachment). */}
+          <ApiExchange node={node} />
+          {/* ui evidence (screenshot / DOM / network / video) nested under
+              the step that captured it, not a side panel. */}
+          <StepCaptures node={node} artifacts={artifacts} />
+          {blobObs.length > 0 && (
+            <ol className="step-blob-events" data-testid="step-blob-events">
+              {blobObs.map((event) => (
+                <TimelineRow
+                  key={event.seq}
+                  evt={event}
+                  prev={prevOf(event)}
+                  artifacts={artifacts}
+                />
+              ))}
+            </ol>
+          )}
+          {/* Lifecycle events are one diagnostic subtree, not a repeated
+              started/observed/finished mini-timeline. */}
+          <details className="step-raw">
+            <summary>Raw step data · {node.events.length} events</summary>
+            <pre>{JSON.stringify(node.events, null, 2)}</pre>
+          </details>
+        </div>
       </details>
     </li>
   );
@@ -286,23 +502,40 @@ export function SpanChain({ spans }: { spans: SpanModel[] }) {
       </p>
     );
   }
+  const groups = spans.reduce<
+    { seq: number; layer: string; ok: boolean; detail?: string; count: number }[]
+  >((acc, span) => {
+    const last = acc[acc.length - 1];
+    if (last?.layer === span.layer) {
+      last.count += 1;
+      last.ok = last.ok && span.ok;
+      if (!span.ok && !last.detail) last.detail = span.detail;
+    } else {
+      acc.push({ ...span, count: 1 });
+    }
+    return acc;
+  }, []);
   return (
-    <p className="spanchain" data-testid="spanchain">
-      <span className="muted">delivery web: </span>
-      {spans.map((s, i) => (
-        <span key={s.seq}>
-          {i > 0 && <ChevronRight className="span-sep" aria-hidden="true" />}
-          <span
-            className={`span-node ${s.ok ? "span-ok" : "span-fail"}`}
-            title={`step evidence #${s.seq}${s.detail ? ` — ${s.detail}` : ""}`}
-          >
-            {s.layer}
-            {!s.ok && <X className="span-x" aria-hidden="true" />}
-            {!s.ok && s.detail ? s.detail : ""}
+    <div className="spanchain" data-testid="spanchain">
+      <span className="span-label">Delivery web</span>
+      <span className="span-path">
+        {groups.map((s, i) => (
+          <span className="span-segment" key={s.seq}>
+            {i > 0 && <ChevronRight className="span-sep" aria-hidden="true" />}
+            <span
+              className={`span-node ${s.ok ? "span-ok" : "span-fail"}`}
+              title={`${s.count} step${s.count === 1 ? "" : "s"}${
+                s.detail ? ` — ${s.detail}` : ""
+              }`}
+            >
+              {s.layer}
+              {s.count > 1 && <span className="span-count">{s.count} steps</span>}
+              {!s.ok && <X className="span-x" aria-hidden="true" />}
+            </span>
           </span>
-        </span>
-      ))}
-    </p>
+        ))}
+      </span>
+    </div>
   );
 }
 
@@ -722,11 +955,24 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
             {critDesc}
           </p>
         )}
+        <p className="kv check-meta" data-testid="check-meta">
+          {(() => {
+            const duration = checkDurationMs(check.timeline);
+            const steps = check.timeline.filter((event) => event.kind === "step_started").length;
+            const layers = new Set(check.spans.map((span) => span.layer)).size;
+            return [
+              duration !== null ? `⏱ ${formatDuration(duration)}` : null,
+              `${steps} step${steps === 1 ? "" : "s"}`,
+              layers > 0 ? `${layers} layer${layers === 1 ? "" : "s"}` : null,
+            ].filter(Boolean).join(" · ");
+          })()}
+        </p>
         <SpanChain spans={check.spans} />
         <CheckSummary detail={check} />
+        {/* Captures now nest under the step that produced them (see
+            StepCaptures); no separate Artifacts panel. */}
         <Timeline events={check.timeline} artifacts={check.artifacts} />
       </div>
-      <Artifacts artifacts={check.artifacts} />
     </>
   );
 }

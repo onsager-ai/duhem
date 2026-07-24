@@ -1,11 +1,12 @@
 //! Engine-facing outcome + error types (split from `runner.rs` for
 //! the file-token budget).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use duhem_actions::{ActionError, ExistenceState, Locator};
 use duhem_evidence::{EventPayload, EvidenceWriter, StoreError, VerdictState, WriterError};
 use duhem_judge::{AssertionOutcome, InconclusiveCause, RunVerdict};
+use duhem_schema::{Expr, PathRoot};
 use thiserror::Error;
 
 use crate::engine::context::RunContext;
@@ -314,6 +315,11 @@ pub(crate) async fn evaluate_explicit_assertions(
 ) -> Result<(), EngineError> {
     for (i, assertion) in check.assertions.iter().enumerate() {
         let expr = assertion_to_expr(assertion);
+        // The step this assertion is *about*, when it references exactly
+        // one — so the reporter folds it onto that step and paints it
+        // (an explicit `$steps.update.outputs.status == 200` IS about the
+        // `update` step, #279 follow-up).
+        let step_index = owning_step_index(&expr, check);
         let (state, detail) = if any_unknown {
             (
                 VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
@@ -346,12 +352,12 @@ pub(crate) async fn evaluate_explicit_assertions(
                 assertion_index: i as u32,
                 state,
                 detail: detail.clone(),
-                // The human-authored rule this outcome evaluated, so a
-                // reporter can show *what was asserted* (#284 follow-up).
+                // Folds onto its step when the assertion references
+                // exactly one; else standalone (zero/many steps).
+                step_index,
+                // Carry the authored line so the reporter shows *what*
+                // was asserted, not just the observed values.
                 expr: Some(assertion.display()),
-                // Explicit `assertions:` may reference zero or many
-                // steps — no single owning step to link.
-                step_index: None,
             })
             .await?;
         if !matches!(state, VerdictState::Pass) {
@@ -368,6 +374,58 @@ pub(crate) async fn evaluate_explicit_assertions(
         });
     }
     Ok(())
+}
+
+/// Collect the distinct `$steps.<id>` step ids referenced anywhere in an
+/// assertion expression (walks operands, call args, and both sides of a
+/// comparison).
+fn steps_referenced(expr: &Expr, out: &mut BTreeSet<String>) {
+    match expr {
+        Expr::Path(p) => {
+            if matches!(p.root, PathRoot::Steps)
+                && let Some(id) = p.segments.first()
+            {
+                out.insert(id.clone());
+            }
+        }
+        Expr::Call { path, args } => {
+            if matches!(path.root, PathRoot::Steps)
+                && let Some(id) = path.segments.first()
+            {
+                out.insert(id.clone());
+            }
+            for a in args {
+                steps_referenced(a, out);
+            }
+        }
+        Expr::BinOp { lhs, rhs, .. } => {
+            steps_referenced(lhs, out);
+            steps_referenced(rhs, out);
+        }
+        Expr::UnaryOp { expr, .. } => steps_referenced(expr, out),
+        Expr::Lit(_) => {}
+    }
+}
+
+/// If an explicit assertion references exactly one step (`$steps.<id>`),
+/// return that step's 0-based index in the check — so the reporter folds
+/// the assertion onto its step and propagates status (an assertion on a
+/// single step's output IS about that step). Assertions that touch zero
+/// or many steps (a literal comparison, a cross-step comparison) return
+/// `None` and stay standalone. A reference to an `id`-less step (no
+/// `$steps.<id>` can name it) also yields `None`.
+fn owning_step_index(expr: &Expr, check: &duhem_schema::Check) -> Option<u32> {
+    let mut refs = BTreeSet::new();
+    steps_referenced(expr, &mut refs);
+    if refs.len() != 1 {
+        return None;
+    }
+    let only = refs.iter().next()?;
+    check
+        .steps
+        .iter()
+        .position(|s| s.id.as_deref() == Some(only.as_str()))
+        .map(|i| i as u32)
 }
 
 /// Emit the implicit-judgment outcomes as `AssertionEvaluated` events
@@ -613,5 +671,44 @@ mod fail_detail_tests {
             judging_fail_detail(&s, &e, "ui/assert-element #7"),
             "actual false, expected true (implicit `satisfied` of step `ui/assert-element #7`)",
         );
+    }
+}
+
+#[cfg(test)]
+mod step_correlation_tests {
+    use super::*;
+
+    fn check(yaml: &str) -> duhem_schema::Check {
+        serde_yml::from_str(yaml).expect("check")
+    }
+
+    #[test]
+    fn explicit_assertion_on_one_step_folds_onto_it() {
+        // `$steps.update.outputs.status == 200` is about the `update`
+        // step (index 1) → folds onto it (#279 follow-up), so the api
+        // call that 500'd goes red instead of a green "step ok".
+        let c = check(
+            "id: AC-1\nsteps:\n  - { id: login, uses: api/call }\n  - { id: update, uses: api/call }\nassertions:\n  - \"$steps.update.outputs.status == 200\"\n",
+        );
+        let e = assertion_to_expr(&c.assertions[0]);
+        assert_eq!(owning_step_index(&e, &c), Some(1));
+    }
+
+    #[test]
+    fn literal_only_assertion_folds_nowhere() {
+        let c =
+            check("id: AC-1\nsteps:\n  - { id: a, uses: api/call }\nassertions:\n  - \"1 == 1\"\n");
+        let e = assertion_to_expr(&c.assertions[0]);
+        assert_eq!(owning_step_index(&e, &c), None);
+    }
+
+    #[test]
+    fn cross_step_comparison_stays_standalone() {
+        // Two distinct steps referenced → no single owner → standalone.
+        let c = check(
+            "id: AC-1\nsteps:\n  - { id: a, uses: api/call }\n  - { id: b, uses: api/call }\nassertions:\n  - \"$steps.a.outputs.id == $steps.b.outputs.id\"\n",
+        );
+        let e = assertion_to_expr(&c.assertions[0]);
+        assert_eq!(owning_step_index(&e, &c), None);
     }
 }

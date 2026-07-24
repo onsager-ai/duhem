@@ -51,6 +51,21 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+/**
+ * The human line for an assertion outcome — the authored expression AND
+ * the observed-vs-expected detail (#279 follow-up), e.g.
+ * `$steps.update.outputs.status == 200 — actual 500, expected 200`. Shows
+ * *what* was asserted, not just the values. Falls back to whichever is
+ * present (implicit judgments carry only a semantic `detail`; a passing
+ * explicit assertion carries only the `expr`).
+ */
+export function assertionText(evt: TraceEvent): string {
+  const expr = str(evt.expr);
+  const detail = str(evt.detail);
+  if (expr && detail) return `${expr} — ${detail}`;
+  return detail || expr || "";
+}
+
 /** Compact one-line value for an inline observation or arg scalar. */
 export function compactValue(v: unknown): string {
   if (v === null) return "null";
@@ -250,8 +265,8 @@ export interface CheckSummaryModel {
   verdict: CheckDetail["verdict"];
   /** Plain-language "what happened" line. */
   headline: string;
-  /** For a non-pass, the recorded failing-assertion detail lines. */
-  failing: string[];
+  /** For a non-pass, each recorded rule and its mechanical outcome. */
+  failing: { expr?: string; detail: string }[];
 }
 
 /**
@@ -263,7 +278,10 @@ export function summarizeCheck(detail: CheckDetail): CheckSummaryModel {
   const assertions = detail.timeline.filter((e) => e.kind === "assertion_evaluated");
   const failing = assertions
     .filter((e) => str(e.state) !== "pass")
-    .map((e) => str(e.detail) || str(e.state) || "no detail recorded");
+    .map((e) => ({
+      expr: str(e.expr),
+      detail: str(e.detail) || str(e.state) || "no detail recorded",
+    }));
 
   const v = detail.verdict;
   let headline: string;
@@ -343,30 +361,49 @@ export function groupTimeline(events: TraceEvent[]): TimelineNode[] {
     nodes.push({ kind: "event", key: `e${evt.seq}`, event: evt });
   }
   flush();
-  return foldImplicitJudgments(nodes);
+  return foldOntoSteps(nodes);
 }
 
 /**
- * Second pass (#280): fold each implicit-judgment assertion — an
- * `assertion_evaluated` carrying a numeric `step_index` — back onto its
- * step node, so the step propagates the verdict (Allure-style status
- * bubbling) and the assertion isn't an orphan row. The event stays
- * reachable inside the step (its raw is one click away). An explicit
- * assertion (no `step_index`) or one whose step can't be found stays a
- * standalone row.
+ * Second pass (#280): fold each step-owned event back onto its step node
+ * — an `assertion_evaluated` carrying a numeric `step_index` (so the step
+ * propagates the verdict, Allure-style), and a trailing `capture/*` blob
+ * observation (so its screenshot / DOM / network evidence nests under the
+ * step that produced it, not in a side panel). Folded events stay
+ * reachable inside the step; an event with no `step_index`, or whose step
+ * can't be found, stays a standalone row.
  */
-function foldImplicitJudgments(nodes: TimelineNode[]): TimelineNode[] {
+function foldOntoSteps(nodes: TimelineNode[]): TimelineNode[] {
   const stepByIndex = new Map<number, StepNode>();
   for (const n of nodes) if (n.kind === "step") stepByIndex.set(n.stepIndex, n);
   const out: TimelineNode[] = [];
   for (const n of nodes) {
-    if (n.kind === "event" && n.event.kind === "assertion_evaluated") {
-      const si = n.event.step_index;
-      if (typeof si === "number") {
-        const target = stepByIndex.get(si);
+    if (n.kind === "event") {
+      const e = n.event;
+      if (e.kind === "assertion_evaluated" && typeof e.step_index === "number") {
+        const target = stepByIndex.get(e.step_index);
         if (target) {
-          target.judgment = n.event;
-          target.events.push(n.event);
+          // A step may own several assertions (an explicit check can
+          // assert two things about one call). A failing one wins for the
+          // step's status/reason; otherwise keep the first.
+          const prev = target.judgment;
+          const isFail = str(e.state) !== "pass";
+          if (!prev || (isFail && str(prev.state) === "pass")) {
+            target.judgment = e;
+          }
+          target.events.push(e);
+          continue;
+        }
+      }
+      // A trailing capture blob observation nests under its step.
+      if (
+        (e.kind === "step_observation" || e.kind === "setup_step_observation") &&
+        typeof e.blob_sha256 === "string" &&
+        typeof e.step_index === "number"
+      ) {
+        const target = stepByIndex.get(e.step_index);
+        if (target) {
+          target.events.push(e);
           continue;
         }
       }
@@ -392,7 +429,7 @@ export function stepStatus(node: StepNode): {
   failed: boolean;
 } {
   const jstate = node.judgment ? (str(node.judgment.state) ?? "") : "";
-  const reason = node.judgment ? (str(node.judgment.detail) ?? "") : "";
+  const reason = node.judgment ? assertionText(node.judgment) : "";
   if (jstate === "fail") {
     return { icon: "fail", label: "step failed", tone: "fail", reason, failed: true };
   }

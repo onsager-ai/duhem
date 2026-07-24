@@ -26,14 +26,18 @@ at runtime.
 ### Start branch work in a worktree
 
 ```sh
-git worktree add ../<repo>-wt/<branch> -b <branch>
-# open a Claude session in that directory
+just worktree-add <branch>
+# `worktree-add` prints the path; enter it, then use the normal commands:
+just dev  # or: just build / just lint / just test
+# open an agent session in that directory
 # when done:  git worktree remove ../<repo>-wt/<branch>
 ```
 
 ### Scope & guarantees
-- **Claude Code only.** Humans and other harnesses (Codex, OpenCode, …) are
-  unaffected — git has no `pre-checkout` hook, so this can't be enforced there.
+- **Executable enforcement is Claude Code only.** Git has no `pre-checkout`
+  hook, so other harnesses cannot use this hook directly. Codex receives the
+  equivalent primary-checkout/worktree rule through the root `AGENTS.md`
+  (`CLAUDE.md` is its source); humans and other harnesses remain unaffected.
 - **Fail-open.** If `python3` is missing or anything errors, the command is
   allowed; the guard never bricks Bash.
 - **Override:** prefix `ALLOW_BRANCH_SWITCH=1` for the rare legitimate in-place

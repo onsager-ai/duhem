@@ -82,6 +82,9 @@ function describeLocator(loc: Record<string, unknown>): string {
   const parts: string[] = [];
   if (str(loc.role)) parts.push(`role=${loc.role}`);
   if (str(loc.name)) parts.push(`name "${loc.name}"`);
+  if (str(loc.label)) parts.push(`label "${loc.label}"`);
+  if (str(loc.testid)) parts.push(`testid "${loc.testid}"`);
+  if (str(loc.placeholder)) parts.push(`placeholder "${loc.placeholder}"`);
   if (str(loc.text)) parts.push(`text "${loc.text}"`);
   if (str(loc.css)) parts.push(`css ${loc.css}`);
   if (loc.scope && typeof loc.scope === "object") {
@@ -99,8 +102,28 @@ export function describeWith(withObj: unknown): string {
   if (str(w.method) && str(w.url) === undefined) parts.push(w.method as string);
   if (w.locator && typeof w.locator === "object") {
     parts.push(describeLocator(w.locator as Record<string, unknown>));
+  } else {
+    // `ui/click` keeps locator fields inline for backward compatibility
+    // (`with: { role: button, name: Save }`) while the other UI actions
+    // nest them under `locator`. Normalize both shapes into the same
+    // target phrase so every action row aligns and identifies its target.
+    const locatorKeys = [
+      "role",
+      "label",
+      "testid",
+      "placeholder",
+      "css",
+      "name",
+      "text",
+      "scope",
+    ];
+    const inlineLocator = Object.fromEntries(
+      locatorKeys.filter((key) => w[key] !== undefined).map((key) => [key, w[key]]),
+    );
+    if (Object.keys(inlineLocator).length > 0) {
+      parts.push(describeLocator(inlineLocator));
+    }
   }
-  if (str(w.text) && !w.locator) parts.push(`"${w.text}"`);
   if (str(w.expected)) parts.push(String(w.expected));
   if (str(w.within)) parts.push(`within ${w.within}`);
   if (parts.length === 0) {

@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import RunsList, { matchesFilters } from "../views/RunsList";
+import RunsList, { matchesFilters, triageRank } from "../views/RunsList";
 import { RunsProvider } from "../runs-context";
 import {
   Artifacts,
@@ -20,9 +20,9 @@ import type { RunsListEntry, TraceEvent } from "../api";
 
 // RunsList now reads the shared runs context; the provider fetches via the
 // stubbed global fetch, so wrapping it feeds the same entries.
-function renderRuns(ui: ReactElement) {
+function renderRuns(ui: ReactElement, path = "/runs") {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <RunsProvider>{ui}</RunsProvider>
     </MemoryRouter>,
   );
@@ -69,7 +69,7 @@ describe("RunsList", () => {
     );
   });
 
-  it("renders many rows including nested run-set leaves and a live badge", async () => {
+  it("defaults to a flat newest-first view including run-set leaves", async () => {
     stubRuns([
       {
         ...leaf("login", "fail"),
@@ -80,14 +80,63 @@ describe("RunsList", () => {
     ]);
     const { container } = renderRuns(<RunsList />);
     await waitFor(() => expect(screen.getByText("01JRUNC")).toBeTruthy());
-    expect(screen.queryByText("01JRUNA")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
     expect(screen.getByText("01JRUNA")).toBeTruthy();
     expect(screen.getByText("01JRUNB")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
     // The in-progress run shows a "live" verdict badge — distinct from the
     // "live" filter chip in the toolbar, so scope to badge elements.
     const badges = [...container.querySelectorAll('[data-slot="badge"]')];
     expect(badges.some((b) => b.textContent?.trim() === "live")).toBe(true);
+  });
+
+  it("preserves the collapsible server grouping in By verification", async () => {
+    stubRuns([
+      {
+        ...leaf("login", "fail"),
+        kind: "run-set",
+        children: [leaf("01JRUNA", "pass"), leaf("01JRUNB", "fail")],
+      },
+    ]);
+    renderRuns(<RunsList />, "/runs?view=verification");
+    const expand = await screen.findByRole("button", { name: "Expand" });
+    expect(screen.queryByText("01JRUNA")).toBeNull();
+    fireEvent.click(expand);
+    expect(screen.getByText("01JRUNA")).toBeTruthy();
+  });
+
+  it("orders the Triage view by live, failed, then inconclusive", async () => {
+    stubRuns([
+      leaf("pass-run", "pass"),
+      leaf("inc-run", "inconclusive:timeout"),
+      leaf("fail-run", "fail"),
+      leaf("live-run", null, true),
+    ]);
+    const { container } = renderRuns(<RunsList />, "/runs?view=triage");
+    await screen.findByTestId("triage-view");
+    const firstTable = container.querySelector('[aria-label="Runs needing attention"]');
+    const ids = [...(firstTable?.querySelectorAll("tbody a[href*='/run/']") ?? [])].map(
+      (link) => link.textContent,
+    );
+    expect(ids).toEqual(["live-run", "fail-run", "inc-run"]);
+    expect(screen.getByRole("region", { name: "Passing history" })).toBeTruthy();
+  });
+
+  it("switches view without dropping filters from the URL state", async () => {
+    stubRuns([leaf("01JRUNA", "pass")]);
+    renderRuns(
+      <RunsList />,
+      "/runs?verification=login&verdict=pass&from=2026-06-01",
+    );
+    const triage = await screen.findByRole("button", { name: "Triage" });
+    fireEvent.click(triage);
+    expect(triage.getAttribute("aria-pressed")).toBe("true");
+    expect((screen.getByLabelText("verification") as HTMLElement).textContent).toContain(
+      "login",
+    );
+    expect(screen.getByRole("button", { name: "pass" }).getAttribute("data-variant")).toBe(
+      "default",
+    );
+    expect((screen.getByLabelText("from") as HTMLInputElement).value).toBe("2026-06-01");
   });
 });
 
@@ -106,6 +155,19 @@ describe("matchesFilters", () => {
     expect(matchesFilters(leaf("a", "pass"), "other", [], "", "")).toBe(false);
     expect(matchesFilters(leaf("a", "pass"), "", [], "2026-06-01", "2026-06-30")).toBe(true);
     expect(matchesFilters(leaf("a", "pass"), "", [], "2026-06-11", "")).toBe(false);
+  });
+});
+
+describe("triageRank", () => {
+  it("prioritizes live, failed, and inconclusive ahead of pass", () => {
+    expect(triageRank(leaf("live", null, true))).toBe(0);
+    expect(triageRank(leaf("fail", "fail"))).toBe(1);
+    expect(triageRank(leaf("inc", "inconclusive:timeout"))).toBe(2);
+    expect(triageRank(leaf("pass", "pass"))).toBe(3);
+  });
+
+  it("keeps pending runs in the needs-attention group", () => {
+    expect(triageRank(leaf("pending", null))).toBe(2);
   });
 });
 
@@ -420,7 +482,7 @@ describe("Artifacts", () => {
     );
     render(<HarTable url="run/r/artifact/net" />);
     const table = await screen.findByTestId("har-table");
-    const rows = table.querySelectorAll("tbody tr");
+    const rows = table.querySelectorAll("tbody tr.har-row");
     expect(rows).toHaveLength(2);
     expect(rows[0].textContent).toContain("GET");
     expect(rows[1].className).toContain("har-bad");
@@ -440,7 +502,7 @@ describe("Artifacts", () => {
 // ---- #210: in-page artifact inspection -----------------------------
 
 describe("in-page inspection (#210)", () => {
-  it("expands a HAR row to its redacted headers and bodies", async () => {
+  it("opens a failing HAR row to its redacted headers and bodies", async () => {
     const har = {
       log: {
         entries: [
@@ -463,13 +525,9 @@ describe("in-page inspection (#210)", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(har), { status: 200 })));
     render(<HarTable url="run/r/artifact/net" />);
     const row = await screen.findByTestId("har-row");
-    // Collapsed: the body is not shown yet, and it's keyboard-focusable.
-    expect(screen.queryByText(/"error":"declined"/)).toBeNull();
+    // Failure-relevant response evidence is visible immediately.
     expect(row.getAttribute("role")).toBe("button");
-    expect(row.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(row);
     expect(row.getAttribute("aria-expanded")).toBe("true");
-    // Expanded: redacted header + response body are revealed from the blob.
     expect(screen.getByText("authorization")).toBeTruthy();
     expect(screen.getByText('{"error":"declined"}')).toBeTruthy();
     expect(screen.getAllByText("<redacted>").length).toBeGreaterThanOrEqual(1);
@@ -524,11 +582,51 @@ describe("in-page inspection (#210)", () => {
     // of repeating started / observed / finished rows.
     const raw = groups[0].querySelector(".step-raw pre");
     expect(raw?.textContent).toContain("ui/navigate");
+    // One step disclosure owns the whole diagnostic body; raw data is not
+    // hidden behind a second nested click.
+    expect(groups[0].querySelectorAll("details")).toHaveLength(1);
+    expect(groups[0].querySelector('[data-testid="step-raw"]')).not.toBeNull();
     // The verdict is a standalone row, never folded into a step group.
     const labels = [...container.querySelectorAll(".ev-label")]
       .filter((e) => !e.closest(".step-inner"))
       .map((e) => e.textContent);
     expect(labels).toContain("verdict: pass");
+  });
+
+  it("renders structured query results as a table inside their step", () => {
+    const events: TraceEvent[] = [
+      {
+        seq: 1,
+        ts: "t1",
+        kind: "step_started",
+        step_index: 0,
+        uses: "db/query",
+        with: { sql: "select id, state from jobs" },
+      },
+      {
+        seq: 2,
+        ts: "t2",
+        kind: "step_observation",
+        step_index: 0,
+        output_name: "rows",
+        value: [
+          { id: 7, state: "failed" },
+          { id: 8, state: "ready" },
+        ],
+      },
+      {
+        seq: 3,
+        ts: "t3",
+        kind: "step_finished",
+        step_index: 0,
+        outcome: "ok",
+      },
+    ];
+    const { getByTestId } = render(<Timeline events={events} />);
+    const output = getByTestId("structured-outputs");
+    expect(output.closest('[data-testid="step-group"]')).not.toBeNull();
+    expect(output.querySelectorAll("tbody tr")).toHaveLength(2);
+    expect(output.textContent).toContain("failed");
   });
 });
 

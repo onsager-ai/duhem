@@ -10,10 +10,10 @@
 // verifications index at `/verifications`. The evidence views
 // (run/check/diff/verification) render inside the shell.
 //
-// The run report is a tree master–detail (criteria → checks in a rail,
-// the selected node's evidence in the panel) — not the former per-run
-// tab bar. RunPage and CheckPage share the `RunScaffold` spine, so the
-// rail and run header persist while you drill from run to check.
+// The run report uses summary/results/definition tabs. Results is a
+// tree master–detail workspace (criteria → checks in a rail, selected
+// evidence in the detail pane). RunPage, ResultsPage, and CheckPage
+// share the `RunScaffold` spine so the header persists while drilling.
 
 import { HashRouter, Route, Routes } from "react-router-dom";
 
@@ -27,6 +27,7 @@ import DefinitionPage from "./views/DefinitionPage";
 import DiffPage from "./views/DiffPage";
 import Overview from "./views/Overview";
 import RunPage from "./views/RunPage";
+import ResultsPage from "./views/ResultsPage";
 import RunsList from "./views/RunsList";
 import VerificationPage from "./views/VerificationPage";
 import VerificationsList from "./views/VerificationsList";
@@ -42,6 +43,7 @@ export default function App() {
               <Route path="/runs" element={<RunsList />} />
               <Route path="/verifications" element={<VerificationsList />} />
               <Route path="/run/:runId" element={<RunPage />} />
+              <Route path="/run/:runId/results" element={<ResultsPage />} />
               <Route path="/run/:runId/criterion/:criterionId" element={<CriterionPage />} />
               <Route path="/run/:runId/check/:pair" element={<CheckPage />} />
               <Route path="/run/:runId/definition" element={<DefinitionPage />} />

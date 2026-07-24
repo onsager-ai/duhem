@@ -76,7 +76,7 @@ export function StatusDonut({ tally }: { tally: StatusTally }) {
     return arc;
   });
   return (
-    <div className="panel status-summary" data-testid="status-summary">
+    <div className="status-summary" data-testid="status-summary">
       <svg
         className="donut"
         viewBox="0 0 100 100"
@@ -183,9 +183,9 @@ function RunSummary({ run }: { run: RunDetail }) {
   const criteria = tallyCriteria(run.criteria);
   const inputs = Object.entries(run.inputs);
   return (
-    <div className="min-w-0 max-w-full space-y-6" data-testid="run-summary">
+    <div className="min-w-0 max-w-full space-y-7" data-testid="run-summary">
       {run.setup_aborted && (
-        <div className="rounded-md border border-fail/30 bg-fail/10 px-4 py-3 text-sm text-fail">
+        <div className="border-l-2 border-fail bg-fail/5 px-4 py-3 text-sm text-fail">
           Setup aborted — no checks ran. The verdict reflects the abort, not the
           artifact.
         </div>
@@ -194,14 +194,14 @@ function RunSummary({ run }: { run: RunDetail }) {
       {/* Checks and criteria use different denominators. Keep both explicit:
           criteria without checks must remain visible instead of disappearing
           into the executable-check roll-up. */}
-      <div className="space-y-5 rounded-lg border bg-card p-5">
+      <div className="space-y-5 border-y py-5">
         <StatusBreakdown label="Checks" tally={checks} />
         <div className="border-t pt-5">
           <StatusBreakdown label="Criteria" tally={criteria} />
         </div>
       </div>
 
-      <p className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+      <p className="border-l-2 border-muted-foreground/30 px-4 py-1 text-sm text-muted-foreground">
         Select a check in the criteria navigator to inspect its failed steps,
         assertions, and evidence.
       </p>
@@ -234,14 +234,14 @@ function RunSummary({ run }: { run: RunDetail }) {
       </dl>
 
       {inputs.length > 0 && (
-        <details className="min-w-0 max-w-full overflow-hidden rounded-lg border bg-card text-sm">
-          <summary className="cursor-pointer select-none px-4 py-3 font-medium hover:bg-muted/40">
+        <details className="min-w-0 max-w-full overflow-hidden border-y text-sm">
+          <summary className="cursor-pointer select-none py-3 font-medium hover:text-foreground">
             Run configuration
             <span className="ml-2 text-xs font-normal text-muted-foreground">
               {inputs.length} input{inputs.length === 1 ? "" : "s"}
             </span>
           </summary>
-          <div className="min-w-0 space-y-4 border-t p-4">
+          <div className="min-w-0 space-y-4 border-t py-4">
             <p className="text-xs text-muted-foreground">
               Exact recorded inputs for debugging and reproduction.
             </p>

@@ -9,6 +9,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import RunPage from "../views/RunPage";
 import CheckPage from "../views/CheckPage";
 import CriterionPage from "../views/CriterionPage";
+import DefinitionPage from "../views/DefinitionPage";
+import ResultsPage from "../views/ResultsPage";
 
 afterEach(() => {
   cleanup();
@@ -24,6 +26,7 @@ const RUN = {
   verdict: "fail",
   live: false,
   setup_aborted: false,
+  has_definition: true,
   criteria: [
     {
       id: "AC-5",
@@ -78,8 +81,10 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/run/:runId" element={<RunPage />} />
+        <Route path="/run/:runId/results" element={<ResultsPage />} />
         <Route path="/run/:runId/criterion/:criterionId" element={<CriterionPage />} />
         <Route path="/run/:runId/check/:pair" element={<CheckPage />} />
+        <Route path="/run/:runId/definition" element={<DefinitionPage />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -99,9 +104,9 @@ describe("run report tree", () => {
     );
   });
 
-  it("expands criteria by default and names each check link by its id", async () => {
+  it("keeps the criteria tree in Results and names each check link by its id", async () => {
     stub();
-    renderAt("/run/R1");
+    renderAt("/run/R1/results");
     const tree = await screen.findByTestId("run-tree");
     // Every check link is present without interaction, and its accessible
     // name is exactly the check id (no verdict text bleeding in).
@@ -109,6 +114,32 @@ describe("run report tree", () => {
     expect(within(tree).getByRole("link", { name: "AC-5.2" })).toBeTruthy();
     expect(within(tree).getByRole("link", { name: "AC-7.1" })).toBeTruthy();
     expect(within(tree).getByRole("link", { name: "AC-6.1" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Results" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    expect(
+      screen.getAllByTestId("check-children").every((group) =>
+        group.className.includes("ml-8"),
+      ),
+    ).toBe(true);
+  });
+
+  it("gives Summary and Definition full width without the Results tree", async () => {
+    stub();
+    const summary = renderAt("/run/R1");
+    await screen.findByTestId("run-summary");
+    expect(screen.queryByTestId("run-tree")).toBeNull();
+    expect(screen.getByRole("tab", { name: "Summary" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    summary.unmount();
+
+    renderAt("/run/R1/definition");
+    await screen.findByTestId("vd-yaml");
+    expect(screen.queryByTestId("run-tree")).toBeNull();
+    expect(
+      screen.getByRole("tab", { name: "Definition" }).getAttribute("aria-selected"),
+    ).toBe("true");
   });
 
   it("makes an inconclusive criterion with no checks navigable", async () => {
@@ -123,7 +154,7 @@ describe("run report tree", () => {
         },
       ],
     });
-    renderAt("/run/R1");
+    renderAt("/run/R1/results");
     const tree = await screen.findByTestId("run-tree");
     const criterion = within(tree).getByRole("link", { name: /AC-8/ });
     fireEvent.click(criterion);
@@ -189,7 +220,7 @@ describe("run report tree", () => {
     renderAt("/run/R1/check/AC-5%3A%3AAC-5.1");
     const tree = await screen.findByTestId("run-tree");
     expect(tree.className).toContain("max-w-full");
-    expect(tree.className).toContain("overflow-hidden");
+    expect(tree.className).toContain("overflow-x-hidden");
     const active = within(tree).getByRole("link", { name: "AC-5.1" });
     expect(active.getAttribute("aria-current")).toBe("page");
     // A sibling check is not marked active.

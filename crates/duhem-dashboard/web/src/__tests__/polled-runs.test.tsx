@@ -68,7 +68,7 @@ describe("RunsList polling (#298)", () => {
     ]);
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/runs?view=verification"]}>
         <RunsProvider>
           <RunsList />
         </RunsProvider>

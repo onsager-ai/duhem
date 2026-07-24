@@ -3,7 +3,13 @@
 set positional-arguments
 
 default:
-    @just --list
+    @printf 'Duhem development\n\n'
+    @printf '  just dev [args]  Run the CLI locally\n'
+    @printf '  just build       Build the workspace\n'
+    @printf '  just lint        Run static checks\n'
+    @printf '  just test        Run the test suite\n'
+    @printf '  just check       Run lint + test before pushing\n\n'
+    @printf 'Advanced and workspace recipes: just --list\n'
 
 # Create an isolated task worktree. Slashes in the branch name become `+`
 # only in the directory name (for example, `fix/foo` -> `fix+foo`).

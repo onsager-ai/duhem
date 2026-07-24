@@ -1,7 +1,7 @@
 // The recorded Verification Definition snapshot (#302): the raw VD YAML
-// as it was when this run was judged, rendered inside the run's tree
-// rail. Makes a run self-describing — the criteria, checks, steps, and
-// assertion rules are visible without the source file on hand.
+// as it was when this run was judged, rendered in the full-width
+// Definition tab. Makes a run self-describing — the criteria, checks,
+// steps, and assertion rules are visible without the source file on hand.
 
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -29,8 +29,8 @@ function DefinitionView({ runId }: { runId: string }) {
   }, [runId]);
 
   return (
-    <div className="panel">
-      <h2>
+    <div className="run-detail-surface">
+      <h2 className="mb-2 text-base font-semibold">
         Verification Definition <span className="muted">— recorded snapshot</span>
       </h2>
       <p className="kv">

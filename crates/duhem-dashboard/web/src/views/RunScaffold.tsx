@@ -1,16 +1,10 @@
-// The run report's shared spine: a persistent tree rail (criteria →
-// checks) beside a detail panel, under one run header carrying the
-// verdict. RunPage renders the run summary into the panel; CheckPage
-// renders a check's evidence into it — both keep the same rail, so
-// drilling from a run to one of its checks never loses the structure.
-//
-// This replaces the former per-run tab bar (#280 Overview / Suites /
-// Categories / Timeline): the tree is the navigation, the panel is the
-// content. A tree node for a check is a link whose accessible name is
-// the check id — the run's self-verification VD asserts exactly that.
+// The run report's shared workspace (#323): compact sticky run context,
+// horizontal Summary / Results / Definition tabs, and a flat split view
+// inside Results. The criteria → checks rail is deliberately scoped to
+// Results; Summary and Definition get the full content width.
 
 import { useEffect, useState, type ReactNode } from "react";
-import { ChevronRight, FileText, LayoutList } from "lucide-react";
+import { ChevronRight, FileText, ListChecks, LayoutList } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import {
@@ -73,6 +67,19 @@ function checkHref(runId: string, criterionId: string, checkId: string): string 
   return `/run/${encodeURIComponent(runId)}/check/${encodeURIComponent(
     `${criterionId}::${checkId}`,
   )}`;
+}
+
+function resultsHref(run: RunDetail): string {
+  const criterion =
+    run.criteria.find((item) => item.verdict !== "pass") ??
+    run.criteria[0];
+  if (!criterion) return `/run/${encodeURIComponent(run.run_id)}/results`;
+  const check =
+    criterion.checks.find((item) => item.verdict !== "pass") ??
+    criterion.checks[0];
+  return check
+    ? checkHref(run.run_id, criterion.id, check.id)
+    : criterionHref(run.run_id, criterion.id);
 }
 
 function criterionHref(runId: string, criterionId: string): string {
@@ -151,7 +158,10 @@ function TreeGroup({
         </Link>
       </div>
       {open && (
-        <div className="ml-3 space-y-0.5 border-l pl-2 pt-0.5">
+        <div
+          className="ml-8 space-y-0.5 border-l pl-3 pt-0.5"
+          data-testid="check-children"
+        >
           {criterion.checks.map((chk) => {
             const active = activePair === `${criterion.id}::${chk.id}`;
             const chkDesc = vd?.check(criterion.id, chk.id)?.description;
@@ -193,40 +203,23 @@ function TreeGroup({
   );
 }
 
-// The tree rail: a "Summary" root (the run overview) + one group per
-// criterion. `activePair` highlights the open check, or leaves Summary
-// active on the bare run page.
+// The Results-only tree rail. Top-level tabs own Summary and Definition,
+// so this nav can express one hierarchy clearly: criteria → checks.
 function RunTree({
   run,
   activePair,
   activeCriterion,
-  activeDefinition,
 }: {
   run: RunDetail;
   activePair?: string;
   activeCriterion?: string;
-  activeDefinition?: boolean;
 }) {
-  const summaryActive = !activePair && !activeCriterion && !activeDefinition;
   return (
     <nav
       aria-label="criteria and checks"
       data-testid="run-tree"
-      className="min-w-0 max-w-full space-y-0.5 overflow-hidden rounded-lg border bg-card p-2"
+      className="run-results-nav min-w-0 max-w-full space-y-0.5 overflow-x-hidden py-2 pr-3"
     >
-      <Link
-        to={`/run/${encodeURIComponent(run.run_id)}`}
-        aria-current={summaryActive ? "page" : undefined}
-        className={cn(
-          "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium transition-colors",
-          summaryActive
-            ? "bg-accent text-accent-foreground"
-            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-        )}
-      >
-        <LayoutList className="size-4 shrink-0" />
-        Summary
-      </Link>
       {run.criteria.map((c) => (
         <TreeGroup
           key={c.id}
@@ -236,22 +229,76 @@ function RunTree({
           activeCriterion={activeCriterion}
         />
       ))}
-      {/* The recorded VD source snapshot (#302), when the run carries one. */}
-      {run.has_definition && (
-        <Link
-          to={`/run/${encodeURIComponent(run.run_id)}/definition`}
-          aria-current={activeDefinition ? "page" : undefined}
-          className={cn(
-            "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium transition-colors",
-            activeDefinition
-              ? "bg-accent text-accent-foreground"
-              : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-          )}
-        >
-          <FileText className="size-4 shrink-0" />
-          Definition
-        </Link>
-      )}
+    </nav>
+  );
+}
+
+type RunTab = "summary" | "results" | "definition";
+
+function RunTabs({ run, active }: { run: RunDetail; active: RunTab }) {
+  const tabs = [
+    {
+      id: "summary" as const,
+      label: "Summary",
+      icon: LayoutList,
+      to: `/run/${encodeURIComponent(run.run_id)}`,
+      enabled: true,
+    },
+    {
+      id: "results" as const,
+      label: "Results",
+      icon: ListChecks,
+      to: resultsHref(run),
+      enabled: run.criteria.length > 0,
+    },
+    {
+      id: "definition" as const,
+      label: "Definition",
+      icon: FileText,
+      to: `/run/${encodeURIComponent(run.run_id)}/definition`,
+      enabled: run.has_definition,
+    },
+  ];
+  return (
+    <nav
+      aria-label="run detail views"
+      className="run-tabs flex min-w-0 gap-5"
+      role="tablist"
+    >
+      {tabs.map((tab) => {
+        const Icon = tab.icon;
+        const selected = active === tab.id;
+        return tab.enabled ? (
+          <Link
+            key={tab.id}
+            to={tab.to}
+            role="tab"
+            aria-selected={selected}
+            aria-current={selected ? "page" : undefined}
+            className={cn(
+              "relative inline-flex h-9 items-center gap-1.5 whitespace-nowrap border-b-2 px-0.5 text-sm font-medium transition-colors",
+              selected
+                ? "border-foreground text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Icon className="size-3.5" aria-hidden="true" />
+            {tab.label}
+          </Link>
+        ) : (
+          <span
+            key={tab.id}
+            role="tab"
+            aria-selected="false"
+            aria-disabled="true"
+            tabIndex={0}
+            className="inline-flex h-9 items-center gap-1.5 border-b-2 border-transparent px-0.5 text-sm text-muted-foreground/50"
+          >
+            <Icon className="size-3.5" aria-hidden="true" />
+            {tab.label}
+          </span>
+        );
+      })}
     </nav>
   );
 }
@@ -263,12 +310,14 @@ export function RunScaffold({
   activePair,
   activeCriterion,
   activeDefinition,
+  activeResults,
   children,
 }: {
   runId: string;
   activePair?: string;
   activeCriterion?: string;
   activeDefinition?: boolean;
+  activeResults?: boolean;
   children: (run: RunDetail) => ReactNode;
 }) {
   const { run, error } = useRun(runId);
@@ -276,37 +325,51 @@ export function RunScaffold({
   if (error) return <p className="error">{error}</p>;
   if (run === null) return <p className="text-sm text-muted-foreground">Loading…</p>;
 
-  const empty = run.criteria.length === 0;
+  const active: RunTab = activeDefinition
+    ? "definition"
+    : activeResults || activePair || activeCriterion
+      ? "results"
+      : "summary";
   return (
     <DefinitionProvider runId={runId} enabled={run.has_definition}>
-      <div className="min-w-0 max-w-full">
-        <header className="mb-6 border-b pb-4">
-          <h2 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xl font-semibold tracking-tight">
-            <span>{run.verification}</span>
-            <span className="text-muted-foreground">·</span>
-            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm font-normal">
+      <div className="run-workspace min-w-0 max-w-full">
+        <header className="run-workspace-header sticky top-14 z-30 -mx-4 mb-4 border-b bg-background/95 px-4 pt-2 backdrop-blur md:-mx-8 md:px-8">
+          <h2 className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-base font-semibold tracking-tight">
+            <span className="min-w-0 truncate">
+              {run.verification}
+            </span>
+            <code
+              className="max-w-[22ch] truncate font-mono text-xs font-normal text-muted-foreground"
+              title={run.run_id}
+            >
               {run.run_id}
             </code>
             <VerdictBadge verdict={run.verdict} live={run.live} />
           </h2>
+          <RunTabs run={run} active={active} />
         </header>
 
-        {empty ? (
-          <p className="text-sm text-muted-foreground">
-            No criteria recorded{run.live ? " yet" : ""}.
-          </p>
-        ) : (
-          <div className="grid min-w-0 max-w-full gap-6 md:grid-cols-[16rem_minmax(0,1fr)]">
-            <aside className="min-w-0 max-w-full md:sticky md:top-20 md:self-start">
+        {active === "results" ? (
+          run.criteria.length === 0 ? (
+            <p className="py-6 text-sm text-muted-foreground">
+              No criteria recorded{run.live ? " yet" : ""}.
+            </p>
+          ) : (
+          <div className="run-results-grid grid min-w-0 max-w-full md:grid-cols-[17rem_minmax(0,1fr)]">
+            <aside className="run-results-rail min-w-0 max-w-full border-b md:max-h-[calc(100vh-10.5rem)] md:overflow-y-auto md:border-b-0 md:border-r">
               <RunTree
                 run={run}
                 activePair={activePair}
                 activeCriterion={activeCriterion}
-                activeDefinition={activeDefinition}
               />
             </aside>
-            <section className="min-w-0">{children(run)}</section>
+            <section className="run-results-detail min-w-0 py-4 md:max-h-[calc(100vh-10.5rem)] md:overflow-y-auto md:py-0 md:pl-6">
+              {children(run)}
+            </section>
           </div>
+          )
+        ) : (
+          <section className="min-w-0">{children(run)}</section>
         )}
       </div>
     </DefinitionProvider>

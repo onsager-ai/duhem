@@ -41,6 +41,11 @@ Browser-backed (`ui/*`) test lanes need Node ≥ 20 plus the Playwright sidecar'
 
 `just test browser-actions` exercises the generic `ui/*` and `api/observe` action lane. `just dashboard test` exercises the dashboard frontend, crate, and CLI lane. The core `just check` gate does not require either one.
 
+For dashboard development, `just dashboard dev` starts the Rust API on
+port 7878 and the Vite frontend with hot reload on port 5173. Dashboard
+server options are forwarded, for example `just dashboard dev --db
+path/to/duhem.db`.
+
 ## Schema-impact discipline
 
 Duhem's schema is still **v0.x** — pre-stability, breaking changes are expected before v0.5 — so every schema-touching change is logged. If your change touches the Verification Definition or manifest schema, add an entry under `## Unreleased` in [`CHANGELOG.md`](CHANGELOG.md), tagged with one of:

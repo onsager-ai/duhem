@@ -9,7 +9,7 @@ default:
     @printf '  just lint                    Run static checks\n'
     @printf '  just test [browser-actions]  Run tests\n'
     @printf '  just check                   Run lint + test before pushing\n\n'
-    @printf '  just dashboard [build|test]  Manage the dashboard\n'
+    @printf '  just dashboard [dev|build|test]  Develop, build, or test the dashboard\n'
     @printf '  just worktree [add|list]     Manage task worktrees\n'
 
 # Manage isolated task worktrees (`add <branch> [base]` or `list`).
@@ -65,27 +65,50 @@ worktree action="help" *args:
 build:
     cargo build --workspace
 
-# Build or test the dashboard application.
-dashboard action="help":
+# Develop, build, or test the dashboard application.
+dashboard action="help" *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    case "$1" in
+    action=$1
+    shift
+    case "$action" in
+        dev)
+            (cd crates/duhem-dashboard/web && npm install)
+            cargo run -p duhem-dashboard -- "$@" &
+            api_pid=$!
+            (cd crates/duhem-dashboard/web && npm run dev) &
+            web_pid=$!
+            cleanup() {
+                kill "$api_pid" "$web_pid" 2>/dev/null || true
+                wait "$api_pid" "$web_pid" 2>/dev/null || true
+            }
+            trap cleanup EXIT INT TERM
+            wait -n "$api_pid" "$web_pid"
+            ;;
         build)
+            if (( $# != 0 )); then
+                printf 'usage: just dashboard build\n' >&2
+                exit 2
+            fi
             (cd crates/duhem-dashboard/web && npm ci && npm run build)
             exec cargo build -p duhem-dashboard
             ;;
         test)
+            if (( $# != 0 )); then
+                printf 'usage: just dashboard test\n' >&2
+                exit 2
+            fi
             (cd crates/duhem-dashboard/web && npm ci && npm test && npm run build)
             cargo test -p duhem-dashboard
             cargo build -p duhem-dashboard -p duhem-cli
             exec cargo test -p duhem-cli --test dashboard_cmd -- --ignored
             ;;
         help|-h|--help)
-            printf 'usage: just dashboard <build|test>\n'
+            printf 'usage: just dashboard <dev|build|test> [dashboard options]\n'
             ;;
         *)
-            printf 'unknown dashboard action: %s\n' "$1" >&2
-            printf 'usage: just dashboard <build|test>\n' >&2
+            printf 'unknown dashboard action: %s\n' "$action" >&2
+            printf 'usage: just dashboard <dev|build|test> [dashboard options]\n' >&2
             exit 2
             ;;
     esac

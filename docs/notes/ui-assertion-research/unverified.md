@@ -19,6 +19,17 @@ bottom so the record shows what changed.
 | U11 | **Galen's evaluator internals.** | I verified Galen's release currency (2.4.4, 2019-03-15) and reasoned about its *language* from documented syntax. I did **not** read its grammar or evaluator source this session, which the brief asked for. | Read `galenframework/galen` parser + evaluator; revisit the DSL-vs-API argument against what the evaluator actually does. |
 | U12 | **`figma.com` / `en.wikipedia.org` flipping between runs is live mutation.** | Both reported horizontal scroll in the sweep and none minutes later in verification. Most likely consent banners / A-B variants, but I did not isolate the cause. | Repeat the live sweep N times per width and report verdict variance; that number is the real cost of live sweeping. |
 
+## Added in Phase 5
+
+| # | Claim (as used) | Why unverified | What would confirm it |
+|---|---|---|---|
+| U13 | **Injected faults resemble real ones.** | CSS-injected faults are clean single-cause geometric displacements. Real generator defects may differ in shape and co-occur. Phase 5a recall is therefore an **upper bound**. | Hand-label defects in a generated corpus and measure recall against those. |
+| U14 | **Contrast predicate recall.** | Not run — no contrast detector exists in the frozen set. Reported rather than substituted. | Build the detector, measure precision on the wild corpus *first*, then recall under injection. |
+| U15 | **The SVG blind spot's true cost.** | Confirmed that `offsetParent` is `undefined` on all SVG elements so they are excluded from every detector. I did **not** measure how many real findings this hides. | Re-run Phase 2 with an SVG-aware visibility test; diff the finding sets. |
+| U16 | **Live-sweep flip rate.** | Two pages flipped verdicts between runs in Phase 2, and archive/live disagreed on 2 of 6 pages here — but I never ran N repeats per width to get a rate. | Repeat the live sweep N times per width; report verdict variance per page. |
+| U17 | **Generated-corpus representativeness.** | 26 published pages, unbalanced across generators (13/10/3), with `replit.app` mixed-provenance. Published projects are survivorship-biased; raw first-draft generator output is plausibly worse and is absent. | Capture unpublished/first-draft output directly from a generator run (e.g. a Chreode gauntlet on a Docker host). |
+| U18 | **A-class scatter would actually fail a token check.** | Generated pages are 2.3× less regular in font-size per element, but nothing was checked against a frozen scale — "less regular" ≠ "violates a scale". | Freeze a scale for one generator's output and measure actual membership-failure rates. |
+
 ## Resolved this session
 
 | Was unverified | Now |

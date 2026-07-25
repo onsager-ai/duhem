@@ -59,3 +59,32 @@ when so the corpus can be re-captured.
 Adjudication was done by reading rendered crops of each finding. The
 crops and contact sheets are not committed (they are screenshots of
 third-party sites); regenerate with `phase2c.mjs` / `phase2f.mjs`.
+
+## Phase 5 additions
+
+Measurement only — detectors frozen. `phase2a.mjs` / `phase2e.mjs` were edited
+**only** to add `export` keywords and an import guard so they could be reused
+without re-running; no thresholds or logic changed.
+
+```sh
+node phase5a.mjs     # recall under CSS fault injection (SHARD/NSHARD to parallelise)
+node phase5b.mjs     # capture cost, defect width windows, archive-vs-live fidelity
+node bisect.mjs      # fine 4px bisection of the known defect windows
+node phase5c.mjs     # capture + analyse the AI-generated corpus
+node phase5c2.mjs    # top-up batch for the same corpus
+node svgcheck.mjs    # confirms offsetParent is undefined on SVG elements
+node discover.mjs    # gallery link harvesting (returned nothing usable; kept as the record)
+```
+
+`inject.mjs` holds the fault-injection primitives, deliberately separate from
+the detectors so it is obvious nothing there touches them.
+
+| raw file | what |
+|---|---|
+| `phase5a.merged.json` | every (page, fault, severity) record: achieved delta, detected, localised, gated, finding counts |
+| `phase5b.json` | `b1` capture timings/sizes, `b3` width-window grids, `b4` archive-vs-live pairs |
+| `phase5c.merged.json` | per-page generated-corpus results incl. scale-cardinality stats |
+
+Generated-corpus archives live in `gen-archives/` in the scratch dir and are
+not committed, same as the wild corpus — third-party page content, with URLs
+and timestamps recorded so it can be re-captured.

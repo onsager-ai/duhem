@@ -1,0 +1,1620 @@
+[
+  {
+    "id": "lovable_vf_demo_landing_page",
+    "generator": "lovable",
+    "url": "https://vf-demo-landing-page.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 1220,
+    "archiveKB": 254,
+    "usable": true,
+    "fail": {
+      "B1.overlap": 16
+    },
+    "failTotal": 16,
+    "inconclusive": 2,
+    "suppressed": 2,
+    "textrunFail": 4,
+    "textrunStacked": 1,
+    "textrunRuns": 347,
+    "stats": {
+      "pairsTested": 2795,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 12,
+        "n90": 6,
+        "usages": 299
+      },
+      "color": {
+        "distinct": 13,
+        "n90": 6,
+        "usages": 299
+      },
+      "spacing": {
+        "distinct": 15,
+        "n90": 8,
+        "usages": 788
+      },
+      "visEls": 765
+    }
+  },
+  {
+    "id": "lovable_doenkers_pagelens",
+    "generator": "lovable",
+    "url": "https://doenkers-pagelens.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 88,
+    "archiveKB": 141,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 3,
+    "stats": {
+      "pairsTested": 2,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 2,
+        "n90": 2,
+        "usages": 3
+      },
+      "color": {
+        "distinct": 3,
+        "n90": 3,
+        "usages": 3
+      },
+      "spacing": {
+        "distinct": 5,
+        "n90": 4,
+        "usages": 21
+      },
+      "visEls": 10
+    }
+  },
+  {
+    "id": "lovable_onize_consult",
+    "generator": "lovable",
+    "url": "https://onize-consult.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 881,
+    "archiveKB": 17367,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 9,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 316,
+    "stats": {
+      "pairsTested": 1070,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 11,
+        "n90": 7,
+        "usages": 252
+      },
+      "color": {
+        "distinct": 9,
+        "n90": 4,
+        "usages": 252
+      },
+      "spacing": {
+        "distinct": 16,
+        "n90": 10,
+        "usages": 780
+      },
+      "visEls": 567
+    }
+  },
+  {
+    "id": "lovable_emoba_93960",
+    "generator": "lovable",
+    "url": "https://emoba-93960.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 206,
+    "archiveKB": 3446,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 177,
+    "stats": {
+      "pairsTested": 308,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 18,
+        "n90": 12,
+        "usages": 88
+      },
+      "color": {
+        "distinct": 11,
+        "n90": 5,
+        "usages": 88
+      },
+      "spacing": {
+        "distinct": 26,
+        "n90": 14,
+        "usages": 188
+      },
+      "visEls": 159
+    }
+  },
+  {
+    "id": "lovable_cryptofree",
+    "generator": "lovable",
+    "url": "https://cryptofree.lovable.app/dashboard",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 81,
+    "archiveKB": 154,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 12,
+    "stats": {
+      "pairsTested": 15,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 3,
+        "n90": 2,
+        "usages": 10
+      },
+      "color": {
+        "distinct": 3,
+        "n90": 2,
+        "usages": 10
+      },
+      "spacing": {
+        "distinct": 11,
+        "n90": 9,
+        "usages": 52
+      },
+      "visEls": 26
+    }
+  },
+  {
+    "id": "lovable_dealdaddy_pro_dashboard",
+    "generator": "lovable",
+    "url": "https://dealdaddy-pro-dashboard.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 71,
+    "archiveKB": 900,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 8,
+    "stats": {
+      "pairsTested": 10,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 3,
+        "n90": 3,
+        "usages": 8
+      },
+      "color": {
+        "distinct": 5,
+        "n90": 5,
+        "usages": 8
+      },
+      "spacing": {
+        "distinct": 7,
+        "n90": 5,
+        "usages": 30
+      },
+      "visEls": 21
+    }
+  },
+  {
+    "id": "lovable_cyberdem_visions",
+    "generator": "lovable",
+    "url": "https://cyberdem-visions.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 575,
+    "archiveKB": 1123,
+    "usable": true,
+    "fail": {
+      "B1.overlap": 3
+    },
+    "failTotal": 3,
+    "inconclusive": 0,
+    "suppressed": 16,
+    "textrunFail": 3,
+    "textrunStacked": 0,
+    "textrunRuns": 239,
+    "stats": {
+      "pairsTested": 703,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 12,
+        "n90": 6,
+        "usages": 176
+      },
+      "color": {
+        "distinct": 7,
+        "n90": 3,
+        "usages": 176
+      },
+      "spacing": {
+        "distinct": 18,
+        "n90": 9,
+        "usages": 237
+      },
+      "visEls": 370
+    }
+  },
+  {
+    "id": "lovable_harrisaidashboard",
+    "generator": "lovable",
+    "url": "https://harrisaidashboard.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 117,
+    "archiveKB": 472,
+    "usable": false,
+    "fail": {
+      "B2.protrude": 2
+    },
+    "failTotal": 2,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 8,
+    "stats": {
+      "pairsTested": 8,
+      "protrusions": 2,
+      "fontSize": {
+        "distinct": 5,
+        "n90": 5,
+        "usages": 7
+      },
+      "color": {
+        "distinct": 3,
+        "n90": 3,
+        "usages": 7
+      },
+      "spacing": {
+        "distinct": 13,
+        "n90": 10,
+        "usages": 34
+      },
+      "visEls": 64
+    }
+  },
+  {
+    "id": "lovable_prompt_directory_fh",
+    "generator": "lovable",
+    "url": "https://prompt-directory-fh.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 837,
+    "archiveKB": 230,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 636,
+    "stats": {
+      "pairsTested": 792,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 6,
+        "n90": 3,
+        "usages": 298
+      },
+      "color": {
+        "distinct": 3,
+        "n90": 2,
+        "usages": 298
+      },
+      "spacing": {
+        "distinct": 9,
+        "n90": 5,
+        "usages": 870
+      },
+      "visEls": 668
+    }
+  },
+  {
+    "id": "lovable_daniel_brooks_shopify_experts",
+    "generator": "lovable",
+    "url": "https://daniel-brooks-shopify-experts.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 817,
+    "archiveKB": 1730,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 7,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 264,
+    "stats": {
+      "pairsTested": 531,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 10,
+        "n90": 5,
+        "usages": 187
+      },
+      "color": {
+        "distinct": 11,
+        "n90": 7,
+        "usages": 187
+      },
+      "spacing": {
+        "distinct": 18,
+        "n90": 9,
+        "usages": 599
+      },
+      "visEls": 492
+    }
+  },
+  {
+    "id": "bolt_prospect_site_ai_moc_vefw",
+    "generator": "bolt",
+    "url": "https://prospect-site-ai-moc-vefw.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 39,
+    "archiveKB": 120,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 8,
+    "stats": {
+      "pairsTested": 9,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 4,
+        "n90": 4,
+        "usages": 7
+      },
+      "color": {
+        "distinct": 3,
+        "n90": 3,
+        "usages": 7
+      },
+      "spacing": {
+        "distinct": 6,
+        "n90": 5,
+        "usages": 33
+      },
+      "visEls": 22
+    }
+  },
+  {
+    "id": "bolt_boltfaq",
+    "generator": "bolt",
+    "url": "https://boltfaq.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 373,
+    "archiveKB": 74,
+    "usable": true,
+    "fail": {
+      "B1.overlap": 3
+    },
+    "failTotal": 3,
+    "inconclusive": 0,
+    "suppressed": 2,
+    "textrunFail": 2,
+    "textrunStacked": 1,
+    "textrunRuns": 65,
+    "stats": {
+      "pairsTested": 457,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 5,
+        "n90": 3,
+        "usages": 54
+      },
+      "color": {
+        "distinct": 13,
+        "n90": 9,
+        "usages": 54
+      },
+      "spacing": {
+        "distinct": 13,
+        "n90": 8,
+        "usages": 301
+      },
+      "visEls": 197
+    }
+  },
+  {
+    "id": "bolt_jira_project_app_dev_8kxq",
+    "generator": "bolt",
+    "url": "https://jira-project-app-dev-8kxq.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 257,
+    "archiveKB": 56,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 79,
+    "stats": {
+      "pairsTested": 436,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 6,
+        "n90": 4,
+        "usages": 50
+      },
+      "color": {
+        "distinct": 14,
+        "n90": 9,
+        "usages": 50
+      },
+      "spacing": {
+        "distinct": 11,
+        "n90": 8,
+        "usages": 160
+      },
+      "visEls": 127
+    }
+  },
+  {
+    "id": "bolt_consultant_partner_l_8wmy",
+    "generator": "bolt",
+    "url": "https://consultant-partner-l-8wmy.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 683,
+    "archiveKB": 114,
+    "usable": true,
+    "fail": {
+      "B1.overlap": 1
+    },
+    "failTotal": 1,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 1,
+    "textrunStacked": 0,
+    "textrunRuns": 288,
+    "stats": {
+      "pairsTested": 800,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 10,
+        "n90": 5,
+        "usages": 222
+      },
+      "color": {
+        "distinct": 7,
+        "n90": 5,
+        "usages": 222
+      },
+      "spacing": {
+        "distinct": 12,
+        "n90": 6,
+        "usages": 506
+      },
+      "visEls": 461
+    }
+  },
+  {
+    "id": "bolt_altrix_digital_techn_3960",
+    "generator": "bolt",
+    "url": "https://altrix-digital-techn-3960.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 1127,
+    "archiveKB": 372,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 8,
+    "textrunFail": 1,
+    "textrunStacked": 0,
+    "textrunRuns": 406,
+    "stats": {
+      "pairsTested": 1544,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 9,
+        "n90": 4,
+        "usages": 282
+      },
+      "color": {
+        "distinct": 11,
+        "n90": 7,
+        "usages": 282
+      },
+      "spacing": {
+        "distinct": 17,
+        "n90": 9,
+        "usages": 593
+      },
+      "visEls": 644
+    }
+  },
+  {
+    "id": "bolt_page_element_upload_zjl3",
+    "generator": "bolt",
+    "url": "https://page-element-upload-zjl3.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 987,
+    "archiveKB": 5280,
+    "usable": true,
+    "fail": {
+      "B1.overlap": 6,
+      "B2.protrude": 2
+    },
+    "failTotal": 8,
+    "inconclusive": 1,
+    "suppressed": 0,
+    "textrunFail": 3,
+    "textrunStacked": 1,
+    "textrunRuns": 336,
+    "stats": {
+      "pairsTested": 1282,
+      "protrusions": 2,
+      "fontSize": {
+        "distinct": 30,
+        "n90": 18,
+        "usages": 280
+      },
+      "color": {
+        "distinct": 22,
+        "n90": 8,
+        "usages": 280
+      },
+      "spacing": {
+        "distinct": 31,
+        "n90": 15,
+        "usages": 1144
+      },
+      "visEls": 890
+    }
+  },
+  {
+    "id": "bolt_simple_team_project_djg1",
+    "generator": "bolt",
+    "url": "https://simple-team-project-djg1.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 32,
+    "archiveKB": 20,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 5,
+    "stats": {
+      "pairsTested": 4,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 3,
+        "n90": 3,
+        "usages": 5
+      },
+      "color": {
+        "distinct": 4,
+        "n90": 4,
+        "usages": 5
+      },
+      "spacing": {
+        "distinct": 5,
+        "n90": 4,
+        "usages": 18
+      },
+      "visEls": 13
+    }
+  },
+  {
+    "id": "bolt_sensory_branding_pac_x19y",
+    "generator": "bolt",
+    "url": "https://sensory-branding-pac-x19y.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 718,
+    "archiveKB": 1093,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 1,
+    "textrunStacked": 0,
+    "textrunRuns": 290,
+    "stats": {
+      "pairsTested": 1182,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 10,
+        "n90": 4,
+        "usages": 208
+      },
+      "color": {
+        "distinct": 14,
+        "n90": 8,
+        "usages": 208
+      },
+      "spacing": {
+        "distinct": 17,
+        "n90": 8,
+        "usages": 599
+      },
+      "visEls": 450
+    }
+  },
+  {
+    "id": "bolt_nichefoundry_saas_bu_npf6",
+    "generator": "bolt",
+    "url": "https://nichefoundry-saas-bu-npf6.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 897,
+    "archiveKB": 886,
+    "usable": true,
+    "fail": {
+      "B2.protrude": 1
+    },
+    "failTotal": 1,
+    "inconclusive": 0,
+    "suppressed": 20,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 432,
+    "stats": {
+      "pairsTested": 2462,
+      "protrusions": 1,
+      "fontSize": {
+        "distinct": 19,
+        "n90": 9,
+        "usages": 326
+      },
+      "color": {
+        "distinct": 16,
+        "n90": 9,
+        "usages": 326
+      },
+      "spacing": {
+        "distinct": 19,
+        "n90": 9,
+        "usages": 661
+      },
+      "visEls": 628
+    }
+  },
+  {
+    "id": "bolt_graphic_design_portf_xz9f",
+    "generator": "bolt",
+    "url": "https://graphic-design-portf-xz9f.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 559,
+    "archiveKB": 399,
+    "usable": true,
+    "fail": {
+      "B2.protrude": 1
+    },
+    "failTotal": 1,
+    "inconclusive": 0,
+    "suppressed": 2,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 174,
+    "stats": {
+      "pairsTested": 585,
+      "protrusions": 1,
+      "fontSize": {
+        "distinct": 9,
+        "n90": 6,
+        "usages": 144
+      },
+      "color": {
+        "distinct": 8,
+        "n90": 6,
+        "usages": 144
+      },
+      "spacing": {
+        "distinct": 9,
+        "n90": 6,
+        "usages": 471
+      },
+      "visEls": 365
+    }
+  },
+  {
+    "id": "replit_uptimedash",
+    "generator": "replit",
+    "url": "https://uptimedash.replit.app/",
+    "ok": true,
+    "status": 404,
+    "renderedEls": 29,
+    "archiveKB": 11,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 29,
+    "stats": {
+      "pairsTested": 4,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 4,
+        "n90": 4,
+        "usages": 5
+      },
+      "color": {
+        "distinct": 2,
+        "n90": 2,
+        "usages": 5
+      },
+      "spacing": {
+        "distinct": 6,
+        "n90": 6,
+        "usages": 18
+      },
+      "visEls": 17
+    }
+  },
+  {
+    "id": "replit_jacks_sidekick",
+    "generator": "replit",
+    "url": "https://jacks-sidekick.replit.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 76,
+    "archiveKB": 265,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 17,
+    "stats": {
+      "pairsTested": 26,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 4,
+        "n90": 3,
+        "usages": 14
+      },
+      "color": {
+        "distinct": 3,
+        "n90": 2,
+        "usages": 14
+      },
+      "spacing": {
+        "distinct": 6,
+        "n90": 4,
+        "usages": 52
+      },
+      "visEls": 35
+    }
+  },
+  {
+    "id": "replit_dash_bookmark",
+    "generator": "replit",
+    "url": "https://dash-bookmark.replit.app/",
+    "ok": true,
+    "status": 404,
+    "renderedEls": 29,
+    "archiveKB": 11,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 29,
+    "stats": {
+      "pairsTested": 4,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 4,
+        "n90": 4,
+        "usages": 5
+      },
+      "color": {
+        "distinct": 2,
+        "n90": 2,
+        "usages": 5
+      },
+      "spacing": {
+        "distinct": 6,
+        "n90": 6,
+        "usages": 18
+      },
+      "visEls": 17
+    }
+  },
+  {
+    "id": "replit_know_tools",
+    "generator": "replit",
+    "url": "https://know-tools.replit.app/",
+    "ok": false,
+    "status": 200,
+    "error": "page.evaluate: Execution context was destroyed, most likely because of a navigation"
+  },
+  {
+    "id": "replit_site_audit_dashboard",
+    "generator": "replit",
+    "url": "https://site-audit-dashboard.replit.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 86,
+    "archiveKB": 128,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 5,
+    "stats": {
+      "pairsTested": 10,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 4,
+        "n90": 4,
+        "usages": 5
+      },
+      "color": {
+        "distinct": 2,
+        "n90": 2,
+        "usages": 5
+      },
+      "spacing": {
+        "distinct": 5,
+        "n90": 4,
+        "usages": 51
+      },
+      "visEls": 53
+    }
+  },
+  {
+    "id": "replit_mylifedashboard",
+    "generator": "replit",
+    "url": "https://mylifedashboard.replit.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 33,
+    "archiveKB": 137,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 5,
+    "stats": {
+      "pairsTested": 0,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 2,
+        "n90": 2,
+        "usages": 3
+      },
+      "color": {
+        "distinct": 2,
+        "n90": 2,
+        "usages": 3
+      },
+      "spacing": {
+        "distinct": 6,
+        "n90": 5,
+        "usages": 14
+      },
+      "visEls": 12
+    }
+  },
+  {
+    "id": "replit_ultimate_wedding_planner",
+    "generator": "replit",
+    "url": "https://ultimate-wedding-planner.replit.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 363,
+    "archiveKB": 594,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 181,
+    "stats": {
+      "pairsTested": 193,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 9,
+        "n90": 5,
+        "usages": 94
+      },
+      "color": {
+        "distinct": 13,
+        "n90": 7,
+        "usages": 94
+      },
+      "spacing": {
+        "distinct": 14,
+        "n90": 8,
+        "usages": 312
+      },
+      "visEls": 199
+    }
+  },
+  {
+    "id": "replit_markobra",
+    "generator": "replit",
+    "url": "https://markobra.replit.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 35,
+    "archiveKB": 142,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 2,
+    "stats": {
+      "pairsTested": 1,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 2,
+        "n90": 2,
+        "usages": 2
+      },
+      "color": {
+        "distinct": 2,
+        "n90": 2,
+        "usages": 2
+      },
+      "spacing": {
+        "distinct": 3,
+        "n90": 3,
+        "usages": 8
+      },
+      "visEls": 10
+    }
+  },
+  {
+    "id": "replit_asset_manager__rennzz",
+    "generator": "replit",
+    "url": "https://asset-manager--rennzz.replit.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 1103,
+    "archiveKB": 237,
+    "usable": true,
+    "fail": {
+      "B1.overlap": 1
+    },
+    "failTotal": 1,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 521,
+    "stats": {
+      "pairsTested": 6566,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 11,
+        "n90": 3,
+        "usages": 399
+      },
+      "color": {
+        "distinct": 8,
+        "n90": 4,
+        "usages": 399
+      },
+      "spacing": {
+        "distinct": 12,
+        "n90": 3,
+        "usages": 914
+      },
+      "visEls": 746
+    }
+  },
+  {
+    "id": "replit_buildathons",
+    "generator": "replit",
+    "url": "https://buildathons.replit.app/gallery",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 4392,
+    "archiveKB": 82402,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 2,
+    "textrunStacked": 0,
+    "textrunRuns": 4829,
+    "stats": {
+      "pairsTested": 74998,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 4,
+        "n90": 1,
+        "usages": 2327
+      },
+      "color": {
+        "distinct": 5,
+        "n90": 1,
+        "usages": 2327
+      },
+      "spacing": {
+        "distinct": 10,
+        "n90": 2,
+        "usages": 9347
+      },
+      "visEls": 2389
+    }
+  },
+  {
+    "id": "bolt_project_portfolio_re_a1xv",
+    "generator": "bolt",
+    "url": "https://project-portfolio-re-a1xv.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 250,
+    "archiveKB": 60,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 47,
+    "stats": {
+      "pairsTested": 184,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 7,
+        "n90": 5,
+        "usages": 35
+      },
+      "color": {
+        "distinct": 9,
+        "n90": 6,
+        "usages": 35
+      },
+      "spacing": {
+        "distinct": 6,
+        "n90": 5,
+        "usages": 146
+      },
+      "visEls": 87
+    }
+  },
+  {
+    "id": "bolt_saas_bcnf",
+    "generator": "bolt",
+    "url": "https://saas-bcnf.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 128,
+    "archiveKB": 38,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 58,
+    "stats": {
+      "pairsTested": 85,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 6,
+        "n90": 4,
+        "usages": 34
+      },
+      "color": {
+        "distinct": 10,
+        "n90": 7,
+        "usages": 34
+      },
+      "spacing": {
+        "distinct": 6,
+        "n90": 4,
+        "usages": 146
+      },
+      "visEls": 89
+    }
+  },
+  {
+    "id": "bolt_personal_portfolio_w_ok7x",
+    "generator": "bolt",
+    "url": "https://personal-portfolio-w-ok7x.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 379,
+    "archiveKB": 723,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 190,
+    "stats": {
+      "pairsTested": 777,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 10,
+        "n90": 6,
+        "usages": 134
+      },
+      "color": {
+        "distinct": 7,
+        "n90": 4,
+        "usages": 134
+      },
+      "spacing": {
+        "distinct": 11,
+        "n90": 6,
+        "usages": 357
+      },
+      "visEls": 320
+    }
+  },
+  {
+    "id": "bolt_supplyhub",
+    "generator": "bolt",
+    "url": "https://supplyhub.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 60,
+    "archiveKB": 107,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 10,
+    "stats": {
+      "pairsTested": 12,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 5,
+        "n90": 5,
+        "usages": 7
+      },
+      "color": {
+        "distinct": 5,
+        "n90": 5,
+        "usages": 7
+      },
+      "spacing": {
+        "distinct": 12,
+        "n90": 10,
+        "usages": 25
+      },
+      "visEls": 26
+    }
+  },
+  {
+    "id": "bolt_pottery_e_commerce_p_9pe0",
+    "generator": "bolt",
+    "url": "https://pottery-e-commerce-p-9pe0.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 135,
+    "archiveKB": 38,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 53,
+    "stats": {
+      "pairsTested": 64,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 7,
+        "n90": 5,
+        "usages": 34
+      },
+      "color": {
+        "distinct": 6,
+        "n90": 5,
+        "usages": 34
+      },
+      "spacing": {
+        "distinct": 7,
+        "n90": 6,
+        "usages": 79
+      },
+      "visEls": 83
+    }
+  },
+  {
+    "id": "bolt_suggestomatic_red",
+    "generator": "bolt",
+    "url": "https://suggestomatic-red.bolt.host/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 31,
+    "archiveKB": 42,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 5,
+    "stats": {
+      "pairsTested": 2,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 3,
+        "n90": 3,
+        "usages": 4
+      },
+      "color": {
+        "distinct": 2,
+        "n90": 2,
+        "usages": 4
+      },
+      "spacing": {
+        "distinct": 5,
+        "n90": 5,
+        "usages": 19
+      },
+      "visEls": 14
+    }
+  },
+  {
+    "id": "lovable_connectyourpms",
+    "generator": "lovable",
+    "url": "https://connectyourpms.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 597,
+    "archiveKB": 646,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 425,
+    "stats": {
+      "pairsTested": 1873,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 12,
+        "n90": 5,
+        "usages": 287
+      },
+      "color": {
+        "distinct": 14,
+        "n90": 6,
+        "usages": 287
+      },
+      "spacing": {
+        "distinct": 17,
+        "n90": 9,
+        "usages": 772
+      },
+      "visEls": 526
+    }
+  },
+  {
+    "id": "lovable_tide_crm",
+    "generator": "lovable",
+    "url": "https://tide-crm.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 66,
+    "archiveKB": 162,
+    "usable": false,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 6,
+    "stats": {
+      "pairsTested": 4,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 3,
+        "n90": 3,
+        "usages": 5
+      },
+      "color": {
+        "distinct": 4,
+        "n90": 4,
+        "usages": 5
+      },
+      "spacing": {
+        "distinct": 4,
+        "n90": 3,
+        "usages": 16
+      },
+      "visEls": 12
+    }
+  },
+  {
+    "id": "lovable_contxai",
+    "generator": "lovable",
+    "url": "https://contxai.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 626,
+    "archiveKB": 479,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 335,
+    "stats": {
+      "pairsTested": 1045,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 23,
+        "n90": 14,
+        "usages": 221
+      },
+      "color": {
+        "distinct": 14,
+        "n90": 9,
+        "usages": 221
+      },
+      "spacing": {
+        "distinct": 32,
+        "n90": 20,
+        "usages": 538
+      },
+      "visEls": 417
+    }
+  },
+  {
+    "id": "lovable_pauldee_content_hub",
+    "generator": "lovable",
+    "url": "https://pauldee-content-hub.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 452,
+    "archiveKB": 211,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 126,
+    "stats": {
+      "pairsTested": 395,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 9,
+        "n90": 5,
+        "usages": 99
+      },
+      "color": {
+        "distinct": 5,
+        "n90": 3,
+        "usages": 99
+      },
+      "spacing": {
+        "distinct": 17,
+        "n90": 8,
+        "usages": 357
+      },
+      "visEls": 264
+    }
+  },
+  {
+    "id": "lovable_pawsitive_crm_builder",
+    "generator": "lovable",
+    "url": "https://pawsitive-crm-builder.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 152,
+    "archiveKB": 133,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 48,
+    "stats": {
+      "pairsTested": 73,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 7,
+        "n90": 5,
+        "usages": 32
+      },
+      "color": {
+        "distinct": 6,
+        "n90": 3,
+        "usages": 32
+      },
+      "spacing": {
+        "distinct": 8,
+        "n90": 6,
+        "usages": 99
+      },
+      "visEls": 80
+    }
+  },
+  {
+    "id": "lovable_fresha_setup",
+    "generator": "lovable",
+    "url": "https://fresha-setup.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 622,
+    "archiveKB": 270,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 232,
+    "stats": {
+      "pairsTested": 499,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 9,
+        "n90": 5,
+        "usages": 158
+      },
+      "color": {
+        "distinct": 6,
+        "n90": 3,
+        "usages": 158
+      },
+      "spacing": {
+        "distinct": 14,
+        "n90": 6,
+        "usages": 495
+      },
+      "visEls": 367
+    }
+  },
+  {
+    "id": "lovable_dasuccess_ecommerce",
+    "generator": "lovable",
+    "url": "https://dasuccess-ecommerce.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 3760,
+    "archiveKB": 4599,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 0,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 1441,
+    "stats": {
+      "pairsTested": 3318,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 12,
+        "n90": 5,
+        "usages": 699
+      },
+      "color": {
+        "distinct": 8,
+        "n90": 3,
+        "usages": 699
+      },
+      "spacing": {
+        "distinct": 19,
+        "n90": 8,
+        "usages": 1223
+      },
+      "visEls": 1276
+    }
+  },
+  {
+    "id": "lovable_travel_horizon_flow",
+    "generator": "lovable",
+    "url": "https://travel-horizon-flow.lovable.app/",
+    "ok": true,
+    "status": 200,
+    "renderedEls": 380,
+    "archiveKB": 7026,
+    "usable": true,
+    "fail": {},
+    "failTotal": 0,
+    "inconclusive": 0,
+    "suppressed": 16,
+    "textrunFail": 0,
+    "textrunStacked": 0,
+    "textrunRuns": 289,
+    "stats": {
+      "pairsTested": 581,
+      "protrusions": 0,
+      "fontSize": {
+        "distinct": 11,
+        "n90": 7,
+        "usages": 163
+      },
+      "color": {
+        "distinct": 12,
+        "n90": 7,
+        "usages": 163
+      },
+      "spacing": {
+        "distinct": 14,
+        "n90": 8,
+        "usages": 329
+      },
+      "visEls": 335
+    }
+  }
+]

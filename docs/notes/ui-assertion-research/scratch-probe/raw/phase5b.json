@@ -1,0 +1,502 @@
+{
+  "b1": [
+    {
+      "id": "news.ycombinator.com",
+      "width": 320,
+      "ms": 2957,
+      "kb": 54,
+      "err": null
+    },
+    {
+      "id": "news.ycombinator.com",
+      "width": 768,
+      "ms": 1836,
+      "kb": 54,
+      "err": null
+    },
+    {
+      "id": "news.ycombinator.com",
+      "width": 1280,
+      "ms": 1842,
+      "kb": 54,
+      "err": null
+    },
+    {
+      "id": "react.dev",
+      "width": 320,
+      "ms": 6489,
+      "kb": 496,
+      "err": null
+    },
+    {
+      "id": "react.dev",
+      "width": 768,
+      "ms": 4117,
+      "kb": 497,
+      "err": null
+    },
+    {
+      "id": "react.dev",
+      "width": 1280,
+      "ms": 3875,
+      "kb": 497,
+      "err": null
+    },
+    {
+      "id": "stripe.com",
+      "width": 320,
+      "ms": 9546,
+      "kb": 2078,
+      "err": null
+    },
+    {
+      "id": "stripe.com",
+      "width": 768,
+      "ms": 8078,
+      "kb": 2257,
+      "err": null
+    },
+    {
+      "id": "stripe.com",
+      "width": 1280,
+      "ms": 8260,
+      "kb": 3133,
+      "err": null
+    },
+    {
+      "id": "theguardian.com",
+      "width": 320,
+      "ms": 6304,
+      "kb": 5257,
+      "err": null
+    },
+    {
+      "id": "theguardian.com",
+      "width": 768,
+      "ms": 5397,
+      "kb": 2755,
+      "err": null
+    },
+    {
+      "id": "theguardian.com",
+      "width": 1280,
+      "ms": 6562,
+      "kb": 3415,
+      "err": null
+    }
+  ],
+  "b3": [
+    {
+      "id": "news.ycombinator.com",
+      "known": 768,
+      "scrollableAtKnown": true,
+      "grid": {
+        "320": false,
+        "340": false,
+        "360": false,
+        "375": false,
+        "414": false,
+        "480": false,
+        "560": false,
+        "640": false,
+        "700": false,
+        "768": true,
+        "840": false,
+        "900": false,
+        "1024": false,
+        "1152": false,
+        "1280": false,
+        "1360": false,
+        "1440": false,
+        "1600": false,
+        "1920": false
+      },
+      "observableWidths": [
+        768
+      ],
+      "span": [
+        768,
+        768
+      ]
+    },
+    {
+      "id": "allbirds.com",
+      "known": 320,
+      "scrollableAtKnown": true,
+      "grid": {
+        "320": true,
+        "340": false,
+        "360": false,
+        "375": false,
+        "414": false,
+        "480": false,
+        "560": false,
+        "640": false,
+        "700": false,
+        "768": false,
+        "840": false,
+        "900": false,
+        "1024": false,
+        "1152": false,
+        "1280": false,
+        "1360": false,
+        "1440": false,
+        "1600": false,
+        "1920": false
+      },
+      "observableWidths": [
+        320
+      ],
+      "span": [
+        320,
+        320
+      ]
+    },
+    {
+      "id": "app.diagrams.net",
+      "known": 1280,
+      "scrollableAtKnown": true,
+      "grid": {
+        "320": false,
+        "340": false,
+        "360": false,
+        "375": false,
+        "414": false,
+        "480": false,
+        "560": false,
+        "640": false,
+        "700": false,
+        "768": false,
+        "840": false,
+        "900": false,
+        "1024": false,
+        "1152": true,
+        "1280": true,
+        "1360": true,
+        "1440": true,
+        "1600": true,
+        "1920": true
+      },
+      "observableWidths": [
+        1152,
+        1280,
+        1360,
+        1440,
+        1600,
+        1920
+      ],
+      "span": [
+        1152,
+        1920
+      ]
+    }
+  ],
+  "b4": [
+    {
+      "id": "stripe.com",
+      "width": 320,
+      "atCapture": false,
+      "archive": {
+        "maxX": 432,
+        "sw": 752,
+        "cw": 320
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 320,
+        "cw": 320
+      },
+      "verdictAgrees": false,
+      "swRatio": 2.35
+    },
+    {
+      "id": "stripe.com",
+      "width": 768,
+      "atCapture": false,
+      "archive": {
+        "maxX": 1729,
+        "sw": 2497,
+        "cw": 768
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 768,
+        "cw": 768
+      },
+      "verdictAgrees": false,
+      "swRatio": 3.251
+    },
+    {
+      "id": "stripe.com",
+      "width": 1280,
+      "atCapture": true,
+      "archive": {
+        "maxX": 0,
+        "sw": 1280,
+        "cw": 1280
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 1280,
+        "cw": 1280
+      },
+      "verdictAgrees": true,
+      "swRatio": 1
+    },
+    {
+      "id": "news.ycombinator.com",
+      "width": 320,
+      "atCapture": false,
+      "archive": {
+        "maxX": 0,
+        "sw": 320,
+        "cw": 320
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 320,
+        "cw": 320
+      },
+      "verdictAgrees": true,
+      "swRatio": 1
+    },
+    {
+      "id": "news.ycombinator.com",
+      "width": 768,
+      "atCapture": false,
+      "archive": {
+        "maxX": 36,
+        "sw": 804,
+        "cw": 768
+      },
+      "live": {
+        "maxX": 36,
+        "sw": 804,
+        "cw": 768
+      },
+      "verdictAgrees": true,
+      "swRatio": 1
+    },
+    {
+      "id": "news.ycombinator.com",
+      "width": 1280,
+      "atCapture": true,
+      "archive": {
+        "maxX": 0,
+        "sw": 1280,
+        "cw": 1280
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 1280,
+        "cw": 1280
+      },
+      "verdictAgrees": true,
+      "swRatio": 1
+    },
+    {
+      "id": "react.dev",
+      "width": 320,
+      "atCapture": false,
+      "archive": {
+        "maxX": 0,
+        "sw": 320,
+        "cw": 320
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 320,
+        "cw": 320
+      },
+      "verdictAgrees": true,
+      "swRatio": 1
+    },
+    {
+      "id": "react.dev",
+      "width": 768,
+      "atCapture": false,
+      "archive": {
+        "maxX": 0,
+        "sw": 768,
+        "cw": 768
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 768,
+        "cw": 768
+      },
+      "verdictAgrees": true,
+      "swRatio": 1
+    },
+    {
+      "id": "react.dev",
+      "width": 1280,
+      "atCapture": true,
+      "archive": {
+        "maxX": 0,
+        "sw": 1280,
+        "cw": 1280
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 1280,
+        "cw": 1280
+      },
+      "verdictAgrees": true,
+      "swRatio": 1
+    },
+    {
+      "id": "allbirds.com",
+      "width": 320,
+      "atCapture": false,
+      "archive": {
+        "maxX": 6,
+        "sw": 326,
+        "cw": 320
+      },
+      "live": {
+        "maxX": 6,
+        "sw": 326,
+        "cw": 320
+      },
+      "verdictAgrees": true,
+      "swRatio": 1
+    },
+    {
+      "id": "allbirds.com",
+      "width": 768,
+      "atCapture": false,
+      "archive": {
+        "maxX": 0,
+        "sw": 768,
+        "cw": 768
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 768,
+        "cw": 768
+      },
+      "verdictAgrees": true,
+      "swRatio": 1
+    },
+    {
+      "id": "allbirds.com",
+      "width": 1280,
+      "atCapture": true,
+      "archive": {
+        "maxX": 0,
+        "sw": 1280,
+        "cw": 1280
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 1280,
+        "cw": 1280
+      },
+      "verdictAgrees": true,
+      "swRatio": 1
+    },
+    {
+      "id": "docs.python.org",
+      "width": 320,
+      "atCapture": false,
+      "archive": {
+        "maxX": 0,
+        "sw": 320,
+        "cw": 320
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 320,
+        "cw": 320
+      },
+      "verdictAgrees": true,
+      "swRatio": 1
+    },
+    {
+      "id": "docs.python.org",
+      "width": 768,
+      "atCapture": false,
+      "archive": {
+        "maxX": 0,
+        "sw": 768,
+        "cw": 768
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 768,
+        "cw": 768
+      },
+      "verdictAgrees": true,
+      "swRatio": 1
+    },
+    {
+      "id": "docs.python.org",
+      "width": 1280,
+      "atCapture": true,
+      "archive": {
+        "maxX": 0,
+        "sw": 1280,
+        "cw": 1280
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 1280,
+        "cw": 1280
+      },
+      "verdictAgrees": true,
+      "swRatio": 1
+    },
+    {
+      "id": "bbc.com",
+      "width": 320,
+      "atCapture": false,
+      "archive": {
+        "maxX": 805,
+        "sw": 1125,
+        "cw": 320
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 320,
+        "cw": 320
+      },
+      "verdictAgrees": false,
+      "swRatio": 3.516
+    },
+    {
+      "id": "bbc.com",
+      "width": 768,
+      "atCapture": false,
+      "archive": {
+        "maxX": 357,
+        "sw": 1125,
+        "cw": 768
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 768,
+        "cw": 768
+      },
+      "verdictAgrees": false,
+      "swRatio": 1.465
+    },
+    {
+      "id": "bbc.com",
+      "width": 1280,
+      "atCapture": true,
+      "archive": {
+        "maxX": 0,
+        "sw": 1280,
+        "cw": 1280
+      },
+      "live": {
+        "maxX": 0,
+        "sw": 1280,
+        "cw": 1280
+      },
+      "verdictAgrees": true,
+      "swRatio": 1
+    }
+  ]
+}

@@ -5,7 +5,7 @@ actually land — A (token/unary), B (relational), C (global), D
 (cross-state)? And how many of them would a human agree are real?
 
 **Gate 2 verdict, in one sentence:** *B-class static overlap detection
-produced 0 confirmed true positives out of 71 adjudicated findings on
+produced 0 confirmed true positives out of 46 adjudicated findings on
 23 production pages, while the class-D cross-viewport sweep produced 3
 confirmed, observable defects — so the relational predicate DSL is not
 justified, but a narrow class-C/D responsive checker is.*
@@ -82,10 +82,13 @@ not collide with boxes, text collides with text.
 79.8% of text-run fails have `cover = 1.00` — one text run exactly
 covering another. Inspection shows these are *duplicated text nodes*
 (a11y duplicates, animation clones, icon-font pairs), not collisions.
-Dropping them leaves 147 findings across 10 pages. A further 15-case
+Dropping them leaves 147 findings across 10 pages. A further 18-case
 visual sample of those found **no true positives** either.
 
-Net: **0 / 71 adjudicated B-class findings were real.**
+Net: **0 / 46 adjudicated B-class findings were real** — 28 border-box
+plus 18 text-run. (71 crops were *generated*; 46 were actually
+inspected. An earlier revision of this note reported 71 adjudicated,
+conflating crops rendered with crops read. Corrected here.)
 
 ## Result 3 — class D is where the real defects are
 
@@ -169,7 +172,7 @@ in the freeze layer, not the evaluator.
 
 - **Mostly A?** No — A-class is not even expressible on a wild corpus
   without a frozen scale.
-- **Meaningful B?** **No.** 0/71 adjudicated true positives across two
+- **Meaningful B?** **No.** 0/46 adjudicated true positives across two
   different geometric primitives.
 - **Meaningful D?** **Yes** — 3 real, observable, oracle-free defects,
   two of them only visible at a single viewport width.

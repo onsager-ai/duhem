@@ -5,7 +5,7 @@ observability* checker with roughly six predicates, as a typed host-language
 API over a versioned `Facts` snapshot, integrated as a Duhem action pack.
 Do **not** build a Galen-style relational predicate DSL: the B-class
 relational checks that would justify a metalanguage produced 0 confirmed
-true positives out of 71 adjudicated findings on 23 production pages
+true positives out of 46 adjudicated findings on 23 production pages
 (`phase2-failure-distribution.md`), while the metamorphic cross-viewport
 sweep produced 3 real defects with no oracle. A parser, an LSP, error
 messages and a docs surface are a permanent cost; six predicates do not

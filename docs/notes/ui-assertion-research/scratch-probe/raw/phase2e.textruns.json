@@ -1,0 +1,242 @@
+[
+  {
+    "id": "stripe.com",
+    "genre": "marketing",
+    "runs": 878,
+    "fail": 170,
+    "incon": 0,
+    "suppressed": 60,
+    "coverHist": {
+      "1.00": 131,
+      "<0.99": 39
+    }
+  },
+  {
+    "id": "linear.app",
+    "genre": "marketing",
+    "runs": 689,
+    "fail": 8,
+    "incon": 0,
+    "suppressed": 2,
+    "coverHist": {
+      "<0.99": 7,
+      "1.00": 1
+    }
+  },
+  {
+    "id": "vercel.com",
+    "genre": "marketing",
+    "runs": 180,
+    "fail": 1,
+    "incon": 0,
+    "suppressed": 1,
+    "coverHist": {
+      "<0.99": 1
+    }
+  },
+  {
+    "id": "figma.com",
+    "genre": "marketing",
+    "runs": 164,
+    "fail": 8,
+    "incon": 0,
+    "suppressed": 5,
+    "coverHist": {
+      "1.00": 8
+    }
+  },
+  {
+    "id": "netlify.com",
+    "genre": "marketing",
+    "runs": 280,
+    "fail": 21,
+    "incon": 0,
+    "suppressed": 0,
+    "coverHist": {
+      "<0.99": 18,
+      "1.00": 3
+    }
+  },
+  {
+    "id": "slack.com",
+    "genre": "marketing",
+    "runs": 554,
+    "fail": 1,
+    "incon": 0,
+    "suppressed": 0,
+    "coverHist": {
+      "<0.99": 1
+    }
+  },
+  {
+    "id": "play.grafana.org",
+    "genre": "app",
+    "runs": 200,
+    "fail": 0,
+    "incon": 0,
+    "suppressed": 6,
+    "coverHist": {}
+  },
+  {
+    "id": "app.diagrams.net",
+    "genre": "app",
+    "runs": 7,
+    "fail": 0,
+    "incon": 0,
+    "suppressed": 0,
+    "coverHist": {}
+  },
+  {
+    "id": "developer.mozilla.org",
+    "genre": "docs",
+    "runs": 2206,
+    "fail": 58,
+    "incon": 0,
+    "suppressed": 1779,
+    "coverHist": {
+      "<0.99": 31,
+      "1.00": 27
+    }
+  },
+  {
+    "id": "docs.python.org",
+    "genre": "docs",
+    "runs": 1869,
+    "fail": 0,
+    "incon": 0,
+    "suppressed": 0,
+    "coverHist": {}
+  },
+  {
+    "id": "react.dev",
+    "genre": "docs",
+    "runs": 1592,
+    "fail": 0,
+    "incon": 0,
+    "suppressed": 57,
+    "coverHist": {}
+  },
+  {
+    "id": "tailwindcss.com",
+    "genre": "docs",
+    "runs": 594,
+    "fail": 0,
+    "incon": 0,
+    "suppressed": 0,
+    "coverHist": {}
+  },
+  {
+    "id": "kubernetes.io",
+    "genre": "docs",
+    "runs": 209,
+    "fail": 0,
+    "incon": 0,
+    "suppressed": 0,
+    "coverHist": {}
+  },
+  {
+    "id": "books.toscrape.com",
+    "genre": "ecommerce",
+    "runs": 149,
+    "fail": 0,
+    "incon": 0,
+    "suppressed": 0,
+    "coverHist": {}
+  },
+  {
+    "id": "allbirds.com",
+    "genre": "ecommerce",
+    "runs": 133,
+    "fail": 1,
+    "incon": 0,
+    "suppressed": 0,
+    "coverHist": {
+      "1.00": 1
+    }
+  },
+  {
+    "id": "gymshark.com",
+    "genre": "ecommerce",
+    "runs": 364,
+    "fail": 11,
+    "incon": 0,
+    "suppressed": 0,
+    "coverHist": {
+      "<0.99": 10,
+      "1.00": 1
+    }
+  },
+  {
+    "id": "en.wikipedia.org",
+    "genre": "editorial",
+    "runs": 1916,
+    "fail": 405,
+    "incon": 0,
+    "suppressed": 0,
+    "coverHist": {
+      "1.00": 405
+    }
+  },
+  {
+    "id": "news.ycombinator.com",
+    "genre": "editorial",
+    "runs": 425,
+    "fail": 0,
+    "incon": 0,
+    "suppressed": 0,
+    "coverHist": {}
+  },
+  {
+    "id": "bbc.com",
+    "genre": "editorial",
+    "runs": 351,
+    "fail": 0,
+    "incon": 0,
+    "suppressed": 0,
+    "coverHist": {}
+  },
+  {
+    "id": "theguardian.com",
+    "genre": "editorial",
+    "runs": 871,
+    "fail": 21,
+    "incon": 0,
+    "suppressed": 2,
+    "coverHist": {
+      "<0.99": 21
+    }
+  },
+  {
+    "id": "arstechnica.com",
+    "genre": "editorial",
+    "runs": 403,
+    "fail": 10,
+    "incon": 0,
+    "suppressed": 0,
+    "coverHist": {
+      "<0.99": 9,
+      "1.00": 1
+    }
+  },
+  {
+    "id": "smashingmagazine.com",
+    "genre": "editorial",
+    "runs": 461,
+    "fail": 0,
+    "incon": 0,
+    "suppressed": 12,
+    "coverHist": {}
+  },
+  {
+    "id": "css_tricks.com",
+    "genre": "editorial",
+    "runs": 576,
+    "fail": 14,
+    "incon": 0,
+    "suppressed": 17,
+    "coverHist": {
+      "<0.99": 10,
+      "1.00": 4
+    }
+  }
+]

@@ -1,0 +1,1008 @@
+{
+  "N": 5,
+  "report": [
+    {
+      "id": "app.diagrams.net",
+      "genre": "app",
+      "naive": {
+        "n": 2475,
+        "unionN": 2475,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          800,
+          800,
+          800,
+          800,
+          800
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 2474,
+        "unionN": 2474,
+        "setStable": true,
+        "identicalPct": 99.6,
+        "geomPct": 100,
+        "topDrift": [
+          [
+            "style.opacity",
+            10
+          ]
+        ],
+        "scrollH": [
+          800,
+          800,
+          800,
+          800,
+          800
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "play.grafana.org",
+      "genre": "app",
+      "naive": {
+        "n": 524,
+        "unionN": 524,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          800,
+          800,
+          800,
+          800,
+          800
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 524,
+        "unionN": 524,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          800,
+          800,
+          800,
+          800,
+          800
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "developer.mozilla.org",
+      "genre": "docs",
+      "naive": {
+        "n": 2451,
+        "unionN": 2451,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          23768,
+          23768,
+          23768,
+          23768,
+          23768
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 2450,
+        "unionN": 2450,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          23768,
+          23768,
+          23768,
+          23768,
+          23768
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "docs.python.org",
+      "genre": "docs",
+      "naive": {
+        "n": 2466,
+        "unionN": 2466,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          13719,
+          13719,
+          13719,
+          13719,
+          13719
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 2465,
+        "unionN": 2465,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          13719,
+          13719,
+          13719,
+          13719,
+          13719
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "kubernetes.io",
+      "genre": "docs",
+      "naive": {
+        "n": 2444,
+        "unionN": 2444,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          5333,
+          5333,
+          5333,
+          5333,
+          5333
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 2443,
+        "unionN": 2443,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          5333,
+          5333,
+          5333,
+          5333,
+          5333
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "react.dev",
+      "genre": "docs",
+      "naive": {
+        "n": 2451,
+        "unionN": 2451,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          14576,
+          14576,
+          14576,
+          14576,
+          14576
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 2450,
+        "unionN": 2450,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          14576,
+          14576,
+          14576,
+          14576,
+          14576
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "tailwindcss.com",
+      "genre": "docs",
+      "naive": {
+        "n": 1189,
+        "unionN": 1189,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          4106,
+          4106,
+          4106,
+          4106,
+          4106
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 1189,
+        "unionN": 1189,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          4106,
+          4106,
+          4106,
+          4106,
+          4106
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "allbirds.com",
+      "genre": "ecommerce",
+      "naive": {
+        "n": 2014,
+        "unionN": 2014,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          3389,
+          3389,
+          3389,
+          3389,
+          3389
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 2013,
+        "unionN": 2013,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          3389,
+          3389,
+          3389,
+          3389,
+          3389
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "books.toscrape.com",
+      "genre": "ecommerce",
+      "naive": {
+        "n": 523,
+        "unionN": 523,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          2549,
+          2549,
+          2549,
+          2549,
+          2549
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 523,
+        "unionN": 523,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          2549,
+          2549,
+          2549,
+          2549,
+          2549
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "gymshark.com",
+      "genre": "ecommerce",
+      "naive": {
+        "n": 2392,
+        "unionN": 2392,
+        "setStable": true,
+        "identicalPct": 99.83,
+        "geomPct": 99.83,
+        "topDrift": [
+          [
+            "box.x",
+            4
+          ],
+          [
+            "box.y",
+            4
+          ],
+          [
+            "box.w",
+            4
+          ],
+          [
+            "box.h",
+            4
+          ],
+          [
+            "style.transform",
+            2
+          ]
+        ],
+        "scrollH": [
+          6885,
+          6885,
+          6885,
+          6885,
+          6885
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 2391,
+        "unionN": 2391,
+        "setStable": true,
+        "identicalPct": 99.83,
+        "geomPct": 99.83,
+        "topDrift": [
+          [
+            "box.x",
+            4
+          ],
+          [
+            "box.y",
+            4
+          ],
+          [
+            "box.w",
+            4
+          ],
+          [
+            "box.h",
+            4
+          ],
+          [
+            "style.transform",
+            2
+          ]
+        ],
+        "scrollH": [
+          6885,
+          6885,
+          6885,
+          6885,
+          6885
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "arstechnica.com",
+      "genre": "editorial",
+      "naive": {
+        "n": 2451,
+        "unionN": 2451,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          10065,
+          10065,
+          10065,
+          10065,
+          10065
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 2450,
+        "unionN": 2450,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          10065,
+          10065,
+          10065,
+          10065,
+          10065
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "bbc.com",
+      "genre": "editorial",
+      "naive": {
+        "n": 1273,
+        "unionN": 1273,
+        "setStable": true,
+        "identicalPct": 99.92,
+        "geomPct": 100,
+        "topDrift": [
+          [
+            "style.opacity",
+            1
+          ]
+        ],
+        "scrollH": [
+          5829,
+          5829,
+          5829,
+          5829,
+          5829
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 1273,
+        "unionN": 1273,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          5829,
+          5829,
+          5829,
+          5829,
+          5829
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "css_tricks.com",
+      "genre": "editorial",
+      "naive": {
+        "n": 1016,
+        "unionN": 1016,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          5673,
+          5673,
+          5673,
+          5673,
+          5673
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 1016,
+        "unionN": 1016,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          5673,
+          5673,
+          5673,
+          5673,
+          5673
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "en.wikipedia.org",
+      "genre": "editorial",
+      "naive": {
+        "n": 2379,
+        "unionN": 2379,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          15892,
+          15892,
+          15892,
+          15892,
+          15892
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 2378,
+        "unionN": 2378,
+        "setStable": true,
+        "identicalPct": 99.96,
+        "geomPct": 100,
+        "topDrift": [
+          [
+            "lineBoxes",
+            1
+          ]
+        ],
+        "scrollH": [
+          15892,
+          15892,
+          15892,
+          15892,
+          15892
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "news.ycombinator.com",
+      "genre": "editorial",
+      "naive": {
+        "n": 813,
+        "unionN": 813,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          1213,
+          1213,
+          1213,
+          1213,
+          1213
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 813,
+        "unionN": 813,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          1213,
+          1213,
+          1213,
+          1213,
+          1213
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "smashingmagazine.com",
+      "genre": "editorial",
+      "naive": {
+        "n": 726,
+        "unionN": 726,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          9488,
+          9488,
+          9488,
+          9488,
+          9488
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 726,
+        "unionN": 726,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          9488,
+          9488,
+          9488,
+          9488,
+          9488
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "theguardian.com",
+      "genre": "editorial",
+      "naive": {
+        "n": 2429,
+        "unionN": 2429,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          19137,
+          19137,
+          19137,
+          19137,
+          19137
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 2428,
+        "unionN": 2428,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          19137,
+          19137,
+          19137,
+          19137,
+          19137
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "figma.com",
+      "genre": "marketing",
+      "naive": {
+        "n": 873,
+        "unionN": 873,
+        "setStable": true,
+        "identicalPct": 99.89,
+        "geomPct": 99.89,
+        "topDrift": [
+          [
+            "box.x",
+            1
+          ],
+          [
+            "box.y",
+            1
+          ],
+          [
+            "box.w",
+            1
+          ],
+          [
+            "box.h",
+            1
+          ]
+        ],
+        "scrollH": [
+          8749,
+          8749,
+          8749,
+          8749,
+          8749
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 873,
+        "unionN": 873,
+        "setStable": true,
+        "identicalPct": 99.89,
+        "geomPct": 99.89,
+        "topDrift": [
+          [
+            "box.x",
+            1
+          ],
+          [
+            "box.y",
+            1
+          ],
+          [
+            "box.w",
+            1
+          ],
+          [
+            "box.h",
+            1
+          ]
+        ],
+        "scrollH": [
+          8749,
+          8749,
+          8749,
+          8749,
+          8749
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "linear.app",
+      "genre": "marketing",
+      "naive": {
+        "n": 2088,
+        "unionN": 2088,
+        "setStable": true,
+        "identicalPct": 99.81,
+        "geomPct": 99.86,
+        "topDrift": [
+          [
+            "box.y",
+            3
+          ],
+          [
+            "style.opacity",
+            2
+          ],
+          [
+            "style.transform",
+            2
+          ],
+          [
+            "vis",
+            2
+          ]
+        ],
+        "scrollH": [
+          10500,
+          10500,
+          10500,
+          10500,
+          10500
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 2087,
+        "unionN": 2087,
+        "setStable": true,
+        "identicalPct": 97.75,
+        "geomPct": 100,
+        "topDrift": [
+          [
+            "style.opacity",
+            46
+          ],
+          [
+            "vis",
+            2
+          ],
+          [
+            "style.visibility",
+            1
+          ]
+        ],
+        "scrollH": [
+          10500,
+          10500,
+          10500,
+          10500,
+          10500
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "netlify.com",
+      "genre": "marketing",
+      "naive": {
+        "n": 1764,
+        "unionN": 1764,
+        "setStable": true,
+        "identicalPct": 96.32,
+        "geomPct": 96.43,
+        "topDrift": [
+          [
+            "box.x",
+            63
+          ],
+          [
+            "style.transform",
+            3
+          ],
+          [
+            "style.opacity",
+            2
+          ]
+        ],
+        "scrollH": [
+          7824,
+          7824,
+          7824,
+          7824,
+          7824
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 1764,
+        "unionN": 1764,
+        "setStable": true,
+        "identicalPct": 96.09,
+        "geomPct": 96.2,
+        "topDrift": [
+          [
+            "box.x",
+            63
+          ],
+          [
+            "box.y",
+            5
+          ],
+          [
+            "style.transform",
+            3
+          ],
+          [
+            "style.opacity",
+            2
+          ],
+          [
+            "box.h",
+            1
+          ]
+        ],
+        "scrollH": [
+          7824,
+          7824,
+          7824,
+          7824,
+          7824
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "slack.com",
+      "genre": "marketing",
+      "naive": {
+        "n": 2179,
+        "unionN": 2179,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          11728,
+          11728,
+          11728,
+          11728,
+          11728
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 2179,
+        "unionN": 2179,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          11728,
+          11728,
+          11728,
+          11728,
+          11728
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "stripe.com",
+      "genre": "marketing",
+      "naive": {
+        "n": 2352,
+        "unionN": 2352,
+        "setStable": true,
+        "identicalPct": 99.96,
+        "geomPct": 100,
+        "topDrift": [
+          [
+            "style.marginRight",
+            1
+          ],
+          [
+            "style.marginLeft",
+            1
+          ]
+        ],
+        "scrollH": [
+          14677,
+          14677,
+          14677,
+          14677,
+          14677
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 2351,
+        "unionN": 2351,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          14677,
+          14677,
+          14677,
+          14677,
+          14677
+        ],
+        "externalBlocked": 0
+      }
+    },
+    {
+      "id": "vercel.com",
+      "genre": "marketing",
+      "naive": {
+        "n": 939,
+        "unionN": 939,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          5183,
+          5183,
+          5183,
+          5183,
+          5183
+        ],
+        "externalBlocked": 0
+      },
+      "settled": {
+        "n": 939,
+        "unionN": 939,
+        "setStable": true,
+        "identicalPct": 100,
+        "geomPct": 100,
+        "topDrift": [],
+        "scrollH": [
+          5183,
+          5183,
+          5183,
+          5183,
+          5183
+        ],
+        "externalBlocked": 0
+      }
+    }
+  ],
+  "driftTally": {
+    "style.opacity": 58,
+    "box.y": 10,
+    "box.h": 6,
+    "box.x": 68,
+    "style.transform": 5,
+    "lineBoxes": 1,
+    "vis": 2,
+    "style.visibility": 1,
+    "box.w": 5
+  }
+}

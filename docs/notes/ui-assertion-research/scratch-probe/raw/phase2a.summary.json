@@ -1,0 +1,799 @@
+{
+  "totals": {
+    "fail": 466,
+    "inconclusive": 22,
+    "suppressed": 2613
+  },
+  "pages": [
+    {
+      "id": "stripe.com",
+      "genre": "marketing",
+      "fail": 43,
+      "inconclusive": 0,
+      "suppressed": 276,
+      "failByCheck": {
+        "B1.overlap": 38,
+        "B2.protrude": 5
+      },
+      "inconByCause": {},
+      "suppressedByCause": {
+        "collision-region-clipped": 70,
+        "clipped-ancestor": 197,
+        "protrusion-clipped-higher-up": 9
+      },
+      "stats": {
+        "pairsTested": 11005,
+        "protrusions": 5,
+        "fontSize": {
+          "distinct": 15,
+          "n90": 7,
+          "usages": 472
+        },
+        "color": {
+          "distinct": 22,
+          "n90": 9,
+          "usages": 472
+        },
+        "spacing": {
+          "distinct": 40,
+          "n90": 18,
+          "usages": 759
+        },
+        "visEls": 1334
+      }
+    },
+    {
+      "id": "linear.app",
+      "genre": "marketing",
+      "fail": 18,
+      "inconclusive": 1,
+      "suppressed": 110,
+      "failByCheck": {
+        "B1.overlap": 18
+      },
+      "inconByCause": {
+        "occluder-bg-unresolvable": 1
+      },
+      "suppressedByCause": {
+        "collision-region-clipped": 2,
+        "clipped-ancestor": 90,
+        "protrusion-clipped-higher-up": 18
+      },
+      "stats": {
+        "pairsTested": 4640,
+        "protrusions": 0,
+        "fontSize": {
+          "distinct": 12,
+          "n90": 5,
+          "usages": 362
+        },
+        "color": {
+          "distinct": 13,
+          "n90": 5,
+          "usages": 362
+        },
+        "spacing": {
+          "distinct": 49,
+          "n90": 19,
+          "usages": 643
+        },
+        "visEls": 1093
+      }
+    },
+    {
+      "id": "vercel.com",
+      "genre": "marketing",
+      "fail": 0,
+      "inconclusive": 1,
+      "suppressed": 4,
+      "failByCheck": {},
+      "inconByCause": {
+        "positioned-offscreen": 1
+      },
+      "suppressedByCause": {
+        "collision-region-clipped": 1,
+        "clipped-ancestor": 2,
+        "protrusion-clipped-higher-up": 1
+      },
+      "stats": {
+        "pairsTested": 2174,
+        "protrusions": 0,
+        "fontSize": {
+          "distinct": 8,
+          "n90": 4,
+          "usages": 171
+        },
+        "color": {
+          "distinct": 7,
+          "n90": 3,
+          "usages": 171
+        },
+        "spacing": {
+          "distinct": 18,
+          "n90": 5,
+          "usages": 775
+        },
+        "visEls": 452
+      }
+    },
+    {
+      "id": "figma.com",
+      "genre": "marketing",
+      "fail": 9,
+      "inconclusive": 1,
+      "suppressed": 151,
+      "failByCheck": {
+        "B2.protrude": 3,
+        "C1.viewport": 6
+      },
+      "inconByCause": {
+        "positioned-offscreen": 1
+      },
+      "suppressedByCause": {
+        "clipped-ancestor": 141,
+        "protrusion-clipped-higher-up": 10
+      },
+      "stats": {
+        "pairsTested": 660,
+        "protrusions": 3,
+        "fontSize": {
+          "distinct": 8,
+          "n90": 4,
+          "usages": 127
+        },
+        "color": {
+          "distinct": 4,
+          "n90": 3,
+          "usages": 127
+        },
+        "spacing": {
+          "distinct": 18,
+          "n90": 11,
+          "usages": 326
+        },
+        "visEls": 703
+      }
+    },
+    {
+      "id": "netlify.com",
+      "genre": "marketing",
+      "fail": 0,
+      "inconclusive": 0,
+      "suppressed": 49,
+      "failByCheck": {},
+      "inconByCause": {},
+      "suppressedByCause": {
+        "clipped-ancestor": 49
+      },
+      "stats": {
+        "pairsTested": 3321,
+        "protrusions": 0,
+        "fontSize": {
+          "distinct": 12,
+          "n90": 4,
+          "usages": 252
+        },
+        "color": {
+          "distinct": 24,
+          "n90": 11,
+          "usages": 252
+        },
+        "spacing": {
+          "distinct": 19,
+          "n90": 9,
+          "usages": 407
+        },
+        "visEls": 536
+      }
+    },
+    {
+      "id": "slack.com",
+      "genre": "marketing",
+      "fail": 12,
+      "inconclusive": 0,
+      "suppressed": 74,
+      "failByCheck": {
+        "B2.protrude": 4,
+        "C1.viewport": 8
+      },
+      "inconByCause": {},
+      "suppressedByCause": {
+        "clipped-ancestor": 62,
+        "protrusion-clipped-higher-up": 12
+      },
+      "stats": {
+        "pairsTested": 1344,
+        "protrusions": 4,
+        "fontSize": {
+          "distinct": 19,
+          "n90": 9,
+          "usages": 258
+        },
+        "color": {
+          "distinct": 17,
+          "n90": 10,
+          "usages": 258
+        },
+        "spacing": {
+          "distinct": 35,
+          "n90": 15,
+          "usages": 623
+        },
+        "visEls": 864
+      }
+    },
+    {
+      "id": "play.grafana.org",
+      "genre": "app",
+      "fail": 5,
+      "inconclusive": 0,
+      "suppressed": 2,
+      "failByCheck": {
+        "B1.overlap": 1,
+        "B2.protrude": 4
+      },
+      "inconByCause": {},
+      "suppressedByCause": {
+        "collision-region-clipped": 1,
+        "protrusion-clipped-higher-up": 1
+      },
+      "stats": {
+        "pairsTested": 303,
+        "protrusions": 4,
+        "fontSize": {
+          "distinct": 8,
+          "n90": 2,
+          "usages": 72
+        },
+        "color": {
+          "distinct": 8,
+          "n90": 6,
+          "usages": 72
+        },
+        "spacing": {
+          "distinct": 17,
+          "n90": 6,
+          "usages": 297
+        },
+        "visEls": 377
+      }
+    },
+    {
+      "id": "app.diagrams.net",
+      "genre": "app",
+      "fail": 2,
+      "inconclusive": 1,
+      "suppressed": 0,
+      "failByCheck": {
+        "C1.viewport": 2
+      },
+      "inconByCause": {
+        "positioned-offscreen": 1
+      },
+      "suppressedByCause": {},
+      "stats": {
+        "pairsTested": 15,
+        "protrusions": 0,
+        "fontSize": {
+          "distinct": 1,
+          "n90": 1,
+          "usages": 6
+        },
+        "color": {
+          "distinct": 1,
+          "n90": 1,
+          "usages": 6
+        },
+        "spacing": {
+          "distinct": 6,
+          "n90": 3,
+          "usages": 37
+        },
+        "visEls": 38
+      }
+    },
+    {
+      "id": "developer.mozilla.org",
+      "genre": "docs",
+      "fail": 100,
+      "inconclusive": 0,
+      "suppressed": 756,
+      "failByCheck": {
+        "B1.overlap": 100
+      },
+      "inconByCause": {},
+      "suppressedByCause": {
+        "occluded-by-opaque-top": 21,
+        "collision-region-clipped": 735
+      },
+      "stats": {
+        "pairsTested": 10640,
+        "protrusions": 0,
+        "fontSize": {
+          "distinct": 5,
+          "n90": 1,
+          "usages": 939
+        },
+        "color": {
+          "distinct": 4,
+          "n90": 2,
+          "usages": 939
+        },
+        "spacing": {
+          "distinct": 19,
+          "n90": 4,
+          "usages": 2935
+        },
+        "visEls": 2154
+      }
+    },
+    {
+      "id": "docs.python.org",
+      "genre": "docs",
+      "fail": 20,
+      "inconclusive": 0,
+      "suppressed": 0,
+      "failByCheck": {
+        "B1.overlap": 20
+      },
+      "inconByCause": {},
+      "suppressedByCause": {},
+      "stats": {
+        "pairsTested": 25991,
+        "protrusions": 0,
+        "fontSize": {
+          "distinct": 10,
+          "n90": 2,
+          "usages": 1373
+        },
+        "color": {
+          "distinct": 16,
+          "n90": 6,
+          "usages": 1373
+        },
+        "spacing": {
+          "distinct": 18,
+          "n90": 7,
+          "usages": 933
+        },
+        "visEls": 2269
+      }
+    },
+    {
+      "id": "react.dev",
+      "genre": "docs",
+      "fail": 1,
+      "inconclusive": 11,
+      "suppressed": 90,
+      "failByCheck": {
+        "B2.protrude": 1
+      },
+      "inconByCause": {
+        "occluder-bg-unresolvable": 11
+      },
+      "suppressedByCause": {
+        "collision-region-clipped": 90
+      },
+      "stats": {
+        "pairsTested": 20488,
+        "protrusions": 1,
+        "fontSize": {
+          "distinct": 10,
+          "n90": 3,
+          "usages": 1334
+        },
+        "color": {
+          "distinct": 13,
+          "n90": 6,
+          "usages": 1334
+        },
+        "spacing": {
+          "distinct": 17,
+          "n90": 8,
+          "usages": 1241
+        },
+        "visEls": 2058
+      }
+    },
+    {
+      "id": "tailwindcss.com",
+      "genre": "docs",
+      "fail": 4,
+      "inconclusive": 0,
+      "suppressed": 0,
+      "failByCheck": {
+        "B2.protrude": 4
+      },
+      "inconByCause": {},
+      "suppressedByCause": {},
+      "stats": {
+        "pairsTested": 7155,
+        "protrusions": 4,
+        "fontSize": {
+          "distinct": 8,
+          "n90": 2,
+          "usages": 547
+        },
+        "color": {
+          "distinct": 13,
+          "n90": 8,
+          "usages": 547
+        },
+        "spacing": {
+          "distinct": 18,
+          "n90": 7,
+          "usages": 781
+        },
+        "visEls": 1050
+      }
+    },
+    {
+      "id": "kubernetes.io",
+      "genre": "docs",
+      "fail": 0,
+      "inconclusive": 0,
+      "suppressed": 0,
+      "failByCheck": {},
+      "inconByCause": {},
+      "suppressedByCause": {},
+      "stats": {
+        "pairsTested": 42,
+        "protrusions": 0,
+        "fontSize": {
+          "distinct": 3,
+          "n90": 2,
+          "usages": 14
+        },
+        "color": {
+          "distinct": 2,
+          "n90": 2,
+          "usages": 14
+        },
+        "spacing": {
+          "distinct": 13,
+          "n90": 6,
+          "usages": 82
+        },
+        "visEls": 69
+      }
+    },
+    {
+      "id": "books.toscrape.com",
+      "genre": "ecommerce",
+      "fail": 2,
+      "inconclusive": 0,
+      "suppressed": 0,
+      "failByCheck": {
+        "B2.protrude": 2
+      },
+      "inconByCause": {},
+      "suppressedByCause": {},
+      "stats": {
+        "pairsTested": 1294,
+        "protrusions": 2,
+        "fontSize": {
+          "distinct": 5,
+          "n90": 2,
+          "usages": 144
+        },
+        "color": {
+          "distinct": 6,
+          "n90": 3,
+          "usages": 144
+        },
+        "spacing": {
+          "distinct": 15,
+          "n90": 6,
+          "usages": 368
+        },
+        "visEls": 520
+      }
+    },
+    {
+      "id": "allbirds.com",
+      "genre": "ecommerce",
+      "fail": 21,
+      "inconclusive": 5,
+      "suppressed": 154,
+      "failByCheck": {
+        "B1.overlap": 1,
+        "C1.viewport": 20
+      },
+      "inconByCause": {
+        "positioned-offscreen": 5
+      },
+      "suppressedByCause": {
+        "clipped-ancestor": 154
+      },
+      "stats": {
+        "pairsTested": 934,
+        "protrusions": 0,
+        "fontSize": {
+          "distinct": 6,
+          "n90": 2,
+          "usages": 116
+        },
+        "color": {
+          "distinct": 4,
+          "n90": 3,
+          "usages": 116
+        },
+        "spacing": {
+          "distinct": 16,
+          "n90": 7,
+          "usages": 380
+        },
+        "visEls": 478
+      }
+    },
+    {
+      "id": "gymshark.com",
+      "genre": "ecommerce",
+      "fail": 0,
+      "inconclusive": 0,
+      "suppressed": 344,
+      "failByCheck": {},
+      "inconByCause": {},
+      "suppressedByCause": {
+        "clipped-ancestor": 344
+      },
+      "stats": {
+        "pairsTested": 2465,
+        "protrusions": 0,
+        "fontSize": {
+          "distinct": 7,
+          "n90": 3,
+          "usages": 197
+        },
+        "color": {
+          "distinct": 4,
+          "n90": 3,
+          "usages": 197
+        },
+        "spacing": {
+          "distinct": 14,
+          "n90": 9,
+          "usages": 708
+        },
+        "visEls": 1061
+      }
+    },
+    {
+      "id": "en.wikipedia.org",
+      "genre": "editorial",
+      "fail": 142,
+      "inconclusive": 1,
+      "suppressed": 0,
+      "failByCheck": {
+        "B1.overlap": 140,
+        "B2.protrude": 2
+      },
+      "inconByCause": {
+        "occluder-bg-unresolvable": 1
+      },
+      "suppressedByCause": {},
+      "stats": {
+        "pairsTested": 8042,
+        "protrusions": 2,
+        "fontSize": {
+          "distinct": 12,
+          "n90": 4,
+          "usages": 876
+        },
+        "color": {
+          "distinct": 7,
+          "n90": 2,
+          "usages": 876
+        },
+        "spacing": {
+          "distinct": 28,
+          "n90": 12,
+          "usages": 551
+        },
+        "visEls": 1766
+      }
+    },
+    {
+      "id": "news.ycombinator.com",
+      "genre": "editorial",
+      "fail": 0,
+      "inconclusive": 0,
+      "suppressed": 0,
+      "failByCheck": {},
+      "inconByCause": {},
+      "suppressedByCause": {},
+      "stats": {
+        "pairsTested": 9640,
+        "protrusions": 0,
+        "fontSize": {
+          "distinct": 3,
+          "n90": 3,
+          "usages": 323
+        },
+        "color": {
+          "distinct": 3,
+          "n90": 2,
+          "usages": 323
+        },
+        "spacing": {
+          "distinct": 6,
+          "n90": 4,
+          "usages": 75
+        },
+        "visEls": 811
+      }
+    },
+    {
+      "id": "bbc.com",
+      "genre": "editorial",
+      "fail": 0,
+      "inconclusive": 0,
+      "suppressed": 0,
+      "failByCheck": {},
+      "inconByCause": {},
+      "suppressedByCause": {},
+      "stats": {
+        "pairsTested": 1581,
+        "protrusions": 0,
+        "fontSize": {
+          "distinct": 8,
+          "n90": 5,
+          "usages": 220
+        },
+        "color": {
+          "distinct": 7,
+          "n90": 3,
+          "usages": 220
+        },
+        "spacing": {
+          "distinct": 19,
+          "n90": 6,
+          "usages": 407
+        },
+        "visEls": 987
+      }
+    },
+    {
+      "id": "theguardian.com",
+      "genre": "editorial",
+      "fail": 22,
+      "inconclusive": 0,
+      "suppressed": 253,
+      "failByCheck": {
+        "B1.overlap": 20,
+        "C1.viewport": 2
+      },
+      "inconByCause": {},
+      "suppressedByCause": {
+        "occluded-by-opaque-top": 1,
+        "clipped-ancestor": 244,
+        "protrusion-clipped-higher-up": 8
+      },
+      "stats": {
+        "pairsTested": 1207,
+        "protrusions": 0,
+        "fontSize": {
+          "distinct": 8,
+          "n90": 6,
+          "usages": 265
+        },
+        "color": {
+          "distinct": 15,
+          "n90": 6,
+          "usages": 265
+        },
+        "spacing": {
+          "distinct": 43,
+          "n90": 11,
+          "usages": 738
+        },
+        "visEls": 2002
+      }
+    },
+    {
+      "id": "arstechnica.com",
+      "genre": "editorial",
+      "fail": 7,
+      "inconclusive": 1,
+      "suppressed": 0,
+      "failByCheck": {
+        "B1.overlap": 7
+      },
+      "inconByCause": {
+        "positioned-offscreen": 1
+      },
+      "suppressedByCause": {},
+      "stats": {
+        "pairsTested": 1410,
+        "protrusions": 0,
+        "fontSize": {
+          "distinct": 7,
+          "n90": 4,
+          "usages": 303
+        },
+        "color": {
+          "distinct": 8,
+          "n90": 4,
+          "usages": 303
+        },
+        "spacing": {
+          "distinct": 11,
+          "n90": 4,
+          "usages": 332
+        },
+        "visEls": 855
+      }
+    },
+    {
+      "id": "smashingmagazine.com",
+      "genre": "editorial",
+      "fail": 4,
+      "inconclusive": 0,
+      "suppressed": 31,
+      "failByCheck": {
+        "B1.overlap": 2,
+        "B2.protrude": 2
+      },
+      "inconByCause": {},
+      "suppressedByCause": {
+        "collision-region-clipped": 1,
+        "clipped-ancestor": 30
+      },
+      "stats": {
+        "pairsTested": 1668,
+        "protrusions": 2,
+        "fontSize": {
+          "distinct": 22,
+          "n90": 10,
+          "usages": 283
+        },
+        "color": {
+          "distinct": 11,
+          "n90": 5,
+          "usages": 283
+        },
+        "spacing": {
+          "distinct": 59,
+          "n90": 26,
+          "usages": 744
+        },
+        "visEls": 693
+      }
+    },
+    {
+      "id": "css_tricks.com",
+      "genre": "editorial",
+      "fail": 54,
+      "inconclusive": 0,
+      "suppressed": 319,
+      "failByCheck": {
+        "B1.overlap": 54
+      },
+      "inconByCause": {},
+      "suppressedByCause": {
+        "collision-region-clipped": 60,
+        "clipped-ancestor": 259
+      },
+      "stats": {
+        "pairsTested": 8974,
+        "protrusions": 0,
+        "fontSize": {
+          "distinct": 17,
+          "n90": 5,
+          "usages": 395
+        },
+        "color": {
+          "distinct": 18,
+          "n90": 9,
+          "usages": 395
+        },
+        "spacing": {
+          "distinct": 13,
+          "n90": 5,
+          "usages": 555
+        },
+        "visEls": 808
+      }
+    }
+  ]
+}

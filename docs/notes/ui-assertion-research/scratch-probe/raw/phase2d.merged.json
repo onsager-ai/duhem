@@ -1,0 +1,2369 @@
+[
+  {
+    "id": "stripe.com",
+    "genre": "marketing",
+    "url": "https://stripe.com/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": []
+  },
+  {
+    "id": "figma.com",
+    "genre": "marketing",
+    "url": "https://www.figma.com/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 2062,
+        "hScroll": true,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 2433,
+        "hScroll": true,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 2697,
+        "hScroll": true,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 3322,
+        "hScroll": true,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 2890,
+        "hScroll": true,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 2746,
+        "hScroll": true,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 3106,
+        "hScroll": true,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 3466,
+        "hScroll": true,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      320,
+      480,
+      560,
+      768,
+      960,
+      1024,
+      1280,
+      1440,
+      1600,
+      1920
+    ],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [
+      320,
+      375,
+      414,
+      768,
+      1024,
+      1280,
+      1440,
+      1920
+    ],
+    "overflowWidths": []
+  },
+  {
+    "id": "play.grafana.org",
+    "genre": "app",
+    "url": "https://play.grafana.org/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      0,
+      481,
+      544,
+      545,
+      769,
+      770,
+      992,
+      993,
+      1200,
+      1513
+    ],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": []
+  },
+  {
+    "id": "docs.python.org",
+    "genre": "docs",
+    "url": "https://docs.python.org/3/library/json.html",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      1024
+    ],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": []
+  },
+  {
+    "id": "kubernetes.io",
+    "genre": "docs",
+    "url": "https://kubernetes.io/docs/concepts/overview/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      481,
+      569,
+      576,
+      577,
+      641,
+      651,
+      768,
+      769,
+      800,
+      946,
+      960,
+      961,
+      992,
+      993,
+      1024,
+      1025,
+      1200,
+      1201,
+      1281,
+      1286,
+      1400,
+      1401,
+      1500,
+      1501,
+      1920
+    ],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": []
+  },
+  {
+    "id": "gymshark.com",
+    "genre": "ecommerce",
+    "url": "https://www.gymshark.com/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 340,
+        "hScroll": true,
+        "unclippedOverflow": 2,
+        "topOffenders": [
+          {
+            "t": "a",
+            "c": "button_button__GH8fH button_bu",
+            "r": 340
+          },
+          {
+            "t": "a",
+            "c": "button_button__GH8fH button_bu",
+            "r": 324
+          }
+        ]
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      400,
+      426,
+      500,
+      531,
+      550,
+      551,
+      768,
+      801,
+      897,
+      1024,
+      1200,
+      1223,
+      1421,
+      1440,
+      1920,
+      2560
+    ],
+    "changePoints": [
+      {
+        "from": 320,
+        "to": 375,
+        "a": "true|true",
+        "b": "false|false"
+      }
+    ],
+    "unexplained": [
+      {
+        "from": 320,
+        "to": 375,
+        "a": "true|true",
+        "b": "false|false"
+      }
+    ],
+    "hScrollWidths": [
+      320
+    ],
+    "overflowWidths": [
+      320
+    ]
+  },
+  {
+    "id": "bbc.com",
+    "genre": "editorial",
+    "url": "https://www.bbc.com/news",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      400,
+      600,
+      601,
+      651,
+      721,
+      768,
+      900,
+      986,
+      1008,
+      1280,
+      8193
+    ],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": []
+  },
+  {
+    "id": "smashingmagazine.com",
+    "genre": "editorial",
+    "url": "https://www.smashingmagazine.com/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      301,
+      320,
+      351,
+      371,
+      376,
+      381,
+      401,
+      421,
+      450,
+      451,
+      480,
+      481,
+      500,
+      501,
+      503,
+      520,
+      550,
+      551,
+      560,
+      600,
+      601,
+      611,
+      640,
+      641,
+      650,
+      651,
+      680,
+      681,
+      687,
+      700,
+      701,
+      740,
+      741,
+      750,
+      751,
+      768,
+      769,
+      770,
+      780,
+      781,
+      800,
+      801,
+      803,
+      840,
+      841,
+      850,
+      851,
+      900,
+      901,
+      905,
+      920,
+      930,
+      931,
+      981,
+      1000,
+      1001,
+      1024,
+      1025,
+      1026,
+      1100,
+      1101,
+      1120,
+      1150,
+      1170,
+      1200,
+      1201,
+      1245,
+      1250,
+      1264,
+      1280,
+      1301,
+      1350,
+      1400,
+      1450,
+      1500,
+      1550,
+      1600,
+      1601,
+      1670,
+      1815,
+      1920,
+      1930,
+      2185,
+      2560,
+      2875,
+      3000
+    ],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": []
+  },
+  {
+    "id": "linear.app",
+    "genre": "marketing",
+    "url": "https://linear.app/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      601,
+      641,
+      769,
+      1025,
+      1281
+    ],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": []
+  },
+  {
+    "id": "netlify.com",
+    "genre": "marketing",
+    "url": "https://www.netlify.com/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 4,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "grecaptcha-badge",
+            "r": 506
+          },
+          {
+            "t": "div",
+            "c": "grecaptcha-logo",
+            "r": 506
+          },
+          {
+            "t": "iframe",
+            "c": "",
+            "r": 506
+          }
+        ]
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 4,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "grecaptcha-badge",
+            "r": 561
+          },
+          {
+            "t": "div",
+            "c": "grecaptcha-logo",
+            "r": 561
+          },
+          {
+            "t": "iframe",
+            "c": "",
+            "r": 561
+          }
+        ]
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 4,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "grecaptcha-badge",
+            "r": 600
+          },
+          {
+            "t": "div",
+            "c": "grecaptcha-logo",
+            "r": 600
+          },
+          {
+            "t": "iframe",
+            "c": "",
+            "r": 600
+          }
+        ]
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 4,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "grecaptcha-badge",
+            "r": 954
+          },
+          {
+            "t": "div",
+            "c": "grecaptcha-logo",
+            "r": 954
+          },
+          {
+            "t": "iframe",
+            "c": "",
+            "r": 954
+          }
+        ]
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 4,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "grecaptcha-badge",
+            "r": 1210
+          },
+          {
+            "t": "div",
+            "c": "grecaptcha-logo",
+            "r": 1210
+          },
+          {
+            "t": "iframe",
+            "c": "",
+            "r": 1210
+          }
+        ]
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 4,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "grecaptcha-badge",
+            "r": 1466
+          },
+          {
+            "t": "div",
+            "c": "grecaptcha-logo",
+            "r": 1466
+          },
+          {
+            "t": "iframe",
+            "c": "",
+            "r": 1466
+          }
+        ]
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 4,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "grecaptcha-badge",
+            "r": 1626
+          },
+          {
+            "t": "div",
+            "c": "grecaptcha-logo",
+            "r": 1626
+          },
+          {
+            "t": "iframe",
+            "c": "",
+            "r": 1626
+          }
+        ]
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 4,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "grecaptcha-badge",
+            "r": 2106
+          },
+          {
+            "t": "div",
+            "c": "grecaptcha-logo",
+            "r": 2106
+          },
+          {
+            "t": "iframe",
+            "c": "",
+            "r": 2106
+          }
+        ]
+      }
+    },
+    "declared": [
+      400,
+      401,
+      426,
+      477,
+      480,
+      481,
+      501,
+      531,
+      550,
+      551,
+      600,
+      601,
+      641,
+      720,
+      750,
+      769,
+      800,
+      897,
+      1085
+    ],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": [
+      320,
+      375,
+      414,
+      768,
+      1024,
+      1280,
+      1440,
+      1920
+    ]
+  },
+  {
+    "id": "app.diagrams.net",
+    "genre": "app",
+    "url": "https://app.diagrams.net/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1284,
+        "hScroll": true,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1444,
+        "hScroll": true,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1924,
+        "hScroll": true,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [],
+    "changePoints": [
+      {
+        "from": 1024,
+        "to": 1280,
+        "a": "false|false",
+        "b": "true|false"
+      }
+    ],
+    "unexplained": [
+      {
+        "from": 1024,
+        "to": 1280,
+        "a": "false|false",
+        "b": "true|false"
+      }
+    ],
+    "hScrollWidths": [
+      1280,
+      1440,
+      1920
+    ],
+    "overflowWidths": []
+  },
+  {
+    "id": "react.dev",
+    "genre": "docs",
+    "url": "https://react.dev/learn",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      374,
+      640,
+      681,
+      768,
+      769,
+      1024,
+      1025,
+      1280,
+      1536,
+      1919
+    ],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": []
+  },
+  {
+    "id": "books.toscrape.com",
+    "genre": "ecommerce",
+    "url": "https://books.toscrape.com/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      481,
+      768,
+      992,
+      1200
+    ],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": []
+  },
+  {
+    "id": "en.wikipedia.org",
+    "genre": "editorial",
+    "url": "https://en.wikipedia.org/wiki/Typography",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 777,
+        "hScroll": true,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1033,
+        "hScroll": true,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      500,
+      640,
+      641,
+      721,
+      1120,
+      1400,
+      1680
+    ],
+    "changePoints": [
+      {
+        "from": 414,
+        "to": 768,
+        "a": "false|false",
+        "b": "true|false"
+      },
+      {
+        "from": 1024,
+        "to": 1280,
+        "a": "true|false",
+        "b": "false|false"
+      }
+    ],
+    "unexplained": [],
+    "hScrollWidths": [
+      768,
+      1024
+    ],
+    "overflowWidths": []
+  },
+  {
+    "id": "theguardian.com",
+    "genre": "editorial",
+    "url": "https://www.theguardian.com/international",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      375,
+      376,
+      480,
+      481,
+      660,
+      740,
+      741,
+      980,
+      981,
+      1140,
+      1141,
+      1300,
+      1301
+    ],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": []
+  },
+  {
+    "id": "css_tricks.com",
+    "genre": "editorial",
+    "url": "https://css-tricks.com/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      375,
+      401,
+      481,
+      576,
+      577,
+      600,
+      641,
+      651,
+      768,
+      769,
+      783,
+      800,
+      801,
+      831,
+      951,
+      961,
+      992,
+      993,
+      1001,
+      1025,
+      1200,
+      1201,
+      1281,
+      1400
+    ],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": []
+  },
+  {
+    "id": "vercel.com",
+    "genre": "marketing",
+    "url": "https://vercel.com/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      242,
+      252,
+      360,
+      371,
+      375,
+      381,
+      384,
+      395,
+      400,
+      401,
+      440,
+      441,
+      451,
+      470,
+      481,
+      500,
+      501,
+      540,
+      600,
+      601,
+      602,
+      641,
+      671,
+      750,
+      768,
+      769,
+      800,
+      801,
+      841,
+      860,
+      880,
+      893,
+      896,
+      900,
+      960,
+      961,
+      992,
+      1024,
+      1025,
+      1033,
+      1036,
+      1080,
+      1109,
+      1200,
+      1201,
+      1300,
+      1400,
+      1496,
+      1600,
+      2300
+    ],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": []
+  },
+  {
+    "id": "slack.com",
+    "genre": "marketing",
+    "url": "https://slack.com/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      400,
+      425,
+      426,
+      501,
+      531,
+      550,
+      551,
+      601,
+      768,
+      769,
+      890,
+      897,
+      1024,
+      1025,
+      1280,
+      1281
+    ],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": []
+  },
+  {
+    "id": "developer.mozilla.org",
+    "genre": "docs",
+    "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/display",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 305,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 360,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 399,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 753,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1009,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1265,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1425,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1905,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": []
+  },
+  {
+    "id": "tailwindcss.com",
+    "genre": "docs",
+    "url": "https://tailwindcss.com/docs/flex",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 4,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "flex items-center gap-2.5 md:h",
+            "r": 349
+          },
+          {
+            "t": "button",
+            "c": "relative inline-grid size-7 pl",
+            "r": 349
+          },
+          {
+            "t": "svg",
+            "c": "",
+            "r": 343
+          }
+        ]
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      320,
+      384,
+      448,
+      475,
+      500,
+      512,
+      544,
+      576,
+      600,
+      618,
+      640,
+      641,
+      712,
+      768,
+      877,
+      1024,
+      1280,
+      1536
+    ],
+    "changePoints": [
+      {
+        "from": 320,
+        "to": 375,
+        "a": "false|true",
+        "b": "false|false"
+      }
+    ],
+    "unexplained": [
+      {
+        "from": 320,
+        "to": 375,
+        "a": "false|true",
+        "b": "false|false"
+      }
+    ],
+    "hScrollWidths": [],
+    "overflowWidths": [
+      320
+    ]
+  },
+  {
+    "id": "allbirds.com",
+    "genre": "ecommerce",
+    "url": "https://www.allbirds.com/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 326,
+        "hScroll": true,
+        "unclippedOverflow": 26,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "z-takeover fixed top-0 right-0",
+            "r": 640
+          },
+          {
+            "t": "div",
+            "c": "flex flex-col items-center jus",
+            "r": 640
+          },
+          {
+            "t": "div",
+            "c": "mt-14 px-14 text-center",
+            "r": 640
+          }
+        ]
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 23,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "z-takeover fixed top-0 right-0",
+            "r": 750
+          },
+          {
+            "t": "div",
+            "c": "flex flex-col items-center jus",
+            "r": 750
+          },
+          {
+            "t": "div",
+            "c": "mt-14 px-14 text-center",
+            "r": 750
+          }
+        ]
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 23,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "z-takeover fixed top-0 right-0",
+            "r": 828
+          },
+          {
+            "t": "div",
+            "c": "flex flex-col items-center jus",
+            "r": 828
+          },
+          {
+            "t": "div",
+            "c": "mt-14 px-14 text-center",
+            "r": 828
+          }
+        ]
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 23,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "z-takeover fixed top-0 right-0",
+            "r": 1299
+          },
+          {
+            "t": "div",
+            "c": "flex flex-col items-center jus",
+            "r": 1299
+          },
+          {
+            "t": "div",
+            "c": "mt-14 px-14 text-center",
+            "r": 1299
+          }
+        ]
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 23,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "z-takeover fixed top-0 right-0",
+            "r": 1555
+          },
+          {
+            "t": "div",
+            "c": "flex flex-col items-center jus",
+            "r": 1555
+          },
+          {
+            "t": "div",
+            "c": "mt-14 px-14 text-center",
+            "r": 1555
+          }
+        ]
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 23,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "z-takeover fixed top-0 right-0",
+            "r": 1811
+          },
+          {
+            "t": "div",
+            "c": "flex flex-col items-center jus",
+            "r": 1811
+          },
+          {
+            "t": "div",
+            "c": "mt-14 px-14 text-center",
+            "r": 1811
+          }
+        ]
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 23,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "z-takeover fixed top-0 right-0",
+            "r": 1971
+          },
+          {
+            "t": "div",
+            "c": "flex flex-col items-center jus",
+            "r": 1971
+          },
+          {
+            "t": "div",
+            "c": "mt-14 px-14 text-center",
+            "r": 1971
+          }
+        ]
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 23,
+        "topOffenders": [
+          {
+            "t": "div",
+            "c": "z-takeover fixed top-0 right-0",
+            "r": 2451
+          },
+          {
+            "t": "div",
+            "c": "flex flex-col items-center jus",
+            "r": 2451
+          },
+          {
+            "t": "div",
+            "c": "mt-14 px-14 text-center",
+            "r": 2451
+          }
+        ]
+      }
+    },
+    "declared": [
+      300,
+      480,
+      600,
+      640,
+      749,
+      750,
+      751,
+      768,
+      1024,
+      1280,
+      1536,
+      1920,
+      2560,
+      3120
+    ],
+    "changePoints": [
+      {
+        "from": 320,
+        "to": 375,
+        "a": "true|true",
+        "b": "false|true"
+      }
+    ],
+    "unexplained": [
+      {
+        "from": 320,
+        "to": 375,
+        "a": "true|true",
+        "b": "false|true"
+      }
+    ],
+    "hScrollWidths": [
+      320
+    ],
+    "overflowWidths": [
+      320,
+      375,
+      414,
+      768,
+      1024,
+      1280,
+      1440,
+      1920
+    ]
+  },
+  {
+    "id": "news.ycombinator.com",
+    "genre": "editorial",
+    "url": "https://news.ycombinator.com/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 804,
+        "hScroll": true,
+        "unclippedOverflow": 22,
+        "topOffenders": [
+          {
+            "t": "table",
+            "c": "",
+            "r": 804
+          },
+          {
+            "t": "tbody",
+            "c": "",
+            "r": 804
+          },
+          {
+            "t": "tr",
+            "c": "",
+            "r": 804
+          }
+        ]
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      300,
+      390,
+      510,
+      600,
+      690,
+      751,
+      810,
+      900,
+      1080,
+      1170,
+      1260,
+      1350
+    ],
+    "changePoints": [
+      {
+        "from": 414,
+        "to": 768,
+        "a": "false|false",
+        "b": "true|true"
+      },
+      {
+        "from": 768,
+        "to": 1024,
+        "a": "true|true",
+        "b": "false|false"
+      }
+    ],
+    "unexplained": [],
+    "hScrollWidths": [
+      768
+    ],
+    "overflowWidths": [
+      768
+    ]
+  },
+  {
+    "id": "arstechnica.com",
+    "genre": "editorial",
+    "url": "https://arstechnica.com/",
+    "widths": {
+      "320": {
+        "vw": 320,
+        "sw": 320,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "375": {
+        "vw": 375,
+        "sw": 375,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "414": {
+        "vw": 414,
+        "sw": 414,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "768": {
+        "vw": 768,
+        "sw": 768,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1024": {
+        "vw": 1024,
+        "sw": 1024,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1280": {
+        "vw": 1280,
+        "sw": 1280,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1440": {
+        "vw": 1440,
+        "sw": 1440,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      },
+      "1920": {
+        "vw": 1920,
+        "sw": 1920,
+        "hScroll": false,
+        "unclippedOverflow": 0,
+        "topOffenders": []
+      }
+    },
+    "declared": [
+      481,
+      768,
+      769,
+      1025,
+      1280
+    ],
+    "changePoints": [],
+    "unexplained": [],
+    "hScrollWidths": [],
+    "overflowWidths": []
+  }
+]

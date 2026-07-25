@@ -1,0 +1,311 @@
+{
+  "report": [
+    {
+      "id": "stripe.com",
+      "genre": "marketing",
+      "n": 2352,
+      "unionN": 2352,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        14677
+      ]
+    },
+    {
+      "id": "netlify.com",
+      "genre": "marketing",
+      "n": 1764,
+      "unionN": 1764,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        7824
+      ]
+    },
+    {
+      "id": "developer.mozilla.org",
+      "genre": "docs",
+      "n": 2451,
+      "unionN": 2451,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        23768
+      ]
+    },
+    {
+      "id": "kubernetes.io",
+      "genre": "docs",
+      "n": 2444,
+      "unionN": 2444,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        5333
+      ]
+    },
+    {
+      "id": "en.wikipedia.org",
+      "genre": "editorial",
+      "n": 2379,
+      "unionN": 2379,
+      "setStable": true,
+      "identicalPct": 99.92,
+      "geomPct": 100,
+      "topDrift": [
+        [
+          "lineBoxes",
+          2
+        ]
+      ],
+      "scrollH": [
+        15892
+      ]
+    },
+    {
+      "id": "arstechnica.com",
+      "genre": "editorial",
+      "n": 2451,
+      "unionN": 2451,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        10065
+      ]
+    },
+    {
+      "id": "linear.app",
+      "genre": "marketing",
+      "n": 2088,
+      "unionN": 2088,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        10500
+      ]
+    },
+    {
+      "id": "slack.com",
+      "genre": "marketing",
+      "n": 2179,
+      "unionN": 2179,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        11728
+      ]
+    },
+    {
+      "id": "docs.python.org",
+      "genre": "docs",
+      "n": 2466,
+      "unionN": 2466,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        13719
+      ]
+    },
+    {
+      "id": "books.toscrape.com",
+      "genre": "ecommerce",
+      "n": 523,
+      "unionN": 523,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        2549
+      ]
+    },
+    {
+      "id": "news.ycombinator.com",
+      "genre": "editorial",
+      "n": 813,
+      "unionN": 813,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        1213
+      ]
+    },
+    {
+      "id": "smashingmagazine.com",
+      "genre": "editorial",
+      "n": 726,
+      "unionN": 726,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        9488
+      ]
+    },
+    {
+      "id": "vercel.com",
+      "genre": "marketing",
+      "n": 939,
+      "unionN": 939,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        5183
+      ]
+    },
+    {
+      "id": "play.grafana.org",
+      "genre": "app",
+      "n": 524,
+      "unionN": 524,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        800
+      ]
+    },
+    {
+      "id": "react.dev",
+      "genre": "docs",
+      "n": 2451,
+      "unionN": 2451,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        14576
+      ]
+    },
+    {
+      "id": "allbirds.com",
+      "genre": "ecommerce",
+      "n": 2014,
+      "unionN": 2014,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        3389
+      ]
+    },
+    {
+      "id": "bbc.com",
+      "genre": "editorial",
+      "n": 1273,
+      "unionN": 1273,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        5829
+      ]
+    },
+    {
+      "id": "css_tricks.com",
+      "genre": "editorial",
+      "n": 1016,
+      "unionN": 1016,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        5673
+      ]
+    },
+    {
+      "id": "figma.com",
+      "genre": "marketing",
+      "n": 873,
+      "unionN": 873,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        8749
+      ]
+    },
+    {
+      "id": "app.diagrams.net",
+      "genre": "app",
+      "n": 2475,
+      "unionN": 2475,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        800
+      ]
+    },
+    {
+      "id": "tailwindcss.com",
+      "genre": "docs",
+      "n": 1189,
+      "unionN": 1189,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        4106
+      ]
+    },
+    {
+      "id": "gymshark.com",
+      "genre": "ecommerce",
+      "n": 2392,
+      "unionN": 2392,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        6885
+      ]
+    },
+    {
+      "id": "theguardian.com",
+      "genre": "editorial",
+      "n": 2429,
+      "unionN": 2429,
+      "setStable": true,
+      "identicalPct": 100,
+      "geomPct": 100,
+      "topDrift": [],
+      "scrollH": [
+        19137
+      ]
+    }
+  ],
+  "driftTally": {
+    "lineBoxes": 2
+  }
+}

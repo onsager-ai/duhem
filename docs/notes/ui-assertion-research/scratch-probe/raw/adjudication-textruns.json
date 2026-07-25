@@ -1,0 +1,647 @@
+[
+  {
+    "id": "01",
+    "page": "allbirds.com",
+    "a": "html/body:2/section:110/div:1/div:1/div:1/div:1/p:1",
+    "b": "html/body:2/section:110/div:1/div:1/div:1/div:2/p:1",
+    "ix": 276.3,
+    "iy": 14,
+    "cover": 1,
+    "box": [
+      501.84,
+      9,
+      276.3,
+      14
+    ]
+  },
+  {
+    "id": "02",
+    "page": "arstechnica.com",
+    "a": "html/body:2/div:3/header:3/div:2/div:7/div:1/button:1/span:1",
+    "b": "html/body:2/div:3/header:3/div:2/a:8/span:2",
+    "ix": 23.6,
+    "iy": 17,
+    "cover": 0.4,
+    "box": [
+      1081.09,
+      332.5,
+      23.559999999999945,
+      17
+    ]
+  },
+  {
+    "id": "03",
+    "page": "arstechnica.com",
+    "a": "html/body:2/div:3/main:4/div:4/div:1/div:1/article:1/div:2/div:2/div:2/h2:1/a:1",
+    "b": "html/body:2/section:15/div:1/div:1/div:1/a:4/span:1",
+    "ix": 57.6,
+    "iy": 16,
+    "cover": 1,
+    "box": [
+      920.2,
+      846,
+      57.58000000000004,
+      16
+    ]
+  },
+  {
+    "id": "04",
+    "page": "arstechnica.com",
+    "a": "html/body:2/div:3/main:4/div:4/div:1/div:2/article:7/div:1/div:2/h2:1/a:1",
+    "b": "html/body:2/section:15/div:1/div:1/div:1/div:1",
+    "ix": 218.3,
+    "iy": 19,
+    "cover": 0.53,
+    "box": [
+      256,
+      840,
+      218.31,
+      19
+    ]
+  },
+  {
+    "id": "05",
+    "page": "arstechnica.com",
+    "a": "html/body:2/div:3/main:4/div:4/div:1/div:2/article:7/div:1/div:2/div:3/span:2/span:2",
+    "b": "html/body:2/section:15/div:1/div:1/div:1/div:1",
+    "ix": 2.7,
+    "iy": 12,
+    "cover": 0.86,
+    "box": [
+      313.03,
+      874,
+      2.660000000000025,
+      12
+    ]
+  },
+  {
+    "id": "06",
+    "page": "css_tricks.com",
+    "a": "html/body:2/header:2/a:1",
+    "b": "html/body:2/header:2/div:2/a:1/div:1",
+    "ix": 16.1,
+    "iy": 12.7,
+    "cover": 0.67,
+    "box": [
+      47,
+      36.5,
+      16.060000000000002,
+      12.689999999999998
+    ]
+  },
+  {
+    "id": "07",
+    "page": "css_tricks.com",
+    "a": "html/body:2/header:2/a:1",
+    "b": "html/body:2/div:3/main:1/article:1/div:1/a:1/div:2",
+    "ix": 28.3,
+    "iy": 6.4,
+    "cover": 0.34,
+    "box": [
+      47,
+      97.19,
+      28.299999999999997,
+      6.3700000000000045
+    ]
+  },
+  {
+    "id": "08",
+    "page": "css_tricks.com",
+    "a": "html/body:2/div:3/section:2/div:2/div:2/article:3/time:1",
+    "b": "html/body:2/div:3/section:2/div:2/div:2/article:4/time:1/strong:1",
+    "ix": 31,
+    "iy": 19,
+    "cover": 0.38,
+    "box": [
+      944,
+      3754.23,
+      31.019999999999982,
+      19
+    ]
+  },
+  {
+    "id": "09",
+    "page": "css_tricks.com",
+    "a": "html/body:2/div:3/section:2/div:2/div:2/article:1/a:3/code:1/span:1/span:4",
+    "b": "html/body:2/div:3/section:2/div:2/div:2/article:2/a:3/code:1/span:1/span:1",
+    "ix": 9.6,
+    "iy": 18,
+    "cover": 1,
+    "box": [
+      597.27,
+      3872.3,
+      9.610000000000014,
+      18
+    ]
+  },
+  {
+    "id": "10",
+    "page": "developer.mozilla.org",
+    "a": "html/body:2/div:4/div:1/main:1/div:1/details:3/div:2/p:1",
+    "b": "html/body:2/div:4/div:1/main:1/div:1/section:4/p:1/a:2",
+    "ix": 32.9,
+    "iy": 11,
+    "cover": 0.65,
+    "box": [
+      399.91,
+      366,
+      32.910000000000025,
+      11
+    ]
+  },
+  {
+    "id": "11",
+    "page": "developer.mozilla.org",
+    "a": "html/body:2/div:4/div:1/aside:2/nav:1/div:2/ol:1/li:3/details:1/ol:2/li:5/a:1",
+    "b": "html/body:2/div:4/div:1/aside:2/nav:1/div:2/ol:1/li:7/details:1/ol:2/li:1/a:1",
+    "ix": 117.4,
+    "iy": 17,
+    "cover": 1,
+    "box": [
+      40,
+      598,
+      117.41,
+      17
+    ]
+  },
+  {
+    "id": "12",
+    "page": "developer.mozilla.org",
+    "a": "html/body:2/div:4/div:1/aside:2/nav:1/div:2/ol:1/li:6/details:1/ol:2/li:2/a:1",
+    "b": "html/body:2/div:4/div:1/aside:2/nav:1/div:2/ol:1/li:8/details:1/summary:1/span:1",
+    "ix": 93.4,
+    "iy": 9,
+    "cover": 0.49,
+    "box": [
+      40,
+      606,
+      93.38999999999999,
+      9
+    ]
+  },
+  {
+    "id": "13",
+    "page": "developer.mozilla.org",
+    "a": "html/body:2/div:4/div:1/aside:2/nav:1/div:2/ol:1/li:9/details:1/ol:2/li:2/a:1",
+    "b": "html/body:2/div:4/div:1/aside:2/nav:1/div:2/ol:1/li:11/details:1/summary:1/span:1",
+    "ix": 55.2,
+    "iy": 9,
+    "cover": 0.46,
+    "box": [
+      40,
+      726,
+      55.16,
+      9
+    ]
+  },
+  {
+    "id": "14",
+    "page": "en.wikipedia.org",
+    "a": "html/body:2/div:4/div:1/div:3/main:1/div:4/div:3/div:2/section:9/section:2/div:3/div:1/ol:1/li:8/span:1/a:1/span:1",
+    "b": "html/body:2/div:4/div:1/div:3/main:1/div:4/div:3/div:2/section:9/section:2/div:3/div:1/ol:1/li:9/span:1/a:1/span:1",
+    "ix": 7.2,
+    "iy": 16,
+    "cover": 1,
+    "box": [
+      327.25,
+      -99833.36,
+      7.199999999999989,
+      16
+    ]
+  },
+  {
+    "id": "15",
+    "page": "en.wikipedia.org",
+    "a": "html/body:2/div:4/div:1/div:3/main:1/div:4/div:3/div:2/section:9/section:2/div:3/div:1/ol:1/li:8/span:1/a:1/span:1",
+    "b": "html/body:2/div:4/div:1/div:3/main:1/div:4/div:3/div:2/section:9/section:2/div:3/div:1/ol:1/li:19/span:1/a:1/span:1",
+    "ix": 8,
+    "iy": 16,
+    "cover": 1,
+    "box": [
+      327.25,
+      -99763.14,
+      8.019999999999982,
+      16
+    ]
+  },
+  {
+    "id": "16",
+    "page": "en.wikipedia.org",
+    "a": "html/body:2/div:4/div:1/div:3/main:1/div:4/div:3/div:2/section:9/section:2/div:3/div:1/ol:1/li:19/span:1/a:1/span:1",
+    "b": "html/body:2/div:4/div:1/div:3/main:1/div:4/div:3/div:2/section:9/section:2/div:3/div:1/ol:1/li:37/span:1/a:1/span:1",
+    "ix": 8,
+    "iy": 16,
+    "cover": 1,
+    "box": [
+      327.25,
+      -99739.73,
+      8.019999999999982,
+      16
+    ]
+  },
+  {
+    "id": "17",
+    "page": "en.wikipedia.org",
+    "a": "html/body:2/div:4/div:1/div:3/main:1/div:4/div:3/div:2/section:9/section:2/div:3/div:1/ol:1/li:9/span:1/a:1/span:1",
+    "b": "html/body:2/div:4/div:1/div:3/main:1/div:4/div:3/div:2/section:9/section:2/div:3/div:1/ol:1/li:37/span:1/a:1/span:1",
+    "ix": 4,
+    "iy": 16,
+    "cover": 1,
+    "box": [
+      327.25,
+      -99692.92,
+      4,
+      16
+    ]
+  },
+  {
+    "id": "18",
+    "page": "figma.com",
+    "a": "html/body:2/div:1/main:5/section:6/div:1/div:1/div:2/div:1/div:2/ul:1/li:1/span:1/span:1/span:1",
+    "b": "html/body:2/div:1/main:5/section:6/div:1/div:1/div:2/div:1/div:2/ul:1/li:1/span:1/span:1/span:2",
+    "ix": 109.5,
+    "iy": 103,
+    "cover": 1,
+    "box": [
+      993,
+      5701.91,
+      109.48000000000002,
+      103
+    ]
+  },
+  {
+    "id": "19",
+    "page": "figma.com",
+    "a": "html/body:2/div:1/main:5/section:8/div:1/div:2/div:1/span:1/span:1",
+    "b": "html/body:2/div:1/main:5/section:8/div:1/div:2/div:1/span:1/span:2",
+    "ix": 49.1,
+    "iy": 16,
+    "cover": 1,
+    "box": [
+      1094.88,
+      6918.05,
+      49.13000000000011,
+      16
+    ]
+  },
+  {
+    "id": "20",
+    "page": "figma.com",
+    "a": "html/body:2/div:1/main:5/section:8/div:1/div:2/div:2/div:1/div:1/div:3/article:1/div:3/div:1/h2:1",
+    "b": "html/body:2/div:1/main:5/section:8/div:1/div:2/div:2/div:1/div:1/div:3/article:1/div:3/div:2/a:1/span:1/span:1",
+    "ix": 102.4,
+    "iy": 19,
+    "cover": 1,
+    "box": [
+      648,
+      7457.2,
+      102.36000000000001,
+      19
+    ]
+  },
+  {
+    "id": "21",
+    "page": "figma.com",
+    "a": "html/body:2/div:1/main:5/section:8/div:1/div:2/div:2/div:1/div:1/div:4/article:1/div:3/div:1/h2:1",
+    "b": "html/body:2/div:1/main:5/section:8/div:1/div:2/div:2/div:1/div:1/div:4/article:1/div:3/div:2/a:1/span:1/span:1",
+    "ix": 96,
+    "iy": 19,
+    "cover": 1,
+    "box": [
+      952,
+      7313.2,
+      96.02999999999997,
+      19
+    ]
+  },
+  {
+    "id": "22",
+    "page": "gymshark.com",
+    "a": "html/body:2/div:1/div:1/header:2/div:4/div:2/div:2/div:3/button:1/span:2",
+    "b": "html/body:2/div:1/div:1/header:2/div:4/div:2/div:2/a:6/span:1",
+    "ix": 27.2,
+    "iy": 13.3,
+    "cover": 0.83,
+    "box": [
+      119.98,
+      85.2,
+      27.230000000000004,
+      13.299999999999997
+    ]
+  },
+  {
+    "id": "23",
+    "page": "gymshark.com",
+    "a": "html/body:2/div:1/div:1/header:2/div:4/div:2/div:2/div:3/button:1/span:2",
+    "b": "html/body:2/div:1/div:1/header:2/div:4/div:2/div:2/a:9/span:1",
+    "ix": 18.8,
+    "iy": 13.3,
+    "cover": 0.36,
+    "box": [
+      179.22,
+      85.2,
+      18.75,
+      13.299999999999997
+    ]
+  },
+  {
+    "id": "24",
+    "page": "gymshark.com",
+    "a": "html/body:2/div:1/div:1/header:2/div:4/div:2/div:2/div:7/button:1/span:2",
+    "b": "html/body:2/div:1/div:1/header:2/div:4/div:2/div:2/a:9/span:1",
+    "ix": 25.9,
+    "iy": 13.3,
+    "cover": 0.89,
+    "box": [
+      211.52,
+      85.2,
+      25.939999999999998,
+      13.299999999999997
+    ]
+  },
+  {
+    "id": "25",
+    "page": "gymshark.com",
+    "a": "html/body:2/div:1/footer:3/div:6/div:1/div:2/div:1/label:1",
+    "b": "html/body:2/div:1/footer:3/div:6/div:1/div:2/div:1/div:2/div:1/span:1/div:1/span:2",
+    "ix": 19.5,
+    "iy": 9.9,
+    "cover": 0.62,
+    "box": [
+      1091.63,
+      6849.47,
+      19.450000000000045,
+      9.859999999999673
+    ]
+  },
+  {
+    "id": "26",
+    "page": "linear.app",
+    "a": "html/body:2/div:1/div:3/main:2/div:2/div:1/div:9/div:1/div:4/div:1/div:4/div:3/div:1/div:1/div:2/div:14/div:2/div:1/span:3",
+    "b": "html/body:2/div:1/div:3/main:2/div:2/div:1/div:9/div:1/div:4/div:1/div:4/div:3/div:1/div:2/div:2/div:5/button:1",
+    "ix": 45.5,
+    "iy": 10.8,
+    "cover": 0.51,
+    "box": [
+      1000,
+      825,
+      45.47000000000003,
+      10.799999999999955
+    ]
+  },
+  {
+    "id": "27",
+    "page": "linear.app",
+    "a": "html/body:2/div:1/div:3/main:2/div:2/div:1/div:9/div:1/div:4/div:1/div:4/div:3/div:1/div:1/div:2/div:14/div:2/div:7/span:1/span:2",
+    "b": "html/body:2/div:1/div:3/main:2/div:2/div:1/div:9/div:1/div:4/div:1/div:4/div:3/div:1/div:2/div:2/div:13/span:2",
+    "ix": 96.9,
+    "iy": 4.8,
+    "cover": 0.34,
+    "box": [
+      1006,
+      999.59,
+      96.8599999999999,
+      4.7999999999999545
+    ]
+  },
+  {
+    "id": "28",
+    "page": "linear.app",
+    "a": "html/body:2/div:1/div:3/main:2/div:2/section:19/div:2/div:1/div:1/div:1/div:2/div:1/div:2/div:2/div:1/span:1",
+    "b": "html/body:2/div:1/div:3/main:2/div:2/section:19/div:2/div:2/div:1/div:3/div:3/div:2/span:3",
+    "ix": 46.1,
+    "iy": 11,
+    "cover": 1,
+    "box": [
+      293,
+      2722.83,
+      46.05000000000001,
+      11
+    ]
+  },
+  {
+    "id": "29",
+    "page": "linear.app",
+    "a": "html/body:2/div:1/div:3/main:2/div:2/section:19/div:2/div:1/div:1/div:1/div:2/div:1/div:2/div:4/div:1/span:1",
+    "b": "html/body:2/div:1/div:3/main:2/div:2/section:19/div:2/div:2/div:1/div:4/div:1/span:1/div:1/span:2",
+    "ix": 46.1,
+    "iy": 9.5,
+    "cover": 0.86,
+    "box": [
+      293,
+      2930.83,
+      46.05000000000001,
+      9.5
+    ]
+  },
+  {
+    "id": "30",
+    "page": "netlify.com",
+    "a": "html/body:2/header:2/section:2/nav:1/h2:1",
+    "b": "html/body:2/header:2/section:2/nav:1/ul:6/li:1/span:1",
+    "ix": 78.2,
+    "iy": 11.5,
+    "cover": 0.61,
+    "box": [
+      170.8,
+      71.39,
+      78.17000000000002,
+      11.5
+    ]
+  },
+  {
+    "id": "31",
+    "page": "netlify.com",
+    "a": "html/body:2/header:2/section:2/nav:1/ul:6/li:1/submenu-utils:2/button:1/span:1",
+    "b": "html/body:2/header:2/section:2/nav:1/ul:6/li:2/span:1",
+    "ix": 84.4,
+    "iy": 7.5,
+    "cover": 0.4,
+    "box": [
+      274.97,
+      75.38,
+      84.44,
+      7.510000000000005
+    ]
+  },
+  {
+    "id": "32",
+    "page": "netlify.com",
+    "a": "html/body:2/header:2/section:2/nav:1/ul:6/li:2/submenu-utils:2/button:1/span:1",
+    "b": "html/body:2/header:2/section:2/nav:1/ul:6/li:4/span:1",
+    "ix": 61.1,
+    "iy": 7.5,
+    "cover": 0.26,
+    "box": [
+      513.02,
+      75.38,
+      61.139999999999986,
+      7.510000000000005
+    ]
+  },
+  {
+    "id": "33",
+    "page": "netlify.com",
+    "a": "html/body:2/header:2/section:2/nav:1/ul:6/li:6/button:1/span:1",
+    "b": "html/body:2/header:2/section:2/nav:1/ul:6/li:7/a:1",
+    "ix": 23,
+    "iy": 17,
+    "cover": 0.37,
+    "box": [
+      964.94,
+      63.89,
+      22.970000000000027,
+      17
+    ]
+  },
+  {
+    "id": "34",
+    "page": "slack.com",
+    "a": "html/body:2/main:4/section:6/div:2/div:1/div:4/div:1/div:1/div:2/div:2/div:2",
+    "b": "html/body:2/main:4/section:6/div:2/div:1/div:4/div:1/div:1/div:3/div:2/div:1",
+    "ix": 109.4,
+    "iy": 15,
+    "cover": 0.71,
+    "box": [
+      79.19,
+      4829.66,
+      109.36000000000001,
+      15
+    ]
+  },
+  {
+    "id": "35",
+    "page": "stripe.com",
+    "a": "html/body:2/div:1/div:1/main:3/section:1/div:1/div:1/h1:2/em:1",
+    "b": "html/body:2/div:1/div:1/main:3/section:1/div:1/div:1/h1:3/em:1",
+    "ix": 727.5,
+    "iy": 53,
+    "cover": 1,
+    "box": [
+      135.5,
+      196.03,
+      727.47,
+      53
+    ]
+  },
+  {
+    "id": "36",
+    "page": "stripe.com",
+    "a": "html/body:2/div:1/div:1/main:3/section:7/div:1/div:1/section:1/div:2/div:2/div:2/div:1/h3:1",
+    "b": "html/body:2/div:1/div:1/main:3/section:7/div:1/div:1/section:1/div:2/div:2/div:4/div:1/h3:1",
+    "ix": 455,
+    "iy": 25,
+    "cover": 1,
+    "box": [
+      33,
+      12087.64,
+      455,
+      25
+    ]
+  },
+  {
+    "id": "37",
+    "page": "stripe.com",
+    "a": "html/body:2/div:1/div:1/main:3/section:7/div:1/div:1/section:1/div:2/div:2/div:5/div:1/p:2",
+    "b": "html/body:2/div:1/div:1/main:3/section:7/div:1/div:1/section:1/div:2/div:2/div:8/div:1/p:2",
+    "ix": 107.3,
+    "iy": 25,
+    "cover": 0.7,
+    "box": [
+      678.61,
+      12087.64,
+      107.31000000000006,
+      25
+    ]
+  },
+  {
+    "id": "38",
+    "page": "stripe.com",
+    "a": "html/body:2/div:1/div:1/main:3/section:7/div:1/div:1/section:1/div:2/div:2/div:2/a:2",
+    "b": "html/body:2/div:1/div:1/main:3/section:7/div:1/div:1/section:1/div:2/div:2/div:5/a:2",
+    "ix": 74.7,
+    "iy": 17,
+    "cover": 1,
+    "box": [
+      1134.28,
+      12103.14,
+      74.72000000000003,
+      17
+    ]
+  },
+  {
+    "id": "39",
+    "page": "theguardian.com",
+    "a": "html/body:2/main:14/section:11/div:5/ul:2/li:1/div:1/div:1/div:2/div:2/div:1/footer:3/a:2/gu-island:1/div:1/div:3",
+    "b": "html/body:2/main:14/section:11/div:5/ul:2/li:1/div:1/div:1/div:2/div:2/div:1/footer:3/a:2/gu-island:1/div:1/span:4",
+    "ix": 13.4,
+    "iy": 13,
+    "cover": 0.93,
+    "box": [
+      318.69,
+      6177.64,
+      13.360000000000014,
+      13
+    ]
+  },
+  {
+    "id": "40",
+    "page": "theguardian.com",
+    "a": "html/body:2/main:14/section:16/div:5/ul:1/li:1/div:1/div:1/div:2/div:2/div:1/footer:3/a:1/gu-island:1/div:1/div:3",
+    "b": "html/body:2/main:14/section:16/div:5/ul:1/li:1/div:1/div:1/div:2/div:2/div:1/footer:3/a:1/gu-island:1/div:1/span:4",
+    "ix": 13.4,
+    "iy": 13,
+    "cover": 0.93,
+    "box": [
+      266,
+      9079.75,
+      13.360000000000014,
+      13
+    ]
+  },
+  {
+    "id": "41",
+    "page": "theguardian.com",
+    "a": "html/body:2/main:14/section:27/div:5/gu-island:1/div:1/ul:1/li:4/div:1/div:1/div:2/div:2/div:1/footer:2/a:1/div:1/div:3",
+    "b": "html/body:2/main:14/section:27/div:5/gu-island:1/div:1/ul:1/li:4/div:1/div:1/div:2/div:2/div:1/footer:2/a:1/div:1/span:4",
+    "ix": 20,
+    "iy": 13,
+    "cover": 0.93,
+    "box": [
+      986,
+      12058.5,
+      20.029999999999973,
+      13
+    ]
+  },
+  {
+    "id": "42",
+    "page": "theguardian.com",
+    "a": "html/body:2/main:14/section:36/div:5/gu-island:1/div:1/ul:1/li:4/div:1/div:1/div:2/div:2/div:1/footer:2/a:1/div:1/div:3",
+    "b": "html/body:2/main:14/section:36/div:5/gu-island:1/div:1/ul:1/li:4/div:1/div:1/div:2/div:2/div:1/footer:2/a:1/div:1/span:4",
+    "ix": 13.4,
+    "iy": 13,
+    "cover": 0.93,
+    "box": [
+      986,
+      14766.66,
+      13.360000000000014,
+      13
+    ]
+  },
+  {
+    "id": "43",
+    "page": "vercel.com",
+    "a": "html/body:2/div:2/div:1/div:6/footer:1/div:2/fieldset:2/span:2/label:2/span:1",
+    "b": "html/body:2/div:2/div:1/div:6/footer:1/div:2/fieldset:2/span:3/label:2/span:1",
+    "ix": 14.9,
+    "iy": 15,
+    "cover": 0.58,
+    "box": [
+      1219.5,
+      5364.16,
+      14.8900000000001,
+      15
+    ]
+  }
+]

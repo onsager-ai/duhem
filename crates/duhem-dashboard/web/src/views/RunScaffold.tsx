@@ -411,7 +411,7 @@ export function RunScaffold({
       : "summary";
   return (
     <DefinitionProvider runId={runId} enabled={run.has_definition}>
-      <div className="run-workspace -mt-4 min-w-0 max-w-full md:-mt-6">
+      <div className="run-workspace -my-6 min-w-0 max-w-full md:-my-8">
         <header className="run-workspace-header sticky top-14 z-30 -mx-4 mb-2 border-b bg-background/95 px-4 pt-2 backdrop-blur md:-mx-8 md:px-8">
           <h2 className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-base font-semibold tracking-tight">
             <span className="min-w-0 truncate">

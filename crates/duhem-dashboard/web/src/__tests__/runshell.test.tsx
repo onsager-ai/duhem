@@ -125,6 +125,21 @@ function LocationProbe() {
 }
 
 describe("run report tree", () => {
+  it("pulls the run workspace up into the app-shell vertical inset", async () => {
+    stub();
+    const { container } = renderAt("/run/R1");
+    // The workspace reclaims the shell's py-6/md:py-8 padding (-my-6/md:-my-8)
+    // so the sticky header sits flush under the top bar and the document
+    // gains no body-level scrollbar (issue #333). A top-only reclaim leaves
+    // an 8px band and a ~5px overflow at desktop.
+    await waitFor(() =>
+      expect(container.querySelector(".run-workspace")).toBeTruthy(),
+    );
+    const workspace = container.querySelector(".run-workspace");
+    expect(workspace?.className).toContain("-my-6");
+    expect(workspace?.className).toContain("md:-my-8");
+  });
+
   it("renders the run verdict inside a heading", async () => {
     stub();
     renderAt("/run/R1");

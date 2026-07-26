@@ -158,7 +158,7 @@ export function checkPage(facts) {
   return res;
 }
 
-if (process.argv[1].endsWith('phase2a.mjs')) {
+if (process.argv[1] && process.argv[1].endsWith('phase2a.mjs')) {
   const prov = JSON.parse(fs.readFileSync('archives/provenance.json', 'utf8')).filter(r => r.usable);
   const all = [];
   for (const s of prov) {

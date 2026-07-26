@@ -15,15 +15,6 @@ async function scrollable(url,w){
     const m=await p.evaluate(()=>{const b0=window.scrollX;window.scrollTo(9999,0);const a=window.scrollX;window.scrollTo(b0,0);return a;});
     return m>0; } finally { await ctx.close().catch(()=>{}); }
 }
-// find the boundary where the verdict flips, to +-2px
-async function edge(url, lo, hi){ // lo=false side, hi=true side (or vice versa)
-  let a=lo,c=hi;
-  while (Math.abs(c-a)>2){ const mid=Math.round((a+c)/2);
-    const v=await scrollable(url,mid);
-    if (v===await Promise.resolve(true) && v) { c=mid; } else { a=mid; }
-  }
-  return { lower:a, upper:c };
-}
 const CASES=[
   {id:'news.ycombinator.com', url:'https://news.ycombinator.com/', lo:700, hi:768, hi2:840},
   {id:'allbirds.com', url:'https://www.allbirds.com/', lo:340, hi:320, hi2:null},

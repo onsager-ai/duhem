@@ -16,7 +16,7 @@ const T = (p, ms, l) => Promise.race([Promise.resolve(p), new Promise((_, rj) =>
 const FREEZE = `(()=>{const inj=()=>{if(document.getElementById('__f'))return;const s=document.createElement('style');s.id='__f';s.textContent='*,*::before,*::after{animation:none!important;transition:none!important}';(document.head||document.documentElement).appendChild(s);};if(document.documentElement)inj();document.addEventListener('DOMContentLoaded',inj,{once:true});})()`;
 
 // Collect one rect per rendered line of text, tagged with its owning element.
-const TEXTRUNS = `(() => {
+export const TEXTRUNS = `(() => {
   const runs = [];
   const path = (el) => { const p=[]; let e=el;
     while (e && e.nodeType===1 && e!==document.documentElement) { let i=1,s=e; while((s=s.previousElementSibling)) i++; p.unshift(e.tagName.toLowerCase()+':'+i); e=e.parentElement; }
@@ -64,7 +64,7 @@ const TEXTRUNS = `(() => {
 const isAnc = (a, b) => b.startsWith(a + '/');
 const alphaOf = c => { const m=/rgba?\(([^)]+)\)/.exec(c||''); if(!m) return 1; const p=m[1].split(',').map(parseFloat); return p.length>3?p[3]:1; };
 
-function overlapCheck(data) {
+export function overlapCheck(data) {
   const { runs, clip } = data;
   const fail = [], incon = [], suppressed = [];
   const BAND = 100, bands = new Map();
@@ -129,4 +129,4 @@ async function main(){
   }
   await browser.close();
 }
-main();
+if (process.argv[1] && process.argv[1].endsWith('phase2e.mjs')) main();

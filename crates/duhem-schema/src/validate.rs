@@ -170,6 +170,14 @@ pub enum ValidationError {
     },
 
     #[error(
+        "input `{input}`: `secret: true` cannot be combined with `default:` — supply the value via `env:`, a selected environment, or `--inputs`"
+    )]
+    SecretInputHasDefault { input: String },
+
+    #[error("input `{input}`: env name `{name}` is invalid — expected `[A-Z_][A-Z0-9_]*`")]
+    InvalidInputEnvName { input: String, name: String },
+
+    #[error(
         "inherited input `{name}` is also declared locally under `inputs:` — list it in one place, not both"
     )]
     InheritedInputAlsoDeclared { name: String },
@@ -221,6 +229,19 @@ pub fn validate_with_contract_outputs(
     let setup_outputs = collect_setup_outputs(&v.setup, outputs_for, &mut errs);
 
     for (name, decl) in &v.inputs {
+        if decl.secret && decl.default.is_some() {
+            errs.push(ValidationError::SecretInputHasDefault {
+                input: name.clone(),
+            });
+        }
+        if let Some(env_name) = &decl.env
+            && !valid_env_name(env_name)
+        {
+            errs.push(ValidationError::InvalidInputEnvName {
+                input: name.clone(),
+                name: env_name.clone(),
+            });
+        }
         if let Some(default) = &decl.default {
             let unwrapped = unwrap_tagged(default);
             match yml_shape(unwrapped) {
@@ -283,6 +304,14 @@ pub fn validate_with_contract_outputs(
     }
 
     if errs.is_empty() { Ok(()) } else { Err(errs) }
+}
+
+/// Shell-portable environment name accepted by `inputs.<name>.env`.
+/// Kept local to validation so loading a VD never reads process state.
+fn valid_env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some('A'..='Z' | '_'))
+        && chars.all(|c| matches!(c, 'A'..='Z' | '0'..='9' | '_'))
 }
 
 /// A step's referenceable outputs (spec #267): the names it binds in
@@ -1298,6 +1327,68 @@ criteria:
 "#;
         let v = parse(y);
         validate(&v).expect("integer default under `number` should validate");
+    }
+
+    #[test]
+    fn secret_input_with_default_is_rejected() {
+        let v = parse(
+            r#"
+verification: x
+inputs:
+  token: { type: string, secret: true, default: committed }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#,
+        );
+        let errs = validate(&v).unwrap_err();
+        assert!(errs.iter().any(|err| matches!(
+            err,
+            ValidationError::SecretInputHasDefault { input } if input == "token"
+        )));
+    }
+
+    #[test]
+    fn input_env_name_must_be_shell_portable_uppercase() {
+        for bad in ["", "1TOKEN", "Token", "TOKEN-NAME", "TOKEN.name"] {
+            let v = parse(&format!(
+                r#"
+verification: x
+inputs:
+  token: {{ type: string, env: {bad:?} }}
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#
+            ));
+            let errs = validate(&v).unwrap_err();
+            assert!(errs.iter().any(|err| matches!(
+                err,
+                ValidationError::InvalidInputEnvName { input, name }
+                    if input == "token" && name == bad
+            )));
+        }
+
+        let valid = parse(
+            r#"
+verification: x
+inputs:
+  token: { type: string, env: _TOKEN_2 }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#,
+        );
+        validate(&valid).expect("portable name validates");
     }
 
     #[test]

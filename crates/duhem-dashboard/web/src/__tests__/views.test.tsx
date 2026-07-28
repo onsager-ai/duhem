@@ -432,6 +432,23 @@ describe("Timeline", () => {
 });
 
 describe("Artifacts", () => {
+  it("explains per-secret masking counts beside an artifact", () => {
+    const sha = "9".repeat(64);
+    const { container } = render(
+      <Artifacts
+        artifacts={[
+          {
+            id: sha,
+            kind: "capture/dom",
+            url: `run/r/artifact/${sha}`,
+            mask_counts: { admin_password: 37 },
+          },
+        ]}
+      />,
+    );
+    expect(container.textContent).toContain("[redacted:admin_password] ×37");
+  });
+
   it("renders screenshots as images and other blobs as links", () => {
     const sha = "a".repeat(64);
     const { container } = render(

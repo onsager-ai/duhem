@@ -35,6 +35,18 @@ fn worked_example_round_trips_byte_equivalent() {
     );
 }
 
+#[test]
+fn definition_without_secret_fields_keeps_canonical_bytes() {
+    let v = VerificationDefinition::from_yaml_str(POSITIVE).expect("parse");
+    let out = v.to_yaml_string().expect("serialize");
+    assert!(!out.contains("\nenv:"), "absent env must not serialize");
+    assert!(
+        !out.contains("\nsecret:"),
+        "default false secret must not serialize"
+    );
+    assert_eq!(normalize(&out), normalize(POSITIVE));
+}
+
 fn normalize(s: &str) -> &str {
     s.trim_end_matches('\n')
 }

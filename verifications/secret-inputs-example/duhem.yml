@@ -1,0 +1,21 @@
+verification: Secret database input is safe to use
+spec_ref: https://github.com/onsager-ai/duhem/issues/346
+inputs:
+  db_dsn:
+    type: string
+    env: DATABASE_URL
+    secret: true
+criteria:
+  - id: AC-1
+    description: The workspaces data is reachable and contains at least one record.
+    checks:
+      - id: AC-1.1
+        description: Query the real database and mechanically verify a non-empty result.
+        steps:
+          - id: count
+            uses: db/query
+            with:
+              connection: $inputs.db_dsn
+              sql: select count(*) as n from workspaces
+        assertions:
+          - $steps.count.outputs.rows[0].n > 0

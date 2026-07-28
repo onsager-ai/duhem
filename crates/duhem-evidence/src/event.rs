@@ -91,7 +91,14 @@ pub use duhem_judge::VerdictState;
 pub enum ObservationValue {
     /// Blob reference. The bytes live in the artifact store under
     /// this content address.
-    Blob { blob_sha256: String },
+    Blob {
+        blob_sha256: String,
+        /// Non-zero exact-substring replacements made while writing this
+        /// text artifact (spec #346). Absent for binary artifacts,
+        /// unmasked text, and evidence recorded before the field existed.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        mask_counts: BTreeMap<String, u64>,
+    },
     /// Inline JSON value.
     Inline { value: serde_json::Value },
 }
@@ -379,6 +386,7 @@ mod tests {
                 output_name: "screenshot".into(),
                 value: ObservationValue::Blob {
                     blob_sha256: "abc123".into(),
+                    mask_counts: BTreeMap::new(),
                 },
             },
         };

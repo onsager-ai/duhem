@@ -24,6 +24,7 @@ use crate::event::{
     BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, HEARTBEAT_PERIOD, ObservationValue,
     SCHEMA_VERSION,
 };
+use crate::secret::SecretRegistry;
 use crate::store::{RunMeta, RunScope, Store, StoreError};
 
 /// Truncate to millisecond precision. The wire format pins `ts` at
@@ -72,6 +73,14 @@ struct SharedWriter {
     /// Send failures are ignored: a dropped receiver must never affect
     /// the run or the evidence.
     tee: std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<Event>>>,
+    /// Run-scoped secret spellings. Centralizing this on the writer is
+    /// the sink-level guarantee from spec #346: callers append ordinary
+    /// evidence and cannot accidentally opt an action out of masking.
+    secrets: SecretRegistry,
+    /// Counts produced when a blob was written, keyed by its content
+    /// address. A subsequent observation reference picks them up without
+    /// requiring capture/action call sites to carry masking metadata.
+    artifact_mask_counts: std::sync::Mutex<BTreeMap<String, BTreeMap<String, u64>>>,
 }
 
 impl EvidenceWriter {
@@ -87,7 +96,15 @@ impl EvidenceWriter {
         definition_path: &str,
         inputs: BTreeMap<String, serde_json::Value>,
     ) -> Result<Self, WriterError> {
-        Self::begin_scoped(store, run_id, definition_path, inputs, RunScope::default()).await
+        Self::begin_scoped_with_secrets(
+            store,
+            run_id,
+            definition_path,
+            inputs,
+            RunScope::default(),
+            SecretRegistry::new(),
+        )
+        .await
     }
 
     /// [`EvidenceWriter::begin`] with scoping + provenance (#190):
@@ -100,11 +117,43 @@ impl EvidenceWriter {
         inputs: BTreeMap<String, serde_json::Value>,
         scope: RunScope,
     ) -> Result<Self, WriterError> {
+        Self::begin_scoped_with_secrets(
+            store,
+            run_id,
+            definition_path,
+            inputs,
+            scope,
+            SecretRegistry::new(),
+        )
+        .await
+    }
+
+    /// [`EvidenceWriter::begin_scoped`] with the run's resolved secret
+    /// registry attached before the header row is written. The header,
+    /// event stream, blobs, and post-commit tee therefore all see the
+    /// same already-masked facts.
+    pub async fn begin_scoped_with_secrets(
+        store: Arc<dyn Store>,
+        run_id: impl Into<String>,
+        definition_path: &str,
+        mut inputs: BTreeMap<String, serde_json::Value>,
+        mut scope: RunScope,
+        secrets: SecretRegistry,
+    ) -> Result<Self, WriterError> {
         let run_id = run_id.into();
+        for value in inputs.values_mut() {
+            secrets.mask_json(value);
+        }
+        let definition_path = secrets.mask(definition_path).text;
+        mask_optional(&secrets, &mut scope.project_id);
+        mask_optional(&secrets, &mut scope.verifier_repo);
+        mask_optional(&secrets, &mut scope.verifier_sha);
+        mask_optional(&secrets, &mut scope.target_repo);
+        mask_optional(&secrets, &mut scope.target_sha);
         store
             .begin_run(&RunMeta {
                 run_id: run_id.clone(),
-                verification: definition_path.to_string(),
+                verification: definition_path,
                 schema_version: SCHEMA_VERSION.to_string(),
                 inputs,
                 started_at: now_ms(),
@@ -117,6 +166,8 @@ impl EvidenceWriter {
                 run_id,
                 next_seq: tokio::sync::Mutex::new(0),
                 tee: std::sync::Mutex::new(None),
+                secrets,
+                artifact_mask_counts: std::sync::Mutex::new(BTreeMap::new()),
             }),
             heartbeat_stop: None,
             heartbeat_task: None,
@@ -193,8 +244,20 @@ impl EvidenceWriter {
         let inline_bytes = serde_json::to_vec(&value)?;
         let obs = if inline_bytes.len() > BLOB_INLINE_THRESHOLD_BYTES {
             let sha = self.write_blob(&inline_bytes).await?;
-            ObservationValue::Blob { blob_sha256: sha.0 }
+            ObservationValue::Blob {
+                mask_counts: self
+                    .shared
+                    .artifact_mask_counts
+                    .lock()
+                    .expect("artifact mask-count mutex poisoned")
+                    .get(sha.as_str())
+                    .cloned()
+                    .unwrap_or_default(),
+                blob_sha256: sha.0,
+            }
         } else {
+            let mut value = value;
+            self.shared.secrets.mask_json(&mut value);
             ObservationValue::Inline { value }
         };
         self.append(EventPayload::StepObservation {
@@ -206,9 +269,20 @@ impl EvidenceWriter {
     }
 
     /// Store a content-addressed blob and return its address.
-    /// Idempotent for identical content.
+    /// Idempotent for identical masked content. UTF-8 blobs are recorded
+    /// text and are masked here; binary blobs (including screenshots and
+    /// video) remain byte-identical by the explicit spec #346 limit.
     pub async fn write_blob(&mut self, bytes: &[u8]) -> Result<Sha256Hex, WriterError> {
-        Ok(self.shared.store.put_blob(bytes).await?)
+        let (masked, counts) = self.shared.secrets.mask_bytes(bytes);
+        let sha = self.shared.store.put_blob(&masked).await?;
+        if !counts.is_empty() {
+            self.shared
+                .artifact_mask_counts
+                .lock()
+                .expect("artifact mask-count mutex poisoned")
+                .insert(sha.0.clone(), counts);
+        }
+        Ok(sha)
     }
 
     /// Stop the heartbeat task and close the writer. The caller must
@@ -225,6 +299,12 @@ impl EvidenceWriter {
     }
 }
 
+fn mask_optional(secrets: &SecretRegistry, value: &mut Option<String>) {
+    if let Some(value) = value {
+        *value = secrets.mask(value).text;
+    }
+}
+
 impl Drop for EvidenceWriter {
     fn drop(&mut self) {
         if let Some(stop) = self.heartbeat_stop.take() {
@@ -236,8 +316,20 @@ impl Drop for EvidenceWriter {
     }
 }
 
-async fn append_shared(shared: &SharedWriter, payload: EventPayload) -> Result<u64, WriterError> {
+async fn append_shared(
+    shared: &SharedWriter,
+    mut payload: EventPayload,
+) -> Result<u64, WriterError> {
     let mut next_seq = shared.next_seq.lock().await;
+    attach_artifact_counts(shared, &mut payload);
+    // Every event kind, including runtime-owned heartbeat and abort
+    // markers, crosses the same masking chokepoint before persistence or
+    // the live tee. Callers cannot opt a new payload out of redaction.
+    if !shared.secrets.is_empty() {
+        let mut value = serde_json::to_value(&payload)?;
+        shared.secrets.mask_json(&mut value);
+        payload = serde_json::from_value(value)?;
+    }
     let seq = *next_seq;
     let evt = Event {
         seq,
@@ -257,6 +349,27 @@ async fn append_shared(shared: &SharedWriter, payload: EventPayload) -> Result<u
     }
     *next_seq += 1;
     Ok(seq)
+}
+
+fn attach_artifact_counts(shared: &SharedWriter, payload: &mut EventPayload) {
+    let value = match payload {
+        EventPayload::StepObservation { value, .. }
+        | EventPayload::SetupStepObservation { value, .. } => value,
+        _ => return,
+    };
+    if let ObservationValue::Blob {
+        blob_sha256,
+        mask_counts,
+    } = value
+        && mask_counts.is_empty()
+        && let Some(counts) = shared
+            .artifact_mask_counts
+            .lock()
+            .expect("artifact mask-count mutex poisoned")
+            .get(blob_sha256)
+    {
+        *mask_counts = counts.clone();
+    }
 }
 
 /// Helper for building a `run_started` payload without hand-rolling
@@ -325,5 +438,62 @@ mod tests {
         })
         .await
         .expect("heartbeat persisted");
+    }
+
+    #[tokio::test]
+    async fn lifecycle_events_cross_the_secret_masking_chokepoint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteStore::open(tmp.path().join("duhem.db"))
+                .await
+                .unwrap(),
+        );
+        let secret = "SIGSECRET-credential-value";
+        let mut secrets = SecretRegistry::new();
+        secrets.register("abort_signal", secret);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut writer = EvidenceWriter::begin_scoped_with_secrets(
+            store.clone(),
+            "01MASKEDLIFECYCLE",
+            "lifecycle.yml",
+            BTreeMap::new(),
+            RunScope::default(),
+            secrets,
+        )
+        .await
+        .unwrap()
+        .with_tee(tx);
+
+        writer
+            .append(run_started("lifecycle.yml", BTreeMap::new()))
+            .await
+            .unwrap();
+        writer.append(EventPayload::RunHeartbeat).await.unwrap();
+        writer
+            .append(EventPayload::RunAborted {
+                signal: secret.to_string(),
+            })
+            .await
+            .unwrap();
+        writer.finish().await.unwrap();
+
+        let stored = store.run_events("01MASKEDLIFECYCLE").await.unwrap();
+        let tee: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        for events in [&stored, &tee] {
+            let json = serde_json::to_string(events).unwrap();
+            assert!(!json.contains(secret));
+            assert!(
+                events
+                    .iter()
+                    .any(|event| matches!(event.payload, EventPayload::RunHeartbeat))
+            );
+            assert!(events.iter().any(|event| {
+                matches!(
+                    &event.payload,
+                    EventPayload::RunAborted { signal }
+                        if signal == "[redacted:abort_signal]"
+                )
+            }));
+        }
     }
 }

@@ -290,4 +290,8 @@ pub struct ArtifactRef {
     /// Where to fetch the bytes. Serve mode: the API artifact route.
     /// Static export rewrites this to the exported relative path.
     pub url: String,
+    /// Non-zero replacements made while recording this text artifact,
+    /// keyed by secret input name. Empty for unmasked/binary artifacts.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub mask_counts: std::collections::BTreeMap<String, u64>,
 }

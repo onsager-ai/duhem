@@ -82,29 +82,47 @@ struct CriterionPlan {
 }
 
 impl Plan {
+    #[cfg(test)]
     pub fn from_def(def: &duhem_schema::VerificationDefinition) -> Self {
-        let criterion_ids = def.criteria.iter().map(|c| c.id.clone()).collect();
+        Self::from_def_masked(def, &duhem_evidence::SecretRegistry::new())
+    }
+
+    /// Build plan-only terminal text through the run's masking sink.
+    /// Event-derived text has already crossed the evidence sink; this
+    /// covers authored descriptions that never become event payloads.
+    pub fn from_def_masked(
+        def: &duhem_schema::VerificationDefinition,
+        secrets: &duhem_evidence::SecretRegistry,
+    ) -> Self {
+        let criterion_ids = def
+            .criteria
+            .iter()
+            .map(|c| secrets.mask(&c.id).text)
+            .collect();
         let mut check_owner = HashMap::new();
         let mut criteria = Vec::new();
         for c in &def.criteria {
             let mut criterion_checks = Vec::new();
             for ch in &c.checks {
-                check_owner.insert(ch.id.clone(), c.id.clone());
+                check_owner.insert(secrets.mask(&ch.id).text, secrets.mask(&c.id).text);
                 let check = CheckPlan {
-                    id: ch.id.clone(),
-                    description: ch.description.clone(),
+                    id: secrets.mask(&ch.id).text,
+                    description: ch
+                        .description
+                        .as_ref()
+                        .map(|description| secrets.mask(description).text),
                     step_count: ch.steps.len(),
                 };
                 criterion_checks.push(check);
             }
             criteria.push(CriterionPlan {
-                id: c.id.clone(),
-                description: c.description.clone(),
+                id: secrets.mask(&c.id).text,
+                description: secrets.mask(&c.description).text,
                 checks: criterion_checks,
             });
         }
         Self {
-            verification: def.verification.clone(),
+            verification: secrets.mask(&def.verification).text,
             criterion_ids,
             check_owner,
             criteria,

@@ -57,6 +57,7 @@ export interface ArtifactRef {
   id: string;
   kind: string;
   url: string;
+  mask_counts?: Record<string, number>;
 }
 
 export interface SpanModel {

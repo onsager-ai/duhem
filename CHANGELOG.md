@@ -28,6 +28,7 @@ needs more than a bullet.
 ## Unreleased
 
 - [additive] separate runtime lifecycle (`running` / `finished` / `aborted` / inferred `orphaned`) from judge verdicts, with heartbeat and terminal trace events so completed unjudged runs are representable. (#TBD)
+- [additive] Inputs accept `env:` (source the value from a process environment variable) and `secret: true` (mask the value everywhere Duhem records or displays it). (#346)
 - [additive] add step-level screenshot storyboards and synchronized browser replay evidence. (#337)
 
 ## v0.1.8 — 2026-07-24

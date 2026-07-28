@@ -358,6 +358,12 @@ function StepCaptures({
               open
             </a>
           </p>
+          {c.art.mask_counts &&
+            Object.entries(c.art.mask_counts).map(([name, count]) => (
+              <p className="muted" key={name}>
+                [redacted:{name}] ×{count}
+              </p>
+            ))}
           {isImageArtifact(c.art.kind, c.art.url) && (
             <ScreenshotArtifact artifact={c.art} rectsUrl={rectsUrl} />
           )}
@@ -983,6 +989,12 @@ export function Artifacts({ artifacts }: { artifacts: CheckDetail["artifacts"] }
               open<span className="muted"> ({artifact.id.slice(0, 12)}…)</span>
             </a>
           </p>
+          {artifact.mask_counts &&
+            Object.entries(artifact.mask_counts).map(([name, count]) => (
+              <p className="muted" key={name}>
+                [redacted:{name}] ×{count}
+              </p>
+            ))}
           {isImageArtifact(artifact.kind, artifact.url) && (
             <ScreenshotArtifact artifact={artifact} rectsUrl={rectsUrl} />
           )}

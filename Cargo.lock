@@ -864,12 +864,14 @@ dependencies = [
 name = "duhem-evidence"
 version = "0.1.8"
 dependencies = [
+ "aho-corasick",
  "async-trait",
  "base64",
  "chrono",
  "directories",
  "duhem-judge",
  "hex",
+ "percent-encoding",
  "serde",
  "serde_json",
  "sha2",

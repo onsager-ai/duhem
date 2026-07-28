@@ -150,6 +150,7 @@ pub async fn write_passing_run(
         output_name: "screenshot".into(),
         value: ObservationValue::Blob {
             blob_sha256: sha.as_str().to_string(),
+            mask_counts: BTreeMap::new(),
         },
     })
     .await
@@ -228,6 +229,7 @@ pub async fn write_replay_run(store: Arc<SqliteStore>, run_id: &str) -> (String,
         output_name: STEP_SCREENSHOT_OBSERVATION.into(),
         value: ObservationValue::Blob {
             blob_sha256: shot.0.clone(),
+            mask_counts: BTreeMap::new(),
         },
     })
     .await
@@ -241,6 +243,7 @@ pub async fn write_replay_run(store: Arc<SqliteStore>, run_id: &str) -> (String,
         output_name: "capture/video".into(),
         value: ObservationValue::Blob {
             blob_sha256: video.0.clone(),
+            mask_counts: BTreeMap::new(),
         },
     })
     .await
@@ -285,6 +288,7 @@ pub async fn write_replay_run(store: Arc<SqliteStore>, run_id: &str) -> (String,
         output_name: SESSION_EVIDENCE_OBSERVATION.into(),
         value: ObservationValue::Blob {
             blob_sha256: session_blob.0.clone(),
+            mask_counts: BTreeMap::new(),
         },
     })
     .await

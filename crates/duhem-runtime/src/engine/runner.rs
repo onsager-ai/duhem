@@ -26,12 +26,13 @@ use std::time::Duration;
 use duhem_actions::Page;
 use duhem_actions::{Outcome, RunBrowser};
 use duhem_evidence::{
-    EventPayload, EvidenceWriter, RunScope, SqliteStore, Store, StoreError, VerdictState,
-    new_run_id, project_db_path, run_started_with_definition,
+    EventPayload, EvidenceWriter, RunScope, SecretRegistry, SqliteStore, Store, StoreError,
+    VerdictState, new_run_id, project_db_path, run_started_with_definition,
 };
 use duhem_judge::{
-    AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusivePolicy, RunVerdict,
-    aggregate_check, aggregate_criterion, aggregate_run, apply_inconclusive_policy,
+    AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusiveCause,
+    InconclusivePolicy, RunVerdict, aggregate_check, aggregate_criterion, aggregate_run,
+    apply_inconclusive_policy,
 };
 use duhem_schema::{Check, Criterion, RetryBackoff, RetryPolicy, VerificationDefinition};
 use tracing::debug;
@@ -137,9 +138,15 @@ pub struct Engine {
     capture: CapturePolicy,
     /// Live progress sink (#299); see [`Engine::with_progress`].
     progress: Option<tokio::sync::mpsc::UnboundedSender<duhem_evidence::Event>>,
+    /// Resolved secret spellings for the run's two output sinks (spec
+    /// #346). Empty is a safe default; programmatic callers that do not
+    /// use the CLI resolution path are populated from `def.inputs` and
+    /// the supplied input map at run start.
+    secrets: SecretRegistry,
 }
 
 mod builder;
+mod masking;
 
 impl Engine {
     /// Build the v1 engine with the closed action catalog. The
@@ -167,6 +174,7 @@ impl Engine {
             retry_backoff_base: RETRY_BACKOFF_BASE,
             capture: CapturePolicy::default(),
             progress: None,
+            secrets: SecretRegistry::new(),
         }
     }
 
@@ -203,6 +211,20 @@ impl Engine {
         def: &VerificationDefinition,
         inputs: BTreeMap<String, serde_json::Value>,
     ) -> Result<RunOutcome, EngineError> {
+        if self.secrets.is_empty() {
+            for (name, decl) in &def.inputs {
+                if decl.secret
+                    && let Some(value) = inputs.get(name)
+                {
+                    self.secrets.register_json(name.clone(), value);
+                }
+            }
+        }
+        let missing_declared = def
+            .inputs
+            .keys()
+            .find(|name| !inputs.contains_key(*name))
+            .cloned();
         let mut input_values: BTreeMap<String, Value> = BTreeMap::new();
         for (k, v) in &inputs {
             let val = json_to_value(v)
@@ -259,12 +281,13 @@ impl Engine {
             .definition_path
             .clone()
             .unwrap_or_else(|| def.verification.clone());
-        let mut writer = EvidenceWriter::begin_scoped(
+        let mut writer = EvidenceWriter::begin_scoped_with_secrets(
             store,
             &run_id,
             &evidence_path,
             inputs.clone(),
             self.scope.clone(),
+            self.secrets.clone(),
         )
         .await?;
         // #299: tee persisted events to the subscribed progress sink.
@@ -282,6 +305,28 @@ impl Engine {
             .await?;
 
         let execution = async {
+            // Missing declared input is an environment failure recorded
+            // before browser launch or lifecycle hooks.
+            if let Some(name) = missing_declared {
+                let verdict = RunVerdict {
+                    state: VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+                    criteria: Vec::new(),
+                };
+                writer
+                    .append(EventPayload::RunFinished {
+                        verdict: Some(verdict.state),
+                    })
+                    .await?;
+                return Ok(RunOutcome {
+                    verdict,
+                    run_id,
+                    failures: Vec::new(),
+                    warnings: vec![format!(
+                        "missing required input `{name}`; supply its declared env variable, a selected environment value, or --inputs"
+                    )],
+                });
+            }
+
             // Resolve the Verification Definition's directory so relative
             // `environment.up:` / `down:` paths anchor at the same place
             // an author would `cd` to before running the script by hand.
@@ -445,7 +490,9 @@ impl Engine {
         match completed {
             Ok(result) => {
                 writer.finish().await?;
-                result
+                let mut outcome = result?;
+                masking::mask_run_outcome(&self.secrets, &mut outcome);
+                Ok(outcome)
             }
             Err(signal) => {
                 writer
@@ -861,6 +908,7 @@ mod tests {
     use crate::engine::registry::Dispatch;
     use async_trait::async_trait;
     use duhem_actions::{ActionError, ActionResult, Outcome};
+    use duhem_evidence::Trace;
     use duhem_judge::InconclusiveCause;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -1046,6 +1094,7 @@ criteria:
             retry_backoff_base: Duration::ZERO,
             capture: CapturePolicy::default(),
             progress: None,
+            secrets: SecretRegistry::new(),
         };
         // Clear default registry so each test composes its own.
         e.registry.clear();
@@ -2779,5 +2828,87 @@ criteria:
             verdict.criteria[0].checks[0].state,
             VerdictState::Inconclusive(InconclusiveCause::EmptyAggregation)
         ));
+    }
+
+    #[tokio::test]
+    async fn secret_input_masks_substituted_with_map_at_evidence_sink() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("db/query", Outcome::Ok)));
+        let definition = def(r#"
+verification: secret connection
+inputs:
+  db_dsn: { type: string, env: DATABASE_URL, secret: true }
+criteria:
+  - id: AC-1
+    description: database is reachable
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: db/query
+            with:
+              connection: $inputs.db_dsn
+              sql: select 1
+        assertions: ["true"]
+"#);
+        let secret = "postgres://user:pass@host/db";
+        let outcome = engine
+            .run_with_metadata(
+                &definition,
+                BTreeMap::from([("db_dsn".into(), serde_json::json!(secret))]),
+            )
+            .await
+            .unwrap();
+        let events = Trace::from_store(engine.store.as_ref().unwrap().as_ref(), &outcome.run_id)
+            .await
+            .unwrap()
+            .into_events();
+        let connection = events.iter().find_map(|event| match &event.payload {
+            EventPayload::StepStarted { with, .. } => with.get("connection"),
+            _ => None,
+        });
+        assert_eq!(connection, Some(&serde_json::json!("[redacted:db_dsn]")));
+        assert!(!serde_json::to_string(&events).unwrap().contains(secret));
+    }
+
+    #[tokio::test]
+    async fn missing_declared_input_records_environment_inconclusive() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        let definition = def(r#"
+verification: missing secret
+inputs:
+  token: { type: string, env: API_TOKEN, secret: true }
+criteria:
+  - id: AC-1
+    description: service is reachable
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#);
+        let outcome = engine
+            .run_with_metadata(&definition, BTreeMap::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome.verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::EnvironmentError)
+        );
+        assert!(outcome.warnings[0].contains("token"));
+        let events = Trace::from_store(engine.store.as_ref().unwrap().as_ref(), &outcome.run_id)
+            .await
+            .unwrap()
+            .into_events();
+        assert!(matches!(
+            events.last().map(|event| &event.payload),
+            Some(EventPayload::RunFinished {
+                verdict: Some(VerdictState::Inconclusive(
+                    InconclusiveCause::EnvironmentError
+                ))
+            })
+        ));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event.payload, EventPayload::StepStarted { .. }))
+        );
     }
 }

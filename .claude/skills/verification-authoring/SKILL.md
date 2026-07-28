@@ -255,11 +255,11 @@ Authoring rules:
   captures are never recorded as `$steps.<id>.outputs.*` bindings —
   so nothing can forge a capture and no assertion can bind one.
   Captures are evidence for humans/agents, never judge input. The
-  network HAR redacts sensitive headers and auth request bodies, but
-  response bodies are captured verbatim (the repair signal) — like the
-  DOM snapshot, a page that echoes a secret in a response carries it
-  into the evidence, which is shipped to the hub; keep that in mind
-  for capture-sensitive targets (use `--capture off`).
+  network HAR redacts sensitive headers and auth request bodies.
+  Registered secret input values are additionally exact-substring
+  masked from response bodies, DOM snapshots, and other recorded text
+  at the evidence boundary. Screenshots/video remain unmasked pixels,
+  so keep credentials out of rendered UI (or use `--capture off`).
 
 ### 4. The holistic-environment tax
 

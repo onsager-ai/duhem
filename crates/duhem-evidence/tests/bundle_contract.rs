@@ -43,6 +43,7 @@ fn fixed_bundle() -> RunBundle {
         artifacts: vec![BundleArtifact {
             sha256: "aa".repeat(32),
             bytes_base64: "aGVsbG8=".into(),
+            mask_counts: BTreeMap::new(),
         }],
     }
 }
@@ -106,6 +107,7 @@ async fn store_to_bundle_round_trips_through_the_export_directory() {
         output_name: STEP_SCREENSHOT_OBSERVATION.into(),
         value: ObservationValue::Blob {
             blob_sha256: shot.0.clone(),
+            mask_counts: BTreeMap::new(),
         },
     })
     .await
@@ -128,6 +130,7 @@ async fn store_to_bundle_round_trips_through_the_export_directory() {
         output_name: SESSION_EVIDENCE_OBSERVATION.into(),
         value: ObservationValue::Blob {
             blob_sha256: session_blob.0.clone(),
+            mask_counts: BTreeMap::new(),
         },
     })
     .await

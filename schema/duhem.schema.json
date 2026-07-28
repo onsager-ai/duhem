@@ -169,6 +169,17 @@
       "additionalProperties": false,
       "properties": {
         "default": true,
+        "env": {
+          "description": "Process-environment fallback (spec #346). This sits below a selected Duhem environment and above `default:` in resolution precedence; it is deliberately leaf-local rather than another global override layer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "secret": {
+          "description": "Register the resolved value for evidence/terminal masking. A secret may not carry a committed `default:`; validation owns that authoring rule so deserialization can report it alongside other structural findings.",
+          "type": "boolean"
+        },
         "type": {
           "$ref": "#/definitions/InputType",
           "description": "The declared type from the v1 catalog. Unknown names parse-fail at `from_yaml_str` per the type-catalog spec."

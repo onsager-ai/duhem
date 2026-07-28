@@ -8,6 +8,7 @@
 // in both modes.
 
 export type Verdict = string; // "pass" | "fail" | "inconclusive:<cause>"
+export type RunStatus = "running" | "finished" | "aborted" | "orphaned";
 
 export interface RunsListEntry {
   run_id: string;
@@ -16,7 +17,7 @@ export interface RunsListEntry {
   duration_ms: number | null;
   verdict: Verdict | null;
   kind: "leaf" | "run-set";
-  live: boolean;
+  status: RunStatus;
   children?: RunsListEntry[];
 }
 
@@ -37,7 +38,7 @@ export interface RunDetail {
   started_at: string | null;
   inputs: Record<string, unknown>;
   verdict: Verdict | null;
-  live: boolean;
+  status: RunStatus;
   setup_aborted: boolean;
   /** `true` when the run recorded its VD source snapshot (#302); the
    *  client then fetches it from `definitionUrl`. */

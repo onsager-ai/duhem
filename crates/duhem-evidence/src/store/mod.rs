@@ -8,8 +8,9 @@
 //! surface.
 //!
 //! Write surface: [`Store::begin_run`] → [`Store::append_event`]* →
-//! (the `run_finished` event seals the run — its fold inserts the
-//! verdict row, after which further appends are rejected by the DB).
+//! (a `run_finished` or `run_aborted` event seals the run — its fold
+//! inserts a terminal row, after which further appends are rejected
+//! by the DB). Judgment is folded separately when present.
 //! Read surface: [`Store::get_run`] / [`Store::list_runs`] /
 //! [`Store::run_events`] / [`Store::events_after`] /
 //! [`Store::get_blob`].
@@ -27,7 +28,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use crate::event::{Event, VerdictState};
+use crate::event::{Event, ORPHAN_THRESHOLD, RunStatus, VerdictState};
 use crate::writer::Sha256Hex;
 
 #[derive(Debug, Error)]
@@ -50,6 +51,8 @@ pub enum StoreError {
     NoStateDir,
     #[error("bad verdict token {0:?} in store")]
     BadVerdict(String),
+    #[error("bad run status token {0:?} in store")]
+    BadRunStatus(String),
 }
 
 /// Header recorded at `begin_run` — the store-level successor of the
@@ -89,10 +92,8 @@ pub struct RunScope {
     pub target_sha: Option<String>,
 }
 
-/// One run as the store knows it: the `runs` row joined with its
-/// verdict row, if judgment has landed. `verdict: None` means the run
-/// is in flight or crashed before `run_finished` — the same semantics
-/// a trace without a final line had.
+/// One run as the store knows it: runtime lifecycle and judge verdict
+/// are independent projections over the append-only event stream.
 #[derive(Debug, Clone)]
 pub struct RunRecord {
     pub run_id: String,
@@ -100,12 +101,37 @@ pub struct RunRecord {
     pub schema_version: String,
     pub inputs: BTreeMap<String, serde_json::Value>,
     pub started_at: DateTime<Utc>,
+    pub status: RunStatus,
     pub verdict: Option<VerdictState>,
     pub finished_at: Option<DateTime<Utc>>,
     pub duration_ms: Option<u64>,
+    /// Last persisted proof of runtime ownership. `run_started` is the
+    /// initial heartbeat for traces that have not emitted a beat yet.
+    pub last_heartbeat_at: DateTime<Utc>,
     /// Scoping + provenance (#190). All-`None` for runs recorded
     /// before the scoping migration or without attribution.
     pub scope: RunScope,
+}
+
+/// Derive lifecycle at a caller-supplied clock instant. Terminal
+/// markers always win; only unterminated runs consult heartbeat age.
+pub fn derive_run_status(
+    terminal: Option<RunStatus>,
+    last_heartbeat_at: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> RunStatus {
+    if let Some(status) = terminal {
+        return status;
+    }
+    let age = now
+        .signed_duration_since(last_heartbeat_at)
+        .to_std()
+        .unwrap_or_default();
+    if age >= ORPHAN_THRESHOLD {
+        RunStatus::Orphaned
+    } else {
+        RunStatus::Running
+    }
 }
 
 /// One project row in the portfolio rollup (#190): a project's run
@@ -177,7 +203,7 @@ pub trait Store: Send + Sync {
     /// Append one event (seq/ts already stamped by the writer) and
     /// fold its derived projection rows (assertions, checks, criteria,
     /// run verdict) in the same transaction. Appending the
-    /// `run_finished` event seals the run.
+    /// A terminal lifecycle event seals the run.
     async fn append_event(&self, run_id: &str, event: &Event) -> Result<(), StoreError>;
 
     /// Store a content-addressed blob. Idempotent: identical content

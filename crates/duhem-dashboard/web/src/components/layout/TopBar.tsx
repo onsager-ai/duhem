@@ -3,7 +3,6 @@ import { Maximize2, Menu, Minimize2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BrandMark } from "./BrandMark";
 import { Breadcrumbs } from "./Breadcrumbs";
-import { LiveIndicator } from "./LiveIndicator";
 import { ThemeToggle } from "./ThemeToggle";
 
 export function TopBar({
@@ -51,7 +50,6 @@ export function TopBar({
             ⌘K
           </kbd>
         </Button>
-        <LiveIndicator />
         <Button
           variant="ghost"
           size="icon"

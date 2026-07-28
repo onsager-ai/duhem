@@ -2,7 +2,7 @@
 // Overview KPIs / trend and the Verifications index. No backend call;
 // everything the landing needs is already in the runs tree.
 
-import type { RunsListEntry } from "./api";
+import type { RunStatus, RunsListEntry } from "./api";
 import { verdictFamily } from "./ui";
 
 export type Family = "pass" | "fail" | "inconclusive" | null;
@@ -26,7 +26,7 @@ export interface OverviewStats {
   pass: number;
   fail: number;
   inconclusive: number;
-  live: number;
+  running: number;
   passRate: number | null; // over decided runs (pass + fail + inconclusive)
   verifications: number;
   failingVerifications: number; // verifications whose latest run failed
@@ -41,9 +41,9 @@ export function computeStats(entries: RunsListEntry[]): OverviewStats {
   let pass = 0;
   let fail = 0;
   let inconclusive = 0;
-  let live = 0;
+  let running = 0;
   for (const e of leaves) {
-    if (e.live) live++;
+    if (e.status === "running") running++;
     const fam = verdictFamily(e.verdict);
     if (fam === "pass") pass++;
     else if (fam === "fail") fail++;
@@ -67,7 +67,7 @@ export function computeStats(entries: RunsListEntry[]): OverviewStats {
     pass,
     fail,
     inconclusive,
-    live,
+    running,
     passRate: decided ? pass / decided : null,
     verifications: latestByVerification.size,
     failingVerifications,
@@ -84,7 +84,7 @@ export interface VerificationSummary {
   runs: number;
   latest: RunsListEntry | null;
   recent: Family[]; // oldest → newest, up to 12
-  live: boolean;
+  status: RunStatus;
 }
 
 export function verificationSummaries(
@@ -107,7 +107,7 @@ export function verificationSummaries(
         .slice(0, 12)
         .reverse()
         .map((e) => verdictFamily(e.verdict)),
-      live: runs.some((r) => r.live),
+      status: newestFirst[0]?.status ?? "finished",
     });
   }
   out.sort((a, b) => a.name.localeCompare(b.name));

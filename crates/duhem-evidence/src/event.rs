@@ -8,6 +8,7 @@
 //! commitment in issue #10.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,25 @@ pub const SCHEMA_VERSION: &str = "v1";
 /// serialized byte length exceeds this are written to the artifact
 /// store and the event carries `blob_sha256` instead.
 pub const BLOB_INLINE_THRESHOLD_BYTES: usize = 4 * 1024;
+
+/// Runtime evidence heartbeat cadence. The CLI terminal renderer uses
+/// the same period so operator narration and stored liveness cannot
+/// drift apart.
+pub const HEARTBEAT_PERIOD: Duration = Duration::from_secs(10);
+
+/// Three missed runtime heartbeats make an unterminated run orphaned.
+/// This is read-time policy: no `orphaned` fact is persisted.
+pub const ORPHAN_THRESHOLD: Duration = Duration::from_secs(30);
+
+/// Runtime-owned lifecycle, independent of the judge's verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunStatus {
+    Running,
+    Finished,
+    Aborted,
+    Orphaned,
+}
 
 /// Outcome of a single step invocation. Distinct from a verdict —
 /// this answers "did the action complete?", not "did the artifact
@@ -116,6 +136,8 @@ pub enum EventPayload {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         definition: Option<String>,
     },
+    /// Periodic proof that the runtime still owns this unterminated run.
+    RunHeartbeat,
     EnvUpStarted {
         command: String,
     },
@@ -243,7 +265,15 @@ pub enum EventPayload {
         verdict: VerdictState,
     },
     RunFinished {
-        verdict: VerdictState,
+        /// A run can complete without being judged. The suite-level
+        /// environment container is the canonical example.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        verdict: Option<VerdictState>,
+    },
+    /// The runtime observed an operator termination signal and sealed
+    /// the run before exiting.
+    RunAborted {
+        signal: String,
     },
 }
 
@@ -255,6 +285,7 @@ impl EventPayload {
     pub fn kind(&self) -> &'static str {
         match self {
             EventPayload::RunStarted { .. } => "run_started",
+            EventPayload::RunHeartbeat => "run_heartbeat",
             EventPayload::EnvUpStarted { .. } => "env_up_started",
             EventPayload::EnvUpFinished { .. } => "env_up_finished",
             EventPayload::EnvReady { .. } => "env_ready",
@@ -272,6 +303,7 @@ impl EventPayload {
             EventPayload::CheckFinished { .. } => "check_finished",
             EventPayload::CriterionFinished { .. } => "criterion_finished",
             EventPayload::RunFinished { .. } => "run_finished",
+            EventPayload::RunAborted { .. } => "run_aborted",
         }
     }
 
@@ -289,6 +321,7 @@ impl EventPayload {
                 | EventPayload::CheckFinished { .. }
                 | EventPayload::CriterionFinished { .. }
                 | EventPayload::RunFinished { .. }
+                | EventPayload::RunAborted { .. }
         )
     }
 }
@@ -359,6 +392,20 @@ mod tests {
     fn unknown_kind_is_a_hard_error() {
         let bad = r#"{"seq":0,"ts":"2026-05-08T12:00:00.000Z","kind":"made_up"}"#;
         assert!(serde_json::from_str::<Event>(bad).is_err());
+    }
+
+    #[test]
+    fn pre_lifecycle_run_finished_keeps_its_wire_shape() {
+        let old =
+            r#"{"seq":7,"ts":"2026-05-08T12:00:00.000Z","kind":"run_finished","verdict":"pass"}"#;
+        let event: Event = serde_json::from_str(old).unwrap();
+        assert_eq!(
+            event.payload,
+            EventPayload::RunFinished {
+                verdict: Some(VerdictState::Pass)
+            }
+        );
+        assert_eq!(serde_json::to_string(&event).unwrap(), old);
     }
 
     #[test]
@@ -477,7 +524,7 @@ mod tests {
     fn is_finished_flags_the_right_variants() {
         assert!(
             EventPayload::RunFinished {
-                verdict: VerdictState::Pass
+                verdict: Some(VerdictState::Pass)
             }
             .is_finished()
         );

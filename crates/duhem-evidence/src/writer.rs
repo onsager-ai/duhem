@@ -10,8 +10,9 @@
 //!   as strong as the old fsync-on-`*_finished` policy.
 //! - Blobs are content-addressed (`sha256`) in the store's `artifacts`
 //!   table; puts are idempotent.
-//! - Appending `run_finished` seals the run: the store folds the
-//!   verdict row in the same transaction and rejects any later event.
+//! - Appending `run_finished` or `run_aborted` seals the run: the
+//!   store folds a lifecycle terminal in the same transaction and
+//!   rejects any later event. A `run_finished` verdict is optional.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -20,7 +21,8 @@ use chrono::{DateTime, SubsecRound, Utc};
 use thiserror::Error;
 
 use crate::event::{
-    BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, ObservationValue, SCHEMA_VERSION,
+    BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, HEARTBEAT_PERIOD, ObservationValue,
+    SCHEMA_VERSION,
 };
 use crate::store::{RunMeta, RunScope, Store, StoreError};
 
@@ -51,16 +53,25 @@ impl Sha256Hex {
 
 /// Append-only writer for a single run.
 pub struct EvidenceWriter {
+    shared: Arc<SharedWriter>,
+    heartbeat_stop: Option<tokio::sync::oneshot::Sender<()>>,
+    heartbeat_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+struct SharedWriter {
     store: Arc<dyn Store>,
     run_id: String,
-    next_seq: u64,
+    /// Serializes sequence allocation and the corresponding commit.
+    /// The runtime heartbeat task and foreground execution can never
+    /// publish events out of order.
+    next_seq: tokio::sync::Mutex<u64>,
     /// Optional live tee (#299): every successfully persisted event is
     /// also sent here, stamped, in `seq` order. This is the runtime's
     /// in-process progress seam — a live terminal renderer (or any
     /// same-process observer) subscribes without polling the store.
     /// Send failures are ignored: a dropped receiver must never affect
     /// the run or the evidence.
-    tee: Option<tokio::sync::mpsc::UnboundedSender<Event>>,
+    tee: std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<Event>>>,
 }
 
 impl EvidenceWriter {
@@ -101,10 +112,14 @@ impl EvidenceWriter {
             })
             .await?;
         Ok(Self {
-            store,
-            run_id,
-            next_seq: 0,
-            tee: None,
+            shared: Arc::new(SharedWriter {
+                store,
+                run_id,
+                next_seq: tokio::sync::Mutex::new(0),
+                tee: std::sync::Mutex::new(None),
+            }),
+            heartbeat_stop: None,
+            heartbeat_task: None,
         })
     }
 
@@ -112,39 +127,58 @@ impl EvidenceWriter {
     /// also sent to `tx` after it committed to the store. Evidence
     /// stays the single source of truth — the tee only ever sees what
     /// the store already accepted.
-    pub fn with_tee(mut self, tx: tokio::sync::mpsc::UnboundedSender<Event>) -> Self {
-        self.tee = Some(tx);
+    pub fn with_tee(self, tx: tokio::sync::mpsc::UnboundedSender<Event>) -> Self {
+        *self.shared.tee.lock().expect("evidence tee mutex poisoned") = Some(tx);
         self
+    }
+
+    /// Start the runtime-owned evidence heartbeat. The first beat lands
+    /// after [`HEARTBEAT_PERIOD`], then repeats at that cadence until
+    /// [`EvidenceWriter::finish`] or drop.
+    pub fn start_heartbeats(&mut self) {
+        self.start_heartbeats_with_period(HEARTBEAT_PERIOD);
+    }
+
+    fn start_heartbeats_with_period(&mut self, period: std::time::Duration) {
+        if self.heartbeat_task.is_some() {
+            return;
+        }
+        let shared = self.shared.clone();
+        let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel();
+        self.heartbeat_stop = Some(stop_tx);
+        self.heartbeat_task = Some(tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(period);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            // `interval` ticks immediately; runtime evidence should not.
+            ticker.tick().await;
+            loop {
+                tokio::select! {
+                    _ = &mut stop_rx => break,
+                    _ = ticker.tick() => {
+                        if append_shared(&shared, EventPayload::RunHeartbeat).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        }));
     }
 
     /// The run this writer is appending to.
     pub fn run_id(&self) -> &str {
-        &self.run_id
+        &self.shared.run_id
     }
 
     /// The store this writer appends to (for read-back within the
     /// same process, e.g. the CLI rendering a run it just executed).
     pub fn store(&self) -> &Arc<dyn Store> {
-        &self.store
+        &self.shared.store
     }
 
     /// Append one event. The caller supplies the `payload`; `seq` and
     /// `ts` are stamped here.
     pub async fn append(&mut self, payload: EventPayload) -> Result<u64, WriterError> {
-        let evt = Event {
-            seq: self.next_seq,
-            ts: now_ms(),
-            payload,
-        };
-        self.store.append_event(&self.run_id, &evt).await?;
-        // Tee after the commit (#299): observers only see persisted
-        // events, and a gone receiver is silently ignored.
-        if let Some(tx) = &self.tee {
-            let _ = tx.send(evt);
-        }
-        let seq = self.next_seq;
-        self.next_seq += 1;
-        Ok(seq)
+        append_shared(&self.shared, payload).await
     }
 
     /// Convenience: emit a `step_observation`, choosing inline vs
@@ -174,15 +208,55 @@ impl EvidenceWriter {
     /// Store a content-addressed blob and return its address.
     /// Idempotent for identical content.
     pub async fn write_blob(&mut self, bytes: &[u8]) -> Result<Sha256Hex, WriterError> {
-        Ok(self.store.put_blob(bytes).await?)
+        Ok(self.shared.store.put_blob(bytes).await?)
     }
 
-    /// Close the writer. Every append already committed, so this is a
-    /// consume-only marker — kept so call sites state intent (and so
-    /// a future batching writer has a flush point).
-    pub async fn finish(self) -> Result<(), WriterError> {
+    /// Stop the heartbeat task and close the writer. The caller must
+    /// append a terminal lifecycle event first; every append is
+    /// already committed, so this method has no store mutation.
+    pub async fn finish(mut self) -> Result<(), WriterError> {
+        if let Some(stop) = self.heartbeat_stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(task) = self.heartbeat_task.take() {
+            let _ = task.await;
+        }
         Ok(())
     }
+}
+
+impl Drop for EvidenceWriter {
+    fn drop(&mut self) {
+        if let Some(stop) = self.heartbeat_stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(task) = self.heartbeat_task.take() {
+            task.abort();
+        }
+    }
+}
+
+async fn append_shared(shared: &SharedWriter, payload: EventPayload) -> Result<u64, WriterError> {
+    let mut next_seq = shared.next_seq.lock().await;
+    let seq = *next_seq;
+    let evt = Event {
+        seq,
+        ts: now_ms(),
+        payload,
+    };
+    shared.store.append_event(&shared.run_id, &evt).await?;
+    // Tee after the commit (#299): observers only see persisted
+    // events, and a gone receiver is silently ignored.
+    if let Some(tx) = shared
+        .tee
+        .lock()
+        .expect("evidence tee mutex poisoned")
+        .as_ref()
+    {
+        let _ = tx.send(evt);
+    }
+    *next_seq += 1;
+    Ok(seq)
 }
 
 /// Helper for building a `run_started` payload without hand-rolling
@@ -209,5 +283,47 @@ pub fn run_started_with_definition(
         inputs,
         schema_version: SCHEMA_VERSION.to_string(),
         definition,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{SqliteStore, Store};
+
+    #[tokio::test]
+    async fn heartbeat_task_appends_periodically() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteStore::open(tmp.path().join("duhem.db"))
+                .await
+                .unwrap(),
+        );
+        let mut writer =
+            EvidenceWriter::begin(store.clone(), "01HEARTBEAT", "slow.yml", BTreeMap::new())
+                .await
+                .unwrap();
+        writer.start_heartbeats_with_period(std::time::Duration::from_millis(10));
+        writer
+            .append(run_started("slow.yml", BTreeMap::new()))
+            .await
+            .unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                if store
+                    .run_events("01HEARTBEAT")
+                    .await
+                    .unwrap()
+                    .iter()
+                    .any(|event| matches!(event.payload, EventPayload::RunHeartbeat))
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("heartbeat persisted");
     }
 }

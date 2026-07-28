@@ -239,7 +239,33 @@ impl SuiteEnvironment {
         if let Some(tx) = progress {
             writer = writer.with_tee(tx);
         }
-        let up = bring_environment_up(&mut writer, env, manifest_dir, &run, skip_env_up).await?;
+        writer.start_heartbeats();
+        let mut provision = Box::pin(bring_environment_up(
+            &mut writer,
+            env,
+            manifest_dir,
+            &run,
+            skip_env_up,
+        ));
+        let completed = tokio::select! {
+            signal = super::runner::termination_signal() => Err(signal),
+            result = &mut provision => Ok(result),
+        };
+        drop(provision);
+        let up = match completed {
+            Ok(result) => result?,
+            Err(signal) => {
+                writer
+                    .append(EventPayload::RunAborted {
+                        signal: signal.to_string(),
+                    })
+                    .await?;
+                writer.finish().await?;
+                return Err(EngineError::Aborted {
+                    signal: signal.to_string(),
+                });
+            }
+        };
         Ok(Self {
             env: env.clone(),
             dir: manifest_dir.map(Path::to_path_buf),
@@ -259,14 +285,35 @@ impl SuiteEnvironment {
     /// Tear the shared environment down (best-effort) and close the
     /// suite trace. `keep_env` is the manifest-level `--keep-env`.
     pub async fn tear_down(mut self, keep_env: bool) -> Result<(), EngineError> {
-        tear_environment_down(
+        let mut teardown = Box::pin(tear_environment_down(
             &mut self.writer,
             &self.env,
             self.dir.as_deref(),
             keep_env,
             self.should_tear_down,
-        )
-        .await?;
+        ));
+        let completed = tokio::select! {
+            signal = super::runner::termination_signal() => Err(signal),
+            result = &mut teardown => Ok(result),
+        };
+        drop(teardown);
+        match completed {
+            Ok(result) => result?,
+            Err(signal) => {
+                self.writer
+                    .append(EventPayload::RunAborted {
+                        signal: signal.to_string(),
+                    })
+                    .await?;
+                self.writer.finish().await?;
+                return Err(EngineError::Aborted {
+                    signal: signal.to_string(),
+                });
+            }
+        }
+        self.writer
+            .append(EventPayload::RunFinished { verdict: None })
+            .await?;
         self.writer.finish().await?;
         Ok(())
     }
@@ -559,20 +606,29 @@ mod tests {
             down: Some(PathBuf::from("down.sh")),
             ready: None,
         };
-        let store = duhem_evidence::SqliteStore::open(base.join("duhem.db"))
-            .await
-            .unwrap();
-
-        let session =
-            SuiteEnvironment::provision(&env, Some(&base), std::sync::Arc::new(store), false, None)
+        let store = std::sync::Arc::new(
+            duhem_evidence::SqliteStore::open(base.join("duhem.db"))
                 .await
-                .expect("provision");
+                .unwrap(),
+        );
+
+        let session = SuiteEnvironment::provision(&env, Some(&base), store.clone(), false, None)
+            .await
+            .expect("provision");
         assert!(session.aborted_cause().is_none(), "suite should be up");
         session.tear_down(false).await.expect("tear down");
 
         let log = std::fs::read_to_string(&marker).unwrap();
         assert_eq!(log.matches("up").count(), 1, "up ran once: {log:?}");
         assert_eq!(log.matches("down").count(), 1, "down ran once: {log:?}");
+        let suite = duhem_evidence::Store::list_runs(store.as_ref())
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|run| run.verification == "<suite>")
+            .expect("suite evidence run");
+        assert_eq!(suite.status, duhem_evidence::RunStatus::Finished);
+        assert_eq!(suite.verdict, None, "suite is completed but never judged");
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -624,7 +680,8 @@ mod tests {
                 "env_up_started",
                 "env_up_finished",
                 "env_down_started",
-                "env_down_finished"
+                "env_down_finished",
+                "run_finished"
             ]
         );
 

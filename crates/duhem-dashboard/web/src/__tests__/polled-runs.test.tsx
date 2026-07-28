@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import RunsList from "../views/RunsList";
 import { RunsProvider } from "../runs-context";
 import { POLL_INTERVAL_MS } from "../hooks/use-polled-runs";
-import type { RunsListEntry } from "../api";
+import type { RunStatus, RunsListEntry } from "../api";
 
 afterEach(() => {
   cleanup();
@@ -16,7 +16,11 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function leaf(id: string, verdict: string | null, live = false): RunsListEntry {
+function leaf(
+  id: string,
+  verdict: string | null,
+  status: RunStatus = "finished",
+): RunsListEntry {
   return {
     run_id: id,
     verification: "login",
@@ -24,7 +28,7 @@ function leaf(id: string, verdict: string | null, live = false): RunsListEntry {
     duration_ms: 1234,
     verdict,
     kind: "leaf",
-    live,
+    status,
   };
 }
 
@@ -61,7 +65,7 @@ describe("RunsList polling (#298)", () => {
           duration_ms: child.duration_ms,
           verdict: "fail",
           kind: "run-set",
-          live: false,
+          status: "finished",
           children: [child],
         },
       ],
@@ -87,7 +91,7 @@ describe("RunsList polling (#298)", () => {
     setVisibility("visible");
     const calls = stubRunsSequence([
       [leaf("old-run", "pass")],
-      [leaf("new-run", null, true), leaf("old-run", "pass")],
+      [leaf("new-run", null, "running"), leaf("old-run", "pass")],
       [leaf("new-run", "pass"), leaf("old-run", "pass")],
     ]);
 
@@ -104,13 +108,13 @@ describe("RunsList polling (#298)", () => {
     expect(screen.getByText("old-run")).toBeTruthy();
     expect(screen.queryByText("new-run")).toBeNull();
 
-    // One interval later the in-flight run has appeared, live.
+    // One interval later the in-flight run has appeared, running.
     await act(() => vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS));
     expect(screen.getByText("new-run")).toBeTruthy();
-    const liveBadge = [...document.querySelectorAll('[data-slot="badge"]')].find(
-      (b) => b.textContent?.trim() === "live",
+    const runningBadge = [...document.querySelectorAll('[data-slot="badge"]')].find(
+      (b) => b.textContent?.trim() === "running",
     );
-    expect(liveBadge).toBeTruthy();
+    expect(runningBadge).toBeTruthy();
 
     // Another interval and its verdict resolved — still no reload.
     await act(() => vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS));

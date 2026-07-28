@@ -65,7 +65,8 @@ async fn runs_list_single_leaf_run() {
     assert_eq!(row["verification"], "create-workspace");
     assert_eq!(row["verdict"], "pass");
     assert_eq!(row["kind"], "leaf");
-    assert_eq!(row["live"], false);
+    assert_eq!(row["status"], "finished");
+    assert!(row.get("live").is_none());
     assert!(row["started_at"].is_string());
     assert!(row["duration_ms"].is_u64());
 }
@@ -102,13 +103,14 @@ async fn runs_list_groups_a_verifications_runs_and_rolls_up_with_the_judge_fold(
 }
 
 #[tokio::test]
-async fn in_progress_run_is_live_with_no_verdict() {
+async fn in_progress_run_is_running_with_no_verdict() {
     let (_tmp, rw, ro) = common::open_stores().await;
     common::write_in_progress_run(rw, "01J0000000000000000000000C", "verifications/live.yml").await;
 
     let (_, json) = get_json(EvidenceReader::new(ro), "/api/runs").await;
     let row = &json.as_array().unwrap()[0];
-    assert_eq!(row["live"], true);
+    assert_eq!(row["status"], "running");
+    assert!(row.get("live").is_none());
     assert_eq!(row["verdict"], Value::Null);
     assert_eq!(row["duration_ms"], Value::Null);
 }
@@ -133,6 +135,8 @@ async fn run_detail_carries_inputs_verdict_and_criteria() {
     assert_eq!(json["verification"], "create-workspace");
     assert_eq!(json["inputs"]["workspace_name"], "ws-fixture");
     assert_eq!(json["verdict"], "pass");
+    assert_eq!(json["status"], "finished");
+    assert!(json.get("live").is_none());
     assert_eq!(json["setup_aborted"], false);
     let criteria = json["criteria"].as_array().unwrap();
     assert_eq!(criteria.len(), 1);
@@ -142,6 +146,24 @@ async fn run_detail_carries_inputs_verdict_and_criteria() {
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0]["id"], "AC-1.1");
     assert_eq!(checks[0]["verdict"], "pass");
+}
+
+#[tokio::test]
+async fn finished_unjudged_run_has_status_without_a_verdict() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let run_id = "01J0000000000000000000000U";
+    let mut writer = EvidenceWriter::begin(rw, run_id, "<suite>", BTreeMap::new())
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::RunFinished { verdict: None })
+        .await
+        .unwrap();
+    writer.finish().await.unwrap();
+
+    let (_, json) = get_json(EvidenceReader::new(ro), &format!("/api/runs/{run_id}")).await;
+    assert_eq!(json["status"], "finished");
+    assert_eq!(json["verdict"], Value::Null);
 }
 
 #[tokio::test]
@@ -318,7 +340,7 @@ async fn run_definition_is_served_verbatim_and_flagged_on_run_detail() {
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
-        verdict: VerdictState::Pass,
+        verdict: Some(VerdictState::Pass),
     })
     .await
     .unwrap();
@@ -546,7 +568,7 @@ async fn colliding_check_ids_attribute_to_the_first_owner() {
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
-        verdict: VerdictState::Pass,
+        verdict: Some(VerdictState::Pass),
     })
     .await
     .unwrap();

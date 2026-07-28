@@ -24,6 +24,10 @@ pub enum EngineError {
     /// The evidence store itself could not be opened or resolved.
     #[error("store: {0}")]
     Store(#[from] StoreError),
+    /// The runtime trapped an operator termination signal after
+    /// recording an append-only `run_aborted` marker.
+    #[error("run aborted by {signal}")]
+    Aborted { signal: String },
     /// Browser failed to launch when the run needed one. Carries the
     /// install-hint humanization from `RunBrowser::launch`.
     #[error("browser: {0}")]

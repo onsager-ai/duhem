@@ -1,6 +1,6 @@
 // Runs list (#86, reskinned #284): faceted filters held in URL state
-// (bookmarkable), run-set rows expanding to their leaves (#49), "live"
-// badges on in-progress runs (#84) — now on TanStack Table + shadcn.
+// (bookmarkable), run-set rows expanding to their leaves (#49), and
+// lifecycle status independent from verdict — on TanStack Table + shadcn.
 // Data comes from the shell's shared, visibility-polled runs context
 // (#298/#303), so the list stays live without its own fetch.
 
@@ -47,12 +47,14 @@ import { flatLeaves } from "@/stats";
 import {
   formatDuration,
   formatStartedAt,
+  StatusBadge,
   verdictFamily,
   VerdictBadge,
 } from "@/ui";
 import type { RunsListEntry } from "../api";
 
-const VERDICT_CHIPS = ["pass", "fail", "inconclusive", "live"] as const;
+const VERDICT_CHIPS = ["pass", "fail", "inconclusive"] as const;
+const STATUS_CHIPS = ["running", "finished", "aborted", "orphaned"] as const;
 const ALL = "__all__";
 type RunsView = "runs" | "verification" | "triage";
 
@@ -65,7 +67,7 @@ function startedMs(entry: RunsListEntry): number {
 }
 
 export function triageRank(entry: RunsListEntry): number {
-  if (entry.live) return 0;
+  if (entry.status === "running") return 0;
   const family = verdictFamily(entry.verdict);
   if (family === "fail") return 1;
   if (family === "inconclusive") return 2;
@@ -77,6 +79,7 @@ export function matchesFilters(
   entry: RunsListEntry,
   verification: string,
   verdicts: string[],
+  statuses: string[],
   from: string,
   to: string,
 ): boolean {
@@ -84,13 +87,11 @@ export function matchesFilters(
   if (verdicts.length > 0) {
     const v = entry.verdict;
     const hit =
-      (verdicts.includes("live") && entry.live) ||
-      (v !== null &&
-        verdicts.some(
-          (w) => w !== "live" && (v === w || v.startsWith(`${w}:`)),
-        ));
+      v !== null &&
+      verdicts.some((w) => v === w || v.startsWith(`${w}:`));
     if (!hit) return false;
   }
+  if (statuses.length > 0 && !statuses.includes(entry.status)) return false;
   if (entry.started_at) {
     const t = entry.started_at.slice(0, 10);
     if (from && t < from) return false;
@@ -211,15 +212,17 @@ const columns: ColumnDef<RunsListEntry>[] = [
     meta: { className: "hidden sm:table-cell" } satisfies Meta,
   },
   {
+    id: "status",
+    header: "Status",
+    enableSorting: false,
+    cell: ({ row }) => <StatusBadge status={row.original.status} />,
+  },
+  {
     id: "verdict",
     header: "Verdict",
     enableSorting: false,
     cell: ({ row }) => (
-      <VerdictBadge
-        verdict={row.original.verdict}
-        live={row.original.live}
-        compact
-      />
+      <VerdictBadge verdict={row.original.verdict} compact />
     ),
   },
 ];
@@ -314,7 +317,7 @@ function TriageView({ leaves }: { leaves: RunsListEntry[] }) {
             Needs attention
           </h3>
           <span className="text-xs text-muted-foreground">
-            live · failed · inconclusive
+            running · failed · inconclusive
           </span>
         </div>
         {actionable.length > 0 ? (
@@ -325,7 +328,7 @@ function TriageView({ leaves }: { leaves: RunsListEntry[] }) {
           />
         ) : (
           <p className="border-y py-5 text-sm text-muted-foreground">
-            No live, failed, or inconclusive runs match the filters.
+            No running, failed, or inconclusive runs match the filters.
           </p>
         )}
       </section>
@@ -352,6 +355,7 @@ export default function RunsList() {
 
   const verification = params.get("verification") ?? "";
   const verdicts = params.getAll("verdict");
+  const statuses = params.getAll("status");
   const from = params.get("from") ?? "";
   const to = params.get("to") ?? "";
   const view = runsView(params.get("view"));
@@ -367,24 +371,31 @@ export default function RunsList() {
   const filteredLeaves = useMemo(
     () =>
       flatLeaves(runs ?? []).filter((entry) =>
-        matchesFilters(entry, verification, verdicts, from, to),
+        matchesFilters(entry, verification, verdicts, statuses, from, to),
       ),
-    [runs, verification, verdicts, from, to],
+    [runs, verification, verdicts, statuses, from, to],
   );
   const filteredGroups = useMemo(
     () =>
       (runs ?? []).flatMap((entry) => {
         if (entry.kind !== "run-set") {
-          return matchesFilters(entry, verification, verdicts, from, to)
+          return matchesFilters(
+            entry,
+            verification,
+            verdicts,
+            statuses,
+            from,
+            to,
+          )
             ? [entry]
             : [];
         }
         const children = (entry.children ?? []).filter((child) =>
-          matchesFilters(child, verification, verdicts, from, to),
+          matchesFilters(child, verification, verdicts, statuses, from, to),
         );
         return children.length > 0 ? [{ ...entry, children }] : [];
       }),
-    [runs, verification, verdicts, from, to],
+    [runs, verification, verdicts, statuses, from, to],
   );
 
   const update = (mutate: (p: URLSearchParams) => void) => {
@@ -399,7 +410,11 @@ export default function RunsList() {
     setParams(next, { replace: true });
   };
   const hasFilters =
-    Boolean(verification) || verdicts.length > 0 || Boolean(from) || Boolean(to);
+    Boolean(verification) ||
+    verdicts.length > 0 ||
+    statuses.length > 0 ||
+    Boolean(from) ||
+    Boolean(to);
 
   if (error) return <ErrorState error={error} />;
 
@@ -486,6 +501,33 @@ export default function RunsList() {
                       ? current.filter((c) => c !== chip)
                       : [...current, chip];
                     nextChips.forEach((c) => p.append("verdict", c));
+                  })
+                }
+              >
+                {chip}
+              </Button>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center gap-1" aria-label="status filters">
+          {STATUS_CHIPS.map((chip) => {
+            const on = statuses.includes(chip);
+            return (
+              <Button
+                key={chip}
+                type="button"
+                size="sm"
+                variant={on ? "default" : "outline"}
+                className="capitalize"
+                onClick={() =>
+                  update((p) => {
+                    const current = p.getAll("status");
+                    p.delete("status");
+                    const nextChips = current.includes(chip)
+                      ? current.filter((c) => c !== chip)
+                      : [...current, chip];
+                    nextChips.forEach((c) => p.append("status", c));
                   })
                 }
               >

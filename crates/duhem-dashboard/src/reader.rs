@@ -16,7 +16,9 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use duhem_evidence::{Event, EventPayload, ObservationValue, RunRecord, Store, VerdictState};
+use duhem_evidence::{
+    Event, EventPayload, ObservationValue, RunRecord, RunStatus, Store, VerdictState,
+};
 use duhem_judge::{RunVerdict, aggregate_run_set};
 use thiserror::Error;
 
@@ -47,10 +49,9 @@ pub struct RunEvidence {
 }
 
 impl RunEvidence {
-    /// `true` iff the run's verdict has landed. The inverse is the
-    /// #84 "in progress" predicate.
+    /// `true` iff the runtime recorded a terminal lifecycle marker.
     pub fn finished(&self) -> bool {
-        self.record.verdict.is_some()
+        matches!(self.record.status, RunStatus::Finished | RunStatus::Aborted)
     }
 
     pub fn started_at(&self) -> Option<DateTime<Utc>> {
@@ -488,15 +489,16 @@ fn leaf_entry_from_record(record: &RunRecord) -> RunsListEntry {
         duration_ms: record.duration_ms,
         verdict: record.verdict,
         kind: EntryKind::Leaf,
-        live: record.verdict.is_none(),
+        status: record.status,
         children: None,
     }
 }
 
 /// Roll a verification's runs up into a run-set row. The rollup state
 /// is the judge's `aggregate_run_set` fold over the *recorded* child
-/// verdicts — the dashboard never invents a verdict. While any child
-/// is still live the rollup is withheld (`None`).
+/// verdicts — the dashboard never invents a verdict. Lifecycle follows
+/// the newest child; historical unfinished runs do not contaminate the
+/// current rollup.
 fn group_entry(name: String, children: Vec<RunsListEntry>) -> RunsListEntry {
     let verdict = if children.iter().all(|c| c.verdict.is_some()) {
         let runs: Vec<RunVerdict> = children
@@ -512,7 +514,10 @@ fn group_entry(name: String, children: Vec<RunsListEntry>) -> RunsListEntry {
     } else {
         None
     };
-    let live = children.iter().any(|c| c.live);
+    let status = children
+        .first()
+        .map(|c| c.status)
+        .unwrap_or(RunStatus::Finished);
     let started_at = children.iter().filter_map(|c| c.started_at).min();
     let duration_ms = children.iter().map(|c| c.duration_ms).sum::<Option<u64>>();
     RunsListEntry {
@@ -522,7 +527,7 @@ fn group_entry(name: String, children: Vec<RunsListEntry>) -> RunsListEntry {
         duration_ms,
         verdict,
         kind: EntryKind::RunSet,
-        live,
+        status,
         children: Some(children),
     }
 }
@@ -622,7 +627,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 criterion_order.push(criterion_id.clone());
                 checks_by_criterion.push((criterion_id.clone(), Vec::new()));
             }
-            EventPayload::RunFinished { verdict } => run_verdict = Some(*verdict),
+            EventPayload::RunFinished { verdict } => run_verdict = *verdict,
             _ => {}
         }
     }
@@ -656,7 +661,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         started_at: run.started_at(),
         inputs,
         verdict: run_verdict,
-        live: !run.finished(),
+        status: run.record.status,
         setup_aborted,
         has_definition,
         criteria,

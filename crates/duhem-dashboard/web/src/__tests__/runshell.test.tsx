@@ -24,7 +24,7 @@ const RUN = {
   started_at: "2026-07-22T14:03:00.000Z",
   inputs: {},
   verdict: "fail",
-  live: false,
+  status: "finished",
   setup_aborted: false,
   has_definition: true,
   criteria: [

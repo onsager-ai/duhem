@@ -14,9 +14,8 @@
 //! ```
 //!
 //! Every URL the export emits is relative to the export root, so the
-//! tree works under any base path. Live affordances are omitted: an
-//! export is a snapshot, so `live` is forced to `false` everywhere
-//! (#84's serve-mode-only boundary).
+//! tree works under any base path. Connection state is client-owned
+//! and never enters these API snapshots.
 
 use std::fs;
 use std::path::Path;
@@ -44,10 +43,7 @@ pub async fn export(reader: &EvidenceReader, out: &Path) -> anyhow::Result<Expor
         stats.spa_files += 1;
     }
 
-    let mut list = reader.list().await?;
-    for entry in &mut list {
-        freeze_live(entry);
-    }
+    let list = reader.list().await?;
     write_file(out, "api/runs.json", &serde_json::to_vec_pretty(&list)?)?;
 
     for run_id in leaf_run_ids(&list) {
@@ -77,10 +73,9 @@ async fn export_run(
     run_id: &str,
     stats: &mut ExportStats,
 ) -> anyhow::Result<()> {
-    let Some(mut detail) = reader.run_detail(run_id).await? else {
+    let Some(detail) = reader.run_detail(run_id).await? else {
         return Ok(());
     };
-    detail.live = false;
     write_file(
         out,
         &format!("api/runs/{run_id}.json"),
@@ -164,15 +159,6 @@ fn leaf_run_ids(list: &[RunsListEntry]) -> Vec<String> {
         }
     }
     ids
-}
-
-fn freeze_live(entry: &mut RunsListEntry) {
-    entry.live = false;
-    if let Some(children) = &mut entry.children {
-        for child in children {
-            freeze_live(child);
-        }
-    }
 }
 
 /// Write `rel` under `out`, refusing any path that could escape the

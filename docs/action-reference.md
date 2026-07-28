@@ -15,10 +15,11 @@ assertion as `$steps.<id>.outputs.<name>`. Assert over **scalar** outputs
 (`status`, `body_text`, `satisfied`, `exit_code`, …); helpers like
 `$runtime.contains(...)` cover membership.
 
-An action contract may declare a scalar output path secret by default. Those
-values join the masking registry before the producing step writes evidence and
-need no authored `secret:` entry. When present, the contract's paths are listed
-as **secret outputs (masked by contract)** below.
+An action contract may declare an output path secret by default, including a
+structured credential such as browser storage state. The value joins the masking
+registry before the producing step writes evidence and needs no authored `secret:`
+entry. When present, the contract's paths are listed as **secret outputs (masked
+by contract)** below. Author-declared `steps[].secret` paths remain scalar-only.
 
 ## `ui/*`
 
@@ -146,6 +147,22 @@ Assert an app state (e.g. signed in/out, or a marker) via `state:`.
 ```yaml
 - uses: ui/assert-state
   with: { state: signed_in }
+```
+
+### `ui/capture-session`
+
+Capture the current browser context storage state for a later check.
+
+| `with:` field | required | values |
+|---|:---:|---|
+
+**outputs:** `state`
+
+**secret outputs (masked by contract):** `state`
+
+```yaml
+- id: session
+  uses: ui/capture-session
 ```
 
 ## `api/*`

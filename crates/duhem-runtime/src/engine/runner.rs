@@ -49,6 +49,7 @@ use crate::engine::capture::{
 };
 use crate::engine::context::{RunContext, RunState, json_to_value};
 use crate::engine::registry::{ActionRegistry, default_registry};
+use crate::engine::session::SessionResolution;
 use crate::engine::template::substitute_with;
 use crate::engine::translate::{
     RETRY_BACKOFF_BASE, apply_default_within, check_is_retryable, outcome_to_evidence, retry_delay,
@@ -505,7 +506,7 @@ impl Engine {
         failures: &mut Vec<CheckFailure>,
         warnings: &mut Vec<String>,
     ) -> Result<CriterionVerdict, EngineError> {
-        let mut check_verdicts: Vec<CheckVerdict> = Vec::new();
+        let mut check_verdicts = Vec::new();
         for check in &criterion.checks {
             // Filtered-out checks emit no events and don't contribute
             // to verdict aggregation. A criterion with all checks
@@ -516,13 +517,20 @@ impl Engine {
             {
                 continue;
             }
+            // Session expressions resolve after setup has populated the
+            // run state and before any check context exists. A retry
+            // reuses the same immutable baseline but still opens a new
+            // context for every attempt.
+            let session = crate::engine::session::resolve(check, run);
             let cv = self
-                .run_check_with_retry(writer, run, &criterion.id, check, failures)
+                .run_check_with_retry(writer, run, &criterion.id, check, &session, failures)
                 .await?;
             writer
                 .append(EventPayload::CheckFinished {
                     check_id: check.id.clone(),
                     verdict: cv.state,
+                    session_source: session.source.clone(),
+                    session_digest: session.digest(),
                 })
                 .await?;
             check_verdicts.push(cv);
@@ -557,6 +565,7 @@ impl Engine {
         run: &RunState,
         criterion_id: &str,
         check: &Check,
+        session: &SessionResolution,
         failures: &mut Vec<CheckFailure>,
     ) -> Result<CheckVerdict, EngineError> {
         let max = self.retry.map(|r| r.max).unwrap_or(0);
@@ -564,13 +573,13 @@ impl Engine {
             .retry
             .map(|r| r.backoff)
             .unwrap_or(RetryBackoff::Exponential);
-        let mut attempt: u32 = 0;
+        let mut attempt = 0;
         loop {
             // Discard any failures a prior (retried) attempt left behind
             // so only the final attempt's detail reaches the reporter.
             let failures_mark = failures.len();
             let cv = self
-                .run_check(writer, run, criterion_id, check, failures)
+                .run_check(writer, run, criterion_id, check, session, failures)
                 .await?;
             if attempt < max && check_is_retryable(cv.state) {
                 failures.truncate(failures_mark);
@@ -591,6 +600,7 @@ impl Engine {
         run: &RunState,
         criterion_id: &str,
         check: &Check,
+        session: &SessionResolution,
         failures: &mut Vec<CheckFailure>,
     ) -> Result<CheckVerdict, EngineError> {
         let mut ctx = RunContext::new(run);
@@ -619,15 +629,15 @@ impl Engine {
 
         // Track per-check environment failures from open_check, too:
         // a browser was attached but allocating a context failed.
-        let mut environment_failed = browser_missing;
+        let mut environment_failed = browser_missing || session.failed;
 
         let mut check_browser = None;
         if !any_unknown
-            && !browser_missing
+            && !environment_failed
             && !check.steps.is_empty()
             && let Some(b) = self.browser.as_ref()
         {
-            match b.open_check().await {
+            match session.open_check(b).await {
                 Ok(cb) => check_browser = Some(cb),
                 Err(e) => {
                     debug!(error = %e, "open_check failed; check will surface as Inconclusive(EnvironmentError)");

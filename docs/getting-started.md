@@ -197,6 +197,43 @@ criteria:
   in their contract, in which case no authored `secret:` entry is
   needed.
 
+### Reuse a real browser login
+
+For UI behind authentication, log in once during `setup:`, capture the
+resulting browser state, and seed each authenticated check explicitly:
+
+```yaml
+setup:
+  - uses: ui/navigate
+    with: { url: $inputs.login_url }
+  - uses: ui/type
+    with: { locator: { label: Password }, text: $inputs.password }
+  - uses: ui/click
+    with: { role: button, name: Sign in }
+  - id: session
+    uses: ui/capture-session
+
+criteria:
+  - id: AC-1
+    description: An administrator can see the workspace list.
+    checks:
+      - id: AC-1.1
+        session: $setup.session.outputs.state
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.workspaces_url }
+          - uses: ui/assert-element
+            with:
+              locator: { role: heading, name: Workspaces }
+              expected: visible
+```
+
+`session:` must be one whole `$` reference; inline cookie/state literals
+are rejected. Each check still gets a fresh isolated context, so mutations
+do not leak to siblings. Omit `session:` for the signed-out path. The
+captured `state` is contract-secret automatically—do not add a `secret:`
+entry—and evidence carries only the expression plus a SHA-256 digest.
+
 ## 5. Author a real check
 
 Point it at *your* system by changing three things in `duhem.yml`:

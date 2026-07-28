@@ -18,6 +18,7 @@ pub mod outcome;
 pub mod registry;
 pub mod runner;
 pub(crate) mod secret_output;
+pub(crate) mod session;
 pub mod setup;
 pub mod shim;
 pub mod template;

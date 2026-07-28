@@ -617,6 +617,8 @@ async fn colliding_check_ids_attribute_to_the_first_owner() {
     w.append(EventPayload::CheckFinished {
         check_id: "DUP".into(),
         verdict: VerdictState::Pass,
+        session_source: None,
+        session_digest: None,
     })
     .await
     .unwrap();

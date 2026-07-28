@@ -212,6 +212,25 @@ pub fn value_to_yml(v: &Value) -> serde_yml::Value {
     }
 }
 
+/// Total JSON rendering of a runtime value. Session injection uses the
+/// resolved value as opaque Playwright `storageState`; keeping this
+/// conversion beside [`json_to_value`] makes the round trip explicit.
+pub(crate) fn value_to_json(v: &Value) -> serde_json::Value {
+    match v {
+        Value::Null => serde_json::Value::Null,
+        Value::Bool(b) => serde_json::Value::Bool(*b),
+        Value::Int(i) => serde_json::json!(i),
+        Value::Float(f) => serde_json::json!(f),
+        Value::Str(s) => serde_json::Value::String(s.clone()),
+        Value::Array(items) => serde_json::Value::Array(items.iter().map(value_to_json).collect()),
+        Value::Object(map) => serde_json::Value::Object(
+            map.iter()
+                .map(|(key, value)| (key.clone(), value_to_json(value)))
+                .collect(),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,6 +243,18 @@ mod tests {
         let ctx = RunContext::new(&run);
         assert_eq!(ctx.input("x"), Some(&Value::Int(42)));
         assert_eq!(ctx.input("y"), None);
+    }
+
+    #[test]
+    fn json_runtime_value_round_trip_is_lossless() {
+        let json = serde_json::json!({
+            "cookies": [{"name": "session", "value": "credential"}],
+            "origins": [],
+            "enabled": true,
+            "count": 1
+        });
+        let runtime = json_to_value(&json).unwrap();
+        assert_eq!(value_to_json(&runtime), json);
     }
 
     #[test]

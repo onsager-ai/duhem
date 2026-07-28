@@ -300,6 +300,11 @@ async function dispatch(req) {
         dir = mkdtempSync(join(os.tmpdir(), 'duhem-video-'))
         opts = { recordVideo: { dir } }
       }
+      // A session seed is a copied baseline, not a shared context:
+      // every request still creates a new BrowserContext (#347).
+      if (req.storageState !== undefined) {
+        opts.storageState = req.storageState
+      }
       let ctx
       try {
         ctx = await browser.newContext(opts)
@@ -393,6 +398,9 @@ async function dispatch(req) {
 
     case 'cookies':
       return await page(req).context().cookies()
+
+    case 'getStorageState':
+      return await page(req).context().storageState()
 
     case 'screenshot':
       // Full-page PNG, base64 over the pipe. Fed to the runtime's

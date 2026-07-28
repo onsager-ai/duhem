@@ -248,7 +248,9 @@ impl Store for SqliteStore {
                 .execute(&mut *tx)
                 .await?;
             }
-            EventPayload::CheckFinished { check_id, verdict } => {
+            EventPayload::CheckFinished {
+                check_id, verdict, ..
+            } => {
                 // Resolve the owning criterion from the first
                 // step_started that named this check.
                 let criterion: Option<String> = sqlx::query_scalar(

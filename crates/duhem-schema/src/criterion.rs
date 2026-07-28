@@ -43,6 +43,13 @@ pub struct Check {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
+    /// Whole-string runtime reference to Playwright storage state used
+    /// to seed this check's fresh browser context (spec #347). The
+    /// schema keeps the authored expression opaque; validation proves
+    /// it is a reference and the runtime resolves its value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+
     /// Ordered sequence of action invocations.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<Step>,
@@ -96,6 +103,34 @@ checks:
         // Round-trip: an empty assertions list is not serialized.
         let out = serde_yml::to_string(&c).expect("serialize");
         assert!(!out.contains("assertions"), "got: {out}");
+    }
+
+    #[test]
+    fn session_is_optional_and_absence_preserves_the_wire_shape() {
+        let without = r#"
+id: AC-1
+description: x
+checks:
+  - id: AC-1.1
+    assertions: ["true"]
+"#;
+        let criterion: Criterion = serde_yml::from_str(without).expect("parse");
+        assert!(criterion.checks[0].session.is_none());
+        let round_trip = serde_yml::to_string(&criterion).expect("serialize");
+        assert!(
+            !round_trip.contains("session:"),
+            "an absent additive field must not alter old VDs: {round_trip}"
+        );
+
+        let with = without.replace(
+            "    assertions:",
+            "    session: $setup.login.outputs.state\n    assertions:",
+        );
+        let criterion: Criterion = serde_yml::from_str(&with).expect("parse session");
+        assert_eq!(
+            criterion.checks[0].session.as_deref(),
+            Some("$setup.login.outputs.state")
+        );
     }
 
     #[test]

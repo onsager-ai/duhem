@@ -342,6 +342,45 @@ and later references become `[redacted:login.body.data]`. An action may
 also mark a credential output secret in its contract, requiring no
 authored `secret:` entry.
 
+### Reuse an acquired browser session
+
+Authenticate once in `setup:`, capture the resulting Playwright
+storage state, and seed each authenticated check explicitly:
+
+```yaml
+setup:
+  - uses: ui/navigate
+    with: { url: "$inputs.base_url/login" }
+  - uses: ui/type
+    with: { locator: { label: Password }, text: $inputs.password }
+  - uses: ui/click
+    with: { locator: { role: button, name: Sign in } }
+  - id: session
+    uses: ui/capture-session
+
+criteria:
+  - id: AC-1
+    description: An authenticated user sees the workspace list.
+    checks:
+      - id: AC-1.1
+        session: $setup.session.outputs.state
+        steps:
+          - uses: ui/navigate
+            with: { url: "$inputs.base_url/workspaces" }
+          - uses: ui/assert-element
+            with:
+              locator: { role: heading, name: Workspaces }
+              expected: visible
+```
+
+`session:` must be one whole-string `$` reference. Do not hand-author
+cookies or local storage: acquire the state by exercising the real
+login surface. Each check still receives a fresh browser context
+seeded from that baseline, so mutations do not cross between checks.
+Omit `session:` for the signed-out path. `ui/capture-session` marks its
+structured `state` output secret by contract; do not add an authored
+`secret:` entry for it.
+
 ## Worked example template
 
 ```yaml

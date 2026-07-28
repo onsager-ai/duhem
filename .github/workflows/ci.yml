@@ -121,13 +121,16 @@ jobs:
           npm ci
           npx --yes playwright install --with-deps chromium
 
-      # Action protocol coverage plus the runtime capture/replay contract;
-      # mirrors `just test browser-actions` (this job has no `just`, so the
-      # two ignored browser suites the recipe runs are invoked directly).
+      # Action protocol coverage, the runtime capture/replay contract, and
+      # session seeding against a real context; mirrors
+      # `just test browser-actions` (this job has no `just`, so the ignored
+      # browser suites the recipe runs are invoked directly). Adding a suite
+      # to that recipe means adding it here too — the duplication is the
+      # point of failure, and a suite missing here passes CI by not running.
       - name: cargo test (ignored browser suites)
         run: |
           cargo test -p duhem-actions --test ui_smoke --test api_observe_smoke -- --ignored
-          cargo test -p duhem-runtime --test capture_smoke -- --ignored
+          cargo test -p duhem-runtime --test capture_smoke --test session_injection_smoke -- --ignored
 
   # Exercises `duhem run`'s auto-provision (#295): a `ui/*` run with no
   # usable sidecar must fetch Chromium itself instead of hard-failing (the

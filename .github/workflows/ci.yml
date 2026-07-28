@@ -50,11 +50,8 @@ jobs:
       # Schema-versioning discipline (per the spec issue that introduced
       # `duhem_schema::SCHEMA_VERSION`). schema-drift: every fenced YAML
       # example under `docs/duhem-spec.md` §10 must parse + validate
-      # against the current `SCHEMA_VERSION`. schema-changelog-check:
-      # touching `crates/duhem-schema/src/**` or
-      # `crates/duhem-evidence/src/**` requires an entry in
-      # `CHANGELOG.md`'s `## Unreleased` section; `clarifying` PRs
-      # bypass via `DUHEM_CHANGELOG_CLARIFYING=1`.
+      # against the current `SCHEMA_VERSION`. schema-changelog-check
+      # without `--lint` is the PR-only, diff-scoped touch gate below.
       - name: spec/code drift check
         run: cargo run -p xtask --quiet -- schema-drift
 
@@ -81,6 +78,13 @@ jobs:
           DUHEM_DX_IMPACT_NONE: ${{ contains(github.event.pull_request.body, '<!-- dx:none -->') && '1' || '' }}
         run: cargo run -p xtask --quiet -- dx-drift --mode=warn
 
+      # Whole-file changelog structure and release coverage run on every
+      # event; unlike the diff-scoped touch gate, this has no escape hatch.
+      - name: changelog whole-file lint
+        run: cargo run -p xtask --quiet -- schema-changelog-check --lint
+
+      # Schema/evidence touches require an `## Unreleased` entry. A
+      # clarifying PR may explicitly bypass only this diff-scoped gate.
       - name: changelog touch check
         if: github.event_name == 'pull_request'
         env:

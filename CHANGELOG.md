@@ -14,9 +14,9 @@ criteria) lives in the spec issue that introduced
 - **clarifying** — doc-only, error-message wording, internal rename.
   Does not bump.
 
-`SCHEMA_VERSION` advances in a dedicated bump commit that converts
-`## Unreleased` to `## v0.x.y — YYYY-MM-DD` and tags the git commit
-`schema-v0.x.y`.
+`SCHEMA_VERSION` advances in a dedicated bump commit that inserts
+`## v0.x.y — YYYY-MM-DD` below `## Unreleased`, leaving `## Unreleased`
+empty. The release commit is tagged `v0.x.y`.
 
 **Entry style.** One bullet per landing — the tag, the
 consumer-facing change, and (if `[breaking]`) the migration action,

@@ -3,7 +3,7 @@
 //!     cargo run -p xtask -- check-file-budget        # bound per-file token cost
 //!     cargo run -p xtask -- count-tokens <file>      # one-file token count
 //!     cargo run -p xtask -- schema-drift             # docs/spec.md §10 ↔ code
-//!     cargo run -p xtask -- schema-changelog-check   # CHANGELOG.md touch gate
+//!     cargo run -p xtask -- schema-changelog-check [--lint] # CHANGELOG touch/whole-file gate
 //!     cargo run -p xtask -- schema-json [--check]    # emit/verify JSON Schema
 //!     cargo run -p xtask -- skill-scrub              # published skills ↔ no internal vocab
 //!     cargo run -p xtask -- dx-drift [--mode=warn|fail]  # DX surfaces ↔ product currency
@@ -19,6 +19,7 @@
 //! `duhem_schema::SCHEMA_VERSION`.
 
 mod action_reference;
+mod changelog_lint;
 mod check_file_budget;
 mod dx_drift;
 mod schema_changelog_check;
@@ -45,7 +46,7 @@ fn main() -> ExitCode {
         Some("dx-drift") => dx_drift::run(args.collect()),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage:\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- schema-drift\n  cargo run -p xtask -- schema-changelog-check\n  cargo run -p xtask -- schema-json [--check]\n  cargo run -p xtask -- action-reference [--check]\n  cargo run -p xtask -- skill-scrub\n  cargo run -p xtask -- dx-drift [--mode=warn|fail]"
+            "usage:\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- schema-drift\n  cargo run -p xtask -- schema-changelog-check [--lint]\n  cargo run -p xtask -- schema-json [--check]\n  cargo run -p xtask -- action-reference [--check]\n  cargo run -p xtask -- skill-scrub\n  cargo run -p xtask -- dx-drift [--mode=warn|fail]"
         )),
     };
 

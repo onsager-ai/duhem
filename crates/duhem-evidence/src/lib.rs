@@ -31,7 +31,7 @@ pub mod writer;
 pub use bundle::{BUNDLE_VERSION, BundleArtifact, BundleRun, RunBundle};
 pub use event::{
     BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, HEARTBEAT_PERIOD, ORPHAN_THRESHOLD,
-    ObservationValue, RunStatus, SCHEMA_VERSION, StepOutcome, VerdictState,
+    ObservationValue, RunOrigin, RunStatus, SCHEMA_VERSION, StepOutcome, VerdictState,
 };
 pub use reader::{ReadError, Trace};
 pub use replay::{ReplayDivergence, ReplayError, ReplayedRun, replay};
@@ -41,12 +41,13 @@ pub use session::{
     SessionEvidence, SessionNetworkEntry, SessionPerformanceObservation, SessionStep, SessionVideo,
 };
 pub use store::{
-    CriterionHistoryEntry, ProjectSummary, RunMeta, RunRecord, RunScope, Span, SqliteStore, Store,
-    StoreError, TargetStatus, dashboard_addr_path, derive_run_status, project_db_path,
-    project_slug, state_root, verification_name,
+    CriterionHistoryEntry, ProjectSummary, RunLineage, RunMeta, RunRecord, RunScope, Span,
+    SqliteStore, Store, StoreError, TargetStatus, dashboard_addr_path, derive_run_status,
+    project_db_path, project_slug, state_root, verification_name,
 };
 pub use writer::{
     EvidenceWriter, Sha256Hex, WriterError, run_started, run_started_with_definition,
+    run_started_with_definition_and_lineage,
 };
 
 /// Generate a new run id — a ULID (sortable, opaque, time-prefixed).

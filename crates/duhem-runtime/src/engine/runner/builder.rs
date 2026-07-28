@@ -114,6 +114,20 @@ impl Engine {
         self
     }
 
+    /// Record this run as a child of another run (#348).
+    pub fn with_lineage(mut self, lineage: RunLineage) -> Self {
+        self.lineage = lineage;
+        self
+    }
+
+    /// Store location inherited by nested `duhem run` subprocesses.
+    /// The CLI always supplies the path it opened; programmatic engines
+    /// that open their default store fill it lazily.
+    pub fn with_child_store_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.child_store_path = Some(path.into());
+        self
+    }
+
     /// Skip `environment.up:` + readiness probing. Used by the CLI's
     /// `--no-env-up` flag; useful when the operator brought the SUT
     /// up out-of-band. Teardown still runs unless [`Engine::keep_env`]
@@ -149,6 +163,10 @@ impl Engine {
     pub fn with_inherited(mut self, names: impl IntoIterator<Item = String>) -> Self {
         self.inherited = names.into_iter().collect();
         self
+    }
+
+    pub(crate) fn child_process_env(&self, run_id: &str) -> BTreeMap<String, String> {
+        crate::engine::lineage::child_process_env(run_id, self.child_store_path.as_deref())
     }
 }
 

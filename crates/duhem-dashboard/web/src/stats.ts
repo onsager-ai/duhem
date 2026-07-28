@@ -11,12 +11,15 @@ function startedMs(e: RunsListEntry): number {
   return e.started_at ? Date.parse(e.started_at) || 0 : 0;
 }
 
-// Flatten run-set groupings to their leaf runs (plus top-level leaves).
+// Flatten the recorded lineage tree to every real run. Run-set parents
+// are no longer synthetic rollups: they are addressable recorded runs
+// and therefore count alongside their descendants.
 export function flatLeaves(entries: RunsListEntry[]): RunsListEntry[] {
   const out: RunsListEntry[] = [];
   for (const e of entries) {
-    if (e.kind === "run-set") out.push(...(e.children ?? []));
-    else out.push(e);
+    const { children, ...run } = e;
+    out.push({ ...run, kind: "leaf" });
+    out.push(...flatLeaves(children ?? []));
   }
   return out;
 }

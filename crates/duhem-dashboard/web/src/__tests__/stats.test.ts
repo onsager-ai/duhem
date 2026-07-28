@@ -36,11 +36,12 @@ const entries: RunsListEntry[] = [
 ];
 
 describe("flatLeaves", () => {
-  it("expands run-sets to their children and keeps top-level leaves", () => {
+  it("flattens every recorded parent and descendant run", () => {
     const leaves = flatLeaves(entries);
     expect(leaves.map((l) => l.run_id).sort()).toEqual([
       "api1",
       "live1",
+      "login",
       "r1",
       "r2",
       "r3",
@@ -51,17 +52,17 @@ describe("flatLeaves", () => {
 describe("computeStats", () => {
   const s = computeStats(entries);
 
-  it("tallies verdict families and running runs over the leaves", () => {
-    expect(s.total).toBe(5);
+  it("tallies verdict families and running runs over every recorded run", () => {
+    expect(s.total).toBe(6);
     expect(s.pass).toBe(2);
-    expect(s.fail).toBe(1);
+    expect(s.fail).toBe(2);
     expect(s.inconclusive).toBe(1);
     expect(s.running).toBe(1);
   });
 
   it("computes pass rate over decided runs only (excludes the live run)", () => {
-    // 2 pass / (2 pass + 1 fail + 1 inconclusive) = 0.5
-    expect(s.passRate).toBe(0.5);
+    // 2 pass / (2 pass + 2 fail + 1 inconclusive) = 0.4
+    expect(s.passRate).toBe(0.4);
   });
 
   it("counts a verification as failing when its latest run failed", () => {
@@ -82,9 +83,9 @@ describe("verificationSummaries", () => {
   it("groups by verification, alphabetical, with latest lifecycle", () => {
     expect(summaries.map((v) => v.name)).toEqual(["api", "checkout", "login"]);
     const login = summaries.find((v) => v.name === "login")!;
-    expect(login.runs).toBe(3);
-    expect(login.latest?.run_id).toBe("r3");
-    expect(login.recent).toEqual(["pass", "pass", "fail"]); // oldest→newest
+    expect(login.runs).toBe(4);
+    expect(login.latest?.run_id).toBe("login");
+    expect(login.recent).toEqual(["pass", "pass", "fail", "fail"]); // oldest→newest
     const checkout = summaries.find((v) => v.name === "checkout")!;
     expect(checkout.status).toBe("running");
   });

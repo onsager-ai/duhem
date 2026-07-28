@@ -26,6 +26,7 @@ mod reporter;
 mod reporter_config;
 mod resolve;
 mod run_cmd;
+mod run_lineage;
 mod run_scope;
 mod validate_cmd;
 

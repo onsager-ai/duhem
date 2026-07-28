@@ -153,9 +153,9 @@ async fn export_run(
 fn leaf_run_ids(list: &[RunsListEntry]) -> Vec<String> {
     let mut ids = Vec::new();
     for entry in list {
-        match &entry.children {
-            Some(children) => ids.extend(children.iter().map(|c| c.run_id.clone())),
-            None => ids.push(entry.run_id.clone()),
+        ids.push(entry.run_id.clone());
+        if let Some(children) = &entry.children {
+            ids.extend(leaf_run_ids(children));
         }
     }
     ids

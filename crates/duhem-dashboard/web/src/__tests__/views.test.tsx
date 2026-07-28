@@ -106,6 +106,34 @@ describe("RunsList", () => {
     expect(screen.getByText("01JRUNA")).toBeTruthy();
   });
 
+  it("renders recorded lineage recursively", async () => {
+    const invocation = {
+      ...leaf("invocation-child", "pass"),
+      origin: "invocation" as const,
+    };
+    const suite = {
+      ...leaf("suite-child", null),
+      kind: "run-set" as const,
+      origin: "suite" as const,
+      children: [invocation],
+    };
+    stubRuns([
+      {
+        ...leaf("root-run", null),
+        kind: "run-set",
+        children: [suite],
+      },
+    ]);
+    renderRuns(<RunsList />, "/runs?view=verification");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Expand" }));
+    expect(screen.getByText("suite-child")).toBeTruthy();
+    expect(screen.queryByText("invocation-child")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expect(screen.getByText("invocation-child")).toBeTruthy();
+    expect(screen.getByText("invocation")).toBeTruthy();
+  });
+
   it("orders the Triage view by running, failed, then inconclusive", async () => {
     stubRuns([
       leaf("pass-run", "pass"),

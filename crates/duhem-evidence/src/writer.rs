@@ -25,7 +25,7 @@ use crate::event::{
     SCHEMA_VERSION,
 };
 use crate::secret::SecretRegistry;
-use crate::store::{RunMeta, RunScope, Store, StoreError};
+use crate::store::{RunLineage, RunMeta, RunScope, Store, StoreError};
 
 /// Truncate to millisecond precision. The wire format pins `ts` at
 /// ms; in-memory `Utc::now()` carries ns. Truncate at the stamping
@@ -136,8 +136,33 @@ impl EvidenceWriter {
         store: Arc<dyn Store>,
         run_id: impl Into<String>,
         definition_path: &str,
+        inputs: BTreeMap<String, serde_json::Value>,
+        scope: RunScope,
+        secrets: SecretRegistry,
+    ) -> Result<Self, WriterError> {
+        Self::begin_scoped_with_secrets_and_lineage(
+            store,
+            run_id,
+            definition_path,
+            inputs,
+            scope,
+            RunLineage::default(),
+            secrets,
+        )
+        .await
+    }
+
+    /// [`EvidenceWriter::begin_scoped_with_secrets`] plus recorded run
+    /// lineage (#348). The parent id stays verbatim in the header
+    /// because it is a foreign key; the redundant `run_started` field
+    /// still crosses the event masking chokepoint.
+    pub async fn begin_scoped_with_secrets_and_lineage(
+        store: Arc<dyn Store>,
+        run_id: impl Into<String>,
+        definition_path: &str,
         mut inputs: BTreeMap<String, serde_json::Value>,
         mut scope: RunScope,
+        lineage: RunLineage,
         secrets: SecretRegistry,
     ) -> Result<Self, WriterError> {
         let run_id = run_id.into();
@@ -157,6 +182,7 @@ impl EvidenceWriter {
                 schema_version: SCHEMA_VERSION.to_string(),
                 inputs,
                 started_at: now_ms(),
+                lineage,
                 scope,
             })
             .await?;
@@ -432,10 +458,29 @@ pub fn run_started_with_definition(
     inputs: BTreeMap<String, serde_json::Value>,
     definition: Option<String>,
 ) -> EventPayload {
+    run_started_with_definition_and_lineage(
+        verification_path,
+        inputs,
+        definition,
+        RunLineage::default(),
+    )
+}
+
+/// [`run_started_with_definition`] carrying recorded lineage (#348).
+/// The payload is appended through [`EvidenceWriter::append`], so the
+/// parent id shares the lifecycle event masking chokepoint.
+pub fn run_started_with_definition_and_lineage(
+    verification_path: impl Into<String>,
+    inputs: BTreeMap<String, serde_json::Value>,
+    definition: Option<String>,
+    lineage: RunLineage,
+) -> EventPayload {
     EventPayload::RunStarted {
         verification_path: verification_path.into(),
         inputs,
         schema_version: SCHEMA_VERSION.to_string(),
+        parent_run_id: lineage.parent_run_id,
+        origin: lineage.origin,
         definition,
     }
 }
@@ -490,15 +535,26 @@ mod tests {
                 .unwrap(),
         );
         let secret = "SIGSECRET-credential-value";
+        // The parent row makes the lineage FK real; the event copy of
+        // that id must still cross the masking chokepoint below.
+        let parent = EvidenceWriter::begin(store.clone(), secret, "parent.yml", BTreeMap::new())
+            .await
+            .unwrap();
+        drop(parent);
         let mut secrets = SecretRegistry::new();
         secrets.register("abort_signal", secret);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut writer = EvidenceWriter::begin_scoped_with_secrets(
+        let lineage = RunLineage {
+            parent_run_id: Some(secret.to_string()),
+            origin: Some(crate::RunOrigin::Invocation),
+        };
+        let mut writer = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
             store.clone(),
             "01MASKEDLIFECYCLE",
             "lifecycle.yml",
             BTreeMap::new(),
             RunScope::default(),
+            lineage.clone(),
             secrets,
         )
         .await
@@ -506,7 +562,12 @@ mod tests {
         .with_tee(tx);
 
         writer
-            .append(run_started("lifecycle.yml", BTreeMap::new()))
+            .append(run_started_with_definition_and_lineage(
+                "lifecycle.yml",
+                BTreeMap::new(),
+                None,
+                lineage,
+            ))
             .await
             .unwrap();
         writer.append(EventPayload::RunHeartbeat).await.unwrap();
@@ -533,6 +594,13 @@ mod tests {
                     &event.payload,
                     EventPayload::RunAborted { signal }
                         if signal == "[redacted:abort_signal]"
+                )
+            }));
+            assert!(events.iter().any(|event| {
+                matches!(
+                    &event.payload,
+                    EventPayload::RunStarted { parent_run_id, .. }
+                        if parent_run_id.as_deref() == Some("[redacted:abort_signal]")
                 )
             }));
         }

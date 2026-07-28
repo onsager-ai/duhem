@@ -105,6 +105,7 @@ impl Action for Query {
                 FieldSpec::optional("within"),
             ],
             outputs: vec!["rows", "row_count"],
+            secret_outputs: vec![],
             example: "- uses: db/query\n  with: { connection: $inputs.db, sql: \"select id from users\" }\n  outputs: { n: row_count }",
         }
     }

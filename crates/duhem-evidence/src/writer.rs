@@ -76,7 +76,7 @@ struct SharedWriter {
     /// Run-scoped secret spellings. Centralizing this on the writer is
     /// the sink-level guarantee from spec #346: callers append ordinary
     /// evidence and cannot accidentally opt an action out of masking.
-    secrets: SecretRegistry,
+    secrets: std::sync::RwLock<SecretRegistry>,
     /// Counts produced when a blob was written, keyed by its content
     /// address. A subsequent observation reference picks them up without
     /// requiring capture/action call sites to carry masking metadata.
@@ -166,7 +166,7 @@ impl EvidenceWriter {
                 run_id,
                 next_seq: tokio::sync::Mutex::new(0),
                 tee: std::sync::Mutex::new(None),
-                secrets,
+                secrets: std::sync::RwLock::new(secrets),
                 artifact_mask_counts: std::sync::Mutex::new(BTreeMap::new()),
             }),
             heartbeat_stop: None,
@@ -226,6 +226,32 @@ impl EvidenceWriter {
         &self.shared.store
     }
 
+    /// Add a scalar value acquired during the run to this writer's
+    /// secret registry (spec #355). Registration affects this point
+    /// forward: events already committed remain unchanged, preserving
+    /// append-only streaming rather than buffering for retroactive
+    /// masking.
+    pub fn register_secret(&mut self, source: impl Into<String>, value: &serde_json::Value) {
+        self.shared
+            .secrets
+            .write()
+            .expect("secret registry lock poisoned")
+            .register_json(source, value);
+    }
+
+    /// Apply the writer's current registry to a non-evidence text sink
+    /// such as the structured run outcome rendered in the terminal.
+    /// Keeping the registry private still makes the writer the single
+    /// owner while letting the runtime honor the same boundary there.
+    pub fn mask_text(&self, text: &str) -> String {
+        self.shared
+            .secrets
+            .read()
+            .expect("secret registry lock poisoned")
+            .mask(text)
+            .text
+    }
+
     /// Append one event. The caller supplies the `payload`; `seq` and
     /// `ts` are stamped here.
     pub async fn append(&mut self, payload: EventPayload) -> Result<u64, WriterError> {
@@ -257,7 +283,11 @@ impl EvidenceWriter {
             }
         } else {
             let mut value = value;
-            self.shared.secrets.mask_json(&mut value);
+            self.shared
+                .secrets
+                .read()
+                .expect("secret registry lock poisoned")
+                .mask_json(&mut value);
             ObservationValue::Inline { value }
         };
         self.append(EventPayload::StepObservation {
@@ -273,7 +303,12 @@ impl EvidenceWriter {
     /// text and are masked here; binary blobs (including screenshots and
     /// video) remain byte-identical by the explicit spec #346 limit.
     pub async fn write_blob(&mut self, bytes: &[u8]) -> Result<Sha256Hex, WriterError> {
-        let (masked, counts) = self.shared.secrets.mask_bytes(bytes);
+        let (masked, counts) = self
+            .shared
+            .secrets
+            .read()
+            .expect("secret registry lock poisoned")
+            .mask_bytes(bytes);
         let sha = self.shared.store.put_blob(&masked).await?;
         if !counts.is_empty() {
             self.shared
@@ -325,10 +360,16 @@ async fn append_shared(
     // Every event kind, including runtime-owned heartbeat and abort
     // markers, crosses the same masking chokepoint before persistence or
     // the live tee. Callers cannot opt a new payload out of redaction.
-    if !shared.secrets.is_empty() {
-        let mut value = serde_json::to_value(&payload)?;
-        shared.secrets.mask_json(&mut value);
-        payload = serde_json::from_value(value)?;
+    {
+        let secrets = shared
+            .secrets
+            .read()
+            .expect("secret registry lock poisoned");
+        if !secrets.is_empty() {
+            let mut value = serde_json::to_value(&payload)?;
+            secrets.mask_json(&mut value);
+            payload = serde_json::from_value(value)?;
+        }
     }
     let seq = *next_seq;
     let evt = Event {

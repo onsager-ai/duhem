@@ -30,9 +30,8 @@ use duhem_evidence::{
     VerdictState, new_run_id, project_db_path, run_started_with_definition,
 };
 use duhem_judge::{
-    AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusiveCause,
-    InconclusivePolicy, RunVerdict, aggregate_check, aggregate_criterion, aggregate_run,
-    apply_inconclusive_policy,
+    AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusivePolicy, RunVerdict,
+    aggregate_check, aggregate_criterion, aggregate_run, apply_inconclusive_policy,
 };
 use duhem_schema::{Check, Criterion, RetryBackoff, RetryPolicy, VerificationDefinition};
 use tracing::debug;
@@ -147,6 +146,9 @@ pub struct Engine {
 
 mod builder;
 mod masking;
+mod missing_input;
+mod signal;
+pub(crate) use signal::termination_signal;
 
 impl Engine {
     /// Build the v1 engine with the closed action catalog. The
@@ -305,26 +307,8 @@ impl Engine {
             .await?;
 
         let execution = async {
-            // Missing declared input is an environment failure recorded
-            // before browser launch or lifecycle hooks.
             if let Some(name) = missing_declared {
-                let verdict = RunVerdict {
-                    state: VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
-                    criteria: Vec::new(),
-                };
-                writer
-                    .append(EventPayload::RunFinished {
-                        verdict: Some(verdict.state),
-                    })
-                    .await?;
-                return Ok(RunOutcome {
-                    verdict,
-                    run_id,
-                    failures: Vec::new(),
-                    warnings: vec![format!(
-                        "missing required input `{name}`; supply its declared env variable, a selected environment value, or --inputs"
-                    )],
-                });
+                return missing_input::finish(&mut writer, &name, &run_id).await;
             }
 
             // Resolve the Verification Definition's directory so relative
@@ -489,10 +473,15 @@ impl Engine {
         drop(execution);
         match completed {
             Ok(result) => {
+                let result = result.map(|mut outcome| {
+                    // Use the writer's live registry: it includes
+                    // credentials acquired after Engine's input-only
+                    // registry was cloned.
+                    masking::mask_run_outcome(&writer, &mut outcome);
+                    outcome
+                });
                 writer.finish().await?;
-                let mut outcome = result?;
-                masking::mask_run_outcome(&self.secrets, &mut outcome);
-                Ok(outcome)
+                result
             }
             Err(signal) => {
                 writer
@@ -694,6 +683,30 @@ impl Engine {
                 targets.push(t);
             }
 
+            let known = self.registry.contains_key(step.uses.as_str());
+            let step_started_ms = if will_run && !matches!(self.capture, CapturePolicy::Off) {
+                match check_browser.as_ref() {
+                    Some(cb) => Some(storyboard.step_started(&cb.page).await),
+                    None => None,
+                }
+            } else {
+                None
+            };
+
+            // Resolved here so the secret pass below reaches the same
+            // action's contract without a second registry lookup. The
+            // invocation itself stays *after* `StepStarted` — see the
+            // registration comment below.
+            let dispatcher = if !known || environment_failed || step_aborted {
+                None
+            } else {
+                Some(
+                    self.registry
+                        .get(step.uses.as_str())
+                        .expect("known checked above"),
+                )
+            };
+
             writer
                 .append(EventPayload::StepStarted {
                     criterion_id: criterion_id.to_string(),
@@ -709,34 +722,39 @@ impl Engine {
                 })
                 .await?;
 
-            let known = self.registry.contains_key(step.uses.as_str());
-            let step_started_ms = if will_run && !matches!(self.capture, CapturePolicy::Off) {
-                match check_browser.as_ref() {
-                    Some(cb) => Some(storyboard.step_started(&cb.page).await),
-                    None => None,
+            // Invoke after `StepStarted` is persisted, then register any
+            // acquired secret before anything carrying this step's
+            // outputs (spec #355).
+            //
+            // `StepStarted` records the resolved `with:` — this step's
+            // *inputs* — which cannot contain this step's own outputs,
+            // so nothing leaks by persisting it first. Invoking earlier
+            // to register sooner buys nothing and costs liveness:
+            // `StepStarted` is what live progress folds over to put a
+            // step in flight, so a slow step would go unreported for its
+            // whole duration, the `… still in <uses>` heartbeat (#305)
+            // could never fire, and `step_started.ts` would be stamped
+            // at completion, collapsing event-derived durations.
+            let execution = match dispatcher {
+                None => None,
+                Some(dispatcher) => {
+                    let page_ref: Option<&Page> = check_browser.as_ref().map(|cb| &cb.page);
+                    let result = dispatcher.invoke(page_ref, idx, &resolved_with).await;
+                    if let Ok(r) = &result {
+                        crate::engine::secret_output::register(
+                            writer,
+                            step,
+                            idx,
+                            &dispatcher.secret_outputs(),
+                            &r.outputs,
+                        )?;
+                    }
+                    Some(result)
                 }
-            } else {
-                None
             };
-            let outcome = if !known || environment_failed || step_aborted {
-                // Step can't run — emit a synthetic Error so evidence
-                // carries the "not executed" signal alongside the
-                // upstream cause via the assertion `detail`s below.
-                Outcome::Error
-            } else {
-                let dispatcher = self
-                    .registry
-                    .get(step.uses.as_str())
-                    .expect("known checked above");
-                let page_ref: Option<&Page> = check_browser.as_ref().map(|cb| &cb.page);
-                let result = dispatcher.invoke(page_ref, idx, &resolved_with).await;
 
-                let outcome = match &result {
-                    Ok(r) => r.outcome.clone(),
-                    Err(_) => Outcome::Error,
-                };
-
-                if let Ok(r) = &result {
+            let outcome = match &execution {
+                Some(Ok(r)) => {
                     // Bind raw fields + `outputs:` aliases (spec #273);
                     // see `engine::extract`.
                     if let Some(id) = step.id.as_deref() {
@@ -757,9 +775,12 @@ impl Engine {
                         with: resolved_with.clone(),
                         outputs: r.outputs.clone(),
                     };
+                    r.outcome.clone()
                 }
-
-                outcome
+                // Step can't run (or invocation failed) — emit a
+                // synthetic Error so evidence carries "not executed"
+                // alongside the assertion cause below.
+                Some(Err(_)) | None => Outcome::Error,
             };
 
             writer
@@ -867,47 +888,12 @@ impl Engine {
     }
 }
 
-#[cfg(unix)]
-pub(crate) async fn termination_signal() -> &'static str {
-    use std::sync::OnceLock;
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    static FLAGS: OnceLock<(Arc<AtomicBool>, Arc<AtomicBool>)> = OnceLock::new();
-    let (sigint, sigterm) = FLAGS.get_or_init(|| {
-        use signal_hook::consts::signal::{SIGINT, SIGTERM};
-
-        let sigint = Arc::new(AtomicBool::new(false));
-        let sigterm = Arc::new(AtomicBool::new(false));
-        signal_hook::flag::register(SIGINT, sigint.clone()).expect("install SIGINT handler");
-        signal_hook::flag::register(SIGTERM, sigterm.clone()).expect("install SIGTERM handler");
-        (sigint, sigterm)
-    });
-
-    loop {
-        if sigint.swap(false, Ordering::SeqCst) {
-            return "SIGINT";
-        }
-        if sigterm.swap(false, Ordering::SeqCst) {
-            return "SIGTERM";
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-}
-
-#[cfg(not(unix))]
-pub(crate) async fn termination_signal() -> &'static str {
-    tokio::signal::ctrl_c()
-        .await
-        .expect("install Ctrl-C handler");
-    "SIGINT"
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::registry::Dispatch;
+    use crate::engine::registry::{ConcreteAction, Dispatch};
     use async_trait::async_trait;
-    use duhem_actions::{ActionError, ActionResult, Outcome};
+    use duhem_actions::{Action, ActionContract, ActionCtx, ActionError, ActionResult, Outcome};
     use duhem_evidence::Trace;
     use duhem_judge::InconclusiveCause;
     use std::sync::Arc;
@@ -1014,6 +1000,7 @@ criteria:
         outputs: Vec<(&'static str, serde_json::Value)>,
         invocations: Arc<AtomicUsize>,
         judges: bool,
+        delay: Option<std::time::Duration>,
     }
 
     impl StubAction {
@@ -1024,10 +1011,18 @@ criteria:
                 outputs: Vec::new(),
                 invocations: Arc::new(AtomicUsize::new(0)),
                 judges: false,
+                delay: None,
             }
         }
         fn with_output(mut self, k: &'static str, v: serde_json::Value) -> Self {
             self.outputs.push((k, v));
+            self
+        }
+        /// Make the action observably slow, so the gap between
+        /// `StepStarted.ts` and `StepFinished.ts` reveals whether the
+        /// start event was persisted before the action ran.
+        fn slow(mut self, delay: std::time::Duration) -> Self {
+            self.delay = Some(delay);
             self
         }
         /// Mark the stub as a judging action (its contract would list
@@ -1056,6 +1051,9 @@ criteria:
             _with: &serde_yml::Value,
         ) -> Result<ActionResult, ActionError> {
             self.invocations.fetch_add(1, Ordering::SeqCst);
+            if let Some(delay) = self.delay {
+                tokio::time::sleep(delay).await;
+            }
             let mut r = match self.outcome {
                 Outcome::Ok => ActionResult::ok(),
                 Outcome::Error => ActionResult::error(),
@@ -1065,6 +1063,36 @@ criteria:
                 r = r.with_output(k, v.clone());
             }
             Ok(r)
+        }
+    }
+
+    struct ContractSecretAction {
+        token: &'static str,
+    }
+
+    #[async_trait]
+    impl Action for ContractSecretAction {
+        fn uses(&self) -> &'static str {
+            "fake/session"
+        }
+
+        fn contract(&self) -> ActionContract {
+            ActionContract {
+                uses: self.uses(),
+                summary: "Produce a credential for contract registration tests.",
+                with: Vec::new(),
+                outputs: vec!["token"],
+                secret_outputs: vec!["token"],
+                example: "- uses: fake/session",
+            }
+        }
+
+        async fn invoke(
+            &self,
+            _ctx: &ActionCtx<'_>,
+            _with: &serde_yml::Value,
+        ) -> Result<ActionResult, ActionError> {
+            Ok(ActionResult::ok().with_output("token", serde_json::json!(self.token)))
         }
     }
 
@@ -1194,6 +1222,204 @@ criteria:
 "#);
         let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
         assert_eq!(verdict.state, VerdictState::Pass);
+    }
+
+    #[tokio::test]
+    async fn acquired_token_is_masked_in_producing_and_later_step_evidence() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        let token = "eyJhbGciOiJIUzI1NiIs-acquired-at-login";
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/login", Outcome::Ok)
+                .with_output("body", serde_json::json!({ "data": token }))
+                .with_output(
+                    "body_text",
+                    serde_json::json!(format!(r#"{{"data":"{token}"}}"#)),
+                ),
+        ));
+        engine.register_test_action(Box::new(StubAction::new("fake/read", Outcome::Ok)));
+        let v = def(r#"
+verification: acquired secret
+criteria:
+  - id: AC-1
+    description: A login token authenticates a later read without entering evidence.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: login
+            uses: fake/login
+            secret: [body.data]
+          - id: read
+            uses: fake/read
+            with:
+              Authorization: $steps.login.outputs.body.data
+        assertions: ["true"]
+"#);
+        engine.run(&v, BTreeMap::new()).await.unwrap();
+
+        let wire = serde_json::to_string(&read_only_run_events(&engine).await).unwrap();
+        assert!(!wire.contains(token), "plaintext token leaked: {wire}");
+        assert!(
+            wire.matches("[redacted:login.body.data]").count() >= 3,
+            "producer body/body_text and later with: must all be masked: {wire}"
+        );
+    }
+
+    #[tokio::test]
+    async fn deep_array_secret_path_registers_its_scalar_leaf() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        let token = "deep-array-secret-value";
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/deep", Outcome::Ok).with_output(
+                "body",
+                serde_json::json!({ "items": [{ "key": token, "public": "visible" }] }),
+            ),
+        ));
+        let v = def(r#"
+verification: deep secret
+criteria:
+  - id: AC-1
+    description: A scalar nested beneath an array can be protected.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: login
+            uses: fake/deep
+            secret:
+              - body.items[0].key
+        assertions: ["true"]
+"#);
+        engine.run(&v, BTreeMap::new()).await.unwrap();
+        let wire = serde_json::to_string(&read_only_run_events(&engine).await).unwrap();
+        assert!(!wire.contains(token));
+        assert!(wire.contains("[redacted:login.body.items[0].key]"));
+        assert!(wire.contains("visible"), "sibling fields stay observable");
+    }
+
+    /// `StepStarted` must be persisted *before* the action runs, not
+    /// after. Live progress is a fold over these events — `StepStarted`
+    /// is what puts a step in flight — so invoking first would leave a
+    /// slow step unreported for its whole duration and stop the
+    /// `… still in <uses>` heartbeat (#305) from ever firing.
+    ///
+    /// Registering an acquired secret (#355) is a standing temptation to
+    /// invoke early so the value is in hand sooner. It isn't needed:
+    /// `StepStarted` carries the resolved `with:`, i.e. this step's
+    /// inputs, which cannot contain this step's own outputs. This test
+    /// pins the ordering, which two separate attempts have inverted.
+    #[tokio::test]
+    async fn step_started_is_persisted_before_the_action_runs() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        let delay = std::time::Duration::from_millis(150);
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/slow", Outcome::Ok).slow(delay),
+        ));
+        let v = def(r#"
+verification: start event precedes the action
+criteria:
+  - id: AC-1
+    description: A slow step is observable while it runs.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: slow
+            uses: fake/slow
+        assertions: ["true"]
+"#);
+        engine.run(&v, BTreeMap::new()).await.unwrap();
+        let events = read_only_run_events(&engine).await;
+        let started = events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::StepStarted { .. }))
+            .expect("step_started");
+        let finished = events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::StepFinished { .. }))
+            .expect("step_finished");
+        let elapsed = finished.ts - started.ts;
+        assert!(
+            elapsed.num_milliseconds() >= delay.as_millis() as i64 / 2,
+            "step_started must be stamped before the action ran, but the \
+             gap to step_finished was {}ms for a {}ms action — the action \
+             is being invoked before its start event is persisted",
+            elapsed.num_milliseconds(),
+            delay.as_millis()
+        );
+    }
+
+    #[tokio::test]
+    async fn aggregate_secret_path_fails_before_producing_step_evidence() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        let token = "must-not-reach-evidence";
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/login", Outcome::Ok)
+                .with_output("body", serde_json::json!({ "data": token })),
+        ));
+        let v = def(r#"
+verification: invalid aggregate secret
+criteria:
+  - id: AC-1
+    description: Aggregate secret declarations fail safely.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: login
+            uses: fake/login
+            secret: [body]
+        assertions: ["true"]
+"#);
+        let err = engine.run(&v, BTreeMap::new()).await.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "secret: `body` resolved to an object, not a value.\n\
+             Name the scalar that is sensitive, e.g. `body.data`.\n\
+             Registering a whole object would mask only its exact\n\
+             serialization, which is almost never what appears in evidence."
+        );
+        let events = read_only_run_events(&engine).await;
+        // `StepStarted` is permitted and expected: it records the
+        // resolved `with:` — this step's inputs — which cannot contain
+        // the output we just refused to register. What must not exist
+        // is any event carrying this step's *outputs*. Asserting "no
+        // events at all" would force the action to be invoked before
+        // `StepStarted` is persisted, which is what live progress folds
+        // over to put a step in flight (#305).
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event.payload,
+                    EventPayload::StepObservation { .. } | EventPayload::StepFinished { .. }
+                ))
+                .count(),
+            0,
+            "the refused step must produce no output-bearing evidence"
+        );
+        assert!(!serde_json::to_string(&events).unwrap().contains(token));
+    }
+
+    #[tokio::test]
+    async fn contract_declared_secret_output_needs_no_authored_declaration() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        let token = "contract-owned-secret-value";
+        engine.register_test_action(Box::new(ConcreteAction::new(Box::new(
+            ContractSecretAction { token },
+        ))));
+        let v = def(r#"
+verification: contract secret
+criteria:
+  - id: AC-1
+    description: An action can protect credentials by contract.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: capture
+            uses: fake/session
+        assertions: ["true"]
+"#);
+        engine.run(&v, BTreeMap::new()).await.unwrap();
+        let wire = serde_json::to_string(&read_only_run_events(&engine).await).unwrap();
+        assert!(!wire.contains(token));
+        assert!(wire.contains("[redacted:capture.token]"));
     }
 
     #[tokio::test]
@@ -1552,6 +1778,7 @@ criteria:
             outputs: Vec::new(),
             invocations: criterion_calls.clone(),
             judges: false,
+            delay: None,
         };
         engine.register_test_action(Box::new(criterion_tracker));
         let v = def(r#"
@@ -1605,6 +1832,7 @@ criteria:
             outputs: Vec::new(),
             invocations: criterion_calls.clone(),
             judges: false,
+            delay: None,
         };
         engine.register_test_action(Box::new(criterion_tracker));
         let v = def(r#"

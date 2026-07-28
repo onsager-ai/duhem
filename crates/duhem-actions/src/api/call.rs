@@ -166,6 +166,7 @@ impl Action for Call {
                 FieldSpec::optional("within"),
             ],
             outputs: vec!["status", "body", "body_text"],
+            secret_outputs: vec![],
             example: "- uses: api/call\n  with: { method: GET, url: https://example.com }\n# then assert directly: $steps.<id>.outputs.status == 200 (no outputs: block)",
         }
     }

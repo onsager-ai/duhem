@@ -106,6 +106,7 @@ impl Action for Invoke {
                 FieldSpec::optional("within"),
             ],
             outputs: vec!["exit_code", "stdout", "stderr"],
+            secret_outputs: vec![],
             example: "- uses: cli/invoke\n  with: { command: [\"echo\", \"hi\"] }\n  outputs: { code: exit_code }",
         }
     }

@@ -111,6 +111,7 @@ impl Action for Observe {
                 FieldSpec::optional("until"),
             ],
             outputs: vec!["satisfied", "rows", "row_count"],
+            secret_outputs: vec![],
             example: "- uses: db/observe\n  with: { connection: $inputs.db, sql: \"select status from jobs where id=1\", until: \"$rows[0].status == 'done'\" }\n  outputs: { satisfied: satisfied }",
         }
     }

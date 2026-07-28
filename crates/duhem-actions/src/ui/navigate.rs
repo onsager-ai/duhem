@@ -32,6 +32,7 @@ impl Action for Navigate {
             summary: "Navigate the browser to a URL.",
             with: vec![FieldSpec::required("url"), FieldSpec::optional("within")],
             outputs: vec![],
+            secret_outputs: vec![],
             example: "- uses: ui/navigate\n  with: { url: https://example.com }",
         }
     }

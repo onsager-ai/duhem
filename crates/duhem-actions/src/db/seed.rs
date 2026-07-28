@@ -57,6 +57,7 @@ impl Action for Seed {
                 FieldSpec::optional("within"),
             ],
             outputs: vec!["rows_affected"],
+            secret_outputs: vec![],
             example: "- uses: db/seed\n  with: { connection: $inputs.db, sql: \"insert into users(id) values (1)\" }",
         }
     }

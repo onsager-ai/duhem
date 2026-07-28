@@ -164,6 +164,14 @@ fn describe_text(uses: &str) -> String {
     } else {
         s.push_str(&format!("\noutputs: {}\n", c.outputs.join(", ")));
     }
+    if c.secret_outputs.is_empty() {
+        s.push_str("secret outputs: (none)\n");
+    } else {
+        s.push_str(&format!(
+            "secret outputs: {}\n",
+            c.secret_outputs.join(", ")
+        ));
+    }
     s.push_str(&format!("\nexample:\n{}\n", c.example));
     s
 }

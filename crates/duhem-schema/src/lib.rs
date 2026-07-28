@@ -13,6 +13,7 @@ pub mod expr;
 pub mod includes;
 pub mod jsonschema;
 pub mod manifest;
+mod manifest_inputs;
 pub mod project;
 pub mod step;
 pub mod validate;

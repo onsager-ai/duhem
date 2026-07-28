@@ -152,6 +152,7 @@ impl Action for Observe {
                 FieldSpec::optional("within"),
             ],
             outputs: vec![],
+            secret_outputs: vec![],
             example: "- uses: api/observe\n  with: { method: POST, url_pattern: \"**/api/login\" }",
         }
     }

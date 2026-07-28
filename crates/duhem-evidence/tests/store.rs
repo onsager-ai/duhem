@@ -1244,6 +1244,8 @@ async fn secret_registry_masks_events_artifacts_and_bundle_exports() {
     );
 }
 
+/// Spec #355 compatibility: an empty registry keeps the old evidence
+/// shape and value exactly, rather than routing through redaction.
 #[tokio::test]
 async fn non_secret_text_is_recorded_verbatim() {
     let (_tmp, store) = open_store().await;
@@ -1263,9 +1265,53 @@ async fn non_secret_text_is_recorded_verbatim() {
         .await
         .unwrap();
     let trace = Trace::from_store(store.as_ref(), RUN_ID).await.unwrap();
-    assert!(
-        serde_json::to_string(trace.events())
-            .unwrap()
-            .contains(visible)
+    let connection = trace
+        .events()
+        .iter()
+        .find_map(|event| match &event.payload {
+            EventPayload::StepStarted { with, .. } => with.get("connection"),
+            _ => None,
+        });
+    assert_eq!(connection, Some(&serde_json::json!(visible)));
+}
+
+/// Spec #355 states the temporal edge deliberately: a value acquired
+/// mid-run masks the producing step and everything later, but the
+/// append-only writer never rewrites evidence already committed.
+#[tokio::test]
+async fn mid_run_secret_registration_is_not_retroactive() {
+    let (_tmp, store) = open_store().await;
+    let token = "newly-acquired-token";
+    let mut writer = EvidenceWriter::begin(store.clone(), RUN_ID, "v.yml", BTreeMap::new())
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::StepStarted {
+            criterion_id: "AC-1".into(),
+            check_id: "AC-1.1".into(),
+            step_index: 0,
+            uses: "fake/prior".into(),
+            layer: None,
+            with: BTreeMap::from([("note".into(), serde_json::json!(token))]),
+        })
+        .await
+        .unwrap();
+
+    writer.register_secret("login.body.data", &serde_json::json!(token));
+    writer
+        .append_observation(1, "body", serde_json::json!({ "data": token }))
+        .await
+        .unwrap();
+
+    let events = Trace::from_store(store.as_ref(), RUN_ID)
+        .await
+        .unwrap()
+        .into_events();
+    let wire = serde_json::to_string(&events).unwrap();
+    assert_eq!(
+        wire.matches(token).count(),
+        1,
+        "earlier event stays plaintext"
     );
+    assert!(wire.contains("[redacted:login.body.data]"));
 }

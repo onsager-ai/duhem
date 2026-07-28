@@ -52,6 +52,7 @@ impl Action for Type {
                 FieldSpec::optional("within"),
             ],
             outputs: vec![],
+            secret_outputs: vec![],
             example: "- uses: ui/type\n  with: { locator: { css: \"#email\" }, text: \"a@b.com\" }",
         }
     }

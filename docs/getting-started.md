@@ -147,7 +147,55 @@ criteria:
   recorded text and terminal output. A secret input cannot have a
   committed `default:`. Screenshots/video and transformations beyond
   base64, percent encoding, and JSON escaping remain outside the
-  substring-masking guarantee.
+  substring-masking guarantee. For a credential shared by a suite,
+  declare it once under the root manifest's `inputs:` and list its name
+  under each consuming leaf's `inherits:`:
+
+  ```yaml
+  # .duhem/duhem.yml
+  inputs:
+    password:
+      type: string
+      env: APP_PASSWORD
+      secret: true
+  environments:
+    staging:
+      username: admin
+
+  # a leaf Verification Definition
+  inherits: [password]
+  ```
+
+  A declared inherited value uses the same precedence and type checks
+  as a leaf input. An inherited name with no manifest declaration keeps
+  the existing names-only behavior.
+- **Credentials returned by a step** use `secret:` on the producing
+  step. Name the sensitive scalar output path, not its containing
+  object or array:
+
+  ```yaml
+  - id: login
+    uses: api/call
+    secret: [body.data]
+    with:
+      method: POST
+      url: $inputs.login_url
+      body: { username: $inputs.username, password: $inputs.password }
+  - id: projects
+    uses: api/call
+    with:
+      method: GET
+      url: $inputs.projects_url
+      headers: { Authorization: $steps.login.outputs.body.data }
+  ```
+
+  `body.data` is registered before the login step records its own
+  response, so both that response and the later `Authorization` value
+  become `[redacted:login.body.data]`. A path such as `body` (object) or
+  `body.items` (array) fails; name one scalar leaf such as
+  `body.items[0].key`. Some actions may mark credential outputs secret
+  in their contract, in which case no authored `secret:` entry is
+  needed.
 
 ## 5. Author a real check
 

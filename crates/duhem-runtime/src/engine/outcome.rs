@@ -67,6 +67,17 @@ pub enum EngineError {
         "input `{name}` is declared `inherits:` but no environment or --inputs provides it; run the suite (e.g. `duhem run verifications/<suite>`) or pass `--inputs {name}=...`"
     )]
     UnresolvedInheritedInput { name: String },
+    /// A validated secret path started at a declared output, but the
+    /// action did not return that value on this invocation.
+    #[error("step `{step}`: secret output path `{path}` did not resolve to a value")]
+    SecretOutputMissing { step: String, path: String },
+    /// Exact-substring registration protects one scalar spelling.
+    /// Registering an aggregate's serialization would look protected
+    /// while missing the values that actually recur in evidence.
+    #[error(
+        "secret: `{path}` resolved to an {shape}, not a value.\nName the scalar that is sensitive, e.g. `{path}.data`.\nRegistering a whole {shape} would mask only its exact\nserialization, which is almost never what appears in evidence."
+    )]
+    SecretOutputNotScalar { path: String, shape: &'static str },
 }
 
 impl From<ActionError> for EngineError {

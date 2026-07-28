@@ -449,6 +449,13 @@
           "description": "Map of local alias → extraction path into the step's raw action result. Optional: every raw field is already addressable by its native name (`$steps.<id>.outputs.<field>`), so this is the escape hatch for the two cases a native name can't cover — a *rename* (`http_code: status`) and a *derived extraction* (`project_id: body.data._id`, `first: body.items[0].id`). The path is opaque at the schema layer; the runtime navigates it (dotted object keys, `[N]` array indices — spec #273) and records the value under the alias. Identity (`foo: foo`) is a redundant no-op the validator lint flags.",
           "type": "object"
         },
+        "secret": {
+          "description": "Raw action-output paths whose resolved scalar values are sensitive. These are paths, not a second output channel: `body.data` names the same value available at `$steps.<id>.outputs.body.data`. Runtime registration rejects objects and arrays because exact-serialization masking would give a false impression that the subtree was protected.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "uses": {
           "description": "Action type identifier (e.g. `ui/click`). At v0.1 this is any non-empty string; the catalog spec types it later.",
           "type": "string"

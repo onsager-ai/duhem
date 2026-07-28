@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::environment::{DurationSpec, Environment};
 use crate::project::ProjectDecl;
-use crate::verification::{SchemaError, VerificationDefinition};
+use crate::verification::{InputDecl, SchemaError, VerificationDefinition};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -36,6 +36,7 @@ pub struct RootManifest {
     /// Composition is **root-wins**: an include fills only the keys
     /// this manifest leaves absent (for nested maps like
     /// `environments:`, key-by-key, still root-wins per leaf key).
+    /// Manifest `inputs:` declarations overlay by input name.
     /// `verifications:` (and `includes:` themselves) are *concatenated*
     /// rather than overlaid — the root's entries first, then each
     /// include's, in declared order. Nested includes are resolved
@@ -57,7 +58,9 @@ pub struct RootManifest {
     /// Named environment configs (`docs/duhem-spec.md` §10.4, spec
     /// #68). Each key under `environments:` is an environment name
     /// (e.g. `staging`, `prod`) whose value is a free-form
-    /// `key: value` map — typed by convention, not by schema.
+    /// `key: value` map. A key inherited through a manifest `inputs:`
+    /// declaration is type-checked; all other keys remain conventionally
+    /// typed for backward compatibility.
     ///
     /// When an environment is selected for a run (CLI `--environment`,
     /// or auto-selected when exactly one is declared) its keys feed
@@ -76,6 +79,14 @@ pub struct RootManifest {
         with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
     )]
     pub environments: BTreeMap<String, BTreeMap<String, serde_yml::Value>>,
+    /// Suite-wide input declarations (spec #354). The manifest owns
+    /// type, process-`env:` fallback, and sensitivity; selected
+    /// `environments:` entries continue to own values. A leaf opts into
+    /// a declaration by listing its name under `inherits:`, preserving
+    /// names-only dependency injection and the behavior of suites that
+    /// omit this block.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub inputs: BTreeMap<String, InputDecl>,
     /// Suite-wide defaults (`docs/duhem-spec.md` §10.4, spec #66).
     /// A single `defaults:` block that every leaf the manifest expands
     /// to inherits — so an author sets the timeout budget, the
@@ -366,6 +377,9 @@ pub enum LoadError {
     /// multiple coordinate fields, or an empty coordinate.
     #[error("{path}: {message}")]
     BadProjectDecl { path: PathBuf, message: String },
+    /// Manifest declarations use the leaf input authoring rules.
+    #[error("{path}: manifest input validation failed: {message}")]
+    InvalidManifestInputs { path: PathBuf, message: String },
 }
 
 /// Currently-supported `manifest_version` value. Bumping this is
@@ -560,6 +574,7 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
         &mut chain,
         0,
     )?;
+    crate::manifest_inputs::validate(manifest_path, &manifest.inputs)?;
     // Suite-wide `project:` discipline (#191): exactly one non-empty
     // coordinate. Same load-time home as the other structural checks.
     if let Some(project) = &manifest.project
@@ -703,6 +718,13 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
             });
         }
     }
+
+    crate::manifest_inputs::append_unused_warnings(
+        manifest_path,
+        &manifest.inputs,
+        &leaves,
+        &mut warnings,
+    );
 
     Ok(Loaded::Manifest {
         manifest_path: manifest_path.to_path_buf(),

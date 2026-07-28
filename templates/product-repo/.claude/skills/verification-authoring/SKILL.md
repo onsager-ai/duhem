@@ -267,7 +267,7 @@ suite uses a `.duhem/duhem.yml` manifest, add the file to
 `verifications:`; a standalone file run via `duhem run <file>` needs no
 manifest entry.
 
-### Secret inputs
+### Secret inputs and acquired credentials
 
 Never commit a credential as an input `default:` or pass it in a
 long-lived command line. Declare its process-environment source and
@@ -289,6 +289,58 @@ not masked, and other transformations do not match, so do not render
 credentials into the product UI. Prefer high-entropy fixture values;
 short/common values can over-mask the evidence bundle and produce a
 run-time warning.
+
+When multiple Verification Definitions share a credential, declare it
+once in the suite manifest and let each consumer inherit the name:
+
+```yaml
+# .duhem/duhem.yml
+inputs:
+  db_dsn:
+    type: string
+    env: DATABASE_URL
+    secret: true
+verifications:
+  - path: database/duhem.yml
+
+# .duhem/database/duhem.yml
+inherits: [db_dsn]
+```
+
+The manifest declaration owns type checking, `env:`, `default:`, and
+`secret:`; selected `environments:` entries continue to supply values.
+Resolution is `--inputs` → selected environment → manifest `env:` →
+manifest `default:`. A secret declaration cannot carry `default:`.
+
+When a login or setup action returns a credential, declare its scalar
+output path on the producing step:
+
+```yaml
+- id: login
+  uses: api/call
+  secret: [body.data]
+  with:
+    method: POST
+    url: $inputs.login_url
+    body: { username: $inputs.username, password: $inputs.password }
+- id: read
+  uses: api/call
+  with:
+    method: GET
+    url: $inputs.projects_url
+    headers: { Authorization: $steps.login.outputs.body.data }
+```
+
+`secret:` paths start at an output declared by the action contract and
+must resolve to one scalar. `body.data` and `body.items[0].key` are
+valid scalar leaves; `body` when it is an object and `body.items` when
+it is an array are errors. Do not name a whole response subtree: exact
+serialization masking almost never matches later evidence, while
+masking every leaf can swallow unrelated values. Registration happens
+before the producing step records its response, so its own observations
+and later references become `[redacted:login.body.data]`. An action may
+also mark a credential output secret in its contract, requiring no
+authored `secret:` entry.
 
 ## Worked example template
 

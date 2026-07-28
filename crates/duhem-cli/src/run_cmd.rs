@@ -20,7 +20,8 @@ use crate::environment;
 use crate::filter::CliCheckFilter;
 use crate::inputs;
 use crate::reporter::{self, Reporter};
-use crate::resolve::{render_input_value, resolve_inputs, secret_registry};
+use crate::resolve::{render_input_value, resolve_leaf_inputs};
+use crate::run_scope::Scope;
 
 /// One validated leaf after all input precedence layers have resolved.
 /// Kept as an alias because the surrounding execution loop benefits from
@@ -169,31 +170,6 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         }
     };
 
-    // Normalize the load into a list of `(leaf_name, leaf_path, def)`
-    // tuples plus the evidence-namespacing strategy. A single leaf
-    // stays in the today's evidence layout (`<root>/<run_id>/`); a
-    // manifest namespaces per-leaf (`<root>/<leaf>/<run_id>/`).
-    // One-shot dispatch enum; the size skew vs `SingleLeaf` is
-    // irrelevant for a single stack value per invocation.
-    #[allow(clippy::large_enum_variant)]
-    enum Scope {
-        SingleLeaf,
-        Manifest {
-            warnings: Vec<String>,
-            /// Shared environment provisioned once for the whole suite
-            /// (spec #131), with the manifest's parent dir for anchoring
-            /// its `up:` / `down:` scripts.
-            environment: Option<duhem_schema::Environment>,
-            manifest_dir: Option<PathBuf>,
-            /// Suite-wide `defaults:` block (spec #66) applied to every
-            /// leaf's engine: per-step `within:` fallback, inconclusive
-            /// policy, retry posture. `None` on a defaults-less manifest.
-            defaults: Option<duhem_schema::ManifestDefaults>,
-            /// Suite-wide declared target (#191); a leaf's own
-            /// `project:` wins over it.
-            project: Option<duhem_schema::ProjectDecl>,
-        },
-    }
     // Named-environment selection (spec #68). On a manifest we pick the
     // run's environment from the manifest's `environments:` block and
     // the `--environment` flag; the projection feeds both input
@@ -240,6 +216,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                     manifest_dir,
                     defaults: manifest.defaults,
                     project: manifest.project,
+                    inputs: manifest.inputs,
                 },
             )
         }
@@ -274,6 +251,10 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         Scope::Manifest { project, .. } => project.clone(),
         Scope::SingleLeaf => None,
     };
+    let manifest_inputs: BTreeMap<String, duhem_schema::InputDecl> = match &scope {
+        Scope::Manifest { inputs, .. } => inputs.clone(),
+        Scope::SingleLeaf => BTreeMap::new(),
+    };
 
     // Validate + resolve inputs for every leaf up front, before any
     // browser launch. A malformed leaf in a manifest should not
@@ -296,19 +277,18 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             }
             return ExitCode::FAILURE;
         }
-        let inputs = match resolve_inputs(
+        let (inputs, secrets) = match resolve_leaf_inputs(
             &merged_inputs,
             &env_inputs,
-            &leaf.definition.inputs,
-            &leaf.definition.inherits,
+            &leaf.definition,
+            &manifest_inputs,
         ) {
-            Ok(m) => m,
+            Ok(resolved) => resolved,
             Err(e) => {
                 eprintln!("{}: {e}", leaf.path.display());
                 return ExitCode::FAILURE;
             }
         };
-        let secrets = secret_registry(&inputs, &leaf.definition.inputs);
         let name = leaf_name(&leaf.path);
         resolved.push((
             name,

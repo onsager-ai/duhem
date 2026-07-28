@@ -344,3 +344,53 @@ criteria:
               role: button
               name: "Seek to step show-evidence"
               within: 15s
+
+  # ==========================================================================
+  # #349 — runtime lifecycle is independent from judgment. The real slow
+  # suite carries a `<suite>` environment-container run with no criteria and
+  # therefore no judge verdict. Once teardown completes, the dashboard's
+  # static API snapshot must expose it as finished and unjudged.
+  # ==========================================================================
+  - id: AC-6
+    description: |
+      A completed suite reports a finished runtime lifecycle even
+      though its shared environment container is never judged. It
+      does not remain running after teardown and no verdict is
+      invented for it.
+    checks:
+      - id: AC-6.1
+        description: |
+          Run the committed slow-suite fixture against an isolated
+          evidence store, export the dashboard snapshot, and select
+          the `<suite>` list entry. Its serialized lifecycle/verdict
+          pair is mechanically `finished:null`.
+        steps:
+          - id: completed_suite
+            uses: cli/invoke
+            with:
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  tmp="$(mktemp -d)"
+                  trap 'rm -rf "$tmp"' EXIT
+                  duhem_bin="${DUHEM_BIN:-duhem}"
+                  "$duhem_bin" run "$1" --db "$tmp/duhem.db" --no-live --reporter quiet >/dev/null
+                  "$duhem_bin" dashboard --db "$tmp/duhem.db" export --out "$tmp/export" >/dev/null
+                  node -e '
+                    const rows = require(process.argv[1]);
+                    const leaves = rows.flatMap((row) => row.children || [row]);
+                    const suite = leaves.find(
+                      (row) => row.verification === "<suite>"
+                    );
+                    process.stdout.write(
+                      `${suite?.status}:${JSON.stringify(suite?.verdict)}`
+                    );
+                  ' "$tmp/export/api/runs.json"
+                - duhem-lifecycle-check
+                - verifications/duhem-cli/fixtures/slow-suite
+              within: 120s
+        assertions:
+          - $steps.completed_suite.outputs.exit_code == 0
+          - $steps.completed_suite.outputs.stdout == "finished:null"

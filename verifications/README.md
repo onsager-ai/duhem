@@ -24,7 +24,7 @@ Two kinds of directory live here, for two kinds of reader:
 ## Feature examples — the learning ladder
 
 Read top to bottom: each leans on the mental model the previous one
-built. Examples 1–3 are single-file authoring; 4–6 are suite
+built. Examples 1–4 are single-file authoring; 5–7 are suite
 composition.
 
 | # | Directory | Teaches | Runs against | Spec |
@@ -36,6 +36,7 @@ composition.
 | 5 | [`environments-example`](environments-example/) | Named `environments:` — declare configs, select one (`--environment`), feed the leaf input chain and the `$env.*` whitelist | network | #68 |
 | 6 | [`inherits-example`](inherits-example/) | Inherited inputs — a leaf lists input *names* under `inherits:` and reads suite-wide values the manifest provides (a DI container) | network | #135 |
 | 7 | [`manifest-inputs-example`](manifest-inputs-example/) | Manifest input declarations — attach type, process `env:`, and `secret: true` once to a credential inherited by multiple leaves | local process (`cli/invoke`) + `DUHEM_EXAMPLE_PASSWORD` | #354 |
+| 8 | [`secret-outputs-example`](secret-outputs-example/) | Mark a scalar output from a login step `secret:` before using it in a later authenticated request | network (`api/call`) | #355 |
 
 ## Self-verification suites — Duhem's dogfood
 

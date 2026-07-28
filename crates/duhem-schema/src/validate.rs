@@ -70,6 +70,14 @@ pub enum ValidationError {
         name: String,
     },
 
+    #[error("{site}: step `{step}` secret path `{path}` names undeclared action output `{output}`")]
+    UndeclaredSecretOutput {
+        site: String,
+        step: String,
+        path: String,
+        output: String,
+    },
+
     #[error(
         "criterion `{criterion}` / check `{check}`: {site} `{raw}` references undeclared step `{step}`"
     )]
@@ -349,7 +357,9 @@ fn collect_setup_outputs<'a>(
 ) -> HashMap<&'a str, HashSet<String>> {
     let mut seen: HashSet<&str> = HashSet::new();
     let mut outputs: HashMap<&str, HashSet<String>> = HashMap::new();
-    for s in setup {
+    for (idx, s) in setup.iter().enumerate() {
+        let contract_outputs = outputs_for(&s.uses);
+        check_secret_paths(s, &contract_outputs, "setup", &step_label(s, idx), errs);
         if let Some(id) = &s.id {
             if !seen.insert(id.as_str()) {
                 errs.push(ValidationError::DuplicateSetupStepId { id: id.clone() });
@@ -489,6 +499,14 @@ fn validate_check(
     let mut seen_step_ids: HashSet<&str> = HashSet::new();
 
     for (idx, s) in ch.steps.iter().enumerate() {
+        let contract_outputs = outputs_for(&s.uses);
+        check_secret_paths(
+            s,
+            &contract_outputs,
+            &format!("criterion `{}` / check `{}`", c.id, ch.id),
+            &step_label(s, idx),
+            errs,
+        );
         // The `capture/` output namespace is reserved for runner-emitted
         // failure evidence (spec #202) so authored outputs can never
         // masquerade as captures. Enforced here at the authoring
@@ -549,6 +567,38 @@ fn validate_check(
             });
         });
     }
+}
+
+/// A secret path always starts at a raw output from the action
+/// contract. Authored `outputs:` aliases are deliberately excluded:
+/// `secret:` describes the produced value, not a parallel alias
+/// channel (spec #355). Deeper shape remains a runtime fact.
+fn check_secret_paths(
+    step: &Step,
+    contract_outputs: &[String],
+    site: &str,
+    step_name: &str,
+    errs: &mut Vec<ValidationError>,
+) {
+    for path in &step.secret {
+        let output = secret_path_head(path);
+        if output.is_empty() || !contract_outputs.iter().any(|name| name == output) {
+            errs.push(ValidationError::UndeclaredSecretOutput {
+                site: site.to_string(),
+                step: step_name.to_string(),
+                path: path.clone(),
+                output: output.to_string(),
+            });
+        }
+    }
+}
+
+/// The raw action-output name before the first object or array
+/// navigation segment (`body.items[0]` → `body`).
+fn secret_path_head(path: &str) -> &str {
+    let dot = path.find('.').unwrap_or(path.len());
+    let bracket = path.find('[').unwrap_or(path.len());
+    &path[..dot.min(bracket)]
 }
 
 /// A step's human label for diagnostics: its `id` when declared, else
@@ -803,6 +853,58 @@ criteria:
             "{:?}",
             validate_with_contract_outputs(&v, &|u| api_call_outputs(u))
         );
+    }
+
+    #[test]
+    fn secret_path_must_start_at_a_declared_action_output() {
+        let v = parse(
+            r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: login
+            uses: api/call
+            secret: [token.value]
+            with: { method: POST, url: https://example.com/login }
+        assertions: ["true"]
+"#,
+        );
+        let errs = validate_with_contract_outputs(&v, &api_call_outputs).unwrap_err();
+        assert!(errs.iter().any(|err| matches!(
+            err,
+            ValidationError::UndeclaredSecretOutput {
+                step,
+                path,
+                output,
+                ..
+            } if step == "login" && path == "token.value" && output == "token"
+        )));
+    }
+
+    #[test]
+    fn declared_output_accepts_deep_secret_path() {
+        let v = parse(
+            r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: login
+            uses: api/call
+            secret:
+              - body.items[0].key
+            with: { method: POST, url: https://example.com/login }
+        assertions: ["true"]
+"#,
+        );
+        validate_with_contract_outputs(&v, &api_call_outputs).expect("declared output path");
     }
 
     #[test]

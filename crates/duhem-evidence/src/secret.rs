@@ -1,10 +1,10 @@
 //! Secret-value registration and evidence-boundary masking (spec #346).
 //!
-//! Actions never decide what is sensitive. Input resolution registers
-//! secret values here, then the evidence writer applies one exact,
-//! case-sensitive Aho-Corasick pass at the sink. That placement is the
-//! inheritance guarantee: a future action family reaches the same event
-//! and blob writer without learning that masking exists.
+//! Inputs and step/action contracts decide what is sensitive. Resolution
+//! registers secret values here, then the evidence writer applies one
+//! exact, case-sensitive Aho-Corasick pass at the sink. That placement
+//! is the inheritance guarantee: a future action family reaches the same
+//! event and blob writer without learning that masking exists.
 //!
 //! The registry also includes the three transformations most often made
 //! in transit: standard base64, percent encoding, and JSON string
@@ -29,19 +29,19 @@ pub const COMMON_SECRET_WORDS: &[&str] =
     &["admin", "changeme", "password", "secret", "test", "token"];
 
 /// Masked text plus the non-zero occurrence counts produced in the same
-/// matcher pass. Counts are keyed by declared input name so evidence can
-/// explain why an artifact looks sparse without revealing its value.
+/// matcher pass. Counts are keyed by declared source name so evidence
+/// can explain why an artifact looks sparse without revealing its value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaskedText {
     pub text: String,
     pub counts: BTreeMap<String, u64>,
 }
 
-/// A registry of sensitive value spellings and their owning input names.
+/// A registry of sensitive value spellings and their owning source names.
 ///
 /// Duplicate spellings are deterministic: the lexicographically first
-/// input name owns the replacement token. That preserves the required
-/// value → input-name mapping even when two declarations resolve to the
+/// source name owns the replacement token. That preserves a deterministic
+/// value → source mapping even when two declarations resolve to the
 /// same credential.
 #[derive(Clone, Default)]
 pub struct SecretRegistry {
@@ -66,8 +66,8 @@ impl SecretRegistry {
     /// substring occurrences to replace. Registering an empty pattern
     /// would manufacture matches between every pair of characters,
     /// which is not evidence of the value appearing.
-    pub fn register(&mut self, input_name: impl Into<String>, value: &str) {
-        let input_name = input_name.into();
+    pub fn register(&mut self, source_name: impl Into<String>, value: &str) {
+        let source_name = source_name.into();
         let mut reasons = Vec::new();
         if value.chars().count() < SHORT_SECRET_THRESHOLD {
             reasons.push("shorter than 8 characters");
@@ -79,7 +79,7 @@ impl SecretRegistry {
             reasons.push("a common fixture word");
         }
         if !reasons.is_empty() {
-            self.risky.insert(input_name.clone(), reasons);
+            self.risky.insert(source_name.clone(), reasons);
         }
 
         if value.is_empty() {
@@ -99,23 +99,23 @@ impl SecretRegistry {
                 self.patterns
                     .entry(form)
                     .and_modify(|owner| {
-                        if input_name < *owner {
-                            *owner = input_name.clone();
+                        if source_name < *owner {
+                            *owner = source_name.clone();
                         }
                     })
-                    .or_insert_with(|| input_name.clone());
+                    .or_insert_with(|| source_name.clone());
             }
         }
         self.rebuild();
     }
 
     /// Register the stable textual form of a resolved JSON input.
-    pub fn register_json(&mut self, input_name: impl Into<String>, value: &serde_json::Value) {
+    pub fn register_json(&mut self, source_name: impl Into<String>, value: &serde_json::Value) {
         let text = match value {
             serde_json::Value::String(s) => s.clone(),
             other => serde_json::to_string(other).expect("JSON value serializes"),
         };
-        self.register(input_name, &text);
+        self.register(source_name, &text);
     }
 
     /// Human-readable warnings for collision-prone declarations. Values
@@ -125,7 +125,7 @@ impl SecretRegistry {
             .iter()
             .map(|(name, reasons)| {
                 format!(
-                    "secret input `{name}` is {}; exact-substring masking may over-mask evidence",
+                    "secret `{name}` is {}; exact-substring masking may over-mask evidence",
                     reasons.join(" and ")
                 )
             })

@@ -55,6 +55,13 @@ pub(crate) trait Dispatch: Send + Sync {
         false
     }
 
+    /// Scalar output paths sensitive by action contract (spec #355).
+    /// Test dispatchers default to none and opt in when exercising the
+    /// contract-declared path.
+    fn secret_outputs(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
+
     async fn invoke(
         &self,
         page: Option<&Page>,
@@ -91,6 +98,10 @@ impl Dispatch for ConcreteAction {
 
     fn judges(&self) -> bool {
         self.action.contract().judges()
+    }
+
+    fn secret_outputs(&self) -> Vec<&'static str> {
+        self.action.contract().secret_outputs
     }
 
     async fn invoke(

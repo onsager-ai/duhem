@@ -6,10 +6,11 @@
 //!
 //! The reference is the version-exact **retrieval payload** for authoring
 //! a Verification Definition without Duhem pretraining (spec #248): every
-//! built-in action's `with:` fields, closed enums, outputs, and a worked
-//! example — generated from `duhem_actions::catalog()` so it can't drift
-//! from the code that `duhem validate` / `duhem run` enforce. `--check` is
-//! the CI guard against staleness, mirroring `schema-json`.
+//! built-in action's `with:` fields, closed enums, outputs, default-secret
+//! outputs, and a worked example — generated from
+//! `duhem_actions::catalog()` so it can't drift from the code that
+//! `duhem validate` / `duhem run` enforce. `--check` is the CI guard
+//! against staleness, mirroring `schema-json`.
 
 use std::path::{Path, PathBuf};
 
@@ -55,10 +56,13 @@ fn render() -> String {
     );
     s.push_str("# Action reference\n\n");
     s.push_str(
-        "Version-exact ground truth for authoring a Verification Definition — every\nbuilt-in action's `with:` fields, `outputs`, and a worked example. Generated from\nthe action contracts, so it always matches what `duhem validate` / `duhem run`\naccept. `duhem describe <uses>` prints the same for one action; `duhem actions`\nlists the catalog.\n\n",
+        "Version-exact ground truth for authoring a Verification Definition — every\nbuilt-in action's `with:` fields, `outputs`, contract-declared secret outputs,\nand a worked example. Generated from the action contracts, so it always matches\nwhat `duhem validate` / `duhem run` accept. `duhem describe <uses>` prints the\nsame for one action; `duhem actions` lists the catalog.\n\n",
     );
     s.push_str(
         "Bind an output with `outputs: { <name>: <field> }`, then read it in an\nassertion as `$steps.<id>.outputs.<name>`. Assert over **scalar** outputs\n(`status`, `body_text`, `satisfied`, `exit_code`, …); helpers like\n`$runtime.contains(...)` cover membership.\n\n",
+    );
+    s.push_str(
+        "An action contract may declare a scalar output path secret by default. Those\nvalues join the masking registry before the producing step writes evidence and\nneed no authored `secret:` entry. When present, the contract's paths are listed\nas **secret outputs (masked by contract)** below.\n\n",
     );
 
     let cat = catalog();
@@ -87,6 +91,17 @@ fn render() -> String {
             } else {
                 let outs: Vec<String> = c.outputs.iter().map(|o| format!("`{o}`")).collect();
                 s.push_str(&format!("**outputs:** {}\n\n", outs.join(", ")));
+            }
+            if !c.secret_outputs.is_empty() {
+                let secret: Vec<String> = c
+                    .secret_outputs
+                    .iter()
+                    .map(|output| format!("`{output}`"))
+                    .collect();
+                s.push_str(&format!(
+                    "**secret outputs (masked by contract):** {}\n\n",
+                    secret.join(", ")
+                ));
             }
             s.push_str("```yaml\n");
             s.push_str(c.example);

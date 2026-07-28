@@ -179,6 +179,23 @@ impl EvidenceWriter {
         &self.store
     }
 
+    /// Add a scalar value acquired during the run to this writer's
+    /// secret registry (spec #355). Registration affects this point
+    /// forward: events already committed remain unchanged, preserving
+    /// append-only streaming rather than buffering for retroactive
+    /// masking.
+    pub fn register_secret(&mut self, source: impl Into<String>, value: &serde_json::Value) {
+        self.secrets.register_json(source, value);
+    }
+
+    /// Apply the writer's current registry to a non-evidence text sink
+    /// such as the structured run outcome rendered in the terminal.
+    /// Keeping the registry private still makes the writer the single
+    /// owner while letting the runtime honor the same boundary there.
+    pub fn mask_text(&self, text: &str) -> String {
+        self.secrets.mask(text).text
+    }
+
     /// Append one event. The caller supplies the `payload`; `seq` and
     /// `ts` are stamped here.
     pub async fn append(&mut self, mut payload: EventPayload) -> Result<u64, WriterError> {

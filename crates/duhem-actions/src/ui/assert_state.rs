@@ -117,6 +117,7 @@ impl Action for AssertState {
                 FieldSpec::optional("within"),
             ],
             outputs: vec!["satisfied"],
+            secret_outputs: vec![],
             example: "- uses: ui/assert-state\n  with: { state: signed_in }",
         }
     }

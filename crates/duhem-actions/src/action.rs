@@ -196,10 +196,10 @@ impl FieldSpec {
 }
 
 /// Machine-readable contract for one action — the `with:` fields it
-/// accepts and the `outputs` it produces. Defined next to the action
-/// via [`Action::contract`] so it can't drift from `invoke`, and
-/// consumed by `duhem describe` / `duhem actions` and validate-time
-/// field checking.
+/// accepts, the `outputs` it produces, and which scalar output paths
+/// are sensitive by construction. Defined next to the action via
+/// [`Action::contract`] so it can't drift from `invoke`, and consumed
+/// by runtime registration plus the authoring surfaces (spec #355).
 #[derive(Debug, Clone)]
 pub struct ActionContract {
     pub uses: &'static str,
@@ -208,6 +208,10 @@ pub struct ActionContract {
     pub with: Vec<FieldSpec>,
     /// Output names surfaced as `$steps.<id>.outputs.<name>`.
     pub outputs: Vec<&'static str>,
+    /// Scalar output paths registered as secrets after invocation,
+    /// without requiring an authored step-level `secret:` declaration.
+    /// This is contract metadata, not a Verification Definition field.
+    pub secret_outputs: Vec<&'static str>,
     /// A minimal, copyable example step.
     pub example: &'static str,
 }

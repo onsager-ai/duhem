@@ -101,6 +101,7 @@ impl Action for Click {
                 FieldSpec::optional("within"),
             ],
             outputs: vec![],
+            secret_outputs: vec![],
             example: "- uses: ui/click\n  with: { role: button, name: \"Save\" }",
         }
     }

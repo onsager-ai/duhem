@@ -76,6 +76,7 @@ impl Action for Select {
                 FieldSpec::optional("within"),
             ],
             outputs: vec![],
+            secret_outputs: vec![],
             example: "- uses: ui/select\n  with: { locator: { css: \"#role\" }, by: { label: \"Admin\" } }",
         }
     }

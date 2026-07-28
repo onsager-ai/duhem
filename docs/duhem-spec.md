@@ -374,13 +374,50 @@ This content-based identification lets Duhem coexist with other YAML in the repo
 
 Values like `$inputs.workspace_name` below are **runtime expressions** (§10.7). Substitution is whole-string only: a `with:` value that is *exactly* a bare `$…` reference (or a `$runtime.<fn>(…)` call) is resolved to its evaluated scalar; everything else passes through literally. There is no embedded `{{…}}` interpolation — to compose a value, use `$runtime.format(…)` / `$runtime.concat(…)` (§10.7), not string templating. Input `default:` values are taken literally and are never evaluated as expressions.
 
-#### Inputs sourced from the environment and secret masking
+#### Inputs, acquired values, and secret masking
 
 An input may declare `env: VARIABLE_NAME` as a process-environment fallback. Resolution order is `--inputs` (last merged value) → selected Duhem environment → the input's process `env:` → `default:`. Because `env:` is below both explicit sources, adding it never changes a run that already supplied the input. An unset input with no remaining source is an environment failure at run time and produces `inconclusive:environment_error`; it is not a validation failure or a product `fail`.
 
 For a value shared across a manifest suite, put the same declaration shape under the manifest's top-level `inputs:` and let each consuming leaf list the name under `inherits:`. The manifest declaration owns `type`, `env:`, `default:`, and `secret:` while the selected `environments:` entry continues to supply a value. Resolution is `--inputs` → selected environment → manifest `env:` → manifest `default:`. The declared type is enforced for that inherited name; an inherited name with no manifest declaration retains names-only, unchecked resolution for compatibility.
 
 `secret: true` registers the resolved value for exact, case-sensitive substring masking. Secret inputs cannot have `default:` values: credentials belong in process or selected environments, or in an explicit operator-supplied input. Duhem also registers the value's standard-base64, percent-encoded, and JSON-string-escaped forms. Every matching recorded text occurrence becomes `[redacted:<input_name>]` at the two output boundaries: evidence (event payloads, text artifact blobs, and bundle exports) and terminal presentation. Each text artifact records non-zero replacement counts by input name; the dashboard renders those counts so aggressive masking is visible. Values shorter than eight characters or equal (case-insensitively) to the small default list `admin`, `changeme`, `password`, `secret`, `test`, or `token` warn at run time because they commonly over-mask durable evidence. The threshold and list are defaults that may become tunable later, not validation gates.
+
+Credentials acquired by an action use the same registry. A step's optional
+`secret:` list names paths into its raw action outputs:
+
+```yaml
+- id: login
+  uses: api/call
+  secret: [body.data]
+  with:
+    method: POST
+    url: $inputs.login_url
+    body: { username: $inputs.username, password: $inputs.password }
+- id: read
+  uses: api/call
+  with:
+    method: GET
+    url: $inputs.projects_url
+    headers: { Authorization: $steps.login.outputs.body.data }
+```
+
+The path must begin with an output declared by the action contract and resolve
+to one scalar value. `body.data` and `body.items[0].key` are valid when those
+leaves are scalar; `body` when it is an object, and `body.items` when it is an
+array, are errors. Duhem does not register an aggregate's exact serialization
+or recursively mask all its leaves: the first rarely recurs byte-for-byte in
+evidence, while the second can over-mask unrelated values. An action contract
+may declare a scalar output path secret by default, so actions that
+structurally produce credentials need no authored `secret:` entry.
+
+Registration happens after the action returns and before any evidence for that
+step is written. The producing step's own observations and all later events
+therefore use `[redacted:<step_id>.<path>]` (for example,
+`[redacted:login.body.data]`). Masking is intentionally not retroactive:
+events committed before a value is acquired and registered stay unchanged.
+Buffering the entire run to revisit them would break streaming evidence; a
+future feature must not register an input-derived value late because that value
+could already have appeared.
 
 The guarantee is deliberately about recorded text, with two residual gaps. First, screenshots and video are pixels and are not masked; a credential rendered by the application can therefore remain visible in `capture/screenshot`, `capture/step-screenshot`, or `capture/video`. Second, transformations beyond the three registered encodings — including hashing, chunking, and application-specific reformatting — do not exact-match and are not masked. Authors should choose realistic, high-entropy fixtures and avoid rendering credentials in the application under test.
 

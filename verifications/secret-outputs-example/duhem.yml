@@ -1,0 +1,38 @@
+verification: authenticated read with an acquired token
+spec_ref: https://github.com/onsager-ai/duhem/issues/355
+inputs:
+  login_url:
+    type: string
+    default: http://127.0.0.1:8090/login
+  password:
+    type: string
+    env: APP_PASSWORD
+    secret: true
+  projects_url:
+    type: string
+    default: http://127.0.0.1:8090/projects
+  username:
+    type: string
+    default: admin
+criteria:
+  - id: AC-1
+    description: A login token authenticates a gated read, and never reaches evidence.
+    checks:
+      - id: AC-1.1
+        description: Acquire a token from the real login endpoint and use it for a gated read.
+        steps:
+          - id: login
+            uses: api/call
+            secret: [body.data]
+            with:
+              method: POST
+              url: $inputs.login_url
+              body: { username: $inputs.username, password: $inputs.password }
+          - id: read
+            uses: api/call
+            with:
+              method: GET
+              url: $inputs.projects_url
+              headers: { Authorization: $steps.login.outputs.body.data }
+        assertions:
+          - $steps.read.outputs.status == 200

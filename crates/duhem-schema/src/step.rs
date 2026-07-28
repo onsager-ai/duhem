@@ -3,10 +3,10 @@
 //! `uses:` is an opaque string at v0.1; the typed action catalog lands
 //! in `spec(actions): ui/* action types v1` and turns this into an
 //! enum. `with:` stays untyped (`serde_yml::Value`) until the action
-//! catalog gives it a per-action schema. `outputs:` maps an output
-//! name (referenced as `$steps.<step_id>.outputs.<name>`) to a runtime
-//! extraction expression — a string here, evaluated in the runtime
-//! spec.
+//! catalog gives it a per-action schema. `outputs:` maps a local alias
+//! to a runtime extraction path; `secret:` names scalar output paths
+//! that must join the evidence writer's registry before this step emits
+//! evidence (spec #355).
 
 use std::collections::BTreeMap;
 
@@ -46,6 +46,15 @@ pub struct Step {
     /// no-op the validator lint flags.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub outputs: BTreeMap<String, String>,
+
+    /// Raw action-output paths whose resolved scalar values are
+    /// sensitive. These are paths, not a second output channel:
+    /// `body.data` names the same value available at
+    /// `$steps.<id>.outputs.body.data`. Runtime registration rejects
+    /// objects and arrays because exact-serialization masking would
+    /// give a false impression that the subtree was protected.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secret: Vec<String>,
 }
 
 fn is_null(v: &serde_yml::Value) -> bool {
@@ -66,6 +75,23 @@ with: { role: button, name: Create }
         assert_eq!(s.uses, "ui/click");
         assert!(s.id.is_none());
         assert!(s.outputs.is_empty());
+        assert!(s.secret.is_empty());
+    }
+
+    #[test]
+    fn parses_scalar_secret_output_paths() {
+        let yaml = r#"
+id: login
+uses: api/call
+with: { method: POST, url: /login }
+secret:
+  - body.data
+  - body.items[0].key
+"#;
+        let s: Step = serde_yml::from_str(yaml).expect("parse");
+        assert_eq!(s.secret, ["body.data", "body.items[0].key"]);
+        let out = serde_yml::to_string(&s).expect("serialize");
+        assert!(out.contains("secret:\n- body.data\n- body.items[0].key"));
     }
 
     #[test]

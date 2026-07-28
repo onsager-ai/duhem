@@ -27,6 +27,7 @@ needs more than a bullet.
 
 ## Unreleased
 
+- [additive] Steps may declare `secret:`, naming output paths whose values are masked the same way `secret: true` inputs are — so a credential acquired at run time (e.g. a login token) stays out of evidence. (#355)
 - [additive] Manifests may declare `inputs:`, so a credential shared across leaves via `inherits:` can carry `env:` and `secret: true`. (#354)
 - [additive] Inputs accept `env:` (source the value from a process environment variable) and `secret: true` (mask the value everywhere Duhem records or displays it). (#346)
 - [additive] add step-level screenshot storyboards and synchronized browser replay evidence. (#337)

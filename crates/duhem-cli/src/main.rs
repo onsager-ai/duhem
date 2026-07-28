@@ -472,7 +472,7 @@ mod leaf_name_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::resolve::resolve_inputs;
+    use crate::resolve::{resolve_inputs, resolve_inputs_with_env, secret_registry};
     use crate::run_cmd::parse_truthy;
     use clap::Parser;
     use duhem_schema::{InputDecl, VerificationDefinition};
@@ -663,13 +663,10 @@ mod tests {
     }
 
     #[test]
-    fn missing_required_input_errors() {
+    fn missing_required_input_is_left_unbound_for_runtime_classification() {
         let d = decls("  count: { type: integer }");
-        let err = resolve(&raw(&[]), &d).unwrap_err();
-        assert!(
-            err.contains("missing required input") && err.contains("count"),
-            "got: {err}"
-        );
+        let out = resolve(&raw(&[]), &d).unwrap();
+        assert!(!out.contains_key("count"));
     }
 
     #[test]
@@ -840,6 +837,68 @@ mod tests {
         // env absent → default is the floor
         let out = resolve_inputs(&merged(&[]), &BTreeMap::new(), &d, &[]).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-default"));
+    }
+
+    // ---- #346: leaf-declared process environment fallback
+
+    fn resolve_with_process_env(
+        tokens: &[&str],
+        selected: &BTreeMap<String, serde_json::Value>,
+        decls: &BTreeMap<String, InputDecl>,
+        process: &[(&str, &str)],
+    ) -> BTreeMap<String, serde_json::Value> {
+        resolve_inputs_with_env(&merged(tokens), selected, decls, &[], |name| {
+            process
+                .iter()
+                .find_map(|(key, value)| (*key == name).then(|| (*value).to_string()))
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn explicit_input_beats_declared_process_env() {
+        let d = decls("  base_url: { type: string, env: APP_BASE_URL }");
+        let out = resolve_with_process_env(
+            &["base_url=from-flag"],
+            &BTreeMap::new(),
+            &d,
+            &[("APP_BASE_URL", "from-process")],
+        );
+        assert_eq!(out["base_url"], serde_json::json!("from-flag"));
+    }
+
+    #[test]
+    fn selected_environment_beats_declared_process_env() {
+        let d = decls("  base_url: { type: string, env: APP_BASE_URL }");
+        let selected =
+            BTreeMap::from([("base_url".to_string(), serde_json::json!("from-selected"))]);
+        let out = resolve_with_process_env(&[], &selected, &d, &[("APP_BASE_URL", "from-process")]);
+        assert_eq!(out["base_url"], serde_json::json!("from-selected"));
+    }
+
+    #[test]
+    fn declared_process_env_beats_default() {
+        let d = decls("  base_url: { type: string, env: APP_BASE_URL, default: from-default }");
+        let out = resolve_with_process_env(
+            &[],
+            &BTreeMap::new(),
+            &d,
+            &[("APP_BASE_URL", "from-process")],
+        );
+        assert_eq!(out["base_url"], serde_json::json!("from-process"));
+    }
+
+    #[test]
+    fn non_secret_env_input_is_not_registered_for_masking() {
+        let d = decls("  base_url: { type: string, env: APP_BASE_URL }");
+        let out = resolve_with_process_env(
+            &[],
+            &BTreeMap::new(),
+            &d,
+            &[("APP_BASE_URL", "visible-value")],
+        );
+        let registry = secret_registry(&out, &d);
+        assert_eq!(registry.mask("visible-value").text, "visible-value");
     }
 
     #[test]

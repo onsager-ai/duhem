@@ -6,6 +6,14 @@
 use super::*;
 
 impl Engine {
+    /// Attach the registry populated alongside CLI input resolution
+    /// (spec #346). It is applied before the evidence run header is
+    /// opened and shared with the post-commit live-progress stream.
+    pub fn with_secret_registry(mut self, secrets: duhem_evidence::SecretRegistry) -> Self {
+        self.secrets = secrets;
+        self
+    }
+
     /// Subscribe a live progress sink (#299): the run's evidence
     /// events are teed to `tx` post-commit, in order. Observational
     /// only — a dropped receiver never affects the run.

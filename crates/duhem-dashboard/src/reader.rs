@@ -727,7 +727,11 @@ fn project_run(run: &RunEvidence) -> RunProjection {
             }
             EventPayload::StepObservation {
                 output_name,
-                value: ObservationValue::Blob { blob_sha256 },
+                value:
+                    ObservationValue::Blob {
+                        blob_sha256,
+                        mask_counts,
+                    },
                 ..
             } => {
                 if let Some(pos) = current {
@@ -735,6 +739,7 @@ fn project_run(run: &RunEvidence) -> RunProjection {
                         id: blob_sha256.clone(),
                         kind: output_name.clone(),
                         url: format!("/api/runs/{}/artifact/{}", run.record.run_id, blob_sha256),
+                        mask_counts: mask_counts.clone(),
                     });
                 }
             }
@@ -945,12 +950,17 @@ fn build_check_detail(
         .filter_map(|evt| match &evt.payload {
             EventPayload::StepObservation {
                 output_name,
-                value: ObservationValue::Blob { blob_sha256 },
+                value:
+                    ObservationValue::Blob {
+                        blob_sha256,
+                        mask_counts,
+                    },
                 ..
             } => Some(ArtifactRef {
                 id: blob_sha256.clone(),
                 kind: output_name.clone(),
                 url: format!("/api/runs/{}/artifact/{}", run.record.run_id, blob_sha256),
+                mask_counts: mask_counts.clone(),
             }),
             _ => None,
         })

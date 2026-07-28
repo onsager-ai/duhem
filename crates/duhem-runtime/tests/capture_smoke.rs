@@ -291,7 +291,7 @@ fn capture_blobs(events: &[Event]) -> Vec<(String, String)> {
         .filter_map(|e| match &e.payload {
             EventPayload::StepObservation {
                 output_name,
-                value: ObservationValue::Blob { blob_sha256 },
+                value: ObservationValue::Blob { blob_sha256, .. },
                 ..
             } if output_name.starts_with("capture/") => {
                 Some((output_name.clone(), blob_sha256.clone()))
@@ -311,7 +311,7 @@ async fn session_evidence(
         if let EventPayload::StepObservation {
             step_index,
             output_name,
-            value: ObservationValue::Blob { blob_sha256 },
+            value: ObservationValue::Blob { blob_sha256, .. },
         } = &event.payload
         {
             if output_name == STEP_SCREENSHOT_OBSERVATION {

@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use duhem_evidence::{
     BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, EvidenceWriter, ObservationValue, ReadError,
-    ReplayDivergence, ReplayError, SqliteStore, StepOutcome, Store, Trace, VerdictState, replay,
-    run_started,
+    ReplayDivergence, ReplayError, RunBundle, SecretRegistry, SqliteStore, StepOutcome, Store,
+    Trace, VerdictState, replay, run_started,
 };
 use tempfile::TempDir;
 
@@ -211,7 +211,7 @@ async fn blob_threshold_inlines_small_and_blobs_large() {
     }
     match &observations[1].payload {
         EventPayload::StepObservation { value, .. } => match value {
-            ObservationValue::Blob { blob_sha256 } => {
+            ObservationValue::Blob { blob_sha256, .. } => {
                 let bytes = store.get_blob(blob_sha256).await.unwrap().unwrap();
                 // The blob holds the serialized JSON value, not the
                 // raw string (the writer hashes the serialization so
@@ -1013,4 +1013,161 @@ async fn writer_tee_mirrors_persisted_events_in_order() {
     })
     .await
     .expect_err("run is sealed after run_finished — the store, not the tee, rejects");
+}
+
+/// Spec #346: all recorded text crosses the writer boundary once. This
+/// pins the live `with:` leak, common encodings, stored artifact bytes,
+/// per-artifact counts, and the bundle/export path in one real store run.
+#[tokio::test]
+async fn secret_registry_masks_events_artifacts_and_bundle_exports() {
+    use base64::Engine as _;
+
+    let (_tmp, store) = open_store().await;
+    let secret = "postgres://user:pass@host/db";
+    let encoded = base64::engine::general_purpose::STANDARD.encode(secret);
+    let percent = percent_encoding::utf8_percent_encode(secret, percent_encoding::NON_ALPHANUMERIC)
+        .to_string();
+    let mut registry = SecretRegistry::new();
+    registry.register("db_dsn", secret);
+    let inputs = BTreeMap::from([("db_dsn".to_string(), serde_json::json!(secret))]);
+    let mut writer = EvidenceWriter::begin_scoped_with_secrets(
+        store.clone(),
+        RUN_ID,
+        "secret.yml",
+        inputs.clone(),
+        Default::default(),
+        registry,
+    )
+    .await
+    .unwrap();
+    writer
+        .append(run_started("secret.yml", inputs))
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::StepStarted {
+            criterion_id: "AC-1".into(),
+            check_id: "AC-1.1".into(),
+            step_index: 0,
+            uses: "db/query".into(),
+            layer: Some("data".into()),
+            with: BTreeMap::from([
+                ("connection".to_string(), serde_json::json!(secret)),
+                ("encoded".to_string(), serde_json::json!(encoded)),
+                ("percent".to_string(), serde_json::json!(percent)),
+            ]),
+        })
+        .await
+        .unwrap();
+
+    let har = serde_json::json!({
+        "log": {
+            "entries": [{
+                "response": {
+                    "content": {
+                        "text": format!("echo {secret}; again {secret}")
+                    }
+                }
+            }]
+        }
+    });
+    let har_blob = writer
+        .write_blob(&serde_json::to_vec(&har).unwrap())
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::StepObservation {
+            step_index: 0,
+            output_name: "capture/network".into(),
+            value: ObservationValue::Blob {
+                blob_sha256: har_blob.0.clone(),
+                mask_counts: BTreeMap::new(),
+            },
+        })
+        .await
+        .unwrap();
+    let clean_blob = writer.write_blob(b"no credential here").await.unwrap();
+    writer
+        .append(EventPayload::StepObservation {
+            step_index: 0,
+            output_name: "clean".into(),
+            value: ObservationValue::Blob {
+                blob_sha256: clean_blob.0,
+                mask_counts: BTreeMap::new(),
+            },
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::RunFinished {
+            verdict: VerdictState::Pass,
+        })
+        .await
+        .unwrap();
+
+    let trace = Trace::from_store(store.as_ref(), RUN_ID).await.unwrap();
+    let trace_json = serde_json::to_string(trace.events()).unwrap();
+    assert!(!trace_json.contains(secret));
+    assert!(!trace_json.contains(&encoded));
+    assert!(!trace_json.contains(&percent));
+    assert!(trace_json.contains("[redacted:db_dsn]"));
+
+    let stored_har = store.get_blob(&har_blob.0).await.unwrap().unwrap();
+    let stored_har = String::from_utf8(stored_har).unwrap();
+    assert!(!stored_har.contains(secret));
+    assert_eq!(stored_har.matches("[redacted:db_dsn]").count(), 2);
+    let observations: Vec<_> = trace
+        .events()
+        .iter()
+        .filter_map(|event| match &event.payload {
+            EventPayload::StepObservation {
+                output_name,
+                value: ObservationValue::Blob { mask_counts, .. },
+                ..
+            } => Some((output_name.as_str(), mask_counts)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(observations[0].1.get("db_dsn"), Some(&2));
+    assert!(observations[1].1.is_empty(), "zero counts stay absent");
+
+    let bundle = RunBundle::from_store(store.as_ref(), RUN_ID).await.unwrap();
+    let wire = String::from_utf8(bundle.wire_bytes().unwrap()).unwrap();
+    assert!(!wire.contains(secret));
+    assert_eq!(
+        bundle
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.sha256 == har_blob.0)
+            .unwrap()
+            .mask_counts
+            .get("db_dsn"),
+        Some(&2)
+    );
+}
+
+#[tokio::test]
+async fn non_secret_text_is_recorded_verbatim() {
+    let (_tmp, store) = open_store().await;
+    let visible = "postgres://public@example/db";
+    let mut writer = EvidenceWriter::begin(store.clone(), RUN_ID, "v.yml", BTreeMap::new())
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::StepStarted {
+            criterion_id: "AC-1".into(),
+            check_id: "AC-1.1".into(),
+            step_index: 0,
+            uses: "db/query".into(),
+            layer: Some("data".into()),
+            with: BTreeMap::from([("connection".into(), serde_json::json!(visible))]),
+        })
+        .await
+        .unwrap();
+    let trace = Trace::from_store(store.as_ref(), RUN_ID).await.unwrap();
+    assert!(
+        serde_json::to_string(trace.events())
+            .unwrap()
+            .contains(visible)
+    );
 }

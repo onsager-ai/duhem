@@ -79,6 +79,24 @@ pub struct InputDecl {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<serde_json::Value>")]
     pub default: Option<serde_yml::Value>,
+
+    /// Process-environment fallback (spec #346). This sits below a
+    /// selected Duhem environment and above `default:` in resolution
+    /// precedence; it is deliberately leaf-local rather than another
+    /// global override layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<String>,
+
+    /// Register the resolved value for evidence/terminal masking. A
+    /// secret may not carry a committed `default:`; validation owns that
+    /// authoring rule so deserialization can report it alongside other
+    /// structural findings.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub secret: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// The closed catalog of declared input types per the type-catalog
@@ -200,6 +218,8 @@ criteria:
             InputDecl {
                 kind: InputType::String,
                 default: Some(serde_yml::Value::String("hi".into())),
+                env: None,
+                secret: false,
             },
         );
         let v = VerificationDefinition {

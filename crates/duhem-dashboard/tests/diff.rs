@@ -91,6 +91,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, screenshot: boo
             output_name: "capture/screenshot".into(),
             value: ObservationValue::Blob {
                 blob_sha256: sha.as_str().to_string(),
+                mask_counts: BTreeMap::new(),
             },
         })
         .await

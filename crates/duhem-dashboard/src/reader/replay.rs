@@ -44,6 +44,7 @@ pub(super) async fn model(
                 id: sha.to_string(),
                 kind: kind.to_string(),
                 url: format!("/api/runs/{run_id}/artifact/{sha}"),
+                mask_counts: Default::default(),
             })
     };
     let steps = session

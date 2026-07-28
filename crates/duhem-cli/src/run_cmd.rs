@@ -20,7 +20,18 @@ use crate::environment;
 use crate::filter::CliCheckFilter;
 use crate::inputs;
 use crate::reporter::{self, Reporter};
-use crate::resolve::{render_input_value, resolve_inputs};
+use crate::resolve::{render_input_value, resolve_inputs, secret_registry};
+
+/// One validated leaf after all input precedence layers have resolved.
+/// Kept as an alias because the surrounding execution loop benefits from
+/// tuple destructuring while the secret registry remains leaf-scoped.
+type ResolvedLeaf = (
+    String,
+    PathBuf,
+    VerificationDefinition,
+    BTreeMap<String, serde_json::Value>,
+    duhem_evidence::SecretRegistry,
+);
 
 /// Resolved `duhem run` arguments. Kept as a struct so the dispatch
 /// function's signature doesn't grow unbounded as new flags land.
@@ -268,12 +279,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // browser launch. A malformed leaf in a manifest should not
     // produce a half-run; the loader already fails the load on a
     // YAML-parse leaf failure, this catches structural validation.
-    let mut resolved: Vec<(
-        String,
-        std::path::PathBuf,
-        VerificationDefinition,
-        BTreeMap<String, serde_json::Value>,
-    )> = Vec::with_capacity(leaves.len());
+    let mut resolved: Vec<ResolvedLeaf> = Vec::with_capacity(leaves.len());
     for leaf in &leaves {
         if let Err(errs) = validate_with_contract_outputs(&leaf.definition, &|u| {
             crate::contract_check::contract_outputs(u)
@@ -302,17 +308,38 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
+        let secrets = secret_registry(&inputs, &leaf.definition.inputs);
         let name = leaf_name(&leaf.path);
-        resolved.push((name, leaf.path.clone(), leaf.definition.clone(), inputs));
+        resolved.push((
+            name,
+            leaf.path.clone(),
+            leaf.definition.clone(),
+            inputs,
+            secrets,
+        ));
     }
 
     // `--dry-run` short-circuits before any browser launch: print the
     // resolved `(criterion::check)` plan (qualified with the
     // verification name on manifest runs) and exit 0.
     if dry_run {
+        // Dry-run is a plan inspection, not a recorded run, so it has
+        // no three-state verdict in which to classify an unavailable
+        // required input. Preserve its existing fail-fast diagnostic;
+        // real runs continue below and record EnvironmentError.
+        for (_name, path, definition, inputs, _secrets) in &resolved {
+            if let Some(missing) = definition
+                .inputs
+                .keys()
+                .find(|name| !inputs.contains_key(*name))
+            {
+                eprintln!("{}: missing required input: `{missing}`", path.display());
+                return ExitCode::FAILURE;
+            }
+        }
         let mut stdout = std::io::stdout().lock();
         let mut wrote = false;
-        for (name, _path, def, _inputs) in &resolved {
+        for (name, _path, def, _inputs, _secrets) in &resolved {
             let leaf_filter = check_filter.as_ref().and_then(|f| f.for_verification(name));
             // If a filter was passed and nothing scopes to this leaf,
             // skip — no spurious "no checks matched" line per-leaf.
@@ -355,7 +382,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // Qualified by verification name on manifest runs, mirroring the
         // `WOULD RUN` lines. Values render deterministically (strings
         // bare, other types as compact JSON of the coerced value).
-        for (name, _path, _def, inputs) in &resolved {
+        for (name, _path, _def, inputs, secrets) in &resolved {
             let leaf_filter = check_filter.as_ref().and_then(|f| f.for_verification(name));
             if check_filter.is_some() && leaf_filter.is_none() {
                 continue;
@@ -373,7 +400,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 continue;
             }
             for (key, value) in inputs {
-                let rendered = render_input_value(value);
+                let rendered = secrets.mask(&render_input_value(value)).text;
                 let line = if is_manifest {
                     format!("RESOLVED INPUT: {name}::{key} = {rendered}")
                 } else {
@@ -521,7 +548,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     let mut leaf_outcomes: Vec<(String, RunOutcome)> = Vec::with_capacity(resolved.len());
     let total = resolved.len();
     let mut watch_opened = false;
-    for (idx, (name, leaf_path, def, inputs)) in resolved.into_iter().enumerate() {
+    for (idx, (name, leaf_path, def, inputs, secrets)) in resolved.into_iter().enumerate() {
         // Per-leaf filter: every leaf is narrowed by name regardless
         // of `is_manifest`, so a `<verification>::<criterion>::<check>`
         // pattern behaves identically against a single leaf and a
@@ -558,12 +585,14 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // dependency + startup cost) entirely. `uses_requires_page` is
         // the same classifier the engine uses to gate the per-check
         // browser, so this never starves a UI step of a page.
-        let needs_browser = def
-            .criteria
-            .iter()
-            .flat_map(|c| &c.checks)
-            .flat_map(|ch| &ch.steps)
-            .any(|s| duhem_actions::uses_requires_page(&s.uses));
+        let has_missing_input = def.inputs.keys().any(|name| !inputs.contains_key(name));
+        let needs_browser = !has_missing_input
+            && def
+                .criteria
+                .iter()
+                .flat_map(|c| &c.checks)
+                .flat_map(|ch| &ch.steps)
+                .any(|s| duhem_actions::uses_requires_page(&s.uses));
 
         // One browser per leaf when needed. Phase-0 leaves run serially
         // (#49) and `RunBrowser` is non-`Clone`, so a fresh launch per
@@ -591,7 +620,11 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             .keep_env(keep_env || suite_managed)
             .with_env(env_whitelist.clone())
             .with_inherited(def.inherits.clone())
-            .with_capture(capture);
+            .with_capture(capture)
+            .with_secret_registry(secrets.clone());
+        for warning in secrets.warnings() {
+            eprintln!("warning: {warning}");
+        }
         // Record the VD source snapshot so the run is self-describing
         // (spec #302). Best-effort: an unreadable source just records no
         // snapshot — never a run failure.
@@ -654,7 +687,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // arrives) it is aborted rather than awaited.
         let renderer = if live_progress {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-            let plan = crate::live_progress::Plan::from_def(&def);
+            let plan = crate::live_progress::Plan::from_def_masked(&def, &secrets);
             engine = engine.with_progress(tx);
             Some(tokio::spawn(crate::live_progress::render_to_stderr(
                 rx, plan, render_cfg,

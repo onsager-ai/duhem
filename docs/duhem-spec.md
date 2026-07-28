@@ -208,6 +208,18 @@ So Duhem’s checks are integration-or-larger by design. We don’t oppose unit 
 
 Verification environments must be production-equivalent. Duhem provides primitives for spinning up environments that include the real database engine (not in-memory mock), the real message bus (not stubs), the real upstream services (or production-faithful contract tests of them), and the real authentication layer.
 
+> **Alignment note (2026-07-28, #347 — acquired browser sessions).**
+> Replaying browser storage state does not bypass the authentication
+> layer when that state was acquired by authenticating against the real
+> identity provider during `setup:`. `ui/capture-session` makes that
+> ambient result an explicit credential value; each consuming check
+> receives a fresh context seeded from the declared baseline. Hand-writing
+> an inline cookie would mock auth, so `session:` mechanically accepts
+> only a whole-string `$` reference. At least one criterion should still
+> exercise login itself; that authoring discipline remains human-reviewed
+> rather than inferred by the judge. v1 deliberately keeps `session:`
+> per check—there is no Verification-Definition or manifest cascade.
+
 This makes verification expensive relative to unit tests. That cost is acknowledged. It is the unavoidable price of holistic verification — and it is much cheaper than a production incident.
 
 ### What this implies for failure attribution
@@ -406,11 +418,15 @@ Credentials acquired by an action use the same registry. A step's optional
 The path must begin with an output declared by the action contract and resolve
 to one scalar value. `body.data` and `body.items[0].key` are valid when those
 leaves are scalar; `body` when it is an object, and `body.items` when it is an
-array, are errors. Duhem does not register an aggregate's exact serialization
+array, are errors. An authored declaration does not register an aggregate's exact serialization
 or recursively mask all its leaves: the first rarely recurs byte-for-byte in
-evidence, while the second can over-mask unrelated values. An action contract
-may declare a scalar output path secret by default, so actions that
-structurally produce credentials need no authored `secret:` entry.
+evidence, while the second can over-mask unrelated values. A trusted action
+contract may declare an output path secret by default, so actions that
+structurally produce credentials need no authored `secret:` entry. Contract
+metadata may deliberately name a structured credential:
+`ui/capture-session.state` is replaced as one exact JSON subtree at the
+evidence boundary, rather than asking an author to enumerate its cookies and
+local-storage leaves.
 
 Registration happens after the action returns and before any evidence for that
 step is written. The producing step's own observations and all later events
@@ -422,6 +438,61 @@ future feature must not register an input-derived value late because that value
 could already have appeared.
 
 The guarantee is deliberately about recorded text, with two residual gaps. First, screenshots and video are pixels and are not masked; a credential rendered by the application can therefore remain visible in `capture/screenshot`, `capture/step-screenshot`, or `capture/video`. Second, transformations beyond the three registered encodings — including hashing, chunking, and application-specific reformatting — do not exact-match and are not masked. Authors should choose realistic, high-entropy fixtures and avoid rendering credentials in the application under test.
+
+#### Authenticated browser checks
+
+`ui/capture-session` has no `with:` fields and returns `state`, Playwright's
+opaque storage-state object (cookies plus per-origin local storage). The action
+contract declares `state` secret, so a VD never needs an authored `secret:`
+entry for it. Capture login once in `setup:`, then select that value on each
+authenticated check:
+
+```yaml
+verification: Authenticated workspace access
+inputs:
+  login_url: { type: string }
+  workspaces_url: { type: string }
+  password: { type: string, secret: true }
+
+setup:
+  - uses: ui/navigate
+    with: { url: $inputs.login_url }
+  - uses: ui/type
+    with: { locator: { label: Password }, text: $inputs.password }
+  - uses: ui/click
+    with: { role: button, name: Sign in }
+  - id: session
+    uses: ui/capture-session
+
+criteria:
+  - id: AC-1
+    description: An administrator can see the workspace list.
+    checks:
+      - id: AC-1.1
+        session: $setup.session.outputs.state
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.workspaces_url }
+          - uses: ui/assert-element
+            with:
+              locator: { role: heading, name: Workspaces }
+              expected: visible
+```
+
+`session:` is optional and per check. It must be exactly one `$` path
+reference (`$setup.…` or an operator-supplied `$inputs.…`); an inline value
+fails validation, and a dangling setup/input reference uses the ordinary
+missing-reference diagnostic. A check with no `ui/*` step is valid but warns
+that its session is unused. Omission preserves the ordinary fresh signed-out
+context. Presence still creates a **fresh** context seeded from the selected
+baseline—sibling mutations never cross between checks. State that cannot be
+resolved or that Playwright rejects makes the check
+`inconclusive:environment_error`.
+
+The check's `check_finished` evidence records only `session_source` (the
+literal expression) and `session_digest` (lowercase SHA-256 of the resolved
+JSON). The digest proves that checks or runs used the same baseline without
+putting the credential into the trace, export bundle, or dashboard.
 
 **Locators.** UI actions (`ui/click`, `ui/type`, `ui/assert-element`, `ui/select`) address an element by exactly one *primary strategy*: `role` (paired with an optional `name`), `label` (associated label text — how to reach an input with no ARIA role, e.g. `type=password`), `testid` (the `data-testid` attribute), `placeholder`, `css` (a raw CSS selector escape hatch), or a standalone `text`. A `text` substring may additionally *filter* a non-text primary, and a recursive `scope:` narrows the search to inside a container. `ui/click` takes these fields inline in its `with:`; the other actions nest them under `locator:`. Two primaries at once, or none, is rejected. Each maps to the corresponding Playwright `getBy*` engine.
 
@@ -655,6 +726,7 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 - `ui/assert-element` — observe whether an element exists/is visible/has text
 - `ui/assert-url` — observe URL state
 - `ui/assert-state` — observe page-level state (authenticated, loaded, etc.)
+- `ui/capture-session` — capture cookies/local storage as a secret state value for later checks
 
 **API actions**
 

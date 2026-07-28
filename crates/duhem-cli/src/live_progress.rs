@@ -477,7 +477,9 @@ impl<B: Backend> TtyRenderer<B> {
                     .assertion(check_id, *step_index, state, detail.as_deref());
                 (false, true)
             }
-            EventPayload::CheckFinished { check_id, verdict } => {
+            EventPayload::CheckFinished {
+                check_id, verdict, ..
+            } => {
                 self.board.finish_check(check_id, verdict);
                 (false, true)
             }
@@ -1152,6 +1154,8 @@ criteria:
                 EventPayload::CheckFinished {
                     check_id: "AC-1.1".into(),
                     verdict: VerdictState::Pass,
+                    session_source: None,
+                    session_digest: None,
                 },
             ),
             evt(
@@ -1168,6 +1172,8 @@ criteria:
                 EventPayload::CheckFinished {
                     check_id: "AC-2.1".into(),
                     verdict: VerdictState::Fail,
+                    session_source: None,
+                    session_digest: None,
                 },
             ),
             evt(

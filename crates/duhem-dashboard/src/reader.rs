@@ -608,7 +608,9 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                     );
                 }
             }
-            EventPayload::CheckFinished { check_id, verdict } => {
+            EventPayload::CheckFinished {
+                check_id, verdict, ..
+            } => {
                 let owner = criterion_of_check
                     .iter()
                     .find(|(k, _)| k == check_id)
@@ -703,7 +705,7 @@ fn project_run(run: &RunEvidence) -> RunProjection {
     // check whose `step_started` most recently opened (same rule as
     // `build_check_detail`), so trailing `capture/*` observations land
     // on their check.
-    let mut current: Option<usize> = None;
+    let mut current = None;
 
     for evt in &run.events {
         match &evt.payload {
@@ -761,7 +763,9 @@ fn project_run(run: &RunEvidence) -> RunProjection {
                         .push((*assertion_index, *state, detail.clone()));
                 }
             }
-            EventPayload::CheckFinished { check_id, verdict } => {
+            EventPayload::CheckFinished {
+                check_id, verdict, ..
+            } => {
                 if let Some(pos) = checks.iter().position(|c| &c.check_id == check_id) {
                     checks[pos].verdict = Some(*verdict);
                 }
@@ -914,7 +918,7 @@ fn build_check_detail(
         return None;
     }
 
-    let mut timeline: Vec<Event> = Vec::new();
+    let mut timeline = Vec::new();
     let mut verdict = None;
     // `step_observation` / `step_finished` carry only `step_index`;
     // attribution is positional — they belong to the pair iff the most
@@ -942,6 +946,7 @@ fn build_check_detail(
             EventPayload::CheckFinished {
                 check_id: k,
                 verdict: v,
+                ..
             } if k == check_id => {
                 verdict = Some(*v);
                 timeline.push(evt.clone());

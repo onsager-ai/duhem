@@ -132,6 +132,8 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, network: Option
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
         verdict,
+        session_source: None,
+        session_digest: None,
     })
     .await
     .unwrap();

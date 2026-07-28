@@ -20,6 +20,9 @@
 //! - `ui/assert-url`
 //! - `ui/assert-state`
 //!
+//! Shipped in #347 (authenticated-check adapter):
+//! - `ui/capture-session`
+//!
 //! ## Waiter-action outcome shape
 //!
 //! The three "waiter" actions diverge on the verdict shape they
@@ -43,6 +46,7 @@
 pub mod assert_element;
 pub mod assert_state;
 pub mod assert_url;
+pub mod capture_session;
 pub mod click;
 pub mod navigate;
 pub mod select;
@@ -51,6 +55,7 @@ pub mod type_;
 pub use assert_element::AssertElement;
 pub use assert_state::AssertState;
 pub use assert_url::AssertUrl;
+pub use capture_session::CaptureSession;
 pub use click::Click;
 pub use navigate::Navigate;
 pub use select::Select;

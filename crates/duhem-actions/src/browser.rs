@@ -513,11 +513,36 @@ impl RunBrowser {
         self
     }
 
-    /// Allocate a fresh context + page for one check.
+    /// Allocate a fresh unauthenticated context + page for one check.
+    /// Kept as the session-less entry point so an absent `session:`
+    /// follows the pre-#347 protocol byte-for-byte.
     pub async fn open_check(&self) -> Result<CheckBrowser, ActionError> {
+        self.open_check_inner(None).await
+    }
+
+    /// Allocate a fresh context seeded from Playwright storage state.
+    /// Seeding copies a declared baseline; the returned context is
+    /// still isolated from every sibling check (spec #347).
+    pub async fn open_check_with_storage_state(
+        &self,
+        storage_state: &serde_json::Value,
+    ) -> Result<CheckBrowser, ActionError> {
+        self.open_check_inner(Some(storage_state)).await
+    }
+
+    async fn open_check_inner(
+        &self,
+        storage_state: Option<&serde_json::Value>,
+    ) -> Result<CheckBrowser, ActionError> {
+        let params = match storage_state {
+            Some(state) => {
+                json!({ "recordVideo": self.record_video, "storageState": state })
+            }
+            None => json!({ "recordVideo": self.record_video }),
+        };
         let ctx = self
             .conn
-            .request("newContext", json!({ "recordVideo": self.record_video }))
+            .request("newContext", params)
             .await
             .map_err(|e| ActionError::Playwright(format!("context: {e}")))?;
         let context_id = ctx
@@ -712,6 +737,13 @@ impl Page {
     pub async fn cookies(&self) -> Result<Vec<Cookie>, PwError> {
         let v = self.conn.request("cookies", self.p()).await?;
         serde_json::from_value(v).map_err(|e| PwError(format!("cookies decode: {e}")))
+    }
+
+    /// Playwright `BrowserContext::storageState` for this page's
+    /// isolated context. Returned as opaque JSON so the action and
+    /// runtime never interpret cookie/local-storage credentials.
+    pub async fn storage_state(&self) -> Result<serde_json::Value, PwError> {
+        self.conn.request("getStorageState", self.p()).await
     }
 
     /// Full-page PNG of the current viewport state. Failure-evidence

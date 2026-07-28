@@ -149,6 +149,15 @@ pub(crate) fn lint_warnings(def: &VerificationDefinition) -> Vec<String> {
     }
     for c in &def.criteria {
         for ch in &c.checks {
+            // `session:` configures the per-check UI context. Keeping it
+            // on a page-free check is valid (the seed is ignored), but
+            // almost always signals an authoring copy/paste mistake.
+            if ch.session.is_some() && !ch.steps.iter().any(|s| s.uses.starts_with("ui/")) {
+                warns.push(format!(
+                    "criterion `{}` / check `{}`: `session:` is unused because the check has no `ui/*` step",
+                    c.id, ch.id
+                ));
+            }
             for (i, s) in ch.steps.iter().enumerate() {
                 let site = format!("criterion `{}` / check `{}` / step {i}", c.id, ch.id);
                 lint_step(s, Some(ch), &site, &mut warns);
@@ -402,6 +411,50 @@ mod tests {
         // Binding `satisfied` without the paired `== true` is the legit
         // manual-control seam (here asserting `== false`) — not flagged.
         let src = "verification: t\ncriteria:\n  - id: AC-1\n    description: d\n    checks:\n      - id: AC-1.1\n        description: d\n        steps:\n          - { id: s, uses: ui/assert-element, with: { locator: { css: h1 }, expected: visible }, outputs: { satisfied: satisfied } }\n        assertions:\n          - $steps.s.outputs.satisfied == false\n";
+        let d = VerificationDefinition::from_yaml_str(src).expect("parse");
+        assert!(lint_warnings(&d).is_empty(), "{:?}", lint_warnings(&d));
+    }
+
+    #[test]
+    fn session_without_ui_step_warns_but_stays_non_fatal() {
+        let src = r#"
+verification: t
+inputs:
+  state: { type: object }
+criteria:
+  - id: AC-1
+    description: d
+    checks:
+      - id: AC-1.1
+        session: $inputs.state
+        steps:
+          - uses: cli/invoke
+            with: { command: [true] }
+        assertions: ["true"]
+"#;
+        let d = VerificationDefinition::from_yaml_str(src).expect("parse");
+        let warnings = lint_warnings(&d);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("session:") && warnings[0].contains("no `ui/*` step"));
+        assert!(field_errors(&d).is_empty(), "warning must not become error");
+    }
+
+    #[test]
+    fn session_with_ui_step_does_not_warn() {
+        let src = r#"
+verification: t
+inputs:
+  state: { type: object }
+criteria:
+  - id: AC-1
+    description: d
+    checks:
+      - id: AC-1.1
+        session: $inputs.state
+        steps:
+          - uses: ui/assert-url
+            with: { matches: example }
+"#;
         let d = VerificationDefinition::from_yaml_str(src).expect("parse");
         assert!(lint_warnings(&d).is_empty(), "{:?}", lint_warnings(&d));
     }

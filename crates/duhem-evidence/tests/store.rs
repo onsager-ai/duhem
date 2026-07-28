@@ -69,6 +69,8 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
         verdict: VerdictState::Pass,
+        session_source: None,
+        session_digest: None,
     })
     .await
     .unwrap();
@@ -941,6 +943,8 @@ async fn spans_fold_a_checks_layer_chain_in_order() {
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
         verdict: VerdictState::Pass,
+        session_source: None,
+        session_digest: None,
     })
     .await
     .unwrap();
@@ -1081,6 +1085,8 @@ async fn writer_tee_mirrors_persisted_events_in_order() {
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
         verdict: VerdictState::Pass,
+        session_source: None,
+        session_digest: None,
     })
     .await
     .unwrap();
@@ -1108,6 +1114,8 @@ async fn writer_tee_mirrors_persisted_events_in_order() {
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.2".into(),
         verdict: VerdictState::Pass,
+        session_source: None,
+        session_digest: None,
     })
     .await
     .expect_err("run is sealed after run_finished — the store, not the tee, rejects");

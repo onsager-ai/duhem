@@ -17,14 +17,14 @@
 //!   self-identification rule the spec describes in §10.2). Other
 //!   blocks (the §10.4 root manifest, snippet fragments) are skipped.
 //! - VD blocks are parsed via `VerificationDefinition::from_yaml_str`
-//!   and then structurally validated via `duhem_schema::validate`.
+//!   and then structurally validated with the built-in action output
+//!   contracts, matching the CLI's reference checks.
 //!
 //! ## What's not checked
 //!
 //! - Per-action `with:` schemas. The schema crate keeps `with:`
 //!   opaque (`serde_yml::Value`); per-action validation is the
-//!   action's own concern at runtime. A Phase-1 deeper check could
-//!   add per-action structural validation here.
+//!   action's own concern at runtime.
 
 use std::path::{Path, PathBuf};
 
@@ -173,7 +173,12 @@ fn looks_like_vd(body: &str) -> bool {
 fn validate_vd(body: &str) -> Result<()> {
     let v = duhem_schema::VerificationDefinition::from_yaml_str(body)
         .map_err(|e| anyhow!("parse: {e}"))?;
-    duhem_schema::validate(&v).map_err(|errs| {
+    duhem_schema::validate_with_contract_outputs(&v, &|uses| {
+        duhem_actions::contract_for(uses)
+            .map(|contract| contract.outputs.into_iter().map(str::to_string).collect())
+            .unwrap_or_default()
+    })
+    .map_err(|errs| {
         let mut s = format!("{} validation error(s):", errs.len());
         for e in errs {
             s.push_str("\n      - ");
@@ -284,5 +289,23 @@ inputs:
     default: 1
 ";
         validate_vd(body).expect("should validate");
+    }
+
+    #[test]
+    fn validates_references_to_builtin_action_outputs() {
+        let body = "\
+verification: browser session
+setup:
+  - id: session
+    uses: ui/capture-session
+criteria:
+  - id: AC-1
+    description: authenticated
+    checks:
+      - id: AC-1.1
+        session: $setup.session.outputs.state
+        assertions: ['true']
+";
+        validate_vd(body).expect("built-in output contract should validate");
     }
 }

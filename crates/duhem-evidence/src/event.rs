@@ -266,6 +266,16 @@ pub enum EventPayload {
     CheckFinished {
         check_id: String,
         verdict: VerdictState,
+        /// Literal `session:` expression selected by the check. The
+        /// credential value is never recorded; this source proves which
+        /// declared baseline was requested (spec #347).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_source: Option<String>,
+        /// Lowercase SHA-256 of the resolved storage-state JSON. Lets
+        /// traces prove two isolated contexts began from the same
+        /// baseline without carrying that baseline.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_digest: Option<String>,
     },
     CriterionFinished {
         criterion_id: String,
@@ -417,6 +427,29 @@ mod tests {
     }
 
     #[test]
+    fn check_session_metadata_is_additive_and_credential_free() {
+        let old = r#"{"seq":7,"ts":"2026-05-08T12:00:00.000Z","kind":"check_finished","check_id":"AC-1.1","verdict":"pass"}"#;
+        let event: Event = serde_json::from_str(old).unwrap();
+        assert_eq!(serde_json::to_string(&event).unwrap(), old);
+
+        let seeded = Event {
+            seq: 8,
+            ts: ts(),
+            payload: EventPayload::CheckFinished {
+                check_id: "AC-2.1".into(),
+                verdict: VerdictState::Pass,
+                session_source: Some("$setup.session.outputs.state".into()),
+                session_digest: Some("a".repeat(64)),
+            },
+        };
+        let line = serde_json::to_string(&seeded).unwrap();
+        assert!(line.contains(r#""session_source":"$setup.session.outputs.state""#));
+        assert!(line.contains(&format!(r#""session_digest":"{}""#, "a".repeat(64))));
+        assert!(!line.contains("cookies"));
+        assert_eq!(serde_json::from_str::<Event>(&line).unwrap(), seeded);
+    }
+
+    #[test]
     fn setup_variants_round_trip() {
         let cases: Vec<EventPayload> = vec![
             EventPayload::SetupStarted { step_count: 2 },
@@ -539,7 +572,9 @@ mod tests {
         assert!(
             EventPayload::CheckFinished {
                 check_id: "x".into(),
-                verdict: VerdictState::Pass
+                verdict: VerdictState::Pass,
+                session_source: None,
+                session_digest: None,
             }
             .is_finished()
         );

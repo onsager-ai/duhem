@@ -23,6 +23,8 @@ use crate::verification::{InputDecl, InputType, VerificationDefinition};
 pub enum RefSite {
     /// Inside a check's `assertions:` list.
     Assertion,
+    /// The check-level browser-session seed expression.
+    Session,
     /// Inside a step's `with:` payload. Carries the step's label —
     /// its `id` when declared, else `step <index>`.
     StepWith { step: String },
@@ -32,6 +34,7 @@ impl std::fmt::Display for RefSite {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RefSite::Assertion => write!(f, "assertion"),
+            RefSite::Session => write!(f, "session:"),
             RefSite::StepWith { step } => write!(f, "step `{step}` with:"),
         }
     }
@@ -166,6 +169,15 @@ pub enum ValidationError {
         check: String,
         raw: String,
         site: RefSite,
+    },
+
+    #[error(
+        "criterion `{criterion}` / check `{check}`: session `{value}` must be a whole-string `$` reference (for example `$setup.login.outputs.state` or `$inputs.session_state`)"
+    )]
+    InvalidSessionReference {
+        criterion: String,
+        check: String,
+        value: String,
     },
 
     #[error(
@@ -542,6 +554,25 @@ fn validate_check(
         inputs,
         inherited,
     };
+
+    // A browser session is acquired state, not an inline fixture. Only
+    // a whole-string path reference is accepted: literals and runtime
+    // calls could fabricate auth state at the authoring boundary. Once
+    // parsed, the ordinary reference checker supplies the same
+    // undeclared input/setup diagnostics as `with:` (#134).
+    if let Some(raw) = &ch.session {
+        match crate::expr::parse(raw) {
+            Ok(Expr::Path(path)) => {
+                check_path(&scope, &path, raw, &RefSite::Session, errs);
+            }
+            _ => errs.push(ValidationError::InvalidSessionReference {
+                criterion: c.id.clone(),
+                check: ch.id.clone(),
+                value: raw.clone(),
+            }),
+        }
+    }
+
     for assertion in &ch.assertions {
         assertion.walk_exprs(|expr_str| {
             let raw = expr_str.raw.as_str();
@@ -1330,6 +1361,89 @@ criteria:
             )),
             "got: {errs:?}"
         );
+    }
+
+    #[test]
+    fn session_rejects_inline_state_and_runtime_calls() {
+        for session in [
+            r#"{"cookies":[],"origins":[]}"#,
+            "$runtime.format(\"{}\", $inputs.state)",
+        ] {
+            let y = format!(
+                r#"
+verification: x
+inputs:
+  state: {{ type: object }}
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        session: '{session}'
+        assertions: ["true"]
+"#
+            );
+            let errs = validate(&parse(&y)).unwrap_err();
+            assert!(
+                errs.iter()
+                    .any(|e| matches!(e, ValidationError::InvalidSessionReference { .. })),
+                "expected whole-reference error for {session:?}, got {errs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn session_accepts_declared_input_and_setup_output_references() {
+        let y = r#"
+verification: x
+inputs:
+  state: { type: object }
+setup:
+  - id: login
+    uses: ui/capture-session
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        session: $inputs.state
+        assertions: ["true"]
+      - id: AC-1.2
+        session: $setup.login.outputs.state
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        validate_with_contract_outputs(&v, &|uses| {
+            if uses == "ui/capture-session" {
+                vec!["state".to_string()]
+            } else {
+                Vec::new()
+            }
+        })
+        .expect("declared whole-string references validate");
+    }
+
+    #[test]
+    fn dangling_session_setup_reference_reuses_missing_ref_error() {
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        session: $setup.nope.outputs.state
+        assertions: ["true"]
+"#;
+        let errs = validate(&parse(y)).unwrap_err();
+        assert!(errs.iter().any(|e| matches!(
+            e,
+            ValidationError::UnresolvedSetupStepRef {
+                step,
+                site: RefSite::Session,
+                ..
+            } if step == "nope"
+        )));
     }
 
     #[test]

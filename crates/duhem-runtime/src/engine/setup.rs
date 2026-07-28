@@ -80,6 +80,7 @@ pub(crate) async fn run_setup(
     browser: Option<&RunBrowser>,
     run: &mut RunState,
     setup: &[Step],
+    child_env: &BTreeMap<String, String>,
 ) -> Result<SetupResult, EngineError> {
     writer
         .append(EventPayload::SetupStarted {
@@ -161,9 +162,12 @@ pub(crate) async fn run_setup(
                         page_ref,
                         idx,
                         &resolved_with,
-                        step,
-                        run,
-                        writer,
+                        SetupInvocation {
+                            step,
+                            run,
+                            writer,
+                            child_env,
+                        },
                     )
                     .await?
                 }
@@ -221,15 +225,26 @@ async fn append_setup_started(
 /// for every output, and publish scalar outputs onto
 /// `RunState.setup_outputs` so checks can reference them as
 /// `$setup.<id>.outputs.<name>`.
+struct SetupInvocation<'a> {
+    step: &'a Step,
+    run: &'a mut RunState,
+    writer: &'a mut EvidenceWriter,
+    child_env: &'a BTreeMap<String, String>,
+}
+
 async fn invoke_and_record(
     dispatcher: &dyn Dispatch,
     page: Option<&Page>,
     idx: usize,
     resolved_with: &serde_yml::Value,
-    step: &Step,
-    run: &mut RunState,
-    writer: &mut EvidenceWriter,
+    invocation: SetupInvocation<'_>,
 ) -> Result<Outcome, EngineError> {
+    let SetupInvocation {
+        step,
+        run,
+        writer,
+        child_env,
+    } = invocation;
     // `SetupStepStarted` first — the pre-#355 ordering, and symmetric
     // with the per-check path. It records the resolved `with:`, i.e.
     // this step's inputs, which cannot carry this step's own outputs;
@@ -237,7 +252,7 @@ async fn invoke_and_record(
     // step as in flight (#305). Registration follows it, still ahead of
     // anything carrying an output.
     append_setup_started(writer, step, idx, resolved_with).await?;
-    let result = dispatcher.invoke(page, idx, resolved_with).await;
+    let result = dispatcher.invoke(page, idx, resolved_with, child_env).await;
     let outcome = match &result {
         Ok(r) => r.outcome.clone(),
         Err(_) => Outcome::Error,
@@ -330,6 +345,7 @@ mod tests {
             _page: Option<&Page>,
             _step_index: usize,
             _with: &serde_yml::Value,
+            _child_env: &BTreeMap<String, String>,
         ) -> Result<ActionResult, ActionError> {
             self.invocations.fetch_add(1, Ordering::SeqCst);
             let mut r = match self.outcome {
@@ -385,7 +401,7 @@ mod tests {
         );
         let mut run = RunState::new(BTreeMap::new());
         let setup = vec![step(Some("warm"), "fake/seed")];
-        let r = run_setup(&mut w, &registry, None, &mut run, &setup)
+        let r = run_setup(&mut w, &registry, None, &mut run, &setup, &BTreeMap::new())
             .await
             .unwrap();
         assert!(r.aborted.is_none());
@@ -420,7 +436,7 @@ mod tests {
         );
         let mut run = RunState::new(BTreeMap::new());
         let setup = vec![step(None, "fake/boom"), step(None, "fake/tracker")];
-        let r = run_setup(&mut w, &registry, None, &mut run, &setup)
+        let r = run_setup(&mut w, &registry, None, &mut run, &setup, &BTreeMap::new())
             .await
             .unwrap();
         assert_eq!(
@@ -465,7 +481,7 @@ mod tests {
         );
         let mut run = RunState::new(BTreeMap::new());
         let setup = vec![step(None, "fake/slow"), step(None, "fake/tracker")];
-        let r = run_setup(&mut w, &registry, None, &mut run, &setup)
+        let r = run_setup(&mut w, &registry, None, &mut run, &setup, &BTreeMap::new())
             .await
             .unwrap();
         assert_eq!(

@@ -85,8 +85,17 @@ verifications:
 
     let store = SqliteStore::open_read_only(&db).await.unwrap();
     let runs = store.list_runs().await.unwrap();
-    assert_eq!(runs.len(), 2, "one recorded run per inheriting leaf");
-    for run in runs {
+    assert_eq!(runs.len(), 3, "manifest parent plus two inheriting leaves");
+    let parent = runs
+        .iter()
+        .find(|run| run.lineage.parent_run_id.is_none())
+        .expect("manifest parent");
+    let leaves: Vec<_> = runs
+        .iter()
+        .filter(|run| run.lineage.parent_run_id.as_deref() == Some(parent.run_id.as_str()))
+        .collect();
+    assert_eq!(leaves.len(), 2, "one suite child per inheriting leaf");
+    for run in leaves {
         assert_eq!(
             run.inputs["password"],
             serde_json::json!("[redacted:password]"),

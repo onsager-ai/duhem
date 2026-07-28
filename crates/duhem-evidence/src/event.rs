@@ -63,6 +63,14 @@ pub enum RunStatus {
     Orphaned,
 }
 
+/// How a nested run came to exist. Root runs carry no origin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunOrigin {
+    Suite,
+    Invocation,
+}
+
 /// Outcome of a single step invocation. Distinct from a verdict —
 /// this answers "did the action complete?", not "did the artifact
 /// pass?". A step can finish `ok` yet feed an `assertion_evaluated`
@@ -132,6 +140,13 @@ pub enum EventPayload {
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         inputs: BTreeMap<String, serde_json::Value>,
         schema_version: String,
+        /// Recorded lineage (#348). Absent on root runs and traces
+        /// written before lineage existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_run_id: Option<String>,
+        /// Why this child exists. Root and pre-lineage runs omit it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<RunOrigin>,
         /// Snapshot of the Verification Definition source (raw YAML) as
         /// it was when this run was judged (spec #302). Makes a run
         /// self-describing — the criteria/check descriptions, step ids,
@@ -352,6 +367,8 @@ mod tests {
                 verification_path: "create-workspace.yml".into(),
                 inputs,
                 schema_version: SCHEMA_VERSION.into(),
+                parent_run_id: None,
+                origin: None,
                 definition: None,
             },
         };

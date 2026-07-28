@@ -13,9 +13,11 @@
 pub mod engine;
 pub mod eval;
 
+pub use engine::lineage::{PARENT_DB_PATH_ENV, PARENT_RUN_ID_ENV};
 pub use engine::{
     CapturePolicy, CapturedArtifact, CheckFailure, CheckFilter, Engine, EngineError,
-    FailedAssertion, RunContext, RunOutcome, RunState, SuiteEnvironment, resolve_scope,
+    FailedAssertion, RunContext, RunOutcome, RunState, SuiteEnvironment, SuiteRunConfig,
+    resolve_scope,
 };
 pub use eval::{EvalContext, EvalResult, InconclusiveCause, Value, ValueShape, eval};
 

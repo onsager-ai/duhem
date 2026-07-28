@@ -347,9 +347,9 @@ criteria:
 
   # ==========================================================================
   # #349 — runtime lifecycle is independent from judgment. The real slow
-  # suite carries a `<suite>` environment-container run with no criteria and
-  # therefore no judge verdict. Once teardown completes, the dashboard's
-  # static API snapshot must expose it as finished and unjudged.
+  # suite carries a manifest-container run with no criteria and therefore no
+  # judge verdict. Once teardown completes, the dashboard's static API
+  # snapshot must expose its lineage, descendants, and finished lifecycle.
   # ==========================================================================
   - id: AC-6
     description: |
@@ -360,10 +360,10 @@ criteria:
     checks:
       - id: AC-6.1
         description: |
-          Run the committed slow-suite fixture against an isolated
-          evidence store, export the dashboard snapshot, and select
-          the `<suite>` list entry. Its serialized lifecycle/verdict
-          pair is mechanically `finished:null`.
+          Run the committed slow-suite fixture as a nested invocation,
+          export the parent store's dashboard snapshot, and traverse
+          recorded lineage. There is one root; the invocation child has
+          two suite children and is mechanically `finished:null`.
         steps:
           - id: completed_suite
             uses: cli/invoke
@@ -376,15 +376,20 @@ criteria:
                   tmp="$(mktemp -d)"
                   trap 'rm -rf "$tmp"' EXIT
                   duhem_bin="${DUHEM_BIN:-duhem}"
-                  "$duhem_bin" run "$1" --db "$tmp/duhem.db" --no-live --reporter quiet >/dev/null
-                  "$duhem_bin" dashboard --db "$tmp/duhem.db" export --out "$tmp/export" >/dev/null
+                  "$duhem_bin" run "$1" --no-live --reporter quiet >/dev/null
+                  "$duhem_bin" dashboard --db "$DUHEM_PARENT_DB_PATH" export --out "$tmp/export" >/dev/null
                   node -e '
-                    const rows = require(process.argv[1]);
-                    const leaves = rows.flatMap((row) => row.children || [row]);
-                    const suite = leaves.find(
-                      (row) => row.verification === "<suite>"
+                    const roots = require(process.argv[1]);
+                    const flatten = (rows) => rows.flatMap(
+                      (row) => [row, ...flatten(row.children || [])]
+                    );
+                    const suite = flatten(roots).find(
+                      (row) =>
+                        row.verification === "slow-suite" &&
+                        row.origin === "invocation"
                     );
                     process.stdout.write(
+                      `${roots.length}:${suite?.origin}:${suite?.children?.length}:` +
                       `${suite?.status}:${JSON.stringify(suite?.verdict)}`
                     );
                   ' "$tmp/export/api/runs.json"
@@ -393,4 +398,4 @@ criteria:
               within: 120s
         assertions:
           - $steps.completed_suite.outputs.exit_code == 0
-          - $steps.completed_suite.outputs.stdout == "finished:null"
+          - $steps.completed_suite.outputs.stdout == "1:invocation:2:finished:null"

@@ -18,6 +18,8 @@ export interface RunsListEntry {
   verdict: Verdict | null;
   kind: "leaf" | "run-set";
   status: RunStatus;
+  parent_run_id?: string;
+  origin?: "suite" | "invocation";
   children?: RunsListEntry[];
 }
 

@@ -10,8 +10,9 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use duhem_dashboard::{EvidenceReader, events_to_jsonl, router};
 use duhem_evidence::{
-    EventPayload, EvidenceWriter, ObservationValue, SecretRegistry, Store, Trace, VerdictState,
-    replay, run_started_with_definition,
+    EventPayload, EvidenceWriter, ObservationValue, RunLineage, RunOrigin, RunScope,
+    SecretRegistry, Store, Trace, VerdictState, replay, run_started_with_definition,
+    run_started_with_definition_and_lineage,
 };
 use http_body_util::BodyExt;
 use serde_json::Value;
@@ -125,7 +126,7 @@ async fn check_artifact_surfaces_secret_mask_occurrence_counts() {
 }
 
 #[tokio::test]
-async fn runs_list_groups_a_verifications_runs_and_rolls_up_with_the_judge_fold() {
+async fn runs_list_does_not_group_unrelated_runs_with_the_same_basename() {
     let (_tmp, rw, ro) = common::open_stores().await;
     common::write_passing_run(
         rw.clone(),
@@ -143,16 +144,91 @@ async fn runs_list_groups_a_verifications_runs_and_rolls_up_with_the_judge_fold(
     let (status, json) = get_json(EvidenceReader::new(ro), "/api/runs").await;
     assert_eq!(status, StatusCode::OK);
     let rows = json.as_array().unwrap();
-    assert_eq!(rows.len(), 1);
-    let set = &rows[0];
-    assert_eq!(set["kind"], "run-set");
-    assert_eq!(set["verification"], "login");
-    // Any fail → fail (issue #49's rule, applied via aggregate_run_set).
-    assert_eq!(set["verdict"], "fail");
-    let children = set["children"].as_array().unwrap();
-    assert_eq!(children.len(), 2);
-    assert!(children.iter().all(|c| c["kind"] == "leaf"));
-    assert!(children.iter().all(|c| c["verification"] == "login"));
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|row| row["kind"] == "leaf"));
+    assert!(rows.iter().all(|row| row["verification"] == "login"));
+    assert!(rows.iter().all(|row| row.get("children").is_none()));
+}
+
+#[tokio::test]
+async fn runs_list_nests_recorded_suite_and_invocation_children() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let root_id = "01J0000000000000000000000R";
+    let suite_id = "01J0000000000000000000000S";
+    let invocation_id = "01J0000000000000000000000I";
+
+    async fn finished(
+        store: std::sync::Arc<duhem_evidence::SqliteStore>,
+        run_id: &str,
+        path: &str,
+        lineage: RunLineage,
+    ) {
+        let mut writer = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
+            store,
+            run_id,
+            path,
+            BTreeMap::new(),
+            RunScope::default(),
+            lineage.clone(),
+            SecretRegistry::new(),
+        )
+        .await
+        .unwrap();
+        writer
+            .append(run_started_with_definition_and_lineage(
+                path,
+                BTreeMap::new(),
+                None,
+                lineage,
+            ))
+            .await
+            .unwrap();
+        writer
+            .append(EventPayload::RunFinished { verdict: None })
+            .await
+            .unwrap();
+    }
+
+    finished(
+        rw.clone(),
+        root_id,
+        "verifications/slow-suite/duhem.yml",
+        RunLineage::default(),
+    )
+    .await;
+    finished(
+        rw.clone(),
+        suite_id,
+        "verifications/slow-suite/quick.yml",
+        RunLineage {
+            parent_run_id: Some(root_id.to_string()),
+            origin: Some(RunOrigin::Suite),
+        },
+    )
+    .await;
+    finished(
+        rw,
+        invocation_id,
+        "verifications/defaults-example/checks/duhem.yml",
+        RunLineage {
+            parent_run_id: Some(suite_id.to_string()),
+            origin: Some(RunOrigin::Invocation),
+        },
+    )
+    .await;
+
+    let (_, json) = get_json(EvidenceReader::new(ro), "/api/runs").await;
+    let roots = json.as_array().unwrap();
+    assert_eq!(roots.len(), 1);
+    assert_eq!(roots[0]["run_id"], root_id);
+    let suite = &roots[0]["children"][0];
+    assert_eq!(suite["run_id"], suite_id);
+    assert_eq!(suite["parent_run_id"], root_id);
+    assert_eq!(suite["origin"], "suite");
+    let invocation = &suite["children"][0];
+    assert_eq!(invocation["run_id"], invocation_id);
+    assert_eq!(invocation["parent_run_id"], suite_id);
+    assert_eq!(invocation["origin"], "invocation");
 }
 
 #[tokio::test]
@@ -205,7 +281,7 @@ async fn run_detail_carries_inputs_verdict_and_criteria() {
 async fn finished_unjudged_run_has_status_without_a_verdict() {
     let (_tmp, rw, ro) = common::open_stores().await;
     let run_id = "01J0000000000000000000000U";
-    let mut writer = EvidenceWriter::begin(rw, run_id, "<suite>", BTreeMap::new())
+    let mut writer = EvidenceWriter::begin(rw, run_id, "slow-suite/duhem.yml", BTreeMap::new())
         .await
         .unwrap();
     writer

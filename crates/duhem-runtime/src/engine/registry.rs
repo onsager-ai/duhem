@@ -67,6 +67,7 @@ pub(crate) trait Dispatch: Send + Sync {
         page: Option<&Page>,
         step_index: usize,
         with: &serde_yml::Value,
+        child_env: &BTreeMap<String, String>,
     ) -> Result<ActionResult, ActionError>;
 }
 
@@ -109,6 +110,7 @@ impl Dispatch for ConcreteAction {
         page: Option<&Page>,
         step_index: usize,
         with: &serde_yml::Value,
+        child_env: &BTreeMap<String, String>,
     ) -> Result<ActionResult, ActionError> {
         // A page-requiring action without a page is a dispatch-layer
         // failure (the engine should have refused the check upstream).
@@ -119,7 +121,36 @@ impl Dispatch for ConcreteAction {
             )));
         }
         let ctx = ActionCtx { page, step_index };
-        self.action.invoke(&ctx, with).await
+        let mut invocation_with = with.clone();
+        if self.uses == "cli/invoke" {
+            inject_child_env(&mut invocation_with, child_env);
+        }
+        self.action.invoke(&ctx, &invocation_with).await
+    }
+}
+
+/// Layer runtime-owned process context onto `cli/invoke` after authored
+/// fields resolve. Runtime values win so a nested run cannot detach
+/// itself from the parent store or lineage.
+fn inject_child_env(with: &mut serde_yml::Value, child_env: &BTreeMap<String, String>) {
+    if child_env.is_empty() {
+        return;
+    }
+    let Some(with_map) = with.as_mapping_mut() else {
+        return;
+    };
+    let env_key = serde_yml::Value::String("env".to_string());
+    let env = with_map
+        .entry(env_key)
+        .or_insert_with(|| serde_yml::Value::Mapping(Default::default()));
+    let Some(env_map) = env.as_mapping_mut() else {
+        return;
+    };
+    for (key, value) in child_env {
+        env_map.insert(
+            serde_yml::Value::String(key.clone()),
+            serde_yml::Value::String(value.clone()),
+        );
     }
 }
 

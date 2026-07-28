@@ -5,12 +5,11 @@ use std::collections::BTreeMap;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::Arc;
 
 use duhem_actions::RunBrowser;
-use duhem_evidence::{SqliteStore, Store};
+use duhem_evidence::{RunLineage, RunOrigin, RunScope};
 use duhem_judge::{RunVerdict, VerdictState, aggregate_run_set};
-use duhem_runtime::{Engine, RunOutcome, SuiteEnvironment};
+use duhem_runtime::{Engine, RunOutcome, SuiteEnvironment, SuiteRunConfig};
 use duhem_schema::{
     Loaded, LoadedLeaf, VerificationDefinition, load as load_definition,
     validate_with_contract_outputs,
@@ -404,32 +403,16 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // store per invocation; every leaf run (and the suite-environment
     // run) lands in it. Opened only after `--dry-run` returned, so a
     // dry run writes nothing.
-    let db_path = match &db {
-        Some(p) => p.clone(),
-        None => {
-            let cwd = match std::env::current_dir() {
-                Ok(d) => d,
-                Err(e) => {
-                    eprintln!("cannot determine current directory: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            match duhem_evidence::project_db_path(&cwd) {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("resolve store: {e}");
-                    return ExitCode::FAILURE;
-                }
-            }
-        }
-    };
-    let store: Arc<dyn Store> = match SqliteStore::open(&db_path).await {
-        Ok(s) => Arc::new(s),
+    let run_store = match crate::run_lineage::open(db.as_deref()).await {
+        Ok(context) => context,
         Err(e) => {
-            eprintln!("open store {}: {e}", db_path.display());
+            eprintln!("{e}");
             return ExitCode::FAILURE;
         }
     };
+    let db_path = run_store.db_path;
+    let store = run_store.store;
+    let invocation_parent = run_store.parent;
 
     // Live on-ramp (#298): if a dashboard is serving this store (or
     // the operator exported DUHEM_DASHBOARD_URL), each leaf's live
@@ -444,10 +427,8 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         );
     }
 
-    // Manifest-level shared environment (spec #131): provision the whole
-    // suite's stack once, here, instead of each leaf standing up its own.
-    // While it's up, leaves run with per-leaf provisioning suppressed
-    // (`suite_managed`) and target the shared stack.
+    // Every manifest gets a parent run; its optional shared environment
+    // remains provisioned once across all leaves.
     let mut suite_env: Option<SuiteEnvironment> = None;
     // #305 A: while the suite environment provisions (and later tears
     // down), its evidence tee narrates on stderr — the often-slowest
@@ -457,12 +438,36 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // run_cmd's own stderr lines (headers, live links).
     let mut suite_progress: Option<tokio::sync::mpsc::UnboundedReceiver<duhem_evidence::Event>> =
         None;
+    if pinned_run_id.is_some() && (is_manifest || resolved.len() > 1) {
+        eprintln!(
+            "--run-id applies to a single-verification run; a manifest expands to several verifications"
+        );
+        return ExitCode::FAILURE;
+    }
+
+    let mut suite_parent_id: Option<String> = None;
+    let mut inherited_scope: Option<RunScope> = invocation_parent
+        .as_ref()
+        .map(|parent| parent.scope.clone());
     if let Scope::Manifest {
-        environment: Some(env),
+        environment,
         manifest_dir,
         ..
     } = &scope
     {
+        let suite_scope = inherited_scope.clone().unwrap_or_else(|| {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            duhem_runtime::resolve_scope(manifest_project.as_ref(), &cwd, manifest_dir.as_deref())
+        });
+        inherited_scope = Some(suite_scope.clone());
+        let suite_lineage = match &invocation_parent {
+            Some(parent) => RunLineage {
+                parent_run_id: Some(parent.run_id.clone()),
+                origin: Some(RunOrigin::Invocation),
+            },
+            None => RunLineage::default(),
+        };
+        let suite_run_id = duhem_evidence::new_run_id();
         let progress = if live_progress {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
             suite_progress = Some(rx);
@@ -470,11 +475,18 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         } else {
             None
         };
+        let suite_definition_path = target.to_string_lossy().into_owned();
         let provision = SuiteEnvironment::provision(
-            env,
-            manifest_dir.as_deref(),
+            SuiteRunConfig {
+                environment: environment.as_ref(),
+                definition_path: &suite_definition_path,
+                manifest_dir: manifest_dir.as_deref(),
+                run_id: suite_run_id.clone(),
+                scope: suite_scope,
+                lineage: suite_lineage,
+                skip_env_up: no_env_up,
+            },
             store.clone(),
-            no_env_up,
             progress,
         );
         let outcome = match suite_progress.as_mut() {
@@ -505,6 +517,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                     let _ = tear_down_suite(session, keep_env, &mut suite_progress).await;
                     return ExitCode::FAILURE;
                 }
+                suite_parent_id = Some(suite_run_id);
                 suite_env = Some(session);
             }
             Err(e) => {
@@ -513,17 +526,13 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             }
         }
     }
-    let suite_managed = suite_env.is_some();
-
-    if pinned_run_id.is_some() && (is_manifest || resolved.len() > 1) {
-        eprintln!(
-            "--run-id applies to a single-verification run; a manifest expands to several verifications"
-        );
-        if let Some(s) = suite_env.take() {
-            let _ = tear_down_suite(s, keep_env, &mut suite_progress).await;
+    let suite_managed = matches!(
+        &scope,
+        Scope::Manifest {
+            environment: Some(_),
+            ..
         }
-        return ExitCode::FAILURE;
-    }
+    );
 
     let mut leaf_outcomes: Vec<(String, RunOutcome)> = Vec::with_capacity(resolved.len());
     let total = resolved.len();
@@ -601,7 +610,8 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             .with_env(env_whitelist.clone())
             .with_inherited(def.inherits.clone())
             .with_capture(capture)
-            .with_secret_registry(secrets.clone());
+            .with_secret_registry(secrets.clone())
+            .with_child_store_path(db_path.clone());
         for warning in secrets.warnings() {
             eprintln!("warning: {warning}");
         }
@@ -647,7 +657,25 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // Target identity (#191): the declared `project:` (leaf wins
         // over manifest) enters the resolution ladder; the VD's
         // directory anchors the verifier side.
-        {
+        if let Some(parent_run_id) = suite_parent_id.as_ref() {
+            engine = engine
+                .with_scope(
+                    inherited_scope
+                        .clone()
+                        .expect("manifest suite scope resolved above"),
+                )
+                .with_lineage(RunLineage {
+                    parent_run_id: Some(parent_run_id.clone()),
+                    origin: Some(RunOrigin::Suite),
+                });
+        } else if let Some(parent) = invocation_parent.as_ref() {
+            engine = engine
+                .with_scope(parent.scope.clone())
+                .with_lineage(RunLineage {
+                    parent_run_id: Some(parent.run_id.clone()),
+                    origin: Some(RunOrigin::Invocation),
+                });
+        } else {
             let declared = def.project.as_ref().or(manifest_project.as_ref());
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             let vd_dir = leaf_path.parent().map(Path::to_path_buf);

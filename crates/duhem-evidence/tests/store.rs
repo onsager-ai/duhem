@@ -10,9 +10,9 @@ use std::sync::Arc;
 
 use duhem_evidence::{
     BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, EvidenceWriter, HEARTBEAT_PERIOD,
-    ObservationValue, ReadError, ReplayDivergence, ReplayError, RunBundle, RunMeta, RunScope,
-    RunStatus, SCHEMA_VERSION, SecretRegistry, SqliteStore, StepOutcome, Store, Trace,
-    VerdictState, replay, run_started,
+    ObservationValue, ReadError, ReplayDivergence, ReplayError, RunBundle, RunLineage, RunMeta,
+    RunOrigin, RunScope, RunStatus, SCHEMA_VERSION, SecretRegistry, SqliteStore, StepOutcome,
+    Store, Trace, VerdictState, replay, run_started, run_started_with_definition_and_lineage,
 };
 use tempfile::TempDir;
 
@@ -179,9 +179,14 @@ async fn dropped_writer_loses_nothing_and_run_stays_unfinished() {
 #[tokio::test]
 async fn terminal_marker_can_finish_a_run_without_a_verdict() {
     let (_tmp, store) = open_store().await;
-    let mut w = EvidenceWriter::begin(store.clone(), RUN_ID, "<suite>", BTreeMap::new())
-        .await
-        .unwrap();
+    let mut w = EvidenceWriter::begin(
+        store.clone(),
+        RUN_ID,
+        "slow-suite/duhem.yml",
+        BTreeMap::new(),
+    )
+    .await
+    .unwrap();
     w.append(EventPayload::RunFinished { verdict: None })
         .await
         .unwrap();
@@ -227,6 +232,7 @@ async fn stale_unterminated_trace_is_orphaned() {
             schema_version: SCHEMA_VERSION.into(),
             inputs: BTreeMap::new(),
             started_at,
+            lineage: duhem_evidence::RunLineage::default(),
             scope: RunScope::default(),
         })
         .await
@@ -451,6 +457,79 @@ async fn update_and_delete_are_rejected_on_every_table() {
             "unexpected error for DELETE {table}: {err}"
         );
     }
+}
+
+#[tokio::test]
+async fn child_run_records_lineage_with_fk_and_remains_append_only() {
+    let (_tmp, store) = open_store().await;
+    let parent_id = "01PARENT";
+    let child_id = "01CHILD";
+    let parent =
+        EvidenceWriter::begin(store.clone(), parent_id, "suite/duhem.yml", BTreeMap::new())
+            .await
+            .unwrap();
+    drop(parent);
+
+    let lineage = RunLineage {
+        parent_run_id: Some(parent_id.to_string()),
+        origin: Some(RunOrigin::Suite),
+    };
+    let mut child = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
+        store.clone(),
+        child_id,
+        "suite/quick.yml",
+        BTreeMap::new(),
+        RunScope::default(),
+        lineage.clone(),
+        SecretRegistry::new(),
+    )
+    .await
+    .unwrap();
+    child
+        .append(run_started_with_definition_and_lineage(
+            "suite/quick.yml",
+            BTreeMap::new(),
+            None,
+            lineage.clone(),
+        ))
+        .await
+        .unwrap();
+
+    let record = store.get_run(child_id).await.unwrap().unwrap();
+    assert_eq!(record.lineage, lineage);
+    assert!(
+        sqlx::query("UPDATE runs SET parent_run_id = NULL WHERE run_id = ?")
+            .bind(child_id)
+            .execute(store.pool())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("append-only")
+    );
+    assert!(
+        sqlx::query("DELETE FROM runs WHERE run_id = ?")
+            .bind(child_id)
+            .execute(store.pool())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("append-only")
+    );
+
+    let missing_parent = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
+        store,
+        "01ORPHANCHILD",
+        "suite/orphan.yml",
+        BTreeMap::new(),
+        RunScope::default(),
+        RunLineage {
+            parent_run_id: Some("01MISSING".to_string()),
+            origin: Some(RunOrigin::Suite),
+        },
+        SecretRegistry::new(),
+    )
+    .await;
+    assert!(missing_parent.is_err(), "parent FK must be enforced");
 }
 
 #[tokio::test]
@@ -697,6 +776,11 @@ async fn migration_is_additive_and_lossless_over_a_pre_scoping_store() {
         old.scope,
         RunScope::default(),
         "pre-scoping rows are unattributed"
+    );
+    assert_eq!(
+        old.lineage,
+        RunLineage::default(),
+        "pre-lineage rows remain independent roots"
     );
     assert_eq!(store.run_events("01OLD").await.unwrap().len(), 2);
     let orphan = store

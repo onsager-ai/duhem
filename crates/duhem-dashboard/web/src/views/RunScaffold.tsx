@@ -18,18 +18,22 @@ import {
 import { foldRun } from "../fold";
 import { groupTimeline, stepStatus } from "../format";
 import { cn } from "@/lib/utils";
-import { VerdictBadge } from "../ui";
+import { StatusBadge, VerdictBadge } from "../ui";
 import { DefinitionProvider, useVd } from "./definition-context";
 
-// Subscribe to a run: fetch its recorded detail, and for a live run
-// (#84) follow the SSE stream, folding events into the same shape and
-// re-fetching the authoritative rendering once it finishes.
+export type ConnectionState = "connected" | "reconnecting" | "disconnected";
+
+// Subscribe to a run: lifecycle comes from recorded detail. Connection
+// is viewer-local SSE state and never enters the API/static-export shape.
 export function useRun(runId: string): {
   run: RunDetail | null;
   error: string | null;
+  connection: ConnectionState;
 } {
   const [run, setRun] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [connection, setConnection] =
+    useState<ConnectionState>("disconnected");
 
   useEffect(() => {
     let source: EventSource | null = null;
@@ -38,23 +42,27 @@ export function useRun(runId: string): {
 
     setRun(null);
     setError(null);
+    setConnection("disconnected");
     fetchRun(runId).then((detail) => {
       if (cancelled) return;
       setRun(detail);
-      if (!detail.live) return;
+      if (detail.status !== "running") return;
       // Replay-then-follow: the SSE stream re-sends the whole trace,
       // so folding from scratch is gap- and dupe-free by contract.
+      setConnection("reconnecting");
       source = new EventSource(liveUrl(runId));
+      source.onopen = () => !cancelled && setConnection("connected");
       source.addEventListener("trace", (msg) => {
         const evt = JSON.parse((msg as MessageEvent).data) as TraceEvent;
         events.push(evt);
         setRun(foldRun(runId, events));
-        if (evt.kind === "run_finished") {
+        if (evt.kind === "run_finished" || evt.kind === "run_aborted") {
           source?.close();
+          setConnection("disconnected");
           fetchRun(runId).then((d) => !cancelled && setRun(d), () => {});
         }
       });
-      source.onerror = () => source?.close();
+      source.onerror = () => !cancelled && setConnection("reconnecting");
     }, (e) => setError(String(e)));
 
     return () => {
@@ -63,7 +71,7 @@ export function useRun(runId: string): {
     };
   }, [runId]);
 
-  return { run, error };
+  return { run, error, connection };
 }
 
 function checkHref(runId: string, criterionId: string, checkId: string): string {
@@ -399,7 +407,7 @@ export function RunScaffold({
   activeResults?: boolean;
   children: (run: RunDetail) => ReactNode;
 }) {
-  const { run, error } = useRun(runId);
+  const { run, error, connection } = useRun(runId);
 
   if (error) return <p className="error">{error}</p>;
   if (run === null) return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -423,7 +431,13 @@ export function RunScaffold({
             >
               {run.run_id}
             </code>
-            <VerdictBadge verdict={run.verdict} live={run.live} />
+            <StatusBadge status={run.status} />
+            <VerdictBadge verdict={run.verdict} />
+            {run.status === "running" && (
+              <span className="text-xs font-normal text-muted-foreground">
+                {connection}
+              </span>
+            )}
           </h2>
           <RunTabs run={run} active={active} />
         </header>
@@ -431,7 +445,7 @@ export function RunScaffold({
         {active === "results" ? (
           run.criteria.length === 0 ? (
             <p className="py-6 text-sm text-muted-foreground">
-              No criteria recorded{run.live ? " yet" : ""}.
+              No criteria recorded{run.status === "running" ? " yet" : ""}.
             </p>
           ) : (
           <div className="run-results-grid grid min-w-0 max-w-full md:grid-cols-[17rem_minmax(0,1fr)]">

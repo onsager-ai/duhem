@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRunsData } from "@/runs-context";
 import { verificationSummaries } from "@/stats";
-import { formatStartedAt, VerdictBadge } from "@/ui";
+import { formatStartedAt, StatusBadge, VerdictBadge } from "@/ui";
 
 export default function VerificationsList() {
   const { runs, error } = useRunsData();
@@ -65,10 +65,10 @@ export default function VerificationsList() {
                       {v.name}
                     </span>
                   </div>
-                  <VerdictBadge
-                    verdict={v.latest?.verdict ?? null}
-                    live={v.live}
-                  />
+                  <div className="flex gap-1">
+                    <StatusBadge status={v.status} />
+                    <VerdictBadge verdict={v.latest?.verdict ?? null} />
+                  </div>
                 </div>
                 <VerdictTrend trend={v.recent} />
                 <div className="mt-auto flex items-center justify-between pt-1 text-xs text-muted-foreground">

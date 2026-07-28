@@ -30,8 +30,8 @@ pub mod writer;
 
 pub use bundle::{BUNDLE_VERSION, BundleArtifact, BundleRun, RunBundle};
 pub use event::{
-    BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, ObservationValue, SCHEMA_VERSION,
-    StepOutcome, VerdictState,
+    BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, HEARTBEAT_PERIOD, ORPHAN_THRESHOLD,
+    ObservationValue, RunStatus, SCHEMA_VERSION, StepOutcome, VerdictState,
 };
 pub use reader::{ReadError, Trace};
 pub use replay::{ReplayDivergence, ReplayError, ReplayedRun, replay};
@@ -42,8 +42,8 @@ pub use session::{
 };
 pub use store::{
     CriterionHistoryEntry, ProjectSummary, RunMeta, RunRecord, RunScope, Span, SqliteStore, Store,
-    StoreError, TargetStatus, dashboard_addr_path, project_db_path, project_slug, state_root,
-    verification_name,
+    StoreError, TargetStatus, dashboard_addr_path, derive_run_status, project_db_path,
+    project_slug, state_root, verification_name,
 };
 pub use writer::{
     EvidenceWriter, Sha256Hex, WriterError, run_started, run_started_with_definition,

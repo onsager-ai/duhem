@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { computeStats, flatLeaves, verificationSummaries } from "../stats";
-import type { RunsListEntry } from "../api";
+import type { RunStatus, RunsListEntry } from "../api";
 
 function leaf(
   run_id: string,
   verification: string,
   verdict: string | null,
   started_at: string | null,
-  live = false,
+  status: RunStatus = "finished",
 ): RunsListEntry {
   return {
     run_id,
@@ -16,11 +16,11 @@ function leaf(
     duration_ms: 1000,
     verdict,
     kind: "leaf",
-    live,
+    status,
   };
 }
 
-// A run-set (login, latest fails) + two standalone leaves, one live.
+// A run-set (login, latest fails) + two standalone leaves, one running.
 const entries: RunsListEntry[] = [
   {
     ...leaf("login", "login", "fail", "2026-06-10T10:00:00Z"),
@@ -32,7 +32,7 @@ const entries: RunsListEntry[] = [
     ],
   },
   leaf("api1", "api", "inconclusive:timeout", "2026-06-11T10:00:00Z"),
-  leaf("live1", "checkout", null, "2026-06-12T10:00:00Z", true),
+  leaf("live1", "checkout", null, "2026-06-12T10:00:00Z", "running"),
 ];
 
 describe("flatLeaves", () => {
@@ -51,12 +51,12 @@ describe("flatLeaves", () => {
 describe("computeStats", () => {
   const s = computeStats(entries);
 
-  it("tallies verdict families and live runs over the leaves", () => {
+  it("tallies verdict families and running runs over the leaves", () => {
     expect(s.total).toBe(5);
     expect(s.pass).toBe(2);
     expect(s.fail).toBe(1);
     expect(s.inconclusive).toBe(1);
-    expect(s.live).toBe(1);
+    expect(s.running).toBe(1);
   });
 
   it("computes pass rate over decided runs only (excludes the live run)", () => {
@@ -79,13 +79,13 @@ describe("computeStats", () => {
 describe("verificationSummaries", () => {
   const summaries = verificationSummaries(entries);
 
-  it("groups by verification, alphabetical, with latest + live", () => {
+  it("groups by verification, alphabetical, with latest lifecycle", () => {
     expect(summaries.map((v) => v.name)).toEqual(["api", "checkout", "login"]);
     const login = summaries.find((v) => v.name === "login")!;
     expect(login.runs).toBe(3);
     expect(login.latest?.run_id).toBe("r3");
     expect(login.recent).toEqual(["pass", "pass", "fail"]); // oldest→newest
     const checkout = summaries.find((v) => v.name === "checkout")!;
-    expect(checkout.live).toBe(true);
+    expect(checkout.status).toBe("running");
   });
 });

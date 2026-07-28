@@ -31,7 +31,7 @@ fn seed_store(db: &Path) -> String {
             .await
             .unwrap();
         w.append(EventPayload::RunFinished {
-            verdict: VerdictState::Pass,
+            verdict: Some(VerdictState::Pass),
         })
         .await
         .unwrap();

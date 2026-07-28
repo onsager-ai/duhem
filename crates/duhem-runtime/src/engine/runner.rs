@@ -30,9 +30,8 @@ use duhem_evidence::{
     VerdictState, new_run_id, project_db_path, run_started_with_definition,
 };
 use duhem_judge::{
-    AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusiveCause,
-    InconclusivePolicy, RunVerdict, aggregate_check, aggregate_criterion, aggregate_run,
-    apply_inconclusive_policy,
+    AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusivePolicy, RunVerdict,
+    aggregate_check, aggregate_criterion, aggregate_run, apply_inconclusive_policy,
 };
 use duhem_schema::{Check, Criterion, RetryBackoff, RetryPolicy, VerificationDefinition};
 use tracing::debug;
@@ -146,6 +145,10 @@ pub struct Engine {
 }
 
 mod builder;
+mod masking;
+mod missing_input;
+mod signal;
+pub(crate) use signal::termination_signal;
 
 impl Engine {
     /// Build the v1 engine with the closed action catalog. The
@@ -293,6 +296,7 @@ impl Engine {
         if let Some(tx) = &self.progress {
             writer = writer.with_tee(tx.clone());
         }
+        writer.start_heartbeats();
 
         writer
             .append(run_started_with_definition(
@@ -302,111 +306,42 @@ impl Engine {
             ))
             .await?;
 
-        // A missing process-sourced (or otherwise unsupplied) declared
-        // input is an environment problem, not malformed authoring and
-        // not a product failure. Record the three-state verdict before
-        // launching a browser or running lifecycle hooks.
-        if let Some(name) = missing_declared {
-            let verdict = RunVerdict {
-                state: VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
-                criteria: Vec::new(),
-            };
-            writer
-                .append(EventPayload::RunFinished {
-                    verdict: verdict.state,
-                })
-                .await?;
-            writer.finish().await?;
-            return Ok(RunOutcome {
-                verdict,
-                run_id,
-                failures: Vec::new(),
-                warnings: vec![format!(
-                    "missing required input `{name}`; supply its declared env variable, a selected environment value, or --inputs"
-                )],
-            });
-        }
+        let execution = async {
+            if let Some(name) = missing_declared {
+                return missing_input::finish(&mut writer, &name, &run_id).await;
+            }
 
-        // Resolve the Verification Definition's directory so relative
-        // `environment.up:` / `down:` paths anchor at the same place
-        // an author would `cd` to before running the script by hand.
-        let vd_dir: Option<PathBuf> = self
-            .definition_path
-            .as_deref()
-            .and_then(|p| Path::new(p).parent().map(Path::to_path_buf));
+            // Resolve the Verification Definition's directory so relative
+            // `environment.up:` / `down:` paths anchor at the same place
+            // an author would `cd` to before running the script by hand.
+            let vd_dir: Option<PathBuf> = self
+                .definition_path
+                .as_deref()
+                .and_then(|p| Path::new(p).parent().map(Path::to_path_buf));
 
-        // `environment:` lifecycle precedes `setup:` (spec on
-        // issue #50). On `up:` failure or `ready:` timeout we record
-        // the verdict as `Inconclusive`, skip setup + criteria, and
-        // delegate the teardown decision to `bring_environment_up`'s
-        // `should_tear_down` signal (so a half-booted SUT or a
-        // `--no-env-up` run still gets its `down:` invocation unless
-        // `--keep-env` is also on).
-        let mut env_should_tear_down = false;
-        if let Some(env) = def.environment.as_ref() {
-            let r = crate::engine::env::bring_environment_up(
-                &mut writer,
-                env,
-                vd_dir.as_deref(),
-                &run_state,
-                self.skip_env_up,
-            )
-            .await?;
-            env_should_tear_down = r.should_tear_down;
-            if let Some(reason) = r.aborted {
-                let verdict = RunVerdict {
-                    state: VerdictState::Inconclusive(reason.cause()),
-                    criteria: Vec::new(),
-                };
-                crate::engine::env::tear_environment_down(
+            // `environment:` lifecycle precedes `setup:` (spec on
+            // issue #50). On `up:` failure or `ready:` timeout we record
+            // the verdict as `Inconclusive`, skip setup + criteria, and
+            // delegate the teardown decision to `bring_environment_up`'s
+            // `should_tear_down` signal (so a half-booted SUT or a
+            // `--no-env-up` run still gets its `down:` invocation unless
+            // `--keep-env` is also on).
+            let mut env_should_tear_down = false;
+            if let Some(env) = def.environment.as_ref() {
+                let r = crate::engine::env::bring_environment_up(
                     &mut writer,
                     env,
                     vd_dir.as_deref(),
-                    self.keep_env,
-                    env_should_tear_down,
+                    &run_state,
+                    self.skip_env_up,
                 )
                 .await?;
-                writer
-                    .append(EventPayload::RunFinished {
-                        verdict: verdict.state,
-                    })
-                    .await?;
-                writer.finish().await?;
-                return Ok(RunOutcome {
-                    verdict,
-                    run_id,
-                    // The run aborted before any criterion executed, so
-                    // there are no per-assertion failures or warnings
-                    // to surface.
-                    failures: Vec::new(),
-                    warnings: Vec::new(),
-                });
-            }
-        }
-
-        // Run-level `setup:` runs once before any criterion. Skipped
-        // entirely when empty so the wire shape stays byte-identical
-        // for setup-free Verification Definitions (issue #20).
-        if !def.setup.is_empty() {
-            let r = crate::engine::setup::run_setup(
-                &mut writer,
-                &self.registry,
-                self.browser.as_ref(),
-                &mut run_state,
-                &def.setup,
-            )
-            .await?;
-            if let Some(reason) = r.aborted {
-                // Preserve the trigger on the verdict: a setup-step
-                // `Timeout` surfaces as `Inconclusive(Timeout)`; an
-                // `Error` (or any environmental precondition) as
-                // `Inconclusive(EnvironmentError)`. Conflating the
-                // two would lose useful telemetry on the trace.
-                let verdict = RunVerdict {
-                    state: VerdictState::Inconclusive(reason.cause()),
-                    criteria: Vec::new(),
-                };
-                if let Some(env) = def.environment.as_ref() {
+                env_should_tear_down = r.should_tear_down;
+                if let Some(reason) = r.aborted {
+                    let verdict = RunVerdict {
+                        state: VerdictState::Inconclusive(reason.cause()),
+                        criteria: Vec::new(),
+                    };
                     crate::engine::env::tear_environment_down(
                         &mut writer,
                         env,
@@ -415,90 +350,151 @@ impl Engine {
                         env_should_tear_down,
                     )
                     .await?;
+                    writer
+                        .append(EventPayload::RunFinished {
+                            verdict: Some(verdict.state),
+                        })
+                        .await?;
+                    return Ok(RunOutcome {
+                        verdict,
+                        run_id,
+                        // The run aborted before any criterion executed, so
+                        // there are no per-assertion failures or warnings
+                        // to surface.
+                        failures: Vec::new(),
+                        warnings: Vec::new(),
+                    });
                 }
+            }
+
+            // Run-level `setup:` runs once before any criterion. Skipped
+            // entirely when empty so the wire shape stays byte-identical
+            // for setup-free Verification Definitions (issue #20).
+            if !def.setup.is_empty() {
+                let r = crate::engine::setup::run_setup(
+                    &mut writer,
+                    &self.registry,
+                    self.browser.as_ref(),
+                    &mut run_state,
+                    &def.setup,
+                )
+                .await?;
+                if let Some(reason) = r.aborted {
+                    // Preserve the trigger on the verdict: a setup-step
+                    // `Timeout` surfaces as `Inconclusive(Timeout)`; an
+                    // `Error` (or any environmental precondition) as
+                    // `Inconclusive(EnvironmentError)`. Conflating the
+                    // two would lose useful telemetry on the trace.
+                    let verdict = RunVerdict {
+                        state: VerdictState::Inconclusive(reason.cause()),
+                        criteria: Vec::new(),
+                    };
+                    if let Some(env) = def.environment.as_ref() {
+                        crate::engine::env::tear_environment_down(
+                            &mut writer,
+                            env,
+                            vd_dir.as_deref(),
+                            self.keep_env,
+                            env_should_tear_down,
+                        )
+                        .await?;
+                    }
+                    writer
+                        .append(EventPayload::RunFinished {
+                            verdict: Some(verdict.state),
+                        })
+                        .await?;
+                    return Ok(RunOutcome {
+                        verdict,
+                        run_id,
+                        // The run aborted before any criterion executed, so
+                        // there are no per-assertion failures or warnings
+                        // to surface.
+                        failures: Vec::new(),
+                        warnings: Vec::new(),
+                    });
+                }
+            }
+
+            let mut criterion_verdicts: Vec<CriterionVerdict> = Vec::new();
+            let mut failures: Vec<CheckFailure> = Vec::new();
+            let mut warnings: Vec<String> = Vec::new();
+            for criterion in &def.criteria {
+                let cv = self
+                    .run_criterion(
+                        &mut writer,
+                        &run_state,
+                        criterion,
+                        &mut failures,
+                        &mut warnings,
+                    )
+                    .await?;
                 writer
-                    .append(EventPayload::RunFinished {
-                        verdict: verdict.state,
+                    .append(EventPayload::CriterionFinished {
+                        criterion_id: criterion.id.clone(),
+                        verdict: cv.state,
+                    })
+                    .await?;
+                criterion_verdicts.push(cv);
+            }
+
+            let run_verdict = aggregate_run(criterion_verdicts);
+            if let Some(env) = def.environment.as_ref() {
+                crate::engine::env::tear_environment_down(
+                    &mut writer,
+                    env,
+                    vd_dir.as_deref(),
+                    self.keep_env,
+                    env_should_tear_down,
+                )
+                .await?;
+            }
+            writer
+                .append(EventPayload::RunFinished {
+                    verdict: Some(run_verdict.state),
+                })
+                .await?;
+
+            Ok(RunOutcome {
+                verdict: run_verdict,
+                run_id,
+                failures,
+                warnings,
+            })
+        };
+
+        let mut execution = Box::pin(execution);
+        let completed: Result<Result<RunOutcome, EngineError>, &'static str> = tokio::select! {
+            signal = termination_signal() => Err(signal),
+            result = &mut execution => Ok(result),
+        };
+        // Release the execution future's mutable borrow of the writer
+        // before appending a signal-driven terminal marker.
+        drop(execution);
+        match completed {
+            Ok(result) => {
+                let result = result.map(|mut outcome| {
+                    // Use the writer's live registry: it includes
+                    // credentials acquired after Engine's input-only
+                    // registry was cloned.
+                    masking::mask_run_outcome(&writer, &mut outcome);
+                    outcome
+                });
+                writer.finish().await?;
+                result
+            }
+            Err(signal) => {
+                writer
+                    .append(EventPayload::RunAborted {
+                        signal: signal.to_string(),
                     })
                     .await?;
                 writer.finish().await?;
-                return Ok(RunOutcome {
-                    verdict,
-                    run_id,
-                    // The run aborted before any criterion executed, so
-                    // there are no per-assertion failures or warnings
-                    // to surface.
-                    failures: Vec::new(),
-                    warnings: Vec::new(),
-                });
-            }
-        }
-
-        let mut criterion_verdicts: Vec<CriterionVerdict> = Vec::new();
-        let mut failures: Vec<CheckFailure> = Vec::new();
-        let mut warnings: Vec<String> = Vec::new();
-        for criterion in &def.criteria {
-            let cv = self
-                .run_criterion(
-                    &mut writer,
-                    &run_state,
-                    criterion,
-                    &mut failures,
-                    &mut warnings,
-                )
-                .await?;
-            writer
-                .append(EventPayload::CriterionFinished {
-                    criterion_id: criterion.id.clone(),
-                    verdict: cv.state,
+                Err(EngineError::Aborted {
+                    signal: signal.to_string(),
                 })
-                .await?;
-            criterion_verdicts.push(cv);
-        }
-
-        let run_verdict = aggregate_run(criterion_verdicts);
-        if let Some(env) = def.environment.as_ref() {
-            crate::engine::env::tear_environment_down(
-                &mut writer,
-                env,
-                vd_dir.as_deref(),
-                self.keep_env,
-                env_should_tear_down,
-            )
-            .await?;
-        }
-        writer
-            .append(EventPayload::RunFinished {
-                verdict: run_verdict.state,
-            })
-            .await?;
-
-        // The structured reporter is the terminal sink's input. Mask it
-        // before returning so pretty/JSON/JUnit reporters and direct
-        // programmatic renderers cannot diverge in secret handling. Use
-        // the writer's live registry: it includes credentials acquired
-        // after the input-only registry on `Engine` was cloned.
-        for warning in &mut warnings {
-            *warning = writer.mask_text(warning);
-        }
-        for failure in &mut failures {
-            failure.criterion_id = writer.mask_text(&failure.criterion_id);
-            failure.check_id = writer.mask_text(&failure.check_id);
-            for assertion in &mut failure.assertions {
-                assertion.expr = writer.mask_text(&assertion.expr);
-                if let Some(detail) = &mut assertion.detail {
-                    *detail = writer.mask_text(detail);
-                }
             }
         }
-        writer.finish().await?;
-
-        Ok(RunOutcome {
-            verdict: run_verdict,
-            run_id,
-            failures,
-            warnings,
-        })
     }
 
     async fn run_criterion(
@@ -902,6 +898,99 @@ mod tests {
     use duhem_judge::InconclusiveCause;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sigterm_records_an_aborted_terminal() {
+        const CHILD: &str = "DUHEM_SIGNAL_TEST_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            struct SlowAction;
+
+            #[async_trait]
+            impl Dispatch for SlowAction {
+                fn uses(&self) -> &'static str {
+                    "test/slow"
+                }
+
+                fn requires_page(&self) -> bool {
+                    false
+                }
+
+                async fn invoke(
+                    &self,
+                    _page: Option<&Page>,
+                    _step_index: usize,
+                    _with: &serde_yml::Value,
+                ) -> Result<ActionResult, ActionError> {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    Ok(ActionResult::ok())
+                }
+            }
+
+            let (mut engine, tmp) = engine_for_test().await;
+            engine.register_test_action(Box::new(SlowAction));
+            engine.run_id = Some("01ABORTED".into());
+            let verification = def(r#"
+verification: signal
+criteria:
+  - id: AC-1
+    description: interrupted work
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: test/slow
+        assertions: ["true"]
+"#);
+            let raiser = std::thread::spawn(|| {
+                std::thread::sleep(Duration::from_millis(250));
+                signal_hook::low_level::raise(signal_hook::consts::signal::SIGTERM).unwrap();
+            });
+            let result = engine.run(&verification, BTreeMap::new()).await;
+            assert!(
+                matches!(
+                    &result,
+                    Err(EngineError::Aborted {
+                        signal
+                    }) if signal == "SIGTERM"
+                ),
+                "run result: {result:?}"
+            );
+            raiser.join().unwrap();
+
+            let store = SqliteStore::open(tmp.path().join("duhem.db"))
+                .await
+                .unwrap();
+            let record = duhem_evidence::Store::get_run(&store, "01ABORTED")
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(record.status, duhem_evidence::RunStatus::Aborted);
+            assert_eq!(record.verdict, None);
+            let events = duhem_evidence::Store::run_events(&store, "01ABORTED")
+                .await
+                .unwrap();
+            assert!(matches!(
+                events.last().map(|event| &event.payload),
+                Some(EventPayload::RunAborted { signal }) if signal == "SIGTERM"
+            ));
+            return;
+        }
+
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "engine::runner::tests::sigterm_records_an_aborted_terminal",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .expect("spawn isolated signal test");
+        assert!(
+            output.status.success(),
+            "child stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
     /// In-memory stub that ignores `page` and returns a configurable
     /// result. Test-only — kept under `#[cfg(test)]` per the spec.
@@ -3039,7 +3128,9 @@ criteria:
         assert!(matches!(
             events.last().map(|event| &event.payload),
             Some(EventPayload::RunFinished {
-                verdict: VerdictState::Inconclusive(InconclusiveCause::EnvironmentError)
+                verdict: Some(VerdictState::Inconclusive(
+                    InconclusiveCause::EnvironmentError
+                ))
             })
         ));
         assert!(

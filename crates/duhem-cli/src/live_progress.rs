@@ -220,8 +220,8 @@ impl Default for RenderConfig {
         Self {
             tty: false,
             color: false,
-            heartbeat_threshold: Duration::from_secs(10),
-            heartbeat_period: Duration::from_secs(10),
+            heartbeat_threshold: duhem_evidence::HEARTBEAT_PERIOD,
+            heartbeat_period: duhem_evidence::HEARTBEAT_PERIOD,
         }
     }
 }
@@ -488,7 +488,7 @@ impl<B: Backend> TtyRenderer<B> {
                 self.board.finish_criterion(criterion_id, verdict);
                 (false, true)
             }
-            EventPayload::RunFinished { .. } => (true, true),
+            EventPayload::RunFinished { .. } | EventPayload::RunAborted { .. } => (true, true),
             _ => (false, false),
         };
         if redraw {
@@ -611,7 +611,7 @@ impl<W: Write> Renderer<'_, W> {
                 let _ = self.out.flush();
                 self.running = None;
             }
-            EventPayload::RunFinished { .. } => return true,
+            EventPayload::RunFinished { .. } | EventPayload::RunAborted { .. } => return true,
             _ => {}
         }
         false
@@ -987,7 +987,7 @@ criteria:
                     5,
                     2000,
                     EventPayload::RunFinished {
-                        verdict: VerdictState::Fail,
+                        verdict: Some(VerdictState::Fail),
                     },
                 ),
             ],
@@ -1058,7 +1058,7 @@ criteria:
                     6,
                     3100,
                     EventPayload::RunFinished {
-                        verdict: VerdictState::Pass,
+                        verdict: Some(VerdictState::Pass),
                     },
                 ),
             ],
@@ -1079,7 +1079,7 @@ criteria:
             0,
             0,
             EventPayload::RunFinished {
-                verdict: VerdictState::Pass,
+                verdict: Some(VerdictState::Pass),
             },
         ))
         .unwrap();
@@ -1484,7 +1484,7 @@ criteria:
             3,
             5200,
             EventPayload::RunFinished {
-                verdict: VerdictState::Pass,
+                verdict: Some(VerdictState::Pass),
             },
         ))
         .unwrap();

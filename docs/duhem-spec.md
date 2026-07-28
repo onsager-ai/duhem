@@ -186,6 +186,8 @@ The thing being verified. Typically a Git ref (commit, PR, deploy candidate). Th
 
 One execution of a verification against an artifact. Runs are idempotent given a frozen check spec and a stable environment, but Duhem records run history because environments do drift — and environment drift is part of the web Duhem-Quine talks about.
 
+A run's runtime-owned lifecycle is independent of its judge-owned verdict. Lifecycle is `running`, `finished`, `aborted`, or `orphaned`: the runtime emits a heartbeat every 10 seconds, writes a terminal marker on normal completion or a trapped termination signal, and readers classify an unterminated run as `orphaned` after 30 seconds without a heartbeat. `orphaned` is read-time policy, not a stored fact. A run may be `finished` without a verdict — notably the suite container that records shared environment provisioning but has no criteria to judge. Viewer connection state is neither lifecycle nor evidence; it remains local to each live SSE client.
+
 ## 8. The Holistic Verification Principle
 
 This section explains a foundational design choice that follows from Duhem-Quine and that distinguishes Duhem from component-testing tools.
@@ -811,14 +813,16 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 > per-working-copy path-slug namespace; a hosted Postgres store is
 > the #188 commercial layer). The invariants are preserved, restated:
 > the runtime (carrying the judge's verdicts) is the store's **sole
-> writer**; rows are **insert-only** and a run is sealed at its
-> verdict; the dashboard is a **read-only lens** (SQLite `mode=ro` —
+> writer**; rows are **insert-only** and a run is sealed by a
+> runtime-owned terminal event, independently of any verdict; the
+> dashboard is a **read-only lens** (SQLite `mode=ro` —
 > enforced by the connection, not by discipline); and **`duhem
 > export`** is the portability path — a self-contained bundle (run
 > header + wire-format event stream + artifacts) that round-trips
-> what the old files carried. The trace *wire format* (#10) is
-> unchanged; it now lives in the store's `events` rows and in export
-> bundles.
+> what the old files carried. The additive trace *wire format* (#10)
+> now includes heartbeat and aborted terminal events, and permits a
+> verdict-less `run_finished`; it lives in the store's `events` rows
+> and in export bundles.
 
 - Append-only run store: the wire-format event stream, derived
   verdict/criteria/check projections, and content-addressed binary
@@ -1051,7 +1055,7 @@ This phase is contingent on Onsager’s own roadmap. It is not blocking for Duhe
 |Verdict                |The aggregated outcome (pass / fail / inconclusive)                                                                                                                   |
 |Evidence               |The append-only structured trace from a run                                                                                                                           |
 |Artifact               |The thing being verified (typically a Git ref)                                                                                                                        |
-|Run                    |One execution of a verification                                                                                                                                       |
+|Run                    |One execution of a verification; its runtime lifecycle is independent of its optional judge verdict                                                                  |
 |Action type            |A reusable, named operation invoked via `uses:`                                                                                                                       |
 |Judge                  |The deterministic evaluator producing verdicts                                                                                                                        |
 |Web                    |The full set of components, configurations, prompts, data, and runtime context that the artifact depends on; never decomposable into independently testable units     |

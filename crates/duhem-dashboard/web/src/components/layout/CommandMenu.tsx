@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/command";
 import { useRunsData } from "@/runs-context";
 import { computeStats, verificationSummaries } from "@/stats";
-import { VerdictBadge } from "@/ui";
+import { StatusBadge, VerdictBadge } from "@/ui";
 import { NAV } from "./nav";
 
 // ⌘K palette — jump to a section, a verification, or a recent run.
@@ -72,10 +72,10 @@ export function CommandMenu({
                   <ShieldCheck />
                   <span className="truncate">{v.name}</span>
                   <span className="ml-auto">
-                    <VerdictBadge
-                      verdict={v.latest?.verdict ?? null}
-                      live={v.live}
-                    />
+                    <span className="flex gap-1">
+                      <StatusBadge status={v.status} />
+                      <VerdictBadge verdict={v.latest?.verdict ?? null} />
+                    </span>
                   </span>
                 </CommandItem>
               ))}
@@ -96,7 +96,8 @@ export function CommandMenu({
                   <span className="truncate font-mono text-xs">{r.run_id}</span>
                   <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
                     <span className="hidden sm:inline">{r.verification}</span>
-                    <VerdictBadge verdict={r.verdict} live={r.live} />
+                    <StatusBadge status={r.status} />
+                    <VerdictBadge verdict={r.verdict} />
                   </span>
                 </CommandItem>
               ))}

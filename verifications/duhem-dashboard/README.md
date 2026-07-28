@@ -29,8 +29,9 @@ trust role.
 | **AC-1**  | `GET /api/runs` + `GET /api/runs/<id>` serve the recorded verdict and the criterion→check tree in shape. | JSON API |
 | **AC-2**  | The browser renders the SPA shell, the run's `pass` verdict, and the criterion's check as a link. | SPA (real Chromium) |
 | **AC-3**  | The live SSE stream replays the trace through the recorded `run_finished` verdict. | SSE |
-| **AC-4**  | In-flight runs appear live before their verdict lands. | JSON API |
+| **AC-4**  | In-flight runs report `running` before their verdict lands. | JSON API |
 | **AC-5**  | A selected step restores and synchronizes its screenshot and replay evidence. | SPA Replay |
+| **AC-6**  | A completed unjudged suite reports `finished` with no invented verdict. | Static JSON API |
 
 No mocks at the boundary (`docs/duhem-spec.md` §8): `environment.up`
 runs the offline `fixture/dashboard-fixture.yml` through the real

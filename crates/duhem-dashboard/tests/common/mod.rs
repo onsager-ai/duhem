@@ -185,7 +185,7 @@ pub async fn write_passing_run(
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
-        verdict: VerdictState::Pass,
+        verdict: Some(VerdictState::Pass),
     })
     .await
     .unwrap();
@@ -316,7 +316,7 @@ pub async fn write_replay_run(store: Arc<SqliteStore>, run_id: &str) -> (String,
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
-        verdict: VerdictState::Pass,
+        verdict: Some(VerdictState::Pass),
     })
     .await
     .unwrap();
@@ -372,7 +372,7 @@ pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
-        verdict: VerdictState::Fail,
+        verdict: Some(VerdictState::Fail),
     })
     .await
     .unwrap();
@@ -410,15 +410,16 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
         .await
         .unwrap();
     w.append(EventPayload::RunFinished {
-        verdict: VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+        verdict: Some(VerdictState::Inconclusive(
+            InconclusiveCause::EnvironmentError,
+        )),
     })
     .await
     .unwrap();
     w.finish().await.unwrap();
 }
 
-/// An in-progress run (#84): a step has started, no `run_finished` —
-/// the store-era "live" shape (no verdict row).
+/// An in-progress run: a step has started and no terminal marker exists.
 pub async fn write_in_progress_run(store: Arc<SqliteStore>, run_id: &str, definition_path: &str) {
     let mut w = EvidenceWriter::begin(store, run_id, definition_path, BTreeMap::new())
         .await
@@ -436,5 +437,5 @@ pub async fn write_in_progress_run(store: Arc<SqliteStore>, run_id: &str, defini
     })
     .await
     .unwrap();
-    // No run_finished — the run stays live/unfinished in the store.
+    // Fresh heartbeat age keeps this unterminated run `running`.
 }

@@ -24,6 +24,7 @@ async-trait.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 base64.workspace = true
+signal-hook = "0.3"
 
 [dev-dependencies]
 axum.workspace = true

@@ -37,7 +37,7 @@ struct Follow {
     /// for `seq > last_seq` only.
     last_seq: i64,
     pending: VecDeque<String>,
-    /// Set once a `run_finished` event is queued: flush what's
+    /// Set once a terminal lifecycle event is queued: flush what's
     /// pending, then close.
     done: bool,
     deadline: Instant,
@@ -50,7 +50,10 @@ impl Follow {
         let events = self.store.events_after(&self.run_id, self.last_seq).await?;
         for evt in events {
             self.last_seq = evt.seq as i64;
-            if matches!(evt.payload, EventPayload::RunFinished { .. }) {
+            if matches!(
+                evt.payload,
+                EventPayload::RunFinished { .. } | EventPayload::RunAborted { .. }
+            ) {
                 self.done = true;
             }
             if let Ok(line) = serde_json::to_string(&evt) {
@@ -66,7 +69,7 @@ impl Follow {
 /// On connect, every event already in the store is sent (replay),
 /// then new events are streamed as they are appended (follow). Each
 /// event becomes one `trace` SSE event whose data is the wire-format
-/// JSON line. The stream ends after `run_finished`, or with a
+/// JSON line. The stream ends after a terminal lifecycle event, or with a
 /// `timeout` event at the lifetime cap. Dropping the consumer (client
 /// disconnect) drops the stream — no long-lived task survives the
 /// connection.

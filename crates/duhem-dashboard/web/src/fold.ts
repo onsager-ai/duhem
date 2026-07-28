@@ -12,7 +12,7 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
     started_at: null,
     inputs: {},
     verdict: null,
-    live: true,
+    status: "running",
     setup_aborted: false,
     // A live fold doesn't surface the definition; the authoritative
     // re-fetch on `run_finished` fills this in (#302).
@@ -70,8 +70,12 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
         break;
       }
       case "run_finished":
-        detail.verdict = String(evt.verdict);
-        detail.live = false;
+        detail.verdict =
+          typeof evt.verdict === "string" ? String(evt.verdict) : null;
+        detail.status = "finished";
+        break;
+      case "run_aborted":
+        detail.status = "aborted";
         break;
     }
   }

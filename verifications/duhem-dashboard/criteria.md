@@ -45,11 +45,17 @@ the final recorded verdict, in the documented SSE shape.
 ## AC-4
 
 An operator watching the runs list sees in-flight work: a run that is
-still executing is already present in the list, marked live, before any
-verdict exists.
+still executing is already present in the list, marked running, before
+any verdict exists.
 
 ## AC-5
 
 An operator can move from a recorded check to any executed step and inspect
 the visual and browser evidence for that moment without losing run or check
 context.
+
+## AC-6
+
+A completed suite reports a finished runtime lifecycle even though its
+shared environment container is never judged. It does not remain
+running after teardown and no verdict is invented for it.

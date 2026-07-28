@@ -15,13 +15,13 @@ use sha2::{Digest, Sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Pool, Row, Sqlite};
 
-use crate::event::{Event, EventPayload};
+use crate::event::{Event, EventPayload, RunStatus};
 use crate::writer::Sha256Hex;
 
 use super::{
     CriterionHistoryEntry, ProjectSummary, RunMeta, RunRecord, RunScope, Span, Store, StoreError,
-    TargetStatus, is_valid_sha256_hex, parse_verdict, verdict_token, verification_key,
-    verification_name,
+    TargetStatus, derive_run_status, is_valid_sha256_hex, parse_verdict, verdict_token,
+    verification_key, verification_name,
 };
 
 /// RFC 3339 with exactly millisecond precision — the same shape the
@@ -109,17 +109,25 @@ impl SqliteStore {
 fn row_to_run_record(row: &sqlx::sqlite::SqliteRow) -> Result<RunRecord, StoreError> {
     let inputs_json: String = row.get("inputs");
     let verdict: Option<String> = row.get("verdict");
-    let finished_at: Option<String> = row.get("finished_at");
+    let terminal_status: Option<String> = row.get("terminal_status");
+    let finished_at: Option<String> = row.get("terminal_at");
     let duration_ms: Option<i64> = row.get("duration_ms");
+    let last_heartbeat_at = parse_ts(row.get("last_heartbeat_at"))?;
+    let terminal = terminal_status
+        .as_deref()
+        .map(parse_run_status)
+        .transpose()?;
     Ok(RunRecord {
         run_id: row.get("run_id"),
         verification: row.get("verification"),
         schema_version: row.get("schema_version"),
         inputs: serde_json::from_str(&inputs_json)?,
         started_at: parse_ts(row.get("started_at"))?,
+        status: derive_run_status(terminal, last_heartbeat_at, Utc::now()),
         verdict: verdict.as_deref().map(parse_verdict).transpose()?,
         finished_at: finished_at.as_deref().map(parse_ts).transpose()?,
         duration_ms: duration_ms.map(|d| d as u64),
+        last_heartbeat_at,
         scope: RunScope {
             project_id: row.get("project_id"),
             verifier_repo: row.get("verifier_repo"),
@@ -132,8 +140,19 @@ fn row_to_run_record(row: &sqlx::sqlite::SqliteRow) -> Result<RunRecord, StoreEr
 
 const RUN_SELECT: &str = "SELECT r.run_id, r.verification, r.schema_version, r.inputs, \
      r.started_at, r.project_id, r.verifier_repo, r.verifier_sha, r.target_repo, \
-     r.target_sha, v.verdict, v.finished_at, v.duration_ms \
-     FROM runs r LEFT JOIN run_verdicts v ON v.run_id = r.run_id";
+     r.target_sha, v.verdict, t.status AS terminal_status, t.terminal_at, t.duration_ms, \
+     COALESCE((SELECT MAX(e.ts) FROM events e WHERE e.run_id = r.run_id \
+       AND e.kind = 'run_heartbeat'), r.started_at) AS last_heartbeat_at \
+     FROM runs r LEFT JOIN run_verdicts v ON v.run_id = r.run_id \
+     LEFT JOIN run_terminals t ON t.run_id = r.run_id";
+
+fn parse_run_status(token: &str) -> Result<RunStatus, StoreError> {
+    match token {
+        "finished" => Ok(RunStatus::Finished),
+        "aborted" => Ok(RunStatus::Aborted),
+        other => Err(StoreError::BadRunStatus(other.to_string())),
+    }
+}
 
 #[async_trait]
 impl Store for SqliteStore {
@@ -327,12 +346,44 @@ impl Store for SqliteStore {
                 let duration_ms = (event.ts - parse_ts(&started_at)?)
                     .num_milliseconds()
                     .max(0);
+                if let Some(verdict) = verdict {
+                    sqlx::query(
+                        "INSERT INTO run_verdicts (run_id, verdict, finished_at, duration_ms) \
+                         VALUES (?, ?, ?, ?)",
+                    )
+                    .bind(run_id)
+                    .bind(verdict_token(verdict)?)
+                    .bind(fmt_ts(&event.ts))
+                    .bind(duration_ms)
+                    .execute(&mut *tx)
+                    .await?;
+                }
                 sqlx::query(
-                    "INSERT INTO run_verdicts (run_id, verdict, finished_at, duration_ms) \
-                     VALUES (?, ?, ?, ?)",
+                    "INSERT INTO run_terminals (run_id, status, terminal_at, duration_ms) \
+                     VALUES (?, 'finished', ?, ?)",
                 )
                 .bind(run_id)
-                .bind(verdict_token(verdict)?)
+                .bind(fmt_ts(&event.ts))
+                .bind(duration_ms)
+                .execute(&mut *tx)
+                .await?;
+            }
+            EventPayload::RunAborted { .. } => {
+                let started_at: Option<String> =
+                    sqlx::query_scalar("SELECT started_at FROM runs WHERE run_id = ?")
+                        .bind(run_id)
+                        .fetch_optional(&mut *tx)
+                        .await?;
+                let started_at =
+                    started_at.ok_or_else(|| StoreError::UnknownRun(run_id.to_string()))?;
+                let duration_ms = (event.ts - parse_ts(&started_at)?)
+                    .num_milliseconds()
+                    .max(0);
+                sqlx::query(
+                    "INSERT INTO run_terminals (run_id, status, terminal_at, duration_ms) \
+                     VALUES (?, 'aborted', ?, ?)",
+                )
+                .bind(run_id)
                 .bind(fmt_ts(&event.ts))
                 .bind(duration_ms)
                 .execute(&mut *tx)

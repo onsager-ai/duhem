@@ -2,7 +2,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { Verdict } from "./api";
+import type { RunStatus, Verdict } from "./api";
 
 // Verdict "family" collapses "inconclusive:<cause>" to "inconclusive".
 export function verdictFamily(
@@ -23,23 +23,13 @@ export function verdictClass(verdict: Verdict | null): string {
 
 export function VerdictBadge({
   verdict,
-  live,
   className,
   compact = false,
 }: {
   verdict: Verdict | null;
-  live?: boolean;
   className?: string;
   compact?: boolean;
 }) {
-  if (verdict === null && live) {
-    return (
-      <Badge variant="live" className={cn("gap-1.5", className)}>
-        <span className="size-1.5 rounded-full bg-live motion-safe:animate-pulse" />
-        live
-      </Badge>
-    );
-  }
   if (verdict === null) {
     return (
       <Badge variant="none" className={className}>
@@ -54,6 +44,31 @@ export function VerdictBadge({
       title={verdict}
     >
       {compact ? verdictFamily(verdict) : verdict}
+    </Badge>
+  );
+}
+
+export function StatusBadge({
+  status,
+  className,
+}: {
+  status: RunStatus;
+  className?: string;
+}) {
+  const variant =
+    status === "running"
+      ? "live"
+      : status === "finished"
+        ? "none"
+        : status === "aborted"
+          ? "fail"
+          : "inconclusive";
+  return (
+    <Badge variant={variant} className={cn("gap-1.5", className)}>
+      {status === "running" && (
+        <span className="size-1.5 rounded-full bg-live motion-safe:animate-pulse" />
+      )}
+      {status}
     </Badge>
   );
 }

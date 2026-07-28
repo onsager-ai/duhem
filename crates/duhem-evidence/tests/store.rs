@@ -9,9 +9,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use duhem_evidence::{
-    BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, EvidenceWriter, ObservationValue, ReadError,
-    ReplayDivergence, ReplayError, RunBundle, SecretRegistry, SqliteStore, StepOutcome, Store,
-    Trace, VerdictState, replay, run_started,
+    BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, EvidenceWriter, HEARTBEAT_PERIOD,
+    ObservationValue, ReadError, ReplayDivergence, ReplayError, RunBundle, RunMeta, RunScope,
+    RunStatus, SCHEMA_VERSION, SecretRegistry, SqliteStore, StepOutcome, Store, Trace,
+    VerdictState, replay, run_started,
 };
 use tempfile::TempDir;
 
@@ -78,7 +79,7 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
-        verdict: VerdictState::Pass,
+        verdict: Some(VerdictState::Pass),
     })
     .await
     .unwrap();
@@ -97,7 +98,7 @@ async fn round_trip_worked_example() {
     assert!(matches!(
         events.last().unwrap().payload,
         EventPayload::RunFinished {
-            verdict: VerdictState::Pass
+            verdict: Some(VerdictState::Pass)
         }
     ));
 
@@ -105,6 +106,7 @@ async fn round_trip_worked_example() {
     let run = store.get_run(RUN_ID).await.unwrap().unwrap();
     assert_eq!(run.schema_version, "v1");
     assert_eq!(run.verification, "create-workspace.yml");
+    assert_eq!(run.status, RunStatus::Finished);
     assert_eq!(run.verdict, Some(VerdictState::Pass));
     assert!(run.duration_ms.is_some());
     assert_eq!(
@@ -171,6 +173,79 @@ async fn dropped_writer_loses_nothing_and_run_stays_unfinished() {
     }
     let run = store.get_run(RUN_ID).await.unwrap().unwrap();
     assert_eq!(run.verdict, None, "no verdict row without run_finished");
+    assert_eq!(run.status, RunStatus::Running);
+}
+
+#[tokio::test]
+async fn terminal_marker_can_finish_a_run_without_a_verdict() {
+    let (_tmp, store) = open_store().await;
+    let mut w = EvidenceWriter::begin(store.clone(), RUN_ID, "<suite>", BTreeMap::new())
+        .await
+        .unwrap();
+    w.append(EventPayload::RunFinished { verdict: None })
+        .await
+        .unwrap();
+    w.finish().await.unwrap();
+
+    let run = store.get_run(RUN_ID).await.unwrap().unwrap();
+    assert_eq!(run.status, RunStatus::Finished);
+    assert_eq!(run.verdict, None);
+    assert!(run.finished_at.is_some());
+    assert!(run.duration_ms.is_some());
+}
+
+#[tokio::test]
+async fn aborted_terminal_marker_is_distinct_from_an_orphan() {
+    let (_tmp, store) = open_store().await;
+    let mut w = EvidenceWriter::begin(store.clone(), RUN_ID, "slow.yml", BTreeMap::new())
+        .await
+        .unwrap();
+    w.append(EventPayload::RunAborted {
+        signal: "SIGTERM".into(),
+    })
+    .await
+    .unwrap();
+
+    let run = store.get_run(RUN_ID).await.unwrap().unwrap();
+    assert_eq!(run.status, RunStatus::Aborted);
+    assert_eq!(run.verdict, None);
+}
+
+#[test]
+fn runtime_heartbeat_uses_the_shared_ten_second_cadence() {
+    assert_eq!(HEARTBEAT_PERIOD, std::time::Duration::from_secs(10));
+}
+
+#[tokio::test]
+async fn stale_unterminated_trace_is_orphaned() {
+    let (_tmp, store) = open_store().await;
+    let started_at = chrono::Utc::now() - chrono::Duration::seconds(31);
+    store
+        .begin_run(&RunMeta {
+            run_id: RUN_ID.into(),
+            verification: "legacy.yml".into(),
+            schema_version: SCHEMA_VERSION.into(),
+            inputs: BTreeMap::new(),
+            started_at,
+            scope: RunScope::default(),
+        })
+        .await
+        .unwrap();
+    store
+        .append_event(
+            RUN_ID,
+            &Event {
+                seq: 0,
+                ts: started_at,
+                payload: run_started("legacy.yml", BTreeMap::new()),
+            },
+        )
+        .await
+        .unwrap();
+
+    let run = store.get_run(RUN_ID).await.unwrap().unwrap();
+    assert_eq!(run.status, RunStatus::Orphaned);
+    assert_eq!(run.verdict, None);
 }
 
 #[tokio::test]
@@ -353,6 +428,7 @@ async fn update_and_delete_are_rejected_on_every_table() {
     for (table, set_clause) in [
         ("runs", "verification = 'tampered'"),
         ("run_verdicts", "verdict = 'fail'"),
+        ("run_terminals", "status = 'aborted'"),
         ("events", "payload = '{}'"),
         ("criteria", "verdict = 'fail'"),
         ("checks", "verdict = 'fail'"),
@@ -387,7 +463,7 @@ async fn a_finished_run_is_sealed_against_further_events() {
         .await
         .unwrap();
     w.append(EventPayload::RunFinished {
-        verdict: VerdictState::Pass,
+        verdict: Some(VerdictState::Pass),
     })
     .await
     .unwrap();
@@ -484,8 +560,6 @@ async fn list_runs_orders_most_recent_first() {
 // Scoping + provenance (#190)
 // ---------------------------------------------------------------
 
-use duhem_evidence::RunScope;
-
 /// Write a minimal finished run with the given scope and verdict.
 async fn write_scoped_run(
     store: Arc<SqliteStore>,
@@ -517,9 +591,11 @@ async fn write_scoped_run(
     })
     .await
     .unwrap();
-    w.append(EventPayload::RunFinished { verdict })
-        .await
-        .unwrap();
+    w.append(EventPayload::RunFinished {
+        verdict: Some(verdict),
+    })
+    .await
+    .unwrap();
 }
 
 fn scope_for(project: &str, target_sha: &str, verdict_target: &str) -> RunScope {
@@ -579,10 +655,14 @@ async fn migration_is_additive_and_lossless_over_a_pre_scoping_store() {
         .execute(&mut conn)
         .await
         .unwrap();
-        // A pre-#190 run row + verdict, via the 0001 schema only.
+        // Pre-#190 rows via the 0001 schema only: one trace that
+        // finished under the old verdict-welded contract, and one
+        // that never reached a terminal event.
         sqlx::query(
             "INSERT INTO runs (run_id, verification, schema_version, inputs, started_at) \
-             VALUES ('01OLD', 'old.yml', 'v1', '{}', '2026-07-01T00:00:00.000Z')",
+             VALUES \
+             ('01OLD', 'old.yml', 'v1', '{}', '2026-07-01T00:00:00.000Z'), \
+             ('01ORPHAN', 'orphan.yml', 'v1', '{}', '2026-07-01T00:00:00.000Z')",
         )
         .execute(&mut conn)
         .await
@@ -590,7 +670,18 @@ async fn migration_is_additive_and_lossless_over_a_pre_scoping_store() {
         sqlx::query(
             "INSERT INTO events (run_id, seq, ts, kind, payload) VALUES \
              ('01OLD', 0, '2026-07-01T00:00:00.000Z', 'run_started', \
-             '{\"seq\":0,\"ts\":\"2026-07-01T00:00:00.000Z\",\"kind\":\"run_started\",\"verification_path\":\"old.yml\",\"schema_version\":\"v1\"}')",
+             '{\"seq\":0,\"ts\":\"2026-07-01T00:00:00.000Z\",\"kind\":\"run_started\",\"verification_path\":\"old.yml\",\"schema_version\":\"v1\"}'), \
+             ('01OLD', 1, '2026-07-01T00:00:01.000Z', 'run_finished', \
+             '{\"seq\":1,\"ts\":\"2026-07-01T00:00:01.000Z\",\"kind\":\"run_finished\",\"verdict\":\"pass\"}'), \
+             ('01ORPHAN', 0, '2026-07-01T00:00:00.000Z', 'run_started', \
+             '{\"seq\":0,\"ts\":\"2026-07-01T00:00:00.000Z\",\"kind\":\"run_started\",\"verification_path\":\"orphan.yml\",\"schema_version\":\"v1\"}')",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO run_verdicts (run_id, verdict, finished_at, duration_ms) \
+             VALUES ('01OLD', 'pass', '2026-07-01T00:00:01.000Z', 1000)",
         )
         .execute(&mut conn)
         .await
@@ -601,12 +692,19 @@ async fn migration_is_additive_and_lossless_over_a_pre_scoping_store() {
     let store = SqliteStore::open(&db).await.unwrap();
     let old = store.get_run("01OLD").await.unwrap().expect("old run kept");
     assert_eq!(old.verification, "old.yml");
+    assert_eq!(old.status, RunStatus::Finished);
     assert_eq!(
         old.scope,
         RunScope::default(),
         "pre-scoping rows are unattributed"
     );
-    assert_eq!(store.run_events("01OLD").await.unwrap().len(), 1);
+    assert_eq!(store.run_events("01OLD").await.unwrap().len(), 2);
+    let orphan = store
+        .get_run("01ORPHAN")
+        .await
+        .unwrap()
+        .expect("unterminated old run kept");
+    assert_eq!(orphan.status, RunStatus::Orphaned);
 
     // Append-only still enforced post-migration, and new scoped runs land.
     assert!(
@@ -987,7 +1085,7 @@ async fn writer_tee_mirrors_persisted_events_in_order() {
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
-        verdict: VerdictState::Pass,
+        verdict: Some(VerdictState::Pass),
     })
     .await
     .unwrap();
@@ -1100,7 +1198,7 @@ async fn secret_registry_masks_events_artifacts_and_bundle_exports() {
         .unwrap();
     writer
         .append(EventPayload::RunFinished {
-            verdict: VerdictState::Pass,
+            verdict: Some(VerdictState::Pass),
         })
         .await
         .unwrap();

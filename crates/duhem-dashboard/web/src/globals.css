@@ -7,7 +7,7 @@
 
 /* ---- Design tokens -------------------------------------------------- */
 /* Neutral shadcn base with a Duhem indigo primary. Verdict colors
-   (pass/fail/inconclusive/live) are first-class tokens so both the
+   (pass/fail/inconclusive plus the running accent) are first-class tokens so both the
    shadcn components and the bespoke evidence views read from one place.
    Values are oklch for perceptually-even light/dark pairs. */
 

@@ -32,19 +32,21 @@ async fn export_produces_a_self_contained_tree() {
     // The SPA entry point.
     assert!(out.path().join("index.html").is_file());
 
-    // Runs list snapshot, with live affordances frozen off (#84:
-    // export is a snapshot).
+    // Runs list snapshots carry runtime lifecycle but never a viewer's
+    // connection state.
     let list: Value =
         serde_json::from_slice(&std::fs::read(out.path().join("api/runs.json")).unwrap()).unwrap();
     let rows = list.as_array().unwrap();
     assert_eq!(rows.len(), 2);
-    fn assert_not_live(row: &Value) {
-        assert_eq!(row["live"], false);
+    fn assert_static_lifecycle(row: &Value) {
+        assert_eq!(row["status"], "finished");
+        assert!(row.get("live").is_none());
+        assert!(row.get("connection").is_none());
         if let Some(children) = row["children"].as_array() {
-            children.iter().for_each(assert_not_live);
+            children.iter().for_each(assert_static_lifecycle);
         }
     }
-    rows.iter().for_each(assert_not_live);
+    rows.iter().for_each(assert_static_lifecycle);
 
     // Per-run snapshots + the wire-format event stream.
     for run_id in ["01J0000000000000000000000A", "01J0000000000000000000000B"] {
@@ -160,7 +162,7 @@ async fn export_refuses_traversal_shaped_ids() {
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
-        verdict: VerdictState::Pass,
+        verdict: Some(VerdictState::Pass),
     })
     .await
     .unwrap();

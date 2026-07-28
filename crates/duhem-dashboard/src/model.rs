@@ -8,7 +8,7 @@
 //! re-judged at the view layer.
 
 use chrono::{DateTime, Utc};
-use duhem_evidence::{Event, VerdictState};
+use duhem_evidence::{Event, RunStatus, VerdictState};
 use serde::Serialize;
 
 /// Discriminates the two row kinds on the runs list. A `run-set` row
@@ -32,13 +32,11 @@ pub struct RunsListEntry {
     pub verification: String,
     pub started_at: Option<DateTime<Utc>>,
     pub duration_ms: Option<u64>,
-    /// `None` while the run is still in progress (#84): there is no
-    /// verdict until the judge's `run_finished` lands in the trace.
+    /// Judge-owned outcome. A finished unjudged run legitimately has
+    /// no verdict.
     pub verdict: Option<VerdictState>,
     pub kind: EntryKind,
-    /// `true` iff the trace has no `run_finished` yet (#84's "● live"
-    /// affordance). Always `false` in static exports.
-    pub live: bool,
+    pub status: RunStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub children: Option<Vec<RunsListEntry>>,
 }
@@ -51,7 +49,7 @@ pub struct RunDetail {
     pub started_at: Option<DateTime<Utc>>,
     pub inputs: serde_json::Map<String, serde_json::Value>,
     pub verdict: Option<VerdictState>,
-    pub live: bool,
+    pub status: RunStatus,
     /// `true` when the trace carries `setup_finished { aborted: true }`
     /// (#20) — the run never reached its checks.
     pub setup_aborted: bool,

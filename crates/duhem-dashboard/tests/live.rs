@@ -69,7 +69,7 @@ async fn connect_mid_flight_streams_incrementally_and_ends_on_run_finished() {
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
-        verdict: VerdictState::Pass,
+        verdict: Some(VerdictState::Pass),
     })
     .await
     .unwrap();
@@ -105,6 +105,38 @@ async fn late_connect_replays_full_stream_with_no_gap_or_dupe() {
             "event {i} out of order or duplicated: {evt}"
         );
     }
+}
+
+#[tokio::test]
+async fn aborted_terminal_closes_the_stream() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let mut writer = EvidenceWriter::begin(
+        rw,
+        "01J0000000000000000000000C",
+        "verifications/aborted.yml",
+        BTreeMap::new(),
+    )
+    .await
+    .unwrap();
+    writer
+        .append(run_started("verifications/aborted.yml", BTreeMap::new()))
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::RunAborted {
+            signal: "SIGTERM".into(),
+        })
+        .await
+        .unwrap();
+    writer.finish().await.unwrap();
+
+    let events = drain(Box::pin(live_stream(
+        ro,
+        "01J0000000000000000000000C".to_string(),
+    )))
+    .await;
+    assert_eq!(events.len(), 2);
+    assert!(events.last().unwrap().contains("run_aborted"));
 }
 
 #[tokio::test]

@@ -1,4 +1,4 @@
-// The live fold must lift verdicts verbatim from the judge's events
+// The stream fold must lift verdicts verbatim from the judge's events
 // and preserve trace order — it presents, it never judges.
 
 import { describe, expect, it } from "vitest";
@@ -22,9 +22,9 @@ const trace: TraceEvent[] = [
 ];
 
 describe("foldRun", () => {
-  it("is live with no verdict until run_finished arrives", () => {
+  it("is running with no verdict until run_finished arrives", () => {
     const partial = foldRun("r1", trace.slice(0, 4));
-    expect(partial.live).toBe(true);
+    expect(partial.status).toBe("running");
     expect(partial.verdict).toBeNull();
     expect(partial.criteria).toHaveLength(1);
     expect(partial.criteria[0].checks[0]).toEqual({ id: "AC-1.1", verdict: null });
@@ -32,11 +32,19 @@ describe("foldRun", () => {
 
   it("finalizes with the judge's verdicts, in trace order", () => {
     const done = foldRun("r1", trace);
-    expect(done.live).toBe(false);
+    expect(done.status).toBe("finished");
     expect(done.verdict).toBe("pass");
     expect(done.inputs).toEqual({ user: "u1" });
     expect(done.criteria[0].verdict).toBe("pass");
     expect(done.criteria[0].checks[0].verdict).toBe("pass");
+  });
+
+  it("finishes without inventing a verdict", () => {
+    const done = foldRun("suite", [
+      { seq: 0, ts: "2026-06-10T10:00:00.000Z", kind: "run_finished" },
+    ]);
+    expect(done.status).toBe("finished");
+    expect(done.verdict).toBeNull();
   });
 
   it("flags an aborted setup", () => {

@@ -16,7 +16,7 @@ import {
   SpanChain,
   Timeline,
 } from "../views/CheckPage";
-import type { RunsListEntry, TraceEvent } from "../api";
+import type { RunStatus, RunsListEntry, TraceEvent } from "../api";
 
 // RunsList now reads the shared runs context; the provider fetches via the
 // stubbed global fetch, so wrapping it feeds the same entries.
@@ -40,7 +40,11 @@ function stubRuns(entries: RunsListEntry[]) {
   );
 }
 
-function leaf(id: string, verdict: string | null, live = false): RunsListEntry {
+function leaf(
+  id: string,
+  verdict: string | null,
+  status: RunStatus = "finished",
+): RunsListEntry {
   return {
     run_id: id,
     verification: "login",
@@ -48,7 +52,7 @@ function leaf(id: string, verdict: string | null, live = false): RunsListEntry {
     duration_ms: 1234,
     verdict,
     kind: "leaf",
-    live,
+    status,
   };
 }
 
@@ -64,9 +68,8 @@ describe("RunsList", () => {
     const { container } = renderRuns(<RunsList />);
     await waitFor(() => expect(screen.getByText("01JRUNA")).toBeTruthy());
     // The verdict renders as a shadcn Badge carrying the verdict text.
-    expect(container.querySelector('[data-slot="badge"]')?.textContent).toBe(
-      "pass",
-    );
+    const badges = [...container.querySelectorAll('[data-slot="badge"]')];
+    expect(badges.some((badge) => badge.textContent === "pass")).toBe(true);
   });
 
   it("defaults to a flat newest-first view including run-set leaves", async () => {
@@ -76,17 +79,16 @@ describe("RunsList", () => {
         kind: "run-set",
         children: [leaf("01JRUNA", "pass"), leaf("01JRUNB", "fail")],
       },
-      leaf("01JRUNC", null, true),
+      leaf("01JRUNC", null, "running"),
     ]);
     const { container } = renderRuns(<RunsList />);
     await waitFor(() => expect(screen.getByText("01JRUNC")).toBeTruthy());
     expect(screen.getByText("01JRUNA")).toBeTruthy();
     expect(screen.getByText("01JRUNB")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
-    // The in-progress run shows a "live" verdict badge — distinct from the
-    // "live" filter chip in the toolbar, so scope to badge elements.
+    // Lifecycle is a separate badge from the absent verdict.
     const badges = [...container.querySelectorAll('[data-slot="badge"]')];
-    expect(badges.some((b) => b.textContent?.trim() === "live")).toBe(true);
+    expect(badges.some((b) => b.textContent?.trim() === "running")).toBe(true);
   });
 
   it("preserves the collapsible server grouping in By verification", async () => {
@@ -104,12 +106,12 @@ describe("RunsList", () => {
     expect(screen.getByText("01JRUNA")).toBeTruthy();
   });
 
-  it("orders the Triage view by live, failed, then inconclusive", async () => {
+  it("orders the Triage view by running, failed, then inconclusive", async () => {
     stubRuns([
       leaf("pass-run", "pass"),
       leaf("inc-run", "inconclusive:timeout"),
       leaf("fail-run", "fail"),
-      leaf("live-run", null, true),
+      leaf("live-run", null, "running"),
     ]);
     const { container } = renderRuns(<RunsList />, "/runs?view=triage");
     await screen.findByTestId("triage-view");
@@ -141,26 +143,42 @@ describe("RunsList", () => {
 });
 
 describe("matchesFilters", () => {
-  it("filters by verdict family and live state", () => {
-    expect(matchesFilters(leaf("a", "pass"), "", ["pass"], "", "")).toBe(true);
-    expect(matchesFilters(leaf("a", "fail"), "", ["pass"], "", "")).toBe(false);
+  it("separates verdict-family and lifecycle filters", () => {
+    expect(matchesFilters(leaf("a", "pass"), "", ["pass"], [], "", "")).toBe(true);
+    expect(matchesFilters(leaf("a", "fail"), "", ["pass"], [], "", "")).toBe(false);
     expect(
-      matchesFilters(leaf("a", "inconclusive:timeout"), "", ["inconclusive"], "", ""),
+      matchesFilters(
+        leaf("a", "inconclusive:timeout"),
+        "",
+        ["inconclusive"],
+        [],
+        "",
+        "",
+      ),
     ).toBe(true);
-    expect(matchesFilters(leaf("a", null, true), "", ["live"], "", "")).toBe(true);
+    expect(
+      matchesFilters(leaf("a", null, "running"), "", ["live"], [], "", ""),
+    ).toBe(false);
+    expect(
+      matchesFilters(leaf("a", null, "running"), "", [], ["running"], "", ""),
+    ).toBe(true);
   });
 
   it("filters by verification and date range", () => {
-    expect(matchesFilters(leaf("a", "pass"), "login", [], "", "")).toBe(true);
-    expect(matchesFilters(leaf("a", "pass"), "other", [], "", "")).toBe(false);
-    expect(matchesFilters(leaf("a", "pass"), "", [], "2026-06-01", "2026-06-30")).toBe(true);
-    expect(matchesFilters(leaf("a", "pass"), "", [], "2026-06-11", "")).toBe(false);
+    expect(matchesFilters(leaf("a", "pass"), "login", [], [], "", "")).toBe(true);
+    expect(matchesFilters(leaf("a", "pass"), "other", [], [], "", "")).toBe(false);
+    expect(
+      matchesFilters(leaf("a", "pass"), "", [], [], "2026-06-01", "2026-06-30"),
+    ).toBe(true);
+    expect(matchesFilters(leaf("a", "pass"), "", [], [], "2026-06-11", "")).toBe(
+      false,
+    );
   });
 });
 
 describe("triageRank", () => {
-  it("prioritizes live, failed, and inconclusive ahead of pass", () => {
-    expect(triageRank(leaf("live", null, true))).toBe(0);
+  it("prioritizes running, failed, and inconclusive ahead of pass", () => {
+    expect(triageRank(leaf("live", null, "running"))).toBe(0);
     expect(triageRank(leaf("fail", "fail"))).toBe(1);
     expect(triageRank(leaf("inc", "inconclusive:timeout"))).toBe(2);
     expect(triageRank(leaf("pass", "pass"))).toBe(3);

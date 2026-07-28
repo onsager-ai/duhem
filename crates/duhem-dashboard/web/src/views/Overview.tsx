@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useRunsData } from "@/runs-context";
 import { computeStats } from "@/stats";
-import { formatStartedAt, VerdictBadge } from "@/ui";
+import { formatStartedAt, StatusBadge, VerdictBadge } from "@/ui";
 
 function StatCard({
   label,
@@ -102,10 +102,10 @@ export default function Overview() {
           icon={TriangleAlert}
         />
         <StatCard
-          label="Live runs"
-          value={s.live}
+          label="Running runs"
+          value={s.running}
           hint="in progress"
-          tone={s.live > 0 ? "text-live" : undefined}
+          tone={s.running > 0 ? "text-live" : undefined}
           icon={Radio}
         />
         <StatCard
@@ -165,7 +165,10 @@ export default function Overview() {
                   <span className="ml-auto hidden shrink-0 text-xs text-muted-foreground md:block">
                     {formatStartedAt(r.started_at)}
                   </span>
-                  <VerdictBadge verdict={r.verdict} live={r.live} />
+                  <div className="flex gap-1">
+                    <StatusBadge status={r.status} />
+                    <VerdictBadge verdict={r.verdict} />
+                  </div>
                 </li>
               ))}
             </ul>

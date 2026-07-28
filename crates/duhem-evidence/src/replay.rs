@@ -139,9 +139,11 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                 recorded_criteria.insert(criterion_id.clone(), *verdict);
             }
             EventPayload::RunFinished { verdict } => {
-                recorded_run = Some(*verdict);
+                recorded_run = *verdict;
             }
             EventPayload::StepObservation { .. }
+            | EventPayload::RunHeartbeat
+            | EventPayload::RunAborted { .. }
             | EventPayload::StepFinished { .. }
             | EventPayload::SetupStarted { .. }
             | EventPayload::SetupStepStarted { .. }

@@ -27,6 +27,7 @@ needs more than a bullet.
 
 ## Unreleased
 
+- [additive] separate runtime lifecycle (`running` / `finished` / `aborted` / inferred `orphaned`) from judge verdicts, with heartbeat and terminal trace events so completed unjudged runs are representable. (#TBD)
 - [additive] Steps may declare `secret:`, naming output paths whose values are masked the same way `secret: true` inputs are — so a credential acquired at run time (e.g. a login token) stays out of evidence. (#355)
 - [additive] Manifests may declare `inputs:`, so a credential shared across leaves via `inherits:` can carry `env:` and `secret: true`. (#354)
 - [additive] Inputs accept `env:` (source the value from a process environment variable) and `secret: true` (mask the value everywhere Duhem records or displays it). (#346)

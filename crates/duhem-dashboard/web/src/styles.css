@@ -12,7 +12,8 @@
    app theme — light on light, dark on dark — instead of a hard-dark canvas
    (#285). Because each token is `var(--shadcn-token)` (not a fixed colour),
    it re-resolves live when `.dark` flips on <html>. Verdict colours
-   (--pass / --fail / --inconclusive / --live) are still shared from globals.
+   (--pass / --fail / --inconclusive) and the running accent (--live)
+   are still shared from globals.
    ========================================================================== */
 :root {
   --bg: var(--muted);

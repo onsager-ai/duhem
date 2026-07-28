@@ -26,6 +26,7 @@ mod reporter;
 mod reporter_config;
 mod resolve;
 mod run_cmd;
+mod run_scope;
 mod validate_cmd;
 
 use std::path::PathBuf;

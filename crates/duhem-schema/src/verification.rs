@@ -80,10 +80,10 @@ pub struct InputDecl {
     #[schemars(with = "Option<serde_json::Value>")]
     pub default: Option<serde_yml::Value>,
 
-    /// Process-environment fallback (spec #346). This sits below a
-    /// selected Duhem environment and above `default:` in resolution
-    /// precedence; it is deliberately leaf-local rather than another
-    /// global override layer.
+    /// Process-environment fallback (specs #346 / #354). This sits
+    /// below a selected Duhem environment and above `default:` in
+    /// resolution precedence. The declaration may be leaf-local or
+    /// suite-wide on a manifest; it never becomes a global override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<String>,
 

@@ -1,0 +1,33 @@
+# Manifest input declarations — worked example (spec #354).
+#
+# The suite declares a shared credential once. Both leaves consume its
+# name through `inherits:` without restating its type, process source,
+# or sensitivity. `environments:` remains a value map; here it supplies
+# the non-secret username while the credential comes from the process.
+#
+# Run from the repository root:
+#
+#   DUHEM_EXAMPLE_PASSWORD='use-a-high-entropy-fixture' \
+#     duhem run verifications/manifest-inputs-example
+#
+# Each real `cli/invoke` receives the credential. The judge compares its
+# stdout mechanically against `$inputs.password`, while the evidence and
+# terminal sinks record `[redacted:password]`.
+
+manifest_version: 1
+
+inputs:
+  password:
+    type: string
+    env: DUHEM_EXAMPLE_PASSWORD
+    secret: true
+  username:
+    type: string
+
+environments:
+  default:
+    username: admin
+
+verifications:
+  - path: first-consumer/duhem.yml
+  - path: second-consumer/duhem.yml

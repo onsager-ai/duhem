@@ -1,0 +1,25 @@
+# First consumer in the manifest-declared input example (spec #354).
+# The leaf stays names-only: declaration policy belongs to the suite.
+
+verification: first manifest input consumer
+
+inherits:
+  - password
+  - username
+
+criteria:
+  - id: AC-1
+    description: |
+      A verification can consume a suite-declared credential without
+      restating its type, process source, or sensitivity.
+    checks:
+      - id: AC-1.1
+        description: Pass the inherited credential through a real process and compare it mechanically.
+        steps:
+          - id: echo
+            uses: cli/invoke
+            with:
+              command: ["printf", "%s", $inputs.password]
+        assertions:
+          - $steps.echo.outputs.stdout == $inputs.password
+          - $inputs.username == "admin"

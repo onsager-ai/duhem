@@ -267,6 +267,29 @@ suite uses a `.duhem/duhem.yml` manifest, add the file to
 `verifications:`; a standalone file run via `duhem run <file>` needs no
 manifest entry.
 
+### Secret inputs
+
+Never commit a credential as an input `default:` or pass it in a
+long-lived command line. Declare its process-environment source and
+mark it secret:
+
+```yaml
+inputs:
+  db_dsn:
+    type: string
+    env: DATABASE_URL
+    secret: true
+```
+
+Resolution is `--inputs` → selected environment → declared `env:` →
+`default:`. Registered secret values, plus their base64,
+percent-encoded, and JSON-string-escaped forms, are exact-substring
+masked from recorded text and terminal output. Screenshots/video are
+not masked, and other transformations do not match, so do not render
+credentials into the product UI. Prefer high-entropy fixture values;
+short/common values can over-mask the evidence bundle and produce a
+run-time warning.
+
 ## Worked example template
 
 ```yaml

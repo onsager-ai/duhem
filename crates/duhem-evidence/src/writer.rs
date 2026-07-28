@@ -22,6 +22,7 @@ use thiserror::Error;
 use crate::event::{
     BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, ObservationValue, SCHEMA_VERSION,
 };
+use crate::secret::SecretRegistry;
 use crate::store::{RunMeta, RunScope, Store, StoreError};
 
 /// Truncate to millisecond precision. The wire format pins `ts` at
@@ -61,6 +62,14 @@ pub struct EvidenceWriter {
     /// Send failures are ignored: a dropped receiver must never affect
     /// the run or the evidence.
     tee: Option<tokio::sync::mpsc::UnboundedSender<Event>>,
+    /// Run-scoped secret spellings. Centralizing this on the writer is
+    /// the sink-level guarantee from spec #346: callers append ordinary
+    /// evidence and cannot accidentally opt an action out of masking.
+    secrets: SecretRegistry,
+    /// Counts produced when a blob was written, keyed by its content
+    /// address. A subsequent observation reference picks them up without
+    /// requiring capture/action call sites to carry masking metadata.
+    artifact_mask_counts: BTreeMap<String, BTreeMap<String, u64>>,
 }
 
 impl EvidenceWriter {
@@ -76,7 +85,15 @@ impl EvidenceWriter {
         definition_path: &str,
         inputs: BTreeMap<String, serde_json::Value>,
     ) -> Result<Self, WriterError> {
-        Self::begin_scoped(store, run_id, definition_path, inputs, RunScope::default()).await
+        Self::begin_scoped_with_secrets(
+            store,
+            run_id,
+            definition_path,
+            inputs,
+            RunScope::default(),
+            SecretRegistry::new(),
+        )
+        .await
     }
 
     /// [`EvidenceWriter::begin`] with scoping + provenance (#190):
@@ -89,11 +106,43 @@ impl EvidenceWriter {
         inputs: BTreeMap<String, serde_json::Value>,
         scope: RunScope,
     ) -> Result<Self, WriterError> {
+        Self::begin_scoped_with_secrets(
+            store,
+            run_id,
+            definition_path,
+            inputs,
+            scope,
+            SecretRegistry::new(),
+        )
+        .await
+    }
+
+    /// [`EvidenceWriter::begin_scoped`] with the run's resolved secret
+    /// registry attached before the header row is written. The header,
+    /// event stream, blobs, and post-commit tee therefore all see the
+    /// same already-masked facts.
+    pub async fn begin_scoped_with_secrets(
+        store: Arc<dyn Store>,
+        run_id: impl Into<String>,
+        definition_path: &str,
+        mut inputs: BTreeMap<String, serde_json::Value>,
+        mut scope: RunScope,
+        secrets: SecretRegistry,
+    ) -> Result<Self, WriterError> {
         let run_id = run_id.into();
+        for value in inputs.values_mut() {
+            secrets.mask_json(value);
+        }
+        let definition_path = secrets.mask(definition_path).text;
+        mask_optional(&secrets, &mut scope.project_id);
+        mask_optional(&secrets, &mut scope.verifier_repo);
+        mask_optional(&secrets, &mut scope.verifier_sha);
+        mask_optional(&secrets, &mut scope.target_repo);
+        mask_optional(&secrets, &mut scope.target_sha);
         store
             .begin_run(&RunMeta {
                 run_id: run_id.clone(),
-                verification: definition_path.to_string(),
+                verification: definition_path,
                 schema_version: SCHEMA_VERSION.to_string(),
                 inputs,
                 started_at: now_ms(),
@@ -105,6 +154,8 @@ impl EvidenceWriter {
             run_id,
             next_seq: 0,
             tee: None,
+            secrets,
+            artifact_mask_counts: BTreeMap::new(),
         })
     }
 
@@ -130,7 +181,25 @@ impl EvidenceWriter {
 
     /// Append one event. The caller supplies the `payload`; `seq` and
     /// `ts` are stamped here.
-    pub async fn append(&mut self, payload: EventPayload) -> Result<u64, WriterError> {
+    pub async fn append(&mut self, mut payload: EventPayload) -> Result<u64, WriterError> {
+        self.attach_artifact_counts(&mut payload);
+        // Round-trip the payload through its serde shape, masking every
+        // textual leaf at this single sink. Event discriminants and
+        // numeric lifecycle fields remain typed; dynamic `with:` and
+        // observation values are traversed recursively.
+        //
+        // Skipped entirely when no secret is registered — the common
+        // case, since a Verification Definition without `secret:` inputs
+        // has nothing to mask. Beyond the wasted serialization, the
+        // round-trip is the only way `append` can fail on a payload the
+        // caller already built, and `EventPayload` carries an untagged
+        // enum whose variant is reselected on the way back in. Neither
+        // risk is worth taking for a registry that would replace nothing.
+        if !self.secrets.is_empty() {
+            let mut value = serde_json::to_value(&payload)?;
+            self.secrets.mask_json(&mut value);
+            payload = serde_json::from_value(value)?;
+        }
         let evt = Event {
             seq: self.next_seq,
             ts: now_ms(),
@@ -159,8 +228,17 @@ impl EvidenceWriter {
         let inline_bytes = serde_json::to_vec(&value)?;
         let obs = if inline_bytes.len() > BLOB_INLINE_THRESHOLD_BYTES {
             let sha = self.write_blob(&inline_bytes).await?;
-            ObservationValue::Blob { blob_sha256: sha.0 }
+            ObservationValue::Blob {
+                mask_counts: self
+                    .artifact_mask_counts
+                    .get(sha.as_str())
+                    .cloned()
+                    .unwrap_or_default(),
+                blob_sha256: sha.0,
+            }
         } else {
+            let mut value = value;
+            self.secrets.mask_json(&mut value);
             ObservationValue::Inline { value }
         };
         self.append(EventPayload::StepObservation {
@@ -172,9 +250,16 @@ impl EvidenceWriter {
     }
 
     /// Store a content-addressed blob and return its address.
-    /// Idempotent for identical content.
+    /// Idempotent for identical masked content. UTF-8 blobs are recorded
+    /// text and are masked here; binary blobs (including screenshots and
+    /// video) remain byte-identical by the explicit spec #346 limit.
     pub async fn write_blob(&mut self, bytes: &[u8]) -> Result<Sha256Hex, WriterError> {
-        Ok(self.store.put_blob(bytes).await?)
+        let (masked, counts) = self.secrets.mask_bytes(bytes);
+        let sha = self.store.put_blob(&masked).await?;
+        if !counts.is_empty() {
+            self.artifact_mask_counts.insert(sha.0.clone(), counts);
+        }
+        Ok(sha)
     }
 
     /// Close the writer. Every append already committed, so this is a
@@ -182,6 +267,29 @@ impl EvidenceWriter {
     /// a future batching writer has a flush point).
     pub async fn finish(self) -> Result<(), WriterError> {
         Ok(())
+    }
+
+    fn attach_artifact_counts(&self, payload: &mut EventPayload) {
+        let value = match payload {
+            EventPayload::StepObservation { value, .. }
+            | EventPayload::SetupStepObservation { value, .. } => value,
+            _ => return,
+        };
+        if let ObservationValue::Blob {
+            blob_sha256,
+            mask_counts,
+        } = value
+            && mask_counts.is_empty()
+            && let Some(counts) = self.artifact_mask_counts.get(blob_sha256)
+        {
+            *mask_counts = counts.clone();
+        }
+    }
+}
+
+fn mask_optional(secrets: &SecretRegistry, value: &mut Option<String>) {
+    if let Some(value) = value {
+        *value = secrets.mask(value).text;
     }
 }
 

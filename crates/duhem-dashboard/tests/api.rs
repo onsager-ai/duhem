@@ -10,7 +10,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use duhem_dashboard::{EvidenceReader, events_to_jsonl, router};
 use duhem_evidence::{
-    EventPayload, EvidenceWriter, Store, Trace, VerdictState, replay, run_started_with_definition,
+    EventPayload, EvidenceWriter, ObservationValue, SecretRegistry, Store, Trace, VerdictState,
+    replay, run_started_with_definition,
 };
 use http_body_util::BodyExt;
 use serde_json::Value;
@@ -68,6 +69,58 @@ async fn runs_list_single_leaf_run() {
     assert_eq!(row["live"], false);
     assert!(row["started_at"].is_string());
     assert!(row["duration_ms"].is_u64());
+}
+
+#[tokio::test]
+async fn check_artifact_surfaces_secret_mask_occurrence_counts() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let run_id = "01J0000000000000000000000S";
+    let mut secrets = SecretRegistry::new();
+    secrets.register("api_token", "credential-value");
+    let mut writer = EvidenceWriter::begin_scoped_with_secrets(
+        rw,
+        run_id,
+        "secret.yml",
+        BTreeMap::new(),
+        Default::default(),
+        secrets,
+    )
+    .await
+    .unwrap();
+    writer
+        .append(EventPayload::StepStarted {
+            criterion_id: "AC-1".into(),
+            check_id: "AC-1.1".into(),
+            step_index: 0,
+            uses: "api/call".into(),
+            layer: Some("api".into()),
+            with: BTreeMap::new(),
+        })
+        .await
+        .unwrap();
+    let blob = writer
+        .write_blob(b"credential-value and credential-value")
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::StepObservation {
+            step_index: 0,
+            output_name: "body".into(),
+            value: ObservationValue::Blob {
+                blob_sha256: blob.0,
+                mask_counts: BTreeMap::new(),
+            },
+        })
+        .await
+        .unwrap();
+
+    let (status, json) = get_json(
+        EvidenceReader::new(ro),
+        &format!("/api/runs/{run_id}/checks/AC-1::AC-1.1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["artifacts"][0]["mask_counts"]["api_token"], 2);
 }
 
 #[tokio::test]

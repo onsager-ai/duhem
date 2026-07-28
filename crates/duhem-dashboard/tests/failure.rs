@@ -102,6 +102,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, network: Option
             output_name: "capture/screenshot".into(),
             value: ObservationValue::Blob {
                 blob_sha256: shot.as_str().into(),
+                mask_counts: BTreeMap::new(),
             },
         })
         .await
@@ -116,6 +117,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, network: Option
                 output_name: "capture/network".into(),
                 value: ObservationValue::Blob {
                     blob_sha256: net.as_str().into(),
+                    mask_counts: BTreeMap::new(),
                 },
             })
             .await

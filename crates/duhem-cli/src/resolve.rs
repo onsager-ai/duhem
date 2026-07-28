@@ -1,10 +1,10 @@
 //! Input resolution for `duhem run`: combine the merged `--inputs`
 //! tokens (`KEY=VALUE` + `@file`, last-wins — see `inputs::merge_inputs`),
-//! a selected named environment, and the VD's per-input `default:` into
-//! the engine's typed input map.
+//! a selected named environment, a leaf-declared process `env:` fallback,
+//! and the VD's per-input `default:` into the engine's typed input map.
 //!
-//! Precedence, highest first (spec #68 / #151):
-//!   --inputs (last-wins merge)  >  selected environment  >  default
+//! Precedence, highest first (spec #68 / #151 / #346):
+//!   --inputs  >  selected environment  >  process `env:`  >  default
 //!
 //! Lives in its own module so `main.rs` stays under the per-file token
 //! budget.
@@ -28,9 +28,12 @@ use crate::inputs::InputValue;
 ///    declared input is *not* an error here (the environment may carry
 ///    keys that are only consumed via `$env.<key>`, not as inputs); it
 ///    simply doesn't feed input resolution.
-/// 3. The VD's per-input `default:` (schema validator type-checked it
+/// 3. The process variable named by the leaf's `env:` declaration,
+///    coerced with the same rules as a raw `--inputs` token.
+/// 4. The VD's per-input `default:` (schema validator type-checked it
 ///    at parse time).
-/// 4. None of the above + no default → error.
+/// 5. None of the above leaves the input unbound. The runtime records
+///    `Inconclusive(EnvironmentError)` before executing the workload.
 ///
 /// Unknown inputs from `--inputs` remain hard errors (those name an
 /// input explicitly); the environment map is consulted only for keys
@@ -40,6 +43,20 @@ pub(crate) fn resolve_inputs(
     env: &BTreeMap<String, serde_json::Value>,
     decls: &BTreeMap<String, InputDecl>,
     inherits: &[String],
+) -> Result<BTreeMap<String, serde_json::Value>, String> {
+    resolve_inputs_with_env(merged, env, decls, inherits, |name| {
+        std::env::var(name).ok()
+    })
+}
+
+/// Pure resolution seam used by tests to supply process-environment
+/// values without mutating process-global state.
+pub(crate) fn resolve_inputs_with_env(
+    merged: &BTreeMap<String, InputValue>,
+    env: &BTreeMap<String, serde_json::Value>,
+    decls: &BTreeMap<String, InputDecl>,
+    inherits: &[String],
+    process_env: impl Fn(&str) -> Option<String>,
 ) -> Result<BTreeMap<String, serde_json::Value>, String> {
     // An `--inputs` key is "known" if it names a declared input *or* an
     // inherited name (spec #135) — an inherited name has no local
@@ -65,12 +82,20 @@ pub(crate) fn resolve_inputs(
         } else if let Some(env_value) = env.get(name) {
             validate_env_value(name, decl.kind, env_value)?;
             out.insert(name.clone(), env_value.clone());
+        } else if let Some(env_name) = &decl.env
+            && let Some(raw_value) = process_env(env_name)
+        {
+            let resolved = coerce_input(name, decl.kind, &raw_value).map_err(|_| {
+                format!(
+                    "input `{name}` (from env `{env_name}`): expected {}, got `{raw_value}`",
+                    decl.kind
+                )
+            })?;
+            out.insert(name.clone(), resolved);
         } else if let Some(default) = &decl.default {
             let value =
                 yml_to_json(default).map_err(|e| format!("input `{name}`: default: {e}"))?;
             out.insert(name.clone(), value);
-        } else {
-            return Err(format!("missing required input: `{name}`"));
         }
     }
     // Inherited names (spec #135): no local `InputDecl`, so no
@@ -101,6 +126,24 @@ pub(crate) fn resolve_inputs(
         }
     }
     Ok(out)
+}
+
+/// Build the run-scoped registry immediately after resolution. Only
+/// `secret: true` declarations contribute values; a non-secret `env:`
+/// input therefore never becomes masked by implication.
+pub(crate) fn secret_registry(
+    values: &BTreeMap<String, serde_json::Value>,
+    decls: &BTreeMap<String, InputDecl>,
+) -> duhem_evidence::SecretRegistry {
+    let mut registry = duhem_evidence::SecretRegistry::new();
+    for (name, decl) in decls {
+        if decl.secret
+            && let Some(value) = values.get(name)
+        {
+            registry.register_json(name.clone(), value);
+        }
+    }
+    registry
 }
 
 /// Type-check a value supplied by the selected environment against its

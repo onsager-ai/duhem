@@ -8,6 +8,7 @@
 //! change. Captures are evidence for humans and agents, never judge
 //! input; a capture failure warns and never touches the verdict.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use duhem_actions::{BrowserSessionEvidence, CheckBrowser, Page, Rect};
@@ -519,6 +520,7 @@ async fn append_capture(
             output_name: name.to_string(),
             value: ObservationValue::Blob {
                 blob_sha256: sha.0.clone(),
+                mask_counts: BTreeMap::new(),
             },
         })
         .await

@@ -106,6 +106,7 @@ verification: hello — Duhem init skeleton
 inputs:                      # values you can override at run time
   base_url:
     type: string
+    env: APP_BASE_URL        # optional process-environment fallback
     default: https://example.com
 
 criteria:
@@ -140,6 +141,13 @@ criteria:
   step *is* the judgment, so an all-assert check needs no `assertions:`
   block at all. Bind `satisfied` and assert it yourself only for manual
   control (e.g. a disjunction across steps).
+- **Sensitive inputs** use `env: VARIABLE_NAME` with `secret: true`.
+  Values resolve from `--inputs` → selected environment → process
+  `env:` → `default:` and registered secret values are masked from
+  recorded text and terminal output. A secret input cannot have a
+  committed `default:`. Screenshots/video and transformations beyond
+  base64, percent encoding, and JSON escaping remain outside the
+  substring-masking guarantee.
 
 ## 5. Author a real check
 

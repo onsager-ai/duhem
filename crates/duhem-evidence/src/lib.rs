@@ -23,6 +23,7 @@ pub mod bundle;
 pub mod event;
 pub mod reader;
 pub mod replay;
+pub mod secret;
 pub mod session;
 pub mod store;
 pub mod writer;
@@ -34,6 +35,7 @@ pub use event::{
 };
 pub use reader::{ReadError, Trace};
 pub use replay::{ReplayDivergence, ReplayError, ReplayedRun, replay};
+pub use secret::{COMMON_SECRET_WORDS, MaskedText, SHORT_SECRET_THRESHOLD, SecretRegistry};
 pub use session::{
     SESSION_EVIDENCE_OBSERVATION, SESSION_EVIDENCE_VERSION, STEP_SCREENSHOT_OBSERVATION,
     SessionEvidence, SessionNetworkEntry, SessionPerformanceObservation, SessionStep, SessionVideo,

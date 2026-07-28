@@ -76,6 +76,9 @@ pub struct BundleArtifact {
     pub sha256: String,
     /// Base64 (standard alphabet, padded) of the blob bytes.
     pub bytes_base64: String,
+    /// Non-zero replacements made at the artifact write boundary.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub mask_counts: std::collections::BTreeMap<String, u64>,
 }
 
 fn fmt_ts(dt: &chrono::DateTime<chrono::Utc>) -> String {
@@ -94,15 +97,18 @@ impl RunBundle {
         let events = store.run_events(run_id).await?;
         let mut shas = referenced_blobs(&events);
         shas.sort();
+        let counts = referenced_blob_mask_counts(&events);
         let mut artifacts = Vec::with_capacity(shas.len());
         for sha in shas {
             let bytes = store
                 .get_blob(&sha)
                 .await?
                 .ok_or_else(|| StoreError::UnknownRun(format!("missing artifact {sha}")))?;
+            let mask_counts = counts.get(&sha).cloned().unwrap_or_default();
             artifacts.push(BundleArtifact {
                 sha256: sha,
                 bytes_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+                mask_counts,
             });
         }
         Ok(Self {
@@ -195,6 +201,7 @@ impl RunBundle {
             }
             events.push(serde_json::from_str(line).map_err(std::io::Error::other)?);
         }
+        let counts = referenced_blob_mask_counts(&events);
         let mut artifacts = Vec::new();
         let art_dir = dir.join("artifacts");
         if art_dir.is_dir() {
@@ -205,9 +212,11 @@ impl RunBundle {
             for entry in entries {
                 let sha = entry.file_name().to_string_lossy().into_owned();
                 let bytes = std::fs::read(entry.path())?;
+                let mask_counts = counts.get(&sha).cloned().unwrap_or_default();
                 artifacts.push(BundleArtifact {
                     sha256: sha,
                     bytes_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+                    mask_counts,
                 });
             }
         }
@@ -250,11 +259,11 @@ pub fn referenced_blobs(events: &[Event]) -> Vec<String> {
     for evt in events {
         match &evt.payload {
             EventPayload::StepObservation {
-                value: ObservationValue::Blob { blob_sha256 },
+                value: ObservationValue::Blob { blob_sha256, .. },
                 ..
             }
             | EventPayload::SetupStepObservation {
-                value: ObservationValue::Blob { blob_sha256 },
+                value: ObservationValue::Blob { blob_sha256, .. },
                 ..
             } => push(blob_sha256),
             EventPayload::EnvUpFinished {
@@ -278,4 +287,28 @@ pub fn referenced_blobs(events: &[Event]) -> Vec<String> {
         }
     }
     shas
+}
+
+fn referenced_blob_mask_counts(
+    events: &[Event],
+) -> std::collections::BTreeMap<String, std::collections::BTreeMap<String, u64>> {
+    let mut counts = std::collections::BTreeMap::new();
+    for event in events {
+        let value = match &event.payload {
+            EventPayload::StepObservation { value, .. }
+            | EventPayload::SetupStepObservation { value, .. } => value,
+            _ => continue,
+        };
+        if let ObservationValue::Blob {
+            blob_sha256,
+            mask_counts,
+        } = value
+            && !mask_counts.is_empty()
+        {
+            counts
+                .entry(blob_sha256.clone())
+                .or_insert_with(|| mask_counts.clone());
+        }
+    }
+    counts
 }

@@ -18,6 +18,8 @@
 //! `Inconclusive(EnvironmentError)` — the same cause family the
 //! per-check path uses for analogous infrastructure failures.
 
+use std::collections::BTreeMap;
+
 use duhem_actions::Page;
 use duhem_actions::{Outcome, RunBrowser};
 use duhem_evidence::{EventPayload, EvidenceWriter};
@@ -253,7 +255,10 @@ async fn append_setup_observation(
     let inline_bytes = serde_json::to_vec(&value).map_err(duhem_evidence::WriterError::from)?;
     let obs = if inline_bytes.len() > BLOB_INLINE_THRESHOLD_BYTES {
         let sha = writer.write_blob(&inline_bytes).await?;
-        ObservationValue::Blob { blob_sha256: sha.0 }
+        ObservationValue::Blob {
+            blob_sha256: sha.0,
+            mask_counts: BTreeMap::new(),
+        }
     } else {
         ObservationValue::Inline { value }
     };

@@ -832,6 +832,21 @@ li.ev.step-group.tone-inconclusive > details > summary .ev-label { color: var(--
   min-width: 0;
   color: var(--text);
 }
+/* The two Results panes scroll independently of the page. `contain`
+   stops a pane that has hit its end from handing the wheel back to the
+   document — without it, reaching the bottom of the rail starts
+   scrolling the whole app out from under the cursor.
+   `scrollbar-color` has no thumb-hover pseudo-element, so the resting
+   thumb brightens on pane hover instead: idle panes stay quiet, the one
+   you are pointing at reads clearly. */
+.run-results-rail,
+.run-results-detail {
+  overscroll-behavior: contain;
+}
+.run-results-rail:hover,
+.run-results-detail:hover {
+  scrollbar-color: var(--scrollbar-thumb-hover) transparent;
+}
 .step-group.step-selected {
   outline: 2px solid color-mix(in oklab, var(--primary) 55%, transparent);
   outline-offset: -2px;

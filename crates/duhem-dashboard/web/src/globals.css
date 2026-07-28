@@ -53,6 +53,12 @@
   --sidebar-accent-foreground: oklch(0.21 0.006 285);
   --sidebar-border: oklch(0.92 0.004 286);
   --sidebar-ring: oklch(0.51 0.19 277);
+
+  /* Scrollbars. The thumb is `--foreground` at low alpha rather than a
+     fixed grey, so it keeps the same optical weight against either
+     background. The track is always transparent. */
+  --scrollbar-thumb: oklch(0.21 0.006 285 / 22%);
+  --scrollbar-thumb-hover: oklch(0.21 0.006 285 / 42%);
 }
 
 .dark {
@@ -94,6 +100,11 @@
   --sidebar-accent-foreground: oklch(0.92 0.004 286);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.72 0.15 277);
+
+  /* Slightly lower alpha than light: a pale thumb on a dark ground
+     reads heavier at equal opacity. */
+  --scrollbar-thumb: oklch(0.92 0.004 286 / 18%);
+  --scrollbar-thumb-hover: oklch(0.92 0.004 286 / 36%);
 }
 
 /* ---- Tailwind theme mapping ---------------------------------------- */
@@ -164,5 +175,39 @@
     color: var(--foreground);
     min-width: 0;
     overflow-x: clip;
+  }
+
+  /* ---- Scrollbars --------------------------------------------------- */
+  /* Thin, trackless, rounded. The standards properties are
+     authoritative: Chrome 121+, Firefox and Safari 18.2+ honor them —
+     and Chrome ignores the ::-webkit-scrollbar pseudo-elements entirely
+     once `scrollbar-width` is set, so the WebKit block below is a
+     fallback for older engines only, never a parallel code path. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+
+  @supports not (scrollbar-width: thin) {
+    ::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+    ::-webkit-scrollbar-track,
+    ::-webkit-scrollbar-corner {
+      background: transparent;
+    }
+    /* The transparent border + content-box clip is what floats the thumb
+       off the edge; without it a styled WebKit thumb sits flush and
+       reads much heavier than the `thin` native one. */
+    ::-webkit-scrollbar-thumb {
+      background-color: var(--scrollbar-thumb);
+      background-clip: content-box;
+      border: 3px solid transparent;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background-color: var(--scrollbar-thumb-hover);
+    }
   }
 }

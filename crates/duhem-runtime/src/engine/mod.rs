@@ -17,6 +17,7 @@ pub mod inherit;
 pub mod outcome;
 pub mod registry;
 pub mod runner;
+pub(crate) mod secret_output;
 pub mod setup;
 pub mod shim;
 pub mod template;

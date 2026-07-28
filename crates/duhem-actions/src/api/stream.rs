@@ -130,6 +130,7 @@ impl Action for Stream {
                 "last_event",
                 "stopped_reason",
             ],
+            secret_outputs: vec![],
             example: "- uses: api/stream\n  with: { method: GET, url: $inputs.events_url, until_event: done }\n  outputs: { count: event_count }",
         }
     }

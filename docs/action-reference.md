@@ -5,15 +5,20 @@
 # Action reference
 
 Version-exact ground truth for authoring a Verification Definition — every
-built-in action's `with:` fields, `outputs`, and a worked example. Generated from
-the action contracts, so it always matches what `duhem validate` / `duhem run`
-accept. `duhem describe <uses>` prints the same for one action; `duhem actions`
-lists the catalog.
+built-in action's `with:` fields, `outputs`, contract-declared secret outputs,
+and a worked example. Generated from the action contracts, so it always matches
+what `duhem validate` / `duhem run` accept. `duhem describe <uses>` prints the
+same for one action; `duhem actions` lists the catalog.
 
 Bind an output with `outputs: { <name>: <field> }`, then read it in an
 assertion as `$steps.<id>.outputs.<name>`. Assert over **scalar** outputs
 (`status`, `body_text`, `satisfied`, `exit_code`, …); helpers like
 `$runtime.contains(...)` cover membership.
+
+An action contract may declare a scalar output path secret by default. Those
+values join the masking registry before the producing step writes evidence and
+need no authored `secret:` entry. When present, the contract's paths are listed
+as **secret outputs (masked by contract)** below.
 
 ## `ui/*`
 

@@ -2,8 +2,8 @@
 //! machine-readable action contract (spec #247).
 //!
 //! On-demand, version-exact ground truth for an author (human or agent):
-//! the `with:` fields an action accepts and the `outputs` it produces —
-//! retrieval-by-tool, not docs-archaeology. Consumes the same
+//! the `with:` fields an action accepts, its outputs, and any outputs
+//! that are secret by contract — retrieval-by-tool, not docs-archaeology. Consumes the same
 //! `duhem_actions::catalog()` that validate-time field checking uses.
 
 use std::process::ExitCode;
@@ -60,6 +60,11 @@ fn print_contract(c: &ActionContract) {
         println!(
             "  (bound via `outputs: {{ <name>: <field> }}`, read as $steps.<id>.outputs.<name>)"
         );
+    }
+    if c.secret_outputs.is_empty() {
+        println!("secret outputs: (none)");
+    } else {
+        println!("secret outputs: {}", c.secret_outputs.join(", "));
     }
     println!();
     println!("example:");

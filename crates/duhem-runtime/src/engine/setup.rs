@@ -145,21 +145,15 @@ pub(crate) async fn run_setup(
             });
         }
 
-        writer
-            .append(EventPayload::SetupStepStarted {
-                step_index: idx as u32,
-                uses: step.uses.clone(),
-                // Same honesty contract as the per-check tag (#192).
-                layer: duhem_actions::layer_for_uses(&step.uses).map(str::to_string),
-                with: with_to_evidence_map(&resolved_with),
-            })
-            .await?;
-
         let outcome = if aborted.is_some() {
+            append_setup_started(writer, step, idx, &resolved_with).await?;
             Outcome::Error
         } else {
             match registry.get(step.uses.as_str()) {
-                None => Outcome::Error,
+                None => {
+                    append_setup_started(writer, step, idx, &resolved_with).await?;
+                    Outcome::Error
+                }
                 Some(dispatcher) => {
                     let page_ref: Option<&Page> = setup_browser.as_ref().map(|cb| &cb.page);
                     invoke_and_record(
@@ -205,6 +199,24 @@ pub(crate) async fn run_setup(
     Ok(SetupResult { aborted })
 }
 
+async fn append_setup_started(
+    writer: &mut EvidenceWriter,
+    step: &Step,
+    idx: usize,
+    resolved_with: &serde_yml::Value,
+) -> Result<(), EngineError> {
+    writer
+        .append(EventPayload::SetupStepStarted {
+            step_index: idx as u32,
+            uses: step.uses.clone(),
+            // Same honesty contract as the per-check tag (#192).
+            layer: duhem_actions::layer_for_uses(&step.uses).map(str::to_string),
+            with: with_to_evidence_map(resolved_with),
+        })
+        .await?;
+    Ok(())
+}
+
 /// Invoke one setup-step dispatcher, write a `SetupStepObservation`
 /// for every output, and publish scalar outputs onto
 /// `RunState.setup_outputs` so checks can reference them as
@@ -218,11 +230,27 @@ async fn invoke_and_record(
     run: &mut RunState,
     writer: &mut EvidenceWriter,
 ) -> Result<Outcome, EngineError> {
+    // `SetupStepStarted` first — the pre-#355 ordering, and symmetric
+    // with the per-check path. It records the resolved `with:`, i.e.
+    // this step's inputs, which cannot carry this step's own outputs;
+    // and it is what the live narration folds over to show a slow setup
+    // step as in flight (#305). Registration follows it, still ahead of
+    // anything carrying an output.
+    append_setup_started(writer, step, idx, resolved_with).await?;
     let result = dispatcher.invoke(page, idx, resolved_with).await;
     let outcome = match &result {
         Ok(r) => r.outcome.clone(),
         Err(_) => Outcome::Error,
     };
+    if let Ok(r) = &result {
+        crate::engine::secret_output::register(
+            writer,
+            step,
+            idx,
+            &dispatcher.secret_outputs(),
+            &r.outputs,
+        )?;
+    }
     if let Ok(r) = &result {
         // Bind raw fields (native names) + `outputs:` aliases (spec
         // #273) as `$setup.<id>.outputs.<name>`. Symmetric with the
@@ -338,6 +366,7 @@ mod tests {
             uses: uses.to_string(),
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
+            secret: Vec::new(),
         }
     }
 

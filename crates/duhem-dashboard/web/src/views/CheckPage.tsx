@@ -1348,7 +1348,7 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
   return (
     <>
       <div className="run-detail-surface">
-        <div className="check-context sticky top-0 z-10 -mx-2 mb-3 border-b bg-background/95 px-2 pb-3 backdrop-blur">
+        <div className="check-context sticky top-0 z-10 mb-3 border-b bg-background/95 pb-3 backdrop-blur md:-ml-4 md:pl-4">
           <h2 className="flex flex-wrap items-center gap-2 text-base font-semibold">
             <span>{check.criterion_id}</span>
             <span className="text-muted-foreground">/</span>

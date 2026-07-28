@@ -147,7 +147,28 @@ criteria:
   recorded text and terminal output. A secret input cannot have a
   committed `default:`. Screenshots/video and transformations beyond
   base64, percent encoding, and JSON escaping remain outside the
-  substring-masking guarantee.
+  substring-masking guarantee. For a credential shared by a suite,
+  declare it once under the root manifest's `inputs:` and list its name
+  under each consuming leaf's `inherits:`:
+
+  ```yaml
+  # .duhem/duhem.yml
+  inputs:
+    password:
+      type: string
+      env: APP_PASSWORD
+      secret: true
+  environments:
+    staging:
+      username: admin
+
+  # a leaf Verification Definition
+  inherits: [password]
+  ```
+
+  A declared inherited value uses the same precedence and type checks
+  as a leaf input. An inherited name with no manifest declaration keeps
+  the existing names-only behavior.
 
 ## 5. Author a real check
 

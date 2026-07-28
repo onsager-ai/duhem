@@ -15,7 +15,7 @@ use crate::environment::Environment;
 use crate::manifest::{
     LoadError, ManifestEntry, RootManifest, canonical_or_self, validate_entry_path,
 };
-use crate::verification::SchemaError;
+use crate::verification::{InputDecl, SchemaError};
 
 /// An `includes:` target — a manifest fragment composed into a root
 /// manifest (spec #67). Structurally a [`RootManifest`] with every
@@ -42,6 +42,10 @@ pub struct PartialRootManifest {
         with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
     )]
     pub environments: BTreeMap<String, BTreeMap<String, serde_yml::Value>>,
+    /// Suite-wide input declarations, merged by name under the same
+    /// root-wins rule as other manifest maps.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub inputs: BTreeMap<String, InputDecl>,
     /// Verification entries concatenated onto the root manifest's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub verifications: Vec<ManifestEntry>,
@@ -146,10 +150,11 @@ pub(crate) fn resolve_includes(
 /// Root-wins merge of one include (`incoming`) into `effective`.
 ///
 /// Each optional/scalar field is filled only when `effective` still
-/// lacks it; nested maps (`environments:`) overlay key-by-key, again
-/// filling only absent leaf keys; list-shaped fields (`verifications:`,
-/// `includes:`) are concatenated. Adding a future field to the merge
-/// (e.g. `defaults:`) is a one-block addition here.
+/// lacks it; nested environment maps overlay key-by-key and input
+/// declarations overlay by name, again filling only absent keys;
+/// list-shaped fields (`verifications:`, `includes:`) are concatenated.
+/// Adding a future field to the merge (e.g. `defaults:`) is a one-block
+/// addition here.
 fn merge_partial(effective: &mut RootManifest, incoming: &PartialRootManifest) {
     // Scalar/optional fields: root-wins, fill-if-absent.
     if effective.environment.is_none() {
@@ -161,6 +166,12 @@ fn merge_partial(effective: &mut RootManifest, incoming: &PartialRootManifest) {
         for (key, value) in keys {
             slot.entry(key.clone()).or_insert_with(|| value.clone());
         }
+    }
+    for (name, decl) in &incoming.inputs {
+        effective
+            .inputs
+            .entry(name.clone())
+            .or_insert_with(|| decl.clone());
     }
     // List-shaped fields: concatenate (root's already present first).
     effective

@@ -35,6 +35,7 @@ composition.
 | 4 | [`includes-example`](includes-example/) | `includes:` composition — a shared committed fragment plus a per-developer override, under the root-wins merge rule | network | #67 |
 | 5 | [`environments-example`](environments-example/) | Named `environments:` — declare configs, select one (`--environment`), feed the leaf input chain and the `$env.*` whitelist | network | #68 |
 | 6 | [`inherits-example`](inherits-example/) | Inherited inputs — a leaf lists input *names* under `inherits:` and reads suite-wide values the manifest provides (a DI container) | network | #135 |
+| 7 | [`manifest-inputs-example`](manifest-inputs-example/) | Manifest input declarations — attach type, process `env:`, and `secret: true` once to a credential inherited by multiple leaves | local process (`cli/invoke`) + `DUHEM_EXAMPLE_PASSWORD` | #354 |
 
 ## Self-verification suites — Duhem's dogfood
 

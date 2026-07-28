@@ -1,0 +1,25 @@
+# Second consumer proves one manifest declaration applies independently
+# to every leaf that inherits the name (spec #354).
+
+verification: second manifest input consumer
+
+inherits:
+  - password
+  - username
+
+criteria:
+  - id: AC-1
+    description: |
+      Every verification that inherits a suite-declared credential gets
+      the same typed resolution and recorded-text masking guarantees.
+    checks:
+      - id: AC-1.1
+        description: Pass the inherited credential through another real process and compare it mechanically.
+        steps:
+          - id: echo
+            uses: cli/invoke
+            with:
+              command: ["printf", "%s", $inputs.password]
+        assertions:
+          - $steps.echo.outputs.stdout == $inputs.password
+          - $inputs.username == "admin"

@@ -228,7 +228,52 @@ pub fn validate_with_contract_outputs(
 
     let setup_outputs = collect_setup_outputs(&v.setup, outputs_for, &mut errs);
 
-    for (name, decl) in &v.inputs {
+    errs.extend(input_decl_errors(&v.inputs));
+
+    // Inherited input names (spec #135). They satisfy `$inputs.<name>`
+    // references just like a locally-declared input, so they join the
+    // resolvable-name set below. Two well-formedness rules first: a name
+    // may not appear in both `inputs:` and `inherits:` (declare it once),
+    // and an inherited name may not be empty.
+    let mut inherited: HashSet<&str> = HashSet::new();
+    for (index, name) in v.inherits.iter().enumerate() {
+        if name.is_empty() {
+            errs.push(ValidationError::EmptyInheritedName { index });
+            continue;
+        }
+        if v.inputs.contains_key(name) {
+            errs.push(ValidationError::InheritedInputAlsoDeclared { name: name.clone() });
+        }
+        inherited.insert(name.as_str());
+    }
+
+    let mut seen_criteria: HashSet<&str> = HashSet::new();
+    for c in &v.criteria {
+        if !seen_criteria.insert(c.id.as_str()) {
+            errs.push(ValidationError::DuplicateCriterionId { id: c.id.clone() });
+        }
+        validate_criterion(
+            c,
+            &v.inputs,
+            &inherited,
+            &setup_outputs,
+            outputs_for,
+            &mut errs,
+        );
+    }
+
+    if errs.is_empty() { Ok(()) } else { Err(errs) }
+}
+
+/// Apply the shared [`InputDecl`] authoring rules to a declaration map.
+///
+/// Both leaf and manifest `inputs:` reuse the same wire type, so their
+/// safety and type rules must not drift. The manifest loader calls this
+/// before resolving leaves; the leaf validator folds the same findings
+/// into its complete structural punch list.
+pub(crate) fn input_decl_errors(inputs: &BTreeMap<String, InputDecl>) -> Vec<ValidationError> {
+    let mut errs = Vec::new();
+    for (name, decl) in inputs {
         if decl.secret && decl.default.is_some() {
             errs.push(ValidationError::SecretInputHasDefault {
                 input: name.clone(),
@@ -270,40 +315,7 @@ pub fn validate_with_contract_outputs(
             }
         }
     }
-
-    // Inherited input names (spec #135). They satisfy `$inputs.<name>`
-    // references just like a locally-declared input, so they join the
-    // resolvable-name set below. Two well-formedness rules first: a name
-    // may not appear in both `inputs:` and `inherits:` (declare it once),
-    // and an inherited name may not be empty.
-    let mut inherited: HashSet<&str> = HashSet::new();
-    for (index, name) in v.inherits.iter().enumerate() {
-        if name.is_empty() {
-            errs.push(ValidationError::EmptyInheritedName { index });
-            continue;
-        }
-        if v.inputs.contains_key(name) {
-            errs.push(ValidationError::InheritedInputAlsoDeclared { name: name.clone() });
-        }
-        inherited.insert(name.as_str());
-    }
-
-    let mut seen_criteria: HashSet<&str> = HashSet::new();
-    for c in &v.criteria {
-        if !seen_criteria.insert(c.id.as_str()) {
-            errs.push(ValidationError::DuplicateCriterionId { id: c.id.clone() });
-        }
-        validate_criterion(
-            c,
-            &v.inputs,
-            &inherited,
-            &setup_outputs,
-            outputs_for,
-            &mut errs,
-        );
-    }
-
-    if errs.is_empty() { Ok(()) } else { Err(errs) }
+    errs
 }
 
 /// Shell-portable environment name accepted by `inputs.<name>.env`.

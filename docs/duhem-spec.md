@@ -378,6 +378,8 @@ Values like `$inputs.workspace_name` below are **runtime expressions** (§10.7).
 
 An input may declare `env: VARIABLE_NAME` as a process-environment fallback. Resolution order is `--inputs` (last merged value) → selected Duhem environment → the input's process `env:` → `default:`. Because `env:` is below both explicit sources, adding it never changes a run that already supplied the input. An unset input with no remaining source is an environment failure at run time and produces `inconclusive:environment_error`; it is not a validation failure or a product `fail`.
 
+For a value shared across a manifest suite, put the same declaration shape under the manifest's top-level `inputs:` and let each consuming leaf list the name under `inherits:`. The manifest declaration owns `type`, `env:`, `default:`, and `secret:` while the selected `environments:` entry continues to supply a value. Resolution is `--inputs` → selected environment → manifest `env:` → manifest `default:`. The declared type is enforced for that inherited name; an inherited name with no manifest declaration retains names-only, unchecked resolution for compatibility.
+
 `secret: true` registers the resolved value for exact, case-sensitive substring masking. Secret inputs cannot have `default:` values: credentials belong in process or selected environments, or in an explicit operator-supplied input. Duhem also registers the value's standard-base64, percent-encoded, and JSON-string-escaped forms. Every matching recorded text occurrence becomes `[redacted:<input_name>]` at the two output boundaries: evidence (event payloads, text artifact blobs, and bundle exports) and terminal presentation. Each text artifact records non-zero replacement counts by input name; the dashboard renders those counts so aggressive masking is visible. Values shorter than eight characters or equal (case-insensitively) to the small default list `admin`, `changeme`, `password`, `secret`, `test`, or `token` warn at run time because they commonly over-mask durable evidence. The threshold and list are defaults that may become tunable later, not validation gates.
 
 The guarantee is deliberately about recorded text, with two residual gaps. First, screenshots and video are pixels and are not masked; a credential rendered by the application can therefore remain visible in `capture/screenshot`, `capture/step-screenshot`, or `capture/video`. Second, transformations beyond the three registered encodings — including hashing, chunking, and application-specific reformatting — do not exact-match and are not masked. Authors should choose realistic, high-entropy fixtures and avoid rendering credentials in the application under test.
@@ -566,6 +568,14 @@ environment:                  # optional — one shared environment for the whol
       url: http://localhost:3000/healthz
       timeout: 60s
 
+inputs:                       # declarations for names leaves inherit
+  db_password:
+    type: string
+    env: DATABASE_PASSWORD
+    secret: true
+  base_url:
+    type: string
+
 verifications:
   - features/create-workspace/verification.yml
   - features/login/verification.yml
@@ -579,11 +589,13 @@ includes:                           # composition: shared config from other file
 environments:                       # named environment configs
   staging:
     base_url: https://staging.example.com
-    db_url: postgres://staging-db
+    db_password: staging-secret      # value for the declaration above
   prod:
     base_url: https://example.com
-    db_url: postgres://prod-db
+    db_password: prod-secret
 ```
+
+Leaves consume suite inputs with names only (`inherits: [base_url, db_password]`). For an inherited name that has a manifest declaration, values resolve from `--inputs` → selected `environments:` entry → the declaration's process `env:` → its `default:`, and the declaration's `type` is enforced. A manifest input not inherited by any leaf produces an authoring warning, not an error. `secret: true` still cannot be combined with `default:`.
 
 The root manifest is canonical: Duhem auto-discovers `duhem.yml` (or `.duhem.yml`) at the project root or its ancestors. Users can override with `duhem run -f path/to/manifest.yml`.
 

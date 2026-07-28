@@ -290,6 +290,28 @@ credentials into the product UI. Prefer high-entropy fixture values;
 short/common values can over-mask the evidence bundle and produce a
 run-time warning.
 
+When multiple Verification Definitions share a credential, declare it
+once in the suite manifest and let each consumer inherit the name:
+
+```yaml
+# .duhem/duhem.yml
+inputs:
+  db_dsn:
+    type: string
+    env: DATABASE_URL
+    secret: true
+verifications:
+  - path: database/duhem.yml
+
+# .duhem/database/duhem.yml
+inherits: [db_dsn]
+```
+
+The manifest declaration owns type checking, `env:`, `default:`, and
+`secret:`; selected `environments:` entries continue to supply values.
+Resolution is `--inputs` → selected environment → manifest `env:` →
+manifest `default:`. A secret declaration cannot carry `default:`.
+
 ## Worked example template
 
 ```yaml

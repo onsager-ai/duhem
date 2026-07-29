@@ -12,9 +12,11 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 base64 = "0.22"
+chrono.workspace = true
 duhem-actions = { path = "../crates/duhem-actions" }
 duhem-schema = { path = "../crates/duhem-schema" }
 proc-macro2 = { version = "1", features = ["span-locations"] }
+regex.workspace = true
 rustc-hash = "1"
 serde_json.workspace = true
 serde_yml.workspace = true

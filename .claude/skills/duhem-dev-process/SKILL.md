@@ -130,11 +130,16 @@ section with these required keys:
 
 The CHANGELOG entry uses the form
 `- [breaking|additive|clarifying] one-line summary. (#N)` and appends
-to `## Unreleased` on merge. A version-bump commit later renames
-`## Unreleased` to `## v0.x.y — YYYY-MM-DD` and advances
-`duhem_schema::SCHEMA_VERSION`. Under v0.x, **breaking → minor**;
-**additive → patch**; **clarifying → no bump**. Major (`1.0`) is
-reserved for the Phase-2 schema-OSS milestone.
+to `## Unreleased` on merge. A release-cut bump commit later advances
+`duhem_schema::SCHEMA_VERSION`, updates the Cargo workspace version,
+and propagates it to the npm platform packages with
+`npm/scripts/sync-versions.mjs`. The cut inserts a new
+`## vX.Y.Z — YYYY-MM-DD` heading immediately below `## Unreleased`,
+leaving `## Unreleased` empty, then tags that commit `vX.Y.Z`.
+`schema-changelog-check --lint` enforces the dated release section and
+tag coverage. Under v0.x, **breaking → minor**; **additive → patch**;
+**clarifying → no bump**. Major (`1.0`) is reserved for the Phase-2
+schema-OSS milestone.
 
 Category is mechanical, not aesthetic: a field rename is breaking
 regardless of whether the new name is "obviously better." When in
@@ -242,7 +247,7 @@ failing" / respond to a webhook). It covers:
   sub-issues of a parent are closed, ping the parent. See
   `pr-lifecycle`.
 - For schema-impacting PRs, also append the change to `CHANGELOG.md`
-  under the next-version heading.
+  under `## Unreleased`.
 
 ### 8. Closed-unmerged path
 
@@ -370,8 +375,8 @@ past it.
 ### Merge-collision patterns to watch
 
 - **`docs/duhem-spec.md`**: merge by section / by intent, not line-by-line.
-- **`CHANGELOG.md`**: both branches' entries land under the same
-  next-version heading — concatenate, don't pick one.
+- **`CHANGELOG.md`**: both branches' entries land under
+  `## Unreleased` — concatenate, don't pick one.
 - **Schema fixtures** (`crates/duhem-schema/fixtures/**`,
   `crates/duhem-actions/tests/fixtures/**`): YAML key-order conflicts are
   usually false alarms; re-validate via `duhem validate` or the owning

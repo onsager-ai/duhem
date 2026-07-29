@@ -150,6 +150,7 @@ lint:
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo run -p xtask --quiet -- check-file-budget --mode=fail
+    cargo run -p xtask --quiet -- schema-changelog-check --lint
     cargo run -p xtask --quiet -- skill-scrub
     cargo run -p xtask --quiet -- dx-drift --mode=warn
 

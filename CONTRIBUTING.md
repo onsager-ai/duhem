@@ -54,6 +54,8 @@ Duhem's schema is still **v0.x** — pre-stability, breaking changes are expecte
 - **`[additive]`** — new optional field, new action type, new evidence variant. Bumps the patch.
 - **`[clarifying]`** — doc-only, error-message wording, internal rename. Does not bump.
 
+Keep each entry to one landing and at most 400 characters; the frozen pre-consolidation history is in [`docs/changelog-archive.md`](docs/changelog-archive.md).
+
 The live schema version is the `duhem_schema::SCHEMA_VERSION` constant (surfaced by `duhem --version` and `duhem validate`). `cargo run -p xtask -- schema-changelog-check` verifies the changelog is in order.
 
 ## Deeper guides

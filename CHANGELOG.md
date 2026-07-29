@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+## v0.1.9 — 2026-07-29
+
 - [additive] Checks accept `session:` to seed their browser context from the new `ui/capture-session` action, so login can run once per run instead of once per check. (#347)
 - [additive] Runtime lifecycle is separate from judge verdicts, with `running`, `finished`, `aborted`, inferred `orphaned`, heartbeat, and terminal trace events so completed unjudged runs are representable. (#352)
 - [additive] Steps may declare `secret:` output paths whose values are masked like secret inputs, keeping credentials acquired at run time out of evidence. (#355)

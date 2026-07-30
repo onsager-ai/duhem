@@ -774,7 +774,7 @@ impl Page {
     }
 
     /// Bounding rect of `selector`'s first match (spec #214), or `None`
-    /// when it isn't present/visible timeout `timeout_ms`. CSS px,
+    /// when it isn't present or visible within `timeout_ms`. CSS px,
     /// document-relative — the element-highlight overlay maps these
     /// onto the full-page screenshot.
     pub async fn bounding_box(
@@ -799,7 +799,7 @@ impl Page {
     }
 
     /// Drain recorded network responses from `cursor` onward. Returns
-    /// the batch plus the next cursor; `api/observe` polls this timeout
+    /// the batch plus the next cursor; `api/observe` polls this within
     /// its `timeout:` window. See [`NetworkEvent`].
     pub async fn poll_network(&self, cursor: u64) -> Result<NetworkBatch, PwError> {
         let mut req = self.p();

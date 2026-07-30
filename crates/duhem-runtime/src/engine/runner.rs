@@ -644,8 +644,7 @@ impl Engine {
         for (idx, step) in check.steps.iter().enumerate() {
             let gate_reason = gate_skip_reason(step.condition, failed_by.as_deref());
             // Resolve template references in `with:` against whatever
-            // context we have. Cheap and same-shape for every code
-            // path, so we don't bifurcate evidence on it.
+            // context available without bifurcating evidence.
             let mut resolved_with = step.with.clone();
             let catalog_reference = page_reference(&step.with);
             if gate_reason.is_none()
@@ -1195,14 +1194,14 @@ criteria:
     }
 
     #[tokio::test]
-    async fn unresolved_page_reference_surfaces_engine_error() {
+    async fn unresolved_page_reference_is_an_engine_error() {
         let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(StubAction::new("fake/read", Outcome::Ok)));
-        let verification = def(r#"
-verification: unresolved catalog
+        let v = def(r#"
+verification: pages
 criteria:
   - id: AC-1
-    description: locator typo
+    description: x
     checks:
       - id: AC-1.1
         steps:
@@ -1211,10 +1210,7 @@ criteria:
             with: { locator: $pages.login.missing }
         assertions: ["true"]
 "#);
-        let error = engine
-            .run(&verification, BTreeMap::new())
-            .await
-            .unwrap_err();
+        let error = engine.run(&v, BTreeMap::new()).await.unwrap_err();
         assert!(
             matches!(
                 &error,

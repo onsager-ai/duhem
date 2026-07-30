@@ -471,6 +471,10 @@
             "null"
           ]
         },
+        "if": {
+          "$ref": "#/definitions/StepCondition",
+          "description": "Dispatch condition, serialized as `if:`. Omission is byte-identical to `if: success`."
+        },
         "outputs": {
           "additionalProperties": {
             "type": "string"
@@ -497,6 +501,32 @@
         "uses"
       ],
       "type": "object"
+    },
+    "StepCondition": {
+      "description": "Closed dispatch condition for a step. This is deliberately not an expression language: the runtime decides it from recorded outcomes.",
+      "oneOf": [
+        {
+          "description": "Run only while no earlier step in this sequence has failed.",
+          "enum": [
+            "success"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Run regardless of an earlier step failure.",
+          "enum": [
+            "always"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Run only after an earlier step failure.",
+          "enum": [
+            "failure"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "VerificationDefinition": {
       "additionalProperties": false,

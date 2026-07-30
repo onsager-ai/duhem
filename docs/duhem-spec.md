@@ -154,11 +154,19 @@ reference `id`, then `<uses> #<index>`; engine diagnostics remain keyed
 to `id` so they point at a stable YAML token. Steps may produce named
 outputs that subsequent steps and assertions reference.
 
+Steps also accept a closed `if:` condition. `success` is the default and
+runs only while no earlier step in the same check has failed; `always`
+runs regardless (for teardown); `failure` runs only after an earlier
+failure (for diagnostics). A step failure means `Error`, `Timeout`, or a
+judging step that observed `satisfied: false`. The state is scoped to one
+check, so a failed check never gates a sibling check. `setup:` uses the
+same vocabulary and scopes state to its own sequence.
+
 ### 7.6 Verdict
 
 The aggregated outcome of a verification run.
 
-- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Both are folded by the same three-state rule; a check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
+- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). A gated assertion is `skipped`: absence of a verdict, not `inconclusive`. Aggregation discards skipped assertions, then applies fail → inconclusive → pass precedence; if nothing remains, the check is `inconclusive:empty_aggregation`. Thus `[fail, skipped]` stays fail, `[pass, skipped]` stays pass, and `[skipped]` alone cannot become a pass. A check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
 - **Per-criterion verdict**: aggregated from its checks (any check `fail` → criterion `fail`; any `inconclusive` and no `fail` → criterion `inconclusive`; all `pass` → criterion `pass`).
 - **Per-run verdict**: aggregated from all criteria, same rules.
 
@@ -170,7 +178,11 @@ A `fail` verdict on a holistic check tells you the web is broken. It does not te
 
 The structured trace produced during a verification run. Append-only. Never edited.
 
-Evidence includes: each step’s inputs and outputs, each assertion’s predicate and evaluated result, screenshots/DOM snapshots/HAR files where applicable, video recordings (UI runs), and timing data.
+Evidence includes: each authored step and whether it ran, each executed
+step’s inputs and outputs, each assertion’s predicate and evaluated
+result, screenshots/DOM snapshots/HAR files where applicable, video
+recordings (UI runs), and timing data. A gated step is recorded as
+`skipped` with the gate reason; it is never silently omitted.
 
 Browser capture is a retained session, not only a final failure frame. For every executed step while a browser page exists, the runner makes one best-effort post-step screenshot. `duhem run --capture on-failure` records those frames temporarily and retains the complete storyboard only when the check is non-passing; `always` retains it for every browser check; `off` retains none. Captures are bounded, and identical PNG bytes converge on one content address. A screenshot failure or timeout is recorded as unavailable, warns, and never changes the verdict. Page-free steps honestly state that no browser frame exists.
 
@@ -655,10 +667,44 @@ Rules:
 
 - Membership is **catalog-driven**, not name-driven: a step judges iff its action’s contract lists a `satisfied` output. Custom actions that emit `satisfied` participate automatically.
 - Binding `satisfied` in the step’s `outputs:` **opts out** — the author is taking manual control (e.g. to combine several steps into one disjunctive assertion), so the implicit assertion is suppressed and only the explicit `assertions:` judge that step. Binding any *other* output (`count`, `actual`, `body`) does not opt out.
-- A skipped, errored, unknown-action, or environment-failed judging step contributes `inconclusive` with the same cause it would give an explicit assertion — never a silent `pass`.
+- A gated judging step contributes `skipped`, which aggregation discards;
+  an errored, unknown-action, or environment-failed judging step
+  contributes `inconclusive` with the same cause it would give an
+  explicit assertion — never a silent `pass`.
 - `assertions:` is therefore optional. A check with neither `assertions:` nor any judging step is rejected at validate time (there is nothing to judge).
 
 Implicit and explicit judgment compose: a check may carry both, and the fold sees every outcome. This is a spelling convenience over the §7.6 verdict rule, not a new judgment path.
+
+#### 10.3.3 Step gating (`if:`)
+
+Every check starts with a clean gate state. The default `if: success`
+runs while that check has no earlier failed step. `if: always` is for
+cleanup that must run on either path, and `if: failure` is for
+diagnostics that are useful only after failure:
+
+```yaml
+steps:
+  - id: save
+    description: Save the workspace
+    uses: ui/click
+    with: { role: button, name: Save }
+  - description: Capture diagnostics only when save failed
+    uses: cli/invoke
+    if: failure
+    with: { command: ./scripts/collect-diagnostics.sh }
+  - description: Always release the test lease
+    uses: api/call
+    if: always
+    with: { method: DELETE, url: $inputs.lease_url }
+```
+
+`if:` is deliberately not an expression language. Its complete
+vocabulary is `success | always | failure`. A gated step emits a
+`StepOutcome::Skipped` evidence record with the causing step in its
+reason. Explicit assertions that reference a skipped step are skipped
+too. Skipped assertions cost nothing when another assertion passes or
+fails; a check where everything was skipped remains inconclusive
+because nothing was judged.
 
 ### 10.4 Root manifest (`duhem.yml`)
 

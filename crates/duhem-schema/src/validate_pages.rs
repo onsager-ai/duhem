@@ -40,7 +40,7 @@ pub(crate) fn check_page_path(
     errors: &mut Vec<ValidationError>,
 ) {
     let segments = path.segments();
-    if segments.is_empty() || segments.len() > 2 {
+    if segments.len() != 2 {
         errors.push(ValidationError::MalformedPageRef {
             site: site.to_string(),
             raw: raw.to_string(),
@@ -48,21 +48,20 @@ pub(crate) fn check_page_path(
         return;
     }
     let page = &segments[0];
-    let element = segments.get(1);
-    if element.is_some_and(|element| {
-        pages
-            .get(page)
-            .is_some_and(|entries| entries.contains_key(element))
-    }) {
+    let element = &segments[1];
+    if pages
+        .get(page)
+        .is_some_and(|entries| entries.contains_key(element))
+    {
         return;
     }
 
-    let candidates: Vec<&str> = match (pages.get(page), element) {
-        (Some(entries), Some(_)) => entries.keys().map(String::as_str).collect(),
+    let candidates: Vec<&str> = match pages.get(page) {
+        Some(entries) => entries.keys().map(String::as_str).collect(),
         _ => pages.keys().map(String::as_str).collect(),
     };
     let sought = if pages.contains_key(page) {
-        element.unwrap_or(page)
+        element
     } else {
         page
     };
@@ -72,9 +71,7 @@ pub(crate) fn check_page_path(
     errors.push(ValidationError::UnresolvedPageRef {
         site: site.to_string(),
         raw: raw.to_string(),
-        entry: element
-            .map(|element| format!("$pages.{page}.{element}"))
-            .unwrap_or_else(|| format!("$pages.{page}")),
+        entry: format!("$pages.{page}.{element}"),
         help,
     });
 }

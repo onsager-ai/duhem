@@ -949,14 +949,25 @@ criteria:
 
     #[test]
     fn dangling_page_reference_names_step_and_entry() {
-        let errors = validate(&catalog_vd("$pages.typo")).unwrap_err();
+        let errors = validate(&catalog_vd("$pages.login.typo")).unwrap_err();
         let message = errors
             .iter()
             .find(|error| matches!(error, ValidationError::UnresolvedPageRef { .. }))
             .expect("page error")
             .to_string();
         assert!(message.contains("step `target`"), "{message}");
-        assert!(message.contains("$pages.typo"), "{message}");
+        assert!(message.contains("$pages.login.typo"), "{message}");
+    }
+
+    #[test]
+    fn page_reference_requires_page_and_element_segments() {
+        let errors = validate(&catalog_vd("$pages.login")).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| matches!(error, ValidationError::MalformedPageRef { .. })),
+            "{errors:?}"
+        );
     }
 
     #[test]

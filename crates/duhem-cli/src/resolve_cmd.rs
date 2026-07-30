@@ -378,13 +378,14 @@ fn resolve_with(
         }
         serde_yml::Value::String(raw) => {
             let expression = raw.trim().to_string();
-            if !(expression.starts_with("$inputs.") || expression.starts_with("$env.")) {
+            if !expression.starts_with('$') {
                 return;
             }
-            let mut scalar = serde_yml::Value::String(raw.clone());
-            match substitute_with(&mut scalar, context) {
-                Ok(()) => {
-                    *value = scalar;
+            let original = serde_yml::Value::String(raw.clone());
+            let mut resolved = original.clone();
+            match substitute_with(&mut resolved, context) {
+                Ok(()) if resolved != original => {
+                    *value = resolved;
                     let source = expression
                         .strip_prefix("$inputs.")
                         .and_then(reference_head)
@@ -401,9 +402,16 @@ fn resolve_with(
                         }),
                     );
                 }
+                Ok(()) => {}
                 Err(error) => errors.push(ResolveError {
                     stage: "reference_resolution",
-                    message: format!("{path}: unresolved `{}`", error.reference),
+                    message: match error.context {
+                        Some(context) => format!(
+                            "{path}: unresolved `{}` (evaluating `{context}`)",
+                            error.reference
+                        ),
+                        None => format!("{path}: unresolved `{}`", error.reference),
+                    },
                 }),
             }
         }

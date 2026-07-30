@@ -80,7 +80,10 @@ criteria:
         steps:
           - uses: cli/invoke
             with:
-              command: [echo, $inputs.base_url, $inputs.password]
+              command: [echo, $inputs.base_url, $inputs.password, '$runtime.upper("resolved")']
+          - uses: cli/invoke
+            with:
+              command: [echo, '$runtime.format("{}", $inputs.missing)']
         assertions:
           - $inputs.never_declared == true
 "#,
@@ -131,6 +134,21 @@ fn resolves_includes_profiles_secrets_validation_and_provenance_without_side_eff
     assert_eq!(
         leaf["document"]["criteria"][0]["checks"][0]["steps"][0]["with"]["command"][2],
         "••••••"
+    );
+    assert_eq!(
+        leaf["document"]["criteria"][0]["checks"][0]["steps"][0]["with"]["command"][3],
+        "RESOLVED"
+    );
+    assert!(
+        leaf["errors"].as_array().unwrap().iter().any(|error| {
+            error["stage"] == "reference_resolution"
+                && error["message"].as_str().is_some_and(|message| {
+                    message.contains("unresolved `$inputs.missing`")
+                        && message
+                            .contains("(evaluating `$runtime.format(\"{}\", $inputs.missing)`)")
+                })
+        }),
+        "{leaf}"
     );
     assert_eq!(
         leaf["document"]["criteria"][0]["checks"][0]["steps"][0]["with"]["timeout"],

@@ -267,7 +267,7 @@ describe("Timeline", () => {
     const labels = [...container.querySelectorAll(".ev-label")]
       .filter((el) => !el.closest(".step-inner"))
       .map((el) => el.textContent);
-    expect(labels).toEqual(["navigate", "assertion failed", "verdict: fail"]);
+    expect(labels).toEqual(["ui/navigate #0", "assertion failed", "verdict: fail"]);
     // The failing assertion row surfaces its recorded operands as an
     // expected/actual pair (not a raw sentence) and carries the fail tone.
     const cmp = container.querySelector(".ev.tone-fail [data-testid='assert-cmp']");
@@ -328,7 +328,7 @@ describe("Timeline", () => {
     const topLabels = [...container.querySelectorAll(".ev-label")]
       .filter((e) => !e.closest(".step-inner"))
       .map((e) => e.textContent);
-    expect(topLabels).toEqual(["assert-element", "verdict: fail"]);
+    expect(topLabels).toEqual(["ui/assert-element #0", "verdict: fail"]);
   });
 
   it("nests a request/response inspector under an api step, response open on 5xx (#280 follow-up)", () => {

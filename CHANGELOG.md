@@ -29,7 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
-- [clarifying] New `duhem resolve` prints the fully composed document — merged includes, resolved inputs, and per-value provenance — without executing anything. (#370)
+- [clarifying] New `duhem resolve` prints the fully composed document — merged includes, resolved inputs, and per-value provenance — without executing anything. (#372)
 - [breaking] Naming pass: step `within:`→`timeout:`, step `secret:`→`secret_outputs:`, lifecycle `environment:`→`provision:`, `environments:`→`profiles:` (`defaults.profile`, `--profile`), and `inherits: [n]` folded into `inputs: { n: { inherit: true } }`. (#371)
 
 ## v0.1.9 — 2026-07-29

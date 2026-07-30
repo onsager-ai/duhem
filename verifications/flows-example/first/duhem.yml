@@ -1,0 +1,16 @@
+verification: Reusable sign-in flow — first consumer
+criteria:
+  - id: AC-1
+    description: A fixture user can sign in from the first leaf.
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/navigate
+            with:
+              url: "data:text/html,<label>Username<input aria-label='Username'></label><label>Password<input aria-label='Password' type='password'></label><button onclick=\"document.querySelector('h1').hidden=false\">Sign In</button><h1 hidden>Welcome</h1>"
+          - id: login
+            description: Sign in as the first fixture user
+            call: sign_in
+            with: { user: first@example.com, password: first-secret }
+        assertions:
+          - $steps.login.outputs.signed_in == true

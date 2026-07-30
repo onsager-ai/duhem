@@ -284,6 +284,42 @@ entries win over the composed manifest. A locator may contain
 Validate dangling references offline; use `duhem resolve --provenance`
 to inspect the effective catalog and each winning source file.
 
+#### Share step flows instead of copying sequences
+
+Put a repeated action sequence in a `flows:` catalog on the root
+manifest, an included fragment, or a leaf. Bind its typed parameters at
+each `call:`:
+
+```yaml
+flows:
+  sign_in:
+    params:
+      password: { type: string, secret: true }
+      user: { type: string }
+    steps:
+      - uses: ui/type
+        with: { locator: $pages.login.username, text: $params.user }
+      - uses: ui/click
+        with: { locator: $pages.login.submit }
+      - id: landed
+        uses: ui/assert-element
+        with: { locator: $pages.login.welcome, expected: visible }
+    outputs:
+      signed_in: $steps.landed.outputs.satisfied
+
+- id: login
+  call: sign_in
+  with: { user: $inputs.user, password: $inputs.password }
+```
+
+Flow step bodies are hygienic: they may reference `$params.*` and
+`$pages.*` only, never the caller's `$inputs.*` or `$steps.*`. Pass
+every dependency explicitly. The exception is the flow's `outputs:`
+map, where `$steps.*` selects the inner value exposed to callers as
+`$steps.<call-id>.outputs.<declared-name>`. Inner ids are private, and
+`secret: true` params are masked like secret inputs. Inspect the flat
+expanded sequence and flow origins with `duhem resolve --provenance`.
+
 ### 4. The holistic-environment tax
 
 Per §8, a Duhem check, by default, exercises real behavior

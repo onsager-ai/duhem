@@ -39,6 +39,7 @@ composition.
 | 8 | [`secret-outputs-example`](secret-outputs-example/) | Mark a scalar output from a login step `secret_outputs:` before using it in a later authenticated request | network (`api/call`) | #355 |
 | 9 | [`step-gating-example`](step-gating-example/) | Gate ordinary work, failure-only diagnostics, and unconditional cleanup with the closed `if:` vocabulary | local process (`cli/invoke`) | #365 |
 | 10 | [`pages-example`](pages-example/) | Share a two-level `pages:` locator catalog through `includes:` and consume the same entry from sibling leaves | browser + inline fixture pages | #366 |
+| 11 | [`flows-example`](flows-example/) | Reuse a parameterized `flows:` sign-in sequence from sibling leaves while preserving expanded-step evidence | browser + inline fixture pages | #367 |
 
 ## Self-verification suites — Duhem's dogfood
 

@@ -241,6 +241,47 @@ validate` catches dangling `$pages.*` names offline and suggests nearby
 entries; `duhem resolve --provenance` lists the effective catalog and
 the source file of each winning entry.
 
+#### Share step flows instead of copying sequences
+
+Put a repeated action sequence in a `flows:` catalog on the root
+manifest, an included fragment, or a leaf. Parameters are bound at each
+`call:` and reuse the input type catalog:
+
+```yaml
+# flows.yml
+flows:
+  sign_in:
+    params:
+      password: { type: string, secret: true }
+      user: { type: string }
+    steps:
+      - uses: ui/type
+        with: { locator: $pages.login.username, text: $params.user }
+      - uses: ui/click
+        with: { locator: $pages.login.submit }
+      - id: landed
+        uses: ui/assert-element
+        with: { locator: $pages.login.welcome, expected: visible }
+    outputs:
+      signed_in: $steps.landed.outputs.satisfied
+
+# leaf check
+- id: login
+  description: Sign in as the fixture user
+  call: sign_in
+  with: { user: $inputs.user, password: $inputs.password }
+```
+
+A flow body is hygienic: step `with:` values may reference only
+`$params.*` and `$pages.*`, never the caller's `$inputs.*` or
+`$steps.*`. Pass every dependency explicitly. The one intentional
+`$steps.*` use is in the flow's own `outputs:` map, which defines the
+entire caller-visible interface. Callers read only
+`$steps.<call-id>.outputs.<declared-name>`; inner step ids are private.
+`secret: true` parameters receive the same evidence masking as secret
+inputs. Use `duhem resolve --provenance` to inspect the expanded action
+sequence and its flow origins.
+
 ### 4. The holistic-environment tax — no mocks of the web
 
 A Duhem check exercises real behavior end-to-end. **No mocking the web.**

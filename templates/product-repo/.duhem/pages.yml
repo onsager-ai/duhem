@@ -1,3 +1,10 @@
 # Shared locator catalog. Group names are author-chosen surfaces: pages,
-# dialogs, navigation bars, or any other stable UI region.
-pages: {}
+# dialogs, navigation bars, or any other stable UI region. These
+# canonical login entries are consumed by `flows.yml`; rename them to
+# match your product's accessible UI.
+pages:
+  login:
+    password: { role: textbox, name: Password }
+    submit: { role: button, name: Sign In }
+    username: { role: textbox, name: Username }
+    welcome: { role: heading, name: Welcome }

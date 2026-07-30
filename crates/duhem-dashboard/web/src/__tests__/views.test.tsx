@@ -222,7 +222,7 @@ describe("CheckSummary", () => {
 });
 
 describe("Timeline", () => {
-  it("renders a gated step and its assertion as skipped, not failed", () => {
+  it("renders a gated step as skipped from its execution trace", () => {
     const events: TraceEvent[] = [
       {
         seq: 1,
@@ -238,14 +238,6 @@ describe("Timeline", () => {
         kind: "step_finished",
         step_index: 1,
         outcome: { skipped: { reason: "blocked by failed step `login`" } },
-      },
-      {
-        seq: 3,
-        ts: "2026-01-01T00:00:00.020Z",
-        kind: "assertion_evaluated",
-        step_index: 1,
-        state: "skipped",
-        detail: "blocked by failed step `login`",
       },
     ];
     const { container, getByTestId } = render(<Timeline events={events} />);

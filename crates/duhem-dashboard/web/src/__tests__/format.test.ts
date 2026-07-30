@@ -110,13 +110,10 @@ describe("formatEvent", () => {
     expect(f.tone).toBe("inconclusive");
   });
 
-  it("renders skipped distinctly and keeps unknown states neutral", () => {
+  it("keeps unknown assertion states neutral", () => {
     const missing = formatEvent(ev("assertion_evaluated", { detail: "x" }));
     expect(missing.label).toBe("assertion evaluated");
     expect(missing.tone).toBe("muted");
-    const skipped = formatEvent(ev("assertion_evaluated", { state: "skipped" }));
-    expect(skipped.label).toBe("assertion skipped");
-    expect(skipped.tone).toBe("skipped");
     const future = formatEvent(ev("assertion_evaluated", { state: "future" }));
     expect(future.label).toBe("assertion evaluated");
     expect(future.tone).toBe("muted");
@@ -364,17 +361,6 @@ describe("summarizeCheck", () => {
     );
     expect(s.headline).toContain("passed");
     expect(s.headline).toContain("2 assertions held");
-    expect(s.failing).toEqual([]);
-  });
-
-  it("does not count skipped assertions as held or failed", () => {
-    const s = summarizeCheck(
-      check("pass", [
-        ev("assertion_evaluated", { state: "pass" }),
-        ev("assertion_evaluated", { state: "skipped" }, 2),
-      ]),
-    );
-    expect(s.headline).toContain("1 assertion held");
     expect(s.failing).toEqual([]);
   });
 

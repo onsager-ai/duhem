@@ -49,7 +49,7 @@ struct CompletedStep {
     index: u32,
     uses: String,
     outcome: duhem_evidence::StepOutcome,
-    judgment: Option<duhem_judge::AssertionState>,
+    judgment: Option<duhem_judge::VerdictState>,
     detail: Option<String>,
     duration: Duration,
 }
@@ -131,7 +131,7 @@ impl TtyBoard {
         &mut self,
         check_id: &str,
         step_index: Option<u32>,
-        state: &duhem_judge::AssertionState,
+        state: &duhem_judge::VerdictState,
         detail: Option<&str>,
     ) {
         let Some(criterion_id) = self.owner(check_id).map(str::to_string) else {
@@ -457,10 +457,8 @@ impl TtyBoard {
                 terminal_width,
             ));
             if let Some(step) = check_state.steps.iter().rev().find(|step| {
-                !matches!(
-                    step.judgment,
-                    Some(duhem_judge::AssertionState::Pass) | None
-                ) || !matches!(step.outcome, duhem_evidence::StepOutcome::Ok)
+                !matches!(step.judgment, Some(duhem_judge::VerdictState::Pass) | None)
+                    || !matches!(step.outcome, duhem_evidence::StepOutcome::Ok)
             }) {
                 rows.push(fit(
                     format!(
@@ -627,12 +625,7 @@ fn single_line(text: &str) -> String {
 
 fn step_mark(step: &CompletedStep) -> &'static str {
     if let Some(judgment) = &step.judgment {
-        return match judgment {
-            duhem_judge::AssertionState::Pass => INDICATOR_PASS,
-            duhem_judge::AssertionState::Fail => INDICATOR_FAIL,
-            duhem_judge::AssertionState::Inconclusive(_) => INDICATOR_INCONCLUSIVE,
-            duhem_judge::AssertionState::Skipped => INDICATOR_PENDING,
-        };
+        return verdict_mark(judgment);
     }
     match step.outcome {
         duhem_evidence::StepOutcome::Ok => INDICATOR_PASS,

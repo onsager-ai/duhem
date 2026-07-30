@@ -1239,7 +1239,7 @@ criteria:
             let check = format!("{criterion}.1");
             board.start_step(&criterion, &check, 0, "cli/invoke", &with);
             board.finish_step(&duhem_evidence::StepOutcome::Ok);
-            board.assertion(&check, Some(0), &duhem_judge::AssertionState::Pass, None);
+            board.assertion(&check, Some(0), &duhem_judge::VerdictState::Pass, None);
             board.finish_check(&check, &VerdictState::Pass);
             board.finish_criterion(&criterion, &VerdictState::Pass);
         }
@@ -1248,7 +1248,7 @@ criteria:
         board.assertion(
             "AC-6.1",
             Some(0),
-            &duhem_judge::AssertionState::Fail,
+            &duhem_judge::VerdictState::Fail,
             Some("expected HTTP 402, received 500"),
         );
         board.finish_check("AC-6.1", &VerdictState::Fail);

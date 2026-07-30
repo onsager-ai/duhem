@@ -96,10 +96,6 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
                     writeln!(out, "        ({d})")?;
                 }
             }
-            for a in &f.skipped_assertions {
-                writeln!(out, "    skipped  {}", a.expr)?;
-                writeln!(out, "        ({})", a.reason)?;
-            }
         }
     }
     writeln!(out, "store: {} (run {})", s.store.display(), s.run_id)?;
@@ -119,9 +115,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use duhem_summary::{
-        CheckFailureSummary, CriterionSummary, FailedAssertionSummary, SkippedAssertionSummary,
-    };
+    use duhem_summary::{CheckFailureSummary, CriterionSummary, FailedAssertionSummary};
 
     #[test]
     fn renders_pass_run_to_a_2_column_table() {
@@ -193,18 +187,10 @@ mod tests {
                 verdict: VerdictState::Fail,
                 detail: Some("expected textbox \"Username\" to be visible".into()),
             }],
-            skipped_assertions: vec![SkippedAssertionSummary {
-                expr: "$steps.cleanup.outputs.satisfied == true".into(),
-                reason: "blocked by failed step `The Username field is offered`".into(),
-            }],
         }]);
         let mut buf = Vec::new();
         render(&s, &mut buf).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("The Username field is offered"), "got: {out}");
-        assert!(
-            out.contains("skipped  $steps.cleanup.outputs.satisfied == true"),
-            "got: {out}"
-        );
     }
 }

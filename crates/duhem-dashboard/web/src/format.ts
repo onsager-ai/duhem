@@ -19,7 +19,7 @@ export type IconName =
   | "pass" // a step ok / an assertion held
   | "fail" // a step error / an assertion failed
   | "inconclusive" // an assertion that could not be decided
-  | "skipped" // an authored step/assertion that gating did not run
+  | "skipped" // an authored step that gating did not run
   | "timeout" // a step that timed out
   | "verdict-pass" // the check's final pass verdict
   | "verdict-fail" // the check's final fail verdict
@@ -262,9 +262,6 @@ export function formatEvent(
       if (state.startsWith("inconclusive")) {
         return { ...ab, icon: "inconclusive", label: "assertion inconclusive", detail, tone: "inconclusive" };
       }
-      if (state === "skipped") {
-        return { ...ab, icon: "skipped", label: "assertion skipped", detail, tone: "skipped" };
-      }
       // Missing or unknown future state — record it, don't call it a
       // failure (a forward-compatible trace must not be mislabeled).
       return { ...ab, icon: "unknown", label: "assertion evaluated", detail: detail || state, tone: "muted" };
@@ -322,10 +319,7 @@ export interface CheckSummaryModel {
 export function summarizeCheck(detail: CheckDetail): CheckSummaryModel {
   const assertions = detail.timeline.filter((e) => e.kind === "assertion_evaluated");
   const failing = assertions
-    .filter((e) => {
-      const state = str(e.state);
-      return state !== "pass" && state !== "skipped";
-    })
+    .filter((e) => str(e.state) !== "pass")
     .map((e) => ({
       expr: str(e.expr),
       detail: str(e.detail) || str(e.state) || "no detail recorded",
@@ -334,7 +328,7 @@ export function summarizeCheck(detail: CheckDetail): CheckSummaryModel {
   const v = detail.verdict;
   let headline: string;
   if (v === "pass") {
-    const n = assertions.filter((e) => str(e.state) !== "skipped").length;
+    const n = assertions.length;
     headline = `This check passed — ${n} assertion${n === 1 ? "" : "s"} held against the live delivery web.`;
   } else if (v === "fail") {
     headline =
@@ -489,9 +483,6 @@ export function stepStatus(node: StepNode): {
   }
   if (jstate.startsWith("inconclusive")) {
     return { icon: "inconclusive", label: "step inconclusive", tone: "inconclusive", reason, failed: true };
-  }
-  if (jstate === "skipped") {
-    return { icon: "skipped", label: "step skipped", tone: "skipped", reason, failed: false };
   }
   const finished = node.events.find(
     (e) => e.kind === "step_finished" || e.kind === "setup_step_finished",

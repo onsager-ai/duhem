@@ -270,33 +270,18 @@ fn build_summary(o: &RunOutcome, store_db: &std::path::Path) -> RunSummary {
     let failures = o
         .failures
         .iter()
-        .map(|f| {
-            let assertions = f
+        .map(|f| CheckFailureSummary {
+            criterion_id: f.criterion_id.clone(),
+            check_id: f.check_id.clone(),
+            assertions: f
                 .assertions
                 .iter()
-                .filter_map(|a| {
-                    a.state.as_verdict().map(|verdict| FailedAssertionSummary {
-                        expr: a.expr.clone(),
-                        verdict,
-                        detail: a.detail.clone(),
-                    })
-                })
-                .collect();
-            let skipped_assertions = f
-                .assertions
-                .iter()
-                .filter(|a| matches!(a.state, duhem_judge::AssertionState::Skipped))
-                .map(|a| duhem_summary::SkippedAssertionSummary {
+                .map(|a| FailedAssertionSummary {
                     expr: a.expr.clone(),
-                    reason: a.detail.clone().unwrap_or_else(|| "gated".to_string()),
+                    verdict: a.state,
+                    detail: a.detail.clone(),
                 })
-                .collect();
-            CheckFailureSummary {
-                criterion_id: f.criterion_id.clone(),
-                check_id: f.check_id.clone(),
-                assertions,
-                skipped_assertions,
-            }
+                .collect(),
         })
         .collect();
     RunSummary::new(

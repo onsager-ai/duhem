@@ -46,15 +46,18 @@ criteria:
       - id: AC-1.1
         description: Navigate and confirm the form rendered.
         steps:
-          - uses: ui/navigate
+          - description: Open the sign-in page
+            uses: ui/navigate
             with:
               url: $inputs.login_url
-          - uses: ui/assert-element
+          - description: The Username field is offered
+            uses: ui/assert-element
             with:
               locator: { role: textbox, name: Username }
               expected: visible
               timeout: 20s
-          - uses: ui/assert-element
+          - description: The Sign In button is offered
+            uses: ui/assert-element
             with:
               locator: { role: button, name: Sign In }
               expected: visible

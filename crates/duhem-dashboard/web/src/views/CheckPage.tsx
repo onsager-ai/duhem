@@ -431,15 +431,14 @@ function StepGroup({
   );
   const fe = formatEvent(started, prevOf(started));
   const status = stepStatus(node);
-  // Overlay the authored step `id` from the recorded VD snapshot (#302):
-  // a named step reads by its intent (`refund`), with the action verb
-  // demoted into the detail. Anonymous steps keep the verb as the label.
+  // Overlay authored intent from the recorded VD snapshot (#302).
+  // Description is prose for readers; id remains the stable reference.
   const vd = useVd();
   const cid = typeof started.criterion_id === "string" ? started.criterion_id : "";
   const chid = typeof started.check_id === "string" ? started.check_id : "";
-  const stepId = vd?.stepId(cid, chid, node.stepIndex);
-  const label = stepId ?? fe.label;
-  const detailText = stepId ? [fe.label, fe.detail].filter(Boolean).join(" · ") : fe.detail;
+  const uses = typeof started.uses === "string" ? started.uses : "step";
+  const label = vd?.stepLabel(cid, chid, node.stepIndex) ?? `${uses} #${node.stepIndex}`;
+  const detailText = [fe.label, fe.detail].filter(Boolean).join(" · ");
   const statusObs = scalarObs.find(
     (observation) => observation.name === "status" && typeof observation.value === "number",
   );
@@ -1334,12 +1333,15 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
       if (node.kind !== "step") return [];
       const started = node.events[0];
       const uses = typeof started.uses === "string" ? started.uses : "step";
-      const authored = vd?.stepId(check.criterion_id, check.check_id, node.stepIndex);
+      const authoredId = vd?.stepId(check.criterion_id, check.check_id, node.stepIndex);
+      const label =
+        vd?.stepLabel(check.criterion_id, check.check_id, node.stepIndex) ??
+        `${uses} #${node.stepIndex}`;
       return [[
         node.stepIndex,
         {
-          key: authored ?? String(node.stepIndex),
-          label: authored ?? uses.split("/").pop() ?? uses,
+          key: authoredId ?? String(node.stepIndex),
+          label,
         },
       ] as const];
     }),

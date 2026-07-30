@@ -1,6 +1,6 @@
 // Parse a recorded VD source snapshot (#302) into an id/index lookup, so
 // the run views can overlay the *authored intent* — criterion/check
-// descriptions and step ids — onto the execution trace by joining on
+// descriptions and step labels — onto the execution trace by joining on
 // `criterion_id` / `check_id` / `step_index`. Tolerant by construction:
 // any shape that doesn't match yields an empty lookup (views fall back to
 // ids), never a throw — a snapshot is evidence to read, not to trust.
@@ -9,6 +9,7 @@ import { parse } from "yaml";
 
 export interface VdStep {
   id?: string;
+  description?: string;
   uses?: string;
 }
 export interface VdCheck {
@@ -28,6 +29,9 @@ export interface VdLookup {
   /** The author's `id:` for the Nth step of a check (0-based, matching
    *  the trace's `step_index`), or undefined if absent. */
   stepId(criterionId: string, checkId: string, index: number): string | undefined;
+  /** Human-facing label for the Nth step: description, then id, then
+   *  `<uses> #<index>`. */
+  stepLabel(criterionId: string, checkId: string, index: number): string | undefined;
 }
 
 function str(v: unknown): string | undefined {
@@ -36,7 +40,11 @@ function str(v: unknown): string | undefined {
 
 function normStep(raw: unknown): VdStep {
   const r = (raw ?? {}) as Record<string, unknown>;
-  return { id: str(r.id), uses: str(r.uses) };
+  return {
+    id: str(r.id),
+    description: str(r.description),
+    uses: str(r.uses),
+  };
 }
 
 function normCheck(raw: unknown): VdCheck | undefined {
@@ -82,5 +90,9 @@ export function parseDefinition(yamlText: string): VdLookup {
     criterion: (id) => byCrit.get(id),
     check: (cid, chid) => find(cid, chid),
     stepId: (cid, chid, i) => find(cid, chid)?.steps[i]?.id,
+    stepLabel: (cid, chid, i) => {
+      const step = find(cid, chid)?.steps[i];
+      return step?.description ?? step?.id ?? (step?.uses ? `${step.uses} #${i}` : undefined);
+    },
   };
 }

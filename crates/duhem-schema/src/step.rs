@@ -24,6 +24,12 @@ pub struct Step {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
 
+    /// Optional prose explaining what this action is for. Unlike
+    /// [`Step::id`], this is a human-facing display label and is never
+    /// used as a reference symbol.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
     /// Action type identifier (e.g. `ui/click`). At v0.1 this is any
     /// non-empty string; the catalog spec types it later.
     pub uses: String,
@@ -74,8 +80,22 @@ with: { role: button, name: Create }
         let s: Step = serde_yml::from_str(yaml).expect("parse");
         assert_eq!(s.uses, "ui/click");
         assert!(s.id.is_none());
+        assert!(s.description.is_none());
         assert!(s.outputs.is_empty());
         assert!(s.secret_outputs.is_empty());
+    }
+
+    #[test]
+    fn description_is_optional_and_absence_preserves_canonical_bytes() {
+        let old_shape = "id: open\nuses: ui/navigate\nwith:\n  url: /login\n";
+        let step: Step = serde_yml::from_str(old_shape).expect("parse old shape");
+        assert!(step.description.is_none());
+        assert_eq!(serde_yml::to_string(&step).expect("serialize"), old_shape);
+
+        let described = "id: open\ndescription: Open the sign-in page\nuses: ui/navigate\n";
+        let step: Step = serde_yml::from_str(described).expect("parse description");
+        assert_eq!(step.description.as_deref(), Some("Open the sign-in page"));
+        assert_eq!(serde_yml::to_string(&step).expect("serialize"), described);
     }
 
     #[test]

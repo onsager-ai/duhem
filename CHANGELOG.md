@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Steps accept an optional `description:` — a prose label for what the step is for, shown in the run report and failure detail. (#373)
 - [clarifying] New `duhem resolve` prints the fully composed document — merged includes, resolved inputs, and per-value provenance — without executing anything. (#372)
 - [breaking] Naming pass: step `within:`→`timeout:`, step `secret:`→`secret_outputs:`, lifecycle `environment:`→`provision:`, `environments:`→`profiles:` (`defaults.profile`, `--profile`), and `inherits: [n]` folded into `inputs: { n: { inherit: true } }`. (#371)
 

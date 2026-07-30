@@ -239,9 +239,11 @@ function TreeGroup({
                     if (node.kind !== "step") return null;
                     const started = node.events[0];
                     const uses = typeof started.uses === "string" ? started.uses : "step";
-                    const authored = vd?.stepId(criterion.id, chk.id, node.stepIndex);
-                    const label = authored ?? uses.split("/").pop() ?? uses;
-                    const key = authored ?? String(node.stepIndex);
+                    const authoredId = vd?.stepId(criterion.id, chk.id, node.stepIndex);
+                    const label =
+                      vd?.stepLabel(criterion.id, chk.id, node.stepIndex) ??
+                      `${uses} #${node.stepIndex}`;
+                    const key = authoredId ?? String(node.stepIndex);
                     const stepSearch = new URLSearchParams(search);
                     stepSearch.set("step", key);
                     const status = stepStatus(node);

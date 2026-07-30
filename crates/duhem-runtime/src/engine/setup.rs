@@ -363,6 +363,7 @@ mod tests {
     fn step(id: Option<&str>, uses: &str) -> Step {
         Step {
             id: id.map(String::from),
+            description: None,
             uses: uses.to_string(),
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),

@@ -158,15 +158,31 @@ Steps also accept a closed `if:` condition. `success` is the default and
 runs only while no earlier step in the same check has failed; `always`
 runs regardless (for teardown); `failure` runs only after an earlier
 failure (for diagnostics). A step failure means `Error`, `Timeout`, or a
-judging step that observed `satisfied: false`. The state is scoped to one
-check, so a failed check never gates a sibling check. `setup:` uses the
-same vocabulary and scopes state to its own sequence.
+failed implicit judgment. An authored `satisfied` output is only an
+observation until judgment promotes it: binding that output for manual
+composition suppresses the implicit judgment and therefore does not gate.
+The state is scoped to one check, so a failed check never gates a sibling
+check. `setup:` uses the same vocabulary and scopes state to its own
+sequence.
 
 ### 7.6 Verdict
 
 The aggregated outcome of a verification run.
 
-- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). A gated assertion is `skipped`: absence of a verdict, not `inconclusive`. Aggregation discards skipped assertions, then applies fail → inconclusive → pass precedence; if nothing remains, the check is `inconclusive:empty_aggregation`. Thus `[fail, skipped]` stays fail, `[pass, skipped]` stays pass, and `[skipped]` alone cannot become a pass. A check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
+Duhem keeps three layers distinct:
+
+| Layer | Question | Values |
+| --- | --- | --- |
+| Execution | Did the step run? | `ok` · `error` · `timeout` · `skipped` |
+| Observation | What did it see? | Arbitrary outputs; `satisfied` is one boolean among them |
+| Judgment | What do we conclude? | `pass` · `fail` · `inconclusive` |
+
+`satisfied` is not a verdict. An author may combine a false observation
+with another true observation in a passing disjunction. The two coincide
+only when an unbound judging output is promoted into an implicit
+assertion.
+
+- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Every evaluated assertion carries the same three-state `VerdictState` as the final verdict. An assertion that is not evaluated because one of its operands comes from a skipped step is omitted; absence is not a fourth state. Aggregation applies fail → inconclusive → pass precedence directly, and an empty assertion set becomes `inconclusive:empty_aggregation`. A check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
 - **Per-criterion verdict**: aggregated from its checks (any check `fail` → criterion `fail`; any `inconclusive` and no `fail` → criterion `inconclusive`; all `pass` → criterion `pass`).
 - **Per-run verdict**: aggregated from all criteria, same rules.
 
@@ -666,8 +682,8 @@ An action whose contract emits a boolean `satisfied` output — `ui/assert-eleme
 Rules:
 
 - Membership is **catalog-driven**, not name-driven: a step judges iff its action’s contract lists a `satisfied` output. Custom actions that emit `satisfied` participate automatically.
-- Binding `satisfied` in the step’s `outputs:` **opts out** — the author is taking manual control (e.g. to combine several steps into one disjunctive assertion), so the implicit assertion is suppressed and only the explicit `assertions:` judge that step. Binding any *other* output (`count`, `actual`, `body`) does not opt out.
-- A gated judging step contributes `skipped`, which aggregation discards;
+- Binding `satisfied` in the step’s `outputs:` **opts out** — the author is taking manual control (e.g. to combine several steps into one disjunctive assertion), so the implicit assertion and its gate are both suppressed; only the explicit `assertions:` judge that observation. Binding any *other* output (`count`, `actual`, `body`) does not opt out.
+- A gated judging step contributes no assertion;
   an errored, unknown-action, or environment-failed judging step
   contributes `inconclusive` with the same cause it would give an
   explicit assertion — never a silent `pass`.
@@ -701,10 +717,11 @@ steps:
 `if:` is deliberately not an expression language. Its complete
 vocabulary is `success | always | failure`. A gated step emits a
 `StepOutcome::Skipped` evidence record with the causing step in its
-reason. Explicit assertions that reference a skipped step are skipped
-too. Skipped assertions cost nothing when another assertion passes or
-fails; a check where everything was skipped remains inconclusive
-because nothing was judged.
+reason and contributes no implicit assertion. Explicit assertions are
+evaluated only after the step sequence and therefore cannot gate later
+steps; an explicit assertion that references a skipped step is not
+evaluated and is omitted. A check where nothing was judged remains
+inconclusive.
 
 ### 10.4 Root manifest (`duhem.yml`)
 

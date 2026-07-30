@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] Assertions and verdicts share one three-state vocabulary; `skipped` is an execution fact on steps only, and gating follows judgment rather than a raw `satisfied` observation. (#374)
 - [breaking] A failing step now blocks the rest of its check by default; steps accept `if: success|always|failure` to opt out. Add `if: always` to steps that must still run after a failure. (#374)
 - [additive] Steps accept an optional `description:` — a prose label for what the step is for, shown in the run report and failure detail. (#373)
 - [clarifying] New `duhem resolve` prints the fully composed document — merged includes, resolved inputs, and per-value provenance — without executing anything. (#372)

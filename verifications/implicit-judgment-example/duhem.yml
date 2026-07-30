@@ -26,7 +26,7 @@
 #   duhem validate verifications/implicit-judgment-example/duhem.yml
 #
 # The runtime behavior (implicit true -> Pass, false -> Fail, gated ->
-# Skipped/absent from aggregation, manual binding opts out) is covered
+# absent from aggregation, manual binding opts out of judgment + gating) is covered
 # by the engine unit tests in `crates/duhem-runtime/src/engine/runner.rs`.
 
 verification: Implicit judgment — terse vs explicit

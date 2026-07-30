@@ -2,8 +2,8 @@
 #
 # This real local-process check exercises all three closed `if:` values.
 # The first step succeeds, so the failure-only step is recorded as
-# skipped. The always step still runs, and its passing assertion means
-# the skipped assertion costs nothing: [skipped, pass] aggregates pass.
+# skipped. The assertion that references it is omitted; the always step
+# still runs, and its passing assertion makes the check pass.
 
 verification: Step gating conditions
 

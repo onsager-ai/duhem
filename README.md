@@ -106,7 +106,9 @@ For a real-world example — including the `provision.up:` / `down:` hooks Duhem
 - **The verdict.** Deterministic aggregation of structured assertions into `pass` / `fail` / `inconclusive`. No LLM in the loop.
 - **Step gating.** Steps default to `if: success`; use `if: always` for
   teardown or `if: failure` for diagnostics. Gated steps stay visible as
-  skipped evidence and contribute no assertion verdict.
+  skipped evidence and contribute no assertion verdict. Gating follows
+  execution failure or a failed implicit judgment, not a raw
+  `satisfied: false` observation bound for manual composition.
 
 The canonical reference is [`docs/duhem-spec.md`](docs/duhem-spec.md) — start with §1 (Why), §4 (Solution Overview), §7 (Core Concepts), §8 (Holistic Verification Principle), and §10 (VD shape).
 

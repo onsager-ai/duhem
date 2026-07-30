@@ -77,6 +77,14 @@ describe("formatEvent", () => {
     expect(formatEvent(ev("step_finished", { outcome: "ok" })).tone).toBe("ok");
     expect(formatEvent(ev("step_finished", { outcome: "error" })).tone).toBe("fail");
     expect(formatEvent(ev("step_finished", { outcome: "timeout" })).tone).toBe("inconclusive");
+    const skipped = formatEvent(
+      ev("step_finished", {
+        outcome: { skipped: { reason: "blocked by failed step `login`" } },
+      }),
+    );
+    expect(skipped.tone).toBe("skipped");
+    expect(skipped.label).toBe("step skipped");
+    expect(skipped.detail).toContain("login");
   });
 
   it("emphasizes a failing assertion with its recorded detail", () => {
@@ -93,11 +101,14 @@ describe("formatEvent", () => {
     expect(f.tone).toBe("inconclusive");
   });
 
-  it("does not mislabel a missing or unknown assertion state as failed", () => {
+  it("renders skipped distinctly and keeps unknown states neutral", () => {
     const missing = formatEvent(ev("assertion_evaluated", { detail: "x" }));
     expect(missing.label).toBe("assertion evaluated");
     expect(missing.tone).toBe("muted");
-    const future = formatEvent(ev("assertion_evaluated", { state: "skipped" }));
+    const skipped = formatEvent(ev("assertion_evaluated", { state: "skipped" }));
+    expect(skipped.label).toBe("assertion skipped");
+    expect(skipped.tone).toBe("skipped");
+    const future = formatEvent(ev("assertion_evaluated", { state: "future" }));
     expect(future.label).toBe("assertion evaluated");
     expect(future.tone).toBe("muted");
   });
@@ -215,7 +226,7 @@ describe("groupTimeline", () => {
 });
 
 describe("stepStatus (#280 status propagation)", () => {
-  const node = (judgment?: TraceEvent, outcome = "ok"): StepNode => ({
+  const node = (judgment?: TraceEvent, outcome: unknown = "ok"): StepNode => ({
     kind: "step",
     key: "s1",
     stepIndex: 0,
@@ -263,6 +274,16 @@ describe("stepStatus (#280 status propagation)", () => {
     expect(stepStatus(node(undefined, "ok")).label).toBe("step ok");
     expect(stepStatus(node(undefined, "error")).label).toBe("step error");
     expect(stepStatus(node(undefined, "error")).tone).toBe("fail");
+  });
+
+  it("renders a gated step as skipped without marking it failed", () => {
+    const s = stepStatus(
+      node(undefined, { skipped: { reason: "blocked by failed step `login`" } }),
+    );
+    expect(s.label).toBe("step skipped");
+    expect(s.tone).toBe("skipped");
+    expect(s.failed).toBe(false);
+    expect(s.reason).toContain("login");
   });
 });
 
@@ -327,6 +348,17 @@ describe("summarizeCheck", () => {
     );
     expect(s.headline).toContain("passed");
     expect(s.headline).toContain("2 assertions held");
+    expect(s.failing).toEqual([]);
+  });
+
+  it("does not count skipped assertions as held or failed", () => {
+    const s = summarizeCheck(
+      check("pass", [
+        ev("assertion_evaluated", { state: "pass" }),
+        ev("assertion_evaluated", { state: "skipped" }, 2),
+      ]),
+    );
+    expect(s.headline).toContain("1 assertion held");
     expect(s.failing).toEqual([]);
   });
 

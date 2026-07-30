@@ -127,6 +127,10 @@ pub struct CheckFailureSummary {
     pub criterion_id: String,
     pub check_id: String,
     pub assertions: Vec<FailedAssertionSummary>,
+    /// Assertions excluded from verdict aggregation because the step
+    /// they reference was gated out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped_assertions: Vec<SkippedAssertionSummary>,
 }
 
 /// One non-passing assertion: the authored expression, its state, and
@@ -139,6 +143,14 @@ pub struct FailedAssertionSummary {
     pub verdict: VerdictState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+}
+
+/// One authored assertion that did not run, plus the recorded gate
+/// reason. Additive to the v2 reporter contract.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkippedAssertionSummary {
+    pub expr: String,
+    pub reason: String,
 }
 
 /// Aggregated summary across all leaves of a root-manifest run (spec
@@ -225,12 +237,20 @@ mod tests {
                     verdict: VerdictState::Fail,
                     detail: None,
                 }],
+                skipped_assertions: vec![SkippedAssertionSummary {
+                    expr: "$steps.cleanup.outputs.ok == true".into(),
+                    reason: "blocked by failed step `save`".into(),
+                }],
             }],
         );
         let line = serde_json::to_string(&s).unwrap();
         let back: RunSummary = serde_json::from_str(&line).unwrap();
         assert_eq!(back, s);
         assert_eq!(back.failures[0].assertions[0].verdict, VerdictState::Fail);
+        assert_eq!(
+            back.failures[0].skipped_assertions[0].reason,
+            "blocked by failed step `save`"
+        );
     }
 
     #[test]

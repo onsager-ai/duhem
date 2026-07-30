@@ -951,7 +951,7 @@ criteria:
                     EventPayload::AssertionEvaluated {
                         check_id: "AC-1.1".into(),
                         assertion_index: 0,
-                        state: VerdictState::Pass,
+                        state: VerdictState::Pass.into(),
                         detail: None,
                         expr: None,
                         step_index: None,
@@ -971,7 +971,7 @@ criteria:
                     EventPayload::AssertionEvaluated {
                         check_id: "AC-2.1".into(),
                         assertion_index: 0,
-                        state: VerdictState::Fail,
+                        state: VerdictState::Fail.into(),
                         detail: None,
                         expr: None,
                         step_index: None,
@@ -1142,7 +1142,7 @@ criteria:
                 EventPayload::AssertionEvaluated {
                     check_id: "AC-1.1".into(),
                     assertion_index: 0,
-                    state: VerdictState::Pass,
+                    state: VerdictState::Pass.into(),
                     detail: None,
                     expr: None,
                     step_index: Some(0),
@@ -1239,7 +1239,7 @@ criteria:
             let check = format!("{criterion}.1");
             board.start_step(&criterion, &check, 0, "cli/invoke", &with);
             board.finish_step(&duhem_evidence::StepOutcome::Ok);
-            board.assertion(&check, Some(0), &VerdictState::Pass, None);
+            board.assertion(&check, Some(0), &duhem_judge::AssertionState::Pass, None);
             board.finish_check(&check, &VerdictState::Pass);
             board.finish_criterion(&criterion, &VerdictState::Pass);
         }
@@ -1248,7 +1248,7 @@ criteria:
         board.assertion(
             "AC-6.1",
             Some(0),
-            &VerdictState::Fail,
+            &duhem_judge::AssertionState::Fail,
             Some("expected HTTP 402, received 500"),
         );
         board.finish_check("AC-6.1", &VerdictState::Fail);

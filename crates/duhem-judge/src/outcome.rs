@@ -9,9 +9,86 @@
 //! (`docs/duhem-spec.md` §11.2): the runtime makes claims, the judge
 //! aggregates them, and the two halves can be authored independently.
 
-use serde::{Deserialize, Serialize};
+use std::fmt;
 
-use crate::verdict::VerdictState;
+use serde::de::{Error, Unexpected};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+use crate::verdict::{InconclusiveCause, VerdictState};
+
+/// One assertion's state before check aggregation. `Skipped` is the
+/// absence of a verdict: [`aggregate_check`](crate::aggregate_check)
+/// discards it before producing Duhem's ordinary three-state verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssertionState {
+    Pass,
+    Fail,
+    Inconclusive(InconclusiveCause),
+    Skipped,
+}
+
+impl AssertionState {
+    pub fn as_verdict(self) -> Option<VerdictState> {
+        match self {
+            Self::Pass => Some(VerdictState::Pass),
+            Self::Fail => Some(VerdictState::Fail),
+            Self::Inconclusive(cause) => Some(VerdictState::Inconclusive(cause)),
+            Self::Skipped => None,
+        }
+    }
+}
+
+impl From<VerdictState> for AssertionState {
+    fn from(value: VerdictState) -> Self {
+        match value {
+            VerdictState::Pass => Self::Pass,
+            VerdictState::Fail => Self::Fail,
+            VerdictState::Inconclusive(cause) => Self::Inconclusive(cause),
+        }
+    }
+}
+
+impl fmt::Display for AssertionState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Pass => f.write_str("pass"),
+            Self::Fail => f.write_str("fail"),
+            Self::Inconclusive(cause) => write!(f, "inconclusive:{cause}"),
+            Self::Skipped => f.write_str("skipped"),
+        }
+    }
+}
+
+impl Serialize for AssertionState {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for AssertionState {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        match raw.as_str() {
+            "pass" => Ok(Self::Pass),
+            "fail" => Ok(Self::Fail),
+            "skipped" => Ok(Self::Skipped),
+            other => match other.strip_prefix("inconclusive:") {
+                Some(cause) => InconclusiveCause::from_wire(cause)
+                    .map(Self::Inconclusive)
+                    .ok_or_else(|| {
+                        D::Error::invalid_value(
+                            Unexpected::Str(other),
+                            &"a known inconclusive cause",
+                        )
+                    }),
+                None => Err(D::Error::invalid_value(
+                    Unexpected::Str(other),
+                    &"pass, fail, skipped, or inconclusive:<cause>",
+                )),
+            },
+        }
+    }
+}
 
 /// One assertion's evaluated state.
 ///
@@ -24,7 +101,7 @@ use crate::verdict::VerdictState;
 #[serde(deny_unknown_fields)]
 pub struct AssertionOutcome {
     pub assertion_index: usize,
-    pub state: VerdictState,
+    pub state: AssertionState,
     /// Human-readable, evidence-bound. Per §8, this is *never*
     /// structured-causal: it explains, it does not localize blame
     /// inside the web. The judge is opaque to its contents.

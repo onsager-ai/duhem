@@ -6,18 +6,15 @@
 //! discipline. Every call re-queries the store (the MVP's hot-reload
 //! posture from #53 — no cache, no invalidation bug).
 //!
-//! Runs are listed flat from the store and grouped by verification
-//! name: a verification with more than one recorded run renders as a
-//! run-set row with its runs as children (the pre-#190 stand-in for
-//! real scoping; it also seeds the ② VD-over-time altitude from
-//! #188). The rollup verdict is the judge's `aggregate_run_set` fold
-//! over recorded verdicts — the dashboard never invents a verdict.
+//! Run grouping and rollups derive from recorded store state; the
+//! dashboard never invents a verdict.
 
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use duhem_evidence::{
-    Event, EventPayload, ObservationValue, RunRecord, RunStatus, Store, VerdictState,
+    AssertionState, Event, EventPayload, ObservationValue, RunRecord, RunStatus, Store,
+    VerdictState,
 };
 use duhem_judge::{RunVerdict, aggregate_run_set};
 use thiserror::Error;
@@ -347,7 +344,7 @@ impl EvidenceReader {
         let assertions = c
             .assertions
             .iter()
-            .filter(|(_, s, _)| *s != VerdictState::Pass)
+            .filter(|(_, s, _)| *s != AssertionState::Pass)
             .map(|(i, s, d)| FailingAssertion {
                 assertion_index: *i,
                 state: *s,
@@ -694,7 +691,7 @@ struct CheckProjection {
     check_id: String,
     verdict: Option<VerdictState>,
     /// `(assertion_index, state, detail)` in recorded order.
-    assertions: Vec<(u32, VerdictState, Option<String>)>,
+    assertions: Vec<(u32, AssertionState, Option<String>)>,
     artifacts: Vec<ArtifactRef>,
 }
 

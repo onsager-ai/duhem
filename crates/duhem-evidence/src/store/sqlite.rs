@@ -243,7 +243,7 @@ impl Store for SqliteStore {
                 .bind(event.seq as i64)
                 .bind(check_id)
                 .bind(*assertion_index as i64)
-                .bind(verdict_token(state)?)
+                .bind(super::assertion_token(state)?)
                 .bind(detail)
                 .execute(&mut *tx)
                 .await?;
@@ -316,12 +316,15 @@ impl Store for SqliteStore {
                 .await?;
                 if let Some((opener_seq, payload)) = opener {
                     let opener_evt: serde_json::Value = serde_json::from_str(&payload)?;
-                    if let Some(layer) = opener_evt.get("layer").and_then(|l| l.as_str()) {
+                    if !matches!(outcome, crate::event::StepOutcome::Skipped { .. })
+                        && let Some(layer) = opener_evt.get("layer").and_then(|l| l.as_str())
+                    {
                         let ok = matches!(outcome, crate::event::StepOutcome::Ok);
                         let detail = match outcome {
                             crate::event::StepOutcome::Ok => None,
                             crate::event::StepOutcome::Error => Some("error"),
                             crate::event::StepOutcome::Timeout => Some("timeout"),
+                            crate::event::StepOutcome::Skipped { .. } => unreachable!(),
                         };
                         sqlx::query(
                             "INSERT INTO spans (run_id, seq, check_id, layer, ok, detail)                              VALUES (?, ?, ?, ?, ?, ?)",

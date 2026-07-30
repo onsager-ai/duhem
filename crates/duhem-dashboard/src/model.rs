@@ -8,7 +8,7 @@
 //! re-judged at the view layer.
 
 use chrono::{DateTime, Utc};
-use duhem_evidence::{Event, RunStatus, VerdictState};
+use duhem_evidence::{AssertionState, Event, RunStatus, VerdictState};
 use serde::Serialize;
 
 /// Discriminates the two row kinds on the runs list. A `run-set` row
@@ -221,8 +221,8 @@ pub struct CheckDiff {
 #[derive(Debug, Clone, Serialize)]
 pub struct AssertionDiff {
     pub assertion_index: u32,
-    pub baseline_state: Option<VerdictState>,
-    pub current_state: Option<VerdictState>,
+    pub baseline_state: Option<AssertionState>,
+    pub current_state: Option<AssertionState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub baseline_detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -267,7 +267,7 @@ pub struct FailingCheck {
 #[derive(Debug, Clone, Serialize)]
 pub struct FailingAssertion {
     pub assertion_index: u32,
-    pub state: VerdictState,
+    pub state: AssertionState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }

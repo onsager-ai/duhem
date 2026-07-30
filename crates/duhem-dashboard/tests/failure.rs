@@ -88,7 +88,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, network: Option
     w.append(EventPayload::AssertionEvaluated {
         check_id: "AC-1.1".into(),
         assertion_index: 0,
-        state,
+        state: state.into(),
         detail,
         expr: None,
         step_index: None,

@@ -4,8 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use duhem_actions::{ActionError, ExistenceState, Locator};
-use duhem_evidence::{EventPayload, EvidenceWriter, StoreError, VerdictState, WriterError};
-use duhem_judge::{AssertionOutcome, InconclusiveCause, RunVerdict};
+use duhem_evidence::{EventPayload, EvidenceWriter, StoreError, WriterError};
+use duhem_judge::{AssertionOutcome, AssertionState, InconclusiveCause, RunVerdict};
 use duhem_schema::{Expr, PathRoot};
 use thiserror::Error;
 
@@ -103,6 +103,10 @@ pub(crate) struct StepEvidence {
     pub with: serde_yml::Value,
     /// The action's outputs (`satisfied`, `count`, …) for this step.
     pub outputs: BTreeMap<String, serde_json::Value>,
+    /// Why this step was gated out. A skipped step contributes no
+    /// assertion verdict; this distinguishes it from an unrun step
+    /// whose observation is genuinely missing.
+    pub skip_reason: Option<String>,
 }
 
 impl StepEvidence {
@@ -112,6 +116,15 @@ impl StepEvidence {
         StepEvidence {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
+            skip_reason: None,
+        }
+    }
+
+    pub fn skipped(reason: String) -> Self {
+        StepEvidence {
+            with: serde_yml::Value::Null,
+            outputs: BTreeMap::new(),
+            skip_reason: Some(reason),
         }
     }
 
@@ -130,7 +143,7 @@ pub(crate) struct ImplicitOutcome {
     /// reporter folds the assertion into its step and propagates its
     /// status).
     pub step_index: usize,
-    pub state: VerdictState,
+    pub state: AssertionState,
     pub detail: Option<String>,
 }
 
@@ -160,14 +173,16 @@ pub(crate) fn implicit_judgment_outcomes(
             continue;
         }
         let label = display_step_label(step, idx);
-        let (state, detail) = if any_unknown {
+        let (state, detail) = if let Some(reason) = &step_evidence[idx].skip_reason {
+            (AssertionState::Skipped, Some(reason.clone()))
+        } else if any_unknown {
             (
-                VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+                AssertionState::Inconclusive(InconclusiveCause::MissingObservation),
                 Some("unknown_action".to_string()),
             )
         } else if environment_failed {
             (
-                VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+                AssertionState::Inconclusive(InconclusiveCause::EnvironmentError),
                 Some(if browser_missing {
                     "browser_unavailable".to_string()
                 } else {
@@ -177,17 +192,17 @@ pub(crate) fn implicit_judgment_outcomes(
         } else {
             let ev = &step_evidence[idx];
             match ev.satisfied() {
-                Some(true) => (VerdictState::Pass, None),
+                Some(true) => (AssertionState::Pass, None),
                 // The step ran and judged the artifact *not* satisfied.
                 // Speak the reason — the authored intent plus what was
                 // observed — so the reporter shows why, not a bare
                 // `actual false, expected true`.
                 Some(false) => (
-                    VerdictState::Fail,
+                    AssertionState::Fail,
                     Some(judging_fail_detail(step, ev, &label)),
                 ),
                 None => (
-                    VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+                    AssertionState::Inconclusive(InconclusiveCause::MissingObservation),
                     Some(format!(
                         "step `{label}` did not run or produced no `satisfied`"
                     )),
@@ -331,6 +346,7 @@ pub(crate) async fn evaluate_explicit_assertions(
     any_unknown: bool,
     environment_failed: bool,
     browser_missing: bool,
+    step_evidence: &[StepEvidence],
     assertion_outcomes: &mut Vec<AssertionOutcome>,
     failed: &mut Vec<FailedAssertion>,
 ) -> Result<(), EngineError> {
@@ -341,14 +357,17 @@ pub(crate) async fn evaluate_explicit_assertions(
         // (an explicit `$steps.update.outputs.status == 200` IS about the
         // `update` step, #279 follow-up).
         let step_index = owning_step_index(&expr, check);
-        let (state, detail) = if any_unknown {
+        let skip_reason = skipped_reference_reason(&expr, check, step_evidence);
+        let (state, detail) = if let Some(reason) = skip_reason {
+            (AssertionState::Skipped, Some(reason))
+        } else if any_unknown {
             (
-                VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+                AssertionState::Inconclusive(InconclusiveCause::MissingObservation),
                 Some("unknown_action".to_string()),
             )
         } else if environment_failed {
             (
-                VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+                AssertionState::Inconclusive(InconclusiveCause::EnvironmentError),
                 Some(if browser_missing {
                     "browser_unavailable".to_string()
                 } else {
@@ -365,7 +384,7 @@ pub(crate) async fn evaluate_explicit_assertions(
                 EvalResult::False => describe_comparison(&expr, ctx),
                 EvalResult::True => None,
             };
-            (eval_to_state(&r), detail)
+            (AssertionState::from(eval_to_state(&r)), detail)
         };
         writer
             .append(EventPayload::AssertionEvaluated {
@@ -381,7 +400,7 @@ pub(crate) async fn evaluate_explicit_assertions(
                 expr: Some(assertion.display()),
             })
             .await?;
-        if !matches!(state, VerdictState::Pass) {
+        if !matches!(state, AssertionState::Pass) {
             failed.push(FailedAssertion {
                 expr: assertion.display(),
                 state,
@@ -426,6 +445,22 @@ fn steps_referenced(expr: &Expr, out: &mut BTreeSet<String>) {
         Expr::UnaryOp { expr, .. } => steps_referenced(expr, out),
         Expr::Lit(_) => {}
     }
+}
+
+fn skipped_reference_reason(
+    expr: &Expr,
+    check: &duhem_schema::Check,
+    evidence: &[StepEvidence],
+) -> Option<String> {
+    let mut refs = BTreeSet::new();
+    steps_referenced(expr, &mut refs);
+    check.steps.iter().enumerate().find_map(|(index, step)| {
+        let id = step.id.as_ref()?;
+        if !refs.contains(id) {
+            return None;
+        }
+        evidence.get(index)?.skip_reason.clone()
+    })
 }
 
 /// If an explicit assertion references exactly one step (`$steps.<id>`),
@@ -480,7 +515,7 @@ pub(crate) async fn append_implicit_judgment(
                 step_index: Some(imp.step_index as u32),
             })
             .await?;
-        if !matches!(imp.state, VerdictState::Pass) {
+        if !matches!(imp.state, AssertionState::Pass) {
             failed.push(FailedAssertion {
                 expr: format!("implicit: step `{}` satisfied == true", imp.label),
                 state: imp.state,
@@ -553,7 +588,7 @@ pub struct FailedAssertion {
     pub expr: String,
     /// `Fail` or `Inconclusive(..)`; never `Pass` (passing assertions
     /// are not collected).
-    pub state: VerdictState,
+    pub state: AssertionState,
     /// Evidence-bound cause detail when present (e.g. a missing
     /// observation or type mismatch). `None` for a plain comparison
     /// that evaluated false — the expression itself localizes it.
@@ -597,6 +632,7 @@ mod fail_detail_tests {
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.clone()))
                 .collect(),
+            skip_reason: None,
         }
     }
 
@@ -787,6 +823,7 @@ mod step_label_tests {
         let evidence = vec![StepEvidence {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::from([("satisfied".to_string(), serde_json::json!(false))]),
+            skip_reason: None,
         }];
         let outcomes = implicit_judgment_outcomes(&check, |_| true, &evidence, false, false, false);
         assert_eq!(outcomes[0].label, "The Username field is offered");

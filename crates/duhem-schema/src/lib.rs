@@ -30,7 +30,7 @@ pub use manifest::{
 };
 pub use project::{ProjectDecl, ProjectKind};
 pub use provision::{DurationSpec, HttpReadyProbe, Provision, ReadyProbe};
-pub use step::Step;
+pub use step::{Step, StepCondition};
 pub use validate::{ValidationError, validate, validate_with_contract_outputs};
 pub use verification::{InputDecl, InputType, SchemaError, VerificationDefinition};
 

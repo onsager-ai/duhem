@@ -5,7 +5,7 @@
 
 import type { CheckDetail, TraceEvent } from "./api";
 
-export type Tone = "ok" | "fail" | "inconclusive" | "muted" | "anchor";
+export type Tone = "ok" | "fail" | "inconclusive" | "skipped" | "muted" | "anchor";
 
 /**
  * A semantic icon key, not a glyph. `format.ts` stays pure (no JSX):
@@ -19,6 +19,7 @@ export type IconName =
   | "pass" // a step ok / an assertion held
   | "fail" // a step error / an assertion failed
   | "inconclusive" // an assertion that could not be decided
+  | "skipped" // an authored step/assertion that gating did not run
   | "timeout" // a step that timed out
   | "verdict-pass" // the check's final pass verdict
   | "verdict-fail" // the check's final fail verdict
@@ -49,6 +50,21 @@ export interface FormattedEvent {
 
 function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
+}
+
+function stepOutcome(v: unknown): { kind: string; reason: string } {
+  const scalar = str(v);
+  if (scalar) return { kind: scalar, reason: "" };
+  if (v && typeof v === "object") {
+    const skipped = (v as Record<string, unknown>).skipped;
+    if (skipped && typeof skipped === "object") {
+      return {
+        kind: "skipped",
+        reason: str((skipped as Record<string, unknown>).reason) ?? "",
+      };
+    }
+  }
+  return { kind: "ok", reason: "" };
 }
 
 /**
@@ -218,14 +234,15 @@ export function formatEvent(
     }
     case "step_finished":
     case "setup_step_finished": {
-      const outcome = str(evt.outcome) ?? "ok";
+      const outcome = stepOutcome(evt.outcome);
       const map: Record<string, { icon: IconName; label: string; tone: Tone }> = {
         ok: { icon: "pass", label: "step ok", tone: "ok" },
         error: { icon: "fail", label: "step error", tone: "fail" },
         timeout: { icon: "timeout", label: "step timed out", tone: "inconclusive" },
+        skipped: { icon: "skipped", label: "step skipped", tone: "skipped" },
       };
-      const m = map[outcome] ?? { icon: "unknown" as IconName, label: `step ${outcome}`, tone: "muted" as Tone };
-      return { ...base, ...m, detail: "" };
+      const m = map[outcome.kind] ?? { icon: "unknown" as IconName, label: `step ${outcome.kind}`, tone: "muted" as Tone };
+      return { ...base, ...m, detail: outcome.reason };
     }
     case "assertion_evaluated": {
       const state = str(evt.state) ?? "";
@@ -242,6 +259,9 @@ export function formatEvent(
       }
       if (state.startsWith("inconclusive")) {
         return { ...ab, icon: "inconclusive", label: "assertion inconclusive", detail, tone: "inconclusive" };
+      }
+      if (state === "skipped") {
+        return { ...ab, icon: "skipped", label: "assertion skipped", detail, tone: "skipped" };
       }
       // Missing or unknown future state — record it, don't call it a
       // failure (a forward-compatible trace must not be mislabeled).
@@ -300,7 +320,10 @@ export interface CheckSummaryModel {
 export function summarizeCheck(detail: CheckDetail): CheckSummaryModel {
   const assertions = detail.timeline.filter((e) => e.kind === "assertion_evaluated");
   const failing = assertions
-    .filter((e) => str(e.state) !== "pass")
+    .filter((e) => {
+      const state = str(e.state);
+      return state !== "pass" && state !== "skipped";
+    })
     .map((e) => ({
       expr: str(e.expr),
       detail: str(e.detail) || str(e.state) || "no detail recorded",
@@ -309,7 +332,7 @@ export function summarizeCheck(detail: CheckDetail): CheckSummaryModel {
   const v = detail.verdict;
   let headline: string;
   if (v === "pass") {
-    const n = assertions.length;
+    const n = assertions.filter((e) => str(e.state) !== "skipped").length;
     headline = `This check passed — ${n} assertion${n === 1 ? "" : "s"} held against the live delivery web.`;
   } else if (v === "fail") {
     headline =
@@ -410,8 +433,14 @@ function foldOntoSteps(nodes: TimelineNode[]): TimelineNode[] {
           // assert two things about one call). A failing one wins for the
           // step's status/reason; otherwise keep the first.
           const prev = target.judgment;
-          const isFail = str(e.state) !== "pass";
-          if (!prev || (isFail && str(prev.state) === "pass")) {
+          const rank = (state: unknown) => {
+            const value = str(state) ?? "";
+            if (value === "fail") return 3;
+            if (value.startsWith("inconclusive")) return 2;
+            if (value === "pass") return 1;
+            return 0;
+          };
+          if (!prev || rank(e.state) > rank(prev.state)) {
             target.judgment = e;
           }
           target.events.push(e);
@@ -459,15 +488,23 @@ export function stepStatus(node: StepNode): {
   if (jstate.startsWith("inconclusive")) {
     return { icon: "inconclusive", label: "step inconclusive", tone: "inconclusive", reason, failed: true };
   }
+  if (jstate === "skipped") {
+    return { icon: "skipped", label: "step skipped", tone: "skipped", reason, failed: false };
+  }
   const finished = node.events.find(
     (e) => e.kind === "step_finished" || e.kind === "setup_step_finished",
   );
-  const outcome = str(finished?.outcome) ?? "ok";
+  const outcome = stepOutcome(finished?.outcome);
   const map: Record<string, { icon: IconName; label: string; tone: Tone }> = {
     ok: { icon: "pass", label: "step ok", tone: "ok" },
     error: { icon: "fail", label: "step error", tone: "fail" },
     timeout: { icon: "timeout", label: "step timed out", tone: "inconclusive" },
+    skipped: { icon: "skipped", label: "step skipped", tone: "skipped" },
   };
-  const m = map[outcome] ?? { icon: "unknown" as IconName, label: `step ${outcome}`, tone: "muted" as Tone };
-  return { ...m, reason: "", failed: m.tone === "fail" || m.tone === "inconclusive" };
+  const m = map[outcome.kind] ?? { icon: "unknown" as IconName, label: `step ${outcome.kind}`, tone: "muted" as Tone };
+  return {
+    ...m,
+    reason: outcome.reason,
+    failed: m.tone === "fail" || m.tone === "inconclusive",
+  };
 }

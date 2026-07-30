@@ -100,7 +100,12 @@ where
 
 /// Roll up one check's per-assertion outcomes into a `CheckVerdict`.
 pub fn aggregate_check(outcome: &CheckOutcome) -> CheckVerdict {
-    let state = fold_verdicts(outcome.assertions.iter().map(|a| a.state));
+    let state = fold_verdicts(
+        outcome
+            .assertions
+            .iter()
+            .filter_map(|assertion| assertion.state.as_verdict()),
+    );
     CheckVerdict {
         check_id: outcome.check_id.clone(),
         state,
@@ -205,13 +210,21 @@ pub fn aggregate_run_set(verdicts: Vec<RunVerdict>) -> RunSetVerdict {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::outcome::AssertionOutcome;
+    use crate::outcome::{AssertionOutcome, AssertionState};
 
     fn ao(state: VerdictState) -> AssertionOutcome {
         AssertionOutcome {
             assertion_index: 0,
-            state,
+            state: state.into(),
             detail: None,
+        }
+    }
+
+    fn skipped() -> AssertionOutcome {
+        AssertionOutcome {
+            assertion_index: 0,
+            state: AssertionState::Skipped,
+            detail: Some("condition was not met".into()),
         }
     }
 
@@ -360,6 +373,36 @@ mod tests {
         assert_eq!(
             aggregate_check(&out).state,
             VerdictState::Inconclusive(InconclusiveCause::Timeout),
+        );
+    }
+
+    #[test]
+    fn aggregate_check_fail_discards_skipped() {
+        let out = CheckOutcome {
+            check_id: "c1".into(),
+            assertions: vec![ao(VerdictState::Fail), skipped(), skipped()],
+        };
+        assert_eq!(aggregate_check(&out).state, VerdictState::Fail);
+    }
+
+    #[test]
+    fn aggregate_check_pass_discards_skipped() {
+        let out = CheckOutcome {
+            check_id: "c1".into(),
+            assertions: vec![ao(VerdictState::Pass), skipped()],
+        };
+        assert_eq!(aggregate_check(&out).state, VerdictState::Pass);
+    }
+
+    #[test]
+    fn aggregate_check_only_skipped_is_empty_aggregation() {
+        let out = CheckOutcome {
+            check_id: "c1".into(),
+            assertions: vec![skipped()],
+        };
+        assert_eq!(
+            aggregate_check(&out).state,
+            VerdictState::Inconclusive(InconclusiveCause::EmptyAggregation)
         );
     }
 

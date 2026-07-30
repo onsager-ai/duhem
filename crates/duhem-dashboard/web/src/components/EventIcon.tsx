@@ -17,6 +17,7 @@ import {
   Crosshair,
   Paperclip,
   Play,
+  SkipForward,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -30,6 +31,7 @@ const ICONS: Record<IconName, LucideIcon> = {
   pass: Check,
   fail: X,
   inconclusive: CircleSlash,
+  skipped: SkipForward,
   timeout: Clock,
   "verdict-pass": CircleCheck,
   "verdict-fail": Ban,

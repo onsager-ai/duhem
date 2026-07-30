@@ -165,7 +165,7 @@ pub async fn write_passing_run(
     w.append(EventPayload::AssertionEvaluated {
         check_id: "AC-1.1".into(),
         assertion_index: 0,
-        state: VerdictState::Pass,
+        state: VerdictState::Pass.into(),
         detail: None,
         expr: None,
         step_index: None,
@@ -298,7 +298,7 @@ pub async fn write_replay_run(store: Arc<SqliteStore>, run_id: &str) -> (String,
     w.append(EventPayload::AssertionEvaluated {
         check_id: "AC-1.1".into(),
         assertion_index: 0,
-        state: VerdictState::Pass,
+        state: VerdictState::Pass.into(),
         detail: None,
         expr: Some("true".into()),
         step_index: None,
@@ -356,7 +356,7 @@ pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition
     w.append(EventPayload::AssertionEvaluated {
         check_id: "AC-1.1".into(),
         assertion_index: 0,
-        state: VerdictState::Fail,
+        state: VerdictState::Fail.into(),
         detail: Some("status 500 != 200".into()),
         expr: None,
         step_index: None,

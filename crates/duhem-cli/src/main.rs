@@ -1,7 +1,7 @@
 //! `duhem` — the command-line entry point.
 //!
 //! Phase-0 skeleton. The free CLI binary (`docs/duhem-spec.md` §13)
-//! offers `init`, `validate`, `run`, `export`, and `dashboard`.
+//! offers `init`, `validate`, `resolve`, `run`, `export`, and `dashboard`.
 //! `init` (issue #48) scaffolds a runnable Verification Definition
 //! skeleton; the `run` subcommand carries the authoring-ergonomics
 //! surface (`--filter`, `--db`, `--reporter`) per the spec on issue
@@ -25,6 +25,8 @@ mod profile;
 mod reporter;
 mod reporter_config;
 mod resolve;
+mod resolve_cmd;
+mod resolve_provenance;
 mod run_cmd;
 mod run_scope;
 mod validate_cmd;
@@ -118,6 +120,29 @@ enum Cmd {
         /// manifest. Omit to auto-discover a manifest from the current
         /// directory and its ancestors.
         path: Option<PathBuf>,
+    },
+    /// Print the composed document without executing it.
+    ///
+    /// Resolves manifest includes, profiles, inherited inputs,
+    /// input precedence, static references, and default timeouts.
+    /// This command never launches a browser, runs provisioning hooks,
+    /// writes evidence, or performs network I/O.
+    Resolve {
+        /// Path to a Verification Definition, directory, or manifest.
+        /// Omit to auto-discover a manifest from the current directory.
+        path: Option<PathBuf>,
+        /// Select a named profile from the manifest's `profiles:` block.
+        #[arg(long = "profile", alias = "environment", value_name = "NAME")]
+        profile: Option<String>,
+        /// Inputs, repeatable and last-wins: `KEY=VALUE` or `@FILE`.
+        #[arg(long = "inputs", value_name = "KEY=VALUE|@FILE")]
+        inputs: Vec<String>,
+        /// Output encoding. JSON is the stable machine-readable form.
+        #[arg(long = "format", value_name = "yaml|json", default_value = "yaml")]
+        format: resolve_cmd::ResolveFormat,
+        /// Include per-value source, precedence rung, and overrides.
+        #[arg(long = "provenance", default_value_t = false)]
+        provenance: bool,
     },
     /// Execute a Verification Definition end-to-end.
     ///
@@ -315,6 +340,19 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Some(Cmd::Resolve {
+            path,
+            profile,
+            inputs,
+            format,
+            provenance,
+        }) => resolve_cmd::run(resolve_cmd::ResolveArgs {
+            path,
+            profile,
+            inputs,
+            format,
+            provenance,
+        }),
         Some(Cmd::Dashboard(opts)) => dashboard::run(&opts.into()),
         Some(Cmd::Browser(opts)) => browser_cmd::run(&opts),
         Some(Cmd::Export { run_id, db, out }) => {

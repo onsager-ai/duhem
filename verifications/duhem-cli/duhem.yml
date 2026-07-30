@@ -730,3 +730,43 @@ criteria:
           - matches:
               value: $steps.run_slow_suite.outputs.stdout
               pattern: '"verdict":"pass"'
+
+  # ==========================================================================
+  # #370 — inspect the exact composed document without executing it.
+  # ==========================================================================
+  - id: AC-14
+    description: |
+      An author can inspect the document Duhem would execute, including
+      value provenance, through a stable machine-readable command that
+      does not start the verification.
+    checks:
+      - id: AC-14.1
+        description: |
+          The shipped CLI resolves a real committed manifest as JSON with
+          provenance. The result names its schema and composed document,
+          exits successfully, and emits no execution diagnostics.
+        steps:
+          - id: resolve_manifest
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - resolve
+                - verifications/defaults-example
+                - --format
+                - json
+                - --provenance
+              cwd: $inputs.repo_dir
+              timeout: 30s
+        assertions:
+          - $steps.resolve_manifest.outputs.exit_code == 0
+          - matches:
+              value: $steps.resolve_manifest.outputs.stdout
+              pattern: '"schema_version"'
+          - matches:
+              value: $steps.resolve_manifest.outputs.stdout
+              pattern: '"document"'
+          - matches:
+              value: $steps.resolve_manifest.outputs.stdout
+              pattern: '"provenance"'
+          - $steps.resolve_manifest.outputs.stderr == ""

@@ -840,7 +840,7 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 
 **Authoring Surface**
 
-- CLI for local authoring (`duhem-cli` — `duhem init`, `duhem validate`, `duhem run`, `duhem dashboard`)
+- CLI for local authoring (`duhem-cli` — `duhem init`, `duhem validate`, `duhem resolve`, `duhem run`, `duhem dashboard`)
 - Web UI for browsing past runs, evidence, and verdicts (`duhem-dashboard` — serve + static export, live SSE)
 - VS Code extension for inline criterion editing and check preview (roadmap)
 

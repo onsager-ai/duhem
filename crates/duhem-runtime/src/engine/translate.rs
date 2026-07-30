@@ -57,7 +57,7 @@ pub(super) fn retry_delay(base: Duration, backoff: RetryBackoff, attempt: u32) -
 /// duration past `u64::MAX` ms is left out rather than truncated (the
 /// action's `DEFAULT_TIMEOUT` then applies); such a value is not
 /// reachable from the `DurationSpec` wire shape in practice.
-pub(super) fn apply_default_timeout(with: &mut serde_yml::Value, default: Duration) {
+pub fn apply_default_timeout(with: &mut serde_yml::Value, default: Duration) {
     let ms = default.as_millis();
     if ms > u64::MAX as u128 {
         return;

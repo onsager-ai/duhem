@@ -88,6 +88,12 @@ WOULD RUN: checks::AC-1::AC-1.1
 WOULD RUN: checks::AC-2::AC-2.1
 ```
 
+For the composed values behind that plan, use
+`duhem resolve . --provenance`; add `--format json` for the stable
+machine-readable form. It resolves includes, profiles, inputs, and
+default timeouts without running provisioning or opening a browser,
+and masks every secret as `••••••`.
+
 `duhem run` auto-discovers the manifest: with no path it walks the current directory and its ancestors (capped at the enclosing `.git`) for a `duhem.yml` / `.duhem.yml`, so `cd anywhere-in-the-repo && duhem run` finds the repo-root manifest — same as `git`, `cargo`, `pnpm`. Pass an explicit path to override, or `-f path/to/manifest.yml` for an out-of-tree manifest.
 
 For a real-world example — including the `provision.up:` / `down:` hooks Duhem sequences around a check — see [`verifications/duhem-dashboard/`](verifications/duhem-dashboard/). Product suites live co-located in their own repos under `.duhem/` (e.g. `onsager-ai/chreode/.duhem/`); [`templates/product-repo/`](templates/product-repo/) is the drop-in skeleton.
@@ -112,6 +118,7 @@ duhem init       Scaffold a runnable Verification Definition skeleton
 duhem actions    List the built-in action catalog
 duhem describe   Print one action's contract (with-fields, outputs, example)
 duhem validate   Parse and structurally validate a Verification Definition file
+duhem resolve    Print the fully composed document without executing it
 duhem run        Execute a Verification Definition end-to-end
 duhem browser    Provision the Playwright sidecar + Chromium for ui/* checks
 duhem dashboard  Browse run evidence in a read-only web dashboard (serve + static export)

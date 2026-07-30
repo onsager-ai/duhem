@@ -279,8 +279,24 @@ Point it at *your* system by changing three things in `duhem.yml`:
    regular expression instead of a literal, use
    `$runtime.matches(body_text, "Example ?Domain")`.
 
-Then `duhem validate` (catch shape errors early) and `duhem run`. A
-type error in an assertion — say `contains` against a number — is a
+Then `duhem validate` (catch shape errors early) and `duhem run`. When
+composition or input precedence is surprising, inspect the exact
+pre-execution document first:
+
+```bash
+duhem resolve . --profile staging --provenance
+duhem resolve . --profile staging --format json > resolved.json
+```
+
+`resolve` merges includes, expands leaves, resolves inherited and
+profile/process/default inputs, substitutes static step values, and
+fills default timeouts. Secret values stay `••••••`; validation
+failures are reported inside the output. It never launches a browser,
+runs `provision:` hooks, writes evidence, or performs network I/O.
+JSON is the stable machine-readable form; YAML is optimized for
+humans.
+
+A type error in an assertion — say `contains` against a number — is a
 `fail` that names the mismatch, not a silent pass.
 
 ## 6. Verifying a real workload that needs a running system

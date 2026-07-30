@@ -446,6 +446,18 @@ criteria:
   catalog and per-action contract. Author against these, not memory.
 - `duhem validate <dir>` — field-checks your VD and names valid options
   on a miss.
+- `duhem resolve <dir> --provenance` — prints the merged, resolved
+  document without running it. Use this when an include, profile,
+  inherited input, or default produced a surprising value:
+
+  ```bash
+  duhem resolve .duhem --profile staging --provenance
+  duhem resolve .duhem --profile staging --format json > resolved.json
+  ```
+
+  Secrets remain `••••••`, and validation failures appear in the
+  output. The command has no browser, provisioning, evidence-write, or
+  network side effects.
 - `duhem run <dir>` — runs the suite (exit 0 == pass). Add
   `--reporter json` for a per-criterion verdict breakdown; the default
   reporter prints only the overall pass/fail.

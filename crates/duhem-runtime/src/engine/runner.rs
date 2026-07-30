@@ -714,10 +714,7 @@ impl Engine {
                     check_id: check.id.clone(),
                     step_index: idx as u32,
                     uses: step.uses_name().to_string(),
-                    // Honest evidence (#192): the layer comes from the
-                    // executed action's catalog family, never from
-                    // parsing intent; out-of-catalog `uses` stays
-                    // untagged.
+                    // Layer comes only from the executed action's catalog (#192).
                     layer: duhem_actions::layer_for_uses(step.uses_name()).map(str::to_string),
                     with: with_to_evidence_map(&resolved_with),
                     flow: crate::engine::flow::origin(step),
@@ -3102,9 +3099,9 @@ criteria:
         ));
         v.criteria.retain(|criterion| criterion.id == "AC-2");
         let steps = &mut v.criteria[0].checks[0].steps;
-        steps[0].uses = "fake/navigate".to_string();
-        steps[1].uses = "fake/no".to_string();
-        steps[2].uses = "fake/yes".to_string();
+        steps[0].uses = Some("fake/navigate".to_string());
+        steps[1].uses = Some("fake/no".to_string());
+        steps[2].uses = Some("fake/yes".to_string());
 
         let verdict = engine
             .run(

@@ -10,6 +10,7 @@ your product repo.
 your-product/
 ├── .duhem/
 │   ├── duhem.yml                # root manifest — aggregates the suite
+│   ├── pages.yml                # shared named UI locators
 │   └── factory-cli/
 │       └── duhem.yml            # a leaf Verification Definition
 ├── .claude/skills/
@@ -22,6 +23,8 @@ your-product/
 as "this repo adopts the Duhem tool" and never collides with your own
 `verifications/` or test folders. Inside it, a root manifest
 (`duhem.yml`) aggregates one or more leaf Verification Definitions.
+The pre-wired `pages.yml` include is an empty shared locator catalog;
+add entries there when two leaves address the same UI element.
 
 Commit the `.duhem/` VDs, but ignore the evidence DB `duhem run`
 writes there — add this to your `.gitignore`:

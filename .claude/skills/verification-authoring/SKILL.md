@@ -261,6 +261,29 @@ Authoring rules:
   at the evidence boundary. Screenshots/video remain unmasked pixels,
   so keep credentials out of rendered UI (or use `--capture off`).
 
+#### Share locators instead of copying them
+
+Put locators reused by multiple leaves in an ordinary manifest include:
+
+```yaml
+# pages.yml
+pages:
+  login:
+    username: { role: textbox, name: Username }
+    submit: { role: button, name: Sign In }
+
+# leaf step
+- uses: ui/type
+  with: { locator: $pages.login.username, text: $inputs.user }
+```
+
+The catalog is exactly two levels (`page → element`), with no
+`locators:` container. Root entries win over includes; leaf-local
+entries win over the composed manifest. A locator may contain
+`$inputs.*`, but every leaf receiving it must declare those names.
+Validate dangling references offline; use `duhem resolve --provenance`
+to inspect the effective catalog and each winning source file.
+
 ### 4. The holistic-environment tax
 
 Per §8, a Duhem check, by default, exercises real behavior

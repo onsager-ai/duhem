@@ -1,0 +1,6 @@
+manifest_version: 1
+includes:
+  - pages.yml
+verifications:
+  - path: first/duhem.yml
+  - path: second/duhem.yml

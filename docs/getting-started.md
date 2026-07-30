@@ -176,6 +176,27 @@ criteria:
   A declared inherited value uses the manifest declaration's precedence
   and type checks. The leaf declaration remains required, so a typoed
   `$inputs.*` reference cannot silently bind a same-named manifest input.
+- **Shared UI locators** live under a two-level `pages:` catalog in the
+  root manifest, an ordinary include, or a leaf. Reference an entry as a
+  whole locator value:
+
+  ```yaml
+  # pages.yml, listed under the root manifest's includes:
+  pages:
+    login:
+      username: { role: textbox, name: Username }
+      submit: { role: button, name: Sign In }
+
+  # a leaf step
+  - uses: ui/type
+    with: { locator: $pages.login.username, text: $inputs.user }
+  ```
+
+  Root entries win over includes; leaf-local entries win over the
+  composed manifest. A catalog locator may contain `$inputs.*`, but
+  every leaf receiving it must declare those names. `duhem validate`
+  catches dangling names offline (with a nearby-name suggestion), and
+  `duhem resolve --provenance` shows each winning entry's source file.
 - **Credentials returned by a step** use `secret_outputs:` on the producing
   step. Name the sensitive scalar output path, not its containing
   object or array:

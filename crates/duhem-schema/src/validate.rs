@@ -73,7 +73,9 @@ pub enum ValidationError {
         name: String,
     },
 
-    #[error("{site}: step `{step}` secret output path `{path}` names undeclared action output `{output}`")]
+    #[error(
+        "{site}: step `{step}` secret output path `{path}` names undeclared action output `{output}`"
+    )]
     UndeclaredSecretOutput {
         site: String,
         step: String,

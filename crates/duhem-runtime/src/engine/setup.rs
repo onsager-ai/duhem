@@ -293,6 +293,7 @@ async fn invoke_and_record(
             Outcome::Skipped { reason } => Some(reason.clone()),
             _ => None,
         },
+        catalog_reference: None,
     };
     let judgment = implicit_judgment_for_step(
         step,

@@ -148,7 +148,11 @@ Assertions are pure boolean predicates over named values produced by steps. They
 
 A single action Duhem performs on the system under test, or an observation it captures. Steps are typed by the action they invoke (`uses:` field), e.g., `ui/click`, `api/observe`, `db/query`, `event/wait`.
 
-Steps may produce named outputs that subsequent steps and assertions reference.
+Steps may carry an optional human-facing `description:` explaining why
+the action is present. Reports label a step by `description`, then its
+reference `id`, then `<uses> #<index>`; engine diagnostics remain keyed
+to `id` so they point at a stable YAML token. Steps may produce named
+outputs that subsequent steps and assertions reference.
 
 ### 7.6 Verdict
 
@@ -471,9 +475,11 @@ criteria:
       - id: AC-1.1
         session: $setup.session.outputs.state
         steps:
-          - uses: ui/navigate
+          - description: Open the workspace list
+            uses: ui/navigate
             with: { url: $inputs.workspaces_url }
-          - uses: ui/assert-element
+          - description: The Workspaces heading is offered
+            uses: ui/assert-element
             with:
               locator: { role: heading, name: Workspaces }
               expected: visible

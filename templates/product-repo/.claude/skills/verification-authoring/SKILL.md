@@ -177,6 +177,7 @@ Common shape (terse):
   description: <what slice of the web this check exercises>
   steps:
     - id: create
+      description: Create the workspace through the public API
       uses: api/call
       with: { method: POST, url: $inputs.api_base/workspaces, timeout: 3s }
       # no outputs: block — status / body / body.id resolve directly
@@ -190,6 +191,9 @@ Authoring rules:
 - Reference outputs by their fully-qualified path,
   `$steps.<id>.outputs.<name>`; add `outputs:` only for a rename or a
   deep-extraction alias.
+- Use optional step `description:` for reader-facing intent. It labels
+  reports ahead of `id` and `<uses> #<index>`; keep `id` terse and
+  stable because references, diagnostics, and dashboard links use it.
 - Timeouts (`timeout:`) are explicit on steps that observe something
   asynchronous.
 - Use role-based locators (`{ role: "button", name: "…" }`) for `ui/*`

@@ -73,7 +73,9 @@ pub enum ValidationError {
         name: String,
     },
 
-    #[error("{site}: step `{step}` secret path `{path}` names undeclared action output `{output}`")]
+    #[error(
+        "{site}: step `{step}` secret output path `{path}` names undeclared action output `{output}`"
+    )]
     UndeclaredSecretOutput {
         site: String,
         step: String,
@@ -190,20 +192,30 @@ pub enum ValidationError {
     },
 
     #[error(
-        "input `{input}`: `secret: true` cannot be combined with `default:` — supply the value via `env:`, a selected environment, or `--inputs`"
+        "input `{input}`: `secret: true` cannot be combined with `default:` — supply the value via `env:`, a selected profile, or `--inputs`"
     )]
     SecretInputHasDefault { input: String },
 
     #[error("input `{input}`: env name `{name}` is invalid — expected `[A-Z_][A-Z0-9_]*`")]
     InvalidInputEnvName { input: String, name: String },
 
-    #[error(
-        "inherited input `{name}` is also declared locally under `inputs:` — list it in one place, not both"
-    )]
-    InheritedInputAlsoDeclared { name: String },
+    #[error("input `{input}`: `type:` is required unless `inherit: true`")]
+    InputMissingType { input: String },
 
-    #[error("`inherits:` entry #{index} is empty — list input names, e.g. `inherits: [base_url]`")]
-    EmptyInheritedName { index: usize },
+    #[error(
+        "input `{input}`: `inherit: true` cannot be combined with `type:` — declare the type under manifest `inputs.{input}`"
+    )]
+    InheritedInputHasType { input: String },
+
+    #[error(
+        "input `{input}`: `inherit: true` cannot be combined with `default:` — declare the default under manifest `inputs.{input}`"
+    )]
+    InheritedInputHasDefault { input: String },
+
+    #[error(
+        "manifest input `{input}` cannot set `inherit: true` — inheritance is declared by a consuming leaf"
+    )]
+    ManifestInputCannotInherit { input: String },
 
     #[error("{0}")]
     BadProjectDecl(String),
@@ -248,38 +260,14 @@ pub fn validate_with_contract_outputs(
 
     let setup_outputs = collect_setup_outputs(&v.setup, outputs_for, &mut errs);
 
-    errs.extend(input_decl_errors(&v.inputs));
-
-    // Inherited input names (spec #135). They satisfy `$inputs.<name>`
-    // references just like a locally-declared input, so they join the
-    // resolvable-name set below. Two well-formedness rules first: a name
-    // may not appear in both `inputs:` and `inherits:` (declare it once),
-    // and an inherited name may not be empty.
-    let mut inherited: HashSet<&str> = HashSet::new();
-    for (index, name) in v.inherits.iter().enumerate() {
-        if name.is_empty() {
-            errs.push(ValidationError::EmptyInheritedName { index });
-            continue;
-        }
-        if v.inputs.contains_key(name) {
-            errs.push(ValidationError::InheritedInputAlsoDeclared { name: name.clone() });
-        }
-        inherited.insert(name.as_str());
-    }
+    errs.extend(input_decl_errors(&v.inputs, true));
 
     let mut seen_criteria: HashSet<&str> = HashSet::new();
     for c in &v.criteria {
         if !seen_criteria.insert(c.id.as_str()) {
             errs.push(ValidationError::DuplicateCriterionId { id: c.id.clone() });
         }
-        validate_criterion(
-            c,
-            &v.inputs,
-            &inherited,
-            &setup_outputs,
-            outputs_for,
-            &mut errs,
-        );
+        validate_criterion(c, &v.inputs, &setup_outputs, outputs_for, &mut errs);
     }
 
     if errs.is_empty() { Ok(()) } else { Err(errs) }
@@ -291,9 +279,33 @@ pub fn validate_with_contract_outputs(
 /// safety and type rules must not drift. The manifest loader calls this
 /// before resolving leaves; the leaf validator folds the same findings
 /// into its complete structural punch list.
-pub(crate) fn input_decl_errors(inputs: &BTreeMap<String, InputDecl>) -> Vec<ValidationError> {
+pub(crate) fn input_decl_errors(
+    inputs: &BTreeMap<String, InputDecl>,
+    allow_inherit: bool,
+) -> Vec<ValidationError> {
     let mut errs = Vec::new();
     for (name, decl) in inputs {
+        if decl.inherit {
+            if !allow_inherit {
+                errs.push(ValidationError::ManifestInputCannotInherit {
+                    input: name.clone(),
+                });
+            }
+            if decl.kind.is_some() {
+                errs.push(ValidationError::InheritedInputHasType {
+                    input: name.clone(),
+                });
+            }
+            if decl.default.is_some() {
+                errs.push(ValidationError::InheritedInputHasDefault {
+                    input: name.clone(),
+                });
+            }
+        } else if decl.kind.is_none() {
+            errs.push(ValidationError::InputMissingType {
+                input: name.clone(),
+            });
+        }
         if decl.secret && decl.default.is_some() {
             errs.push(ValidationError::SecretInputHasDefault {
                 input: name.clone(),
@@ -307,15 +319,13 @@ pub(crate) fn input_decl_errors(inputs: &BTreeMap<String, InputDecl>) -> Vec<Val
                 name: env_name.clone(),
             });
         }
-        if let Some(default) = &decl.default {
+        if let (Some(default), Some(declared)) = (&decl.default, decl.kind) {
             let unwrapped = unwrap_tagged(default);
             match yml_shape(unwrapped) {
-                Some(actual)
-                    if actual != decl.kind && !matches_with_promotion(decl.kind, actual) =>
-                {
+                Some(actual) if actual != declared && !matches_with_promotion(declared, actual) => {
                     errs.push(ValidationError::InputDefaultTypeMismatch {
                         input: name.clone(),
-                        declared: decl.kind,
+                        declared,
                         actual: yml_shape_name(unwrapped).to_string(),
                     });
                 }
@@ -327,7 +337,7 @@ pub(crate) fn input_decl_errors(inputs: &BTreeMap<String, InputDecl>) -> Vec<Val
                 None => {
                     errs.push(ValidationError::InputDefaultTypeMismatch {
                         input: name.clone(),
-                        declared: decl.kind,
+                        declared,
                         actual: yml_shape_name(unwrapped).to_string(),
                     });
                 }
@@ -455,7 +465,6 @@ fn matches_with_promotion(declared: InputType, actual: InputType) -> bool {
 fn validate_criterion(
     c: &Criterion,
     inputs: &BTreeMap<String, InputDecl>,
-    inherited: &HashSet<&str>,
     setup_outputs: &HashMap<&str, HashSet<String>>,
     outputs_for: &dyn Fn(&str) -> Vec<String>,
     errs: &mut Vec<ValidationError>,
@@ -468,7 +477,7 @@ fn validate_criterion(
                 id: ch.id.clone(),
             });
         }
-        validate_check(c, ch, inputs, inherited, setup_outputs, outputs_for, errs);
+        validate_check(c, ch, inputs, setup_outputs, outputs_for, errs);
     }
 }
 
@@ -480,17 +489,12 @@ struct PathScope<'a> {
     step_outputs: &'a HashMap<&'a str, HashSet<String>>,
     setup_outputs: &'a HashMap<&'a str, HashSet<String>>,
     inputs: &'a BTreeMap<String, InputDecl>,
-    /// Inherited input names (spec #135). An `$inputs.<name>` for a
-    /// name in here resolves like a declared input — the manifest's
-    /// chain binds it at run time.
-    inherited: &'a HashSet<&'a str>,
 }
 
 fn validate_check(
     c: &Criterion,
     ch: &Check,
     inputs: &BTreeMap<String, InputDecl>,
-    inherited: &HashSet<&str>,
     setup_outputs: &HashMap<&str, HashSet<String>>,
     outputs_for: &dyn Fn(&str) -> Vec<String>,
     errs: &mut Vec<ValidationError>,
@@ -552,7 +556,6 @@ fn validate_check(
         step_outputs: &step_outputs,
         setup_outputs,
         inputs,
-        inherited,
     };
 
     // A browser session is acquired state, not an inline fixture. Only
@@ -602,7 +605,7 @@ fn validate_check(
 
 /// A secret path always starts at a raw output from the action
 /// contract. Authored `outputs:` aliases are deliberately excluded:
-/// `secret:` describes the produced value, not a parallel alias
+/// `secret_outputs:` describes the produced value, not a parallel alias
 /// channel (spec #355). Deeper shape remains a runtime fact.
 fn check_secret_paths(
     step: &Step,
@@ -611,7 +614,7 @@ fn check_secret_paths(
     step_name: &str,
     errs: &mut Vec<ValidationError>,
 ) {
-    for path in &step.secret {
+    for path in &step.secret_outputs {
         let output = secret_path_head(path);
         if output.is_empty() || !contract_outputs.iter().any(|name| name == output) {
             errs.push(ValidationError::UndeclaredSecretOutput {
@@ -719,7 +722,6 @@ fn check_path(
         step_outputs,
         setup_outputs,
         inputs,
-        inherited,
     } = *scope;
     match path.root {
         PathRoot::Steps => {
@@ -812,10 +814,10 @@ fn check_path(
                 return;
             }
             let name = segs[0].as_str();
-            // `$inputs.<name>` resolves against `inputs:` ∪ `inherits:`
-            // (spec #135): an inherited name is bound by the parent
-            // manifest's chain at run time, so it is not a typo here.
-            if !inputs.contains_key(name) && !inherited.contains(name) {
+            // Every local and inherited input is declared in `inputs:`.
+            // The leaf's declaration surface remains closed even when
+            // a parent manifest happens to declare the same name.
+            if !inputs.contains_key(name) {
                 errs.push(ValidationError::UnresolvedInputRef {
                     criterion: c.id.clone(),
                     check: ch.id.clone(),
@@ -899,7 +901,7 @@ criteria:
         steps:
           - id: login
             uses: api/call
-            secret: [token.value]
+            secret_outputs: [token.value]
             with: { method: POST, url: https://example.com/login }
         assertions: ["true"]
 "#,
@@ -929,7 +931,7 @@ criteria:
         steps:
           - id: login
             uses: api/call
-            secret:
+            secret_outputs:
               - body.items[0].key
             with: { method: POST, url: https://example.com/login }
         assertions: ["true"]
@@ -1939,12 +1941,12 @@ criteria:
 
     #[test]
     fn inherited_input_ref_resolves() {
-        // `$inputs.base_url` with `base_url` listed under `inherits:`
-        // (and no local `inputs:` for it) is not a typo (spec #135).
+        // `$inputs.base_url` with `base_url` declared `inherit: true`
+        // is not a typo (spec #135).
         let y = r#"
 verification: leaf
-inherits:
-  - base_url
+inputs:
+  base_url: { inherit: true }
 criteria:
   - id: AC-1
     description: a
@@ -1958,13 +1960,11 @@ criteria:
     }
 
     #[test]
-    fn inherited_input_also_declared_fails() {
+    fn inherited_input_with_type_fails() {
         let y = r#"
 verification: leaf
 inputs:
-  base_url: { type: string }
-inherits:
-  - base_url
+  base_url: { inherit: true, type: string }
 criteria:
   - id: AC-1
     description: a
@@ -1978,18 +1978,18 @@ criteria:
         assert!(
             errs.iter().any(|e| matches!(
                 e,
-                ValidationError::InheritedInputAlsoDeclared { name } if name == "base_url"
+                ValidationError::InheritedInputHasType { input } if input == "base_url"
             )),
             "got: {errs:?}"
         );
     }
 
     #[test]
-    fn empty_inherited_name_fails() {
+    fn inherited_input_with_default_fails() {
         let y = r#"
 verification: leaf
-inherits:
-  - ""
+inputs:
+  base_url: { inherit: true, default: "https://example.test" }
 criteria:
   - id: AC-1
     description: a
@@ -2000,20 +2000,22 @@ criteria:
         let v = parse(y);
         let errs = validate(&v).unwrap_err();
         assert!(
-            errs.iter()
-                .any(|e| matches!(e, ValidationError::EmptyInheritedName { .. })),
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::InheritedInputHasDefault { input } if input == "base_url"
+            )),
             "got: {errs:?}"
         );
     }
 
     #[test]
     fn bare_input_ref_not_inherited_still_typo() {
-        // A `$inputs.x` neither in `inputs:` nor `inherits:` is still a
-        // typo error (#134), distinct from the inherited case.
+        // A `$inputs.x` absent from the leaf's `inputs:` is still a typo
+        // error (#134), distinct from the inherited case.
         let y = r#"
 verification: leaf
-inherits:
-  - base_url
+inputs:
+  base_url: { inherit: true }
 criteria:
   - id: AC-1
     description: a

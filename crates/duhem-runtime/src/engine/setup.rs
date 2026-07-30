@@ -41,7 +41,7 @@ use crate::engine::translate::{outcome_to_evidence, with_to_evidence_map};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AbortReason {
     /// A setup step returned `Outcome::Timeout` — the action ran but
-    /// didn't reach its requested state within `within:`.
+    /// didn't reach its requested state within `timeout:`.
     Timeout,
     /// A setup step returned `Outcome::Error`, used an unknown
     /// `Step.uses`, or the runtime couldn't provision a setup browser
@@ -366,7 +366,7 @@ mod tests {
             uses: uses.to_string(),
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
-            secret: Vec::new(),
+            secret_outputs: Vec::new(),
         }
     }
 

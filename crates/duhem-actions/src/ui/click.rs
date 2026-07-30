@@ -5,14 +5,14 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::Deserialize;
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT};
 use crate::error::ActionError;
 use crate::locator::Locator;
 use crate::playwright::to_selector;
-use crate::with::WithinSpec;
+use crate::with::TimeoutSpec;
 
 // The locator fields sit inline in `ui/click`'s `with:` (`{ role: button,
-// name: Create, within: 3s }`), not under a `locator:` key — kept that way
+// name: Create, timeout: 3s }`), not under a `locator:` key — kept that way
 // for backward compatibility. `WithWire` collects the inline fields
 // (rejecting unknowns), then folds them into a validated `Locator` so click
 // gains label/testid/css/placeholder and the exactly-one-primary check.
@@ -36,14 +36,14 @@ struct WithWire {
     #[serde(default)]
     scope: Option<Box<Locator>>,
     #[serde(default)]
-    within: Option<WithinSpec>,
+    timeout: Option<TimeoutSpec>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(try_from = "WithWire")]
 struct With {
     locator: Locator,
-    within: Option<WithinSpec>,
+    timeout: Option<TimeoutSpec>,
 }
 
 impl TryFrom<WithWire> for With {
@@ -63,14 +63,14 @@ impl TryFrom<WithWire> for With {
         locator.validate_primary()?;
         Ok(With {
             locator,
-            within: w.within,
+            timeout: w.timeout,
         })
     }
 }
 
 impl With {
     fn into_locator(self) -> (Locator, Duration) {
-        let timeout = self.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
+        let timeout = self.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
         (self.locator, timeout)
     }
 }
@@ -98,7 +98,7 @@ impl Action for Click {
                 FieldSpec::optional("text"),
                 FieldSpec::optional("scope"),
                 FieldSpec::optional("locator"),
-                FieldSpec::optional("within"),
+                FieldSpec::optional("timeout"),
             ],
             outputs: vec![],
             secret_outputs: vec![],
@@ -147,7 +147,7 @@ mod tests {
 role: button
 name: Create
 scope: { role: list, name: Workspaces }
-within: 3s
+timeout: 3s
 "#;
         let v: With = serde_yml::from_str(yaml).unwrap();
         let (l, t) = v.into_locator();

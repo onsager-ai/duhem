@@ -18,7 +18,7 @@
 //!
 //! Connection: `connection:` is a full database URL. Authors pass it
 //! whole — `$inputs.db_url`, `$env.DATABASE_URL`, or a literal — since
-//! template substitution is whole-string. A named-`environments:`
+//! template substitution is whole-string. A named-`profiles:`
 //! connection registry is a separate spec (#68).
 //!
 //! Value mapping: each result row becomes a JSON object keyed by column

@@ -8,20 +8,19 @@
 
 pub mod assertion;
 pub mod criterion;
-pub mod environment;
 pub mod expr;
 pub mod includes;
 pub mod jsonschema;
 pub mod manifest;
 mod manifest_inputs;
 pub mod project;
+pub mod provision;
 pub mod step;
 pub mod validate;
 pub mod verification;
 
 pub use assertion::{Assertion, TypeCheckKind};
 pub use criterion::{Check, Criterion};
-pub use environment::{DurationSpec, Environment, HttpReadyProbe, ReadyProbe};
 pub use expr::{BinOp, Expr, ExprStr, Literal, ParseError, Path, PathRoot, UnaryOp};
 pub use includes::PartialRootManifest;
 pub use jsonschema::json_schema;
@@ -30,6 +29,7 @@ pub use manifest::{
     RetryBackoff, RetryPolicy, RootManifest, discover, load,
 };
 pub use project::{ProjectDecl, ProjectKind};
+pub use provision::{DurationSpec, HttpReadyProbe, Provision, ReadyProbe};
 pub use step::Step;
 pub use validate::{ValidationError, validate, validate_with_contract_outputs};
 pub use verification::{InputDecl, InputType, SchemaError, VerificationDefinition};

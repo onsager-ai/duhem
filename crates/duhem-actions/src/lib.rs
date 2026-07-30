@@ -23,7 +23,7 @@ pub mod ui;
 pub mod with;
 
 pub use action::{
-    Action, ActionContract, ActionCtx, ActionResult, DEFAULT_WITHIN, FieldSpec, Observation,
+    Action, ActionContract, ActionCtx, ActionResult, DEFAULT_TIMEOUT, FieldSpec, Observation,
     Outcome, layer_for_uses, uses_requires_page,
 };
 pub use api::{Call, Observe, Poll, Stream};
@@ -39,7 +39,7 @@ pub use playwright::to_selector;
 pub use ui::{
     AssertElement, AssertState, AssertUrl, CaptureSession, Click, Navigate, Select, Type,
 };
-pub use with::WithinSpec;
+pub use with::TimeoutSpec;
 
 /// Every built-in action's contract — the single source of truth for
 /// `duhem describe` / `duhem actions` and validate-time field checking.

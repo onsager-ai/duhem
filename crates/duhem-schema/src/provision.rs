@@ -21,7 +21,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// `setup:` starting.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Environment {
+pub struct Provision {
     /// Path to an executable that brings the SUT up. Relative paths
     /// are resolved against the directory containing the Verification
     /// Definition.
@@ -118,7 +118,7 @@ fn default_expect_status() -> u16 {
     200
 }
 
-/// Duration wire format shared with `duhem-actions::WithinSpec`:
+/// Duration wire format shared with `duhem-actions::TimeoutSpec`:
 /// integer milliseconds (`200`) or a string with a `ms` / `s` / `m`
 /// suffix (`60s`, `2m`). Defined locally so the schema crate does
 /// not pull in `duhem-actions`.
@@ -191,16 +191,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_minimal_environment() {
+    fn parses_minimal_provision() {
         let y = "up: ./scripts/up.sh\n";
-        let env: Environment = serde_yml::from_str(y).unwrap();
+        let env: Provision = serde_yml::from_str(y).unwrap();
         assert_eq!(env.up, PathBuf::from("./scripts/up.sh"));
         assert!(env.down.is_none());
         assert!(env.ready.is_none());
     }
 
     #[test]
-    fn parses_full_environment() {
+    fn parses_full_provision() {
         let y = r#"
 up: ./scripts/up.sh
 down: ./scripts/down.sh
@@ -210,7 +210,7 @@ ready:
     expect_status: 200
     timeout: 60s
 "#;
-        let env: Environment = serde_yml::from_str(y).unwrap();
+        let env: Provision = serde_yml::from_str(y).unwrap();
         assert_eq!(env.up, PathBuf::from("./scripts/up.sh"));
         assert_eq!(env.down, Some(PathBuf::from("./scripts/down.sh")));
         let ReadyProbe::Http(probe) = env.ready.unwrap();
@@ -228,23 +228,23 @@ ready:
     url: http://x/health
     timeout: 5s
 "#;
-        let env: Environment = serde_yml::from_str(y).unwrap();
+        let env: Provision = serde_yml::from_str(y).unwrap();
         let ReadyProbe::Http(probe) = env.ready.unwrap();
         assert_eq!(probe.expect_status, 200);
     }
 
     #[test]
     fn missing_up_is_a_parse_error() {
-        // `up:` is required when `environment:` is present — modeled
+        // `up:` is required when `provision:` is present — modeled
         // as a non-optional field, so serde produces the error.
         let y = "down: ./down.sh\n";
-        assert!(serde_yml::from_str::<Environment>(y).is_err());
+        assert!(serde_yml::from_str::<Provision>(y).is_err());
     }
 
     #[test]
-    fn unknown_field_under_environment_is_rejected() {
+    fn unknown_field_under_provision_is_rejected() {
         let y = "up: ./up.sh\nbogus: 1\n";
-        let err = serde_yml::from_str::<Environment>(y).unwrap_err();
+        let err = serde_yml::from_str::<Provision>(y).unwrap_err();
         assert!(format!("{err}").contains("unknown field"), "got: {err}");
     }
 
@@ -257,7 +257,7 @@ ready:
     host: localhost
     port: 5432
 "#;
-        assert!(serde_yml::from_str::<Environment>(y).is_err());
+        assert!(serde_yml::from_str::<Provision>(y).is_err());
     }
 
     #[test]

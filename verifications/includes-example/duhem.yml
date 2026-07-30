@@ -16,7 +16,7 @@ manifest_version: 1
 includes:
   - ./.duhem.shared.yml
   - ./.duhem.local.yml
-environments:
+profiles:
   staging:
     # Declared by the root → root wins even though .duhem.local.yml
     # also sets it. Edit the include, not this line, for a local

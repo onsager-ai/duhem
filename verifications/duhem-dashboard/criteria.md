@@ -15,7 +15,7 @@ attested". The asymmetric Onsager seam holds the trust role
 (`docs/duhem-spec.md` §11.2).
 
 Target: this repo's own `duhem dashboard`. No mocks at the boundary
-(`docs/duhem-spec.md` §8) — `environment.up` produces a genuine run
+(`docs/duhem-spec.md` §8) — `provision.up` produces a genuine run
 through the real `duhem run` pipeline, then serves it with the real
 dashboard binary. The SPA only renders a verdict because the API
 actually served one; the API only serves one because the judge actually

@@ -17,9 +17,9 @@ assertion as `$steps.<id>.outputs.<name>`. Assert over **scalar** outputs
 
 An action contract may declare an output path secret by default, including a
 structured credential such as browser storage state. The value joins the masking
-registry before the producing step writes evidence and needs no authored `secret:`
+registry before the producing step writes evidence and needs no authored `secret_outputs:`
 entry. When present, the contract's paths are listed as **secret outputs (masked
-by contract)** below. Author-declared `steps[].secret` paths remain scalar-only.
+by contract)** below. Author-declared `steps[].secret_outputs` paths remain scalar-only.
 
 ## `ui/*`
 
@@ -30,7 +30,7 @@ Navigate the browser to a URL.
 | `with:` field | required | values |
 |---|:---:|---|
 | `url` | yes | — |
-| `within` | no | — |
+| `timeout` | no | — |
 
 **outputs:** (none)
 
@@ -54,7 +54,7 @@ Click an element (locator shorthand fields, or a `locator` object).
 | `text` | no | — |
 | `scope` | no | — |
 | `locator` | no | — |
-| `within` | no | — |
+| `timeout` | no | — |
 
 **outputs:** (none)
 
@@ -72,7 +72,7 @@ Type text into an element.
 | `locator` | yes | — |
 | `text` | yes | — |
 | `clear` | no | — |
-| `within` | no | — |
+| `timeout` | no | — |
 
 **outputs:** (none)
 
@@ -89,7 +89,7 @@ Select an option in a <select> by value, label, or index.
 |---|:---:|---|
 | `locator` | yes | — |
 | `by` | yes | — |
-| `within` | no | — |
+| `timeout` | no | — |
 
 **outputs:** (none)
 
@@ -106,7 +106,7 @@ Assert an element reaches an existence/visibility state within a deadline.
 |---|:---:|---|
 | `locator` | yes | — |
 | `expected` | yes | `exists` \| `not_exists` \| `visible` \| `hidden` |
-| `within` | no | — |
+| `timeout` | no | — |
 
 **outputs:** `satisfied`, `count`
 
@@ -123,7 +123,7 @@ Assert the page URL equals a string or matches a regex (exactly one of equals/ma
 |---|:---:|---|
 | `equals` | no | — |
 | `matches` | no | — |
-| `within` | no | — |
+| `timeout` | no | — |
 
 **outputs:** `satisfied`, `actual`
 
@@ -140,7 +140,7 @@ Assert an app state (e.g. signed in/out, or a marker) via `state:`.
 |---|:---:|---|
 | `state` | yes | — |
 | `marker` | no | — |
-| `within` | no | — |
+| `timeout` | no | — |
 
 **outputs:** `satisfied`
 
@@ -178,7 +178,7 @@ Make an HTTP request and observe the response.
 | `headers` | no | — |
 | `query` | no | — |
 | `body` | no | — |
-| `within` | no | — |
+| `timeout` | no | — |
 
 **outputs:** `status`, `body`, `body_text`
 
@@ -197,7 +197,7 @@ Observe a network request the page made (matched by method + URL pattern).
 | `method` | yes | — |
 | `url_pattern` | yes | — |
 | `after` | no | — |
-| `within` | no | — |
+| `timeout` | no | — |
 
 **outputs:** (none)
 
@@ -216,7 +216,7 @@ Poll an HTTP endpoint until a condition holds or the deadline elapses.
 | `url` | yes | — |
 | `headers` | no | — |
 | `body` | no | — |
-| `within` | no | — |
+| `timeout` | no | — |
 | `interval` | no | — |
 | `until` | yes | — |
 
@@ -237,7 +237,7 @@ Consume a streaming (SSE) endpoint, collecting events until a condition.
 | `url` | yes | — |
 | `headers` | no | — |
 | `body` | no | — |
-| `within` | no | — |
+| `timeout` | no | — |
 | `until_event` | no | — |
 | `max_events` | no | — |
 
@@ -261,7 +261,7 @@ Run a read query and observe the returned rows.
 | `sql` | yes | — |
 | `params` | no | — |
 | `find` | no | — |
-| `within` | no | — |
+| `timeout` | no | — |
 
 **outputs:** `rows`, `row_count`
 
@@ -281,7 +281,7 @@ Poll a query until a condition holds or the deadline elapses.
 | `sql` | yes | — |
 | `params` | no | — |
 | `find` | no | — |
-| `within` | no | — |
+| `timeout` | no | — |
 | `interval` | no | — |
 | `until` | no | — |
 
@@ -301,7 +301,7 @@ Run a write statement to seed or mutate data.
 |---|:---:|---|
 | `connection` | yes | — |
 | `sql` | yes | — |
-| `within` | no | — |
+| `timeout` | no | — |
 
 **outputs:** `rows_affected`
 
@@ -322,7 +322,7 @@ Invoke a local command and observe its exit code, stdout, and stderr.
 | `cwd` | no | — |
 | `env` | no | — |
 | `stdin` | no | — |
-| `within` | no | — |
+| `timeout` | no | — |
 
 **outputs:** `exit_code`, `stdout`, `stderr`
 

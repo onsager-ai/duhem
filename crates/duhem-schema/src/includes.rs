@@ -11,10 +11,10 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::environment::Environment;
 use crate::manifest::{
     LoadError, ManifestEntry, RootManifest, canonical_or_self, validate_entry_path,
 };
+use crate::provision::Provision;
 use crate::verification::{InputDecl, SchemaError};
 
 /// An `includes:` target — a manifest fragment composed into a root
@@ -31,17 +31,17 @@ pub struct PartialRootManifest {
     /// include's parent directory. See [`RootManifest::includes`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub includes: Vec<PathBuf>,
-    /// Shared suite environment to fill in when the root manifest
-    /// declares none. See [`RootManifest::environment`].
+    /// Shared suite provisioning lifecycle to fill in when the root manifest
+    /// declares none. See [`RootManifest::provision`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment: Option<Environment>,
-    /// Named environment configs, overlaid key-by-key under the
-    /// root-wins rule. See [`RootManifest::environments`].
+    pub provision: Option<Provision>,
+    /// Named configuration profiles, overlaid key-by-key under the
+    /// root-wins rule. See [`RootManifest::profiles`].
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     #[schemars(
         with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
     )]
-    pub environments: BTreeMap<String, BTreeMap<String, serde_yml::Value>>,
+    pub profiles: BTreeMap<String, BTreeMap<String, serde_yml::Value>>,
     /// Suite-wide input declarations, merged by name under the same
     /// root-wins rule as other manifest maps.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -150,19 +150,19 @@ pub(crate) fn resolve_includes(
 /// Root-wins merge of one include (`incoming`) into `effective`.
 ///
 /// Each optional/scalar field is filled only when `effective` still
-/// lacks it; nested environment maps overlay key-by-key and input
+/// lacks it; nested profile maps overlay key-by-key and input
 /// declarations overlay by name, again filling only absent keys;
 /// list-shaped fields (`verifications:`, `includes:`) are concatenated.
 /// Adding a future field to the merge (e.g. `defaults:`) is a one-block
 /// addition here.
 fn merge_partial(effective: &mut RootManifest, incoming: &PartialRootManifest) {
     // Scalar/optional fields: root-wins, fill-if-absent.
-    if effective.environment.is_none() {
-        effective.environment = incoming.environment.clone();
+    if effective.provision.is_none() {
+        effective.provision = incoming.provision.clone();
     }
     // Nested map: overlay key-by-key, still root-wins per leaf key.
-    for (name, keys) in &incoming.environments {
-        let slot = effective.environments.entry(name.clone()).or_default();
+    for (name, keys) in &incoming.profiles {
+        let slot = effective.profiles.entry(name.clone()).or_default();
         for (key, value) in keys {
             slot.entry(key.clone()).or_insert_with(|| value.clone());
         }
@@ -241,7 +241,7 @@ criteria:
             tmp.path(),
             ".duhem.a.yml",
             r#"
-environments:
+profiles:
   staging:
     base_url: from-a
     db_url: from-a
@@ -251,7 +251,7 @@ environments:
             tmp.path(),
             ".duhem.b.yml",
             r#"
-environments:
+profiles:
   staging:
     base_url: from-b
     workers: 3
@@ -265,7 +265,7 @@ manifest_version: 1
 includes:
   - ./.duhem.a.yml
   - ./.duhem.b.yml
-environments:
+profiles:
   staging:
     db_url: from-root
 verifications:
@@ -275,7 +275,7 @@ verifications:
         let loaded = load(&tmp.path().join("duhem.yml")).unwrap();
         match loaded {
             Loaded::Manifest { manifest, .. } => {
-                let staging = &manifest.environments["staging"];
+                let staging = &manifest.profiles["staging"];
                 assert_eq!(staging["db_url"].as_str(), Some("from-root"));
                 assert_eq!(staging["base_url"].as_str(), Some("from-a"));
                 assert_eq!(staging["workers"].as_u64(), Some(3));
@@ -510,9 +510,9 @@ verifications: []
             } => {
                 assert_eq!(leaves.len(), 1, "one leaf");
                 assert!(
-                    manifest.environments.contains_key("staging"),
-                    "merged environments present: {:?}",
-                    manifest.environments
+                    manifest.profiles.contains_key("staging"),
+                    "merged profiles present: {:?}",
+                    manifest.profiles
                 );
             }
             _ => panic!("expected Manifest"),

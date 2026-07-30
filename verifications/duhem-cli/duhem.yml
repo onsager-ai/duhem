@@ -90,7 +90,7 @@ criteria:
             with:
               command: [$inputs.duhem_bin, --version]
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
         assertions:
           - $steps.version.outputs.exit_code == 0
           - matches:
@@ -119,7 +119,7 @@ criteria:
                 - validate
                 - verifications/defaults-example/checks/duhem.yml
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
         assertions:
           - $steps.validate_good.outputs.exit_code == 0
           - matches:
@@ -148,7 +148,7 @@ criteria:
                 - validate
                 - verifications/duhem-cli/fixtures/bad.yml
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
         assertions:
           - $steps.validate_bad.outputs.exit_code != 0
           - matches:
@@ -183,13 +183,13 @@ criteria:
                 - duhem-cli-scaffold-smoke
                 - --force
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
           - id: validate_scaffold
             uses: cli/invoke
             with:
               command: [$inputs.duhem_bin, validate, $inputs.scaffold_dir]
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
         assertions:
           - $steps.scaffold.outputs.exit_code == 0
           - matches:
@@ -224,7 +224,7 @@ criteria:
                 - --reporter
                 - json
               cwd: $inputs.repo_dir
-              within: 120s
+              timeout: 120s
         assertions:
           - $steps.run_example.outputs.exit_code == 0
           - matches:
@@ -265,7 +265,7 @@ criteria:
                 - --inputs
                 - '@verifications/duhem-cli/fixtures/count.yml'
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
         assertions:
           - $steps.at_file_loads.outputs.exit_code == 0
           - matches:
@@ -286,7 +286,7 @@ criteria:
                 - verifications/duhem-cli/fixtures/inputs-fixture.yml
                 - --dry-run
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
         assertions:
           - $steps.missing_required.outputs.exit_code != 0
           - matches:
@@ -322,7 +322,7 @@ criteria:
                 - --inputs
                 - count=notanumber
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
         assertions:
           - $steps.raw_last_wins.outputs.exit_code != 0
           - matches:
@@ -347,7 +347,7 @@ criteria:
                 - --inputs
                 - '@verifications/duhem-cli/fixtures/count.yml'
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
         assertions:
           - $steps.file_last_wins.outputs.exit_code == 0
 
@@ -376,7 +376,7 @@ criteria:
                 - --inputs
                 - name=@nope.yml
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
         assertions:
           - $steps.key_at_literal.outputs.exit_code == 0
       - id: AC-8.2
@@ -398,7 +398,7 @@ criteria:
                 - --inputs
                 - '@nope.yml'
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
         assertions:
           - $steps.bare_at_missing.outputs.exit_code != 0
           - matches:
@@ -428,7 +428,7 @@ criteria:
                 - --seed
                 - '1'
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
           - id: rejected_headed
             uses: cli/invoke
             with:
@@ -438,7 +438,7 @@ criteria:
                 - verifications/duhem-cli/fixtures/inputs-fixture.yml
                 - --headed
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
           - id: rejected_inputs_file
             uses: cli/invoke
             with:
@@ -449,7 +449,7 @@ criteria:
                 - --inputs-file
                 - x.yml
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
         assertions:
           - $steps.rejected_seed.outputs.exit_code != 0
           - matches:
@@ -500,7 +500,7 @@ criteria:
                 - --inputs
                 - count=99
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
         assertions:
           - $steps.flag_value_wins.outputs.exit_code == 0
           - matches:
@@ -529,7 +529,7 @@ criteria:
                 - --inputs
                 - '@verifications/duhem-cli/fixtures/count.yml'
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
         assertions:
           - $steps.file_value_wins.outputs.exit_code == 0
           - matches:
@@ -569,7 +569,7 @@ criteria:
                 - validate
                 - verifications/defaults-example
               cwd: $inputs.repo_dir
-              within: 30s
+              timeout: 30s
         assertions:
           - $steps.validate_manifest_dir.outputs.exit_code == 0
           - matches:
@@ -614,7 +614,7 @@ criteria:
                 - --reporter
                 - json
               cwd: $inputs.repo_dir
-              within: 120s
+              timeout: 120s
         assertions:
           - $steps.run_live.outputs.exit_code == 0
           # stderr: the live narration happened, ordinals incrementing.
@@ -647,7 +647,7 @@ criteria:
                 - $inputs.duhem_bin
                 - $inputs.repo_dir
               cwd: $inputs.repo_dir
-              within: 120s
+              timeout: 120s
         assertions:
           - $steps.run_live_pty.outputs.exit_code == 0
           - matches:
@@ -702,7 +702,7 @@ criteria:
                 - --reporter
                 - json
               cwd: $inputs.repo_dir
-              within: 120s
+              timeout: 120s
         assertions:
           - $steps.run_slow_suite.outputs.exit_code == 0
           # A: suite environment bring-up + teardown narrate.

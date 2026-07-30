@@ -16,9 +16,9 @@ use duhem_schema::{
     validate_with_contract_outputs,
 };
 
-use crate::environment;
 use crate::filter::CliCheckFilter;
 use crate::inputs;
+use crate::profile;
 use crate::reporter::{self, Reporter};
 use crate::resolve::{render_input_value, resolve_leaf_inputs};
 use crate::run_scope::Scope;
@@ -44,7 +44,7 @@ pub struct RunArgs {
     pub db: Option<PathBuf>,
     pub run_id: Option<String>,
     pub reporter: Reporter,
-    pub environment: Option<String>,
+    pub profile: Option<String>,
     pub dry_run: bool,
     pub no_env_up: bool,
     pub keep_env: bool,
@@ -69,7 +69,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         db,
         run_id: pinned_run_id,
         reporter,
-        environment: requested_environment,
+        profile: requested_profile,
         dry_run,
         no_env_up,
         keep_env,
@@ -170,18 +170,18 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         }
     };
 
-    // Named-environment selection (spec #68). On a manifest we pick the
-    // run's environment from the manifest's `environments:` block and
-    // the `--environment` flag; the projection feeds both input
+    // Named-profile selection (spec #68). On a manifest we pick the
+    // run's profile from the manifest's `profiles:` block and
+    // the `--profile` flag; the projection feeds both input
     // resolution and the `$env.<key>` whitelist. On a single leaf there
-    // is no manifest, so nothing is selected; a `--environment` passed
+    // is no manifest, so nothing is selected; a `--profile` passed
     // there is inert (warned below).
-    let mut selected_env: Option<environment::SelectedEnvironment> = None;
+    let mut selected_profile: Option<profile::SelectedProfile> = None;
     let (leaves, scope): (Vec<LoadedLeaf>, Scope) = match loaded {
         Loaded::Leaf { path, definition } => {
-            if requested_environment.is_some() {
+            if requested_profile.is_some() {
                 eprintln!(
-                    "warning: --environment has no effect when running a single verification (no manifest with an `environments:` block)"
+                    "warning: --profile has no effect when running a single verification (no manifest with a `profiles:` block)"
                 );
             }
             (vec![LoadedLeaf { path, definition }], Scope::SingleLeaf)
@@ -192,15 +192,12 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             leaves,
             warnings,
         } => {
-            match environment::select_environment(
-                &manifest.environments,
-                requested_environment.as_deref(),
-            ) {
+            match profile::select_profile(&manifest.profiles, requested_profile.as_deref()) {
                 Ok(sel) => {
                     if let Some(s) = &sel {
-                        eprintln!("environment: {}", s.name);
+                        eprintln!("profile: {}", s.name);
                     }
-                    selected_env = sel;
+                    selected_profile = sel;
                 }
                 Err(e) => {
                     eprintln!("{e}");
@@ -212,7 +209,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 leaves,
                 Scope::Manifest {
                     warnings,
-                    environment: manifest.environment,
+                    provision: manifest.provision,
                     manifest_dir,
                     defaults: manifest.defaults,
                     project: manifest.project,
@@ -221,15 +218,15 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             )
         }
     };
-    // Input-resolution view of the selected environment (precedence
+    // Input-resolution view of the selected profile (precedence
     // layer 3); empty when nothing is selected so the resolution chain
-    // is unchanged on environment-free runs.
-    let env_inputs: BTreeMap<String, serde_json::Value> = selected_env
+    // is unchanged on profile-free runs.
+    let env_inputs: BTreeMap<String, serde_json::Value> = selected_profile
         .as_ref()
         .map(|s| s.inputs.clone())
         .unwrap_or_default();
     // `$env.<key>` whitelist seed (string-valued keys only).
-    let env_whitelist: BTreeMap<String, String> = selected_env
+    let env_whitelist: BTreeMap<String, String> = selected_profile
         .as_ref()
         .map(|s| s.env.clone())
         .unwrap_or_default();
@@ -310,7 +307,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         for (_name, path, definition, inputs, _secrets) in &resolved {
             if let Some(missing) = definition
                 .inputs
-                .keys()
+                .iter()
+                .filter(|(_, decl)| !decl.inherit)
+                .map(|(name, _)| name)
                 .find(|name| !inputs.contains_key(*name))
             {
                 eprintln!("{}: missing required input: `{missing}`", path.display());
@@ -355,7 +354,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
         // RESOLVED INPUTS (spec #155): the post-precedence input map
-        // (`--inputs` last-wins > selected environment > VD `default:`),
+        // (`--inputs` last-wins > selected profile > VD `default:`),
         // one `name = value` per line so a black-box VD can assert the
         // winning value directly off stdout — the value-level assertion
         // that was only reachable indirectly before (via type levers).
@@ -458,7 +457,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     let mut suite_progress: Option<tokio::sync::mpsc::UnboundedReceiver<duhem_evidence::Event>> =
         None;
     if let Scope::Manifest {
-        environment: Some(env),
+        provision: Some(env),
         manifest_dir,
         ..
     } = &scope
@@ -508,7 +507,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 suite_env = Some(session);
             }
             Err(e) => {
-                eprintln!("suite environment: {e}");
+                eprintln!("suite provision: {e}");
                 return ExitCode::FAILURE;
             }
         }
@@ -565,7 +564,10 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // dependency + startup cost) entirely. `uses_requires_page` is
         // the same classifier the engine uses to gate the per-check
         // browser, so this never starves a UI step of a page.
-        let has_missing_input = def.inputs.keys().any(|name| !inputs.contains_key(name));
+        let has_missing_input = def
+            .inputs
+            .iter()
+            .any(|(name, decl)| !decl.inherit && !inputs.contains_key(name));
         let needs_browser = !has_missing_input
             && def
                 .criteria
@@ -599,7 +601,12 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             .skip_env_up(no_env_up || suite_managed)
             .keep_env(keep_env || suite_managed)
             .with_env(env_whitelist.clone())
-            .with_inherited(def.inherits.clone())
+            .with_inherited(
+                def.inputs
+                    .iter()
+                    .filter(|(_, decl)| decl.inherit)
+                    .map(|(name, _)| name.clone()),
+            )
             .with_capture(capture)
             .with_secret_registry(secrets.clone());
         for warning in secrets.warnings() {

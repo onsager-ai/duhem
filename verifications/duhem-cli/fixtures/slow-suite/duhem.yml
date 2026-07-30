@@ -7,7 +7,7 @@
 # 10s heartbeat threshold.
 manifest_version: 1
 
-environment:
+provision:
   up: ./scripts/up.sh
   down: ./scripts/down.sh
 

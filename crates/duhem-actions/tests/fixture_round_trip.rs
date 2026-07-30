@@ -79,7 +79,7 @@ fn each_step_with_deserializes_into_action_with() {
     struct AssertWith {
         locator: Locator,
         expected: ExistenceState,
-        within: Option<String>,
+        timeout: Option<String>,
     }
 
     let def = VerificationDefinition::from_yaml_str(FIXTURE).unwrap();
@@ -97,5 +97,5 @@ fn each_step_with_deserializes_into_action_with() {
     assert_eq!(assertion.expected, ExistenceState::Visible);
     assert_eq!(assertion.locator.role.as_deref(), Some("alert"));
     assert_eq!(assertion.locator.text.as_deref(), Some("Created"));
-    assert_eq!(assertion.within.as_deref(), Some("2s"));
+    assert_eq!(assertion.timeout.as_deref(), Some("2s"));
 }

@@ -7,12 +7,12 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::Deserialize;
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT};
 use crate::browser::SelectBy;
 use crate::error::ActionError;
 use crate::locator::Locator;
 use crate::playwright::to_selector;
-use crate::with::WithinSpec;
+use crate::with::TimeoutSpec;
 
 /// `by:` is a tagged union — exactly one of `value`, `label`, `index`
 /// is set. `untagged` is intentional: each variant carries its own
@@ -54,7 +54,7 @@ struct With {
     locator: Locator,
     by: By,
     #[serde(default)]
-    within: Option<WithinSpec>,
+    timeout: Option<TimeoutSpec>,
 }
 
 pub struct Select;
@@ -73,7 +73,7 @@ impl Action for Select {
             with: vec![
                 FieldSpec::required("locator"),
                 FieldSpec::required("by"),
-                FieldSpec::optional("within"),
+                FieldSpec::optional("timeout"),
             ],
             outputs: vec![],
             secret_outputs: vec![],
@@ -92,7 +92,7 @@ impl Action for Select {
                 action: "ui/select",
                 source: e,
             })?;
-        let timeout: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
+        let timeout: Duration = with.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
         let selector = to_selector(&with.locator);
 
         let by = match with.by {
@@ -134,14 +134,14 @@ by: { value: admin }
         let yaml = r#"
 locator: { role: combobox, name: Role }
 by: { label: "Admin" }
-within: 1s
+timeout: 1s
 "#;
         let v: With = serde_yml::from_str(yaml).unwrap();
         match v.by {
             By::Label(ref by) => assert_eq!(by.label, "Admin"),
             _ => panic!("expected By::Label"),
         }
-        let d: Duration = v.within.unwrap().into();
+        let d: Duration = v.timeout.unwrap().into();
         assert_eq!(d, Duration::from_secs(1));
     }
 

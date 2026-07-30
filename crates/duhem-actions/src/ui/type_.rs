@@ -11,11 +11,11 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::Deserialize;
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT};
 use crate::error::ActionError;
 use crate::locator::Locator;
 use crate::playwright::to_selector;
-use crate::with::WithinSpec;
+use crate::with::TimeoutSpec;
 
 fn default_clear() -> bool {
     true
@@ -29,7 +29,7 @@ struct With {
     #[serde(default = "default_clear")]
     clear: bool,
     #[serde(default)]
-    within: Option<WithinSpec>,
+    timeout: Option<TimeoutSpec>,
 }
 
 pub struct Type;
@@ -49,7 +49,7 @@ impl Action for Type {
                 FieldSpec::required("locator"),
                 FieldSpec::required("text"),
                 FieldSpec::optional("clear"),
-                FieldSpec::optional("within"),
+                FieldSpec::optional("timeout"),
             ],
             outputs: vec![],
             secret_outputs: vec![],
@@ -68,7 +68,7 @@ impl Action for Type {
                 action: "ui/type",
                 source: e,
             })?;
-        let timeout: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
+        let timeout: Duration = with.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
         let selector = to_selector(&with.locator);
         let timeout_ms = timeout.as_millis() as f64;
 
@@ -103,7 +103,7 @@ text: Alice
         assert_eq!(v.locator.role.as_deref(), Some("textbox"));
         assert_eq!(v.text, "Alice");
         assert!(v.clear, "clear defaults to true");
-        assert!(v.within.is_none());
+        assert!(v.timeout.is_none());
     }
 
     #[test]
@@ -112,11 +112,11 @@ text: Alice
 locator: { role: textbox, name: Name }
 text: " Smith"
 clear: false
-within: 2s
+timeout: 2s
 "#;
         let v: With = serde_yml::from_str(yaml).unwrap();
         assert!(!v.clear);
-        let d: Duration = v.within.unwrap().into();
+        let d: Duration = v.timeout.unwrap().into();
         assert_eq!(d, Duration::from_secs(2));
     }
 

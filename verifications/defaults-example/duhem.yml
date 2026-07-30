@@ -3,8 +3,8 @@
 # A root manifest whose `defaults:` block sets the suite-wide posture
 # ONCE, instead of per leaf:
 #
-#   - timeout:             the per-step `within:` fallback. A step that
-#                          declares its own `within:` wins; one that
+#   - timeout:             the per-step `timeout:` fallback. A step that
+#                          declares its own `timeout:` wins; one that
 #                          doesn't picks up 30s here; with neither, the
 #                          engine's built-in 5s last resort applies.
 #   - inconclusive_policy: how a criterion-level `inconclusive` is

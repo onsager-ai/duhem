@@ -27,7 +27,7 @@
 #                The asymmetric Onsager seam holds that role
 #                (`.claude/skills/onsager-dogfood/SKILL.md`).
 #
-# HOLISTIC POSTURE (`docs/duhem-spec.md` §8): no mocks. `environment.up`
+# HOLISTIC POSTURE (`docs/duhem-spec.md` §8): no mocks. `provision.up`
 # produces a REAL run by executing the offline `fixture/` VD through the
 # real `duhem run` pipeline (recording a genuine run in the production
 # evidence store, #189), then launches the real `duhem dashboard`
@@ -62,7 +62,7 @@ spec_ref: https://github.com/onsager-ai/duhem/issues/148
 # (DUHEM_BIN, DUHEM_DASHBOARD_PORT), not VD inputs. The inputs below are
 # the URLs the *steps* and the readiness probe hit; their `:7878` MUST
 # match DUHEM_DASHBOARD_PORT. See `./README.md`.
-environment:
+provision:
   up: ./scripts/up.sh
   down: ./scripts/down.sh
   ready:
@@ -113,13 +113,13 @@ criteria:
             with:
               method: GET
               url: $inputs.runs_url
-              within: 15s
+              timeout: 15s
           - id: detail
             uses: api/call
             with:
               method: GET
               url: $inputs.run_detail_url
-              within: 15s
+              timeout: 15s
         assertions:
           # The list endpoint answers and carries the fixture leaf run.
           - $steps.list.outputs.status == 200
@@ -168,7 +168,7 @@ criteria:
               # embedded bundle (not the fallback) is being served.
               locator: { role: heading, name: Duhem }
               expected: visible
-              within: 15s
+              timeout: 15s
           - id: verdict_rendered
             uses: ui/assert-element
             with:
@@ -177,14 +177,14 @@ criteria:
               # into the run summary from the fetched detail.
               locator: { role: heading, text: pass }
               expected: visible
-              within: 15s
+              timeout: 15s
           # Summary intentionally omits the result tree (#323). Follow the
           # same tab affordance an operator uses to enter Results.
           - uses: ui/click
             with:
               role: tab
               name: Results
-              within: 15s
+              timeout: 15s
           # Each check in the Results rail is a link whose accessible name
           # is the check id; `AC-1.1` proves the tree was built from the
           # live run detail.
@@ -193,7 +193,7 @@ criteria:
             with:
               locator: { role: link, name: AC-1.1 }
               expected: visible
-              within: 15s
+              timeout: 15s
 
   - id: AC-3
     description: |
@@ -213,7 +213,7 @@ criteria:
           finished run replays its whole trace and then the server CLOSES
           the connection at `run_finished` — so collection ends with
           `stopped_reason == "stream_end"` (the server's terminal, not
-          our `within:` cut-off), proving we consumed the stream as a
+          our `timeout:` cut-off), proving we consumed the stream as a
           stream rather than reading one finished body. Assert the
           subscription answered 200, events arrived in order, and the
           terminal event carries the recorded `run_finished` / `pass`
@@ -230,7 +230,7 @@ criteria:
               # `run_finished` well before this; if it ever did NOT, the
               # budget would end collection (Ok), and the `stream_end`
               # assertion below would fail loudly rather than hang.
-              within: 20s
+              timeout: 20s
         assertions:
           # The subscription itself was accepted.
           - $steps.sse.outputs.status == 200
@@ -273,7 +273,7 @@ criteria:
             with:
               method: GET
               url: $inputs.runs_url
-              within: 15s
+              timeout: 15s
         assertions:
           - $steps.list.outputs.status == 200
           # Newest-first ordering: the finished fixture run (started
@@ -316,13 +316,13 @@ criteria:
             with:
               locator: {role: img, name: "Step show-evidence screenshot"}
               expected: visible
-              within: 15s
+              timeout: 15s
           - id: video-available
             uses: ui/assert-element
             with:
               locator: {role: button, name: Video}
               expected: visible
-              within: 15s
+              timeout: 15s
           - id: open-video
             uses: ui/click
             with: {role: button, name: Video}
@@ -331,19 +331,19 @@ criteria:
             with:
               locator: {css: "video.replay-video"}
               expected: visible
-              within: 15s
+              timeout: 15s
           - id: step-marker-visible
             uses: ui/assert-element
             with:
               locator: {role: button, name: "Seek to step show-evidence"}
               expected: visible
-              within: 15s
+              timeout: 15s
           - id: seek-with-step-marker
             uses: ui/click
             with:
               role: button
               name: "Seek to step show-evidence"
-              within: 15s
+              timeout: 15s
 
   # ==========================================================================
   # #349 — runtime lifecycle is independent from judgment. The real slow
@@ -390,7 +390,7 @@ criteria:
                   ' "$tmp/export/api/runs.json"
                 - duhem-lifecycle-check
                 - verifications/duhem-cli/fixtures/slow-suite
-              within: 120s
+              timeout: 120s
         assertions:
           - $steps.completed_suite.outputs.exit_code == 0
           - $steps.completed_suite.outputs.stdout == "finished:null"

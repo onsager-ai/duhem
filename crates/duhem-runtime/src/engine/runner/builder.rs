@@ -26,12 +26,12 @@ impl Engine {
     }
 
     /// Apply a manifest's `defaults:` block (spec #66): the per-step
-    /// `within:` fallback (`timeout`), the inconclusive policy, and the
-    /// retry posture. `defaults.environment` is not consumed here (its
-    /// `environments:` lookup is out of scope). Absent sub-keys leave
+    /// `timeout:` fallback (`timeout`), the inconclusive policy, and the
+    /// retry posture. `defaults.profile` is not consumed here (its
+    /// `profiles:` lookup is out of scope). Absent sub-keys leave
     /// today's behavior in place.
     pub fn with_defaults(mut self, defaults: &duhem_schema::ManifestDefaults) -> Self {
-        self.default_within = defaults.timeout.map(Duration::from);
+        self.default_timeout = defaults.timeout.map(Duration::from);
         self.retry = defaults.retry;
         self.inconclusive_policy = match defaults.inconclusive_policy {
             Some(duhem_schema::InconclusivePolicy::Block) | None => InconclusivePolicy::Block,
@@ -114,7 +114,7 @@ impl Engine {
         self
     }
 
-    /// Skip `environment.up:` + readiness probing. Used by the CLI's
+    /// Skip `provision.up:` + readiness probing. Used by the CLI's
     /// `--no-env-up` flag; useful when the operator brought the SUT
     /// up out-of-band. Teardown still runs unless [`Engine::keep_env`]
     /// is also set — that combination is the "do absolutely no
@@ -124,7 +124,7 @@ impl Engine {
         self
     }
 
-    /// Skip `environment.down:`. Used by the CLI's `--keep-env` flag
+    /// Skip `provision.down:`. Used by the CLI's `--keep-env` flag
     /// so an author can poke at the SUT after a failing run.
     pub fn keep_env(mut self, keep: bool) -> Self {
         self.keep_env = keep;
@@ -132,20 +132,20 @@ impl Engine {
     }
 
     /// Seed the `$env.<key>` whitelist for this run (spec #68). The CLI
-    /// passes the selected named environment's string-valued keys here;
+    /// passes the selected named profile's string-valued keys here;
     /// `$env.<key>` resolves against this map. Empty by default, so
-    /// runs without a selected environment keep today's behavior (no
+    /// runs without a selected profile keep today's behavior (no
     /// `$env` access).
     pub fn with_env(mut self, env: BTreeMap<String, String>) -> Self {
         self.env = env;
         self
     }
 
-    /// Declare the leaf's inherited input names (spec #135). When a
+    /// Declare the leaf's `inherit: true` input names (spec #135). When a
     /// referenced `$inputs.<name>` for one of these names resolves to
     /// nothing, the run fails with a loud, specific error naming it as
     /// inherited and pointing at the suite / `--inputs` remedy, instead
-    /// of a generic deep failure. The CLI threads `def.inherits` here.
+    /// of a generic deep failure. The CLI derives these from `def.inputs`.
     pub fn with_inherited(mut self, names: impl IntoIterator<Item = String>) -> Self {
         self.inherited = names.into_iter().collect();
         self

@@ -52,8 +52,8 @@ use crate::engine::registry::{ActionRegistry, default_registry};
 use crate::engine::session::SessionResolution;
 use crate::engine::template::substitute_with;
 use crate::engine::translate::{
-    RETRY_BACKOFF_BASE, apply_default_within, check_is_retryable, outcome_to_evidence, retry_delay,
-    with_to_evidence_map,
+    RETRY_BACKOFF_BASE, apply_default_timeout, check_is_retryable, outcome_to_evidence,
+    retry_delay, with_to_evidence_map,
 };
 use crate::eval::Value;
 
@@ -102,30 +102,27 @@ pub struct Engine {
     /// (all-`None`) records an unattributed run; #191's resolution
     /// ladder populates it.
     scope: RunScope,
-    /// Skip `environment.up:` + readiness probe (the `--no-env-up`
+    /// Skip `provision.up:` + readiness probe (the `--no-env-up`
     /// escape hatch on issue #50). The operator is presumed to have
     /// brought the SUT up already. Teardown still runs unless
     /// [`Engine::keep_env`] is also set.
     skip_env_up: bool,
-    /// Skip `environment.down:` (the `--keep-env` debug flag on
+    /// Skip `provision.down:` (the `--keep-env` debug flag on
     /// issue #50). Useful when an author wants the SUT to outlive the
     /// run for triage.
     keep_env: bool,
     /// `$env.<key>` whitelist seed for this run (spec #68). Empty by
     /// default — env access from assertions is opt-in. The CLI seeds
-    /// this from the selected named environment's string-valued keys.
+    /// this from the selected named profile's string-valued keys.
     env: BTreeMap<String, String>,
-    /// Names the leaf declared under `inherits:` (spec #135). Used to
-    /// turn a generic unresolved `$inputs.<name>` into the loud,
-    /// specific "declared `inherits:` but nothing provides it" error
-    /// with the suite/--inputs remedy. Empty for a leaf with no
-    /// `inherits:` block, so non-inheriting runs keep today's behavior.
+    /// Leaf inputs declared `inherit: true`, used for the specific
+    /// unbound-inheritance diagnostic (spec #135).
     inherited: std::collections::HashSet<String>,
-    /// Manifest `defaults.timeout` (spec #66): per-step `within:`
-    /// fallback. A step's own `within:` wins; absent here, the action's
-    /// built-in `DEFAULT_WITHIN` (5s) applies. `None` keeps today's
+    /// Manifest `defaults.timeout` (spec #66): per-step `timeout:`
+    /// fallback. A step's own `timeout:` wins; absent here, the action's
+    /// built-in `DEFAULT_TIMEOUT` (5s) applies. `None` keeps today's
     /// behavior.
-    default_within: Option<Duration>,
+    default_timeout: Option<Duration>,
     /// Manifest `defaults.inconclusive_policy` (spec #66). `Block`
     /// (today's behavior) is the default.
     inconclusive_policy: InconclusivePolicy,
@@ -171,7 +168,7 @@ impl Engine {
             keep_env: false,
             env: BTreeMap::new(),
             inherited: std::collections::HashSet::new(),
-            default_within: None,
+            default_timeout: None,
             inconclusive_policy: InconclusivePolicy::Block,
             retry: None,
             retry_backoff_base: RETRY_BACKOFF_BASE,
@@ -225,7 +222,9 @@ impl Engine {
         }
         let missing_declared = def
             .inputs
-            .keys()
+            .iter()
+            .filter(|(_, decl)| !decl.inherit)
+            .map(|(name, _)| name)
             .find(|name| !inputs.contains_key(*name))
             .cloned();
         let mut input_values: BTreeMap<String, Value> = BTreeMap::new();
@@ -234,12 +233,8 @@ impl Engine {
                 .ok_or_else(|| EngineError::InputUnrepresentable { name: k.clone() })?;
             input_values.insert(k.clone(), val);
         }
-        // Loud, specific guard for unresolved inherited inputs (spec
-        // #135): an `inherits:` name that the chain bound nothing for
-        // (no manifest environment, no `--inputs`) fails here — before
-        // any browser launch or network call — naming the input as
-        // inherited and giving the suite / `--inputs` remedy, instead
-        // of surfacing later as a generic deep failure.
+        // Keep unresolved inherited inputs a specific pre-flight error
+        // before any browser launch or network call (spec #135).
         if !self.inherited.is_empty()
             && let Some(name) =
                 crate::engine::inherit::first_unbound_inherited(def, &self.inherited, &input_values)
@@ -313,14 +308,14 @@ impl Engine {
             }
 
             // Resolve the Verification Definition's directory so relative
-            // `environment.up:` / `down:` paths anchor at the same place
+            // `provision.up:` / `down:` paths anchor at the same place
             // an author would `cd` to before running the script by hand.
             let vd_dir: Option<PathBuf> = self
                 .definition_path
                 .as_deref()
                 .and_then(|p| Path::new(p).parent().map(Path::to_path_buf));
 
-            // `environment:` lifecycle precedes `setup:` (spec on
+            // `provision:` lifecycle precedes `setup:` (spec on
             // issue #50). On `up:` failure or `ready:` timeout we record
             // the verdict as `Inconclusive`, skip setup + criteria, and
             // delegate the teardown decision to `bring_environment_up`'s
@@ -328,7 +323,7 @@ impl Engine {
             // `--no-env-up` run still gets its `down:` invocation unless
             // `--keep-env` is also on).
             let mut env_should_tear_down = false;
-            if let Some(env) = def.environment.as_ref() {
+            if let Some(env) = def.provision.as_ref() {
                 let r = crate::engine::env::bring_environment_up(
                     &mut writer,
                     env,
@@ -390,7 +385,7 @@ impl Engine {
                         state: VerdictState::Inconclusive(reason.cause()),
                         criteria: Vec::new(),
                     };
-                    if let Some(env) = def.environment.as_ref() {
+                    if let Some(env) = def.provision.as_ref() {
                         crate::engine::env::tear_environment_down(
                             &mut writer,
                             env,
@@ -440,7 +435,7 @@ impl Engine {
             }
 
             let run_verdict = aggregate_run(criterion_verdicts);
-            if let Some(env) = def.environment.as_ref() {
+            if let Some(env) = def.provision.as_ref() {
                 crate::engine::env::tear_environment_down(
                     &mut writer,
                     env,
@@ -673,12 +668,12 @@ impl Engine {
                 });
             }
             // Manifest `defaults.timeout` (spec #66): fill the step's
-            // `within:` when it doesn't declare its own. A per-step
-            // `within:` already in the payload wins; this only fills the
+            // `timeout:` when it doesn't declare its own. A per-step
+            // `timeout:` already in the payload wins; this only fills the
             // gap. With no manifest default, the action's built-in
-            // `DEFAULT_WITHIN` (5s) remains the last resort.
-            if let Some(default) = self.default_within {
-                apply_default_within(&mut resolved_with, default);
+            // `DEFAULT_TIMEOUT` (5s) remains the last resort.
+            if let Some(default) = self.default_timeout {
+                apply_default_timeout(&mut resolved_with, default);
             }
 
             // Collect ui/assert-element targets for the element-highlight
@@ -1125,7 +1120,7 @@ criteria:
             keep_env: false,
             env: BTreeMap::new(),
             inherited: std::collections::HashSet::new(),
-            default_within: None,
+            default_timeout: None,
             inconclusive_policy: InconclusivePolicy::Block,
             retry: None,
             // Zero backoff so retry-loop tests run instantly.
@@ -1257,7 +1252,7 @@ criteria:
         steps:
           - id: login
             uses: fake/login
-            secret: [body.data]
+            secret_outputs: [body.data]
           - id: read
             uses: fake/read
             with:
@@ -1294,7 +1289,7 @@ criteria:
         steps:
           - id: login
             uses: fake/deep
-            secret:
+            secret_outputs:
               - body.items[0].key
         assertions: ["true"]
 "#);
@@ -1374,13 +1369,13 @@ criteria:
         steps:
           - id: login
             uses: fake/login
-            secret: [body]
+            secret_outputs: [body]
         assertions: ["true"]
 "#);
         let err = engine.run(&v, BTreeMap::new()).await.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "secret: `body` resolved to an object, not a value.\n\
+            "secret_outputs: `body` resolved to an object, not a value.\n\
              Name the scalar that is sensitive, e.g. `body.data`.\n\
              Registering a whole object would mask only its exact\n\
              serialization, which is almost never what appears in evidence."
@@ -2140,8 +2135,8 @@ criteria:
         assert_eq!(verdict.state, VerdictState::Fail);
     }
 
-    /// Spec on #50: `environment.up:` exits 0, criteria run normally,
-    /// and `environment.down:` is invoked after the criteria loop.
+    /// Spec on #50: `provision.up:` exits 0, criteria run normally,
+    /// and `provision.down:` is invoked after the criteria loop.
     /// Both scripts emit the `Env*` evidence events.
     #[tokio::test]
     async fn env_up_success_runs_criteria_and_invokes_down() {
@@ -2166,7 +2161,7 @@ criteria:
             f,
             r#"
 verification: env-up-success
-environment:
+provision:
   up: ./scripts/up.sh
   down: ./scripts/down.sh
 criteria:
@@ -2224,9 +2219,9 @@ criteria:
         assert!(down_finished < run_finished);
     }
 
-    /// Spec on #50: a non-zero `environment.up:` exit aborts the run
+    /// Spec on #50: a non-zero `provision.up:` exit aborts the run
     /// with `Inconclusive(EnvironmentError)`; no setup or criterion
-    /// runs; `environment.down:` is NOT invoked (nothing came up).
+    /// runs; `provision.down:` is NOT invoked (nothing came up).
     #[tokio::test]
     async fn env_up_failure_yields_inconclusive_and_skips_down() {
         use std::fs::Permissions;
@@ -2249,7 +2244,7 @@ criteria:
             f,
             r#"
 verification: env-up-fail
-environment:
+provision:
   up: ./scripts/up.sh
   down: ./scripts/down.sh
 criteria:
@@ -2320,7 +2315,7 @@ criteria:
             f,
             r#"
 verification: env-ready-timeout
-environment:
+provision:
   up: ./scripts/up.sh
   down: ./scripts/down.sh
   ready:
@@ -2397,7 +2392,7 @@ criteria:
             f,
             r#"
 verification: skip-env-up
-environment:
+provision:
   up: ./scripts/up.sh
 criteria:
   - id: AC-1
@@ -2470,7 +2465,7 @@ criteria:
             f,
             r#"
 verification: skip-env-up-still-tears-down
-environment:
+provision:
   up: ./scripts/up.sh
   down: ./scripts/down.sh
 criteria:
@@ -2525,7 +2520,7 @@ criteria:
         );
     }
 
-    /// Spec on #50: a VD without `environment:` produces a
+    /// Spec on #50: a VD without `provision:` produces a
     /// byte-shape-identical trace to today's setup-only definitions
     /// (no `Env*` events).
     #[tokio::test]
@@ -2552,7 +2547,7 @@ criteria:
                     | duhem_evidence::EventPayload::EnvDownFinished { .. }
             )
         });
-        assert!(!saw_env, "VDs without `environment:` emit no Env* events");
+        assert!(!saw_env, "VDs without `provision:` emit no Env* events");
     }
 
     /// Spec #68: a seeded `$env` whitelist (`Engine::with_env`) is
@@ -2590,15 +2585,15 @@ criteria:
         assert_ne!(bare_outcome.verdict.state, VerdictState::Pass);
     }
 
-    /// Spec #135: a leaf referencing an `inherits:` name that nothing
+    /// Spec #135: a leaf referencing an `inherit: true` input that nothing
     /// bound fails LOUDLY with the specific remedy — not a generic deep
     /// failure — before any check runs.
     #[tokio::test]
     async fn unbound_inherited_input_errors_loudly() {
         let v = def(r#"
 verification: leaf
-inherits:
-  - login_url
+inputs:
+  login_url: { inherit: true }
 criteria:
   - id: AC-1
     description: x
@@ -2608,7 +2603,7 @@ criteria:
           - $inputs.login_url == "x"
 "#);
         let (engine, _tmp) = engine_for_test().await;
-        let mut engine = engine.with_inherited(v.inherits.clone());
+        let mut engine = engine.with_inherited(["login_url".to_string()]);
         let err = engine
             .run_with_metadata(&v, BTreeMap::new())
             .await
@@ -2619,7 +2614,7 @@ criteria:
         );
         let msg = err.to_string();
         assert!(msg.contains("login_url"), "{msg}");
-        assert!(msg.contains("inherits:"), "{msg}");
+        assert!(msg.contains("inherit: true"), "{msg}");
         assert!(msg.contains("--inputs"), "{msg}");
     }
 
@@ -2631,8 +2626,8 @@ criteria:
     async fn bound_inherited_input_passes() {
         let v = def(r#"
 verification: leaf
-inherits:
-  - login_url
+inputs:
+  login_url: { inherit: true }
 criteria:
   - id: AC-1
     description: x
@@ -2642,7 +2637,7 @@ criteria:
           - $inputs.login_url == "https://example.test/login"
 "#);
         let (engine, _tmp) = engine_for_test().await;
-        let mut engine = engine.with_inherited(v.inherits.clone());
+        let mut engine = engine.with_inherited(["login_url".to_string()]);
         let mut inputs = BTreeMap::new();
         inputs.insert(
             "login_url".to_string(),
@@ -2658,8 +2653,8 @@ criteria:
     async fn inherited_under_default_carveout_does_not_trip_guard() {
         let v = def(r#"
 verification: leaf
-inherits:
-  - maybe
+inputs:
+  maybe: { inherit: true }
 criteria:
   - id: AC-1
     description: x
@@ -2669,23 +2664,23 @@ criteria:
           - $runtime.default($inputs.maybe, "x") == "x"
 "#);
         let (engine, _tmp) = engine_for_test().await;
-        let mut engine = engine.with_inherited(v.inherits.clone());
+        let mut engine = engine.with_inherited(["maybe".to_string()]);
         let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
         assert_eq!(outcome.verdict.state, VerdictState::Pass);
     }
 
     // -- manifest defaults: timeout / retry / inconclusive_policy (#66) ------
 
-    /// Stub that records the `within` (integer ms) it was handed in its
+    /// Stub that records the `timeout` (integer ms) it was handed in its
     /// `with:` payload — `u64::MAX` when the payload omits it. Lets the
     /// timeout-threading tests observe what the engine injected.
-    struct WithinCapture {
+    struct TimeoutCapture {
         uses: &'static str,
         seen: Arc<AtomicU64>,
     }
 
     #[async_trait]
-    impl Dispatch for WithinCapture {
+    impl Dispatch for TimeoutCapture {
         fn uses(&self) -> &'static str {
             self.uses
         }
@@ -2699,7 +2694,7 @@ criteria:
             with: &serde_yml::Value,
         ) -> Result<ActionResult, ActionError> {
             let ms = with
-                .get(serde_yml::Value::String("within".to_string()))
+                .get(serde_yml::Value::String("timeout".to_string()))
                 .and_then(|v| v.as_u64())
                 .unwrap_or(u64::MAX);
             self.seen.store(ms, Ordering::SeqCst);
@@ -2710,9 +2705,9 @@ criteria:
     #[tokio::test]
     async fn default_timeout_fills_within_when_step_omits_it() {
         let (mut engine, _tmp) = engine_for_test().await;
-        engine.default_within = Some(Duration::from_secs(7));
+        engine.default_timeout = Some(Duration::from_secs(7));
         let seen = Arc::new(AtomicU64::new(0));
-        engine.register_test_action(Box::new(WithinCapture {
+        engine.register_test_action(Box::new(TimeoutCapture {
             uses: "fake/cap",
             seen: seen.clone(),
         }));
@@ -2733,16 +2728,16 @@ criteria:
         assert_eq!(
             seen.load(Ordering::SeqCst),
             7_000,
-            "default timeout fills within"
+            "default timeout fills timeout"
         );
     }
 
     #[tokio::test]
-    async fn per_step_within_wins_over_default_timeout() {
+    async fn per_step_timeout_wins_over_default_timeout() {
         let (mut engine, _tmp) = engine_for_test().await;
-        engine.default_within = Some(Duration::from_secs(7));
+        engine.default_timeout = Some(Duration::from_secs(7));
         let seen = Arc::new(AtomicU64::new(0));
-        engine.register_test_action(Box::new(WithinCapture {
+        engine.register_test_action(Box::new(TimeoutCapture {
             uses: "fake/cap",
             seen: seen.clone(),
         }));
@@ -2755,12 +2750,12 @@ criteria:
       - id: AC-1.1
         steps:
           - uses: fake/cap
-            with: { within: 2000 }
+            with: { timeout: 2000 }
         assertions:
           - "true"
 "#);
         engine.run(&v, BTreeMap::new()).await.unwrap();
-        assert_eq!(seen.load(Ordering::SeqCst), 2_000, "per-step within wins");
+        assert_eq!(seen.load(Ordering::SeqCst), 2_000, "per-step timeout wins");
     }
 
     #[tokio::test]

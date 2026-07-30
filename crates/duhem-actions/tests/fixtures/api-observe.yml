@@ -44,7 +44,7 @@ criteria:
             with:
               method: POST
               url_pattern: "re:/projects$"
-              within: 3s
+              timeout: 3s
         assertions:
           - $steps.observe.outputs.method == "POST"
           - $steps.observe.outputs.status == 201

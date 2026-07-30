@@ -4,7 +4,7 @@
 //! in `spec(actions): ui/* action types v1` and turns this into an
 //! enum. `with:` stays untyped (`serde_yml::Value`) until the action
 //! catalog gives it a per-action schema. `outputs:` maps a local alias
-//! to a runtime extraction path; `secret:` names scalar output paths
+//! to a runtime extraction path; `secret_outputs:` names scalar output paths
 //! that must join the evidence writer's registry before this step emits
 //! evidence (spec #355).
 
@@ -54,7 +54,7 @@ pub struct Step {
     /// objects and arrays because exact-serialization masking would
     /// give a false impression that the subtree was protected.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub secret: Vec<String>,
+    pub secret_outputs: Vec<String>,
 }
 
 fn is_null(v: &serde_yml::Value) -> bool {
@@ -75,7 +75,7 @@ with: { role: button, name: Create }
         assert_eq!(s.uses, "ui/click");
         assert!(s.id.is_none());
         assert!(s.outputs.is_empty());
-        assert!(s.secret.is_empty());
+        assert!(s.secret_outputs.is_empty());
     }
 
     #[test]
@@ -84,14 +84,14 @@ with: { role: button, name: Create }
 id: login
 uses: api/call
 with: { method: POST, url: /login }
-secret:
+secret_outputs:
   - body.data
   - body.items[0].key
 "#;
         let s: Step = serde_yml::from_str(yaml).expect("parse");
-        assert_eq!(s.secret, ["body.data", "body.items[0].key"]);
+        assert_eq!(s.secret_outputs, ["body.data", "body.items[0].key"]);
         let out = serde_yml::to_string(&s).expect("serialize");
-        assert!(out.contains("secret:\n- body.data\n- body.items[0].key"));
+        assert!(out.contains("secret_outputs:\n- body.data\n- body.items[0].key"));
     }
 
     #[test]
@@ -119,6 +119,17 @@ extra: nope
 "#;
         let err = serde_yml::from_str::<Step>(yaml).unwrap_err();
         assert!(format!("{err}").contains("unknown field"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_pre_naming_pass_secret_field() {
+        let yaml = r#"
+uses: api/call
+with: { method: GET, url: / }
+secret: [body]
+"#;
+        let err = serde_yml::from_str::<Step>(yaml).unwrap_err();
+        assert!(format!("{err}").contains("secret"), "got: {err}");
     }
 
     #[test]

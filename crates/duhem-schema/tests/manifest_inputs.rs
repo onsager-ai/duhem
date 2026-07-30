@@ -7,11 +7,12 @@
 
 use std::path::{Path, PathBuf};
 
-use duhem_schema::{LoadError, Loaded, RootManifest, load};
+use duhem_schema::{LoadError, Loaded, RootManifest, ValidationError, load, validate};
 
 const LEAF: &str = r#"
 verification: manifest input consumer
-inherits: [password]
+inputs:
+  password: { inherit: true, secret: true }
 criteria:
   - id: AC-1
     description: The inherited credential is available to the check.
@@ -61,7 +62,7 @@ fn unused_manifest_input_warns_without_failing_load() {
     write(
         tmp.path(),
         "leaf.yml",
-        &LEAF.replace("inherits: [password]\n", ""),
+        &LEAF.replace("inputs:\n  password: { inherit: true, secret: true }\n", ""),
     );
     let manifest = write(
         tmp.path(),
@@ -89,6 +90,48 @@ verifications:
         }
         Loaded::Leaf { .. } => panic!("expected manifest"),
     }
+}
+
+#[test]
+fn manifest_declaration_does_not_make_an_undeclared_leaf_reference_valid() {
+    let tmp = tempfile::tempdir().unwrap();
+    write(
+        tmp.path(),
+        "leaf.yml",
+        r#"
+verification: closed leaf declarations
+criteria:
+  - id: AC-1
+    description: A same-named manifest input cannot hide a leaf typo.
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.target == "expected"
+"#,
+    );
+    let manifest = write(
+        tmp.path(),
+        "duhem.yml",
+        r#"
+manifest_version: 1
+inputs:
+  target: { type: string, default: expected }
+verifications:
+  - path: leaf.yml
+"#,
+    );
+
+    let Loaded::Manifest { leaves, .. } = load(&manifest).expect("manifest loads") else {
+        panic!("expected manifest");
+    };
+    let errs = validate(&leaves[0].definition).expect_err("leaf reference stays undeclared");
+    assert!(
+        errs.iter().any(|err| matches!(
+            err,
+            ValidationError::UnresolvedInputRef { input, .. } if input == "target"
+        )),
+        "same-named manifest input must not widen leaf declarations: {errs:?}"
+    );
 }
 
 #[test]

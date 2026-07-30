@@ -36,7 +36,7 @@ criteria:
             with:
               method: GET
               url: $inputs.base_url
-              within: 15s
+              timeout: 15s
         # No `outputs:` block needed — `$steps.home.outputs.status`
         # resolves against `api/call`'s declared outputs (#267). Add
         # `outputs:` only to rename one, e.g. `outputs: { code: status }`.

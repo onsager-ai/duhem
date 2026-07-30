@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::criterion::Criterion;
-use crate::environment::Environment;
 use crate::project::ProjectDecl;
+use crate::provision::Provision;
 use crate::step::Step;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -34,30 +34,19 @@ pub struct VerificationDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<ProjectDecl>,
 
-    /// Optional operator-supplied environment lifecycle hooks. When
-    /// present, the runtime forks `environment.up:` before `setup:`,
-    /// polls `environment.ready:`, and forks `environment.down:`
+    /// Optional operator-supplied provisioning lifecycle hooks. When
+    /// present, the runtime forks `provision.up:` before `setup:`,
+    /// polls `provision.ready:`, and forks `provision.down:`
     /// (if declared) after the criteria loop. Absent → no behavior
     /// change vs setup-only definitions; the wire shape for
-    /// `environment:`-less VDs is byte-identical to today.
+    /// `provision:`-less VDs is byte-identical to today.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment: Option<Environment>,
+    pub provision: Option<Provision>,
 
     /// Declared inputs. Map keys are alphabetized on round-trip
     /// (BTreeMap); fixtures should be authored alphabetized.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, InputDecl>,
-
-    /// Inherited input names (spec #135). A leaf under a manifest may
-    /// list input names it pulls from the parent manifest's resolution
-    /// chain (#68: selected `environments:` keys, `--inputs`
-    /// `KEY=VALUE` / `@file`) instead of redeclaring them under `inputs:`.
-    /// This is dependency injection — the manifest provides, the leaf
-    /// declares what it needs — not class inheritance: one level deep,
-    /// names only, no local `default:`. An inherited name resolves and
-    /// reads as `$inputs.<name>` exactly like a locally-declared input.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub inherits: Vec<String>,
 
     /// Optional setup steps run once before the criteria.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -73,15 +62,15 @@ pub struct VerificationDefinition {
 pub struct InputDecl {
     /// The declared type from the v1 catalog. Unknown names parse-fail
     /// at `from_yaml_str` per the type-catalog spec.
-    #[serde(rename = "type")]
-    pub kind: InputType,
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    pub kind: Option<InputType>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<serde_json::Value>")]
     pub default: Option<serde_yml::Value>,
 
     /// Process-environment fallback (specs #346 / #354). This sits
-    /// below a selected Duhem environment and above `default:` in
+    /// below a selected Duhem profile and above `default:` in
     /// resolution precedence. The declaration may be leaf-local or
     /// suite-wide on a manifest; it never becomes a global override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -93,6 +82,13 @@ pub struct InputDecl {
     /// structural findings.
     #[serde(default, skip_serializing_if = "is_false")]
     pub secret: bool,
+
+    /// Pull this name from the parent manifest's declaration and value
+    /// resolution ladder. Inherited inputs intentionally omit `type:`
+    /// and `default:` because the manifest owns both; `secret: true`
+    /// may add protection at the consuming leaf.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub inherit: bool,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -202,6 +198,18 @@ criteria:
     }
 
     #[test]
+    fn rejects_pre_naming_pass_top_level_fields() {
+        for old in [
+            "environment:\n  up: ./scripts/up.sh\n",
+            "inherits: [base_url]\n",
+        ] {
+            let y = format!("verification: x\n{old}criteria: []\n");
+            let err = VerificationDefinition::from_yaml_str(&y).unwrap_err();
+            assert!(format!("{err}").contains("unknown field"), "got: {err}");
+        }
+    }
+
+    #[test]
     fn yaml_error_carries_location() {
         // Tab where YAML expects spaces is one common source of error
         // with a real line/column.
@@ -216,19 +224,19 @@ criteria:
         inputs.insert(
             "name".into(),
             InputDecl {
-                kind: InputType::String,
+                kind: Some(InputType::String),
                 default: Some(serde_yml::Value::String("hi".into())),
                 env: None,
                 secret: false,
+                inherit: false,
             },
         );
         let v = VerificationDefinition {
             verification: "x".into(),
             spec_ref: None,
             project: None,
-            environment: None,
+            provision: None,
             inputs,
-            inherits: vec![],
             setup: vec![],
             criteria: vec![],
         };
@@ -238,12 +246,12 @@ criteria:
     }
 
     #[test]
-    fn round_trip_preserves_inherits() {
+    fn round_trip_preserves_inherited_input() {
         let y = r#"
 verification: leaf
-inherits:
-  - base_url
-  - region
+inputs:
+  base_url: { inherit: true }
+  region: { inherit: true }
 criteria:
   - id: AC-1
     description: x
@@ -253,11 +261,8 @@ criteria:
           - $inputs.base_url == "x"
 "#;
         let v = VerificationDefinition::from_yaml_str(y).expect("parse");
-        assert_eq!(
-            v.inherits,
-            vec!["base_url".to_string(), "region".to_string()]
-        );
-        assert!(v.inputs.is_empty());
+        assert!(v.inputs["base_url"].inherit);
+        assert!(v.inputs["region"].inherit);
         let back = VerificationDefinition::from_yaml_str(&v.to_yaml_string().unwrap()).unwrap();
         assert_eq!(v, back);
     }
@@ -269,15 +274,15 @@ criteria:
             let v = VerificationDefinition::from_yaml_str(&y)
                 .unwrap_or_else(|e| panic!("`{name}` should parse: {e}"));
             let decl = v.inputs.get("k").expect("input decl present");
-            assert_eq!(decl.kind.as_str(), name);
+            assert_eq!(decl.kind.expect("type present").as_str(), name);
         }
     }
 
     #[test]
-    fn parses_environment_block() {
+    fn parses_provision_block() {
         let y = r#"
 verification: with-env
-environment:
+provision:
   up: ./scripts/up.sh
   down: ./scripts/down.sh
   ready:
@@ -292,17 +297,17 @@ criteria:
         assertions: ["true"]
 "#;
         let v = VerificationDefinition::from_yaml_str(y).expect("parse");
-        let env = v.environment.expect("environment present");
+        let env = v.provision.expect("provision present");
         assert_eq!(env.up.to_str(), Some("./scripts/up.sh"));
         assert!(env.down.is_some());
         assert!(env.ready.is_some());
     }
 
     #[test]
-    fn environment_without_up_is_a_parse_error() {
+    fn provision_without_up_is_a_parse_error() {
         let y = r#"
 verification: with-env
-environment:
+provision:
   down: ./scripts/down.sh
 criteria:
   - id: AC-1
@@ -311,7 +316,7 @@ criteria:
       - id: AC-1.1
         assertions: ["true"]
 "#;
-        // `up:` is required when `environment:` is present.
+        // `up:` is required when `provision:` is present.
         assert!(VerificationDefinition::from_yaml_str(y).is_err());
     }
 

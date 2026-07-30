@@ -53,12 +53,12 @@ criteria:
             with:
               locator: { role: textbox, name: Username }
               expected: visible
-              within: 20s
+              timeout: 20s
           - uses: ui/assert-element
             with:
               locator: { role: button, name: Sign In }
               expected: visible
-              within: 10s
+              timeout: 10s
 
   - id: AC-2
     description: |
@@ -82,7 +82,7 @@ criteria:
             with:
               locator: { role: button, name: Sign In }
               expected: visible
-              within: 10s
+              timeout: 10s
             outputs:
               satisfied: satisfied
           - id: sso_signin
@@ -90,7 +90,7 @@ criteria:
             with:
               locator: { role: button, name: Continue with SSO }
               expected: visible
-              within: 10s
+              timeout: 10s
             outputs:
               satisfied: satisfied
         assertions:

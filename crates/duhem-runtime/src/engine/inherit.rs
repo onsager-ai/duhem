@@ -1,10 +1,10 @@
 //! Pre-flight guard for inherited inputs (spec #135).
 //!
-//! A leaf may declare `inherits: [name, ...]` — input names it pulls
-//! from the parent manifest's resolution chain (#68) instead of
-//! redeclaring under `inputs:`. When such a name is *referenced* by a
+//! A leaf may declare `inputs.<name>.inherit: true` for values it pulls
+//! from the parent manifest's resolution chain (#68). When such a name
+//! is *referenced* by a
 //! `$inputs.<name>` but the chain bound nothing for it (no manifest
-//! environment selected, no `--inputs`), the run must fail loudly and
+//! profile selected, no `--inputs`), the run must fail loudly and
 //! specifically rather than as a generic deep failure. This module
 //! collects the referenced inherited names and reports the first one
 //! that is unbound; the engine turns that into an
@@ -16,11 +16,11 @@ use duhem_schema::{Expr, PathRoot, VerificationDefinition};
 
 use crate::eval::Value;
 
-/// Return the first `inherits:` name that the VD references via
+/// Return the first `inputs.<name>.inherit: true` name that the VD references via
 /// `$inputs.<name>` but that the resolution chain left unbound
 /// (`bound` is the run's resolved input map). `None` when every
 /// referenced inherited name is bound — the common path when a manifest
-/// environment or `--inputs` supplied it.
+/// profile or `--inputs` supplied it.
 ///
 /// References are read from assertions and step `with:` payloads, with
 /// the same `$runtime.default(value, fallback)` carve-out the validator

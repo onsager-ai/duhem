@@ -119,7 +119,7 @@ criteria:
         steps:              # ordered actions that exercise the system
           - id: home
             uses: api/call
-            with: { method: GET, url: $inputs.base_url, within: 15s }
+            with: { method: GET, url: $inputs.base_url, timeout: 15s }
         assertions:         # structured, mechanically judged — no LLM
           - $steps.home.outputs.status == 200   # no outputs: block needed
 ```
@@ -142,14 +142,14 @@ criteria:
   block at all. Bind `satisfied` and assert it yourself only for manual
   control (e.g. a disjunction across steps).
 - **Sensitive inputs** use `env: VARIABLE_NAME` with `secret: true`.
-  Values resolve from `--inputs` → selected environment → process
+  Values resolve from `--inputs` → selected profile → process
   `env:` → `default:` and registered secret values are masked from
   recorded text and terminal output. A secret input cannot have a
   committed `default:`. Screenshots/video and transformations beyond
   base64, percent encoding, and JSON escaping remain outside the
   substring-masking guarantee. For a credential shared by a suite,
   declare it once under the root manifest's `inputs:` and list its name
-  under each consuming leaf's `inherits:`:
+  under each consuming leaf's `inputs:` with `inherit: true`:
 
   ```yaml
   # .duhem/duhem.yml
@@ -158,25 +158,26 @@ criteria:
       type: string
       env: APP_PASSWORD
       secret: true
-  environments:
+  profiles:
     staging:
       username: admin
 
   # a leaf Verification Definition
-  inherits: [password]
+  inputs:
+    password: { inherit: true, secret: true }
   ```
 
-  A declared inherited value uses the same precedence and type checks
-  as a leaf input. An inherited name with no manifest declaration keeps
-  the existing names-only behavior.
-- **Credentials returned by a step** use `secret:` on the producing
+  A declared inherited value uses the manifest declaration's precedence
+  and type checks. The leaf declaration remains required, so a typoed
+  `$inputs.*` reference cannot silently bind a same-named manifest input.
+- **Credentials returned by a step** use `secret_outputs:` on the producing
   step. Name the sensitive scalar output path, not its containing
   object or array:
 
   ```yaml
   - id: login
     uses: api/call
-    secret: [body.data]
+    secret_outputs: [body.data]
     with:
       method: POST
       url: $inputs.login_url
@@ -194,7 +195,7 @@ criteria:
   become `[redacted:login.body.data]`. A path such as `body` (object) or
   `body.items` (array) fails; name one scalar leaf such as
   `body.items[0].key`. Some actions may mark credential outputs secret
-  in their contract, in which case no authored `secret:` entry is
+  in their contract, in which case no authored `secret_outputs:` entry is
   needed.
 
 ### Reuse a real browser login
@@ -231,7 +232,7 @@ criteria:
 `session:` must be one whole `$` reference; inline cookie/state literals
 are rejected. Each check still gets a fresh isolated context, so mutations
 do not leak to siblings. Omit `session:` for the signed-out path. The
-captured `state` is contract-secret automatically—do not add a `secret:`
+captured `state` is contract-secret automatically—do not add a `secret_outputs:`
 entry—and evidence carries only the expression plus a SHA-256 digest.
 
 ## 5. Author a real check
@@ -289,7 +290,7 @@ can declare environment hooks that provision it once and tear it down
 after:
 
 ```yaml
-environment:
+provision:
   up: ./scripts/up.sh          # stand up the real thing (no mocks)
   down: ./scripts/down.sh
   ready:

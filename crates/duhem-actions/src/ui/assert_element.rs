@@ -19,12 +19,12 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT};
 use crate::browser::ElementState;
 use crate::error::ActionError;
 use crate::locator::{ExistenceState, Locator};
 use crate::playwright::to_selector;
-use crate::with::WithinSpec;
+use crate::with::TimeoutSpec;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,7 +32,7 @@ struct With {
     locator: Locator,
     expected: ExistenceState,
     #[serde(default)]
-    within: Option<WithinSpec>,
+    timeout: Option<TimeoutSpec>,
 }
 
 pub struct AssertElement;
@@ -55,7 +55,7 @@ impl Action for AssertElement {
                     true,
                     &["exists", "not_exists", "visible", "hidden"],
                 ),
-                FieldSpec::optional("within"),
+                FieldSpec::optional("timeout"),
             ],
             outputs: vec!["satisfied", "count"],
             secret_outputs: vec![],
@@ -74,7 +74,7 @@ impl Action for AssertElement {
                 action: "ui/assert-element",
                 source: e,
             })?;
-        let timeout: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
+        let timeout: Duration = with.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
         let selector = to_selector(&with.locator);
 
         let satisfied = match page
@@ -125,11 +125,11 @@ mod tests {
         let yaml = r#"
 locator: { role: alert, text: "Created" }
 expected: visible
-within: 2s
+timeout: 2s
 "#;
         let v: With = serde_yml::from_str(yaml).unwrap();
         assert_eq!(v.expected, ExistenceState::Visible);
-        let d: Duration = v.within.unwrap().into();
+        let d: Duration = v.timeout.unwrap().into();
         assert_eq!(d, Duration::from_secs(2));
         assert_eq!(v.locator.text.as_deref(), Some("Created"));
     }

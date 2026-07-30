@@ -223,7 +223,7 @@ Common shape (terse):
       with:
         method: POST
         path: /workspaces
-        within: 3s
+        timeout: 3s
       # no outputs: block — status / body resolve directly; add a binding
       # only to alias a deep path, e.g. outputs: { workspace_id: body.id }
   assertions:
@@ -239,7 +239,7 @@ Authoring rules:
 - Reference outputs by their fully-qualified path,
   `$steps.<id>.outputs.<name>`; `outputs:` blocks are only for a rename
   or a deep-extraction alias, not for re-declaring native fields.
-- Timeouts (`within:`) are explicit on steps that observe
+- Timeouts (`timeout:`) are explicit on steps that observe
   something asynchronous.
 - Use role-based locators (`{role: "button", name: "..."}`)
   rather than CSS or XPath — UI churn invalidates the latter

@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [breaking] Naming pass: step `within:`→`timeout:`, step `secret:`→`secret_outputs:`, lifecycle `environment:`→`provision:`, `environments:`→`profiles:` (`defaults.profile`, `--profile`), and `inherits: [n]` folded into `inputs: { n: { inherit: true } }`. (#371)
+
 ## v0.1.9 — 2026-07-29
 
 - [additive] Checks accept `session:` to seed their browser context from the new `ui/capture-session` action, so login can run once per run instead of once per check. (#347)

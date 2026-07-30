@@ -10,7 +10,7 @@
 //! - `url`: full URL.
 //! - `headers`: request headers (e.g. an auth token).
 //! - `body`: optional request body (JSON for non-string YAML).
-//! - `within`: total budget (default 30s).
+//! - `timeout`: total budget (default 30s).
 //! - `interval`: poll cadence (default 1s).
 //! - `until`: the stop condition — exactly one mode:
 //!     - `{ status: <int> }` — poll until the HTTP status code matches.
@@ -38,9 +38,9 @@ use reqwest::Method;
 use reqwest::header::CONTENT_TYPE;
 use serde::Deserialize;
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT};
 use crate::error::ActionError;
-use crate::with::WithinSpec;
+use crate::with::TimeoutSpec;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -53,9 +53,9 @@ pub(crate) struct With {
     #[serde(default)]
     body: Option<serde_yml::Value>,
     #[serde(default)]
-    within: Option<WithinSpec>,
+    timeout: Option<TimeoutSpec>,
     #[serde(default)]
-    interval: Option<WithinSpec>,
+    interval: Option<TimeoutSpec>,
     until: Until,
 }
 
@@ -100,7 +100,7 @@ impl Action for Poll {
                 FieldSpec::required("url"),
                 FieldSpec::optional("headers"),
                 FieldSpec::optional("body"),
-                FieldSpec::optional("within"),
+                FieldSpec::optional("timeout"),
                 FieldSpec::optional("interval"),
                 FieldSpec::required("until"),
             ],
@@ -125,7 +125,7 @@ impl Action for Poll {
 }
 
 pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
-    let total: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
+    let total: Duration = with.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
     let interval: Duration = with
         .interval
         .map(Into::into)
@@ -437,7 +437,7 @@ mod tests {
         );
         let base = start(app).await;
         let r = execute(parse_with(&format!(
-            r#"{{ url: "{base}/list", within: 5s, interval: 50ms, until: {{ path: total, gte: 1 }} }}"#
+            r#"{{ url: "{base}/list", timeout: 5s, interval: 50ms, until: {{ path: total, gte: 1 }} }}"#
         )))
         .await
         .unwrap();
@@ -462,7 +462,7 @@ mod tests {
         );
         let base = start(app).await;
         let r = execute(parse_with(&format!(
-            r#"{{ url: "{base}/list", within: 300ms, interval: 50ms, until: {{ path: total, gte: 1 }} }}"#
+            r#"{{ url: "{base}/list", timeout: 300ms, interval: 50ms, until: {{ path: total, gte: 1 }} }}"#
         )))
         .await
         .unwrap();
@@ -495,7 +495,7 @@ mod tests {
         );
         let base = start(app).await;
         let r = execute(parse_with(&format!(
-            r#"{{ url: "{base}/health", within: 5s, interval: 50ms, until: {{ status: 200 }} }}"#
+            r#"{{ url: "{base}/health", timeout: 5s, interval: 50ms, until: {{ status: 200 }} }}"#
         )))
         .await
         .unwrap();
@@ -514,7 +514,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         drop(listener);
         let r = execute(parse_with(&format!(
-            r#"{{ url: "http://{addr}/x", within: 300ms, interval: 50ms, until: {{ status: 200 }} }}"#
+            r#"{{ url: "http://{addr}/x", timeout: 300ms, interval: 50ms, until: {{ status: 200 }} }}"#
         )))
         .await
         .unwrap();

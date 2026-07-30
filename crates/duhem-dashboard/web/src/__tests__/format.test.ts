@@ -33,7 +33,7 @@ describe("formatEvent", () => {
       ev("step_started", {
         uses: "ui/assert-element",
         layer: "ui",
-        with: { locator: { role: "status", text: "Payment complete" }, expected: "visible", within: "4s" },
+        with: { locator: { role: "status", text: "Payment complete" }, expected: "visible", timeout: "4s" },
       }),
     );
     expect(f.label).toBe("assert-element");
@@ -45,7 +45,7 @@ describe("formatEvent", () => {
       ev("step_started", {
         uses: "ui/click",
         layer: "ui",
-        with: { role: "button", name: "Save", within: "3s" },
+        with: { role: "button", name: "Save", timeout: "3s" },
       }),
     );
     expect(f.label).toBe("click");

@@ -49,7 +49,7 @@ criteria:
                 Content-Type: application/json
               body:
                 name: demo
-              within: 2s
+              timeout: 2s
             outputs:
               http_code: status
               project_id: body.data._id

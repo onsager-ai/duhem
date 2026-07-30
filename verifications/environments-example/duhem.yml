@@ -1,35 +1,35 @@
-# Named environments — worked example (spec #68)
+# Named profiles — worked example (spec #68)
 #
-# A root manifest whose `environments:` block declares two named
-# environment configs. Selecting one (CLI `--environment <name>`, or
+# A root manifest whose `profiles:` block declares two named
+# configuration profiles. Selecting one (CLI `--profile <name>`, or
 # auto-select when exactly one is declared) does two things for that
 # run:
 #
-#   1. Feeds the leaf input-resolution chain. The selected env's key
+#   1. Feeds the leaf input-resolution chain. The selected profile's key
 #      `base_url` populates the leaf's declared `base_url` input when no
 #      higher-precedence source (`--inputs`) supplies
 #      it. Precedence, highest first:
-#         --inputs (KEY=VALUE / @file, last-wins)  >  selected env  >  VD default
+#         --inputs (KEY=VALUE / @file, last-wins)  >  selected profile  >  VD default
 #
-#   2. Seeds the `$env.<key>` whitelist. The env's string-valued keys
+#   2. Seeds the `$env.<key>` whitelist. The profile's string-valued keys
 #      become reachable via `$env.<key>` in assertions for that run.
 #
-# This manifest declares TWO environments, so a run must name one:
-#   duhem run verifications/environments-example --environment staging
-#   duhem run verifications/environments-example --environment prod
-# Omitting `--environment` here is an error (multiple declared); a
-# manifest with exactly one environment auto-selects it.
+# This manifest declares TWO profiles, so a run must name one:
+#   duhem run verifications/environments-example --profile staging
+#   duhem run verifications/environments-example --profile prod
+# Omitting `--profile` here is an error (multiple declared); a
+# manifest with exactly one profile auto-selects it.
 #
 # There is no live SUT behind these URLs — this example exists to
-# exercise the environment-selection + resolution plumbing and to
+# exercise the profile-selection + resolution plumbing and to
 # validate structurally (`duhem validate`). The leaf
 # (`reads-env/duhem.yml`) is a page-free, assertion-only Verification
-# Definition: it asserts that the env reached both surfaces (the
+# Definition: it asserts that the profile reached both surfaces (the
 # declared input and `$env.<key>`).
 
 manifest_version: 1
 
-environments:
+profiles:
   staging:
     base_url: https://staging.example.com
     region: us-west

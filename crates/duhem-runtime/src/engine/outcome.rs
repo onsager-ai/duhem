@@ -159,7 +159,7 @@ pub(crate) fn implicit_judgment_outcomes(
         if !judging {
             continue;
         }
-        let label = step_label(step, idx);
+        let label = display_step_label(step, idx);
         let (state, detail) = if any_unknown {
             (
                 VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
@@ -502,6 +502,15 @@ pub(crate) fn step_label(step: &duhem_schema::Step, idx: usize) -> String {
         .unwrap_or_else(|| format!("{} #{idx}", step.uses))
 }
 
+/// A step's human-facing label for reports and run views. Authored
+/// prose wins, then the reference id, then the action/index fallback.
+/// Engine diagnostics deliberately keep using [`step_label`].
+pub(crate) fn display_step_label(step: &duhem_schema::Step, idx: usize) -> String {
+    step.description
+        .clone()
+        .unwrap_or_else(|| step_label(step, idx))
+}
+
 /// Predicate that decides whether the engine should execute a given
 /// `(criterion_id, check_id)` pair. Used by the CLI `--filter` flag
 /// (spec on issue #23) to skip checks the author isn't iterating on.
@@ -731,5 +740,62 @@ mod step_correlation_tests {
         );
         let e = assertion_to_expr(&c.assertions[0]);
         assert_eq!(owning_step_index(&e, &c), None);
+    }
+}
+
+#[cfg(test)]
+mod step_label_tests {
+    use super::*;
+
+    fn step(yaml: &str) -> duhem_schema::Step {
+        serde_yml::from_str(yaml).expect("step")
+    }
+
+    #[test]
+    fn display_label_prefers_description_then_id_then_action_index() {
+        let described = step("id: submit\ndescription: Submit the sign-in form\nuses: ui/click\n");
+        assert_eq!(display_step_label(&described, 3), "Submit the sign-in form");
+        assert_eq!(
+            display_step_label(&step("id: submit\nuses: ui/click\n"), 3),
+            "submit"
+        );
+        assert_eq!(
+            display_step_label(&step("uses: ui/click\n"), 3),
+            "ui/click #3"
+        );
+    }
+
+    #[test]
+    fn unresolved_reference_diagnostic_stays_id_first() {
+        let described = step("id: submit\ndescription: Submit the sign-in form\nuses: ui/click\n");
+        let error = EngineError::UnresolvedReference {
+            reference: "$inputs.missing".to_string(),
+            step: step_label(&described, 0),
+            context: String::new(),
+        };
+        let message = error.to_string();
+        assert!(message.contains("step `submit`"), "{message}");
+        assert!(!message.contains("Submit the sign-in form"), "{message}");
+    }
+
+    #[test]
+    fn implicit_failure_uses_the_display_label() {
+        let check: duhem_schema::Check = serde_yml::from_str(
+            "id: AC-1.1\nsteps:\n  - id: username\n    description: The Username field is offered\n    uses: ui/assert-element\n",
+        )
+        .expect("check");
+        let evidence = vec![StepEvidence {
+            with: serde_yml::Value::Null,
+            outputs: BTreeMap::from([("satisfied".to_string(), serde_json::json!(false))]),
+        }];
+        let outcomes = implicit_judgment_outcomes(&check, |_| true, &evidence, false, false, false);
+        assert_eq!(outcomes[0].label, "The Username field is offered");
+        assert!(
+            outcomes[0]
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("The Username field is offered")
+        );
     }
 }

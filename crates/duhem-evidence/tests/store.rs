@@ -59,7 +59,7 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
     w.append(EventPayload::AssertionEvaluated {
         check_id: "AC-1.1".into(),
         assertion_index: 0,
-        state: VerdictState::Pass.into(),
+        state: VerdictState::Pass,
         detail: None,
         expr: None,
         step_index: None,
@@ -157,7 +157,7 @@ async fn dropped_writer_loses_nothing_and_run_stays_unfinished() {
             w.append(EventPayload::AssertionEvaluated {
                 check_id: format!("C{i}"),
                 assertion_index: 0,
-                state: VerdictState::Pass.into(),
+                state: VerdictState::Pass,
                 detail: None,
                 expr: None,
                 step_index: None,

@@ -26,5 +26,5 @@ pub use aggregate::{
     CheckVerdict, CriterionVerdict, InconclusivePolicy, RunSetVerdict, RunVerdict, aggregate_check,
     aggregate_criterion, aggregate_run, aggregate_run_set, apply_inconclusive_policy,
 };
-pub use outcome::{AssertionOutcome, AssertionState, CheckOutcome};
+pub use outcome::{AssertionOutcome, CheckOutcome};
 pub use verdict::{InconclusiveCause, VerdictState};

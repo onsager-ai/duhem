@@ -243,7 +243,7 @@ impl Store for SqliteStore {
                 .bind(event.seq as i64)
                 .bind(check_id)
                 .bind(*assertion_index as i64)
-                .bind(super::assertion_token(state)?)
+                .bind(super::verdict_token(state)?)
                 .bind(detail)
                 .execute(&mut *tx)
                 .await?;

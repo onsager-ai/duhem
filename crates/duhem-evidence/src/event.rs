@@ -76,11 +76,11 @@ pub enum StepOutcome {
     Skipped { reason: String },
 }
 
-/// Assertion and verdict shapes used by evidence. Assertion state adds
-/// `"skipped"` (absence from aggregation) to the ordinary verdict wire
-/// tokens `"pass"` / `"fail"` / `"inconclusive:<cause>"`; finished
-/// verdict fields remain three-state (`docs/duhem-spec.md` §7.6).
-pub use duhem_judge::{AssertionState, VerdictState};
+/// Assertion and finished-verdict fields share the same three-state
+/// judgment vocabulary (`docs/duhem-spec.md` §7.6). A step that did not
+/// run has no assertion event; its absence is carried by
+/// [`StepOutcome::Skipped`] instead.
+pub use duhem_judge::VerdictState;
 
 /// Either an inline JSON value (small observations) or a reference to
 /// a content-addressed blob (large observations). Exactly one variant
@@ -236,7 +236,7 @@ pub enum EventPayload {
     AssertionEvaluated {
         check_id: String,
         assertion_index: u32,
-        state: AssertionState,
+        state: VerdictState,
         #[serde(default)]
         detail: Option<String>,
         /// The human-readable assertion *expression* this outcome

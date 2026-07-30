@@ -1,9 +1,9 @@
 //! `Engine::run`: execute, evaluate, aggregate, and emit evidence.
 //!
-//! Per-step failure policy (spec #365): `Outcome::Error`,
-//! `Outcome::Timeout`, and a judging step's `satisfied: false` block
-//! later `if: success` steps in this check. `if: always` and
-//! `if: failure` opt out; sibling checks have independent state.
+//! Per-step failure policy (spec #365/#377): execution errors/timeouts
+//! and failed implicit judgments block later `if: success` steps in this
+//! check. `if: always` and `if: failure` opt out; sibling checks have
+//! independent state.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -28,7 +28,7 @@ pub use crate::engine::outcome::{
 };
 pub(crate) use crate::engine::outcome::{
     StepEvidence, append_implicit_judgment, display_step_label, evaluate_explicit_assertions,
-    implicit_judgment_outcomes, step_label,
+    implicit_judgment_for_step, implicit_judgment_outcomes, step_label,
 };
 
 use crate::engine::capture::{
@@ -788,6 +788,9 @@ impl Engine {
                         outputs: r.outputs.clone(),
                         skip_reason: None,
                     };
+                    if let Outcome::Skipped { reason } = &r.outcome {
+                        step_evidence[idx].skip_reason = Some(reason.clone());
+                    }
                     r.outcome.clone()
                 }
                 // Step can't run (or invocation failed) — emit a
@@ -813,9 +816,17 @@ impl Engine {
                     .await;
             }
 
-            if failed_by.is_none()
-                && step_failed(&outcome, dispatcher_judges, &step_evidence[idx].outputs)
-            {
+            let judgment = implicit_judgment_for_step(
+                step,
+                idx,
+                dispatcher_judges,
+                &step_evidence[idx],
+                false,
+                false,
+                false,
+            )
+            .map(|outcome| outcome.state);
+            if failed_by.is_none() && step_failed(&outcome, judgment) {
                 failed_by = Some(display_step_label(step, idx));
             }
         }
@@ -1074,6 +1085,7 @@ criteria:
                 Outcome::Ok => ActionResult::ok(),
                 Outcome::Error => ActionResult::error(),
                 Outcome::Timeout => ActionResult::timeout(),
+                Outcome::Skipped { ref reason } => ActionResult::skipped(reason.clone()),
             };
             for (k, v) in &self.outputs {
                 r = r.with_output(k, v.clone());
@@ -2995,6 +3007,84 @@ criteria:
     }
 
     #[tokio::test]
+    async fn bound_satisfied_false_does_not_gate_its_disjunction_partner() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/no", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(false))
+                .judging(),
+        ));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/yes", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(true))
+                .judging(),
+        ));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: a
+            uses: fake/no
+            outputs:
+              satisfied: satisfied
+          - id: b
+            uses: fake/yes
+            outputs:
+              satisfied: satisfied
+        assertions:
+          - $steps.a.outputs.satisfied == true || $steps.b.outputs.satisfied == true
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            verdict.state,
+            VerdictState::Pass,
+            "disjunction must still evaluate"
+        );
+    }
+
+    #[tokio::test]
+    async fn implicit_judgment_example_ac_2_is_exercised_by_runtime() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/navigate", Outcome::Ok)));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/no", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(false))
+                .judging(),
+        ));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/yes", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(true))
+                .judging(),
+        ));
+
+        let mut v = def(include_str!(
+            "../../../../verifications/implicit-judgment-example/duhem.yml"
+        ));
+        v.criteria.retain(|criterion| criterion.id == "AC-2");
+        let steps = &mut v.criteria[0].checks[0].steps;
+        steps[0].uses = "fake/navigate".to_string();
+        steps[1].uses = "fake/no".to_string();
+        steps[2].uses = "fake/yes".to_string();
+
+        let verdict = engine
+            .run(
+                &v,
+                BTreeMap::from([(
+                    "login_url".to_string(),
+                    serde_json::json!("http://127.0.0.1/login"),
+                )]),
+            )
+            .await
+            .unwrap();
+        let events = read_only_run_events(&engine).await;
+        assert_eq!(verdict.state, VerdictState::Pass, "events: {events:#?}");
+    }
+
+    #[tokio::test]
     async fn skipped_implicit_assertion_leaves_an_empty_aggregation() {
         // An earlier step errors and gates the judging step. The
         // skipped implicit assertion is absence, not a synthetic
@@ -3023,10 +3113,19 @@ criteria:
             verdict.criteria[0].checks[0].state,
             VerdictState::Inconclusive(InconclusiveCause::EmptyAggregation)
         ));
+        let assertion_count = read_only_run_events(&engine)
+            .await
+            .iter()
+            .filter(|event| matches!(event.payload, EventPayload::AssertionEvaluated { .. }))
+            .count();
+        assert_eq!(
+            assertion_count, 0,
+            "a skipped judging step contributes no assertion"
+        );
     }
 
     #[tokio::test]
-    async fn satisfied_false_gates_success_steps_and_preserves_fail_verdict() {
+    async fn unbound_judging_satisfied_false_gates_success_steps() {
         let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(
             StubAction::new("fake/assert", Outcome::Ok)
@@ -3157,7 +3256,7 @@ criteria:
     }
 
     #[tokio::test]
-    async fn explicit_assertion_on_skipped_step_is_skipped_not_missing() {
+    async fn explicit_assertion_on_skipped_step_is_absent() {
         let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(
             StubAction::new("fake/assert", Outcome::Ok)
@@ -3183,16 +3282,24 @@ criteria:
 "#);
         let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
         assert_eq!(verdict.state, VerdictState::Fail);
-        assert!(read_only_run_events(&engine).await.iter().any(|event| {
-            matches!(
-                event.payload,
-                EventPayload::AssertionEvaluated {
-                    assertion_index: 0,
-                    state: duhem_judge::AssertionState::Skipped,
-                    ..
-                }
-            )
-        }));
+        let assertions = read_only_run_events(&engine)
+            .await
+            .into_iter()
+            .filter(|event| matches!(event.payload, EventPayload::AssertionEvaluated { .. }))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            assertions.len(),
+            1,
+            "only the first step's implicit failed judgment is recorded"
+        );
+        assert!(matches!(
+            assertions[0].payload,
+            EventPayload::AssertionEvaluated {
+                assertion_index: 1,
+                state: VerdictState::Fail,
+                ..
+            }
+        ));
     }
 
     #[tokio::test]

@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use duhem_actions::{ActionError, ExistenceState, Locator};
 use duhem_evidence::{EventPayload, EvidenceWriter, StoreError, WriterError};
-use duhem_judge::{AssertionOutcome, AssertionState, InconclusiveCause, RunVerdict};
+use duhem_judge::{AssertionOutcome, InconclusiveCause, RunVerdict, VerdictState};
 use duhem_schema::{Expr, PathRoot};
 use thiserror::Error;
 
@@ -143,8 +143,65 @@ pub(crate) struct ImplicitOutcome {
     /// reporter folds the assertion into its step and propagates its
     /// status).
     pub step_index: usize,
-    pub state: AssertionState,
+    pub state: VerdictState,
     pub detail: Option<String>,
+}
+
+/// Compute one step's implicit judgment, if the step contributes one.
+/// This is also the single source of truth for gating: binding an output
+/// named `satisfied` suppresses both the implicit assertion and any gate
+/// derived from that assertion.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn implicit_judgment_for_step(
+    step: &duhem_schema::Step,
+    step_index: usize,
+    action_judges: bool,
+    evidence: &StepEvidence,
+    any_unknown: bool,
+    environment_failed: bool,
+    browser_missing: bool,
+) -> Option<ImplicitOutcome> {
+    if !action_judges || step.outputs.contains_key("satisfied") || evidence.skip_reason.is_some() {
+        return None;
+    }
+
+    let label = display_step_label(step, step_index);
+    let (state, detail) = if any_unknown {
+        (
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+            Some("unknown_action".to_string()),
+        )
+    } else if environment_failed {
+        (
+            VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+            Some(if browser_missing {
+                "browser_unavailable".to_string()
+            } else {
+                "check_browser_failed".to_string()
+            }),
+        )
+    } else {
+        match evidence.satisfied() {
+            Some(true) => (VerdictState::Pass, None),
+            Some(false) => (
+                VerdictState::Fail,
+                Some(judging_fail_detail(step, evidence, &label)),
+            ),
+            None => (
+                VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+                Some(format!(
+                    "step `{label}` did not run or produced no `satisfied`"
+                )),
+            ),
+        }
+    };
+
+    Some(ImplicitOutcome {
+        label,
+        step_index,
+        state,
+        detail,
+    })
 }
 
 /// Compute the implicit assertion outcomes for a check's judging steps
@@ -162,61 +219,22 @@ pub(crate) fn implicit_judgment_outcomes(
     environment_failed: bool,
     browser_missing: bool,
 ) -> Vec<ImplicitOutcome> {
-    let mut out = Vec::new();
-    for (idx, step) in check.steps.iter().enumerate() {
-        // Opt out when the author binds an output *named* `satisfied`
-        // (the key `$steps.<id>.outputs.satisfied` resolves against),
-        // regardless of which extraction it maps to — that's the author
-        // taking manual control of the satisfied signal.
-        let judging = is_judging(step.uses.as_str()) && !step.outputs.contains_key("satisfied");
-        if !judging {
-            continue;
-        }
-        let label = display_step_label(step, idx);
-        let (state, detail) = if let Some(reason) = &step_evidence[idx].skip_reason {
-            (AssertionState::Skipped, Some(reason.clone()))
-        } else if any_unknown {
-            (
-                AssertionState::Inconclusive(InconclusiveCause::MissingObservation),
-                Some("unknown_action".to_string()),
+    check
+        .steps
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, step)| {
+            implicit_judgment_for_step(
+                step,
+                idx,
+                is_judging(step.uses.as_str()),
+                &step_evidence[idx],
+                any_unknown,
+                environment_failed,
+                browser_missing,
             )
-        } else if environment_failed {
-            (
-                AssertionState::Inconclusive(InconclusiveCause::EnvironmentError),
-                Some(if browser_missing {
-                    "browser_unavailable".to_string()
-                } else {
-                    "check_browser_failed".to_string()
-                }),
-            )
-        } else {
-            let ev = &step_evidence[idx];
-            match ev.satisfied() {
-                Some(true) => (AssertionState::Pass, None),
-                // The step ran and judged the artifact *not* satisfied.
-                // Speak the reason — the authored intent plus what was
-                // observed — so the reporter shows why, not a bare
-                // `actual false, expected true`.
-                Some(false) => (
-                    AssertionState::Fail,
-                    Some(judging_fail_detail(step, ev, &label)),
-                ),
-                None => (
-                    AssertionState::Inconclusive(InconclusiveCause::MissingObservation),
-                    Some(format!(
-                        "step `{label}` did not run or produced no `satisfied`"
-                    )),
-                ),
-            }
-        };
-        out.push(ImplicitOutcome {
-            label,
-            step_index: idx,
-            state,
-            detail,
-        });
-    }
-    out
+        })
+        .collect()
 }
 
 /// A human, semantic failure detail for a judging step whose implicit
@@ -357,17 +375,17 @@ pub(crate) async fn evaluate_explicit_assertions(
         // (an explicit `$steps.update.outputs.status == 200` IS about the
         // `update` step, #279 follow-up).
         let step_index = owning_step_index(&expr, check);
-        let skip_reason = skipped_reference_reason(&expr, check, step_evidence);
-        let (state, detail) = if let Some(reason) = skip_reason {
-            (AssertionState::Skipped, Some(reason))
-        } else if any_unknown {
+        if skipped_reference_reason(&expr, check, step_evidence).is_some() {
+            continue;
+        }
+        let (state, detail) = if any_unknown {
             (
-                AssertionState::Inconclusive(InconclusiveCause::MissingObservation),
+                VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
                 Some("unknown_action".to_string()),
             )
         } else if environment_failed {
             (
-                AssertionState::Inconclusive(InconclusiveCause::EnvironmentError),
+                VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
                 Some(if browser_missing {
                     "browser_unavailable".to_string()
                 } else {
@@ -384,7 +402,7 @@ pub(crate) async fn evaluate_explicit_assertions(
                 EvalResult::False => describe_comparison(&expr, ctx),
                 EvalResult::True => None,
             };
-            (AssertionState::from(eval_to_state(&r)), detail)
+            (eval_to_state(&r), detail)
         };
         writer
             .append(EventPayload::AssertionEvaluated {
@@ -400,7 +418,7 @@ pub(crate) async fn evaluate_explicit_assertions(
                 expr: Some(assertion.display()),
             })
             .await?;
-        if !matches!(state, AssertionState::Pass) {
+        if !matches!(state, VerdictState::Pass) {
             failed.push(FailedAssertion {
                 expr: assertion.display(),
                 state,
@@ -515,7 +533,7 @@ pub(crate) async fn append_implicit_judgment(
                 step_index: Some(imp.step_index as u32),
             })
             .await?;
-        if !matches!(imp.state, AssertionState::Pass) {
+        if !matches!(imp.state, VerdictState::Pass) {
             failed.push(FailedAssertion {
                 expr: format!("implicit: step `{}` satisfied == true", imp.label),
                 state: imp.state,
@@ -588,7 +606,7 @@ pub struct FailedAssertion {
     pub expr: String,
     /// `Fail` or `Inconclusive(..)`; never `Pass` (passing assertions
     /// are not collected).
-    pub state: AssertionState,
+    pub state: VerdictState,
     /// Evidence-bound cause detail when present (e.g. a missing
     /// observation or type mismatch). `None` for a plain comparison
     /// that evaluated false — the expression itself localizes it.

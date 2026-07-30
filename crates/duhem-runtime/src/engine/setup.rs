@@ -30,7 +30,9 @@ use tracing::debug;
 use crate::engine::context::RunState;
 use crate::engine::gating::{skip_reason as gate_skip_reason, step_failed};
 use crate::engine::registry::{ActionRegistry, Dispatch};
-use crate::engine::runner::{EngineError, display_step_label, step_label};
+use crate::engine::runner::{
+    EngineError, StepEvidence, display_step_label, implicit_judgment_for_step, step_label,
+};
 use crate::engine::template::substitute_with;
 use crate::engine::translate::{outcome_to_evidence, with_to_evidence_map};
 
@@ -194,7 +196,7 @@ pub(crate) async fn run_setup(
                 Outcome::Timeout => Some(AbortReason::Timeout),
                 Outcome::Error => Some(AbortReason::Environment),
                 Outcome::Ok if failed => Some(AbortReason::Environment),
-                Outcome::Ok => None,
+                Outcome::Ok | Outcome::Skipped { .. } => None,
             };
             if aborted.is_some() {
                 failed_by = Some(display_step_label(step, idx));
@@ -284,7 +286,25 @@ async fn invoke_and_record(
         .ok()
         .cloned()
         .unwrap_or_default();
-    let failed = step_failed(&outcome, dispatcher.judges(), &outputs);
+    let evidence = StepEvidence {
+        with: resolved_with.clone(),
+        outputs,
+        skip_reason: match &outcome {
+            Outcome::Skipped { reason } => Some(reason.clone()),
+            _ => None,
+        },
+    };
+    let judgment = implicit_judgment_for_step(
+        step,
+        idx,
+        dispatcher.judges(),
+        &evidence,
+        false,
+        false,
+        false,
+    )
+    .map(|outcome| outcome.state);
+    let failed = step_failed(&outcome, judgment);
     Ok((outcome, failed))
 }
 
@@ -357,6 +377,7 @@ mod tests {
                 Outcome::Ok => ActionResult::ok(),
                 Outcome::Error => ActionResult::error(),
                 Outcome::Timeout => ActionResult::timeout(),
+                Outcome::Skipped { ref reason } => ActionResult::skipped(reason.clone()),
             };
             for (k, v) in &self.outputs {
                 r = r.with_output(k, v.clone());

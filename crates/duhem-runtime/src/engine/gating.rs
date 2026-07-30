@@ -1,8 +1,7 @@
 //! Closed step-gating policy shared by checks and setup.
 
-use std::collections::BTreeMap;
-
 use duhem_actions::Outcome;
+use duhem_judge::VerdictState;
 use duhem_schema::StepCondition;
 
 pub(crate) fn skip_reason(condition: StepCondition, failed_by: Option<&str>) -> Option<String> {
@@ -16,15 +15,7 @@ pub(crate) fn skip_reason(condition: StepCondition, failed_by: Option<&str>) -> 
     }
 }
 
-pub(crate) fn step_failed(
-    outcome: &Outcome,
-    judges: bool,
-    outputs: &BTreeMap<String, serde_json::Value>,
-) -> bool {
+pub(crate) fn step_failed(outcome: &Outcome, judgment: Option<VerdictState>) -> bool {
     matches!(outcome, Outcome::Error | Outcome::Timeout)
-        || (judges
-            && outputs
-                .get("satisfied")
-                .and_then(serde_json::Value::as_bool)
-                == Some(false))
+        || matches!(judgment, Some(VerdictState::Fail))
 }

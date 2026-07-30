@@ -264,13 +264,6 @@ pub(crate) fn verdict_token(v: &VerdictState) -> Result<String, StoreError> {
     }
 }
 
-pub(crate) fn assertion_token(v: &crate::AssertionState) -> Result<String, StoreError> {
-    match serde_json::to_value(v)? {
-        serde_json::Value::String(s) => Ok(s),
-        other => Ok(other.to_string()),
-    }
-}
-
 pub(crate) fn parse_verdict(token: &str) -> Result<VerdictState, StoreError> {
     serde_json::from_value(serde_json::Value::String(token.to_string()))
         .map_err(|_| StoreError::BadVerdict(token.to_string()))

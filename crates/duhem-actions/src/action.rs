@@ -60,16 +60,16 @@ impl<'a> ActionCtx<'a> {
     }
 }
 
-/// Per-action lifecycle outcome. Maps onto
-/// `AssertionOutcome::{Ok, Error, Inconclusive(Timeout)}` in the
-/// judge spec — `Timeout` is the structural reason actions prefer
-/// wait-with-timeout over hard-fail polling.
+/// In-process step execution outcome. This stays distinct from the
+/// serialized evidence `StepOutcome`, but the runtime mechanically pins
+/// both types to the same vocabulary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Outcome {
     Ok,
     Error,
     Timeout,
+    Skipped { reason: String },
 }
 
 /// One observation captured during an action invocation. Phase 0 is
@@ -110,6 +110,16 @@ impl ActionResult {
     pub fn error() -> Self {
         Self {
             outcome: Outcome::Error,
+            outputs: BTreeMap::new(),
+            observations: Vec::new(),
+        }
+    }
+
+    pub fn skipped(reason: impl Into<String>) -> Self {
+        Self {
+            outcome: Outcome::Skipped {
+                reason: reason.into(),
+            },
             outputs: BTreeMap::new(),
             observations: Vec::new(),
         }

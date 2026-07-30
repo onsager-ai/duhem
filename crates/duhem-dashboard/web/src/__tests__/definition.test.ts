@@ -32,4 +32,33 @@ criteria:
     expect(vd.stepLabel("AC-1", "AC-1.1", 1)).toBe("ui/assert-element #1");
     expect(vd.stepLabel("AC-1", "AC-1.1", 2)).toBeUndefined();
   });
+
+  it("joins expanded steps through flow provenance and keeps index fallback", () => {
+    const vd = parseDefinition(`
+flows:
+  sign_in:
+    steps:
+      - id: user
+        description: Enter the username
+        uses: ui/type
+      - uses: ui/click
+criteria:
+  - id: AC-1
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: login
+            description: Sign in as the fixture user
+            call: sign_in
+          - id: legacy
+            uses: ui/assert-url
+`);
+    const flow = { name: "sign_in", invocation: "login", inner_index: 0 };
+    expect(vd.flowLabel("AC-1", "AC-1.1", flow)).toBe("Sign in as the fixture user");
+    expect(vd.stepLabel("AC-1", "AC-1.1", 0, flow))
+      .toBe("Sign in as the fixture user › Enter the username");
+    expect(vd.flowStepLabel(flow)).toBe("Enter the username");
+    expect(vd.stepId("AC-1", "AC-1.1", 0, flow)).toBe("login__user");
+    expect(vd.stepLabel("AC-1", "AC-1.1", 1)).toBe("legacy");
+  });
 });

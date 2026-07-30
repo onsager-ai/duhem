@@ -232,7 +232,7 @@ pub(crate) fn implicit_judgment_outcomes(
             implicit_judgment_for_step(
                 step,
                 idx,
-                is_judging(step.uses.as_str()),
+                is_judging(step.uses_name()),
                 &step_evidence[idx],
                 any_unknown,
                 environment_failed,
@@ -251,7 +251,7 @@ pub(crate) fn implicit_judgment_outcomes(
 /// the step's `with:` can't be read (a `$`-ref that never resolved, an
 /// action we don't specially humanize).
 fn judging_fail_detail(step: &duhem_schema::Step, ev: &StepEvidence, label: &str) -> String {
-    let specialized = match step.uses.as_str() {
+    let specialized = match step.uses_name() {
         "ui/assert-element" => assert_element_fail_detail(ev),
         _ => intent_fail_detail(step, ev),
     };
@@ -354,7 +354,7 @@ fn intent_fail_detail(step: &duhem_schema::Step, ev: &StepEvidence) -> Option<St
         .unwrap_or_default();
     Some(format!(
         "`{}`: expected {}{timeout_clause}, but it did not hold{observed}",
-        step.uses,
+        step.uses_name(),
         intent.join(" ")
     ))
 }
@@ -562,7 +562,7 @@ pub(crate) async fn append_implicit_judgment(
 pub(crate) fn step_label(step: &duhem_schema::Step, idx: usize) -> String {
     step.id
         .clone()
-        .unwrap_or_else(|| format!("{} #{idx}", step.uses))
+        .unwrap_or_else(|| format!("{} #{idx}", step.uses_name()))
 }
 
 /// A step's human-facing label for reports and run views. Authored

@@ -19,7 +19,9 @@ use crate::manifest_path::{
 };
 use crate::project::ProjectDecl;
 use crate::provision::{DurationSpec, Provision};
-use crate::verification::{InputDecl, PageCatalog, SchemaError, VerificationDefinition};
+use crate::verification::{
+    FlowCatalog, InputDecl, PageCatalog, SchemaError, VerificationDefinition,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -97,6 +99,10 @@ pub struct RootManifest {
         with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
     )]
     pub pages: PageCatalog,
+    /// Suite-wide reusable step flows. Entries merge by name under
+    /// root-wins; a leaf-local flow with the same name wins.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub flows: FlowCatalog,
     /// Suite-wide defaults (`docs/duhem-spec.md` §10.4, spec #66).
     /// A single `defaults:` block that every leaf the manifest expands
     /// to inherits — so an author sets the timeout budget, the
@@ -390,6 +396,9 @@ pub enum LoadError {
     /// Manifest declarations use the leaf input authoring rules.
     #[error("{path}: manifest input validation failed: {message}")]
     InvalidManifestInputs { path: PathBuf, message: String },
+    /// A reusable flow is structurally invalid or cannot be expanded.
+    #[error("{path}: flow validation failed: {message}")]
+    InvalidFlows { path: PathBuf, message: String },
 }
 
 /// Currently-supported `manifest_version` value. Bumping this is
@@ -549,11 +558,22 @@ fn classify_yaml(path: &Path, src: &str) -> Result<Shape, LoadError> {
     })
 }
 
-fn load_leaf(path: &Path, src: &str) -> Result<VerificationDefinition, LoadError> {
+fn load_leaf_authored(path: &Path, src: &str) -> Result<VerificationDefinition, LoadError> {
     VerificationDefinition::from_yaml_str(src).map_err(|e| LoadError::Yaml {
         path: path.to_path_buf(),
         source: e,
     })
+}
+
+fn load_leaf(path: &Path, src: &str) -> Result<VerificationDefinition, LoadError> {
+    let mut definition = load_leaf_authored(path, src)?;
+    crate::flows::validate_and_expand(&mut definition).map_err(|message| {
+        LoadError::InvalidFlows {
+            path: path.to_path_buf(),
+            message,
+        }
+    })?;
+    Ok(definition)
 }
 
 fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
@@ -721,7 +741,7 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
                     });
                 }
             }
-            let mut def = load_leaf(&leaf_path, &src)?;
+            let mut def = load_leaf_authored(&leaf_path, &src)?;
             // Leaf-local entries win over the effective manifest
             // catalog, element by element.
             for (page, elements) in &manifest.pages {
@@ -732,6 +752,17 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
                         .or_insert_with(|| locator.clone());
                 }
             }
+            for (name, flow) in &manifest.flows {
+                def.flows
+                    .entry(name.clone())
+                    .or_insert_with(|| flow.clone());
+            }
+            crate::flows::validate_and_expand(&mut def).map_err(|message| {
+                LoadError::InvalidFlows {
+                    path: leaf_path.clone(),
+                    message,
+                }
+            })?;
             leaves.push(LoadedLeaf {
                 path: leaf_path,
                 definition: def,
@@ -821,6 +852,22 @@ verifications:
             "manifest_version: 1\npages:\n  login:\n    submit: { role: button, name: Sign In }\nverifications: []\n",
         )
         .expect("parse pages");
+        let round_trip =
+            RootManifest::from_yaml_str(&serde_yml::to_string(&parsed).unwrap()).unwrap();
+        assert_eq!(parsed, round_trip);
+    }
+
+    #[test]
+    fn flows_round_trip_and_absence_keeps_manifest_wire_shape() {
+        let absent =
+            RootManifest::from_yaml_str("manifest_version: 1\nverifications: []\n").unwrap();
+        assert!(absent.flows.is_empty());
+        assert!(!serde_yml::to_string(&absent).unwrap().contains("flows:"));
+
+        let parsed = RootManifest::from_yaml_str(
+            "manifest_version: 1\nflows:\n  shared:\n    steps:\n      - uses: cli/invoke\nverifications: []\n",
+        )
+        .expect("parse flows");
         let round_trip =
             RootManifest::from_yaml_str(&serde_yml::to_string(&parsed).unwrap()).unwrap();
         assert_eq!(parsed, round_trip);

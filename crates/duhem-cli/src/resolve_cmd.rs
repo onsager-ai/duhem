@@ -219,12 +219,8 @@ fn resolve_leaf(
     include_provenance: bool,
 ) -> ResolvedVerification {
     let mut errors = Vec::new();
-    let candidate_secrets = candidate_secret_registry(
-        &leaf.definition.inputs,
-        manifest_inputs,
-        merged,
-        profile_values,
-    );
+    let candidate_secrets =
+        candidate_secret_registry(&leaf.definition, manifest_inputs, merged, profile_values);
     if let Err(validation) = validate_with_contract_outputs(&leaf.definition, &|uses| {
         crate::contract_check::contract_outputs(uses)
     }) {
@@ -234,7 +230,7 @@ fn resolve_leaf(
         }));
     }
 
-    let (resolved_inputs, secrets) =
+    let (resolved_inputs, mut secrets) =
         match resolve_leaf_inputs(merged, profile_values, &leaf.definition, manifest_inputs) {
             Ok(resolved) => resolved,
             Err(error) => {
@@ -245,6 +241,7 @@ fn resolve_leaf(
                 (BTreeMap::new(), duhem_evidence::SecretRegistry::new())
             }
         };
+    register_flow_secrets(&mut secrets, &leaf.definition, Some(&resolved_inputs));
 
     let mut provenance = BTreeMap::new();
     for name in resolved_inputs.keys() {
@@ -362,6 +359,24 @@ fn resolve_steps(
                 let path = format!(
                     "criteria.{criterion_index}.checks.{check_index}.steps.{step_index}.with"
                 );
+                if let Some(flow) = &step.flow {
+                    provenance.insert(
+                        format!(
+                            "criteria.{criterion_index}.checks.{check_index}.steps.{step_index}.flow"
+                        ),
+                        ValueProvenance {
+                            rung: "flow expansion".to_string(),
+                            origin: Origin {
+                                source: format!(
+                                    "flow `{}` invocation `{}` inner step {}",
+                                    flow.name, flow.invocation, flow.inner_index
+                                ),
+                                line: None,
+                            },
+                            overridden: Vec::new(),
+                        },
+                    );
+                }
                 resolve_with(&mut step.with, &context, &path, provenance, errors);
                 apply_timeout(
                     &mut step.with,
@@ -634,13 +649,13 @@ fn mask_document(registry: &duhem_evidence::SecretRegistry, document: &mut serde
 }
 
 fn candidate_secret_registry(
-    leaf_inputs: &BTreeMap<String, InputDecl>,
+    definition: &VerificationDefinition,
     manifest_inputs: &BTreeMap<String, InputDecl>,
     merged: &BTreeMap<String, InputValue>,
     profile: &BTreeMap<String, serde_json::Value>,
 ) -> duhem_evidence::SecretRegistry {
     let mut registry = duhem_evidence::SecretRegistry::new();
-    for (name, leaf) in leaf_inputs {
+    for (name, leaf) in &definition.inputs {
         let manifest = leaf.inherit.then(|| manifest_inputs.get(name)).flatten();
         if !(leaf.secret || manifest.is_some_and(|decl| decl.secret)) {
             continue;
@@ -666,7 +681,34 @@ fn candidate_secret_registry(
             registry.register_json(name.clone(), &value);
         }
     }
+    register_flow_secrets(&mut registry, definition, None);
     registry
+}
+
+fn register_flow_secrets(
+    registry: &mut duhem_evidence::SecretRegistry,
+    definition: &VerificationDefinition,
+    resolved_inputs: Option<&BTreeMap<String, serde_json::Value>>,
+) {
+    for step in definition
+        .criteria
+        .iter()
+        .flat_map(|criterion| &criterion.checks)
+        .flat_map(|check| &check.steps)
+    {
+        for (index, value) in step.flow_secrets.iter().enumerate() {
+            let resolved = value
+                .as_str()
+                .and_then(|raw| raw.strip_prefix("$inputs."))
+                .and_then(reference_head)
+                .and_then(|name| resolved_inputs.and_then(|inputs| inputs.get(name)))
+                .cloned()
+                .or_else(|| inputs::yml_to_json(value).ok());
+            if let Some(value) = resolved {
+                registry.register_json(format!("flow_param_{index}"), &value);
+            }
+        }
+    }
 }
 
 fn redact_error(registry: &duhem_evidence::SecretRegistry, error: &str) -> String {
@@ -795,5 +837,70 @@ verifications:
             .source
             .clone();
         assert!(source.ends_with("pages.yml"), "{source}");
+    }
+
+    #[test]
+    fn resolve_renders_flow_expansion_with_provenance() {
+        let tmp = tempfile::tempdir().unwrap();
+        let leaf = tmp.path().join("duhem.yml");
+        std::fs::write(
+            &leaf,
+            r#"
+verification: resolved flow
+flows:
+  echo:
+    params:
+      message: { type: string }
+    steps:
+      - id: say
+        uses: cli/invoke
+        with: { command: [echo, $params.message] }
+    outputs:
+      code: $steps.say.outputs.exit_code
+criteria:
+  - id: AC-1
+    description: flow is expanded
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: greeting
+            call: echo
+            with: { message: hello }
+        assertions:
+          - $steps.greeting.outputs.code == 0
+"#,
+        )
+        .unwrap();
+
+        let (_, output) = resolve(ResolveArgs {
+            path: Some(leaf),
+            profile: None,
+            inputs: Vec::new(),
+            format: ResolveFormat::Json,
+            provenance: true,
+        })
+        .expect("resolve");
+        let verification = &output.verifications[0];
+        let step = &verification.document["criteria"][0]["checks"][0]["steps"][0];
+        assert_eq!(step["id"], "greeting__say");
+        assert_eq!(step["uses"], "cli/invoke");
+        assert!(step.get("call").is_none());
+        assert_eq!(step["with"]["command"][1], "hello");
+        assert_eq!(
+            verification.document["criteria"][0]["checks"][0]["assertions"][0],
+            "$steps.greeting__say.outputs.exit_code == 0"
+        );
+        let flow = verification
+            .provenance
+            .as_ref()
+            .unwrap()
+            .get("criteria.0.checks.0.steps.0.flow")
+            .expect("flow provenance");
+        assert_eq!(flow.rung, "flow expansion");
+        assert!(
+            flow.origin
+                .source
+                .contains("flow `echo` invocation `greeting`")
+        );
     }
 }

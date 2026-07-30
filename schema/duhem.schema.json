@@ -88,6 +88,37 @@
         }
       ]
     },
+    "Flow": {
+      "additionalProperties": false,
+      "description": "A named, parameterized sequence of steps expanded by the loader.",
+      "properties": {
+        "outputs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Caller-visible output name to an inner `$steps.*` output.",
+          "type": "object"
+        },
+        "params": {
+          "additionalProperties": {
+            "$ref": "#/definitions/InputDecl"
+          },
+          "description": "Per-call parameters. Reuses the input type catalog and sensitivity marker; values are supplied only by the call site.",
+          "type": "object"
+        },
+        "steps": {
+          "description": "Ordered action/flow invocations that make up this flow.",
+          "items": {
+            "$ref": "#/definitions/Step"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "steps"
+      ],
+      "type": "object"
+    },
     "HttpReadyProbe": {
       "additionalProperties": false,
       "description": "HTTP readiness probe. `url:` is templated at runtime (the runtime resolves `$inputs.<name>` references); the schema layer treats it as an opaque string so probes that don't need substitution stay portable.",
@@ -390,6 +421,13 @@
           ],
           "description": "Suite-wide defaults (`docs/duhem-spec.md` §10.4, spec #66). A single `defaults:` block that every leaf the manifest expands to inherits — so an author sets the timeout budget, the inconclusive-handling policy, and the retry posture once for the whole suite instead of per leaf.\n\nEach sub-key is optional and, when absent, reproduces today's behavior exactly:\n\n- `timeout:` is the per-step `timeout:` fallback. A step that declares its own `timeout:` wins; a step that doesn't picks up this default; with neither, the engine's built-in 5s last resort applies. - `inconclusive_policy:` decides how a criterion-level `inconclusive` is treated at run aggregation — `block` (today's behavior; inconclusive ≠ pass), `warn` (criterion passes but a warning is surfaced in the run summary), or `pass` (silent pass). Per-assertion evaluation is unchanged. - `retry:` re-runs a whole check from step 0 when it comes back `inconclusive` for a *retry-eligible* cause (timeout or an environment error); a `fail` never retries. - `profile:` names a key under the sibling `profiles:` block. Cross-key validation is deferred to engine-time lookup (spec #66 Out-of-scope), so any string is accepted here.\n\nAdditive: a manifest without `defaults:` round-trips and behaves byte-for-byte as before."
         },
+        "flows": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Flow"
+          },
+          "description": "Suite-wide reusable step flows. Entries merge by name under root-wins; a leaf-local flow with the same name wins.",
+          "type": "object"
+        },
         "includes": {
           "description": "Other manifest files whose config this one composes in (`docs/duhem-spec.md` §10.4, spec #67). Each path is relative to *this* manifest's parent directory and resolves to a **partial** manifest (every field optional, no `manifest_version:`) — see [`PartialRootManifest`]. Same path discipline as `verifications:` entries: no absolute paths, no `..` escape.\n\nComposition is **root-wins**: an include fills only the keys this manifest leaves absent (for nested maps like `profiles:`, key-by-key, still root-wins per leaf key). Manifest `inputs:` declarations overlay by input name. `verifications:` (and `includes:` themselves) are *concatenated* rather than overlaid — the root's entries first, then each include's, in declared order. Nested includes are resolved depth-first up to depth 3; cycles are a hard error. The typical shape is a team-shared `.duhem.shared.yml` plus a gitignored per-developer `.duhem.local.yml`. Additive: a manifest without `includes:` behaves byte-identically to before.",
           "items": {
@@ -465,6 +503,13 @@
     "Step": {
       "additionalProperties": false,
       "properties": {
+        "call": {
+          "description": "Reusable flow name. The loader expands this invocation into ordinary action steps before the runtime sees the definition.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "description": {
           "description": "Optional prose explaining what this action is for. Unlike [`Step::id`], this is a human-facing display label and is never used as a reference symbol.",
           "type": [
@@ -498,16 +543,16 @@
           "type": "array"
         },
         "uses": {
-          "description": "Action type identifier (e.g. `ui/click`). At v0.1 this is any non-empty string; the catalog spec types it later.",
-          "type": "string"
+          "description": "Action type identifier (e.g. `ui/click`). Exactly one of this field and [`Step::call`] is required; the structural validator owns the friendly exactly-one diagnostic.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "with": {
           "description": "Action-specific arguments. Untyped at the schema layer; the per-action `with:` schema lives with the action implementation."
         }
       },
-      "required": [
-        "uses"
-      ],
       "type": "object"
     },
     "StepCondition": {
@@ -545,6 +590,13 @@
             "$ref": "#/definitions/Criterion"
           },
           "type": "array"
+        },
+        "flows": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Flow"
+          },
+          "description": "Leaf-local reusable flows. When loaded through a manifest these overlay the composed manifest catalog by flow name.",
+          "type": "object"
         },
         "inputs": {
           "additionalProperties": {

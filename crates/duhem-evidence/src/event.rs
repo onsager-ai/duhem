@@ -122,6 +122,14 @@ pub struct Event {
     pub payload: EventPayload,
 }
 
+/// Authored reusable-flow boundary for one expanded action step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowOrigin {
+    pub name: String,
+    pub invocation: String,
+    pub inner_index: u32,
+}
+
 /// The closed set of event payloads. `#[serde(tag = "kind")]` puts the
 /// discriminant alongside `seq` and `ts` on the wire.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -222,6 +230,10 @@ pub enum EventPayload {
         layer: Option<String>,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         with: BTreeMap<String, serde_json::Value>,
+        /// Reusable-flow origin for an expanded action. Absent on
+        /// ordinary steps and on traces recorded before spec #367.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        flow: Option<FlowOrigin>,
     },
     StepObservation {
         step_index: u32,
@@ -604,6 +616,35 @@ mod tests {
                 }
             }
             .is_finished()
+        );
+    }
+
+    #[test]
+    fn step_started_flow_origin_is_optional_and_round_trips() {
+        let old = r#"{"kind":"step_started","criterion_id":"AC-1","check_id":"AC-1.1","step_index":0,"uses":"ui/click"}"#;
+        let parsed: EventPayload = serde_json::from_str(old).expect("old trace parses");
+        assert!(matches!(
+            parsed,
+            EventPayload::StepStarted { flow: None, .. }
+        ));
+
+        let payload = EventPayload::StepStarted {
+            criterion_id: "AC-1".into(),
+            check_id: "AC-1.1".into(),
+            step_index: 0,
+            uses: "ui/click".into(),
+            layer: Some("ui".into()),
+            with: BTreeMap::new(),
+            flow: Some(FlowOrigin {
+                name: "sign_in".into(),
+                invocation: "login".into(),
+                inner_index: 2,
+            }),
+        };
+        let json = serde_json::to_string(&payload).expect("serialize");
+        assert_eq!(
+            serde_json::from_str::<EventPayload>(&json).expect("round trip"),
+            payload
         );
     }
 }

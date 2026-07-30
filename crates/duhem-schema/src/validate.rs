@@ -14,7 +14,7 @@ use thiserror::Error;
 use crate::criterion::{Check, Criterion};
 use crate::expr::{Expr, Path, PathRoot};
 use crate::step::Step;
-use crate::verification::{InputDecl, InputType, PageCatalog, VerificationDefinition};
+use crate::verification::{FlowCatalog, InputDecl, InputType, PageCatalog, VerificationDefinition};
 
 /// Where a `$...` reference was authored. Renders into a
 /// [`ValidationError`] message so a `with:` ref names its step rather
@@ -240,6 +240,9 @@ pub enum ValidationError {
 
     #[error("{0}")]
     BadProjectDecl(String),
+
+    #[error("{message}")]
+    InvalidFlow { message: String },
 }
 
 /// Run every structural rule. Always reports as many errors as
@@ -267,6 +270,12 @@ pub fn validate_with_contract_outputs(
     outputs_for: &dyn Fn(&str) -> Vec<String>,
 ) -> Result<(), Vec<ValidationError>> {
     let mut errs = Vec::new();
+
+    errs.extend(
+        crate::flows::validate_authored(v)
+            .into_iter()
+            .map(|message| ValidationError::InvalidFlow { message }),
+    );
 
     if v.criteria.is_empty() {
         errs.push(ValidationError::NoCriteria);
@@ -303,19 +312,19 @@ pub fn validate_with_contract_outputs(
         });
     }
 
+    let definition_scope = DefinitionScope {
+        inputs: &v.inputs,
+        pages: &v.pages,
+        flows: &v.flows,
+        setup_outputs: &setup_outputs,
+        outputs_for,
+    };
     let mut seen_criteria: HashSet<&str> = HashSet::new();
     for c in &v.criteria {
         if !seen_criteria.insert(c.id.as_str()) {
             errs.push(ValidationError::DuplicateCriterionId { id: c.id.clone() });
         }
-        validate_criterion(
-            c,
-            &v.inputs,
-            &v.pages,
-            &setup_outputs,
-            outputs_for,
-            &mut errs,
-        );
+        validate_criterion(c, &definition_scope, &mut errs);
     }
 
     if errs.is_empty() { Ok(()) } else { Err(errs) }
@@ -412,7 +421,9 @@ fn valid_env_name(name: &str) -> bool {
 /// nested-extraction alias) still contributes its own name.
 fn effective_outputs(s: &Step, outputs_for: &dyn Fn(&str) -> Vec<String>) -> HashSet<String> {
     let mut set: HashSet<String> = s.outputs.keys().cloned().collect();
-    set.extend(outputs_for(&s.uses));
+    if let Some(uses) = s.uses.as_deref() {
+        set.extend(outputs_for(uses));
+    }
     set
 }
 
@@ -428,7 +439,7 @@ fn collect_setup_outputs<'a>(
     let mut seen: HashSet<&str> = HashSet::new();
     let mut outputs: HashMap<&str, HashSet<String>> = HashMap::new();
     for (idx, s) in setup.iter().enumerate() {
-        let contract_outputs = outputs_for(&s.uses);
+        let contract_outputs = s.uses.as_deref().map(outputs_for).unwrap_or_default();
         check_secret_paths(s, &contract_outputs, "setup", &step_label(s, idx), errs);
         if let Some(id) = &s.id {
             if !seen.insert(id.as_str()) {
@@ -510,14 +521,15 @@ fn matches_with_promotion(declared: InputType, actual: InputType) -> bool {
     matches!((declared, actual), (InputType::Number, InputType::Integer))
 }
 
-fn validate_criterion(
-    c: &Criterion,
-    inputs: &BTreeMap<String, InputDecl>,
-    pages: &PageCatalog,
-    setup_outputs: &HashMap<&str, HashSet<String>>,
-    outputs_for: &dyn Fn(&str) -> Vec<String>,
-    errs: &mut Vec<ValidationError>,
-) {
+struct DefinitionScope<'a> {
+    inputs: &'a BTreeMap<String, InputDecl>,
+    pages: &'a PageCatalog,
+    flows: &'a FlowCatalog,
+    setup_outputs: &'a HashMap<&'a str, HashSet<String>>,
+    outputs_for: &'a dyn Fn(&str) -> Vec<String>,
+}
+
+fn validate_criterion(c: &Criterion, scope: &DefinitionScope<'_>, errs: &mut Vec<ValidationError>) {
     let mut seen_checks: HashSet<&str> = HashSet::new();
     for ch in &c.checks {
         if !seen_checks.insert(ch.id.as_str()) {
@@ -526,7 +538,7 @@ fn validate_criterion(
                 id: ch.id.clone(),
             });
         }
-        validate_check(c, ch, inputs, pages, setup_outputs, outputs_for, errs);
+        validate_check(c, ch, scope, errs);
     }
 }
 
@@ -544,12 +556,16 @@ struct PathScope<'a> {
 fn validate_check(
     c: &Criterion,
     ch: &Check,
-    inputs: &BTreeMap<String, InputDecl>,
-    pages: &PageCatalog,
-    setup_outputs: &HashMap<&str, HashSet<String>>,
-    outputs_for: &dyn Fn(&str) -> Vec<String>,
+    definition: &DefinitionScope<'_>,
     errs: &mut Vec<ValidationError>,
 ) {
+    let DefinitionScope {
+        inputs,
+        pages,
+        flows,
+        setup_outputs,
+        outputs_for,
+    } = *definition;
     // A check with neither assertions nor steps can never produce a
     // verdict (the judge would see an empty aggregation). With steps
     // but no assertions the schema layer accepts — whether one of the
@@ -566,7 +582,7 @@ fn validate_check(
     let mut seen_step_ids: HashSet<&str> = HashSet::new();
 
     for (idx, s) in ch.steps.iter().enumerate() {
-        let contract_outputs = outputs_for(&s.uses);
+        let contract_outputs = s.uses.as_deref().map(outputs_for).unwrap_or_default();
         check_secret_paths(
             s,
             &contract_outputs,
@@ -597,7 +613,15 @@ fn validate_check(
                     id: id.clone(),
                 });
             }
-            step_outputs.insert(id.as_str(), effective_outputs(s, outputs_for));
+            let outputs = if let Some(call) = s.call.as_deref() {
+                flows
+                    .get(call)
+                    .map(|flow| flow.outputs.keys().cloned().collect())
+                    .unwrap_or_default()
+            } else {
+                effective_outputs(s, outputs_for)
+            };
+            step_outputs.insert(id.as_str(), outputs);
         }
     }
 

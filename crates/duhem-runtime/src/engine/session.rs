@@ -52,7 +52,10 @@ impl SessionResolution {
 /// an API/DB/CLI-only check is an authoring warning and an operational
 /// no-op, so it cannot make an otherwise valid run fail.
 pub(crate) fn resolve(check: &Check, run: &RunState) -> SessionResolution {
-    let consumes_session = check.steps.iter().any(|step| step.uses.starts_with("ui/"));
+    let consumes_session = check
+        .steps
+        .iter()
+        .any(|step| step.uses_name().starts_with("ui/"));
     let Some(source) = check.session.as_ref().filter(|_| consumes_session) else {
         return SessionResolution {
             source: None,

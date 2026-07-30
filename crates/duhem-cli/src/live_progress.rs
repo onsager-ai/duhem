@@ -1104,6 +1104,7 @@ criteria:
                 step_index: 0,
                 uses: "cli/invoke".into(),
                 layer: None,
+                flow: None,
                 with: Default::default(),
             },
         )));
@@ -1302,6 +1303,7 @@ criteria:
                 step_index: 0,
                 uses: "ui/assert-element".into(),
                 layer: Some("ui".into()),
+                flow: None,
                 with,
             },
         )));
@@ -1345,6 +1347,7 @@ criteria:
                 step_index: 0,
                 uses: "cli/invoke".into(),
                 layer: None,
+                flow: None,
                 with: Default::default(),
             },
         )));
@@ -1459,6 +1462,7 @@ criteria:
                 step_index: 0,
                 uses: "cli/invoke".into(),
                 layer: None,
+                flow: None,
                 with: Default::default(),
             },
         ))

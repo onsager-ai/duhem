@@ -115,11 +115,8 @@ pub struct Engine {
     /// default — env access from assertions is opt-in. The CLI seeds
     /// this from the selected named profile's string-valued keys.
     env: BTreeMap<String, String>,
-    /// Names the leaf inputs declared `inherit: true` (spec #135). Used to
-    /// turn a generic unresolved `$inputs.<name>` into the loud,
-    /// specific "declared `inherit: true` but nothing provides it" error
-    /// with the suite/--inputs remedy. Empty for a leaf with no inherited
-    /// inputs, so non-inheriting runs keep today's behavior.
+    /// Leaf inputs declared `inherit: true`, used for the specific
+    /// unbound-inheritance diagnostic (spec #135).
     inherited: std::collections::HashSet<String>,
     /// Manifest `defaults.timeout` (spec #66): per-step `timeout:`
     /// fallback. A step's own `timeout:` wins; absent here, the action's
@@ -236,13 +233,8 @@ impl Engine {
                 .ok_or_else(|| EngineError::InputUnrepresentable { name: k.clone() })?;
             input_values.insert(k.clone(), val);
         }
-        // Loud, specific guard for unresolved inherited inputs (spec
-        // #135): an `inputs.<name>.inherit: true` declaration that the
-        // chain bound nothing for (no selected profile, no `--inputs`)
-        // fails here — before
-        // any browser launch or network call — naming the input as
-        // inherited and giving the suite / `--inputs` remedy, instead
-        // of surfacing later as a generic deep failure.
+        // Keep unresolved inherited inputs a specific pre-flight error
+        // before any browser launch or network call (spec #135).
         if !self.inherited.is_empty()
             && let Some(name) =
                 crate::engine::inherit::first_unbound_inherited(def, &self.inherited, &input_values)

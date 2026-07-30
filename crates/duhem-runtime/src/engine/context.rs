@@ -35,6 +35,7 @@ use crate::eval::{EvalContext, Value};
 #[derive(Debug)]
 pub struct RunState {
     pub inputs: BTreeMap<String, Value>,
+    pub pages: BTreeMap<(String, String), Value>,
     pub env: BTreeMap<String, String>,
     pub uuid: String,
     /// `$setup.<step_id>.outputs.<name>` lookup map. Populated once
@@ -64,6 +65,7 @@ impl RunState {
     fn new_inner(inputs: BTreeMap<String, Value>, uuid: String) -> Self {
         Self {
             inputs,
+            pages: BTreeMap::new(),
             env: BTreeMap::new(),
             uuid,
             setup_outputs: BTreeMap::new(),
@@ -74,6 +76,21 @@ impl RunState {
     /// assertions is opt-in via this map at v1.
     pub fn with_env(mut self, env: BTreeMap<String, String>) -> Self {
         self.env = env;
+        self
+    }
+
+    /// Attach the effective named-locator catalog. YAML locator maps
+    /// are converted once at run start, then borrowed by every check.
+    pub fn with_pages(mut self, pages: &duhem_schema::PageCatalog) -> Self {
+        for (page, elements) in pages {
+            for (element, locator) in elements {
+                if let Ok(json) = serde_json::to_value(locator)
+                    && let Some(value) = json_to_value(&json)
+                {
+                    self.pages.insert((page.clone(), element.clone()), value);
+                }
+            }
+        }
         self
     }
 
@@ -111,6 +128,10 @@ impl<'r> RunContext<'r> {
 impl<'r> EvalContext for RunContext<'r> {
     fn input(&self, name: &str) -> Option<&Value> {
         self.run.inputs.get(name)
+    }
+
+    fn page(&self, page: &str, element: &str) -> Option<&Value> {
+        self.run.pages.get(&(page.to_string(), element.to_string()))
     }
 
     fn output(&self, step_id: &str, output: &str) -> Option<&Value> {

@@ -30,6 +30,7 @@ pub(crate) struct ValueProvenance {
 pub(crate) struct ManifestOrigins {
     pub inputs: BTreeMap<String, ValueProvenance>,
     pub profiles: BTreeMap<(String, String), ValueProvenance>,
+    pub pages: BTreeMap<(String, String), ValueProvenance>,
 }
 
 pub(crate) fn collect_manifest_origins(path: &Path) -> ManifestOrigins {
@@ -95,27 +96,59 @@ fn record_sections(path: &Path, value: &serde_yml::Value, out: &mut ManifestOrig
         }
     }
 
-    let Some(profiles) = mapping_value(value, "profiles").and_then(serde_yml::Value::as_mapping)
-    else {
-        return;
-    };
-    for (profile, keys) in profiles {
-        let (Some(profile), Some(keys)) = (profile.as_str(), keys.as_mapping()) else {
-            continue;
-        };
-        for (key, _) in keys {
-            let Some(key) = key.as_str() else {
+    if let Some(profiles) = mapping_value(value, "profiles").and_then(serde_yml::Value::as_mapping)
+    {
+        for (profile, keys) in profiles {
+            let (Some(profile), Some(keys)) = (profile.as_str(), keys.as_mapping()) else {
                 continue;
             };
-            let source = origin(path, &["profiles", profile, key]);
-            record(
-                &mut out.profiles,
-                (profile.to_string(), key.to_string()),
-                format!("profile {profile}"),
-                source,
-            );
+            for (key, _) in keys {
+                let Some(key) = key.as_str() else {
+                    continue;
+                };
+                let source = origin(path, &["profiles", profile, key]);
+                record(
+                    &mut out.profiles,
+                    (profile.to_string(), key.to_string()),
+                    format!("profile {profile}"),
+                    source,
+                );
+            }
         }
     }
+
+    if let Some(pages) = mapping_value(value, "pages").and_then(serde_yml::Value::as_mapping) {
+        for (page, entries) in pages {
+            let (Some(page), Some(entries)) = (page.as_str(), entries.as_mapping()) else {
+                continue;
+            };
+            for (element, _) in entries {
+                let Some(element) = element.as_str() else {
+                    continue;
+                };
+                record(
+                    &mut out.pages,
+                    (page.to_string(), element.to_string()),
+                    "manifest page catalog",
+                    origin(path, &["pages", page, element]),
+                );
+            }
+        }
+    }
+}
+
+pub(crate) fn collect_leaf_page_origins(
+    path: &Path,
+) -> BTreeMap<(String, String), ValueProvenance> {
+    let mut out = ManifestOrigins::default();
+    let Ok(src) = std::fs::read_to_string(path) else {
+        return out.pages;
+    };
+    let Ok(value) = serde_yml::from_str::<serde_yml::Value>(&src) else {
+        return out.pages;
+    };
+    record_sections(path, &value, &mut out);
+    out.pages
 }
 
 fn record<K: Ord>(

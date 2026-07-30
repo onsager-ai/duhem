@@ -410,6 +410,14 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "pages": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "description": "Named locator catalog shared by every leaf in the suite. Entries merge by page and element name under the root-wins rule; a leaf-local entry overlays the composed manifest value.",
+          "type": "object"
+        },
         "profiles": {
           "additionalProperties": {
             "additionalProperties": true,
@@ -543,6 +551,14 @@
             "$ref": "#/definitions/InputDecl"
           },
           "description": "Declared inputs. Map keys are alphabetized on round-trip (BTreeMap); fixtures should be authored alphabetized.",
+          "type": "object"
+        },
+        "pages": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "description": "Leaf-local named locators. When loaded through a manifest these overlay the composed manifest catalog by page and element name.",
           "type": "object"
         },
         "project": {

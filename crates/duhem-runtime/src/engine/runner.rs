@@ -38,7 +38,7 @@ use crate::engine::context::{RunContext, RunState, json_to_value};
 use crate::engine::gating::{skip_reason as gate_skip_reason, step_failed};
 use crate::engine::registry::{ActionRegistry, default_registry};
 use crate::engine::session::SessionResolution;
-use crate::engine::template::substitute_with;
+use crate::engine::template::{page_reference, substitute_with};
 use crate::engine::translate::{
     RETRY_BACKOFF_BASE, apply_default_timeout, check_is_retryable, outcome_to_evidence,
     retry_delay, with_to_evidence_map,
@@ -232,7 +232,8 @@ impl Engine {
         let mut run_state = match self.seed {
             Some(s) => RunState::new_with_seed(input_values, s),
             None => RunState::new(input_values),
-        };
+        }
+        .with_pages(&def.pages);
         // Seed the `$env.<key>` whitelist from the selected named
         // environment (spec #68). Empty unless the CLI set it, so
         // environment-free runs keep today's "no `$env` access"
@@ -646,6 +647,7 @@ impl Engine {
             // context we have. Cheap and same-shape for every code
             // path, so we don't bifurcate evidence on it.
             let mut resolved_with = step.with.clone();
+            let catalog_reference = page_reference(&step.with);
             if gate_reason.is_none()
                 && let Err(u) = substitute_with(&mut resolved_with, &ctx)
             {
@@ -787,6 +789,7 @@ impl Engine {
                         with: resolved_with.clone(),
                         outputs: r.outputs.clone(),
                         skip_reason: None,
+                        catalog_reference,
                     };
                     if let Outcome::Skipped { reason } = &r.outcome {
                         step_evidence[idx].skip_reason = Some(reason.clone());
@@ -1189,6 +1192,40 @@ criteria:
             check.state,
             VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
         ));
+    }
+
+    #[tokio::test]
+    async fn unresolved_page_reference_surfaces_engine_error() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/read", Outcome::Ok)));
+        let verification = def(r#"
+verification: unresolved catalog
+criteria:
+  - id: AC-1
+    description: locator typo
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: inspect
+            uses: fake/read
+            with: { locator: $pages.login.missing }
+        assertions: ["true"]
+"#);
+        let error = engine
+            .run(&verification, BTreeMap::new())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                EngineError::UnresolvedReference {
+                    reference,
+                    step,
+                    ..
+                } if reference == "$pages.login.missing" && step == "inspect"
+            ),
+            "got: {error}"
+        );
     }
 
     /// #299: a subscribed progress sink receives the run's evidence

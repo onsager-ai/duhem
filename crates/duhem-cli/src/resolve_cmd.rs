@@ -19,8 +19,8 @@ use crate::inputs::{self, InputValue};
 use crate::profile;
 use crate::resolve::resolve_leaf_inputs;
 use crate::resolve_provenance::{
-    ManifestOrigins, Origin, ValueProvenance, collect_manifest_origins, input_override_origins,
-    origin,
+    ManifestOrigins, Origin, ValueProvenance, collect_leaf_page_origins, collect_manifest_origins,
+    input_override_origins, origin,
 };
 
 const MASK: &str = "••••••";
@@ -261,6 +261,28 @@ fn resolve_leaf(
         );
         provenance.insert(format!("inputs.{name}"), value);
     }
+    let leaf_page_origins = collect_leaf_page_origins(&leaf.path);
+    for (page, elements) in &leaf.definition.pages {
+        for element in elements.keys() {
+            let key = (page.clone(), element.clone());
+            let mut value = leaf_page_origins
+                .get(&key)
+                .cloned()
+                .or_else(|| manifest_origins.pages.get(&key).cloned())
+                .unwrap_or_else(|| ValueProvenance {
+                    rung: "page catalog".to_string(),
+                    origin: origin(&leaf.path, &["pages", page, element]),
+                    overridden: Vec::new(),
+                });
+            if leaf_page_origins.contains_key(&key)
+                && let Some(inherited) = manifest_origins.pages.get(&key)
+            {
+                value.overridden.push(inherited.origin.clone());
+                value.overridden.extend(inherited.overridden.clone());
+            }
+            provenance.insert(format!("pages.{page}.{element}"), value);
+        }
+    }
 
     let mut definition = leaf.definition;
     resolve_steps(
@@ -314,7 +336,9 @@ fn resolve_steps(
         .iter()
         .filter_map(|(name, value)| json_to_value(value).map(|value| (name.clone(), value)))
         .collect();
-    let state = RunState::new_with_seed(values, 0).with_env(env.clone());
+    let state = RunState::new_with_seed(values, 0)
+        .with_env(env.clone())
+        .with_pages(&definition.pages);
     let context = RunContext::new(&state);
     for (index, step) in definition.setup.iter_mut().enumerate() {
         resolve_with(
@@ -389,7 +413,12 @@ fn resolve_with(
                     let source = expression
                         .strip_prefix("$inputs.")
                         .and_then(reference_head)
-                        .and_then(|name| provenance.get(&format!("inputs.{name}")).cloned());
+                        .and_then(|name| provenance.get(&format!("inputs.{name}")).cloned())
+                        .or_else(|| {
+                            expression.strip_prefix("$pages.").and_then(|reference| {
+                                provenance.get(&format!("pages.{reference}")).cloned()
+                            })
+                        });
                     provenance.insert(
                         path.to_string(),
                         source.unwrap_or(ValueProvenance {
@@ -682,5 +711,89 @@ fn render(format: ResolveFormat, output: &ResolveOutput) -> Result<String, Strin
             text.push('\n');
             Ok(text)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_lists_composed_pages_with_entry_provenance() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("leaf")).unwrap();
+        std::fs::write(
+            tmp.path().join("pages.yml"),
+            "pages:\n  login:\n    submit: { role: button, name: Included }\n    username: { role: textbox, name: Username }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join("leaf/duhem.yml"),
+            r#"
+verification: catalog leaf
+pages:
+  login:
+    submit: { role: button, name: Sign In }
+criteria:
+  - id: AC-1
+    description: shared locator
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/assert-element
+            with: { locator: $pages.login.submit, expected: visible }
+"#,
+        )
+        .unwrap();
+        let manifest = tmp.path().join("duhem.yml");
+        std::fs::write(
+            &manifest,
+            r#"
+manifest_version: 1
+includes: [./pages.yml]
+verifications:
+  - path: ./leaf/duhem.yml
+"#,
+        )
+        .unwrap();
+
+        let (_, output) = resolve(ResolveArgs {
+            path: Some(manifest),
+            profile: None,
+            inputs: Vec::new(),
+            format: ResolveFormat::Json,
+            provenance: true,
+        })
+        .unwrap();
+        let verification = &output.verifications[0];
+        assert_eq!(
+            verification.document["pages"]["login"]["submit"]["name"],
+            "Sign In"
+        );
+        assert_eq!(
+            verification.document["criteria"][0]["checks"][0]["steps"][0]["with"]["locator"]["name"],
+            "Sign In",
+            "the execution view carries the spliced locator"
+        );
+        let provenance = verification.provenance.as_ref().unwrap();
+        let submit = provenance
+            .get("pages.login.submit")
+            .expect("leaf-local entry provenance");
+        assert!(submit.origin.source.ends_with("leaf/duhem.yml"));
+        assert!(
+            submit
+                .overridden
+                .iter()
+                .any(|origin| origin.source.ends_with("pages.yml")),
+            "{:?}",
+            submit.overridden
+        );
+        let source = provenance
+            .get("pages.login.username")
+            .unwrap()
+            .origin
+            .source
+            .clone();
+        assert!(source.ends_with("pages.yml"), "{source}");
     }
 }

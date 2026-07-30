@@ -14,7 +14,7 @@ use thiserror::Error;
 use crate::criterion::{Check, Criterion};
 use crate::expr::{Expr, Path, PathRoot};
 use crate::step::Step;
-use crate::verification::{InputDecl, InputType, VerificationDefinition};
+use crate::verification::{InputDecl, InputType, PageCatalog, VerificationDefinition};
 
 /// Where a `$...` reference was authored. Renders into a
 /// [`ValidationError`] message so a `with:` ref names its step rather
@@ -115,6 +115,27 @@ pub enum ValidationError {
         input: String,
         raw: String,
         site: RefSite,
+    },
+
+    #[error("{site} `{raw}` references unknown page locator `{entry}`{help}")]
+    UnresolvedPageRef {
+        site: String,
+        raw: String,
+        entry: String,
+        help: String,
+    },
+
+    #[error("{site} `{raw}`: malformed `$pages` reference (expected `$pages.<page>.<element>`)")]
+    MalformedPageRef { site: String, raw: String },
+
+    #[error(
+        "page locator `$pages.{page}.{element}` references input `{input}`, but leaf `{verification}` does not declare it"
+    )]
+    PageInputUndeclared {
+        verification: String,
+        page: String,
+        element: String,
+        input: String,
     },
 
     #[error(
@@ -261,13 +282,40 @@ pub fn validate_with_contract_outputs(
     let setup_outputs = collect_setup_outputs(&v.setup, outputs_for, &mut errs);
 
     errs.extend(input_decl_errors(&v.inputs, true));
+    crate::validate_pages::validate_catalog_inputs(v, &mut errs);
+
+    // Setup has no criterion/check scope, but its page references still
+    // resolve against the same effective leaf catalog.
+    for (idx, step) in v.setup.iter().enumerate() {
+        let step_name = step_label(step, idx);
+        walk_with_refs(&step.with, &mut |expr, raw| {
+            walk_checkable_paths(expr, &mut |path| {
+                if path.root == PathRoot::Pages {
+                    crate::validate_pages::check_page_path(
+                        &v.pages,
+                        path,
+                        raw,
+                        &format!("setup step `{step_name}` with:"),
+                        &mut errs,
+                    );
+                }
+            });
+        });
+    }
 
     let mut seen_criteria: HashSet<&str> = HashSet::new();
     for c in &v.criteria {
         if !seen_criteria.insert(c.id.as_str()) {
             errs.push(ValidationError::DuplicateCriterionId { id: c.id.clone() });
         }
-        validate_criterion(c, &v.inputs, &setup_outputs, outputs_for, &mut errs);
+        validate_criterion(
+            c,
+            &v.inputs,
+            &v.pages,
+            &setup_outputs,
+            outputs_for,
+            &mut errs,
+        );
     }
 
     if errs.is_empty() { Ok(()) } else { Err(errs) }
@@ -465,6 +513,7 @@ fn matches_with_promotion(declared: InputType, actual: InputType) -> bool {
 fn validate_criterion(
     c: &Criterion,
     inputs: &BTreeMap<String, InputDecl>,
+    pages: &PageCatalog,
     setup_outputs: &HashMap<&str, HashSet<String>>,
     outputs_for: &dyn Fn(&str) -> Vec<String>,
     errs: &mut Vec<ValidationError>,
@@ -477,7 +526,7 @@ fn validate_criterion(
                 id: ch.id.clone(),
             });
         }
-        validate_check(c, ch, inputs, setup_outputs, outputs_for, errs);
+        validate_check(c, ch, inputs, pages, setup_outputs, outputs_for, errs);
     }
 }
 
@@ -489,12 +538,14 @@ struct PathScope<'a> {
     step_outputs: &'a HashMap<&'a str, HashSet<String>>,
     setup_outputs: &'a HashMap<&'a str, HashSet<String>>,
     inputs: &'a BTreeMap<String, InputDecl>,
+    pages: &'a PageCatalog,
 }
 
 fn validate_check(
     c: &Criterion,
     ch: &Check,
     inputs: &BTreeMap<String, InputDecl>,
+    pages: &PageCatalog,
     setup_outputs: &HashMap<&str, HashSet<String>>,
     outputs_for: &dyn Fn(&str) -> Vec<String>,
     errs: &mut Vec<ValidationError>,
@@ -556,6 +607,7 @@ fn validate_check(
         step_outputs: &step_outputs,
         setup_outputs,
         inputs,
+        pages,
     };
 
     // A browser session is acquired state, not an inline fixture. Only
@@ -722,6 +774,7 @@ fn check_path(
         step_outputs,
         setup_outputs,
         inputs,
+        pages,
     } = *scope;
     match path.root {
         PathRoot::Steps => {
@@ -827,6 +880,15 @@ fn check_path(
                 });
             }
         }
+        PathRoot::Pages => {
+            crate::validate_pages::check_page_path(
+                pages,
+                path,
+                raw,
+                &format!("criterion `{}` / check `{}`: {site}", c.id, ch.id),
+                errs,
+            );
+        }
         PathRoot::Env | PathRoot::Runtime => {
             // `$env` and `$runtime` are open catalogs at the schema
             // layer; the runtime spec validates the whitelist /
@@ -857,6 +919,98 @@ mod tests {
         } else {
             Vec::new()
         }
+    }
+
+    fn catalog_vd(reference: &str) -> VerificationDefinition {
+        parse(&format!(
+            r#"
+verification: catalog leaf
+pages:
+  login:
+    submit: {{ role: button, name: Sign In }}
+    username: {{ role: textbox, name: Username }}
+criteria:
+  - id: AC-1
+    description: shared locator
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: target
+            uses: ui/assert-element
+            with: {{ locator: {reference}, expected: visible }}
+"#
+        ))
+    }
+
+    #[test]
+    fn page_reference_resolves_offline() {
+        validate(&catalog_vd("$pages.login.submit")).expect("known entry resolves");
+    }
+
+    #[test]
+    fn dangling_page_reference_names_step_and_entry() {
+        let errors = validate(&catalog_vd("$pages.typo")).unwrap_err();
+        let message = errors
+            .iter()
+            .find(|error| matches!(error, ValidationError::UnresolvedPageRef { .. }))
+            .expect("page error")
+            .to_string();
+        assert!(message.contains("step `target`"), "{message}");
+        assert!(message.contains("$pages.typo"), "{message}");
+    }
+
+    #[test]
+    fn page_reference_suggests_only_a_near_name() {
+        let near = validate(&catalog_vd("$pages.login.usernme")).unwrap_err();
+        let near_message = near
+            .iter()
+            .find(|error| matches!(error, ValidationError::UnresolvedPageRef { .. }))
+            .unwrap()
+            .to_string();
+        assert!(
+            near_message.contains("did you mean `username`?"),
+            "{near_message}"
+        );
+
+        let far = validate(&catalog_vd("$pages.login.completely_different")).unwrap_err();
+        let far_message = far
+            .iter()
+            .find(|error| matches!(error, ValidationError::UnresolvedPageRef { .. }))
+            .unwrap()
+            .to_string();
+        assert!(!far_message.contains("did you mean"), "{far_message}");
+    }
+
+    #[test]
+    fn catalog_input_must_be_declared_by_the_leaf() {
+        let vd = parse(
+            r#"
+verification: missing input leaf
+pages:
+  projects:
+    row_delete:
+      role: button
+      name: Delete
+      scope: { role: row, text: $inputs.project_name }
+criteria:
+  - id: AC-1
+    description: shared locator
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/click
+            with: { locator: $pages.projects.row_delete }
+"#,
+        );
+        let errors = validate(&vd).unwrap_err();
+        let message = errors
+            .iter()
+            .find(|error| matches!(error, ValidationError::PageInputUndeclared { .. }))
+            .expect("catalog input error")
+            .to_string();
+        assert!(message.contains("$pages.projects.row_delete"), "{message}");
+        assert!(message.contains("missing input leaf"), "{message}");
+        assert!(message.contains("project_name"), "{message}");
     }
 
     /// A step that binds NO `outputs:` yet asserts over `status`.

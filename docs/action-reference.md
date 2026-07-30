@@ -60,7 +60,7 @@ Click an element (locator shorthand fields, or a `locator` object).
 
 ```yaml
 - uses: ui/click
-  with: { role: button, name: "Save" }
+  with: { locator: { role: button, name: "Save" } }
 ```
 
 ### `ui/type`

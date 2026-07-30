@@ -53,8 +53,10 @@ function str(v: unknown): string | undefined {
 }
 
 function stepOutcome(v: unknown): { kind: string; reason: string } {
+  // Runs recorded before step outcomes were explicit may omit the field.
+  if (v === null || v === undefined) return { kind: "ok", reason: "" };
   const scalar = str(v);
-  if (scalar) return { kind: scalar, reason: "" };
+  if (scalar !== undefined) return { kind: scalar, reason: "" };
   if (v && typeof v === "object") {
     const skipped = (v as Record<string, unknown>).skipped;
     if (skipped && typeof skipped === "object") {
@@ -64,7 +66,7 @@ function stepOutcome(v: unknown): { kind: string; reason: string } {
       };
     }
   }
-  return { kind: "ok", reason: "" };
+  return { kind: "unknown", reason: "" };
 }
 
 /**

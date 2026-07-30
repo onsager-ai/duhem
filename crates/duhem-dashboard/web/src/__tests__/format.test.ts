@@ -87,6 +87,15 @@ describe("formatEvent", () => {
     expect(skipped.detail).toContain("login");
   });
 
+  it("keeps unknown structured step outcomes neutral", () => {
+    const future = formatEvent(
+      ev("step_finished", { outcome: { future: { detail: "new wire shape" } } }),
+    );
+    expect(future.icon).toBe("unknown");
+    expect(future.label).toBe("step unknown");
+    expect(future.tone).toBe("muted");
+  });
+
   it("emphasizes a failing assertion with its recorded detail", () => {
     const f = formatEvent(ev("assertion_evaluated", { state: "fail", detail: "actual false, expected true" }));
     expect(f.icon).toBe("fail");
@@ -274,6 +283,13 @@ describe("stepStatus (#280 status propagation)", () => {
     expect(stepStatus(node(undefined, "ok")).label).toBe("step ok");
     expect(stepStatus(node(undefined, "error")).label).toBe("step error");
     expect(stepStatus(node(undefined, "error")).tone).toBe("fail");
+  });
+
+  it("does not render an unknown structured outcome as successful", () => {
+    const s = stepStatus(node(undefined, { future: { detail: "new wire shape" } }));
+    expect(s.icon).toBe("unknown");
+    expect(s.label).toBe("step unknown");
+    expect(s.tone).toBe("muted");
   });
 
   it("renders a gated step as skipped without marking it failed", () => {

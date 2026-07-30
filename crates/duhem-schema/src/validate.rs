@@ -931,7 +931,7 @@ criteria:
         steps:
           - id: login
             uses: api/call
-            secret:
+            secret_outputs:
               - body.items[0].key
             with: { method: POST, url: https://example.com/login }
         assertions: ["true"]

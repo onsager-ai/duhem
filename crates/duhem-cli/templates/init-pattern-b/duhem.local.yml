@@ -7,7 +7,7 @@
 # is root-wins — anything you set here fills only the keys the root
 # manifest leaves absent. Uncomment and edit as needed:
 #
-# environments:
+# profiles:
 #   local:
 #     base_url: http://localhost:3000
 {}

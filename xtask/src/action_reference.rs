@@ -62,7 +62,7 @@ fn render() -> String {
         "Bind an output with `outputs: { <name>: <field> }`, then read it in an\nassertion as `$steps.<id>.outputs.<name>`. Assert over **scalar** outputs\n(`status`, `body_text`, `satisfied`, `exit_code`, …); helpers like\n`$runtime.contains(...)` cover membership.\n\n",
     );
     s.push_str(
-        "An action contract may declare an output path secret by default, including a\nstructured credential such as browser storage state. The value joins the masking\nregistry before the producing step writes evidence and needs no authored `secret:`\nentry. When present, the contract's paths are listed as **secret outputs (masked\nby contract)** below. Author-declared `steps[].secret` paths remain scalar-only.\n\n",
+        "An action contract may declare an output path secret by default, including a\nstructured credential such as browser storage state. The value joins the masking\nregistry before the producing step writes evidence and needs no authored `secret_outputs:`\nentry. When present, the contract's paths are listed as **secret outputs (masked\nby contract)** below. Author-declared `steps[].secret_outputs` paths remain scalar-only.\n\n",
     );
 
     let cat = catalog();

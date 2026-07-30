@@ -16,7 +16,7 @@
 //! `with:` mirrors `db/query` (`connection` + `find:` / `sql:`+`params:`)
 //! plus `api/poll`'s loop knobs:
 //!
-//! - `within`: total budget (default [`DEFAULT_WITHIN`]).
+//! - `timeout`: total budget (default [`DEFAULT_TIMEOUT`]).
 //! - `interval`: poll cadence (default 1s).
 //! - `until`: the stop condition — exactly one mode:
 //!     - `{ row_count: <int> }` — poll until exactly N rows are returned.
@@ -46,11 +46,11 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use serde::Deserialize;
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT};
 use crate::api::poll::{navigate, value_as_str, yml_to_json_value};
 use crate::db::query::{FindSpec, fetch_rows};
 use crate::error::ActionError;
-use crate::with::WithinSpec;
+use crate::with::TimeoutSpec;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -63,9 +63,9 @@ pub(crate) struct With {
     #[serde(default)]
     find: Option<FindSpec>,
     #[serde(default)]
-    within: Option<WithinSpec>,
+    timeout: Option<TimeoutSpec>,
     #[serde(default)]
-    interval: Option<WithinSpec>,
+    interval: Option<TimeoutSpec>,
     until: Until,
 }
 
@@ -106,7 +106,7 @@ impl Action for Observe {
                 FieldSpec::required("sql"),
                 FieldSpec::optional("params"),
                 FieldSpec::optional("find"),
-                FieldSpec::optional("within"),
+                FieldSpec::optional("timeout"),
                 FieldSpec::optional("interval"),
                 FieldSpec::optional("until"),
             ],
@@ -131,7 +131,7 @@ impl Action for Observe {
 }
 
 pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
-    let total: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
+    let total: Duration = with.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
     let interval: Duration = with
         .interval
         .map(Into::into)
@@ -350,7 +350,7 @@ until: {{ path: "rows[0].status", equals: shipped }}
             r#"
 connection: "{MEM}"
 sql: "select 1 as x where 1 = 0"
-within: "1s"
+timeout: "1s"
 interval: "200ms"
 until: {{ row_count: 1 }}
 "#
@@ -379,7 +379,7 @@ until: {{ row_count: 1 }}
             r#"
 connection: "{url}"
 sql: "select name from t"
-within: "10s"
+timeout: "10s"
 interval: "150ms"
 until: {{ path: "rows[0].name", equals: settled }}
 "#

@@ -680,11 +680,11 @@ fn expectation(with: &std::collections::BTreeMap<String, serde_json::Value>) -> 
     None
 }
 
-/// `within:` is shared by the action families and reaches evidence as a
+/// `timeout:` is shared by the action families and reaches evidence as a
 /// resolved JSON scalar. Keep the parser deliberately narrow: an unknown
 /// value merely omits the bar, never affects execution or rendering.
 fn timeout(with: &std::collections::BTreeMap<String, serde_json::Value>) -> Option<Duration> {
-    let raw = with.get("within")?;
+    let raw = with.get("timeout")?;
     if let Some(ms) = raw.as_u64() {
         return Some(Duration::from_millis(ms));
     }
@@ -1291,7 +1291,7 @@ criteria:
     async fn tty_line_shows_check_step_expectation_and_timeout_budget() {
         let mut with = std::collections::BTreeMap::new();
         with.insert("expected".into(), serde_json::json!("visible"));
-        with.insert("within".into(), serde_json::json!("60s"));
+        with.insert("timeout".into(), serde_json::json!("60s"));
         let mut renderer = tty_renderer(120, 12);
         assert!(!renderer.event(evt(
             1,

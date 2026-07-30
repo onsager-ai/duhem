@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn env_whitelist_resolves_after_seeding() {
-        // Spec #68: a selected environment's string-valued keys seed
+        // Spec #68: a selected profile's string-valued keys seed
         // the `$env.<key>` whitelist. With the map populated,
         // `EvalContext::env` resolves; an unseeded key stays `None`.
         let mut env = BTreeMap::new();
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn empty_env_whitelist_resolves_nothing() {
-        // Regression: without a selected environment the whitelist is
+        // Regression: without a selected profile the whitelist is
         // empty and `$env.<key>` resolves to nothing (today's default).
         let run = RunState::new(BTreeMap::new());
         let ctx = RunContext::new(&run);

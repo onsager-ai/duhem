@@ -14,7 +14,6 @@ mod browser_cmd;
 mod contract_check;
 mod dashboard;
 mod describe_cmd;
-mod environment;
 mod export_cmd;
 mod filter;
 mod init;
@@ -22,6 +21,7 @@ mod inputs;
 mod live_link;
 mod live_progress;
 mod mcp_cmd;
+mod profile;
 mod reporter;
 mod reporter_config;
 mod resolve;
@@ -176,16 +176,16 @@ enum Cmd {
         /// always win over a same-named plugin entry.
         #[arg(long = "reporter", value_name = "NAME", default_value = "default")]
         reporter: String,
-        /// Select a named environment from the manifest's
-        /// `environments:` block (spec #68). The selected environment's
+        /// Select a named profile from the manifest's
+        /// `profiles:` block (spec #68). The selected profile's
         /// keys feed input resolution (below `--inputs`, above the VD
         /// `default:`) and its
         /// string-valued keys are reachable via `$env.<key>`. When the
-        /// manifest declares exactly one environment it auto-selects;
+        /// manifest declares exactly one profile it auto-selects;
         /// with two or more, this flag is required. Inert on a
         /// single-leaf run (no manifest).
-        #[arg(long = "environment", value_name = "NAME")]
-        environment: Option<String>,
+        #[arg(long = "profile", alias = "environment", value_name = "NAME")]
+        profile: Option<String>,
         /// Parse + validate the definition, resolve the filter, print
         /// the `(criterion::check)` pairs that *would* run, and exit
         /// 0 without launching the browser or writing evidence. Use
@@ -193,15 +193,15 @@ enum Cmd {
         /// `--filter` resolves to the pairs you expect (spec on #33).
         #[arg(long = "dry-run", default_value_t = false)]
         dry_run: bool,
-        /// Skip `environment.up:` and readiness probing. Use when the
+        /// Skip `provision.up:` and readiness probing. Use when the
         /// operator brought the SUT up out-of-band. Teardown still
         /// runs unless `--keep-env` is also passed. Has no effect on
-        /// VDs without an `environment:` block. Spec on issue #50.
+        /// VDs without a `provision:` block. Spec on issue #50.
         #[arg(long = "no-env-up", default_value_t = false)]
         no_env_up: bool,
-        /// Skip `environment.down:`. Use when an author wants the
+        /// Skip `provision.down:`. Use when an author wants the
         /// SUT to outlive the run for triage. Has no effect on VDs
-        /// without an `environment:` block. Spec on issue #50.
+        /// without a `provision:` block. Spec on issue #50.
         #[arg(long = "keep-env", default_value_t = false)]
         keep_env: bool,
         /// Browser evidence retention for ui checks: every executed
@@ -353,7 +353,7 @@ fn main() -> ExitCode {
             db,
             run_id,
             reporter,
-            environment,
+            profile,
             dry_run,
             no_env_up,
             keep_env,
@@ -404,7 +404,7 @@ fn main() -> ExitCode {
                 db,
                 run_id,
                 reporter: resolved_reporter,
-                environment,
+                profile,
                 dry_run,
                 no_env_up,
                 keep_env,
@@ -564,7 +564,7 @@ mod tests {
     }
 
     /// Test-only shorthand: resolve `KEY=VALUE` tokens with no `@file`,
-    /// no environment, no inherited names. The `@file` / environment /
+    /// no profile, no inherited names. The `@file` / profile /
     /// inherited code paths are exercised separately below.
     fn resolve(
         cli: &[String],
@@ -572,7 +572,7 @@ mod tests {
     ) -> Result<BTreeMap<String, serde_json::Value>, String> {
         let empty = BTreeMap::new();
         let merged = inputs::merge_inputs(cli).expect("merge tokens");
-        resolve_inputs(&merged, &empty, decls, &[])
+        resolve_inputs(&merged, &empty, decls)
     }
 
     #[test]
@@ -720,7 +720,6 @@ mod tests {
             &typed(&[("count", serde_json::json!(7))]),
             &BTreeMap::new(),
             &d,
-            &[],
         )
         .unwrap();
         assert_eq!(out["count"], serde_json::json!(7));
@@ -737,7 +736,6 @@ mod tests {
             &typed(&[("count", serde_json::json!("not a number"))]),
             &BTreeMap::new(),
             &d,
-            &[],
         )
         .unwrap_err();
         assert!(
@@ -756,7 +754,6 @@ mod tests {
             ]),
             &BTreeMap::new(),
             &d,
-            &[],
         )
         .unwrap_err();
         assert!(
@@ -781,21 +778,20 @@ mod tests {
             &typed(&[("name", serde_json::json!("from-file"))]),
             &BTreeMap::new(),
             &d,
-            &[],
         )
         .unwrap();
         assert_eq!(out["name"], serde_json::json!("from-file"));
     }
 
-    // ---- #68: selected-environment input resolution (precedence:
-    // --inputs (last-wins) > selected env > VD default) ----
+    // ---- #68: selected-profile input resolution (precedence:
+    // --inputs (last-wins) > selected profile > VD default) ----
 
     #[test]
     fn env_supplies_input_when_nothing_higher_does() {
         let d = decls("  base_url: { type: string }");
         let mut env = BTreeMap::new();
         env.insert("base_url".into(), serde_json::json!("https://staging"));
-        let out = resolve_inputs(&merged(&[]), &env, &d, &[]).unwrap();
+        let out = resolve_inputs(&merged(&[]), &env, &d).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("https://staging"));
     }
 
@@ -804,7 +800,7 @@ mod tests {
         let d = decls("  base_url: { type: string }");
         let mut env = BTreeMap::new();
         env.insert("base_url".into(), serde_json::json!("https://staging"));
-        let out = resolve_inputs(&merged(&["base_url=from-flag"]), &env, &d, &[]).unwrap();
+        let out = resolve_inputs(&merged(&["base_url=from-flag"]), &env, &d).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-flag"));
     }
 
@@ -818,12 +814,11 @@ mod tests {
             &typed(&[("base_url", serde_json::json!("from-file"))]),
             &env,
             &d,
-            &[],
         )
         .unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-file"));
         // a `KEY=VALUE` raw value beats env
-        let out = resolve_inputs(&merged(&["base_url=from-flag"]), &env, &d, &[]).unwrap();
+        let out = resolve_inputs(&merged(&["base_url=from-flag"]), &env, &d).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-flag"));
     }
 
@@ -833,10 +828,10 @@ mod tests {
         // env supplies → env wins over the default
         let mut env = BTreeMap::new();
         env.insert("base_url".into(), serde_json::json!("from-env"));
-        let out = resolve_inputs(&merged(&[]), &env, &d, &[]).unwrap();
+        let out = resolve_inputs(&merged(&[]), &env, &d).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-env"));
         // env absent → default is the floor
-        let out = resolve_inputs(&merged(&[]), &BTreeMap::new(), &d, &[]).unwrap();
+        let out = resolve_inputs(&merged(&[]), &BTreeMap::new(), &d).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("from-default"));
     }
 
@@ -848,7 +843,7 @@ mod tests {
         decls: &BTreeMap<String, InputDecl>,
         process: &[(&str, &str)],
     ) -> BTreeMap<String, serde_json::Value> {
-        resolve_inputs_with_env(&merged(tokens), selected, decls, &[], |name| {
+        resolve_inputs_with_env(&merged(tokens), selected, decls, |name| {
             process
                 .iter()
                 .find_map(|(key, value)| (*key == name).then(|| (*value).to_string()))
@@ -869,7 +864,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_environment_beats_declared_process_env() {
+    fn selected_profile_beats_declared_process_env() {
         let d = decls("  base_url: { type: string, env: APP_BASE_URL }");
         let selected =
             BTreeMap::from([("base_url".to_string(), serde_json::json!("from-selected"))]);
@@ -904,36 +899,44 @@ mod tests {
 
     #[test]
     fn env_key_with_no_declared_input_is_ignored() {
-        // An environment may carry keys consumed only via `$env.<key>`;
+        // A profile may carry keys consumed only via `$env.<key>`;
         // such a key matching no declared input must not error.
         let d = decls("  base_url: { type: string }");
         let mut env = BTreeMap::new();
         env.insert("base_url".into(), serde_json::json!("https://staging"));
         env.insert("db_url".into(), serde_json::json!("postgres://x"));
-        let out = resolve_inputs(&merged(&[]), &env, &d, &[]).unwrap();
+        let out = resolve_inputs(&merged(&[]), &env, &d).unwrap();
         assert_eq!(out["base_url"], serde_json::json!("https://staging"));
         assert!(!out.contains_key("db_url"));
     }
 
     #[test]
-    fn env_value_type_mismatch_is_an_error() {
+    fn profile_value_type_mismatch_is_an_error() {
         let d = decls("  count: { type: integer }");
         let mut env = BTreeMap::new();
         env.insert("count".into(), serde_json::json!("not a number"));
-        let err = resolve_inputs(&merged(&[]), &env, &d, &[]).unwrap_err();
+        let err = resolve_inputs(&merged(&[]), &env, &d).unwrap_err();
         assert!(
-            err.contains("count") && err.contains("environment"),
+            err.contains("count") && err.contains("profile"),
             "got: {err}"
         );
     }
 
     #[test]
-    fn environment_flag_parses() {
+    fn profile_flag_and_environment_alias_parse() {
+        let parsed =
+            Cli::try_parse_from(["duhem", "run", "v.yml", "--profile", "prod"]).expect("parse");
+        match parsed.cmd {
+            Some(Cmd::Run { profile, .. }) => {
+                assert_eq!(profile, Some("prod".to_string()));
+            }
+            _ => panic!("expected Run"),
+        }
         let parsed =
             Cli::try_parse_from(["duhem", "run", "v.yml", "--environment", "prod"]).expect("parse");
         match parsed.cmd {
-            Some(Cmd::Run { environment, .. }) => {
-                assert_eq!(environment, Some("prod".to_string()));
+            Some(Cmd::Run { profile, .. }) => {
+                assert_eq!(profile, Some("prod".to_string()));
             }
             _ => panic!("expected Run"),
         }
@@ -978,7 +981,7 @@ mod tests {
     fn env_lifecycle_flags_parse_and_default_off() {
         // Spec on #50: `--no-env-up` and `--keep-env` are independent
         // escape hatches; both default off so the runtime manages the
-        // full lifecycle when `environment:` is present.
+        // full lifecycle when `provision:` is present.
         let default = Cli::try_parse_from(["duhem", "run", "v.yml"]).expect("parse");
         match default.cmd {
             Some(Cmd::Run {

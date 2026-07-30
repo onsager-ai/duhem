@@ -88,38 +88,6 @@
         }
       ]
     },
-    "Environment": {
-      "additionalProperties": false,
-      "description": "Operator-supplied lifecycle hooks for the system-under-test.\n\n`up:` runs once before `setup:`; `down:` (if declared) runs once after the last criterion, regardless of verdict. `ready:` is a readiness probe the runtime polls between `up:` exiting zero and `setup:` starting.",
-      "properties": {
-        "down": {
-          "description": "Optional path to an executable that tears the SUT down. Runs after the criteria loop regardless of verdict. Teardown failures are evidence, not verdict-altering.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "ready": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ReadyProbe"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Optional readiness probe. Polled after `up:` exits zero and before `setup:` starts."
-        },
-        "up": {
-          "description": "Path to an executable that brings the SUT up. Relative paths are resolved against the directory containing the Verification Definition.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "up"
-      ],
-      "type": "object"
-    },
     "HttpReadyProbe": {
       "additionalProperties": false,
       "description": "HTTP readiness probe. `url:` is templated at runtime (the runtime resolves `$inputs.<name>` references); the schema layer treats it as an opaque string so probes that don't need substitution stay portable.",
@@ -177,24 +145,32 @@
       "properties": {
         "default": true,
         "env": {
-          "description": "Process-environment fallback (specs #346 / #354). This sits below a selected Duhem environment and above `default:` in resolution precedence. The declaration may be leaf-local or suite-wide on a manifest; it never becomes a global override.",
+          "description": "Process-environment fallback (specs #346 / #354). This sits below a selected Duhem profile and above `default:` in resolution precedence. The declaration may be leaf-local or suite-wide on a manifest; it never becomes a global override.",
           "type": [
             "string",
             "null"
           ]
+        },
+        "inherit": {
+          "description": "Pull this name from the parent manifest's declaration and value resolution ladder. Inherited inputs intentionally omit `type:` and `default:` because the manifest owns both; `secret: true` may add protection at the consuming leaf.",
+          "type": "boolean"
         },
         "secret": {
           "description": "Register the resolved value for evidence/terminal masking. A secret may not carry a committed `default:`; validation owns that authoring rule so deserialization can report it alongside other structural findings.",
           "type": "boolean"
         },
         "type": {
-          "$ref": "#/definitions/InputType",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InputType"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "The declared type from the v1 catalog. Unknown names parse-fail at `from_yaml_str` per the type-catalog spec."
         }
       },
-      "required": [
-        "type"
-      ],
       "type": "object"
     },
     "InputType": {
@@ -213,13 +189,6 @@
       "additionalProperties": false,
       "description": "Suite-wide defaults declared once on the root manifest (spec #66). Every sub-key is optional; an absent sub-key falls back to today's behavior (`timeout` → the engine's 5s default, `inconclusive_policy` → `block`, `retry.max` → `0`).",
       "properties": {
-        "environment": {
-          "description": "Name of an environment under the sibling `environments:` block to use for the suite. Accepted as any string here; the lookup against `environments:` happens at engine-time (spec #66 Out-of-scope), so an unknown name is not a parse error.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "inconclusive_policy": {
           "anyOf": [
             {
@@ -230,6 +199,13 @@
             }
           ],
           "description": "How a criterion-level `inconclusive` verdict is treated at run aggregation. Absent → `block` (today's behavior)."
+        },
+        "profile": {
+          "description": "Name of a profile under the sibling `profiles:` block to use for the suite. Accepted as any string here; the lookup against `profiles:` happens at engine-time (spec #66 Out-of-scope), so an unknown name is not a parse error.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "retry": {
           "anyOf": [
@@ -251,7 +227,7 @@
               "type": "null"
             }
           ],
-          "description": "Per-step `within:` fallback for every leaf. A step's own `within:` always wins; this only fills in when a step omits it. Same duration wire shape as `environment.ready.http.timeout` (integer milliseconds or a suffixed string like `30s` / `2m`). Absent → the engine's built-in 5s default still applies."
+          "description": "Per-step `timeout:` fallback for every leaf. A step's own `timeout:` always wins; this only fills in when a step omits it. Same duration wire shape as `provision.ready.http.timeout` (integer milliseconds or a suffixed string like `30s` / `2m`). Absent → the engine's built-in 5s default still applies."
         }
       },
       "type": "object"
@@ -322,6 +298,38 @@
       },
       "type": "object"
     },
+    "Provision": {
+      "additionalProperties": false,
+      "description": "Operator-supplied lifecycle hooks for the system-under-test.\n\n`up:` runs once before `setup:`; `down:` (if declared) runs once after the last criterion, regardless of verdict. `ready:` is a readiness probe the runtime polls between `up:` exiting zero and `setup:` starting.",
+      "properties": {
+        "down": {
+          "description": "Optional path to an executable that tears the SUT down. Runs after the criteria loop regardless of verdict. Teardown failures are evidence, not verdict-altering.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ready": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReadyProbe"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional readiness probe. Polled after `up:` exits zero and before `setup:` starts."
+        },
+        "up": {
+          "description": "Path to an executable that brings the SUT up. Relative paths are resolved against the directory containing the Verification Definition.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "up"
+      ],
+      "type": "object"
+    },
     "ReadyProbe": {
       "properties": {
         "http": {
@@ -380,29 +388,10 @@
               "type": "null"
             }
           ],
-          "description": "Suite-wide defaults (`docs/duhem-spec.md` §10.4, spec #66). A single `defaults:` block that every leaf the manifest expands to inherits — so an author sets the timeout budget, the inconclusive-handling policy, and the retry posture once for the whole suite instead of per leaf.\n\nEach sub-key is optional and, when absent, reproduces today's behavior exactly:\n\n- `timeout:` is the per-step `within:` fallback. A step that declares its own `within:` wins; a step that doesn't picks up this default; with neither, the engine's built-in 5s last resort applies. - `inconclusive_policy:` decides how a criterion-level `inconclusive` is treated at run aggregation — `block` (today's behavior; inconclusive ≠ pass), `warn` (criterion passes but a warning is surfaced in the run summary), or `pass` (silent pass). Per-assertion evaluation is unchanged. - `retry:` re-runs a whole check from step 0 when it comes back `inconclusive` for a *retry-eligible* cause (timeout or an environment error); a `fail` never retries. - `environment:` names a key under the sibling `environments:` block. Cross-key validation is deferred to engine-time lookup (spec #66 Out-of-scope), so any string is accepted here.\n\nAdditive: a manifest without `defaults:` round-trips and behaves byte-for-byte as before."
-        },
-        "environment": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Environment"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Optional environment shared by the whole suite. When present, the runtime provisions it **once** (`up:` + `ready:`) before any leaf runs and tears it down **once** after the last leaf — instead of each leaf standing up its own. Leaves keep their own `environment:` so they stay runnable standalone; a manifest run suppresses per-leaf provisioning and points every leaf at this shared stack. Additive: a manifest without it behaves as before."
-        },
-        "environments": {
-          "additionalProperties": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "description": "Named environment configs (`docs/duhem-spec.md` §10.4, spec #68). Each key under `environments:` is an environment name (e.g. `staging`, `prod`) whose value is a free-form `key: value` map. A key inherited through a manifest `inputs:` declaration is type-checked; all other keys remain conventionally typed for backward compatibility.\n\nWhen an environment is selected for a run (CLI `--environment`, or auto-selected when exactly one is declared) its keys feed the leaf input-resolution chain (an env key `base_url` populates a declared input `base_url` when no higher-precedence source supplies it) and its string-valued keys are whitelisted for `$env.<key>`. Additive: a manifest without `environments:` behaves byte-identically to before.\n\n`serde_yml::Value` has no `JsonSchema` impl, so the field is described to schemars via a `serde_json::Value`-shaped stand-in (same wire surface) purely so the JSON-schema artifact generates.",
-          "type": "object"
+          "description": "Suite-wide defaults (`docs/duhem-spec.md` §10.4, spec #66). A single `defaults:` block that every leaf the manifest expands to inherits — so an author sets the timeout budget, the inconclusive-handling policy, and the retry posture once for the whole suite instead of per leaf.\n\nEach sub-key is optional and, when absent, reproduces today's behavior exactly:\n\n- `timeout:` is the per-step `timeout:` fallback. A step that declares its own `timeout:` wins; a step that doesn't picks up this default; with neither, the engine's built-in 5s last resort applies. - `inconclusive_policy:` decides how a criterion-level `inconclusive` is treated at run aggregation — `block` (today's behavior; inconclusive ≠ pass), `warn` (criterion passes but a warning is surfaced in the run summary), or `pass` (silent pass). Per-assertion evaluation is unchanged. - `retry:` re-runs a whole check from step 0 when it comes back `inconclusive` for a *retry-eligible* cause (timeout or an environment error); a `fail` never retries. - `profile:` names a key under the sibling `profiles:` block. Cross-key validation is deferred to engine-time lookup (spec #66 Out-of-scope), so any string is accepted here.\n\nAdditive: a manifest without `defaults:` round-trips and behaves byte-for-byte as before."
         },
         "includes": {
-          "description": "Other manifest files whose config this one composes in (`docs/duhem-spec.md` §10.4, spec #67). Each path is relative to *this* manifest's parent directory and resolves to a **partial** manifest (every field optional, no `manifest_version:`) — see [`PartialRootManifest`]. Same path discipline as `verifications:` entries: no absolute paths, no `..` escape.\n\nComposition is **root-wins**: an include fills only the keys this manifest leaves absent (for nested maps like `environments:`, key-by-key, still root-wins per leaf key). Manifest `inputs:` declarations overlay by input name. `verifications:` (and `includes:` themselves) are *concatenated* rather than overlaid — the root's entries first, then each include's, in declared order. Nested includes are resolved depth-first up to depth 3; cycles are a hard error. The typical shape is a team-shared `.duhem.shared.yml` plus a gitignored per-developer `.duhem.local.yml`. Additive: a manifest without `includes:` behaves byte-identically to before.",
+          "description": "Other manifest files whose config this one composes in (`docs/duhem-spec.md` §10.4, spec #67). Each path is relative to *this* manifest's parent directory and resolves to a **partial** manifest (every field optional, no `manifest_version:`) — see [`PartialRootManifest`]. Same path discipline as `verifications:` entries: no absolute paths, no `..` escape.\n\nComposition is **root-wins**: an include fills only the keys this manifest leaves absent (for nested maps like `profiles:`, key-by-key, still root-wins per leaf key). Manifest `inputs:` declarations overlay by input name. `verifications:` (and `includes:` themselves) are *concatenated* rather than overlaid — the root's entries first, then each include's, in declared order. Nested includes are resolved depth-first up to depth 3; cycles are a hard error. The typical shape is a team-shared `.duhem.shared.yml` plus a gitignored per-developer `.duhem.local.yml`. Additive: a manifest without `includes:` behaves byte-identically to before.",
           "items": {
             "type": "string"
           },
@@ -412,7 +401,7 @@
           "additionalProperties": {
             "$ref": "#/definitions/InputDecl"
           },
-          "description": "Suite-wide input declarations (spec #354). The manifest owns type, process-`env:` fallback, and sensitivity; selected `environments:` entries continue to own values. A leaf opts into a declaration by listing its name under `inherits:`, preserving names-only dependency injection and the behavior of suites that omit this block.",
+          "description": "Suite-wide input declarations (spec #354). The manifest owns type, process-`env:` fallback, and sensitivity; selected `profiles:` entries continue to own values. A leaf opts into a declaration with `inputs.<name>.inherit: true`, preserving explicit dependency injection and a closed leaf declaration set.",
           "type": "object"
         },
         "manifest_version": {
@@ -420,6 +409,14 @@
           "format": "uint32",
           "minimum": 0.0,
           "type": "integer"
+        },
+        "profiles": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "description": "Named configuration profiles (`docs/duhem-spec.md` §10.4, spec #68). Each key under `profiles:` is a profile name (e.g. `staging`, `prod`) whose value is a free-form `key: value` map. A key inherited through a manifest `inputs:` declaration is type-checked; all other keys remain conventionally typed for backward compatibility.\n\nWhen a profile is selected for a run (CLI `--profile`, or auto-selected when exactly one is declared) its keys feed the leaf input-resolution chain (a profile key `base_url` populates a declared input `base_url` when no higher-precedence source supplies it) and its string-valued keys are whitelisted for `$env.<key>`. Additive: a manifest without `profiles:` behaves byte-identically to before.\n\n`serde_yml::Value` has no `JsonSchema` impl, so the field is described to schemars via a `serde_json::Value`-shaped stand-in (same wire surface) purely so the JSON-schema artifact generates.",
+          "type": "object"
         },
         "project": {
           "anyOf": [
@@ -431,6 +428,17 @@
             }
           ],
           "description": "Optional suite-wide declared target coordinate (#191): what the whole suite verifies. A leaf's own `project:` wins over this. Absent → the runtime's identity-resolution ladder falls through to CI context / normalized remote / path."
+        },
+        "provision": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Provision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional provisioning lifecycle shared by the whole suite. When present, the runtime provisions it **once** (`up:` + `ready:`) before any leaf runs and tears it down **once** after the last leaf — instead of each leaf standing up its own. Leaves keep their own `provision:` so they stay runnable standalone; a manifest run suppresses per-leaf provisioning and points every leaf at this shared stack. Additive: a manifest without it behaves as before."
         },
         "verifications": {
           "description": "Entries that resolve to leaf Verification Definitions. Order determines execution order across leaves.",
@@ -463,7 +471,7 @@
           "description": "Map of local alias → extraction path into the step's raw action result. Optional: every raw field is already addressable by its native name (`$steps.<id>.outputs.<field>`), so this is the escape hatch for the two cases a native name can't cover — a *rename* (`http_code: status`) and a *derived extraction* (`project_id: body.data._id`, `first: body.items[0].id`). The path is opaque at the schema layer; the runtime navigates it (dotted object keys, `[N]` array indices — spec #273) and records the value under the alias. Identity (`foo: foo`) is a redundant no-op the validator lint flags.",
           "type": "object"
         },
-        "secret": {
+        "secret_outputs": {
           "description": "Raw action-output paths whose resolved scalar values are sensitive. These are paths, not a second output channel: `body.data` names the same value available at `$steps.<id>.outputs.body.data`. Runtime registration rejects objects and arrays because exact-serialization masking would give a false impression that the subtree was protected.",
           "items": {
             "type": "string"
@@ -493,24 +501,6 @@
           },
           "type": "array"
         },
-        "environment": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Environment"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Optional operator-supplied environment lifecycle hooks. When present, the runtime forks `environment.up:` before `setup:`, polls `environment.ready:`, and forks `environment.down:` (if declared) after the criteria loop. Absent → no behavior change vs setup-only definitions; the wire shape for `environment:`-less VDs is byte-identical to today."
-        },
-        "inherits": {
-          "description": "Inherited input names (spec #135). A leaf under a manifest may list input names it pulls from the parent manifest's resolution chain (#68: selected `environments:` keys, `--inputs` `KEY=VALUE` / `@file`) instead of redeclaring them under `inputs:`. This is dependency injection — the manifest provides, the leaf declares what it needs — not class inheritance: one level deep, names only, no local `default:`. An inherited name resolves and reads as `$inputs.<name>` exactly like a locally-declared input.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "inputs": {
           "additionalProperties": {
             "$ref": "#/definitions/InputDecl"
@@ -528,6 +518,17 @@
             }
           ],
           "description": "Optional declared target coordinate (#191): what this verification verifies (a repo, a service URL, an image, or a locally-named project). Top rung of the identity-resolution ladder; absent → the runtime falls through to CI context / normalized remote / path. A leaf declaration wins over a manifest-level one."
+        },
+        "provision": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Provision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional operator-supplied provisioning lifecycle hooks. When present, the runtime forks `provision.up:` before `setup:`, polls `provision.ready:`, and forks `provision.down:` (if declared) after the criteria loop. Absent → no behavior change vs setup-only definitions; the wire shape for `provision:`-less VDs is byte-identical to today."
         },
         "setup": {
           "description": "Optional setup steps run once before the criteria.",

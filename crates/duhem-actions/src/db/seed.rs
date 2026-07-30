@@ -9,13 +9,13 @@
 //! - `sql`: one or more statements (`;`-separated) — DDL and/or inserts.
 //!   Run as a raw script, so a seed can `CREATE TABLE IF NOT EXISTS`
 //!   then `INSERT` in one step.
-//! - `within` (optional): wall-clock budget.
+//! - `timeout` (optional): wall-clock budget.
 //!
 //! Output:
 //!
 //! - `rows_affected`: total rows affected, as an integer.
 //!
-//! Outcome: success → `Outcome::Ok`; `within:` exceeded →
+//! Outcome: success → `Outcome::Ok`; `timeout:` exceeded →
 //! `Outcome::Timeout`; connect / SQL error → `ActionError::Db` →
 //! `Outcome::Error`.
 
@@ -24,10 +24,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::Deserialize;
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT};
 use crate::db::{connect, parse_with};
 use crate::error::ActionError;
-use crate::with::WithinSpec;
+use crate::with::TimeoutSpec;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -35,7 +35,7 @@ pub(crate) struct With {
     connection: String,
     sql: String,
     #[serde(default)]
-    within: Option<WithinSpec>,
+    timeout: Option<TimeoutSpec>,
 }
 
 pub struct Seed;
@@ -54,7 +54,7 @@ impl Action for Seed {
             with: vec![
                 FieldSpec::required("connection"),
                 FieldSpec::required("sql"),
-                FieldSpec::optional("within"),
+                FieldSpec::optional("timeout"),
             ],
             outputs: vec!["rows_affected"],
             secret_outputs: vec![],
@@ -72,7 +72,7 @@ impl Action for Seed {
 }
 
 pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
-    let timeout: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
+    let timeout: Duration = with.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
     match tokio::time::timeout(timeout, run(with)).await {
         Ok(result) => result,
         Err(_elapsed) => Ok(ActionResult::timeout()),

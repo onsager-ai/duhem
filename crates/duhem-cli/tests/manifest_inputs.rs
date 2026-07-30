@@ -26,7 +26,8 @@ fn leaf(name: &str) -> String {
     format!(
         r#"
 verification: {name}
-inherits: [password]
+inputs:
+  password: {{ inherit: true, secret: true }}
 criteria:
   - id: AC-1
     description: The inherited credential reaches the real command.
@@ -217,6 +218,6 @@ fn manifest_without_declarations_keeps_existing_fixture_output_exactly() {
     );
     assert_eq!(
         String::from_utf8(output.stderr).unwrap(),
-        "environment: default\n"
+        "profile: default\n"
     );
 }

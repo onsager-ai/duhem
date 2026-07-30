@@ -293,7 +293,7 @@ describe("Timeline", () => {
         step_index: 0,
         uses: "ui/assert-element",
         layer: "ui",
-        with: { locator: { text: "Manager" }, expected: "not_exists", within: "5s" },
+        with: { locator: { text: "Manager" }, expected: "not_exists", timeout: "5s" },
       },
       { seq: 2, ts: "2026-01-01T00:00:00.100Z", kind: "step_observation", step_index: 0, output_name: "satisfied", value: false },
       { seq: 3, ts: "2026-01-01T00:00:00.150Z", kind: "step_observation", step_index: 0, output_name: "count", value: 1 },

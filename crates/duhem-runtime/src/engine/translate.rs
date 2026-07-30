@@ -49,21 +49,21 @@ pub(super) fn retry_delay(base: Duration, backoff: RetryBackoff, attempt: u32) -
     base.saturating_mul(factor)
 }
 
-/// Fill a step's `within:` from the manifest `defaults.timeout` when
+/// Fill a step's `timeout:` from the manifest `defaults.timeout` when
 /// it doesn't already declare one (spec #66). Only a `with:` that's a
-/// mapping is touched, and only when it lacks a `within` key — so a
-/// per-step `within:` always wins. The value is written as integer
-/// milliseconds, the form `duhem_actions::WithinSpec` accepts. A
+/// mapping is touched, and only when it lacks a `timeout` key — so a
+/// per-step `timeout:` always wins. The value is written as integer
+/// milliseconds, the form `duhem_actions::TimeoutSpec` accepts. A
 /// duration past `u64::MAX` ms is left out rather than truncated (the
-/// action's `DEFAULT_WITHIN` then applies); such a value is not
+/// action's `DEFAULT_TIMEOUT` then applies); such a value is not
 /// reachable from the `DurationSpec` wire shape in practice.
-pub(super) fn apply_default_within(with: &mut serde_yml::Value, default: Duration) {
+pub(super) fn apply_default_timeout(with: &mut serde_yml::Value, default: Duration) {
     let ms = default.as_millis();
     if ms > u64::MAX as u128 {
         return;
     }
     if let serde_yml::Value::Mapping(m) = with {
-        let key = serde_yml::Value::String("within".to_string());
+        let key = serde_yml::Value::String("timeout".to_string());
         if !m.contains_key(&key) {
             m.insert(key, serde_yml::Value::Number((ms as u64).into()));
         }
@@ -255,27 +255,27 @@ mod tests {
     }
 
     #[test]
-    fn default_within_fills_only_absent_within_on_a_mapping() {
-        // Mapping without `within` → filled with the default (ms int).
+    fn default_timeout_fills_only_absent_timeout_on_a_mapping() {
+        // Mapping without `timeout` → filled with the default (ms int).
         let mut empty = serde_yml::from_str::<serde_yml::Value>("{}").unwrap();
-        apply_default_within(&mut empty, Duration::from_secs(7));
+        apply_default_timeout(&mut empty, Duration::from_secs(7));
         assert_eq!(
             empty
-                .get(serde_yml::Value::String("within".into()))
+                .get(serde_yml::Value::String("timeout".into()))
                 .and_then(|v| v.as_u64()),
             Some(7_000)
         );
-        // Mapping with its own `within` → untouched (per-step wins).
-        let mut own = serde_yml::from_str::<serde_yml::Value>("within: 2000").unwrap();
-        apply_default_within(&mut own, Duration::from_secs(7));
+        // Mapping with its own `timeout` → untouched (per-step wins).
+        let mut own = serde_yml::from_str::<serde_yml::Value>("timeout: 2000").unwrap();
+        apply_default_timeout(&mut own, Duration::from_secs(7));
         assert_eq!(
-            own.get(serde_yml::Value::String("within".into()))
+            own.get(serde_yml::Value::String("timeout".into()))
                 .and_then(|v| v.as_u64()),
             Some(2_000)
         );
         // Non-mapping (null `with:`) → left alone.
         let mut null = serde_yml::Value::Null;
-        apply_default_within(&mut null, Duration::from_secs(7));
+        apply_default_timeout(&mut null, Duration::from_secs(7));
         assert!(null.is_null());
     }
 }

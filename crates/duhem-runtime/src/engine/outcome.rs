@@ -58,13 +58,13 @@ pub enum EngineError {
         context: String,
     },
     /// A `$inputs.<name>` reference names an input the leaf declared
-    /// under `inherits:` (spec #135), but nothing on the resolution
-    /// chain bound it — no manifest environment was selected and no
+    /// with `inherit: true` (spec #135), but nothing on the resolution
+    /// chain bound it — no manifest profile was selected and no
     /// `--inputs` supplied it. Distinct from the generic
     /// `UnresolvedReference` so the remedy (run the suite, or pass
     /// `--inputs`) is named instead of a deep network failure.
     #[error(
-        "input `{name}` is declared `inherits:` but no environment or --inputs provides it; run the suite (e.g. `duhem run verifications/<suite>`) or pass `--inputs {name}=...`"
+        "input `{name}` is declared `inherit: true` but no profile or --inputs provides it; run the suite (e.g. `duhem run verifications/<suite>`) or pass `--inputs {name}=...`"
     )]
     UnresolvedInheritedInput { name: String },
     /// A validated secret path started at a declared output, but the
@@ -75,7 +75,7 @@ pub enum EngineError {
     /// Registering an aggregate's serialization would look protected
     /// while missing the values that actually recur in evidence.
     #[error(
-        "secret: `{path}` resolved to an {shape}, not a value.\nName the scalar that is sensitive, e.g. `{path}.data`.\nRegistering a whole {shape} would mask only its exact\nserialization, which is almost never what appears in evidence."
+        "secret_outputs: `{path}` resolved to an {shape}, not a value.\nName the scalar that is sensitive, e.g. `{path}.data`.\nRegistering a whole {shape} would mask only its exact\nserialization, which is almost never what appears in evidence."
     )]
     SecretOutputNotScalar { path: String, shape: &'static str },
 }
@@ -226,42 +226,48 @@ fn generic_fail_detail(label: &str) -> String {
 }
 
 /// Optional ` within 5s` suffix, read from the step's resolved `with:`.
-fn within_suffix(ev: &StepEvidence) -> String {
+fn timeout_suffix(ev: &StepEvidence) -> String {
     ev.with
-        .get("within")
+        .get("timeout")
         .and_then(|v| v.as_str())
         .map(|s| format!(" within {s}"))
         .unwrap_or_default()
 }
 
 /// `ui/assert-element`: "expected text \"Manager\" to be absent within
-/// 5s, but 1 still matched". Reads the locator / `expected` / `within`
+/// 5s, but 1 still matched". Reads the locator / `expected` / `timeout`
 /// from the resolved `with:` and the observed `count` from the outputs.
 fn assert_element_fail_detail(ev: &StepEvidence) -> Option<String> {
     let loc: Locator = serde_yml::from_value(ev.with.get("locator")?.clone()).ok()?;
     let expected: ExistenceState = serde_yml::from_value(ev.with.get("expected")?.clone()).ok()?;
     let desc = loc.describe();
-    let within = within_suffix(ev);
+    let timeout_clause = timeout_suffix(ev);
     let count = ev.outputs.get("count").and_then(|v| v.as_u64());
     Some(match expected {
         ExistenceState::NotExists => match count {
-            Some(n) => format!("expected {desc} to be absent{within}, but {n} still matched"),
-            None => format!("expected {desc} to be absent{within}, but it was present"),
+            Some(n) => {
+                format!("expected {desc} to be absent{timeout_clause}, but {n} still matched")
+            }
+            None => format!("expected {desc} to be absent{timeout_clause}, but it was present"),
         },
         ExistenceState::Hidden => match count {
             Some(n) => {
-                format!("expected {desc} to be hidden{within}, but it stayed visible ({n} present)")
+                format!(
+                    "expected {desc} to be hidden{timeout_clause}, but it stayed visible ({n} present)"
+                )
             }
-            None => format!("expected {desc} to be hidden{within}, but it stayed visible"),
+            None => format!("expected {desc} to be hidden{timeout_clause}, but it stayed visible"),
         },
         ExistenceState::Exists => {
-            format!("expected {desc} to appear{within}, but none was found")
+            format!("expected {desc} to appear{timeout_clause}, but none was found")
         }
         ExistenceState::Visible => match count {
             Some(n) if n > 0 => {
-                format!("expected {desc} to be visible{within}, but it stayed hidden ({n} present)")
+                format!(
+                    "expected {desc} to be visible{timeout_clause}, but it stayed hidden ({n} present)"
+                )
             }
-            _ => format!("expected {desc} to be visible{within}, but it never appeared"),
+            _ => format!("expected {desc} to be visible{timeout_clause}, but it never appeared"),
         },
     })
 }
@@ -296,7 +302,7 @@ fn intent_fail_detail(step: &duhem_schema::Step, ev: &StepEvidence) -> Option<St
     if intent.is_empty() {
         return None;
     }
-    let within = within_suffix(ev);
+    let timeout_clause = timeout_suffix(ev);
     let observed = ev
         .outputs
         .get("status")
@@ -304,7 +310,7 @@ fn intent_fail_detail(step: &duhem_schema::Step, ev: &StepEvidence) -> Option<St
         .map(|st| format!(" — last status {st}"))
         .unwrap_or_default();
     Some(format!(
-        "`{}`: expected {}{within}, but it did not hold{observed}",
+        "`{}`: expected {}{timeout_clause}, but it did not hold{observed}",
         step.uses,
         intent.join(" ")
     ))
@@ -591,7 +597,7 @@ mod fail_detail_tests {
         // because the element WAS present. The message must say what it
         // looked for and how many it found — not `actual false`.
         let e = ev(
-            r#"{ locator: { text: "Manager" }, expected: not_exists, within: "5s" }"#,
+            r#"{ locator: { text: "Manager" }, expected: not_exists, timeout: "5s" }"#,
             &[("satisfied", json!(false)), ("count", json!(1))],
         );
         assert_eq!(
@@ -615,7 +621,7 @@ mod fail_detail_tests {
     #[test]
     fn assert_element_visible_distinguishes_present_from_absent() {
         let present = ev(
-            r#"{ locator: { role: button, name: Go }, expected: visible, within: "2s" }"#,
+            r#"{ locator: { role: button, name: Go }, expected: visible, timeout: "2s" }"#,
             &[("satisfied", json!(false)), ("count", json!(3))],
         );
         assert_eq!(
@@ -637,7 +643,7 @@ mod fail_detail_tests {
     #[test]
     fn assert_element_hidden_reports_still_visible() {
         let e = ev(
-            r#"{ locator: { testid: banner }, expected: hidden, within: "1s" }"#,
+            r#"{ locator: { testid: banner }, expected: hidden, timeout: "1s" }"#,
             &[("satisfied", json!(false)), ("count", json!(1))],
         );
         assert_eq!(
@@ -652,7 +658,7 @@ mod fail_detail_tests {
     fn poll_intent_names_endpoint_and_last_status() {
         let s = step("api/poll");
         let e = ev(
-            r#"{ method: GET, url: "http://x/job", until: "$response.body.done == true", within: "30s" }"#,
+            r#"{ method: GET, url: "http://x/job", until: "$response.body.done == true", timeout: "30s" }"#,
             &[("satisfied", json!(false)), ("status", json!(500))],
         );
         assert_eq!(

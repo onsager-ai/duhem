@@ -22,7 +22,7 @@
 //!   `_id` or `*_id` field (e.g. `spider_id`) is coerced to a BSON
 //!   `ObjectId` so equality matches an ObjectId-typed `_id`; non-`_id`
 //!   fields and non-hex values are left as strings.
-//! - `within` (optional): wall-clock budget for connect + query.
+//! - `timeout` (optional): wall-clock budget for connect + query.
 //!
 //! Outputs:
 //!
@@ -36,7 +36,7 @@
 //! string, so `$steps.q.outputs.rows[0]._id` is a plain string.
 //!
 //! Outcome: a completed query is `Outcome::Ok` (the rows are data,
-//! judged by assertions); `within:` exceeded → `Outcome::Timeout`; a
+//! judged by assertions); `timeout:` exceeded → `Outcome::Timeout`; a
 //! connect / query / shape error → `ActionError::Db` → `Outcome::Error`.
 
 use std::time::Duration;
@@ -49,10 +49,10 @@ use mongodb::bson::{Bson, Document};
 use mongodb::options::ClientOptions;
 use serde::Deserialize;
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT};
 use crate::db::{connect, parse_with, row_to_json};
 use crate::error::ActionError;
-use crate::with::WithinSpec;
+use crate::with::TimeoutSpec;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -65,7 +65,7 @@ pub(crate) struct With {
     #[serde(default)]
     find: Option<FindSpec>,
     #[serde(default)]
-    within: Option<WithinSpec>,
+    timeout: Option<TimeoutSpec>,
 }
 
 /// MongoDB `find` request: the collection plus optional shaping. The
@@ -102,7 +102,7 @@ impl Action for Query {
                 FieldSpec::required("sql"),
                 FieldSpec::optional("params"),
                 FieldSpec::optional("find"),
-                FieldSpec::optional("within"),
+                FieldSpec::optional("timeout"),
             ],
             outputs: vec!["rows", "row_count"],
             secret_outputs: vec![],
@@ -120,7 +120,7 @@ impl Action for Query {
 }
 
 pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
-    let timeout: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
+    let timeout: Duration = with.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
     match tokio::time::timeout(timeout, run(with)).await {
         Ok(result) => result,
         Err(_elapsed) => Ok(ActionResult::timeout()),

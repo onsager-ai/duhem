@@ -26,7 +26,7 @@ pub(crate) fn register(
     contract_paths: &[&str],
     outputs: &std::collections::BTreeMap<String, serde_json::Value>,
 ) -> Result<(), EngineError> {
-    let authored: BTreeSet<&str> = step.secret.iter().map(String::as_str).collect();
+    let authored: BTreeSet<&str> = step.secret_outputs.iter().map(String::as_str).collect();
     let contract: BTreeSet<&str> = contract_paths.iter().copied().collect();
     if authored.is_empty() && contract.is_empty() {
         return Ok(());

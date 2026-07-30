@@ -14,8 +14,8 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::environment::{DurationSpec, Environment};
 use crate::project::ProjectDecl;
+use crate::provision::{DurationSpec, Provision};
 use crate::verification::{InputDecl, SchemaError, VerificationDefinition};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -35,7 +35,7 @@ pub struct RootManifest {
     ///
     /// Composition is **root-wins**: an include fills only the keys
     /// this manifest leaves absent (for nested maps like
-    /// `environments:`, key-by-key, still root-wins per leaf key).
+    /// `profiles:`, key-by-key, still root-wins per leaf key).
     /// Manifest `inputs:` declarations overlay by input name.
     /// `verifications:` (and `includes:` themselves) are *concatenated*
     /// rather than overlaid — the root's entries first, then each
@@ -46,28 +46,28 @@ pub struct RootManifest {
     /// `includes:` behaves byte-identically to before.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub includes: Vec<PathBuf>,
-    /// Optional environment shared by the whole suite. When present, the
+    /// Optional provisioning lifecycle shared by the whole suite. When present, the
     /// runtime provisions it **once** (`up:` + `ready:`) before any leaf
     /// runs and tears it down **once** after the last leaf — instead of
     /// each leaf standing up its own. Leaves keep their own
-    /// `environment:` so they stay runnable standalone; a manifest run
+    /// `provision:` so they stay runnable standalone; a manifest run
     /// suppresses per-leaf provisioning and points every leaf at this
     /// shared stack. Additive: a manifest without it behaves as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment: Option<Environment>,
-    /// Named environment configs (`docs/duhem-spec.md` §10.4, spec
-    /// #68). Each key under `environments:` is an environment name
+    pub provision: Option<Provision>,
+    /// Named configuration profiles (`docs/duhem-spec.md` §10.4, spec
+    /// #68). Each key under `profiles:` is a profile name
     /// (e.g. `staging`, `prod`) whose value is a free-form
     /// `key: value` map. A key inherited through a manifest `inputs:`
     /// declaration is type-checked; all other keys remain conventionally
     /// typed for backward compatibility.
     ///
-    /// When an environment is selected for a run (CLI `--environment`,
+    /// When a profile is selected for a run (CLI `--profile`,
     /// or auto-selected when exactly one is declared) its keys feed
-    /// the leaf input-resolution chain (an env key `base_url`
+    /// the leaf input-resolution chain (a profile key `base_url`
     /// populates a declared input `base_url` when no higher-precedence
     /// source supplies it) and its string-valued keys are whitelisted
-    /// for `$env.<key>`. Additive: a manifest without `environments:`
+    /// for `$env.<key>`. Additive: a manifest without `profiles:`
     /// behaves byte-identically to before.
     ///
     /// `serde_yml::Value` has no `JsonSchema` impl, so the field is
@@ -78,13 +78,12 @@ pub struct RootManifest {
     #[schemars(
         with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
     )]
-    pub environments: BTreeMap<String, BTreeMap<String, serde_yml::Value>>,
+    pub profiles: BTreeMap<String, BTreeMap<String, serde_yml::Value>>,
     /// Suite-wide input declarations (spec #354). The manifest owns
     /// type, process-`env:` fallback, and sensitivity; selected
-    /// `environments:` entries continue to own values. A leaf opts into
-    /// a declaration by listing its name under `inherits:`, preserving
-    /// names-only dependency injection and the behavior of suites that
-    /// omit this block.
+    /// `profiles:` entries continue to own values. A leaf opts into
+    /// a declaration with `inputs.<name>.inherit: true`, preserving
+    /// explicit dependency injection and a closed leaf declaration set.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, InputDecl>,
     /// Suite-wide defaults (`docs/duhem-spec.md` §10.4, spec #66).
@@ -96,8 +95,8 @@ pub struct RootManifest {
     /// Each sub-key is optional and, when absent, reproduces today's
     /// behavior exactly:
     ///
-    /// - `timeout:` is the per-step `within:` fallback. A step that
-    ///   declares its own `within:` wins; a step that doesn't picks up
+    /// - `timeout:` is the per-step `timeout:` fallback. A step that
+    ///   declares its own `timeout:` wins; a step that doesn't picks up
     ///   this default; with neither, the engine's built-in 5s last
     ///   resort applies.
     /// - `inconclusive_policy:` decides how a criterion-level
@@ -108,7 +107,7 @@ pub struct RootManifest {
     /// - `retry:` re-runs a whole check from step 0 when it comes back
     ///   `inconclusive` for a *retry-eligible* cause (timeout or an
     ///   environment error); a `fail` never retries.
-    /// - `environment:` names a key under the sibling `environments:`
+    /// - `profile:` names a key under the sibling `profiles:`
     ///   block. Cross-key validation is deferred to engine-time lookup
     ///   (spec #66 Out-of-scope), so any string is accepted here.
     ///
@@ -134,15 +133,15 @@ pub struct RootManifest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ManifestDefaults {
-    /// Name of an environment under the sibling `environments:` block
+    /// Name of a profile under the sibling `profiles:` block
     /// to use for the suite. Accepted as any string here; the lookup
-    /// against `environments:` happens at engine-time (spec #66
+    /// against `profiles:` happens at engine-time (spec #66
     /// Out-of-scope), so an unknown name is not a parse error.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment: Option<String>,
-    /// Per-step `within:` fallback for every leaf. A step's own
-    /// `within:` always wins; this only fills in when a step omits it.
-    /// Same duration wire shape as `environment.ready.http.timeout`
+    pub profile: Option<String>,
+    /// Per-step `timeout:` fallback for every leaf. A step's own
+    /// `timeout:` always wins; this only fills in when a step omits it.
+    /// Same duration wire shape as `provision.ready.http.timeout`
     /// (integer milliseconds or a suffixed string like `30s` / `2m`).
     /// Absent → the engine's built-in 5s default still applies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -198,11 +197,11 @@ pub enum RetryBackoff {
     Linear,
 }
 
-/// A well-formed environment name is lowercase ASCII letters, digits,
+/// A well-formed profile name is lowercase ASCII letters, digits,
 /// and dashes, beginning and ending with an alphanumeric. This keeps
-/// names addressable on the CLI (`--environment <name>`) and stable
+/// names addressable on the CLI (`--profile <name>`) and stable
 /// across the `$env` whitelist surface.
-fn env_name_well_formed(name: &str) -> bool {
+fn profile_name_well_formed(name: &str) -> bool {
     if name.is_empty() {
         return false;
     }
@@ -347,17 +346,17 @@ pub enum LoadError {
     /// looked.
     #[error("no manifest found in the current directory or its ancestors; searched {searched:?}")]
     ManifestNotFound { searched: Vec<PathBuf> },
-    /// An `environments:` key is not a well-formed environment name
+    /// A `profiles:` key is not a well-formed profile name
     /// (lowercase letters, digits, dashes; alphanumeric at both ends).
     #[error(
-        "{manifest}: environment name `{name}` is not well-formed (use lowercase letters, digits, and dashes)"
+        "{manifest}: profile name `{name}` is not well-formed (use lowercase letters, digits, and dashes)"
     )]
-    MalformedEnvironmentName { manifest: PathBuf, name: String },
-    /// An `environments:` entry declares an empty key map. A named
-    /// environment with no keys supplies nothing and is almost
+    MalformedProfileName { manifest: PathBuf, name: String },
+    /// A `profiles:` entry declares an empty key map. A named
+    /// profile with no keys supplies nothing and is almost
     /// certainly an authoring mistake.
-    #[error("{manifest}: environment `{name}` declares no keys")]
-    EmptyEnvironment { manifest: PathBuf, name: String },
+    #[error("{manifest}: profile `{name}` declares no keys")]
+    EmptyProfile { manifest: PathBuf, name: String },
     /// An `includes:` chain re-enters a file already on the chain —
     /// resolving it would loop forever. Both ends are named: the file
     /// that declared the offending include and the include target it
@@ -585,18 +584,18 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
             message: msg,
         });
     }
-    // Named-environments discipline (spec #68): well-formed names,
+    // Named-profiles discipline (spec #68): well-formed names,
     // non-empty key maps. Cheap structural checks at load time, the
     // same place the manifest-version and path checks live.
-    for (name, keys) in &manifest.environments {
-        if !env_name_well_formed(name) {
-            return Err(LoadError::MalformedEnvironmentName {
+    for (name, keys) in &manifest.profiles {
+        if !profile_name_well_formed(name) {
+            return Err(LoadError::MalformedProfileName {
                 manifest: manifest_path.to_path_buf(),
                 name: name.clone(),
             });
         }
         if keys.is_empty() {
-            return Err(LoadError::EmptyEnvironment {
+            return Err(LoadError::EmptyProfile {
                 manifest: manifest_path.to_path_buf(),
                 name: name.clone(),
             });
@@ -1191,10 +1190,10 @@ verifications:
     }
 
     #[test]
-    fn environments_round_trip_preserves_nested_maps() {
+    fn profiles_round_trip_preserves_nested_maps() {
         let y = r#"
 manifest_version: 1
-environments:
+profiles:
   staging:
     base_url: https://staging.example.com
     db_url: postgres://staging-db
@@ -1204,8 +1203,8 @@ environments:
 verifications: []
 "#;
         let m = RootManifest::from_yaml_str(y).expect("parse");
-        assert_eq!(m.environments.len(), 2);
-        let staging = &m.environments["staging"];
+        assert_eq!(m.profiles.len(), 2);
+        let staging = &m.profiles["staging"];
         assert_eq!(
             staging["base_url"],
             serde_yml::Value::String("https://staging.example.com".into())
@@ -1213,33 +1212,40 @@ verifications: []
         assert_eq!(staging["db_url"].as_str(), Some("postgres://staging-db"));
         assert_eq!(staging["workers"].as_u64(), Some(3));
         assert_eq!(
-            m.environments["prod"]["base_url"].as_str(),
+            m.profiles["prod"]["base_url"].as_str(),
             Some("https://example.com")
         );
-        // deny_unknown_fields still holds alongside the new field.
-        let bad = "manifest_version: 1\nenvironments: {}\nverifications: []\nfoo: bar\n";
-        assert!(RootManifest::from_yaml_str(bad).is_err());
+        // Old schema spellings are not transitional aliases.
+        for old in [
+            "environments: {}\n",
+            "environment:\n  up: ./scripts/up.sh\n",
+            "defaults:\n  environment: staging\n",
+        ] {
+            let bad = format!("manifest_version: 1\n{old}verifications: []\n");
+            let err = RootManifest::from_yaml_str(&bad).unwrap_err();
+            assert!(format!("{err}").contains("unknown field"), "got: {err}");
+        }
     }
 
     #[test]
-    fn absent_environments_default_to_empty() {
+    fn absent_profiles_default_to_empty() {
         let y = "manifest_version: 1\nverifications: []\n";
         let m = RootManifest::from_yaml_str(y).expect("parse");
-        assert!(m.environments.is_empty());
-        // Round-trips back out without an `environments:` key.
+        assert!(m.profiles.is_empty());
+        // Round-trips back out without an `profiles:` key.
         let out = serde_yml::to_string(&m).unwrap();
-        assert!(!out.contains("environments"), "got: {out}");
+        assert!(!out.contains("profiles"), "got: {out}");
     }
 
     #[test]
-    fn malformed_environment_name_is_load_error() {
+    fn malformed_profile_name_is_load_error() {
         let tmp = tempfile::tempdir().unwrap();
         write(
             tmp.path(),
             "duhem.yml",
             r#"
 manifest_version: 1
-environments:
+profiles:
   Prod:
     base_url: https://example.com
 verifications: []
@@ -1247,33 +1253,30 @@ verifications: []
         );
         let err = load(&tmp.path().join("duhem.yml")).unwrap_err();
         assert!(
-            matches!(err, LoadError::MalformedEnvironmentName { .. }),
+            matches!(err, LoadError::MalformedProfileName { .. }),
             "got {err:?}"
         );
     }
 
     #[test]
-    fn empty_environment_key_map_is_load_error() {
+    fn empty_profile_key_map_is_load_error() {
         let tmp = tempfile::tempdir().unwrap();
         write(
             tmp.path(),
             "duhem.yml",
             r#"
 manifest_version: 1
-environments:
+profiles:
   staging: {}
 verifications: []
 "#,
         );
         let err = load(&tmp.path().join("duhem.yml")).unwrap_err();
-        assert!(
-            matches!(err, LoadError::EmptyEnvironment { .. }),
-            "got {err:?}"
-        );
+        assert!(matches!(err, LoadError::EmptyProfile { .. }), "got {err:?}");
     }
 
     #[test]
-    fn well_formed_environment_loads() {
+    fn well_formed_profile_loads() {
         let tmp = tempfile::tempdir().unwrap();
         write(tmp.path(), "a/duhem.yml", LEAF_A);
         write(
@@ -1281,7 +1284,7 @@ verifications: []
             "duhem.yml",
             r#"
 manifest_version: 1
-environments:
+profiles:
   staging:
     base_url: https://staging.example.com
 verifications:
@@ -1291,7 +1294,7 @@ verifications:
         let loaded = load(&tmp.path().join("duhem.yml")).unwrap();
         match loaded {
             Loaded::Manifest { manifest, .. } => {
-                assert!(manifest.environments.contains_key("staging"));
+                assert!(manifest.profiles.contains_key("staging"));
             }
             _ => panic!("expected Manifest"),
         }
@@ -1411,7 +1414,7 @@ verifications:
         let y = r#"
 manifest_version: 1
 defaults:
-  environment: staging
+  profile: staging
   timeout: 30s
   inconclusive_policy: warn
   retry:
@@ -1421,7 +1424,7 @@ verifications: []
 "#;
         let m = RootManifest::from_yaml_str(y).expect("parse");
         let d = m.defaults.as_ref().expect("defaults present");
-        assert_eq!(d.environment.as_deref(), Some("staging"));
+        assert_eq!(d.profile.as_deref(), Some("staging"));
         assert_eq!(
             std::time::Duration::from(d.timeout.unwrap()),
             std::time::Duration::from_secs(30)
@@ -1445,7 +1448,7 @@ verifications: []
 "#;
         let m = RootManifest::from_yaml_str(y).expect("parse");
         let d = m.defaults.unwrap();
-        assert!(d.environment.is_none());
+        assert!(d.profile.is_none());
         assert!(d.inconclusive_policy.is_none());
         assert!(d.retry.is_none());
         assert!(d.timeout.is_some());

@@ -33,7 +33,7 @@ pub enum VerdictState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InconclusiveCause {
-    /// A step or assertion exceeded its `within` budget.
+    /// A step or assertion exceeded its `timeout` budget.
     Timeout,
     /// An assertion referenced a step output that was never produced.
     MissingObservation,

@@ -125,7 +125,7 @@ export function describeWith(withObj: unknown): string {
     }
   }
   if (str(w.expected)) parts.push(String(w.expected));
-  if (str(w.within)) parts.push(`within ${w.within}`);
+  if (str(w.timeout)) parts.push(`within ${w.timeout}`);
   if (parts.length === 0) {
     // Generic fallback: first couple of scalar fields.
     for (const [k, v] of Object.entries(w)) {

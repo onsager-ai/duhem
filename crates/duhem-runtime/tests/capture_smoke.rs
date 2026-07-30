@@ -81,14 +81,14 @@ criteria:
             with:
               locator: { role: button, name: Sign in with SSO }
               expected: visible
-              within: 1s
+              timeout: 1s
             outputs:
               satisfied: satisfied
         assertions:
           - $steps.sso.outputs.satisfied == true
 "#;
 
-/// Navigate + assert a missing element; the `within` window gives the
+/// Navigate + assert a missing element; the `timeout` window gives the
 /// on-load fetch time to round-trip and land in the recorder.
 const NETWORK_YAML: &str = r#"
 verification: capture smoke — network
@@ -112,7 +112,7 @@ criteria:
             with:
               locator: { role: button, name: Sign in with SSO }
               expected: visible
-              within: 3s
+              timeout: 3s
             outputs:
               satisfied: satisfied
         assertions:
@@ -141,7 +141,7 @@ criteria:
             with:
               locator: { role: button, name: Create }
               expected: visible
-              within: 5s
+              timeout: 5s
             outputs:
               satisfied: satisfied
         assertions:
@@ -170,7 +170,7 @@ criteria:
             with:
               role: button
               name: Never rendered
-              within: 100ms
+              timeout: 100ms
         assertions:
           - "false"
 "#;
@@ -197,7 +197,7 @@ criteria:
             with:
               method: GET
               url: http://127.0.0.1:1/
-              within: 100ms
+              timeout: 100ms
             outputs:
               status: status
         assertions:

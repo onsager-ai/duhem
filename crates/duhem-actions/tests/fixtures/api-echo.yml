@@ -42,13 +42,13 @@ criteria:
                 Content-Type: application/json
               body:
                 hello: world
-              within: 2s
+              timeout: 2s
           - id: uuid_step
             uses: api/call
             with:
               method: GET
               url: $inputs.uuid_url
-              within: 2s
+              timeout: 2s
         assertions:
           - $steps.echo.outputs.status == 200
           - $runtime.matches($steps.echo.outputs.body_text, "world")

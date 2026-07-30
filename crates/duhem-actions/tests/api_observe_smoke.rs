@@ -17,7 +17,7 @@
 //!   declares `application/json` but isn't parseable yields a `null`
 //!   `body` plus an `api.json_parse_failure` observation.
 //! - `observe_times_out_when_no_event_matches` — no matching traffic
-//!   within `within:` yields `Outcome::Timeout`, promptly.
+//!   within `timeout:` yields `Outcome::Timeout`, promptly.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -133,7 +133,7 @@ async fn observe_captures_fetch_triggered_by_click() {
                 r#"
 method: POST
 url_pattern: "{endpoint}"
-within: 2s
+timeout: 2s
 "#,
             )),
         )
@@ -200,7 +200,7 @@ async fn observe_json_parse_failure_emits_observation() {
             &yaml(&format!(
                 r#"
 url_pattern: "{endpoint}"
-within: 2s
+timeout: 2s
 "#,
             )),
         )
@@ -234,18 +234,18 @@ async fn observe_times_out_when_no_event_matches() {
         .await
         .unwrap();
 
-    // Nothing ever requests this path → timeout within `within:`.
+    // Nothing ever requests this path → timeout within `timeout:`.
     let started = Instant::now();
     let r = Observe
         .invoke(
             &ctx,
-            &yaml(r#"{ url_pattern: "http://does.not/match", within: 300ms }"#),
+            &yaml(r#"{ url_pattern: "http://does.not/match", timeout: 300ms }"#),
         )
         .await
         .unwrap();
     let elapsed = started.elapsed();
     assert_eq!(r.outcome, Outcome::Timeout);
-    // Loose upper bound — verifies we honored `within: 300ms` rather
+    // Loose upper bound — verifies we honored `timeout: 300ms` rather
     // than the 5s default.
     assert!(
         elapsed < Duration::from_millis(2_000),

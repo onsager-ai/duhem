@@ -39,7 +39,7 @@
 //! The sidecar attaches a `page.on('response', …)` recorder when the
 //! page is created and buffers every response (body read eagerly,
 //! base64-encoded). `invoke` polls that buffer via
-//! [`Page::poll_network`] within `within:`, applying the URL/method
+//! [`Page::poll_network`] within `timeout:`, applying the URL/method
 //! filter to each event and collecting the first match. Because the
 //! page is created per check, the buffer only ever holds *this check's*
 //! traffic — so observe scans exactly the HTTP its own check produced.
@@ -57,7 +57,7 @@
 //! `ui/click` it conceptually observes. That ordering requires the
 //! engine to run the observe listener concurrently with subsequent
 //! steps — a Phase-1 follow-up. **v1 here is synchronous**: observe
-//! runs at its own step and waits up to `within:` for a matching
+//! runs at its own step and waits up to `timeout:` for a matching
 //! event to appear in the buffer. Authors place observe AFTER the
 //! trigger; the per-page recorder guarantees a just-finished event is
 //! still observable. Both choices preserve the Holistic Verification
@@ -84,8 +84,8 @@
 //!
 //! ## Outcomes
 //!
-//! - Matching event arrives within `within:` → `Outcome::Ok`.
-//! - No matching event within `within:` → `Outcome::Timeout`.
+//! - Matching event arrives within `timeout:` → `Outcome::Ok`.
+//! - No matching event within `timeout:` → `Outcome::Timeout`.
 //! - Subscription/poll error, bad regex, or a body-read failure on
 //!   the matched event → `ActionError`.
 
@@ -98,10 +98,10 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::Deserialize;
 use tokio::time::{sleep, timeout};
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN, Observation};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT, Observation};
 use crate::browser::NetworkEvent;
 use crate::error::ActionError;
-use crate::with::WithinSpec;
+use crate::with::TimeoutSpec;
 
 /// How often to re-poll the sidecar's network buffer while waiting for
 /// a match. Small enough that observe resolves promptly once the event
@@ -127,9 +127,9 @@ pub(crate) struct With {
     #[serde(default)]
     #[allow(dead_code)]
     after: Option<String>,
-    /// Max wait for a matching event. Defaults to [`DEFAULT_WITHIN`].
+    /// Max wait for a matching event. Defaults to [`DEFAULT_TIMEOUT`].
     #[serde(default)]
-    within: Option<WithinSpec>,
+    timeout: Option<TimeoutSpec>,
 }
 
 pub struct Observe;
@@ -149,7 +149,7 @@ impl Action for Observe {
                 FieldSpec::required("method"),
                 FieldSpec::required("url_pattern"),
                 FieldSpec::optional("after"),
-                FieldSpec::optional("within"),
+                FieldSpec::optional("timeout"),
             ],
             outputs: vec![],
             secret_outputs: vec![],
@@ -168,13 +168,13 @@ impl Action for Observe {
                 action: "api/observe",
                 source: e,
             })?;
-        let timeout_dur: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
+        let timeout_dur: Duration = with.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
 
         let matcher = UrlMatcher::parse(&with.url_pattern)?;
         let method_filter = with.method.as_deref().map(str::to_ascii_uppercase);
 
         // Poll the sidecar's per-page recorder until a matching event
-        // appears or `within:` elapses. `cursor` advances past events
+        // appears or `timeout:` elapses. `cursor` advances past events
         // we've already inspected, so each one is filtered once.
         //
         // Two-phase matching: the cheap URL/method check filters first;
@@ -476,14 +476,14 @@ mod tests {
 method: POST
 url_pattern: "http://x/projects"
 after: nav
-within: 3s
+timeout: 3s
 "#,
         ))
         .unwrap();
         assert_eq!(w.method.as_deref(), Some("POST"));
         assert_eq!(w.url_pattern, "http://x/projects");
         assert_eq!(w.after.as_deref(), Some("nav"));
-        let d: Duration = w.within.unwrap().into();
+        let d: Duration = w.timeout.unwrap().into();
         assert_eq!(d, Duration::from_secs(3));
     }
 
@@ -492,7 +492,7 @@ within: 3s
         let w: With = serde_yml::from_value(yaml(r#"{ url_pattern: "/x" }"#)).unwrap();
         assert!(w.method.is_none());
         assert!(w.after.is_none());
-        assert!(w.within.is_none());
+        assert!(w.timeout.is_none());
         assert_eq!(w.url_pattern, "/x");
     }
 

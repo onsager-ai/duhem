@@ -13,7 +13,7 @@ use crate::manifest::{LoadError, LoadedLeaf};
 use crate::verification::InputDecl;
 
 pub(crate) fn validate(path: &Path, inputs: &BTreeMap<String, InputDecl>) -> Result<(), LoadError> {
-    let errors = crate::validate::input_decl_errors(inputs);
+    let errors = crate::validate::input_decl_errors(inputs, false);
     if errors.is_empty() {
         return Ok(());
     }
@@ -34,10 +34,12 @@ pub(crate) fn append_unused_warnings(
     warnings: &mut Vec<String>,
 ) {
     for name in inputs.keys() {
-        if !leaves
-            .iter()
-            .any(|leaf| leaf.definition.inherits.iter().any(|item| item == name))
-        {
+        if !leaves.iter().any(|leaf| {
+            leaf.definition
+                .inputs
+                .get(name)
+                .is_some_and(|decl| decl.inherit)
+        }) {
             warnings.push(format!(
                 "{}: manifest input `{name}` is not inherited by any verification",
                 path.display()

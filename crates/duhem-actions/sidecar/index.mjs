@@ -436,7 +436,7 @@ async function dispatch(req) {
     case 'pollNetwork': {
       // Return recorded responses from `cursor` onward plus the new
       // cursor (buffer length). `observe.rs` polls this within its
-      // `within:` window. The buffer is per-page and the page is
+      // `timeout:` window. The buffer is per-page and the page is
       // per-check, so it only ever holds this check's own traffic.
       const buf = networkBuffers.get(req.pageId)
       if (!buf) throw new Error(`unknown pageId: ${req.pageId}`)

@@ -30,9 +30,9 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::time::sleep;
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT};
 use crate::error::ActionError;
-use crate::with::WithinSpec;
+use crate::with::TimeoutSpec;
 
 /// How long the resource-entry count must stay flat for
 /// `network_idle` to fire. Matches Playwright's documented
@@ -41,7 +41,7 @@ use crate::with::WithinSpec;
 const NETWORK_IDLE_QUIET: Duration = Duration::from_millis(500);
 
 /// Polling interval for every state. Small enough that 200 ms
-/// `within:` produces multiple samples.
+/// `timeout:` produces multiple samples.
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -61,40 +61,40 @@ struct Marker {
 /// Discriminated state. The internally-tagged `state:` field selects
 /// the variant; `marker:` is structurally required on `authenticated`
 /// / `signed_out` and structurally rejected on `loaded` /
-/// `network_idle`. Each variant carries its own `within:` so the
+/// `network_idle`. Each variant carries its own `timeout:` so the
 /// outer `With` doesn't need to flatten.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 enum With {
     Loaded {
         #[serde(default)]
-        within: Option<WithinSpec>,
+        timeout: Option<TimeoutSpec>,
     },
     NetworkIdle {
         #[serde(default)]
-        within: Option<WithinSpec>,
+        timeout: Option<TimeoutSpec>,
     },
     Authenticated {
         marker: Marker,
         #[serde(default)]
-        within: Option<WithinSpec>,
+        timeout: Option<TimeoutSpec>,
     },
     SignedOut {
         marker: Marker,
         #[serde(default)]
-        within: Option<WithinSpec>,
+        timeout: Option<TimeoutSpec>,
     },
 }
 
 impl With {
     fn timeout(&self) -> Duration {
         let w = match self {
-            With::Loaded { within }
-            | With::NetworkIdle { within }
-            | With::Authenticated { within, .. }
-            | With::SignedOut { within, .. } => within,
+            With::Loaded { timeout }
+            | With::NetworkIdle { timeout }
+            | With::Authenticated { timeout, .. }
+            | With::SignedOut { timeout, .. } => timeout,
         };
-        w.map(Into::into).unwrap_or(DEFAULT_WITHIN)
+        w.map(Into::into).unwrap_or(DEFAULT_TIMEOUT)
     }
 }
 
@@ -114,7 +114,7 @@ impl Action for AssertState {
             with: vec![
                 FieldSpec::required("state"),
                 FieldSpec::optional("marker"),
-                FieldSpec::optional("within"),
+                FieldSpec::optional("timeout"),
             ],
             outputs: vec!["satisfied"],
             secret_outputs: vec![],
@@ -178,8 +178,8 @@ async fn check_loaded(ctx: &ActionCtx<'_>) -> Result<bool, ActionError> {
 /// because the Rust binding doesn't expose `wait_for_load_state`.
 ///
 /// The probe bails as soon as `deadline` is reached so we don't
-/// overshoot the user's `within:` budget — important when
-/// `within:` is shorter than `NETWORK_IDLE_QUIET` (e.g. 200 ms).
+/// overshoot the user's `timeout:` budget — important when
+/// `timeout:` is shorter than `NETWORK_IDLE_QUIET` (e.g. 200 ms).
 async fn check_network_idle(ctx: &ActionCtx<'_>, deadline: Instant) -> Result<bool, ActionError> {
     let initial: u64 = ctx
         .require_page()?
@@ -193,7 +193,7 @@ async fn check_network_idle(ctx: &ActionCtx<'_>, deadline: Instant) -> Result<bo
             return Ok(true);
         }
         if Instant::now() >= deadline {
-            // Out of `within:` budget. Let the outer loop record
+            // Out of `timeout:` budget. Let the outer loop record
             // `satisfied: false`; don't claim quietness we haven't
             // actually observed.
             return Ok(false);
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn parses_loaded() {
-        let yaml = r#"{ state: loaded, within: 2s }"#;
+        let yaml = r#"{ state: loaded, timeout: 2s }"#;
         let w: With = serde_yml::from_str(yaml).unwrap();
         assert!(matches!(w, With::Loaded { .. }));
         assert_eq!(w.timeout(), Duration::from_secs(2));
@@ -253,7 +253,7 @@ mod tests {
         let yaml = r#"
 state: authenticated
 marker: { kind: cookie, name: "session" }
-within: 1s
+timeout: 1s
 "#;
         let w: With = serde_yml::from_str(yaml).unwrap();
         match w {

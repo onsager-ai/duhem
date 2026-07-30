@@ -390,19 +390,19 @@ Values like `$inputs.workspace_name` below are **runtime expressions** (§10.7).
 
 #### Inputs, acquired values, and secret masking
 
-An input may declare `env: VARIABLE_NAME` as a process-environment fallback. Resolution order is `--inputs` (last merged value) → selected Duhem environment → the input's process `env:` → `default:`. Because `env:` is below both explicit sources, adding it never changes a run that already supplied the input. An unset input with no remaining source is an environment failure at run time and produces `inconclusive:environment_error`; it is not a validation failure or a product `fail`.
+An input may declare `env: VARIABLE_NAME` as a process-environment fallback. Resolution order is `--inputs` (last merged value) → selected Duhem profile → the input's process `env:` → `default:`. Because `env:` is below both explicit sources, adding it never changes a run that already supplied the input. An unset input with no remaining source is an environment failure at run time and produces `inconclusive:environment_error`; it is not a validation failure or a product `fail`.
 
-For a value shared across a manifest suite, put the same declaration shape under the manifest's top-level `inputs:` and let each consuming leaf list the name under `inherits:`. The manifest declaration owns `type`, `env:`, `default:`, and `secret:` while the selected `environments:` entry continues to supply a value. Resolution is `--inputs` → selected environment → manifest `env:` → manifest `default:`. The declared type is enforced for that inherited name; an inherited name with no manifest declaration retains names-only, unchecked resolution for compatibility.
+For a value shared across a manifest suite, put the full declaration under the manifest's top-level `inputs:` and let each consuming leaf declare the name as `{ inherit: true }` under its own `inputs:`. The manifest declaration owns `type`, `env:`, and `default:` while the leaf may add `secret: true`; the selected `profiles:` entry continues to supply a value. Resolution is `--inputs` → selected profile → manifest `env:` → manifest `default:`. The leaf opt-in keeps its declaration surface closed: a `$inputs.<name>` it did not declare remains a validation error even when the manifest declares that name.
 
-`secret: true` registers the resolved value for exact, case-sensitive substring masking. Secret inputs cannot have `default:` values: credentials belong in process or selected environments, or in an explicit operator-supplied input. Duhem also registers the value's standard-base64, percent-encoded, and JSON-string-escaped forms. Every matching recorded text occurrence becomes `[redacted:<input_name>]` at the two output boundaries: evidence (event payloads, text artifact blobs, and bundle exports) and terminal presentation. Each text artifact records non-zero replacement counts by input name; the dashboard renders those counts so aggressive masking is visible. Values shorter than eight characters or equal (case-insensitively) to the small default list `admin`, `changeme`, `password`, `secret`, `test`, or `token` warn at run time because they commonly over-mask durable evidence. The threshold and list are defaults that may become tunable later, not validation gates.
+`secret: true` registers the resolved value for exact, case-sensitive substring masking. Secret inputs cannot have `default:` values: credentials belong in process or selected profiles, or in an explicit operator-supplied input. Duhem also registers the value's standard-base64, percent-encoded, and JSON-string-escaped forms. Every matching recorded text occurrence becomes `[redacted:<input_name>]` at the two output boundaries: evidence (event payloads, text artifact blobs, and bundle exports) and terminal presentation. Each text artifact records non-zero replacement counts by input name; the dashboard renders those counts so aggressive masking is visible. Values shorter than eight characters or equal (case-insensitively) to the small default list `admin`, `changeme`, `password`, `secret`, `test`, or `token` warn at run time because they commonly over-mask durable evidence. The threshold and list are defaults that may become tunable later, not validation gates.
 
 Credentials acquired by an action use the same registry. A step's optional
-`secret:` list names paths into its raw action outputs:
+`secret_outputs:` list names paths into its raw action outputs:
 
 ```yaml
 - id: login
   uses: api/call
-  secret: [body.data]
+  secret_outputs: [body.data]
   with:
     method: POST
     url: $inputs.login_url
@@ -422,7 +422,7 @@ array, are errors. An authored declaration does not register an aggregate's exac
 or recursively mask all its leaves: the first rarely recurs byte-for-byte in
 evidence, while the second can over-mask unrelated values. A trusted action
 contract may declare an output path secret by default, so actions that
-structurally produce credentials need no authored `secret:` entry. Contract
+structurally produce credentials need no authored `secret_outputs:` entry. Contract
 metadata may deliberately name a structured credential:
 `ui/capture-session.state` is replaced as one exact JSON subtree at the
 evidence boundary, rather than asking an author to enumerate its cookies and
@@ -443,7 +443,7 @@ The guarantee is deliberately about recorded text, with two residual gaps. First
 
 `ui/capture-session` has no `with:` fields and returns `state`, Playwright's
 opaque storage-state object (cookies plus per-origin local storage). The action
-contract declares `state` secret, so a VD never needs an authored `secret:`
+contract declares `state` secret, so a VD never needs an authored `secret_outputs:`
 entry for it. Capture login once in `setup:`, then select that value on each
 authenticated check:
 
@@ -536,7 +536,7 @@ criteria:
             with:
               method: POST
               path: /workspaces
-              within: 3s
+              timeout: 3s
             outputs:
               status: response.status
               workspace_id: response.body.id
@@ -557,7 +557,7 @@ criteria:
                 text: $inputs.workspace_name
               scope: {role: "list", name: "Workspaces"}
               expected: exists
-              within: 5s
+              timeout: 5s
             outputs:
               satisfied: satisfied
         assertions:
@@ -570,7 +570,7 @@ criteria:
             id: nav_check
             with:
               matches: "^/workspaces/[0-9a-f-]+$"   # regex; step outputs are check-scoped, so match the route shape
-              within: 3s
+              timeout: 3s
             outputs:
               satisfied: satisfied
         assertions:
@@ -594,13 +594,13 @@ Notice that AC-1.1 alone exercises five different layers: UI input capture, UI b
 
 The example above writes the `id` / `outputs: { satisfied: satisfied }` / `$steps.<id>.outputs.satisfied == true` plumbing in full to show the mechanism. In practice most assert steps don’t need it — see the implicit-judgment shorthand in §10.3.2.
 
-#### 10.3.1 Environment provisioning (`environment:`)
+#### 10.3.1 Environment provisioning (`provision:`)
 
-A Verification Definition may declare an optional top-level `environment:` block of operator-supplied lifecycle hooks for the system-under-test (§9 Stage 3). When present, the runtime forks `up:` once before `setup:`, polls the optional `ready:` probe before the first criterion, and forks the optional `down:` after the criteria loop completes — regardless of verdict.
+A Verification Definition may declare an optional top-level `provision:` block of operator-supplied lifecycle hooks for the system-under-test (§9 Stage 3). When present, the runtime forks `up:` once before `setup:`, polls the optional `ready:` probe before the first criterion, and forks the optional `down:` after the criteria loop completes — regardless of verdict.
 
 ```yaml
 verification: Create workspace with a provisioned environment
-environment:
+provision:
   up: ./scripts/up.sh            # required — brings the SUT up; runs once before setup:
   down: ./scripts/down.sh        # optional — torn down after the criteria loop, regardless of verdict
   ready:                         # optional readiness probe, polled after up: exits 0
@@ -627,7 +627,7 @@ criteria:
 
 Failure policy is **inconclusive, never false**: a non-zero `up:` exit (or an unrunnable script) yields a run verdict of `Inconclusive(environment_error)`; a `ready:` probe that exhausts its `timeout:` yields `Inconclusive(timeout)`. A failed `up:` skips teardown (nothing came up to tear down); `down:` failures are recorded as evidence but never alter the verdict. Relative script paths resolve against the Verification Definition's directory. `up:`/`down:` scripts run under the runtime's sanitized subprocess environment (§9 Stage 3, §11.1 Runtime). The `ready:` catalog is closed at `http:` for v1.
 
-A manifest can also provision **one shared environment for the whole suite** rather than per-leaf — see the manifest `environment:` block in §10.4.
+A manifest can also provision **one shared environment for the whole suite** rather than per-leaf — see the manifest `provision:` block in §10.4.
 
 #### 10.3.2 Implicit judgment (judging steps)
 
@@ -642,7 +642,7 @@ An action whose contract emits a boolean `satisfied` output — `ui/assert-eleme
               locator: {role: listitem, text: $inputs.workspace_name}
               scope: {role: "list", name: "Workspaces"}
               expected: exists
-              within: 5s
+              timeout: 5s
 ```
 
 Rules:
@@ -663,14 +663,14 @@ The root manifest is a single canonical file at the project root that aggregates
 manifest_version: 1
 
 defaults:
-  environment: staging        # default environment for runs
+  profile: staging            # default profile for runs
   timeout: 30s                # default per-step timeout
   inconclusive_policy: block  # block | warn | pass
   retry:
     max: 1
     backoff: exponential
 
-environment:                  # optional — one shared environment for the whole suite (§10.3.1)
+provision:                  # optional — one shared environment for the whole suite (§10.3.1)
   up: ./scripts/up.sh         #   provisioned once before the first leaf, torn down after the last
   down: ./scripts/down.sh
   ready:
@@ -696,7 +696,7 @@ includes:                           # composition: shared config from other file
   - .duhem.shared.yml               # team-shared defaults
   - .duhem.local.yml                # gitignored, per-developer overrides
 
-environments:                       # named environment configs
+profiles:                       # named configuration profiles
   staging:
     base_url: https://staging.example.com
     db_password: staging-secret      # value for the declaration above
@@ -705,7 +705,7 @@ environments:                       # named environment configs
     db_password: prod-secret
 ```
 
-Leaves consume suite inputs with names only (`inherits: [base_url, db_password]`). For an inherited name that has a manifest declaration, values resolve from `--inputs` → selected `environments:` entry → the declaration's process `env:` → its `default:`, and the declaration's `type` is enforced. A manifest input not inherited by any leaf produces an authoring warning, not an error. `secret: true` still cannot be combined with `default:`.
+Leaves consume suite inputs by declaring `inputs: { base_url: { inherit: true }, db_password: { inherit: true, secret: true } }`. Values resolve from `--inputs` → selected `profiles:` entry → the manifest declaration's process `env:` → its `default:`, and the manifest declaration's `type` is enforced. `inherit: true` rejects a leaf-local `type:` or `default:`. A manifest input not inherited by any leaf produces an authoring warning, not an error. `secret: true` still cannot be combined with `default:`.
 
 The root manifest is canonical: Duhem auto-discovers `duhem.yml` (or `.duhem.yml`) at the project root or its ancestors. Users can override with `duhem run -f path/to/manifest.yml`.
 
@@ -733,7 +733,7 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 - `api/call` — make an HTTP request actively
 - `api/observe` — passively observe an HTTP request the UI triggers (network sniffing)
 - `api/poll` — re-hit an endpoint until a response condition holds or a timeout elapses
-- `api/stream` — follow an open-ended SSE / `text/event-stream` from an in-progress source, collecting ordered events until a terminal condition (`until_event` / `max_events` / server close) or the `within:` budget; outputs `events` / `event_count` / `last_event` for mechanical assertion
+- `api/stream` — follow an open-ended SSE / `text/event-stream` from an in-progress source, collecting ordered events until a terminal condition (`until_event` / `max_events` / server close) or the `timeout:` budget; outputs `events` / `event_count` / `last_event` for mechanical assertion
 
 **Database actions**
 
@@ -774,7 +774,7 @@ Borrowed from Arazzo. References available in expressions:
 - `$inputs.<name>` — inputs to the verification run
 - `$steps.<id>.outputs.<name>` — outputs from a prior step (scoped to the declaring check)
 - `$setup.<id>.outputs.<name>` — outputs from a run-level `setup:` step (§10.3), read-only from inside any check
-- `$env.<name>` — a value from the selected named environment. The `$env` whitelist is **empty by default**. An author opts a key in by declaring it (with a string value) under a manifest `environments:` entry (§10.4) and selecting that environment with `--environment <name>` (auto-selected when the manifest declares exactly one); the selected entry's string-valued keys seed the whitelist for that run. There is no process-environment passthrough and no `--env` CLI flag. A reference to a key that isn't whitelisted evaluates to `inconclusive` (it carries a missing-env cause, §10.6), never a parse error.
+- `$env.<name>` — a value from the selected named profile. The `$env` whitelist is **empty by default**. An author opts a key in by declaring it (with a string value) under a manifest `profiles:` entry (§10.4) and selecting that profile with `--profile <name>` (`--environment` remains an alias; one profile auto-selects); the selected entry's string-valued keys seed the whitelist for that run. There is no process-environment passthrough and no `--env` CLI flag. A reference to a key that isn't whitelisted evaluates to `inconclusive` (it carries a missing-env cause, §10.6), never a parse error.
 - `$runtime.uuid()` — a stable per-run UUID / `$runtime.now()` — the run's current time as epoch milliseconds
 - `$runtime.format(fmt, args...)` — **pure** string composition: the
   `{}` placeholders in `fmt` are filled, in order, by the remaining
@@ -864,7 +864,7 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 **Runtime** (`duhem-runtime`)
 
 - Executes checks against an environment
-- **Provisions the environment**: owns the `environment.up:`/`down:` lifecycle, the `ready:` readiness probe, and the sanitized subprocess env under which operator-supplied scripts run (§9 Stage 3, §10.3.1)
+- **Provisions the environment**: owns the `provision.up:`/`down:` lifecycle, the `ready:` readiness probe, and the sanitized subprocess env under which operator-supplied scripts run (§9 Stage 3, §10.3.1)
 - Produces evidence
 - Stateless except for run records
 

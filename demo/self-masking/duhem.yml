@@ -20,7 +20,7 @@ criteria:
         steps:
           - id: health
             uses: api/call
-            with: { method: GET, url: $inputs.health_url, within: 10s }
+            with: { method: GET, url: $inputs.health_url, timeout: 10s }
             outputs: { status: status, body: body }
         assertions:
           - $steps.health.outputs.status == 200
@@ -34,7 +34,7 @@ criteria:
         steps:
           - id: front
             uses: api/call
-            with: { method: GET, url: $inputs.front_url, within: 10s }
+            with: { method: GET, url: $inputs.front_url, timeout: 10s }
             outputs: { status: status, body: body }
         assertions:
           - $steps.front.outputs.status == 200

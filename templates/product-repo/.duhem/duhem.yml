@@ -16,7 +16,7 @@ manifest_version: 1
 # every leaf runs against it, torn down once (§11 up:/down: hooks). Omit
 # this block for a page-free CLI suite that needs no server. Example:
 #
-# environment:
+# provision:
 #   up: ./.duhem/scripts/up.sh
 #   down: ./.duhem/scripts/down.sh
 #   ready:

@@ -6,7 +6,7 @@
 # first, so under root-wins / first-include-wins the shared value
 # stands; this `base_url` adds nothing. The `workers` key is unique to
 # this fragment, so it composes in cleanly.
-environments:
+profiles:
   staging:
     base_url: http://localhost:3000
     workers: 1

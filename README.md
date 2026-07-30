@@ -90,13 +90,13 @@ WOULD RUN: checks::AC-2::AC-2.1
 
 `duhem run` auto-discovers the manifest: with no path it walks the current directory and its ancestors (capped at the enclosing `.git`) for a `duhem.yml` / `.duhem.yml`, so `cd anywhere-in-the-repo && duhem run` finds the repo-root manifest — same as `git`, `cargo`, `pnpm`. Pass an explicit path to override, or `-f path/to/manifest.yml` for an out-of-tree manifest.
 
-For a real-world example — including the `up:` / `down:` environment hooks Duhem sequences around a check — see [`verifications/duhem-dashboard/`](verifications/duhem-dashboard/). Product suites live co-located in their own repos under `.duhem/` (e.g. `onsager-ai/chreode/.duhem/`); [`templates/product-repo/`](templates/product-repo/) is the drop-in skeleton.
+For a real-world example — including the `provision.up:` / `down:` hooks Duhem sequences around a check — see [`verifications/duhem-dashboard/`](verifications/duhem-dashboard/). Product suites live co-located in their own repos under `.duhem/` (e.g. `onsager-ai/chreode/.duhem/`); [`templates/product-repo/`](templates/product-repo/) is the drop-in skeleton.
 
 ## Core concepts
 
 - **Criteria vs. checks.** *Criteria* are the human commitment about what "done" means; they are stable and survive implementation churn. *Checks* are how Duhem verifies that commitment; they are derivative and may change as the implementation does. Conflating the two is a defect.
-- **Verification Definition (VD).** A YAML document (criteria + checks + inputs, optionally `environment` hooks) describing one workload to verify. `duhem init` scaffolds one; `verifications/` holds worked examples.
-- **The manifest (`duhem.yml`).** Composes one or more VDs into a suite and carries shared configuration — `defaults:` (timeout / inconclusive policy / retry), `includes:`, `environments:`. A single-file VD *is* a manifest with one leaf.
+- **Verification Definition (VD).** A YAML document (criteria + checks + inputs, optionally `provision` hooks) describing one workload to verify. `duhem init` scaffolds one; `verifications/` holds worked examples.
+- **The manifest (`duhem.yml`).** Composes one or more VDs into a suite and carries shared configuration — `defaults:` (timeout / inconclusive policy / retry), `includes:`, `profiles:`. A single-file VD *is* a manifest with one leaf.
 - **The verdict.** Deterministic aggregation of structured assertions into `pass` / `fail` / `inconclusive`. No LLM in the loop.
 
 The canonical reference is [`docs/duhem-spec.md`](docs/duhem-spec.md) — start with §1 (Why), §4 (Solution Overview), §7 (Core Concepts), §8 (Holistic Verification Principle), and §10 (VD shape).
@@ -121,7 +121,7 @@ duhem mcp        Serve the action contract + validate over MCP (stdio) for AI au
 duhem --version  Print the CLI and schema version
 ```
 
-Run `duhem <command> --help` for the full flag surface (filters, inputs, environment selection, reporters, evidence directory, env-hook control).
+Run `duhem <command> --help` for the full flag surface (filters, inputs, profile selection, reporters, evidence directory, provision-hook control).
 
 ## Status
 

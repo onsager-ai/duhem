@@ -178,7 +178,7 @@ Common shape (terse):
   steps:
     - id: create
       uses: api/call
-      with: { method: POST, url: $inputs.api_base/workspaces, within: 3s }
+      with: { method: POST, url: $inputs.api_base/workspaces, timeout: 3s }
       # no outputs: block — status / body / body.id resolve directly
   assertions:
     - $steps.create.outputs.status == 200
@@ -190,7 +190,7 @@ Authoring rules:
 - Reference outputs by their fully-qualified path,
   `$steps.<id>.outputs.<name>`; add `outputs:` only for a rename or a
   deep-extraction alias.
-- Timeouts (`within:`) are explicit on steps that observe something
+- Timeouts (`timeout:`) are explicit on steps that observe something
   asynchronous.
 - Use role-based locators (`{ role: "button", name: "…" }`) for `ui/*`
   rather than CSS or XPath — UI churn invalidates the latter while
@@ -281,7 +281,7 @@ inputs:
     secret: true
 ```
 
-Resolution is `--inputs` → selected environment → declared `env:` →
+Resolution is `--inputs` → selected profile → declared `env:` →
 `default:`. Registered secret values, plus their base64,
 percent-encoded, and JSON-string-escaped forms, are exact-substring
 masked from recorded text and terminal output. Screenshots/video are
@@ -304,13 +304,15 @@ verifications:
   - path: database/duhem.yml
 
 # .duhem/database/duhem.yml
-inherits: [db_dsn]
+inputs:
+  db_dsn: { inherit: true, secret: true }
 ```
 
-The manifest declaration owns type checking, `env:`, `default:`, and
-`secret:`; selected `environments:` entries continue to supply values.
-Resolution is `--inputs` → selected environment → manifest `env:` →
-manifest `default:`. A secret declaration cannot carry `default:`.
+The manifest declaration owns type checking, `env:`, and `default:`;
+the leaf may add `secret: true`, and selected `profiles:` entries
+continue to supply values. Resolution is `--inputs` → selected profile
+→ manifest `env:` → manifest `default:`. An inherited leaf declaration
+cannot carry `type:` or `default:`.
 
 When a login or setup action returns a credential, declare its scalar
 output path on the producing step:
@@ -318,7 +320,7 @@ output path on the producing step:
 ```yaml
 - id: login
   uses: api/call
-  secret: [body.data]
+  secret_outputs: [body.data]
   with:
     method: POST
     url: $inputs.login_url
@@ -331,7 +333,7 @@ output path on the producing step:
     headers: { Authorization: $steps.login.outputs.body.data }
 ```
 
-`secret:` paths start at an output declared by the action contract and
+`secret_outputs:` paths start at an output declared by the action contract and
 must resolve to one scalar. `body.data` and `body.items[0].key` are
 valid scalar leaves; `body` when it is an object and `body.items` when
 it is an array are errors. Do not name a whole response subtree: exact
@@ -340,7 +342,7 @@ masking every leaf can swallow unrelated values. Registration happens
 before the producing step records its response, so its own observations
 and later references become `[redacted:login.body.data]`. An action may
 also mark a credential output secret in its contract, requiring no
-authored `secret:` entry.
+authored `secret_outputs:` entry.
 
 ### Reuse an acquired browser session
 
@@ -379,7 +381,7 @@ login surface. Each check still receives a fresh browser context
 seeded from that baseline, so mutations do not cross between checks.
 Omit `session:` for the signed-out path. `ui/capture-session` marks its
 structured `state` output secret by contract; do not add an authored
-`secret:` entry for it.
+`secret_outputs:` entry for it.
 
 ## Worked example template
 

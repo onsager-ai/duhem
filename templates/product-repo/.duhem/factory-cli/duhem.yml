@@ -43,7 +43,7 @@ criteria:
               # point (e.g. `[pnpm, <script>, $inputs.app_description]`).
               command: [echo, "shipped → http://127.0.0.1:0/"]
               cwd: $inputs.repo_dir
-              within: 180s
+              timeout: 180s
         assertions:
           # No `outputs:` block needed — `exit_code` and `stdout` are
           # native `cli/invoke` outputs and resolve directly.

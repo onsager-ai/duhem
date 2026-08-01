@@ -74,6 +74,15 @@ mod catalog_tests {
     use super::{catalog, contract_for};
 
     #[test]
+    fn skipping_is_not_an_action_outcome() {
+        let action_contract = include_str!("action.rs");
+        assert!(
+            !action_contract.contains("Skipped"),
+            "skipping is an engine decision; the action contract must not expose it"
+        );
+    }
+
+    #[test]
     fn catalog_is_complete_with_unique_uses() {
         let cat = catalog();
         assert_eq!(cat.len(), 16, "expected 16 action contracts");

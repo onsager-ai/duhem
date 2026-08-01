@@ -66,8 +66,10 @@ error — it's `baseline: null` (see below).
 - **`changed`** (criterion / check) — `true` iff a baseline exists and
   the recorded verdict differs. **`changed`** (assertion) — `true` iff
   the recorded `(state, detail)` differs.
-- **verdict / state values** — the judge's wire tokens: `"pass"`,
-  `"fail"`, `"inconclusive:<cause>"`, or `null` (no recorded verdict).
+- **verdict / state values** — criteria, checks, and evaluated assertions
+  use `"pass"`, `"fail"`, `"inconclusive:<cause>"`, or `null` (no
+  recorded verdict). An assertion whose operands come from a skipped
+  step has no recorded entry.
 - **added / removed** — a criterion/check/assertion present on only
   one side (the VD was edited between runs) appears with the missing
   side `null` and `changed: true`.

@@ -1,22 +1,9 @@
-//! `Engine::run` — the v1 minimal step executor.
+//! `Engine::run`: execute, evaluate, aggregate, and emit evidence.
 //!
-//! Owns the "load → execute → evaluate → aggregate → emit" lifecycle
-//! per the spec on issue #15. The function walks
-//! `def.criteria × Criterion.checks × Check.steps` in order, lazily
-//! opens a `CheckBrowser` only when a step in the check has a known
-//! action, evaluates each `Assertion` via the shim + `eval()`, and
-//! folds outcomes via `aggregate_check / aggregate_criterion /
-//! aggregate_run` from `duhem-judge`. Errors only surface for
-//! runtime-itself failures (browser launch refused, evidence not
-//! writable); a failing artifact is a `RunVerdict::Fail`, not an
-//! `Err`.
-//!
-//! Per-step error policy (alignment ratification on the issue):
-//! `Outcome::Error` aborts the rest of the *check* (sibling checks
-//! still run); the check's verdict is whatever `aggregate_check`
-//! produces over the partial assertion outcomes. `Outcome::Timeout`
-//! does *not* abort — assertions still evaluate and propagate
-//! `Inconclusive(MissingObservation)` naturally.
+//! Per-step failure policy (spec #365/#377): execution errors/timeouts
+//! and failed implicit judgments block later `if: success` steps in this
+//! check. `if: always` and `if: failure` opt out; sibling checks have
+//! independent state.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -40,14 +27,15 @@ pub use crate::engine::outcome::{
     CapturedArtifact, CheckFailure, CheckFilter, EngineError, FailedAssertion, RunOutcome,
 };
 pub(crate) use crate::engine::outcome::{
-    StepEvidence, append_implicit_judgment, evaluate_explicit_assertions,
-    implicit_judgment_outcomes, step_label,
+    StepEvidence, append_implicit_judgment, display_step_label, evaluate_explicit_assertions,
+    implicit_judgment_for_step, implicit_judgment_outcomes, step_label,
 };
 
 use crate::engine::capture::{
     CapturePolicy, Storyboard, TargetLocator, finalize_capture, target_from_step,
 };
 use crate::engine::context::{RunContext, RunState, json_to_value};
+use crate::engine::gating::{skip_reason as gate_skip_reason, step_failed};
 use crate::engine::registry::{ActionRegistry, default_registry};
 use crate::engine::session::SessionResolution;
 use crate::engine::template::substitute_with;
@@ -646,18 +634,21 @@ impl Engine {
         // can't run (unknown action, environment failure) — evidence
         // is more useful when it records what the author wrote, not
         // what the engine got around to invoking.
-        let mut step_aborted = false;
+        let mut failed_by: Option<String> = None;
         let mut targets: Vec<TargetLocator> = Vec::new();
         let mut storyboard = Storyboard::default();
         // Per-step evidence (resolved `with:` + outputs) for implicit
         // judgment (#280). Empty = the step didn't run.
         let mut step_evidence = vec![StepEvidence::empty(); check.steps.len()];
         for (idx, step) in check.steps.iter().enumerate() {
+            let gate_reason = gate_skip_reason(step.condition, failed_by.as_deref());
             // Resolve template references in `with:` against whatever
             // context we have. Cheap and same-shape for every code
             // path, so we don't bifurcate evidence on it.
             let mut resolved_with = step.with.clone();
-            if let Err(u) = substitute_with(&mut resolved_with, &ctx) {
+            if gate_reason.is_none()
+                && let Err(u) = substitute_with(&mut resolved_with, &ctx)
+            {
                 return Err(EngineError::UnresolvedReference {
                     reference: u.reference,
                     context: u
@@ -672,17 +663,19 @@ impl Engine {
             // `timeout:` already in the payload wins; this only fills the
             // gap. With no manifest default, the action's built-in
             // `DEFAULT_TIMEOUT` (5s) remains the last resort.
-            if let Some(default) = self.default_timeout {
+            if gate_reason.is_none()
+                && let Some(default) = self.default_timeout
+            {
                 apply_default_timeout(&mut resolved_with, default);
             }
 
             // Collect ui/assert-element targets for the element-highlight
             // overlay (spec #214) — but only for steps that actually run.
-            // A skipped step (env failure, an earlier abort, unknown
-            // action) never "looked" for anything, so recording its
+            // A gated or otherwise unexecuted step never "looked" for
+            // anything, so recording its
             // locator would be misleading evidence.
-            let will_run = !environment_failed
-                && !step_aborted
+            let will_run = gate_reason.is_none()
+                && !environment_failed
                 && self.registry.contains_key(step.uses.as_str());
             if will_run && let Some(t) = target_from_step(&step.uses, &resolved_with) {
                 targets.push(t);
@@ -702,7 +695,7 @@ impl Engine {
             // action's contract without a second registry lookup. The
             // invocation itself stays *after* `StepStarted` — see the
             // registration comment below.
-            let dispatcher = if !known || environment_failed || step_aborted {
+            let dispatcher = if gate_reason.is_some() || !known || environment_failed {
                 None
             } else {
                 Some(
@@ -727,6 +720,19 @@ impl Engine {
                 })
                 .await?;
 
+            if let Some(reason) = gate_reason {
+                writer
+                    .append(EventPayload::StepFinished {
+                        step_index: idx as u32,
+                        outcome: duhem_evidence::StepOutcome::Skipped {
+                            reason: reason.clone(),
+                        },
+                    })
+                    .await?;
+                step_evidence[idx] = StepEvidence::skipped(reason);
+                continue;
+            }
+
             // Invoke after `StepStarted` is persisted, then register any
             // acquired secret before anything carrying this step's
             // outputs (spec #355).
@@ -740,6 +746,7 @@ impl Engine {
             // whole duration, the `… still in <uses>` heartbeat (#305)
             // could never fire, and `step_started.ts` would be stamped
             // at completion, collapsing event-derived durations.
+            let dispatcher_judges = dispatcher.is_some_and(|dispatcher| dispatcher.judges());
             let execution = match dispatcher {
                 None => None,
                 Some(dispatcher) => {
@@ -779,6 +786,7 @@ impl Engine {
                     step_evidence[idx] = StepEvidence {
                         with: resolved_with.clone(),
                         outputs: r.outputs.clone(),
+                        skip_reason: None,
                     };
                     r.outcome.clone()
                 }
@@ -805,8 +813,18 @@ impl Engine {
                     .await;
             }
 
-            if matches!(outcome, Outcome::Error) {
-                step_aborted = true;
+            let judgment = implicit_judgment_for_step(
+                step,
+                idx,
+                dispatcher_judges,
+                &step_evidence[idx],
+                false,
+                false,
+                false,
+            )
+            .map(|outcome| outcome.state);
+            if failed_by.is_none() && step_failed(&outcome, judgment) {
+                failed_by = Some(display_step_label(step, idx));
             }
         }
 
@@ -825,6 +843,7 @@ impl Engine {
             any_unknown,
             environment_failed,
             browser_missing,
+            &step_evidence,
             &mut assertion_outcomes,
             &mut failed,
         )
@@ -2984,10 +3003,89 @@ criteria:
     }
 
     #[tokio::test]
-    async fn implicit_is_inconclusive_when_step_was_skipped() {
-        // An earlier step errors and aborts the check; the judging
-        // step never runs, so its implicit assertion can't observe —
-        // Inconclusive(MissingObservation), never a silent Pass.
+    async fn bound_satisfied_false_does_not_gate_its_disjunction_partner() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/no", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(false))
+                .judging(),
+        ));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/yes", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(true))
+                .judging(),
+        ));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: a
+            uses: fake/no
+            outputs:
+              satisfied: satisfied
+          - id: b
+            uses: fake/yes
+            outputs:
+              satisfied: satisfied
+        assertions:
+          - $steps.a.outputs.satisfied == true || $steps.b.outputs.satisfied == true
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            verdict.state,
+            VerdictState::Pass,
+            "disjunction must still evaluate"
+        );
+    }
+
+    #[tokio::test]
+    async fn implicit_judgment_example_ac_2_is_exercised_by_runtime() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/navigate", Outcome::Ok)));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/no", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(false))
+                .judging(),
+        ));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/yes", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(true))
+                .judging(),
+        ));
+
+        let mut v = def(include_str!(
+            "../../../../verifications/implicit-judgment-example/duhem.yml"
+        ));
+        v.criteria.retain(|criterion| criterion.id == "AC-2");
+        let steps = &mut v.criteria[0].checks[0].steps;
+        steps[0].uses = "fake/navigate".to_string();
+        steps[1].uses = "fake/no".to_string();
+        steps[2].uses = "fake/yes".to_string();
+
+        let verdict = engine
+            .run(
+                &v,
+                BTreeMap::from([(
+                    "login_url".to_string(),
+                    serde_json::json!("http://127.0.0.1/login"),
+                )]),
+            )
+            .await
+            .unwrap();
+        let events = read_only_run_events(&engine).await;
+        assert_eq!(verdict.state, VerdictState::Pass, "events: {events:#?}");
+    }
+
+    #[tokio::test]
+    async fn gated_judging_step_leaves_an_empty_aggregation() {
+        // An earlier step errors and gates the judging step. The
+        // unperformed judgment is absent, not a synthetic
+        // MissingObservation verdict; with nothing else judged, the
+        // check is inconclusive because its aggregation is empty.
         let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(StubAction::new("fake/error", Outcome::Error)));
         engine.register_test_action(Box::new(
@@ -3009,7 +3107,194 @@ criteria:
         let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
         assert!(matches!(
             verdict.criteria[0].checks[0].state,
-            VerdictState::Inconclusive(InconclusiveCause::MissingObservation)
+            VerdictState::Inconclusive(InconclusiveCause::EmptyAggregation)
+        ));
+        let assertion_count = read_only_run_events(&engine)
+            .await
+            .iter()
+            .filter(|event| matches!(event.payload, EventPayload::AssertionEvaluated { .. }))
+            .count();
+        assert_eq!(
+            assertion_count, 0,
+            "a skipped judging step contributes no assertion"
+        );
+    }
+
+    #[tokio::test]
+    async fn unbound_judging_satisfied_false_gates_success_steps() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/assert", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(false))
+                .judging(),
+        ));
+        let tracker = StubAction::new("fake/tracker", Outcome::Ok);
+        let tracker_calls = tracker.invocations.clone();
+        engine.register_test_action(Box::new(tracker));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: assertion
+            description: The required state is present
+            uses: fake/assert
+          - id: after
+            uses: fake/tracker
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Fail);
+        assert_eq!(tracker_calls.load(Ordering::SeqCst), 0);
+
+        let skipped = read_only_run_events(&engine)
+            .await
+            .into_iter()
+            .find_map(|event| match event.payload {
+                EventPayload::StepFinished {
+                    step_index: 1,
+                    outcome: duhem_evidence::StepOutcome::Skipped { reason },
+                } => Some(reason),
+                _ => None,
+            })
+            .expect("the gated step is recorded");
+        assert!(
+            skipped.contains("The required state is present"),
+            "skip reason must name the causing step: {skipped}"
+        );
+    }
+
+    #[tokio::test]
+    async fn timeout_gates_later_success_step() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/timeout", Outcome::Timeout)));
+        let tracker = StubAction::new("fake/tracker", Outcome::Ok);
+        let tracker_calls = tracker.invocations.clone();
+        engine.register_test_action(Box::new(tracker));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: wait
+            uses: fake/timeout
+          - uses: fake/tracker
+        assertions: ["true"]
+"#);
+        engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(tracker_calls.load(Ordering::SeqCst), 0);
+        assert!(read_only_run_events(&engine).await.iter().any(|event| {
+            matches!(
+                event.payload,
+                EventPayload::StepFinished {
+                    step_index: 1,
+                    outcome: duhem_evidence::StepOutcome::Skipped { .. },
+                }
+            )
+        }));
+    }
+
+    #[tokio::test]
+    async fn always_and_failure_run_after_failure_but_failure_skips_when_clean() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/error", Outcome::Error)));
+        let always = StubAction::new("fake/always", Outcome::Ok);
+        let always_calls = always.invocations.clone();
+        engine.register_test_action(Box::new(always));
+        let failure = StubAction::new("fake/failure", Outcome::Ok);
+        let failure_calls = failure.invocations.clone();
+        engine.register_test_action(Box::new(failure));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/error
+          - uses: fake/always
+            if: always
+          - uses: fake/failure
+            if: failure
+        assertions: ["true"]
+"#);
+        engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(always_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(failure_calls.load(Ordering::SeqCst), 1);
+
+        let (mut clean_engine, _tmp) = engine_for_test().await;
+        clean_engine.register_test_action(Box::new(StubAction::new("fake/ok", Outcome::Ok)));
+        let clean_failure = StubAction::new("fake/failure", Outcome::Ok);
+        let clean_failure_calls = clean_failure.invocations.clone();
+        clean_engine.register_test_action(Box::new(clean_failure));
+        let clean = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/ok
+          - uses: fake/failure
+            if: failure
+        assertions: ["true"]
+"#);
+        let verdict = clean_engine.run(&clean, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Pass);
+        assert_eq!(clean_failure_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn explicit_assertion_on_skipped_step_is_absent() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/assert", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(false))
+                .judging(),
+        ));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/produce", Outcome::Ok).with_output("value", serde_json::json!(1)),
+        ));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/assert
+          - id: later
+            uses: fake/produce
+        assertions:
+          - $steps.later.outputs.value == 1
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Fail);
+        let assertions = read_only_run_events(&engine)
+            .await
+            .into_iter()
+            .filter(|event| matches!(event.payload, EventPayload::AssertionEvaluated { .. }))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            assertions.len(),
+            1,
+            "only the first step's implicit failed judgment is recorded"
+        );
+        assert!(matches!(
+            assertions[0].payload,
+            EventPayload::AssertionEvaluated {
+                assertion_index: 1,
+                state: VerdictState::Fail,
+                ..
+            }
         ));
     }
 

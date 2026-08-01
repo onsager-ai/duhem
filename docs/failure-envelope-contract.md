@@ -56,9 +56,11 @@ A passing run is `200` with `failing: []` — not an error.
 - **`failing`** — every check whose recorded verdict is not `pass`
   (`fail` or `inconclusive:<cause>`). The scoped endpoint returns a
   single such object (not wrapped in `failing`).
-- **`assertions`** — only the *non-passing* assertions, with the
-  judge's recorded `detail` (e.g. `actual false, expected true`, or an
-  inconclusive cause). `state` is a wire verdict token.
+- **`assertions`** — only evaluated assertions that are not `pass`, with
+  the recorded `detail` (e.g. `actual false, expected true`, or an
+  inconclusive cause). `state` uses the same three-state verdict
+  vocabulary as checks. An assertion whose operands come from a skipped
+  step is absent rather than represented by a fourth state.
 - **`layers`** — the ordered delivery-web layers the check crossed
   (`ui` / `api` / `data` / `runtime`), from the #192 spans. Empty for
   pre-tag runs.

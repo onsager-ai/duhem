@@ -115,3 +115,20 @@ impl<'de> Deserialize<'de> for VerdictState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_skipped_assertion_vocabulary_fails_legibly() {
+        let error = serde_json::from_str::<VerdictState>(r#""skipped""#)
+            .expect_err("skipped is execution vocabulary, not a verdict")
+            .to_string();
+
+        assert!(
+            error.contains(r#""pass", "fail", or "inconclusive:<cause>""#),
+            "unexpected migration error: {error}"
+        );
+    }
+}

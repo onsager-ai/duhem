@@ -37,6 +37,7 @@ composition.
 | 6 | [`inherits-example`](inherits-example/) | Inherited inputs — a leaf marks names `inherit: true` under `inputs:` and reads suite-wide values the manifest provides (a DI container) | network | #135 |
 | 7 | [`manifest-inputs-example`](manifest-inputs-example/) | Manifest input declarations — attach type, process `env:`, and `secret: true` once to a credential inherited by multiple leaves | local process (`cli/invoke`) + `DUHEM_EXAMPLE_PASSWORD` | #354 |
 | 8 | [`secret-outputs-example`](secret-outputs-example/) | Mark a scalar output from a login step `secret_outputs:` before using it in a later authenticated request | network (`api/call`) | #355 |
+| 9 | [`step-gating-example`](step-gating-example/) | Gate ordinary work, failure-only diagnostics, and unconditional cleanup with the closed `if:` vocabulary | local process (`cli/invoke`) | #365 |
 
 ## Self-verification suites — Duhem's dogfood
 

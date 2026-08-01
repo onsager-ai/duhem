@@ -13,6 +13,26 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Closed dispatch condition for a step. This is deliberately not an
+/// expression language: the runtime decides it from recorded outcomes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StepCondition {
+    /// Run only while no earlier step in this sequence has failed.
+    #[default]
+    Success,
+    /// Run regardless of an earlier step failure.
+    Always,
+    /// Run only after an earlier step failure.
+    Failure,
+}
+
+impl StepCondition {
+    pub fn is_default(&self) -> bool {
+        matches!(self, Self::Success)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Step {
@@ -29,6 +49,15 @@ pub struct Step {
     /// used as a reference symbol.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+
+    /// Dispatch condition, serialized as `if:`. Omission is
+    /// byte-identical to `if: success`.
+    #[serde(
+        rename = "if",
+        default,
+        skip_serializing_if = "StepCondition::is_default"
+    )]
+    pub condition: StepCondition,
 
     /// Action type identifier (e.g. `ui/click`). At v0.1 this is any
     /// non-empty string; the catalog spec types it later.
@@ -81,6 +110,7 @@ with: { role: button, name: Create }
         assert_eq!(s.uses, "ui/click");
         assert!(s.id.is_none());
         assert!(s.description.is_none());
+        assert_eq!(s.condition, StepCondition::Success);
         assert!(s.outputs.is_empty());
         assert!(s.secret_outputs.is_empty());
     }
@@ -96,6 +126,25 @@ with: { role: button, name: Create }
         let step: Step = serde_yml::from_str(described).expect("parse description");
         assert_eq!(step.description.as_deref(), Some("Open the sign-in page"));
         assert_eq!(serde_yml::to_string(&step).expect("serialize"), described);
+    }
+
+    #[test]
+    fn condition_is_closed_and_default_is_wire_empty() {
+        let old_shape = "uses: ui/click\n";
+        let step: Step = serde_yml::from_str(old_shape).expect("parse default");
+        assert_eq!(step.condition, StepCondition::Success);
+        assert_eq!(serde_yml::to_string(&step).expect("serialize"), old_shape);
+
+        for (wire, expected) in [
+            ("success", StepCondition::Success),
+            ("always", StepCondition::Always),
+            ("failure", StepCondition::Failure),
+        ] {
+            let step: Step =
+                serde_yml::from_str(&format!("if: {wire}\nuses: ui/click\n")).expect(wire);
+            assert_eq!(step.condition, expected);
+        }
+        assert!(serde_yml::from_str::<Step>("if: expression\nuses: ui/click\n").is_err());
     }
 
     #[test]

@@ -28,8 +28,11 @@ use duhem_schema::Step;
 use tracing::debug;
 
 use crate::engine::context::RunState;
+use crate::engine::gating::{skip_reason as gate_skip_reason, step_failed};
 use crate::engine::registry::{ActionRegistry, Dispatch};
-use crate::engine::runner::{EngineError, step_label};
+use crate::engine::runner::{
+    EngineError, StepEvidence, display_step_label, implicit_judgment_for_step, step_label,
+};
 use crate::engine::template::substitute_with;
 use crate::engine::translate::{outcome_to_evidence, with_to_evidence_map};
 
@@ -126,7 +129,9 @@ pub(crate) async fn run_setup(
     } else {
         None
     };
+    let mut failed_by = environment_failed.then(|| "setup environment".to_string());
     for (idx, step) in setup.iter().enumerate() {
+        let gate_reason = gate_skip_reason(step.condition, failed_by.as_deref());
         // Setup steps see the run state (inputs, env, uuid, plus any
         // outputs already published by earlier setup steps in this
         // same block). The view is read-only against the run state —
@@ -134,7 +139,9 @@ pub(crate) async fn run_setup(
         // template substitution.
         let ctx = crate::engine::context::RunContext::new(run);
         let mut resolved_with = step.with.clone();
-        if let Err(u) = substitute_with(&mut resolved_with, &ctx) {
+        if gate_reason.is_none()
+            && let Err(u) = substitute_with(&mut resolved_with, &ctx)
+        {
             return Err(EngineError::UnresolvedReference {
                 reference: u.reference,
                 context: u
@@ -145,15 +152,22 @@ pub(crate) async fn run_setup(
             });
         }
 
-        let outcome = if aborted.is_some() {
-            append_setup_started(writer, step, idx, &resolved_with).await?;
-            Outcome::Error
+        append_setup_started(writer, step, idx, &resolved_with).await?;
+        if let Some(reason) = gate_reason {
+            writer
+                .append(EventPayload::SetupStepFinished {
+                    step_index: idx as u32,
+                    outcome: duhem_evidence::StepOutcome::Skipped { reason },
+                })
+                .await?;
+            continue;
+        }
+
+        let (outcome, failed) = if environment_failed {
+            (Outcome::Error, true)
         } else {
             match registry.get(step.uses.as_str()) {
-                None => {
-                    append_setup_started(writer, step, idx, &resolved_with).await?;
-                    Outcome::Error
-                }
+                None => (Outcome::Error, true),
                 Some(dispatcher) => {
                     let page_ref: Option<&Page> = setup_browser.as_ref().map(|cb| &cb.page);
                     invoke_and_record(
@@ -181,8 +195,12 @@ pub(crate) async fn run_setup(
             aborted = match outcome {
                 Outcome::Timeout => Some(AbortReason::Timeout),
                 Outcome::Error => Some(AbortReason::Environment),
+                Outcome::Ok if failed => Some(AbortReason::Environment),
                 Outcome::Ok => None,
             };
+            if aborted.is_some() {
+                failed_by = Some(display_step_label(step, idx));
+            }
         }
     }
 
@@ -229,14 +247,9 @@ async fn invoke_and_record(
     step: &Step,
     run: &mut RunState,
     writer: &mut EvidenceWriter,
-) -> Result<Outcome, EngineError> {
-    // `SetupStepStarted` first — the pre-#355 ordering, and symmetric
-    // with the per-check path. It records the resolved `with:`, i.e.
-    // this step's inputs, which cannot carry this step's own outputs;
-    // and it is what the live narration folds over to show a slow setup
-    // step as in flight (#305). Registration follows it, still ahead of
-    // anything carrying an output.
-    append_setup_started(writer, step, idx, resolved_with).await?;
+) -> Result<(Outcome, bool), EngineError> {
+    // The caller persisted `SetupStepStarted` before dispatch so slow
+    // actions and gated skips share one honest lifecycle shape.
     let result = dispatcher.invoke(page, idx, resolved_with).await;
     let outcome = match &result {
         Ok(r) => r.outcome.clone(),
@@ -267,7 +280,29 @@ async fn invoke_and_record(
             append_setup_observation(writer, idx as u32, name.clone(), value.clone()).await?;
         }
     }
-    Ok(outcome)
+    let outputs = result
+        .as_ref()
+        .map(|action| &action.outputs)
+        .ok()
+        .cloned()
+        .unwrap_or_default();
+    let evidence = StepEvidence {
+        with: resolved_with.clone(),
+        outputs,
+        skip_reason: None,
+    };
+    let judgment = implicit_judgment_for_step(
+        step,
+        idx,
+        dispatcher.judges(),
+        &evidence,
+        false,
+        false,
+        false,
+    )
+    .map(|outcome| outcome.state);
+    let failed = step_failed(&outcome, judgment);
+    Ok((outcome, failed))
 }
 
 /// Mirror of `EvidenceWriter::append_observation` for setup. The
@@ -325,6 +360,9 @@ mod tests {
         fn requires_page(&self) -> bool {
             false
         }
+        fn judges(&self) -> bool {
+            self.outputs.iter().any(|(name, _)| *name == "satisfied")
+        }
         async fn invoke(
             &self,
             _page: Option<&Page>,
@@ -364,11 +402,22 @@ mod tests {
         Step {
             id: id.map(String::from),
             description: None,
+            condition: duhem_schema::StepCondition::Success,
             uses: uses.to_string(),
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
             secret_outputs: Vec::new(),
         }
+    }
+
+    fn conditioned_step(
+        id: Option<&str>,
+        uses: &str,
+        condition: duhem_schema::StepCondition,
+    ) -> Step {
+        let mut step = step(id, uses);
+        step.condition = condition;
+        step
     }
 
     #[tokio::test]
@@ -479,5 +528,126 @@ mod tests {
             0,
             "step after Timeout must not invoke"
         );
+    }
+
+    #[tokio::test]
+    async fn setup_conditions_share_failure_state_but_keep_abort_policy() {
+        let (mut w, _tmp) = make_writer().await;
+        let mut registry: ActionRegistry = BTreeMap::new();
+        registry.insert(
+            "fake/boom",
+            Box::new(StubAction {
+                uses: "fake/boom",
+                outcome: Outcome::Error,
+                outputs: vec![],
+                invocations: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
+        let always_calls = Arc::new(AtomicUsize::new(0));
+        registry.insert(
+            "fake/always",
+            Box::new(StubAction {
+                uses: "fake/always",
+                outcome: Outcome::Ok,
+                outputs: vec![],
+                invocations: always_calls.clone(),
+            }),
+        );
+        let failure_calls = Arc::new(AtomicUsize::new(0));
+        registry.insert(
+            "fake/failure",
+            Box::new(StubAction {
+                uses: "fake/failure",
+                outcome: Outcome::Ok,
+                outputs: vec![],
+                invocations: failure_calls.clone(),
+            }),
+        );
+        let mut run = RunState::new(BTreeMap::new());
+        let setup = vec![
+            step(Some("boom"), "fake/boom"),
+            conditioned_step(None, "fake/always", duhem_schema::StepCondition::Always),
+            conditioned_step(None, "fake/failure", duhem_schema::StepCondition::Failure),
+        ];
+        let result = run_setup(&mut w, &registry, None, &mut run, &setup)
+            .await
+            .unwrap();
+        assert_eq!(always_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(failure_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            result.aborted,
+            Some(AbortReason::Environment),
+            "opt-in cleanup does not soften setup's abort-the-run policy"
+        );
+    }
+
+    #[tokio::test]
+    async fn setup_failure_condition_skips_on_clean_sequence() {
+        let (mut w, _tmp) = make_writer().await;
+        let mut registry: ActionRegistry = BTreeMap::new();
+        registry.insert(
+            "fake/ok",
+            Box::new(StubAction {
+                uses: "fake/ok",
+                outcome: Outcome::Ok,
+                outputs: vec![],
+                invocations: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
+        let failure_calls = Arc::new(AtomicUsize::new(0));
+        registry.insert(
+            "fake/failure",
+            Box::new(StubAction {
+                uses: "fake/failure",
+                outcome: Outcome::Ok,
+                outputs: vec![],
+                invocations: failure_calls.clone(),
+            }),
+        );
+        let mut run = RunState::new(BTreeMap::new());
+        let setup = vec![
+            step(None, "fake/ok"),
+            conditioned_step(None, "fake/failure", duhem_schema::StepCondition::Failure),
+        ];
+        let result = run_setup(&mut w, &registry, None, &mut run, &setup)
+            .await
+            .unwrap();
+        assert_eq!(failure_calls.load(Ordering::SeqCst), 0);
+        assert!(result.aborted.is_none());
+    }
+
+    #[tokio::test]
+    async fn setup_judging_false_uses_the_shared_failure_predicate() {
+        let (mut w, _tmp) = make_writer().await;
+        let mut registry: ActionRegistry = BTreeMap::new();
+        registry.insert(
+            "fake/assert",
+            Box::new(StubAction {
+                uses: "fake/assert",
+                outcome: Outcome::Ok,
+                outputs: vec![("satisfied", serde_json::json!(false))],
+                invocations: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
+        let after_calls = Arc::new(AtomicUsize::new(0));
+        registry.insert(
+            "fake/after",
+            Box::new(StubAction {
+                uses: "fake/after",
+                outcome: Outcome::Ok,
+                outputs: vec![],
+                invocations: after_calls.clone(),
+            }),
+        );
+        let mut run = RunState::new(BTreeMap::new());
+        let setup = vec![
+            step(Some("precondition"), "fake/assert"),
+            step(None, "fake/after"),
+        ];
+        let result = run_setup(&mut w, &registry, None, &mut run, &setup)
+            .await
+            .unwrap();
+        assert_eq!(after_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(result.aborted, Some(AbortReason::Environment));
     }
 }

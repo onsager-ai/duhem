@@ -279,6 +279,7 @@ li.ev.step-group > details[open] > summary .ev-caret {
 .ev.tone-ok .ev-icon { color: var(--pass); }
 .ev.tone-fail .ev-icon { color: var(--fail); }
 .ev.tone-inconclusive .ev-icon { color: var(--inconclusive); }
+.ev.tone-skipped .ev-icon { color: var(--lg-muted); }
 /* The check-verdict row's tone is "anchor" (not ok/fail), so colour its
    icon from the icon's own key instead — a green result, a red block. */
 .ev-glyph-verdict-pass { color: var(--pass); }
@@ -309,6 +310,7 @@ li.ev.step-group > details[open] > summary .ev-caret {
 .ev.tone-fail .ev-label { color: var(--fail); }
 .ev.tone-ok .ev-label { color: var(--pass); }
 .ev.tone-inconclusive .ev-label { color: var(--inconclusive); }
+.ev.tone-skipped .ev-label { color: var(--lg-muted); }
 .ev.tone-anchor > .ev-raw > summary { background: var(--row-anchor); }
 .ev.tone-anchor .ev-label { font-weight: 700; }
 li.ev.tone-fail > .ev-raw > summary {
@@ -642,6 +644,7 @@ li.ev.step-group > details > summary:hover { background: var(--row-hover); }
 .step-outcome.tone-ok { color: var(--pass); }
 .step-outcome.tone-fail { color: var(--fail); }
 .step-outcome.tone-inconclusive { color: var(--inconclusive); }
+.step-outcome.tone-skipped { color: var(--lg-muted); }
 /* #280: a judging step whose implicit verdict failed reads red at the
    row level (Allure-style status propagation), with the semantic reason
    dropped onto its own line under the intent. `inset` box-shadow, so the
@@ -707,12 +710,19 @@ li.ev.step-group.tone-inconclusive {
 li.ev.step-group.tone-inconclusive > details > summary {
   background: color-mix(in oklab, var(--inconclusive) 5%, var(--panel));
 }
+li.ev.step-group.tone-skipped {
+  border-color: color-mix(in oklab, var(--lg-muted) 32%, var(--lg-border));
+}
+li.ev.step-group.tone-skipped > details > summary {
+  background: color-mix(in oklab, var(--lg-muted) 5%, var(--panel));
+}
 /* Only the step's OWN label takes the fail/inconclusive colour — a
    descendant selector here would blindly redden every passing inner row
    (the action that ran ok, its observations) inside a failed step. The
    inner rows keep their own per-row tone (#284 follow-up). */
 li.ev.step-group.tone-fail > details > summary .ev-label { color: var(--fail); }
 li.ev.step-group.tone-inconclusive > details > summary .ev-label { color: var(--inconclusive); }
+li.ev.step-group.tone-skipped > details > summary .ev-label { color: var(--lg-muted); }
 .step-body {
   padding: 0.65rem 0.85rem 0.75rem 3rem;
   border-top: 1px solid var(--lg-border);

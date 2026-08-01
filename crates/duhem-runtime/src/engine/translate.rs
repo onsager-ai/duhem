@@ -156,6 +156,33 @@ pub(crate) fn outcome_to_evidence(o: &Outcome) -> StepOutcome {
     }
 }
 
+#[cfg(test)]
+mod outcome_vocabulary_tests {
+    use super::*;
+
+    fn is_engine_produced(outcome: &StepOutcome) -> bool {
+        match outcome {
+            StepOutcome::Ok | StepOutcome::Error | StepOutcome::Timeout => false,
+            StepOutcome::Skipped { .. } => true,
+        }
+    }
+
+    #[test]
+    fn action_outcomes_map_to_distinct_non_skipped_evidence_outcomes() {
+        let mapped = [Outcome::Ok, Outcome::Error, Outcome::Timeout]
+            .map(|outcome| outcome_to_evidence(&outcome));
+
+        assert_eq!(
+            mapped,
+            [StepOutcome::Ok, StepOutcome::Error, StepOutcome::Timeout]
+        );
+        assert!(mapped.iter().all(|outcome| !is_engine_produced(outcome)));
+        assert!(is_engine_produced(&StepOutcome::Skipped {
+            reason: "gated".to_string(),
+        }));
+    }
+}
+
 pub(crate) fn with_to_evidence_map(v: &serde_yml::Value) -> BTreeMap<String, serde_json::Value> {
     match v {
         serde_yml::Value::Mapping(m) => m

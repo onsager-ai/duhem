@@ -4,8 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use duhem_actions::{ActionError, ExistenceState, Locator};
-use duhem_evidence::{EventPayload, EvidenceWriter, StoreError, VerdictState, WriterError};
-use duhem_judge::{AssertionOutcome, InconclusiveCause, RunVerdict};
+use duhem_evidence::{EventPayload, EvidenceWriter, StoreError, WriterError};
+use duhem_judge::{AssertionOutcome, InconclusiveCause, RunVerdict, VerdictState};
 use duhem_schema::{Expr, PathRoot};
 use thiserror::Error;
 
@@ -103,6 +103,10 @@ pub(crate) struct StepEvidence {
     pub with: serde_yml::Value,
     /// The action's outputs (`satisfied`, `count`, …) for this step.
     pub outputs: BTreeMap<String, serde_json::Value>,
+    /// Why this step was gated out. A skipped step contributes no
+    /// assertion verdict; this distinguishes it from an unrun step
+    /// whose observation is genuinely missing.
+    pub skip_reason: Option<String>,
 }
 
 impl StepEvidence {
@@ -112,6 +116,15 @@ impl StepEvidence {
         StepEvidence {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
+            skip_reason: None,
+        }
+    }
+
+    pub fn skipped(reason: String) -> Self {
+        StepEvidence {
+            with: serde_yml::Value::Null,
+            outputs: BTreeMap::new(),
+            skip_reason: Some(reason),
         }
     }
 
@@ -134,6 +147,63 @@ pub(crate) struct ImplicitOutcome {
     pub detail: Option<String>,
 }
 
+/// Compute one step's implicit judgment, if the step contributes one.
+/// This is also the single source of truth for gating: binding an output
+/// named `satisfied` suppresses both the implicit assertion and any gate
+/// derived from that assertion.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn implicit_judgment_for_step(
+    step: &duhem_schema::Step,
+    step_index: usize,
+    action_judges: bool,
+    evidence: &StepEvidence,
+    any_unknown: bool,
+    environment_failed: bool,
+    browser_missing: bool,
+) -> Option<ImplicitOutcome> {
+    if !action_judges || step.outputs.contains_key("satisfied") || evidence.skip_reason.is_some() {
+        return None;
+    }
+
+    let label = display_step_label(step, step_index);
+    let (state, detail) = if any_unknown {
+        (
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+            Some("unknown_action".to_string()),
+        )
+    } else if environment_failed {
+        (
+            VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+            Some(if browser_missing {
+                "browser_unavailable".to_string()
+            } else {
+                "check_browser_failed".to_string()
+            }),
+        )
+    } else {
+        match evidence.satisfied() {
+            Some(true) => (VerdictState::Pass, None),
+            Some(false) => (
+                VerdictState::Fail,
+                Some(judging_fail_detail(step, evidence, &label)),
+            ),
+            None => (
+                VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+                Some(format!(
+                    "step `{label}` did not run or produced no `satisfied`"
+                )),
+            ),
+        }
+    };
+
+    Some(ImplicitOutcome {
+        label,
+        step_index,
+        state,
+        detail,
+    })
+}
+
 /// Compute the implicit assertion outcomes for a check's judging steps
 /// (spec #253): one entry per step whose action judges (its contract
 /// emits `satisfied`, tested via `is_judging`) and that hasn't bound
@@ -149,59 +219,22 @@ pub(crate) fn implicit_judgment_outcomes(
     environment_failed: bool,
     browser_missing: bool,
 ) -> Vec<ImplicitOutcome> {
-    let mut out = Vec::new();
-    for (idx, step) in check.steps.iter().enumerate() {
-        // Opt out when the author binds an output *named* `satisfied`
-        // (the key `$steps.<id>.outputs.satisfied` resolves against),
-        // regardless of which extraction it maps to — that's the author
-        // taking manual control of the satisfied signal.
-        let judging = is_judging(step.uses.as_str()) && !step.outputs.contains_key("satisfied");
-        if !judging {
-            continue;
-        }
-        let label = display_step_label(step, idx);
-        let (state, detail) = if any_unknown {
-            (
-                VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
-                Some("unknown_action".to_string()),
+    check
+        .steps
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, step)| {
+            implicit_judgment_for_step(
+                step,
+                idx,
+                is_judging(step.uses.as_str()),
+                &step_evidence[idx],
+                any_unknown,
+                environment_failed,
+                browser_missing,
             )
-        } else if environment_failed {
-            (
-                VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
-                Some(if browser_missing {
-                    "browser_unavailable".to_string()
-                } else {
-                    "check_browser_failed".to_string()
-                }),
-            )
-        } else {
-            let ev = &step_evidence[idx];
-            match ev.satisfied() {
-                Some(true) => (VerdictState::Pass, None),
-                // The step ran and judged the artifact *not* satisfied.
-                // Speak the reason — the authored intent plus what was
-                // observed — so the reporter shows why, not a bare
-                // `actual false, expected true`.
-                Some(false) => (
-                    VerdictState::Fail,
-                    Some(judging_fail_detail(step, ev, &label)),
-                ),
-                None => (
-                    VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
-                    Some(format!(
-                        "step `{label}` did not run or produced no `satisfied`"
-                    )),
-                ),
-            }
-        };
-        out.push(ImplicitOutcome {
-            label,
-            step_index: idx,
-            state,
-            detail,
-        });
-    }
-    out
+        })
+        .collect()
 }
 
 /// A human, semantic failure detail for a judging step whose implicit
@@ -331,6 +364,7 @@ pub(crate) async fn evaluate_explicit_assertions(
     any_unknown: bool,
     environment_failed: bool,
     browser_missing: bool,
+    step_evidence: &[StepEvidence],
     assertion_outcomes: &mut Vec<AssertionOutcome>,
     failed: &mut Vec<FailedAssertion>,
 ) -> Result<(), EngineError> {
@@ -341,6 +375,9 @@ pub(crate) async fn evaluate_explicit_assertions(
         // (an explicit `$steps.update.outputs.status == 200` IS about the
         // `update` step, #279 follow-up).
         let step_index = owning_step_index(&expr, check);
+        if skipped_reference_reason(&expr, check, step_evidence).is_some() {
+            continue;
+        }
         let (state, detail) = if any_unknown {
             (
                 VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
@@ -426,6 +463,22 @@ fn steps_referenced(expr: &Expr, out: &mut BTreeSet<String>) {
         Expr::UnaryOp { expr, .. } => steps_referenced(expr, out),
         Expr::Lit(_) => {}
     }
+}
+
+fn skipped_reference_reason(
+    expr: &Expr,
+    check: &duhem_schema::Check,
+    evidence: &[StepEvidence],
+) -> Option<String> {
+    let mut refs = BTreeSet::new();
+    steps_referenced(expr, &mut refs);
+    check.steps.iter().enumerate().find_map(|(index, step)| {
+        let id = step.id.as_ref()?;
+        if !refs.contains(id) {
+            return None;
+        }
+        evidence.get(index)?.skip_reason.clone()
+    })
 }
 
 /// If an explicit assertion references exactly one step (`$steps.<id>`),
@@ -597,6 +650,7 @@ mod fail_detail_tests {
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.clone()))
                 .collect(),
+            skip_reason: None,
         }
     }
 
@@ -787,6 +841,7 @@ mod step_label_tests {
         let evidence = vec![StepEvidence {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::from([("satisfied".to_string(), serde_json::json!(false))]),
+            skip_reason: None,
         }];
         let outcomes = implicit_judgment_outcomes(&check, |_| true, &evidence, false, false, false);
         assert_eq!(outcomes[0].label, "The Username field is offered");

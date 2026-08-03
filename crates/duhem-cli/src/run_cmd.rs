@@ -574,7 +574,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 .iter()
                 .flat_map(|c| &c.checks)
                 .flat_map(|ch| &ch.steps)
-                .any(|s| duhem_actions::uses_requires_page(&s.uses));
+                .any(|s| duhem_actions::uses_requires_page(s.uses_name()));
 
         // One browser per leaf when needed. Phase-0 leaves run serially
         // (#49) and `RunBrowser` is non-`Clone`, so a fresh launch per

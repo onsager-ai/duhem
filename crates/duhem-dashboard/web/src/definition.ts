@@ -11,6 +11,7 @@ export interface VdStep {
   id?: string;
   description?: string;
   uses?: string;
+  call?: string;
 }
 export interface VdCheck {
   id: string;
@@ -28,10 +29,30 @@ export interface VdLookup {
   check(criterionId: string, checkId: string): VdCheck | undefined;
   /** The author's `id:` for the Nth step of a check (0-based, matching
    *  the trace's `step_index`), or undefined if absent. */
-  stepId(criterionId: string, checkId: string, index: number): string | undefined;
+  stepId(
+    criterionId: string,
+    checkId: string,
+    index: number,
+    flow?: FlowOrigin,
+  ): string | undefined;
   /** Human-facing label for the Nth step: description, then id, then
    *  `<uses> #<index>`. */
-  stepLabel(criterionId: string, checkId: string, index: number): string | undefined;
+  stepLabel(
+    criterionId: string,
+    checkId: string,
+    index: number,
+    flow?: FlowOrigin,
+  ): string | undefined;
+  /** Human-facing label for the authored inner step of a flow. */
+  flowStepLabel(flow: FlowOrigin): string | undefined;
+  /** Label for the authored invocation that owns an expanded step. */
+  flowLabel(criterionId: string, checkId: string, flow: FlowOrigin): string | undefined;
+}
+
+export interface FlowOrigin {
+  name: string;
+  invocation: string;
+  inner_index: number;
 }
 
 function str(v: unknown): string | undefined {
@@ -44,7 +65,25 @@ function normStep(raw: unknown): VdStep {
     id: str(r.id),
     description: str(r.description),
     uses: str(r.uses),
+    call: str(r.call),
   };
+}
+
+function stepLabel(step: VdStep | undefined, index: number): string | undefined {
+  return step?.description ??
+    step?.id ??
+    (step?.uses ? `${step.uses} #${index}` : step?.call);
+}
+
+export function flowOrigin(raw: unknown): FlowOrigin | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as Record<string, unknown>;
+  const name = str(value.name);
+  const invocation = str(value.invocation);
+  const inner = value.inner_index;
+  return name && invocation && typeof inner === "number"
+    ? { name, invocation, inner_index: inner }
+    : undefined;
 }
 
 function normCheck(raw: unknown): VdCheck | undefined {
@@ -75,24 +114,52 @@ function normCriterion(raw: unknown): VdCriterion | undefined {
 
 export function parseDefinition(yamlText: string): VdLookup {
   let criteria: VdCriterion[] = [];
+  let flows = new Map<string, VdStep[]>();
   try {
-    const doc = parse(yamlText) as { criteria?: unknown } | null;
+    const doc = parse(yamlText) as { criteria?: unknown; flows?: unknown } | null;
     if (doc && Array.isArray(doc.criteria)) {
       criteria = doc.criteria.map(normCriterion).filter((c): c is VdCriterion => !!c);
     }
+    if (doc?.flows && typeof doc.flows === "object") {
+      flows = new Map(
+        Object.entries(doc.flows as Record<string, unknown>).map(([name, raw]) => {
+          const body = (raw ?? {}) as Record<string, unknown>;
+          return [name, Array.isArray(body.steps) ? body.steps.map(normStep) : []];
+        }),
+      );
+    }
   } catch {
     criteria = [];
+    flows = new Map();
   }
   const byCrit = new Map(criteria.map((c) => [c.id, c]));
   const find = (cid: string, chid: string) =>
     byCrit.get(cid)?.checks.find((c) => c.id === chid);
+  const invocationStep = (cid: string, chid: string, origin: FlowOrigin) =>
+    find(cid, chid)?.steps.find((step) => step.id === origin.invocation);
+  const innerStep = (origin: FlowOrigin) => flows.get(origin.name)?.[origin.inner_index];
+  const invocationLabel = (cid: string, chid: string, origin: FlowOrigin) =>
+    stepLabel(invocationStep(cid, chid, origin), origin.inner_index) ?? origin.invocation;
   return {
     criterion: (id) => byCrit.get(id),
     check: (cid, chid) => find(cid, chid),
-    stepId: (cid, chid, i) => find(cid, chid)?.steps[i]?.id,
-    stepLabel: (cid, chid, i) => {
-      const step = find(cid, chid)?.steps[i];
-      return step?.description ?? step?.id ?? (step?.uses ? `${step.uses} #${i}` : undefined);
+    stepId: (cid, chid, i, flow) => {
+      if (flow) {
+        const inner = innerStep(flow);
+        return `${flow.invocation}__${inner?.id ?? flow.inner_index}`;
+      }
+      return find(cid, chid)?.steps[i]?.id;
     },
+    stepLabel: (cid, chid, i, flow) => {
+      if (flow) {
+        const inner = stepLabel(innerStep(flow), flow.inner_index);
+        const invocation = invocationLabel(cid, chid, flow);
+        return inner ? `${invocation} › ${inner}` : invocation;
+      }
+      const step = find(cid, chid)?.steps[i];
+      return stepLabel(step, i);
+    },
+    flowStepLabel: (flow) => stepLabel(innerStep(flow), flow.inner_index),
+    flowLabel: invocationLabel,
   };
 }

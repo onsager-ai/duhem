@@ -595,7 +595,7 @@ impl Engine {
         let any_unknown = check
             .steps
             .iter()
-            .any(|s| !self.registry.contains_key(s.uses.as_str()));
+            .any(|s| !self.registry.contains_key(s.uses_name()));
 
         // A step that requires a page (production wrapper around a
         // real `Action`) but has no browser attached is an
@@ -605,7 +605,7 @@ impl Engine {
         // check.
         let needs_browser = check.steps.iter().any(|s| {
             self.registry
-                .get(s.uses.as_str())
+                .get(s.uses_name())
                 .map(|d| d.requires_page())
                 .unwrap_or(false)
         });
@@ -677,12 +677,12 @@ impl Engine {
             // locator would be misleading evidence.
             let will_run = gate_reason.is_none()
                 && !environment_failed
-                && self.registry.contains_key(step.uses.as_str());
-            if will_run && let Some(t) = target_from_step(&step.uses, &resolved_with) {
+                && self.registry.contains_key(step.uses_name());
+            if will_run && let Some(t) = target_from_step(step.uses_name(), &resolved_with) {
                 targets.push(t);
             }
 
-            let known = self.registry.contains_key(step.uses.as_str());
+            let known = self.registry.contains_key(step.uses_name());
             let step_started_ms = if will_run && !matches!(self.capture, CapturePolicy::Off) {
                 match check_browser.as_ref() {
                     Some(cb) => Some(storyboard.step_started(&cb.page).await),
@@ -701,23 +701,23 @@ impl Engine {
             } else {
                 Some(
                     self.registry
-                        .get(step.uses.as_str())
+                        .get(step.uses_name())
                         .expect("known checked above"),
                 )
             };
+
+            crate::engine::flow::register_secrets(writer, step, &ctx);
 
             writer
                 .append(EventPayload::StepStarted {
                     criterion_id: criterion_id.to_string(),
                     check_id: check.id.clone(),
                     step_index: idx as u32,
-                    uses: step.uses.clone(),
-                    // Honest evidence (#192): the layer comes from the
-                    // executed action's catalog family, never from
-                    // parsing intent; out-of-catalog `uses` stays
-                    // untagged.
-                    layer: duhem_actions::layer_for_uses(&step.uses).map(str::to_string),
+                    uses: step.uses_name().to_string(),
+                    // Layer comes only from the executed action's catalog (#192).
+                    layer: duhem_actions::layer_for_uses(step.uses_name()).map(str::to_string),
                     with: with_to_evidence_map(&resolved_with),
+                    flow: crate::engine::flow::origin(step),
                 })
                 .await?;
 
@@ -3099,9 +3099,9 @@ criteria:
         ));
         v.criteria.retain(|criterion| criterion.id == "AC-2");
         let steps = &mut v.criteria[0].checks[0].steps;
-        steps[0].uses = "fake/navigate".to_string();
-        steps[1].uses = "fake/no".to_string();
-        steps[2].uses = "fake/yes".to_string();
+        steps[0].uses = Some("fake/navigate".to_string());
+        steps[1].uses = Some("fake/no".to_string());
+        steps[2].uses = Some("fake/yes".to_string());
 
         let verdict = engine
             .run(
@@ -3423,6 +3423,100 @@ criteria:
         });
         assert_eq!(connection, Some(&serde_json::json!("[redacted:db_dsn]")));
         assert!(!serde_json::to_string(&events).unwrap().contains(secret));
+    }
+
+    #[tokio::test]
+    async fn failing_flow_step_records_provenance_and_masks_secret_param() {
+        let (mut engine, tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/login", Outcome::Error)));
+        engine.register_test_action(Box::new(StubAction::new("fake/after", Outcome::Ok)));
+        engine.register_test_action(Box::new(StubAction::new("fake/outside", Outcome::Ok)));
+        let path = tmp.path().join("flow.yml");
+        std::fs::write(
+            &path,
+            r#"
+verification: flow evidence
+flows:
+  sign_in:
+    params:
+      password: { type: string, secret: true }
+    steps:
+      - id: submit
+        uses: fake/login
+        with: { password: $params.password }
+      - uses: fake/after
+criteria:
+  - id: AC-1
+    description: sign in succeeds
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: login
+            call: sign_in
+            with: { password: correct-horse-battery-staple }
+          - uses: fake/outside
+        assertions: ["true"]
+"#,
+        )
+        .unwrap();
+        let duhem_schema::Loaded::Leaf { definition, .. } =
+            duhem_schema::load(&path).expect("load and expand")
+        else {
+            panic!("expected leaf");
+        };
+
+        let outcome = engine
+            .run_with_metadata(&definition, BTreeMap::new())
+            .await
+            .unwrap();
+        let events = Trace::from_store(engine.store.as_ref().unwrap().as_ref(), &outcome.run_id)
+            .await
+            .unwrap()
+            .into_events();
+        let started = events.iter().find_map(|event| match &event.payload {
+            EventPayload::StepStarted { with, flow, .. } => Some((with, flow)),
+            _ => None,
+        });
+        let (with, flow) = started.expect("expanded step started");
+        assert_eq!(
+            with.get("password"),
+            Some(&serde_json::json!("[redacted:flow parameter fake/login:0]"))
+        );
+        assert_eq!(
+            flow.as_ref().map(|origin| (
+                origin.name.as_str(),
+                origin.invocation.as_str(),
+                origin.inner_index
+            )),
+            Some(("sign_in", "login", 0))
+        );
+        assert!(events.iter().any(|event| matches!(
+            event.payload,
+            EventPayload::StepFinished {
+                outcome: duhem_evidence::StepOutcome::Error,
+                ..
+            }
+        )));
+        let skipped: Vec<u32> = events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                EventPayload::StepFinished {
+                    step_index,
+                    outcome: duhem_evidence::StepOutcome::Skipped { .. },
+                } => Some(*step_index),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            skipped,
+            vec![1, 2],
+            "flow failure gates the rest of the flow and the check"
+        );
+        assert!(
+            !serde_json::to_string(&events)
+                .unwrap()
+                .contains("correct-horse-battery-staple")
+        );
     }
 
     #[tokio::test]

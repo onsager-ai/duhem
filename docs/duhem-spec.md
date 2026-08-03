@@ -757,8 +757,26 @@ inputs:                       # declarations for names leaves inherit
 
 pages:                        # named locators, shared by leaves
   login:
+    password: { role: textbox, name: Password }
     username: { role: textbox, name: Username }
     submit: { role: button, name: Sign In }
+    welcome: { role: heading, name: Welcome }
+
+flows:                        # reusable parameterized step sequences
+  sign_in:
+    params:
+      password: { type: string, secret: true }
+      user: { type: string }
+    steps:
+      - uses: ui/type
+        with: { locator: $pages.login.username, text: $params.user }
+      - uses: ui/type
+        with: { locator: $pages.login.password, text: $params.password }
+      - id: landed
+        uses: ui/assert-element
+        with: { locator: $pages.login.welcome, expected: visible }
+    outputs:
+      signed_in: $steps.landed.outputs.satisfied
 
 verifications:
   - features/create-workspace/verification.yml
@@ -793,13 +811,46 @@ checks both input closure and dangling catalog references offline.
 `duhem resolve --provenance` lists the composed entries and their
 winning source files.
 
+`flows:` is a catalog of named action sequences, declared on a root,
+an `includes:` fragment, or a leaf and merged by flow name under the
+same root-wins / leaf-local-wins rule. A check invokes one with
+`call: <flow-name>`, an optional `description:`, an `id:`, and a
+`with:` map matching the flow's typed `params:`. `call:` is distinct
+from `uses:` so a flow cannot shadow or masquerade as a closed-catalog
+action. Exactly one of the two keys is valid on a step.
+
+The loader expands every call into ordinary action steps before the
+runtime sees the definition. Parameters replace `$params.*`, inner ids
+are namespaced per invocation, and a flow's `outputs:` map is the whole
+caller-visible interface:
+`$steps.<call-id>.outputs.<declared-name>`. Inner ids cannot be
+referenced by the caller. A `secret: true` param joins the same
+evidence-masking boundary as a secret input. Flows may call other
+flows; cycles and chains deeper than the include-depth limit are
+offline validation errors.
+
+Flow bodies are hygienic. Step `with:` values may reference only
+`$params.*` and `$pages.*`; a `$inputs.*` or `$steps.*` dependency in
+the body is rejected with the flow name. The intentional exception is
+the flow's own `outputs:` map, whose `$steps.*` reference selects an
+inner action output to expose. This keeps a flow portable between
+suites instead of coupling it to caller input or step names.
+
+Expansion does not collapse evidence. Every executed inner action emits
+its normal step events plus a `flow` origin (`name`, invocation id,
+inner index). The recorded definition snapshot remains the authored
+file, not an expanded rewrite; the dashboard joins through flow origin
+when present, groups those steps under the invocation, and retains its
+index join for older/non-flow traces. `duhem resolve --provenance`
+prints the flat expansion and its origins for offline debugging.
+
 The root manifest is canonical: Duhem auto-discovers `duhem.yml` (or `.duhem.yml`) at the project root or its ancestors. Users can override with `duhem run -f path/to/manifest.yml`.
 
 If no root manifest is present, Duhem still works on individual Verification Definition files passed directly.
 
 ### 10.5 Action types
 
-Verification Definitions invoke pre-defined action types via `uses:`. Each action defines a typed `with:` schema (its internal `With` struct) and named outputs; the dispatch boundary itself is untyped YAML that the action downcasts inside `invoke`. The v1 catalog is **closed** (`crates/duhem-actions`); a `uses:` that names an unregistered action is a runtime "unknown action" error, not a silent skip.
+Verification Definitions invoke pre-defined action types via `uses:`. Each action defines a typed `with:` schema (its internal `With` struct) and named outputs; the dispatch boundary itself is untyped YAML that the action downcasts inside `invoke`. The v1 catalog is **closed** (`crates/duhem-actions`); a `uses:` that names an unregistered action is a runtime "unknown action" error, not a silent skip. Reusable flow invocations use the separate `call:` key (§10.4) and are expanded before dispatch, so they do not widen this catalog.
 
 #### Implemented (v1)
 
@@ -861,6 +912,9 @@ Borrowed from Arazzo. References available in expressions:
 - `$pages.<page>.<element>` — a named locator from the effective
   manifest/leaf catalog. Valid only as a whole `with:` value; its map is
   spliced before nested `$inputs.*` substitution.
+- `$params.<name>` — a reusable-flow parameter, valid only inside the
+  flow body that declares it. The loader substitutes it during static
+  expansion; it never reaches runtime evaluation.
 - `$steps.<id>.outputs.<name>` — outputs from a prior step (scoped to the declaring check)
 - `$setup.<id>.outputs.<name>` — outputs from a run-level `setup:` step (§10.3), read-only from inside any check
 - `$env.<name>` — a value from the selected named profile. The `$env` whitelist is **empty by default**. An author opts a key in by declaring it (with a string value) under a manifest `profiles:` entry (§10.4) and selecting that profile with `--profile <name>` (`--environment` remains an alias; one profile auto-selects); the selected entry's string-valued keys seed the whitelist for that run. There is no process-environment passthrough and no `--env` CLI flag. A reference to a key that isn't whitelisted evaluates to `inconclusive` (it carries a missing-env cause, §10.6), never a parse error.
@@ -937,6 +991,8 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 
 - The Verification Definition wire shape, the expression AST + parser, and the structural validator
 - The root manifest (`duhem.yml`) loader and leaf/manifest discrimination (§10.2)
+- Static expansion of reusable `flows:` into ordinary action steps,
+  with namespaced outputs and flow provenance
 - Cross-cutting dependency of the CLI, runtime, and judge; owns `duhem_schema::SCHEMA_VERSION`
 
 **Action Catalog** (`duhem-actions`)
@@ -988,6 +1044,8 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 - Append-only run store: the wire-format event stream, derived
   verdict/criteria/check projections, and content-addressed binary
   blobs (screenshots, videos, HAR), one database per working copy
+- Expanded flow actions remain individual step events; optional
+  `StepStarted.flow` provenance preserves the authored call boundary
 - Sole writer: the runtime; the dashboard reads through a read-only
   handle
 - Portable via `duhem export` (self-contained per-run bundle)

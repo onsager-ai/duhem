@@ -219,12 +219,8 @@ fn resolve_leaf(
     include_provenance: bool,
 ) -> ResolvedVerification {
     let mut errors = Vec::new();
-    let candidate_secrets = candidate_secret_registry(
-        &leaf.definition.inputs,
-        manifest_inputs,
-        merged,
-        profile_values,
-    );
+    let candidate_secrets =
+        candidate_secret_registry(&leaf.definition, manifest_inputs, merged, profile_values);
     if let Err(validation) = validate_with_contract_outputs(&leaf.definition, &|uses| {
         crate::contract_check::contract_outputs(uses)
     }) {
@@ -234,7 +230,7 @@ fn resolve_leaf(
         }));
     }
 
-    let (resolved_inputs, secrets) =
+    let (resolved_inputs, mut secrets) =
         match resolve_leaf_inputs(merged, profile_values, &leaf.definition, manifest_inputs) {
             Ok(resolved) => resolved,
             Err(error) => {
@@ -245,6 +241,7 @@ fn resolve_leaf(
                 (BTreeMap::new(), duhem_evidence::SecretRegistry::new())
             }
         };
+    register_flow_secrets(&mut secrets, &leaf.definition, Some(&resolved_inputs));
 
     let mut provenance = BTreeMap::new();
     for name in resolved_inputs.keys() {
@@ -362,6 +359,24 @@ fn resolve_steps(
                 let path = format!(
                     "criteria.{criterion_index}.checks.{check_index}.steps.{step_index}.with"
                 );
+                if let Some(flow) = &step.flow {
+                    provenance.insert(
+                        format!(
+                            "criteria.{criterion_index}.checks.{check_index}.steps.{step_index}.flow"
+                        ),
+                        ValueProvenance {
+                            rung: "flow expansion".to_string(),
+                            origin: Origin {
+                                source: format!(
+                                    "flow `{}` invocation `{}` inner step {}",
+                                    flow.name, flow.invocation, flow.inner_index
+                                ),
+                                line: None,
+                            },
+                            overridden: Vec::new(),
+                        },
+                    );
+                }
                 resolve_with(&mut step.with, &context, &path, provenance, errors);
                 apply_timeout(
                     &mut step.with,
@@ -634,13 +649,13 @@ fn mask_document(registry: &duhem_evidence::SecretRegistry, document: &mut serde
 }
 
 fn candidate_secret_registry(
-    leaf_inputs: &BTreeMap<String, InputDecl>,
+    definition: &VerificationDefinition,
     manifest_inputs: &BTreeMap<String, InputDecl>,
     merged: &BTreeMap<String, InputValue>,
     profile: &BTreeMap<String, serde_json::Value>,
 ) -> duhem_evidence::SecretRegistry {
     let mut registry = duhem_evidence::SecretRegistry::new();
-    for (name, leaf) in leaf_inputs {
+    for (name, leaf) in &definition.inputs {
         let manifest = leaf.inherit.then(|| manifest_inputs.get(name)).flatten();
         if !(leaf.secret || manifest.is_some_and(|decl| decl.secret)) {
             continue;
@@ -666,7 +681,70 @@ fn candidate_secret_registry(
             registry.register_json(name.clone(), &value);
         }
     }
+    register_flow_secrets(&mut registry, definition, None);
     registry
+}
+
+fn register_flow_secrets(
+    registry: &mut duhem_evidence::SecretRegistry,
+    definition: &VerificationDefinition,
+    resolved_inputs: Option<&BTreeMap<String, serde_json::Value>>,
+) {
+    for step in definition
+        .criteria
+        .iter()
+        .flat_map(|criterion| &criterion.checks)
+        .flat_map(|check| &check.steps)
+    {
+        for (index, value) in step.flow_secrets.iter().enumerate() {
+            // A secret flow param's bound value is not always a plain
+            // `$inputs.<name>` string — it may be a mapping or sequence
+            // that embeds one or more such references anywhere inside
+            // it (spec #376). Walking every leaf and resolving each
+            // reference individually keeps the registry holding the
+            // real resolved secret instead of the placeholder text,
+            // while a top-level plain string still takes exactly one
+            // trip through this loop, unchanged from before.
+            let mut ordinal = 0usize;
+            walk_flow_secret_leaves(value, &mut |leaf| {
+                let name = if ordinal == 0 {
+                    format!("flow_param_{index}")
+                } else {
+                    format!("flow_param_{index}_{ordinal}")
+                };
+                ordinal += 1;
+                let resolved = leaf
+                    .as_str()
+                    .and_then(|raw| raw.strip_prefix("$inputs."))
+                    .and_then(reference_head)
+                    .and_then(|name| resolved_inputs.and_then(|inputs| inputs.get(name)))
+                    .cloned()
+                    .or_else(|| inputs::yml_to_json(leaf).ok());
+                if let Some(value) = resolved {
+                    registry.register_json(name, &value);
+                }
+            });
+        }
+    }
+}
+
+/// Visit every scalar leaf of a `flow_secrets` binding, recursing
+/// through mappings and sequences. A plain scalar (the historical
+/// case) is its own single leaf.
+fn walk_flow_secret_leaves<F: FnMut(&serde_yml::Value)>(value: &serde_yml::Value, visit: &mut F) {
+    match value {
+        serde_yml::Value::Sequence(values) => {
+            for value in values {
+                walk_flow_secret_leaves(value, visit);
+            }
+        }
+        serde_yml::Value::Mapping(values) => {
+            for value in values.values() {
+                walk_flow_secret_leaves(value, visit);
+            }
+        }
+        leaf => visit(leaf),
+    }
 }
 
 fn redact_error(registry: &duhem_evidence::SecretRegistry, error: &str) -> String {
@@ -795,5 +873,254 @@ verifications:
             .source
             .clone();
         assert!(source.ends_with("pages.yml"), "{source}");
+    }
+
+    #[test]
+    fn resolve_renders_flow_expansion_with_provenance() {
+        let tmp = tempfile::tempdir().unwrap();
+        let leaf = tmp.path().join("duhem.yml");
+        std::fs::write(
+            &leaf,
+            r#"
+verification: resolved flow
+flows:
+  echo:
+    params:
+      message: { type: string }
+    steps:
+      - id: say
+        uses: cli/invoke
+        with: { command: [echo, $params.message] }
+    outputs:
+      code: $steps.say.outputs.exit_code
+criteria:
+  - id: AC-1
+    description: flow is expanded
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: greeting
+            call: echo
+            with: { message: hello }
+        assertions:
+          - $steps.greeting.outputs.code == 0
+"#,
+        )
+        .unwrap();
+
+        let (_, output) = resolve(ResolveArgs {
+            path: Some(leaf),
+            profile: None,
+            inputs: Vec::new(),
+            format: ResolveFormat::Json,
+            provenance: true,
+        })
+        .expect("resolve");
+        let verification = &output.verifications[0];
+        let step = &verification.document["criteria"][0]["checks"][0]["steps"][0];
+        assert_eq!(step["id"], "greeting__say");
+        assert_eq!(step["uses"], "cli/invoke");
+        assert!(step.get("call").is_none());
+        assert_eq!(step["with"]["command"][1], "hello");
+        assert_eq!(
+            verification.document["criteria"][0]["checks"][0]["assertions"][0],
+            "$steps.greeting__say.outputs.exit_code == 0"
+        );
+        let flow = verification
+            .provenance
+            .as_ref()
+            .unwrap()
+            .get("criteria.0.checks.0.steps.0.flow")
+            .expect("flow provenance");
+        assert_eq!(flow.rung, "flow expansion");
+        assert!(
+            flow.origin
+                .source
+                .contains("flow `echo` invocation `greeting`")
+        );
+    }
+
+    /// Regression coverage for the flow-secret masking leak (spec #376):
+    /// a secret flow param bound to a *structured* value (mapping or
+    /// sequence) must mask the value the `$inputs.*` reference resolves
+    /// to, not the unresolved placeholder text. Each fixture below binds
+    /// `token`'s resolved default through a differently-shaped `auth`
+    /// flow param and asserts the value surfaces in `document.inputs`
+    /// (a field unrelated to the flow secret itself) fully masked.
+    #[test]
+    fn register_flow_secrets_masks_mapping_bound_secret_param() {
+        let tmp = tempfile::tempdir().unwrap();
+        let leaf = tmp.path().join("duhem.yml");
+        let secret = "mapping-secret-9f31ab";
+        std::fs::write(
+            &leaf,
+            format!(
+                r#"
+verification: flow secret mapping leak
+inputs:
+  token: {{ type: string, default: {secret} }}
+flows:
+  call_api:
+    params:
+      auth: {{ type: object, secret: true }}
+    steps:
+      - id: invoke
+        uses: cli/invoke
+        with: {{ command: [echo, ok] }}
+criteria:
+  - id: AC-1
+    description: mapping-bound secret flow param is masked
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: step1
+            call: call_api
+            with: {{ auth: {{ header: $inputs.token }} }}
+"#
+            ),
+        )
+        .unwrap();
+
+        let (_, output) = resolve(ResolveArgs {
+            path: Some(leaf),
+            profile: None,
+            inputs: Vec::new(),
+            format: ResolveFormat::Json,
+            provenance: false,
+        })
+        .expect("resolve");
+        let verification = &output.verifications[0];
+        assert!(
+            verification.errors.is_empty(),
+            "{}",
+            verification
+                .errors
+                .iter()
+                .map(|error| format!("{}: {}", error.stage, error.message))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        assert_eq!(
+            verification.document["inputs"]["token"], MASK,
+            "a secret bound to a mapping flow param must mask the resolved value, not the `$inputs.token` placeholder"
+        );
+    }
+
+    #[test]
+    fn register_flow_secrets_masks_sequence_bound_secret_param() {
+        let tmp = tempfile::tempdir().unwrap();
+        let leaf = tmp.path().join("duhem.yml");
+        let secret = "sequence-secret-4d2acb";
+        std::fs::write(
+            &leaf,
+            format!(
+                r#"
+verification: flow secret sequence leak
+inputs:
+  token: {{ type: string, default: {secret} }}
+flows:
+  call_api:
+    params:
+      auth: {{ type: array, secret: true }}
+    steps:
+      - id: invoke
+        uses: cli/invoke
+        with: {{ command: [echo, ok] }}
+criteria:
+  - id: AC-1
+    description: sequence-bound secret flow param is masked
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: step1
+            call: call_api
+            with: {{ auth: [$inputs.token] }}
+"#
+            ),
+        )
+        .unwrap();
+
+        let (_, output) = resolve(ResolveArgs {
+            path: Some(leaf),
+            profile: None,
+            inputs: Vec::new(),
+            format: ResolveFormat::Json,
+            provenance: false,
+        })
+        .expect("resolve");
+        let verification = &output.verifications[0];
+        assert!(
+            verification.errors.is_empty(),
+            "{}",
+            verification
+                .errors
+                .iter()
+                .map(|error| format!("{}: {}", error.stage, error.message))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        assert_eq!(
+            verification.document["inputs"]["token"], MASK,
+            "a secret bound to a sequence flow param must mask the resolved value, not the `$inputs.token` placeholder"
+        );
+    }
+
+    #[test]
+    fn register_flow_secrets_still_masks_plain_string_bound_secret_param() {
+        let tmp = tempfile::tempdir().unwrap();
+        let leaf = tmp.path().join("duhem.yml");
+        let secret = "plain-secret-7a10ee";
+        std::fs::write(
+            &leaf,
+            format!(
+                r#"
+verification: flow secret plain string leak (regression)
+inputs:
+  token: {{ type: string, default: {secret} }}
+flows:
+  call_api:
+    params:
+      auth: {{ type: string, secret: true }}
+    steps:
+      - id: invoke
+        uses: cli/invoke
+        with: {{ command: [echo, ok] }}
+criteria:
+  - id: AC-1
+    description: plain-string-bound secret flow param is masked
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: step1
+            call: call_api
+            with: {{ auth: $inputs.token }}
+"#
+            ),
+        )
+        .unwrap();
+
+        let (_, output) = resolve(ResolveArgs {
+            path: Some(leaf),
+            profile: None,
+            inputs: Vec::new(),
+            format: ResolveFormat::Json,
+            provenance: false,
+        })
+        .expect("resolve");
+        let verification = &output.verifications[0];
+        assert!(
+            verification.errors.is_empty(),
+            "{}",
+            verification
+                .errors
+                .iter()
+                .map(|error| format!("{}: {}", error.stage, error.message))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        assert_eq!(
+            verification.document["inputs"]["token"], MASK,
+            "the historical plain-string secret flow param binding must keep masking the resolved value"
+        );
     }
 }

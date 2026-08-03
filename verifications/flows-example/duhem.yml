@@ -1,0 +1,6 @@
+manifest_version: 1
+includes:
+  - flows.yml
+verifications:
+  - path: first/duhem.yml
+  - path: second/duhem.yml

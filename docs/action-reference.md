@@ -15,6 +15,10 @@ assertion as `$steps.<id>.outputs.<name>`. Assert over **scalar** outputs
 (`status`, `body_text`, `satisfied`, `exit_code`, …); helpers like
 `$runtime.contains(...)` cover membership.
 
+`uses:` always names one of the closed-catalog actions below. Reusable
+`flows:` use the distinct `call:` key and expand into these actions before
+runtime dispatch; a flow can never shadow an action name.
+
 An action contract may declare an output path secret by default, including a
 structured credential such as browser storage state. The value joins the masking
 registry before the producing step writes evidence and needs no authored `secret_outputs:`

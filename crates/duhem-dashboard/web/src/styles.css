@@ -597,6 +597,28 @@ ol.timeline li.ev.step-group {
   overflow: visible;
   padding: 0;
 }
+ol.timeline > li.flow-group {
+  list-style: none;
+  border-bottom: 1px solid var(--lg-border);
+  background: color-mix(in oklab, var(--panel-2) 55%, transparent);
+}
+.flow-group-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--lg-border);
+}
+.flow-group-label { font-weight: 650; }
+.flow-group-header code { color: var(--lg-muted); font-size: 0.75rem; }
+.flow-step-list {
+  list-style: none;
+  margin: 0 0 0 1rem;
+  padding: 0;
+  border-left: 2px solid color-mix(in oklab, var(--accent) 35%, var(--lg-border));
+}
+.flow-step-list > li.ev.step-group:last-child { border-bottom: 0; }
 /* The summary is a block wrapper: its primary line is a shared `.ev-row`
    grid (so step rows align pixel-for-pixel with the events below them),
    with an optional `.step-detail` second line under it. */

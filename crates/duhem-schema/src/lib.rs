@@ -9,6 +9,7 @@
 pub mod assertion;
 pub mod criterion;
 pub mod expr;
+mod flows;
 pub mod includes;
 pub mod jsonschema;
 pub mod manifest;
@@ -32,9 +33,11 @@ pub use manifest::{
 };
 pub use project::{ProjectDecl, ProjectKind};
 pub use provision::{DurationSpec, HttpReadyProbe, Provision, ReadyProbe};
-pub use step::{Step, StepCondition};
+pub use step::{ExpandedFlowOrigin, Step, StepCondition};
 pub use validate::{ValidationError, validate, validate_with_contract_outputs};
-pub use verification::{InputDecl, InputType, PageCatalog, SchemaError, VerificationDefinition};
+pub use verification::{
+    Flow, FlowCatalog, InputDecl, InputType, PageCatalog, SchemaError, VerificationDefinition,
+};
 
 /// Current Verification Definition schema version. Pre-1.0 per
 /// `docs/duhem-spec.md` §11.3 — breaking changes bump the minor under

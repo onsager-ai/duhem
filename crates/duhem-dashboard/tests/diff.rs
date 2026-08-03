@@ -56,6 +56,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, screenshot: boo
         step_index: 0,
         uses: "ui/assert-element".into(),
         layer: Some("ui".into()),
+        flow: None,
         with: BTreeMap::new(),
     })
     .await

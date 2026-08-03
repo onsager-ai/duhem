@@ -95,6 +95,7 @@ async fn check_artifact_surfaces_secret_mask_occurrence_counts() {
             step_index: 0,
             uses: "api/call".into(),
             layer: Some("api".into()),
+            flow: None,
             with: BTreeMap::new(),
         })
         .await
@@ -603,6 +604,7 @@ async fn colliding_check_ids_attribute_to_the_first_owner() {
             step_index: 0,
             uses: "api/call".into(),
             layer: None,
+            flow: None,
             with: BTreeMap::new(),
         })
         .await

@@ -11,6 +11,7 @@ pub mod capture;
 pub mod context;
 pub mod env;
 pub(crate) mod extract;
+pub(crate) mod flow;
 pub(crate) mod gating;
 pub mod har;
 pub mod identity;

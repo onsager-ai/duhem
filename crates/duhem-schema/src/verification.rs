@@ -20,6 +20,25 @@ use crate::step::Step;
 /// untyped here; `duhem-actions` owns the authoritative locator schema.
 pub type PageCatalog = BTreeMap<String, BTreeMap<String, serde_yml::Value>>;
 
+/// A named, parameterized sequence of steps expanded by the loader.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Flow {
+    /// Per-call parameters. Reuses the input type catalog and
+    /// sensitivity marker; values are supplied only by the call site.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, InputDecl>,
+
+    /// Ordered action/flow invocations that make up this flow.
+    pub steps: Vec<Step>,
+
+    /// Caller-visible output name to an inner `$steps.*` output.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub outputs: BTreeMap<String, String>,
+}
+
+pub type FlowCatalog = BTreeMap<String, Flow>;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VerificationDefinition {
@@ -60,6 +79,11 @@ pub struct VerificationDefinition {
         with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
     )]
     pub pages: PageCatalog,
+
+    /// Leaf-local reusable flows. When loaded through a manifest these
+    /// overlay the composed manifest catalog by flow name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub flows: FlowCatalog,
 
     /// Optional setup steps run once before the criteria.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -251,6 +275,7 @@ criteria:
             provision: None,
             inputs,
             pages: BTreeMap::new(),
+            flows: BTreeMap::new(),
             setup: vec![],
             criteria: vec![],
         };
@@ -281,6 +306,33 @@ criteria: []
             parsed.pages["login"]["submit"]["name"].as_str(),
             Some("Sign In")
         );
+        let round_trip =
+            VerificationDefinition::from_yaml_str(&parsed.to_yaml_string().unwrap()).unwrap();
+        assert_eq!(parsed, round_trip);
+    }
+
+    #[test]
+    fn flows_round_trip_and_absent_flows_keep_wire_shape() {
+        let absent = VerificationDefinition::from_yaml_str("verification: x\ncriteria: []\n")
+            .expect("parse absent");
+        assert!(absent.flows.is_empty());
+        assert!(!absent.to_yaml_string().unwrap().contains("flows:"));
+
+        let y = r#"
+verification: catalog
+flows:
+  sign_in:
+    params:
+      password: { type: string, secret: true }
+      user: { type: string }
+    steps:
+      - uses: ui/type
+        with: { text: $params.user }
+    outputs: {}
+criteria: []
+"#;
+        let parsed = VerificationDefinition::from_yaml_str(y).expect("parse flows");
+        assert!(parsed.flows["sign_in"].params["password"].secret);
         let round_trip =
             VerificationDefinition::from_yaml_str(&parsed.to_yaml_string().unwrap()).unwrap();
         assert_eq!(parsed, round_trip);

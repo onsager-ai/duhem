@@ -95,13 +95,11 @@ pub(crate) async fn run_setup(
     // setup behaves the same way on an env-failure path.
     let needs_browser = setup.iter().any(|s| {
         registry
-            .get(s.uses.as_str())
+            .get(s.uses_name())
             .map(|d| d.requires_page())
             .unwrap_or(false)
     });
-    let any_unknown = setup
-        .iter()
-        .any(|s| !registry.contains_key(s.uses.as_str()));
+    let any_unknown = setup.iter().any(|s| !registry.contains_key(s.uses_name()));
     let browser_missing = needs_browser && browser.is_none();
     let mut environment_failed = browser_missing || any_unknown;
 
@@ -166,7 +164,7 @@ pub(crate) async fn run_setup(
         let (outcome, failed) = if environment_failed {
             (Outcome::Error, true)
         } else {
-            match registry.get(step.uses.as_str()) {
+            match registry.get(step.uses_name()) {
                 None => (Outcome::Error, true),
                 Some(dispatcher) => {
                     let page_ref: Option<&Page> = setup_browser.as_ref().map(|cb| &cb.page);
@@ -226,9 +224,9 @@ async fn append_setup_started(
     writer
         .append(EventPayload::SetupStepStarted {
             step_index: idx as u32,
-            uses: step.uses.clone(),
+            uses: step.uses_name().to_string(),
             // Same honesty contract as the per-check tag (#192).
-            layer: duhem_actions::layer_for_uses(&step.uses).map(str::to_string),
+            layer: duhem_actions::layer_for_uses(step.uses_name()).map(str::to_string),
             with: with_to_evidence_map(resolved_with),
         })
         .await?;
@@ -408,10 +406,13 @@ mod tests {
             id: id.map(String::from),
             description: None,
             condition: duhem_schema::StepCondition::Success,
-            uses: uses.to_string(),
+            uses: Some(uses.to_string()),
+            call: None,
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
             secret_outputs: Vec::new(),
+            flow: None,
+            flow_secrets: Vec::new(),
         }
     }
 

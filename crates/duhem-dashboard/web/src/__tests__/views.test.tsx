@@ -222,6 +222,69 @@ describe("CheckSummary", () => {
 });
 
 describe("Timeline", () => {
+  it("groups expanded steps under their recorded flow invocation", () => {
+    const flow = { name: "sign_in", invocation: "login", inner_index: 0 };
+    const events: TraceEvent[] = [
+      {
+        seq: 1,
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "step_started",
+        criterion_id: "AC-1",
+        check_id: "AC-1.1",
+        step_index: 0,
+        uses: "ui/type",
+        flow,
+      },
+      {
+        seq: 2,
+        ts: "2026-01-01T00:00:00.010Z",
+        kind: "step_finished",
+        step_index: 0,
+        outcome: "ok",
+      },
+      {
+        seq: 3,
+        ts: "2026-01-01T00:00:00.020Z",
+        kind: "step_started",
+        criterion_id: "AC-1",
+        check_id: "AC-1.1",
+        step_index: 1,
+        uses: "ui/click",
+        flow: { ...flow, inner_index: 1 },
+      },
+      {
+        seq: 4,
+        ts: "2026-01-01T00:00:00.030Z",
+        kind: "step_finished",
+        step_index: 1,
+        outcome: "ok",
+      },
+      {
+        seq: 5,
+        ts: "2026-01-01T00:00:00.040Z",
+        kind: "step_started",
+        step_index: 2,
+        uses: "ui/assert-url",
+      },
+      {
+        seq: 6,
+        ts: "2026-01-01T00:00:00.050Z",
+        kind: "step_finished",
+        step_index: 2,
+        outcome: "ok",
+      },
+    ];
+
+    const { container, getByTestId } = render(<Timeline events={events} />);
+    const group = getByTestId("flow-group");
+    expect(group.getAttribute("data-flow-invocation")).toBe("login");
+    expect(group.getAttribute("data-flow-name")).toBe("sign_in");
+    expect(group.textContent).toContain("login");
+    expect(group.querySelectorAll('[data-testid="step-group"]')).toHaveLength(2);
+    expect(container.querySelectorAll(':scope > ol.timeline > [data-testid="step-group"]'))
+      .toHaveLength(1);
+  });
+
   it("renders a gated step as skipped from its execution trace", () => {
     const events: TraceEvent[] = [
       {

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::manifest::{LoadError, ManifestEntry, RootManifest};
 use crate::manifest_path::{canonical_or_self, validate_entry_path};
 use crate::provision::Provision;
-use crate::verification::{InputDecl, PageCatalog, SchemaError};
+use crate::verification::{FlowCatalog, InputDecl, PageCatalog, SchemaError};
 
 /// An `includes:` target — a manifest fragment composed into a root
 /// manifest (spec #67). Structurally a [`RootManifest`] with every
@@ -51,6 +51,9 @@ pub struct PartialRootManifest {
         with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
     )]
     pub pages: PageCatalog,
+    /// Reusable flows, merged by name under root-wins.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub flows: FlowCatalog,
     /// Verification entries concatenated onto the root manifest's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub verifications: Vec<ManifestEntry>,
@@ -186,6 +189,12 @@ fn merge_partial(effective: &mut RootManifest, incoming: &PartialRootManifest) {
                 .or_insert_with(|| locator.clone());
         }
     }
+    for (name, flow) in &incoming.flows {
+        effective
+            .flows
+            .entry(name.clone())
+            .or_insert_with(|| flow.clone());
+    }
     // List-shaped fields: concatenate (root's already present first).
     effective
         .verifications
@@ -252,6 +261,21 @@ criteria:
             "pages:\n  login:\n    submit: { role: button, name: Sign In }\n",
         )
         .expect("parse pages");
+        let round_trip =
+            PartialRootManifest::from_yaml_str(&serde_yml::to_string(&parsed).unwrap()).unwrap();
+        assert_eq!(parsed, round_trip);
+    }
+
+    #[test]
+    fn partial_flows_round_trip_and_absence_keeps_wire_shape() {
+        let absent = PartialRootManifest::from_yaml_str("{}\n").expect("parse absent");
+        assert!(absent.flows.is_empty());
+        assert!(!serde_yml::to_string(&absent).unwrap().contains("flows:"));
+
+        let parsed = PartialRootManifest::from_yaml_str(
+            "flows:\n  shared:\n    steps:\n      - uses: cli/invoke\n",
+        )
+        .expect("parse flows");
         let round_trip =
             PartialRootManifest::from_yaml_str(&serde_yml::to_string(&parsed).unwrap()).unwrap();
         assert_eq!(parsed, round_trip);
@@ -375,6 +399,70 @@ verifications:
             leaves[0].definition.pages["login"]["username"]["name"].as_str(),
             Some("Username"),
             "non-conflicting include entries reach the leaf"
+        );
+    }
+
+    #[test]
+    fn flows_merge_root_first_and_leaf_local_wins() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            ".duhem.flows.yml",
+            r#"
+flows:
+  shared:
+    steps:
+      - uses: cli/invoke
+        with: { command: included }
+"#,
+        );
+        write(
+            tmp.path(),
+            "leaf/duhem.yml",
+            r#"
+verification: leaf
+flows:
+  shared:
+    steps:
+      - uses: cli/invoke
+        with: { command: leaf }
+criteria:
+  - id: AC-1
+    description: trivial
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#,
+        );
+        write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+includes: [./.duhem.flows.yml]
+flows:
+  shared:
+    steps:
+      - uses: cli/invoke
+        with: { command: root }
+verifications:
+  - path: ./leaf/duhem.yml
+"#,
+        );
+
+        let Loaded::Manifest {
+            manifest, leaves, ..
+        } = load(&tmp.path().join("duhem.yml")).unwrap()
+        else {
+            panic!("expected manifest");
+        };
+        assert_eq!(
+            manifest.flows["shared"].steps[0].with["command"].as_str(),
+            Some("root")
+        );
+        assert_eq!(
+            leaves[0].definition.flows["shared"].steps[0].with["command"].as_str(),
+            Some("leaf")
         );
     }
 

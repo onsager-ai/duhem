@@ -6,12 +6,8 @@
 //! discipline. Every call re-queries the store (the MVP's hot-reload
 //! posture from #53 — no cache, no invalidation bug).
 //!
-//! Runs are listed flat from the store and grouped by verification
-//! name: a verification with more than one recorded run renders as a
-//! run-set row with its runs as children (the pre-#190 stand-in for
-//! real scoping; it also seeds the ② VD-over-time altitude from
-//! #188). The rollup verdict is the judge's `aggregate_run_set` fold
-//! over recorded verdicts — the dashboard never invents a verdict.
+//! Run grouping and rollups derive from recorded store state; the
+//! dashboard never invents a verdict.
 
 use std::sync::Arc;
 

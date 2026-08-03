@@ -119,7 +119,10 @@ impl TtyBoard {
                 uses: step.uses,
                 outcome: outcome.clone(),
                 judgment: None,
-                detail: None,
+                detail: match outcome {
+                    duhem_evidence::StepOutcome::Skipped { reason } => Some(reason.clone()),
+                    _ => None,
+                },
                 duration: step.since.elapsed(),
             });
     }
@@ -628,6 +631,7 @@ fn step_mark(step: &CompletedStep) -> &'static str {
         duhem_evidence::StepOutcome::Ok => INDICATOR_PASS,
         duhem_evidence::StepOutcome::Error => INDICATOR_FAIL,
         duhem_evidence::StepOutcome::Timeout => INDICATOR_INCONCLUSIVE,
+        duhem_evidence::StepOutcome::Skipped { .. } => INDICATOR_PENDING,
     }
 }
 
@@ -640,6 +644,12 @@ fn completed_steps_mark(steps: &[CompletedStep]) -> &'static str {
         .any(|step| step_mark(step) == INDICATOR_INCONCLUSIVE)
     {
         return INDICATOR_INCONCLUSIVE;
+    }
+    if steps
+        .iter()
+        .any(|step| step_mark(step) == INDICATOR_PENDING)
+    {
+        return INDICATOR_PENDING;
     }
     INDICATOR_PASS
 }

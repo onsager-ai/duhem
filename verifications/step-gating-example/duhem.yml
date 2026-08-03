@@ -1,0 +1,39 @@
+# Step gating — worked example (spec #365)
+#
+# This real local-process check exercises all three closed `if:` values.
+# The first step succeeds, so the failure-only step is recorded as
+# skipped. The assertion that references it is omitted; the always step
+# still runs, and its passing assertion makes the check pass.
+
+verification: Step gating conditions
+
+criteria:
+  - id: AC-1
+    description: |
+      Cleanup runs on the success path, while failure-only diagnostics
+      remain visible in evidence without executing.
+    checks:
+      - id: AC-1.1
+        description: Exercise success, failure-only, and always dispatch.
+        steps:
+          - id: work
+            description: Complete the primary work
+            uses: cli/invoke
+            if: success
+            with:
+              command: [sh, -c, "exit 0"]
+          - id: diagnostics
+            description: Collect diagnostics only after failure
+            uses: cli/invoke
+            if: failure
+            with:
+              command: [sh, -c, "exit 0"]
+          - id: cleanup
+            description: Always release resources
+            uses: cli/invoke
+            if: always
+            with:
+              command: [sh, -c, "exit 0"]
+        assertions:
+          - $steps.diagnostics.outputs.exit_code == 0
+          - $steps.cleanup.outputs.exit_code == 0

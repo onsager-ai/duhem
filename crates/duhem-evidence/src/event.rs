@@ -73,13 +73,13 @@ pub enum StepOutcome {
     Ok,
     Error,
     Timeout,
+    Skipped { reason: String },
 }
 
-/// Verdict shape for `assertion_evaluated.state` and the three
-/// `*_finished.verdict` fields. Re-exported from `duhem-judge` so the
-/// evidence wire format and the judge's output share one canonical
-/// type — the wire token is `"pass"` / `"fail"` /
-/// `"inconclusive:<cause>"` (`docs/duhem-spec.md` §7.6).
+/// Assertion and finished-verdict fields share the same three-state
+/// judgment vocabulary (`docs/duhem-spec.md` §7.6). A step that did not
+/// run has no assertion event; its absence is carried by
+/// [`StepOutcome::Skipped`] instead.
 pub use duhem_judge::VerdictState;
 
 /// Either an inline JSON value (small observations) or a reference to
@@ -404,6 +404,23 @@ mod tests {
         assert!(line.contains(r#""blob_sha256":"abc123""#));
         let back: Event = serde_json::from_str(&line).unwrap();
         assert_eq!(blob, back);
+    }
+
+    #[test]
+    fn skipped_step_outcome_round_trips_with_reason() {
+        let evt = Event {
+            seq: 2,
+            ts: ts(),
+            payload: EventPayload::StepFinished {
+                step_index: 1,
+                outcome: StepOutcome::Skipped {
+                    reason: "blocked by failed step `login`".into(),
+                },
+            },
+        };
+        let line = serde_json::to_string(&evt).unwrap();
+        assert!(line.contains(r#""skipped":{"reason":"blocked by failed step `login`"}"#));
+        assert_eq!(serde_json::from_str::<Event>(&line).unwrap(), evt);
     }
 
     #[test]

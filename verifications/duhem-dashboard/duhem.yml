@@ -302,9 +302,15 @@ criteria:
           - id: open-results
             uses: ui/click
             with: {role: tab, name: Results}
-          - id: open-check
-            uses: ui/click
-            with: {role: link, name: AC-1.1}
+          # Results selects the first check by default. Pin that
+          # prerequisite mechanically instead of tolerating a redundant
+          # self-link click that can time out without changing the page.
+          - id: check-visible
+            uses: ui/assert-element
+            with:
+              locator: {role: link, name: AC-1.1}
+              expected: visible
+              timeout: 15s
           - id: select-step
             uses: ui/click
             with: {role: link, name: show-evidence}

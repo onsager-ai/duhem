@@ -153,6 +153,40 @@ pub(crate) fn outcome_to_evidence(o: &Outcome) -> StepOutcome {
         Outcome::Ok => StepOutcome::Ok,
         Outcome::Error => StepOutcome::Error,
         Outcome::Timeout => StepOutcome::Timeout,
+        Outcome::Skipped { reason } => StepOutcome::Skipped {
+            reason: reason.clone(),
+        },
+    }
+}
+
+#[cfg(test)]
+mod outcome_vocabulary_tests {
+    use super::*;
+
+    fn evidence_to_action(outcome: StepOutcome) -> Outcome {
+        match outcome {
+            StepOutcome::Ok => Outcome::Ok,
+            StepOutcome::Error => Outcome::Error,
+            StepOutcome::Timeout => Outcome::Timeout,
+            StepOutcome::Skipped { reason } => Outcome::Skipped { reason },
+        }
+    }
+
+    #[test]
+    fn action_and_evidence_outcomes_have_variant_parity() {
+        let action_outcomes = [
+            Outcome::Ok,
+            Outcome::Error,
+            Outcome::Timeout,
+            Outcome::Skipped {
+                reason: "gated".to_string(),
+            },
+        ];
+
+        for action in action_outcomes {
+            let evidence = outcome_to_evidence(&action);
+            assert_eq!(evidence_to_action(evidence), action);
+        }
     }
 }
 

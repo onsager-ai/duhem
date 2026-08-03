@@ -136,6 +136,12 @@ criteria:
   (`outputs: { code: status }`) or bind a *deep extraction* to a short
   alias (`outputs: { project_id: body.data._id }`) so you write the path
   once instead of repeating it across assertions.
+- **Step gating** defaults to `if: success`: after an earlier step errors,
+  times out, or produces a failed implicit judgment, later default steps
+  in that check are recorded as skipped. Binding `satisfied` for manual
+  composition opts out of both implicit judgment and gating. Use
+  `if: always` for teardown and `if: failure` for failure-only
+  diagnostics. Gate state is per check and never affects sibling checks.
 - **`assertions`** are evaluated deterministically — no model in the
   judging loop. They're also **optional**: a `ui/assert-*` (or `api/poll`)
   step *is* the judgment, so an all-assert check needs no `assertions:`

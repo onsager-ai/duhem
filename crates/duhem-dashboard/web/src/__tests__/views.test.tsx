@@ -222,6 +222,32 @@ describe("CheckSummary", () => {
 });
 
 describe("Timeline", () => {
+  it("renders a gated step as skipped from its execution trace", () => {
+    const events: TraceEvent[] = [
+      {
+        seq: 1,
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "step_started",
+        step_index: 1,
+        uses: "ui/click",
+        with: { role: "button", name: "Cleanup" },
+      },
+      {
+        seq: 2,
+        ts: "2026-01-01T00:00:00.010Z",
+        kind: "step_finished",
+        step_index: 1,
+        outcome: { skipped: { reason: "blocked by failed step `login`" } },
+      },
+    ];
+    const { container, getByTestId } = render(<Timeline events={events} />);
+    const group = getByTestId("step-group");
+    expect(group.className).toContain("tone-skipped");
+    expect(group.className).not.toContain("tone-fail");
+    expect(getByTestId("step-outcome").textContent).toBe("skipped");
+    expect(container.querySelector(".ev-glyph-skipped")).not.toBeNull();
+  });
+
   it("renders each event as a legible row in trace order, raw one click away", () => {
     const events: TraceEvent[] = [
       {

@@ -196,6 +196,15 @@ Authoring rules:
   stable because references, diagnostics, and dashboard links use it.
 - Timeouts (`timeout:`) are explicit on steps that observe something
   asynchronous.
+- Steps default to `if: success`: an earlier execution `Error` /
+  `Timeout` or failed implicit judgment gates the remaining default
+  steps in that check. Binding a judging step's `satisfied` output opts
+  out of both implicit judgment and gating, so a false observation can
+  still participate in a later disjunction. Explicit `assertions:` are
+  evaluated after the step sequence and cannot gate steps. Use
+  `if: always` for teardown and `if: failure` for diagnostics that
+  should run only after failure. Do not invent expressions under `if:`;
+  its closed vocabulary is `success | always | failure`.
 - Use role-based locators (`{ role: "button", name: "…" }`) for `ui/*`
   rather than CSS or XPath — UI churn invalidates the latter while
   role-based selectors track the user-visible affordance.

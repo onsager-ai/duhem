@@ -77,6 +77,23 @@ describe("formatEvent", () => {
     expect(formatEvent(ev("step_finished", { outcome: "ok" })).tone).toBe("ok");
     expect(formatEvent(ev("step_finished", { outcome: "error" })).tone).toBe("fail");
     expect(formatEvent(ev("step_finished", { outcome: "timeout" })).tone).toBe("inconclusive");
+    const skipped = formatEvent(
+      ev("step_finished", {
+        outcome: { skipped: { reason: "blocked by failed step `login`" } },
+      }),
+    );
+    expect(skipped.tone).toBe("skipped");
+    expect(skipped.label).toBe("step skipped");
+    expect(skipped.detail).toContain("login");
+  });
+
+  it("keeps unknown structured step outcomes neutral", () => {
+    const future = formatEvent(
+      ev("step_finished", { outcome: { future: { detail: "new wire shape" } } }),
+    );
+    expect(future.icon).toBe("unknown");
+    expect(future.label).toBe("step unknown");
+    expect(future.tone).toBe("muted");
   });
 
   it("emphasizes a failing assertion with its recorded detail", () => {
@@ -93,11 +110,11 @@ describe("formatEvent", () => {
     expect(f.tone).toBe("inconclusive");
   });
 
-  it("does not mislabel a missing or unknown assertion state as failed", () => {
+  it("keeps unknown assertion states neutral", () => {
     const missing = formatEvent(ev("assertion_evaluated", { detail: "x" }));
     expect(missing.label).toBe("assertion evaluated");
     expect(missing.tone).toBe("muted");
-    const future = formatEvent(ev("assertion_evaluated", { state: "skipped" }));
+    const future = formatEvent(ev("assertion_evaluated", { state: "future" }));
     expect(future.label).toBe("assertion evaluated");
     expect(future.tone).toBe("muted");
   });
@@ -215,7 +232,7 @@ describe("groupTimeline", () => {
 });
 
 describe("stepStatus (#280 status propagation)", () => {
-  const node = (judgment?: TraceEvent, outcome = "ok"): StepNode => ({
+  const node = (judgment?: TraceEvent, outcome: unknown = "ok"): StepNode => ({
     kind: "step",
     key: "s1",
     stepIndex: 0,
@@ -263,6 +280,23 @@ describe("stepStatus (#280 status propagation)", () => {
     expect(stepStatus(node(undefined, "ok")).label).toBe("step ok");
     expect(stepStatus(node(undefined, "error")).label).toBe("step error");
     expect(stepStatus(node(undefined, "error")).tone).toBe("fail");
+  });
+
+  it("does not render an unknown structured outcome as successful", () => {
+    const s = stepStatus(node(undefined, { future: { detail: "new wire shape" } }));
+    expect(s.icon).toBe("unknown");
+    expect(s.label).toBe("step unknown");
+    expect(s.tone).toBe("muted");
+  });
+
+  it("renders a gated step as skipped without marking it failed", () => {
+    const s = stepStatus(
+      node(undefined, { skipped: { reason: "blocked by failed step `login`" } }),
+    );
+    expect(s.label).toBe("step skipped");
+    expect(s.tone).toBe("skipped");
+    expect(s.failed).toBe(false);
+    expect(s.reason).toContain("login");
   });
 });
 

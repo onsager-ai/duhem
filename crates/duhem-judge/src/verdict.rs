@@ -59,7 +59,7 @@ impl InconclusiveCause {
         }
     }
 
-    fn from_wire(s: &str) -> Option<Self> {
+    pub(crate) fn from_wire(s: &str) -> Option<Self> {
         Some(match s {
             "timeout" => InconclusiveCause::Timeout,
             "missing_observation" => InconclusiveCause::MissingObservation,

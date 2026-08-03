@@ -20,6 +20,8 @@ use crate::with::TimeoutSpec;
 #[serde(deny_unknown_fields)]
 struct WithWire {
     #[serde(default)]
+    locator: Option<Locator>,
+    #[serde(default)]
     role: Option<String>,
     #[serde(default)]
     label: Option<String>,
@@ -50,7 +52,7 @@ impl TryFrom<WithWire> for With {
     type Error = String;
 
     fn try_from(w: WithWire) -> Result<Self, Self::Error> {
-        let locator = Locator {
+        let inline = Locator {
             role: w.role,
             label: w.label,
             testid: w.testid,
@@ -59,6 +61,24 @@ impl TryFrom<WithWire> for With {
             name: w.name,
             text: w.text,
             scope: w.scope,
+        };
+        let has_inline = inline.role.is_some()
+            || inline.label.is_some()
+            || inline.testid.is_some()
+            || inline.placeholder.is_some()
+            || inline.css.is_some()
+            || inline.name.is_some()
+            || inline.text.is_some()
+            || inline.scope.is_some();
+        let locator = match (w.locator, has_inline) {
+            (Some(_), true) => {
+                return Err(
+                    "use either `locator:` or inline locator fields on ui/click, not both"
+                        .to_string(),
+                );
+            }
+            (Some(locator), false) => locator,
+            (None, _) => inline,
         };
         locator.validate_primary()?;
         Ok(With {
@@ -102,7 +122,7 @@ impl Action for Click {
             ],
             outputs: vec![],
             secret_outputs: vec![],
-            example: "- uses: ui/click\n  with: { role: button, name: \"Save\" }",
+            example: "- uses: ui/click\n  with: { locator: { role: button, name: \"Save\" } }",
         }
     }
 
@@ -153,6 +173,23 @@ timeout: 3s
         let (l, t) = v.into_locator();
         assert_eq!(l.scope.as_ref().unwrap().role.as_deref(), Some("list"));
         assert_eq!(t, Duration::from_secs(3));
+    }
+
+    #[test]
+    fn parses_nested_locator_for_catalog_splicing() {
+        let yaml = r#"{ locator: { role: button, name: Create }, timeout: 3s }"#;
+        let v: With = serde_yml::from_str(yaml).unwrap();
+        let (locator, timeout) = v.into_locator();
+        assert_eq!(locator.role.as_deref(), Some("button"));
+        assert_eq!(locator.name.as_deref(), Some("Create"));
+        assert_eq!(timeout, Duration::from_secs(3));
+    }
+
+    #[test]
+    fn rejects_nested_and_inline_locator_together() {
+        let yaml = r#"{ locator: { role: button }, role: button }"#;
+        let error = serde_yml::from_str::<With>(yaml).unwrap_err().to_string();
+        assert!(error.contains("either `locator:` or inline"), "{error}");
     }
 
     #[test]

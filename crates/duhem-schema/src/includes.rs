@@ -11,11 +11,10 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::manifest::{
-    LoadError, ManifestEntry, RootManifest, canonical_or_self, validate_entry_path,
-};
+use crate::manifest::{LoadError, ManifestEntry, RootManifest};
+use crate::manifest_path::{canonical_or_self, validate_entry_path};
 use crate::provision::Provision;
-use crate::verification::{InputDecl, SchemaError};
+use crate::verification::{InputDecl, PageCatalog, SchemaError};
 
 /// An `includes:` target — a manifest fragment composed into a root
 /// manifest (spec #67). Structurally a [`RootManifest`] with every
@@ -46,6 +45,12 @@ pub struct PartialRootManifest {
     /// root-wins rule as other manifest maps.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, InputDecl>,
+    /// Named locators, merged by page and element under root-wins.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(
+        with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
+    )]
+    pub pages: PageCatalog,
     /// Verification entries concatenated onto the root manifest's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub verifications: Vec<ManifestEntry>,
@@ -173,6 +178,14 @@ fn merge_partial(effective: &mut RootManifest, incoming: &PartialRootManifest) {
             .entry(name.clone())
             .or_insert_with(|| decl.clone());
     }
+    for (page, elements) in &incoming.pages {
+        let target = effective.pages.entry(page.clone()).or_default();
+        for (element, locator) in elements {
+            target
+                .entry(element.clone())
+                .or_insert_with(|| locator.clone());
+        }
+    }
     // List-shaped fields: concatenate (root's already present first).
     effective
         .verifications
@@ -230,6 +243,21 @@ criteria:
     }
 
     #[test]
+    fn partial_pages_round_trip_and_absence_keeps_wire_shape() {
+        let absent = PartialRootManifest::from_yaml_str("{}\n").expect("parse absent");
+        assert!(absent.pages.is_empty());
+        assert!(!serde_yml::to_string(&absent).unwrap().contains("pages:"));
+
+        let parsed = PartialRootManifest::from_yaml_str(
+            "pages:\n  login:\n    submit: { role: button, name: Sign In }\n",
+        )
+        .expect("parse pages");
+        let round_trip =
+            PartialRootManifest::from_yaml_str(&serde_yml::to_string(&parsed).unwrap()).unwrap();
+        assert_eq!(parsed, round_trip);
+    }
+
+    #[test]
     fn includes_merge_is_root_wins_then_first_include_wins() {
         // staging.db_url is declared by the root → root wins.
         // staging.base_url is declared by both includes → the first
@@ -282,6 +310,72 @@ verifications:
             }
             _ => panic!("expected Manifest"),
         }
+    }
+
+    #[test]
+    fn pages_merge_root_first_and_leaf_local_wins() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            ".duhem.pages.yml",
+            r#"
+pages:
+  login:
+    submit: { role: button, name: Included }
+    username: { role: textbox, name: Username }
+"#,
+        );
+        write(
+            tmp.path(),
+            "leaf/duhem.yml",
+            r#"
+verification: leaf
+pages:
+  login:
+    submit: { role: button, name: Leaf }
+criteria:
+  - id: AC-1
+    description: trivial
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#,
+        );
+        write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+includes: [./.duhem.pages.yml]
+pages:
+  login:
+    submit: { role: button, name: Root }
+verifications:
+  - path: ./leaf/duhem.yml
+"#,
+        );
+
+        let Loaded::Manifest {
+            manifest, leaves, ..
+        } = load(&tmp.path().join("duhem.yml")).unwrap()
+        else {
+            panic!("expected manifest");
+        };
+        assert_eq!(
+            manifest.pages["login"]["submit"]["name"].as_str(),
+            Some("Root"),
+            "root wins over include"
+        );
+        assert_eq!(
+            leaves[0].definition.pages["login"]["submit"]["name"].as_str(),
+            Some("Leaf"),
+            "leaf-local wins over the composed manifest"
+        );
+        assert_eq!(
+            leaves[0].definition.pages["login"]["username"]["name"].as_str(),
+            Some("Username"),
+            "non-conflicting include entries reach the leaf"
+        );
     }
 
     #[test]

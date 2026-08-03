@@ -36,11 +36,34 @@ pub struct UnresolvedWith {
     pub context: Option<String>,
 }
 
+/// First whole-string `$pages.<page>.<element>` reference in an
+/// authored `with:` tree. Retained beside the resolved locator solely
+/// for human failure detail; action dispatch still receives the map.
+pub(crate) fn page_reference(with: &serde_yml::Value) -> Option<String> {
+    match with {
+        serde_yml::Value::String(raw) => match duhem_schema::expr::parse(raw).ok()? {
+            Expr::Path(Path {
+                root: duhem_schema::PathRoot::Pages,
+                segments,
+            }) if segments.len() == 2 => Some(raw.trim().to_string()),
+            _ => None,
+        },
+        serde_yml::Value::Sequence(values) => values.iter().find_map(page_reference),
+        serde_yml::Value::Mapping(values) => values.values().find_map(page_reference),
+        _ => None,
+    }
+}
+
 /// Outcome of resolving one `with:` string slot.
 enum Resolution {
     /// The string was a `$`-leading substitutable expr that evaluated
     /// to a scalar — splice it in.
-    Replace(serde_yml::Value),
+    Replace {
+        value: serde_yml::Value,
+        /// Catalog entries may themselves contain `$inputs.*`; walk
+        /// the newly spliced node before returning to the action.
+        resolve_nested: bool,
+    },
     /// The string was not a substitutable reference (no leading `$`,
     /// or parses as an assertion-shaped expr) — pass through unchanged.
     Passthrough,
@@ -65,9 +88,21 @@ pub fn substitute_with(
 ) -> Result<(), UnresolvedWith> {
     match with {
         serde_yml::Value::String(s) => match try_resolve(s, ctx) {
-            Resolution::Replace(replacement) => {
+            Resolution::Replace {
+                value: replacement,
+                resolve_nested,
+            } => {
                 *with = replacement;
-                Ok(())
+                if resolve_nested
+                    && matches!(
+                        with,
+                        serde_yml::Value::Mapping(_) | serde_yml::Value::Sequence(_)
+                    )
+                {
+                    substitute_with(with, ctx)
+                } else {
+                    Ok(())
+                }
             }
             Resolution::Passthrough => Ok(()),
             Resolution::Unresolved(u) => Err(u),
@@ -114,7 +149,16 @@ fn try_resolve(s: &str, ctx: &dyn EvalContext) -> Resolution {
     // fallback — so the carve-out is automatic; we don't special-case
     // it here.
     match eval_to_value(&expr, ctx) {
-        Ok(value) => Resolution::Replace(value_to_yml(&value)),
+        Ok(value) => Resolution::Replace {
+            value: value_to_yml(&value),
+            resolve_nested: matches!(
+                expr,
+                Expr::Path(Path {
+                    root: duhem_schema::PathRoot::Pages,
+                    ..
+                })
+            ),
+        },
         Err(_) => Resolution::Unresolved(pinpoint(&expr, s, ctx)),
     }
 }
@@ -209,6 +253,48 @@ mod tests {
         let map = with.as_mapping().unwrap();
         let url = map.get(serde_yml::Value::String("url".into())).unwrap();
         assert_eq!(url.as_str(), Some("http://x"));
+    }
+
+    #[test]
+    fn page_locator_map_splices_byte_equal_to_inline() {
+        let pages: duhem_schema::PageCatalog =
+            serde_yml::from_str("login:\n  submit: { role: button, name: Sign In }\n").unwrap();
+        let run = run_with(&[]).with_pages(&pages);
+        let ctx = RunContext::new(&run);
+        let mut authored: serde_yml::Value =
+            serde_yml::from_str("locator: $pages.login.submit").unwrap();
+        substitute_with(&mut authored, &ctx).expect("catalog resolves");
+        let inline: serde_yml::Value =
+            serde_yml::from_str("locator: { role: button, name: Sign In }").unwrap();
+        assert_eq!(authored, inline);
+    }
+
+    #[test]
+    fn page_locator_inputs_resolve_after_the_map_splice() {
+        let pages: duhem_schema::PageCatalog = serde_yml::from_str(
+            "projects:\n  row_delete:\n    role: button\n    name: Delete\n    scope: { role: row, text: $inputs.project_name }\n",
+        )
+        .unwrap();
+        let run = run_with(&[("project_name", Value::Str("Duhem".into()))]).with_pages(&pages);
+        let ctx = RunContext::new(&run);
+        let mut authored: serde_yml::Value =
+            serde_yml::from_str("locator: $pages.projects.row_delete").unwrap();
+        substitute_with(&mut authored, &ctx).expect("catalog and nested input resolve");
+        let inline: serde_yml::Value = serde_yml::from_str(
+            "locator:\n  role: button\n  name: Delete\n  scope: { role: row, text: Duhem }\n",
+        )
+        .unwrap();
+        assert_eq!(authored, inline);
+    }
+
+    #[test]
+    fn unresolved_page_reference_is_a_hard_runtime_error() {
+        let run = run_with(&[]);
+        let ctx = RunContext::new(&run);
+        let mut authored: serde_yml::Value =
+            serde_yml::from_str("locator: $pages.login.missing").unwrap();
+        let error = substitute_with(&mut authored, &ctx).unwrap_err();
+        assert_eq!(error.reference, "$pages.login.missing");
     }
 
     #[test]

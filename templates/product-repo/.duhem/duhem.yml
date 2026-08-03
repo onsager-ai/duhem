@@ -12,6 +12,11 @@
 
 manifest_version: 1
 
+# Shared named locators. `pages.yml` starts empty; keep the include so
+# the first reusable locator is one edit, not a new loading convention.
+includes:
+  - pages.yml
+
 # Optional shared environment: provision your product's real stack once,
 # every leaf runs against it, torn down once (§11 up:/down: hooks). Omit
 # this block for a page-free CLI suite that needs no server. Example:

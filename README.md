@@ -88,15 +88,22 @@ WOULD RUN: checks::AC-1::AC-1.1
 WOULD RUN: checks::AC-2::AC-2.1
 ```
 
+For the composed values behind that plan, use
+`duhem resolve . --provenance`; add `--format json` for the stable
+machine-readable form. It resolves includes, profiles, inputs, named
+`pages:` locators, and
+default timeouts without running provisioning or opening a browser,
+and masks every secret as `••••••`.
+
 `duhem run` auto-discovers the manifest: with no path it walks the current directory and its ancestors (capped at the enclosing `.git`) for a `duhem.yml` / `.duhem.yml`, so `cd anywhere-in-the-repo && duhem run` finds the repo-root manifest — same as `git`, `cargo`, `pnpm`. Pass an explicit path to override, or `-f path/to/manifest.yml` for an out-of-tree manifest.
 
-For a real-world example — including the `environment.up:` / `down:` hooks Duhem sequences around a check — see [`verifications/duhem-dashboard/`](verifications/duhem-dashboard/). Product suites live co-located in their own repos under `.duhem/` (e.g. `onsager-ai/chreode/.duhem/`); [`templates/product-repo/`](templates/product-repo/) is the drop-in skeleton.
+For a real-world example — including the `provision.up:` / `down:` hooks Duhem sequences around a check — see [`verifications/duhem-dashboard/`](verifications/duhem-dashboard/). Product suites live co-located in their own repos under `.duhem/` (e.g. `onsager-ai/chreode/.duhem/`); [`templates/product-repo/`](templates/product-repo/) is the drop-in skeleton.
 
 ## Core concepts
 
 - **Criteria vs. checks.** *Criteria* are the human commitment about what "done" means; they are stable and survive implementation churn. *Checks* are how Duhem verifies that commitment; they are derivative and may change as the implementation does. Conflating the two is a defect.
-- **Verification Definition (VD).** A YAML document (criteria + checks + inputs, optionally `environment` hooks) describing one workload to verify. `duhem init` scaffolds one; `verifications/` holds worked examples.
-- **The manifest (`duhem.yml`).** Composes one or more VDs into a suite and carries shared configuration — `defaults:` (timeout / inconclusive policy / retry), `includes:`, named `environments:`. A single-file VD *is* a manifest with one leaf.
+- **Verification Definition (VD).** A YAML document (criteria + checks + inputs, optionally `provision` hooks) describing one workload to verify. `duhem init` scaffolds one; `verifications/` holds worked examples.
+- **The manifest (`duhem.yml`).** Composes one or more VDs into a suite and carries shared configuration — `defaults:` (timeout / inconclusive policy / retry), `includes:`, `profiles:`, and reusable `pages:` locators. A single-file VD *is* a manifest with one leaf.
 - **The verdict.** Deterministic aggregation of structured assertions into `pass` / `fail` / `inconclusive`. No LLM in the loop.
 - **Step gating.** Steps default to `if: success`; use `if: always` for
   teardown or `if: failure` for diagnostics. Gated steps stay visible as
@@ -117,6 +124,7 @@ duhem init       Scaffold a runnable Verification Definition skeleton
 duhem actions    List the built-in action catalog
 duhem describe   Print one action's contract (with-fields, outputs, example)
 duhem validate   Parse and structurally validate a Verification Definition file
+duhem resolve    Print the fully composed document without executing it
 duhem run        Execute a Verification Definition end-to-end
 duhem browser    Provision the Playwright sidecar + Chromium for ui/* checks
 duhem dashboard  Browse run evidence in a read-only web dashboard (serve + static export)
@@ -126,7 +134,7 @@ duhem mcp        Serve the action contract + validate over MCP (stdio) for AI au
 duhem --version  Print the CLI and schema version
 ```
 
-Run `duhem <command> --help` for the full flag surface (filters, inputs, environment selection, reporters, evidence directory, environment-hook control).
+Run `duhem <command> --help` for the full flag surface (filters, inputs, profile selection, reporters, evidence directory, provision-hook control).
 
 ## Status
 

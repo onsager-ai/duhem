@@ -1,0 +1,3 @@
+pages:
+  fixture:
+    heading: { role: heading, name: Catalog Fixture }

@@ -107,6 +107,9 @@ pub(crate) struct StepEvidence {
     /// assertion verdict; this distinguishes it from an unrun step
     /// whose observation is genuinely missing.
     pub skip_reason: Option<String>,
+    /// Authored catalog coordinate, retained after the map is spliced
+    /// so a failure points back to the one shared entry to edit.
+    pub catalog_reference: Option<String>,
 }
 
 impl StepEvidence {
@@ -117,6 +120,7 @@ impl StepEvidence {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
             skip_reason: None,
+            catalog_reference: None,
         }
     }
 
@@ -125,6 +129,7 @@ impl StepEvidence {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
             skip_reason: Some(reason),
+            catalog_reference: None,
         }
     }
 
@@ -273,7 +278,12 @@ fn timeout_suffix(ev: &StepEvidence) -> String {
 fn assert_element_fail_detail(ev: &StepEvidence) -> Option<String> {
     let loc: Locator = serde_yml::from_value(ev.with.get("locator")?.clone()).ok()?;
     let expected: ExistenceState = serde_yml::from_value(ev.with.get("expected")?.clone()).ok()?;
-    let desc = loc.describe();
+    let resolved = loc.describe();
+    let desc = ev
+        .catalog_reference
+        .as_ref()
+        .map(|reference| format!("`{reference}` ({resolved})"))
+        .unwrap_or(resolved);
     let timeout_clause = timeout_suffix(ev);
     let count = ev.outputs.get("count").and_then(|v| v.as_u64());
     Some(match expected {
@@ -651,6 +661,7 @@ mod fail_detail_tests {
                 .map(|(k, v)| (k.to_string(), v.clone()))
                 .collect(),
             skip_reason: None,
+            catalog_reference: None,
         }
     }
 
@@ -701,6 +712,19 @@ mod fail_detail_tests {
             assert_element_fail_detail(&absent).as_deref(),
             Some("expected role=button \"Go\" to be visible, but it never appeared"),
         );
+    }
+
+    #[test]
+    fn catalog_locator_failure_names_entry_and_resolved_locator() {
+        let mut e = ev(
+            r#"{ locator: { role: button, name: Sign In }, expected: visible }"#,
+            &[("satisfied", json!(false)), ("count", json!(0))],
+        );
+        e.catalog_reference = Some("$pages.login.submit".to_string());
+        let detail = assert_element_fail_detail(&e).unwrap();
+        assert!(detail.contains("`$pages.login.submit`"), "{detail}");
+        assert!(detail.contains("role=button \"Sign In\""), "{detail}");
+        assert!(detail.contains("never appeared"), "{detail}");
     }
 
     #[test]
@@ -842,6 +866,7 @@ mod step_label_tests {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::from([("satisfied".to_string(), serde_json::json!(false))]),
             skip_reason: None,
+            catalog_reference: None,
         }];
         let outcomes = implicit_judgment_outcomes(&check, |_| true, &evidence, false, false, false);
         assert_eq!(outcomes[0].label, "The Username field is offered");

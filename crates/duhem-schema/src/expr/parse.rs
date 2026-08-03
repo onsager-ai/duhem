@@ -81,12 +81,13 @@ fn expr_parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
                     "steps" => Ok(PathRoot::Steps),
                     "setup" => Ok(PathRoot::Setup),
                     "inputs" => Ok(PathRoot::Inputs),
+                    "pages" => Ok(PathRoot::Pages),
                     "env" => Ok(PathRoot::Env),
                     "runtime" => Ok(PathRoot::Runtime),
                     other => Err(Rich::custom(
                         span,
                         format!(
-                            "unknown scope `${other}` (expected `$steps`, `$setup`, `$inputs`, `$env`, or `$runtime`)"
+                            "unknown scope `${other}` (expected `$steps`, `$setup`, `$inputs`, `$pages`, `$env`, or `$runtime`)"
                         ),
                     )),
                 });
@@ -325,6 +326,17 @@ mod tests {
                 },
                 args: vec![],
             }
+        );
+    }
+
+    #[test]
+    fn parses_page_locator_path() {
+        assert_eq!(
+            p("$pages.login.submit"),
+            Expr::Path(Path {
+                root: PathRoot::Pages,
+                segments: vec!["login".into(), "submit".into()],
+            })
         );
     }
 

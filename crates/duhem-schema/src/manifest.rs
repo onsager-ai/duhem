@@ -14,9 +14,12 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::manifest_path::{
+    canonical_or_self, is_under, validate_entry_path, validate_glob_pattern,
+};
 use crate::project::ProjectDecl;
 use crate::provision::{DurationSpec, Provision};
-use crate::verification::{InputDecl, SchemaError, VerificationDefinition};
+use crate::verification::{InputDecl, PageCatalog, SchemaError, VerificationDefinition};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -86,6 +89,14 @@ pub struct RootManifest {
     /// explicit dependency injection and a closed leaf declaration set.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, InputDecl>,
+    /// Named locator catalog shared by every leaf in the suite.
+    /// Entries merge by page and element name under the root-wins rule;
+    /// a leaf-local entry overlays the composed manifest value.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(
+        with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
+    )]
+    pub pages: PageCatalog,
     /// Suite-wide defaults (`docs/duhem-spec.md` §10.4, spec #66).
     /// A single `defaults:` block that every leaf the manifest expands
     /// to inherits — so an author sets the timeout budget, the
@@ -710,7 +721,17 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
                     });
                 }
             }
-            let def = load_leaf(&leaf_path, &src)?;
+            let mut def = load_leaf(&leaf_path, &src)?;
+            // Leaf-local entries win over the effective manifest
+            // catalog, element by element.
+            for (page, elements) in &manifest.pages {
+                let target = def.pages.entry(page.clone()).or_default();
+                for (element, locator) in elements {
+                    target
+                        .entry(element.clone())
+                        .or_insert_with(|| locator.clone());
+                }
+            }
             leaves.push(LoadedLeaf {
                 path: leaf_path,
                 definition: def,
@@ -731,68 +752,6 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
         leaves,
         warnings,
     })
-}
-
-/// Validate a `glob:` pattern under the same discipline as `path:`
-/// entries: no absolute roots, no `..` segments. Wildcard chars (`*`,
-/// `?`, `[`, `]`) inside literal path components are fine; the check
-/// runs purely on the path-segment shape of the pattern.
-fn validate_glob_pattern(manifest: &Path, pattern: &str) -> Result<(), LoadError> {
-    let candidate = Path::new(pattern);
-    if candidate.is_absolute() {
-        return Err(LoadError::UnconstrainedGlob {
-            manifest: manifest.to_path_buf(),
-            pattern: pattern.to_string(),
-        });
-    }
-    for component in candidate.components() {
-        if matches!(component, std::path::Component::ParentDir) {
-            return Err(LoadError::UnconstrainedGlob {
-                manifest: manifest.to_path_buf(),
-                pattern: pattern.to_string(),
-            });
-        }
-    }
-    Ok(())
-}
-
-/// `true` when `candidate`'s canonicalized path lives under `root`'s
-/// canonicalized path. Falls back to lexical comparison when
-/// canonicalization fails (the same fallback `canonical_or_self`
-/// uses), which is good enough to catch the symlinked-escape case in
-/// practice and identical for the lexical-only test inputs.
-fn is_under(root: &Path, candidate: &Path) -> bool {
-    let c = canonical_or_self(candidate);
-    c.starts_with(root)
-}
-
-pub(crate) fn validate_entry_path(manifest: &Path, entry: &Path) -> Result<(), LoadError> {
-    if entry.is_absolute() {
-        return Err(LoadError::AbsolutePath {
-            manifest: manifest.to_path_buf(),
-            entry: entry.to_path_buf(),
-        });
-    }
-    // Reject any `..` segment in the entry — silently allowing
-    // escapes would make `duhem run` reach files outside the
-    // verifications directory, which is a real surprise vector.
-    for component in entry.components() {
-        if matches!(component, std::path::Component::ParentDir) {
-            return Err(LoadError::PathEscape {
-                manifest: manifest.to_path_buf(),
-                entry: entry.to_path_buf(),
-            });
-        }
-    }
-    Ok(())
-}
-
-/// Best-effort canonicalization. Falls back to the input when the
-/// file doesn't yet exist (e.g. unit tests using temp paths that may
-/// or may not have been created). Identity comparison is "same
-/// canonical path or, failing that, same lexical path."
-pub(crate) fn canonical_or_self(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
@@ -849,6 +808,22 @@ verifications:
             ManifestEntry::Glob { glob } => assert_eq!(glob, "./**/duhem.yml"),
             _ => panic!("expected glob entry"),
         }
+    }
+
+    #[test]
+    fn pages_round_trip_and_absence_keeps_manifest_wire_shape() {
+        let absent =
+            RootManifest::from_yaml_str("manifest_version: 1\nverifications: []\n").unwrap();
+        assert!(absent.pages.is_empty());
+        assert!(!serde_yml::to_string(&absent).unwrap().contains("pages:"));
+
+        let parsed = RootManifest::from_yaml_str(
+            "manifest_version: 1\npages:\n  login:\n    submit: { role: button, name: Sign In }\nverifications: []\n",
+        )
+        .expect("parse pages");
+        let round_trip =
+            RootManifest::from_yaml_str(&serde_yml::to_string(&parsed).unwrap()).unwrap();
+        assert_eq!(parsed, round_trip);
     }
 
     #[test]

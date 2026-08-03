@@ -15,6 +15,11 @@ use crate::project::ProjectDecl;
 use crate::provision::Provision;
 use crate::step::Step;
 
+/// Named UI locators grouped by page (or any other author-chosen
+/// surface such as a modal or navigation bar). Locator bodies stay
+/// untyped here; `duhem-actions` owns the authoritative locator schema.
+pub type PageCatalog = BTreeMap<String, BTreeMap<String, serde_yml::Value>>;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VerificationDefinition {
@@ -47,6 +52,14 @@ pub struct VerificationDefinition {
     /// (BTreeMap); fixtures should be authored alphabetized.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, InputDecl>,
+
+    /// Leaf-local named locators. When loaded through a manifest these
+    /// overlay the composed manifest catalog by page and element name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(
+        with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
+    )]
+    pub pages: PageCatalog,
 
     /// Optional setup steps run once before the criteria.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -237,12 +250,40 @@ criteria:
             project: None,
             provision: None,
             inputs,
+            pages: BTreeMap::new(),
             setup: vec![],
             criteria: vec![],
         };
         let y = v.to_yaml_string().unwrap();
         let back = VerificationDefinition::from_yaml_str(&y).unwrap();
         assert_eq!(v, back);
+    }
+
+    #[test]
+    fn pages_round_trip_and_absent_pages_keep_wire_shape() {
+        let absent = VerificationDefinition::from_yaml_str("verification: x\ncriteria: []\n")
+            .expect("parse absent");
+        assert!(absent.pages.is_empty());
+        assert!(
+            !absent.to_yaml_string().unwrap().contains("pages:"),
+            "an absent additive field must not change the wire shape"
+        );
+
+        let y = r#"
+verification: catalog
+pages:
+  login:
+    submit: { role: button, name: Sign In }
+criteria: []
+"#;
+        let parsed = VerificationDefinition::from_yaml_str(y).expect("parse pages");
+        assert_eq!(
+            parsed.pages["login"]["submit"]["name"].as_str(),
+            Some("Sign In")
+        );
+        let round_trip =
+            VerificationDefinition::from_yaml_str(&parsed.to_yaml_string().unwrap()).unwrap();
+        assert_eq!(parsed, round_trip);
     }
 
     #[test]

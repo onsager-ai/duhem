@@ -1,0 +1,3 @@
+# Shared locator catalog. Group names are author-chosen surfaces: pages,
+# dialogs, navigation bars, or any other stable UI region.
+pages: {}

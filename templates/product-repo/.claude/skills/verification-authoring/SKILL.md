@@ -216,6 +216,31 @@ Authoring rules:
   judge input; an authored output under `capture/` is rejected at
   validate time.
 
+#### Share locators instead of copying them
+
+When two leaves use the same locator, declare it once in an ordinary
+manifest include and reference it as `$pages.<group>.<name>`:
+
+```yaml
+# .duhem/pages.yml (included by .duhem/duhem.yml)
+pages:
+  login:
+    username: { role: textbox, name: Username }
+    submit: { role: button, name: Sign In }
+
+# a leaf step
+- uses: ui/type
+  with: { locator: $pages.login.username, text: $inputs.user }
+```
+
+The catalog is flat below each group; do not add a `locators:` layer.
+A leaf-local entry wins over a shared entry of the same name. Catalog
+entries may use `$inputs.*` for dynamic scope text, but every leaf that
+receives that catalog must declare each referenced input. `duhem
+validate` catches dangling `$pages.*` names offline and suggests nearby
+entries; `duhem resolve --provenance` lists the effective catalog and
+the source file of each winning entry.
+
 ### 4. The holistic-environment tax — no mocks of the web
 
 A Duhem check exercises real behavior end-to-end. **No mocking the web.**

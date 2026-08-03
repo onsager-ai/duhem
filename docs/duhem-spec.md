@@ -418,7 +418,7 @@ This content-based identification lets Duhem coexist with other YAML in the repo
 
 ### 10.3 Verification Definition structure
 
-Values like `$inputs.workspace_name` below are **runtime expressions** (§10.7). Substitution is whole-string only: a `with:` value that is *exactly* a bare `$…` reference (or a `$runtime.<fn>(…)` call) is resolved to its evaluated scalar; everything else passes through literally. There is no embedded `{{…}}` interpolation — to compose a value, use `$runtime.format(…)` / `$runtime.concat(…)` (§10.7), not string templating. Input `default:` values are taken literally and are never evaluated as expressions.
+Values like `$inputs.workspace_name` below are **runtime expressions** (§10.7). Substitution is whole-string only: a `with:` value that is *exactly* a bare `$…` reference (or a `$runtime.<fn>(…)` call) is resolved to its evaluated value; everything else passes through literally. `$pages.<page>.<element>` is the deliberate map-valued case: the locator node is spliced first, then any `$inputs.*` inside that node resolves in the leaf's context. There is no embedded `{{…}}` interpolation — to compose a scalar, use `$runtime.format(…)` / `$runtime.concat(…)` (§10.7), not string templating. Input `default:` values are taken literally and are never evaluated as expressions.
 
 #### Inputs, acquired values, and secret masking
 
@@ -755,6 +755,11 @@ inputs:                       # declarations for names leaves inherit
   base_url:
     type: string
 
+pages:                        # named locators, shared by leaves
+  login:
+    username: { role: textbox, name: Username }
+    submit: { role: button, name: Sign In }
+
 verifications:
   - features/create-workspace/verification.yml
   - features/login/verification.yml
@@ -775,6 +780,18 @@ profiles:                       # named configuration profiles
 ```
 
 Leaves consume suite inputs by declaring `inputs: { base_url: { inherit: true }, db_password: { inherit: true, secret: true } }`. Values resolve from `--inputs` → selected `profiles:` entry → the manifest declaration's process `env:` → its `default:`, and the manifest declaration's `type` is enforced. `inherit: true` rejects a leaf-local `type:` or `default:`. A manifest input not inherited by any leaf produces an authoring warning, not an error. `secret: true` still cannot be combined with `default:`.
+
+`pages:` is a two-level catalog (`page → element → locator`) with no
+intervening `locators:` key. It may be declared by the root, an
+`includes:` fragment, or a leaf; include composition is root-wins by
+page and element, then the leaf-local entry wins. Locator bodies remain
+untyped at the schema layer because the consuming action owns their
+contract. A step uses one as `locator: $pages.login.submit`. Catalog
+entries may contain `$inputs.*` (for example a row-scoped locator);
+every leaf receiving that entry must declare those inputs. Validation
+checks both input closure and dangling catalog references offline.
+`duhem resolve --provenance` lists the composed entries and their
+winning source files.
 
 The root manifest is canonical: Duhem auto-discovers `duhem.yml` (or `.duhem.yml`) at the project root or its ancestors. Users can override with `duhem run -f path/to/manifest.yml`.
 
@@ -841,6 +858,9 @@ An `inconclusive` result always carries a cause, distinguishing "the check could
 Borrowed from Arazzo. References available in expressions:
 
 - `$inputs.<name>` — inputs to the verification run
+- `$pages.<page>.<element>` — a named locator from the effective
+  manifest/leaf catalog. Valid only as a whole `with:` value; its map is
+  spliced before nested `$inputs.*` substitution.
 - `$steps.<id>.outputs.<name>` — outputs from a prior step (scoped to the declaring check)
 - `$setup.<id>.outputs.<name>` — outputs from a run-level `setup:` step (§10.3), read-only from inside any check
 - `$env.<name>` — a value from the selected named profile. The `$env` whitelist is **empty by default**. An author opts a key in by declaring it (with a string value) under a manifest `profiles:` entry (§10.4) and selecting that profile with `--profile <name>` (`--environment` remains an alias; one profile auto-selects); the selected entry's string-valued keys seed the whitelist for that run. There is no process-environment passthrough and no `--env` CLI flag. A reference to a key that isn't whitelisted evaluates to `inconclusive` (it carries a missing-env cause, §10.6), never a parse error.

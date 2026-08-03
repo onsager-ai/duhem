@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+## v0.2.0 — 2026-08-03
+
 - [clarifying] Assertions and verdicts share one three-state vocabulary; `skipped` is an execution fact on steps only, and gating follows judgment rather than a raw `satisfied` observation. (#374)
 - [additive] Manifests and VDs accept a `flows:` catalog of parameterized step sequences, invoked from a check with `call:` and expanded into recorded steps. (#376)
 - [additive] Manifests and VDs accept a `pages:` catalog of named locators, referenced from steps as `$pages.<page>.<name>`. (#375)

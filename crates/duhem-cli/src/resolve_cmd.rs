@@ -697,17 +697,53 @@ fn register_flow_secrets(
         .flat_map(|check| &check.steps)
     {
         for (index, value) in step.flow_secrets.iter().enumerate() {
-            let resolved = value
-                .as_str()
-                .and_then(|raw| raw.strip_prefix("$inputs."))
-                .and_then(reference_head)
-                .and_then(|name| resolved_inputs.and_then(|inputs| inputs.get(name)))
-                .cloned()
-                .or_else(|| inputs::yml_to_json(value).ok());
-            if let Some(value) = resolved {
-                registry.register_json(format!("flow_param_{index}"), &value);
+            // A secret flow param's bound value is not always a plain
+            // `$inputs.<name>` string — it may be a mapping or sequence
+            // that embeds one or more such references anywhere inside
+            // it (spec #376). Walking every leaf and resolving each
+            // reference individually keeps the registry holding the
+            // real resolved secret instead of the placeholder text,
+            // while a top-level plain string still takes exactly one
+            // trip through this loop, unchanged from before.
+            let mut ordinal = 0usize;
+            walk_flow_secret_leaves(value, &mut |leaf| {
+                let name = if ordinal == 0 {
+                    format!("flow_param_{index}")
+                } else {
+                    format!("flow_param_{index}_{ordinal}")
+                };
+                ordinal += 1;
+                let resolved = leaf
+                    .as_str()
+                    .and_then(|raw| raw.strip_prefix("$inputs."))
+                    .and_then(reference_head)
+                    .and_then(|name| resolved_inputs.and_then(|inputs| inputs.get(name)))
+                    .cloned()
+                    .or_else(|| inputs::yml_to_json(leaf).ok());
+                if let Some(value) = resolved {
+                    registry.register_json(name, &value);
+                }
+            });
+        }
+    }
+}
+
+/// Visit every scalar leaf of a `flow_secrets` binding, recursing
+/// through mappings and sequences. A plain scalar (the historical
+/// case) is its own single leaf.
+fn walk_flow_secret_leaves<F: FnMut(&serde_yml::Value)>(value: &serde_yml::Value, visit: &mut F) {
+    match value {
+        serde_yml::Value::Sequence(values) => {
+            for value in values {
+                walk_flow_secret_leaves(value, visit);
             }
         }
+        serde_yml::Value::Mapping(values) => {
+            for value in values.values() {
+                walk_flow_secret_leaves(value, visit);
+            }
+        }
+        leaf => visit(leaf),
     }
 }
 
@@ -901,6 +937,190 @@ criteria:
             flow.origin
                 .source
                 .contains("flow `echo` invocation `greeting`")
+        );
+    }
+
+    /// Regression coverage for the flow-secret masking leak (spec #376):
+    /// a secret flow param bound to a *structured* value (mapping or
+    /// sequence) must mask the value the `$inputs.*` reference resolves
+    /// to, not the unresolved placeholder text. Each fixture below binds
+    /// `token`'s resolved default through a differently-shaped `auth`
+    /// flow param and asserts the value surfaces in `document.inputs`
+    /// (a field unrelated to the flow secret itself) fully masked.
+    #[test]
+    fn register_flow_secrets_masks_mapping_bound_secret_param() {
+        let tmp = tempfile::tempdir().unwrap();
+        let leaf = tmp.path().join("duhem.yml");
+        let secret = "mapping-secret-9f31ab";
+        std::fs::write(
+            &leaf,
+            format!(
+                r#"
+verification: flow secret mapping leak
+inputs:
+  token: {{ type: string, default: {secret} }}
+flows:
+  call_api:
+    params:
+      auth: {{ type: object, secret: true }}
+    steps:
+      - id: invoke
+        uses: cli/invoke
+        with: {{ command: [echo, ok] }}
+criteria:
+  - id: AC-1
+    description: mapping-bound secret flow param is masked
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: step1
+            call: call_api
+            with: {{ auth: {{ header: $inputs.token }} }}
+"#
+            ),
+        )
+        .unwrap();
+
+        let (_, output) = resolve(ResolveArgs {
+            path: Some(leaf),
+            profile: None,
+            inputs: Vec::new(),
+            format: ResolveFormat::Json,
+            provenance: false,
+        })
+        .expect("resolve");
+        let verification = &output.verifications[0];
+        assert!(
+            verification.errors.is_empty(),
+            "{}",
+            verification
+                .errors
+                .iter()
+                .map(|error| format!("{}: {}", error.stage, error.message))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        assert_eq!(
+            verification.document["inputs"]["token"], MASK,
+            "a secret bound to a mapping flow param must mask the resolved value, not the `$inputs.token` placeholder"
+        );
+    }
+
+    #[test]
+    fn register_flow_secrets_masks_sequence_bound_secret_param() {
+        let tmp = tempfile::tempdir().unwrap();
+        let leaf = tmp.path().join("duhem.yml");
+        let secret = "sequence-secret-4d2acb";
+        std::fs::write(
+            &leaf,
+            format!(
+                r#"
+verification: flow secret sequence leak
+inputs:
+  token: {{ type: string, default: {secret} }}
+flows:
+  call_api:
+    params:
+      auth: {{ type: array, secret: true }}
+    steps:
+      - id: invoke
+        uses: cli/invoke
+        with: {{ command: [echo, ok] }}
+criteria:
+  - id: AC-1
+    description: sequence-bound secret flow param is masked
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: step1
+            call: call_api
+            with: {{ auth: [$inputs.token] }}
+"#
+            ),
+        )
+        .unwrap();
+
+        let (_, output) = resolve(ResolveArgs {
+            path: Some(leaf),
+            profile: None,
+            inputs: Vec::new(),
+            format: ResolveFormat::Json,
+            provenance: false,
+        })
+        .expect("resolve");
+        let verification = &output.verifications[0];
+        assert!(
+            verification.errors.is_empty(),
+            "{}",
+            verification
+                .errors
+                .iter()
+                .map(|error| format!("{}: {}", error.stage, error.message))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        assert_eq!(
+            verification.document["inputs"]["token"], MASK,
+            "a secret bound to a sequence flow param must mask the resolved value, not the `$inputs.token` placeholder"
+        );
+    }
+
+    #[test]
+    fn register_flow_secrets_still_masks_plain_string_bound_secret_param() {
+        let tmp = tempfile::tempdir().unwrap();
+        let leaf = tmp.path().join("duhem.yml");
+        let secret = "plain-secret-7a10ee";
+        std::fs::write(
+            &leaf,
+            format!(
+                r#"
+verification: flow secret plain string leak (regression)
+inputs:
+  token: {{ type: string, default: {secret} }}
+flows:
+  call_api:
+    params:
+      auth: {{ type: string, secret: true }}
+    steps:
+      - id: invoke
+        uses: cli/invoke
+        with: {{ command: [echo, ok] }}
+criteria:
+  - id: AC-1
+    description: plain-string-bound secret flow param is masked
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: step1
+            call: call_api
+            with: {{ auth: $inputs.token }}
+"#
+            ),
+        )
+        .unwrap();
+
+        let (_, output) = resolve(ResolveArgs {
+            path: Some(leaf),
+            profile: None,
+            inputs: Vec::new(),
+            format: ResolveFormat::Json,
+            provenance: false,
+        })
+        .expect("resolve");
+        let verification = &output.verifications[0];
+        assert!(
+            verification.errors.is_empty(),
+            "{}",
+            verification
+                .errors
+                .iter()
+                .map(|error| format!("{}: {}", error.stage, error.message))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        assert_eq!(
+            verification.document["inputs"]["token"], MASK,
+            "the historical plain-string secret flow param binding must keep masking the resolved value"
         );
     }
 }

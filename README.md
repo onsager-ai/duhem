@@ -1,6 +1,6 @@
 # Duhem
 
-**Holistic verification for AI-delivered software.**
+**Holistic verification for AI-built software.**
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/onsager-ai/duhem/actions/workflows/ci.yml/badge.svg)](https://github.com/onsager-ai/duhem/actions/workflows/ci.yml)
@@ -8,14 +8,14 @@
 
 Duhem sits between AI coding agents and production. It captures human intent as acceptance criteria, translates them into mechanically-judged checks that exercise the real delivery web — code + prompts + tool wiring + data + runtime — and gates merge/deploy on the verdict.
 
-Two commitments shape everything:
-
-- **Holistic.** A check exercises the whole delivery web at once. Duhem does not pretend the web decomposes into independently testable units, and it does not mock the web at verification time.
-- **Mechanical judgment, not LLM judgment.** AI may help author criteria and checks, and humans review them — but the verdict is produced by deterministic evaluation of structured assertions. There is no LLM in the judging loop.
+- **Runnable specs.** A Verification Definition is one artifact — readable intent bound to runnable checks. What you read *is* what runs *is* what gates the merge, so spec, tests, and code can't drift apart.
+- **Holistic, no mocks.** Checks drive the real shipped artifact — code + prompts + tools + data + runtime — through its real interfaces, all at once. A green means the real system worked, not that a stand-in did.
+- **Mechanical judgment — no LLM in the judge.** AI can help draft criteria; a human owns them; pass/fail is deterministic evaluation of structured assertions. No AI grading its own homework, no confident-but-wrong green.
+- **Agent-native.** You write *what* to verify, not the program that verifies it — anchored to intent, not implementation, so it doesn't rot when an agent refactors underneath.
 
 ## It caught a real one
 
-Crawlab Pro gates its `:edge` Docker image on a Duhem suite before it can promote to `:stable`. One build's gate went red: the environment wouldn't come up. The cause was nearly invisible — a new image shipped without `envsubst`, so the startup script silently rendered an **empty** nginx config and the whole web front went dead on its expected port. The part that matters: the backend was fine and the product's *own* healthcheck reported **healthy** — a human clicking through, or the container's self-check, would have shipped it. Duhem didn't. No working front, no green. It refused the build *before* it could reach `:stable`, the same gate then verified the fix, and it now runs on every build.
+Crawlab Pro gates its `:edge` Docker image on a Duhem suite before it can promote to `:stable`. One build's gate went red: the environment wouldn't come up. The cause was nearly invisible — a new image shipped without `envsubst`, so the startup script silently rendered an **empty** nginx config and the whole web front went dead on its expected port. The part that matters: the backend was fine and the product's *own* healthcheck reported **healthy** — a human clicking through, or the container's self-check, would have shipped it. Duhem didn't: no working front, no green. It refused the build before it could reach `:stable`, so no user was hit; the same gate then verified the fix and now runs on every build.
 
 **That's the class of bug this exists for: a self-masking regression that everything else — including the product's own healthcheck — was calling healthy.** Full write-up: [*Your AI Says "All Tests Pass" — But Do They?*](https://marvinzhang.dev/blog/introducing-duhem).
 
@@ -146,7 +146,7 @@ Schema is **v0.x** — breaking changes are expected before v0.5. The live schem
 
 Duhem is open source and **early — v0.x, breaking changes expected, and we'll help you migrate.** If you own a business-critical, complex, AI-built system where a silent regression is expensive, we'd like a few people to try it and shape it with us — direct support, a direct line to the people building it. (If you can verify by looking, you don't need Duhem — and we'd rather tell you that than sell it to you.)
 
-Reach out by [opening an issue](https://github.com/onsager-ai/duhem/issues), or add me on WeChat at **`tikazyq1`** with a note saying "Duhem".
+Reach out by [opening an issue](https://github.com/onsager-ai/duhem/issues), or add me on WeChat at **`tikazyq1`** with a note saying "Duhem". More on why this exists: [*Your AI Says "All Tests Pass" — But Do They?*](https://marvinzhang.dev/blog/introducing-duhem).
 
 ## Contributing
 

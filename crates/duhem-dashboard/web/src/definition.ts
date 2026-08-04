@@ -23,6 +23,10 @@ export interface VdCriterion {
   description?: string;
   checks: VdCheck[];
 }
+interface VdFlow {
+  description?: string;
+  steps: VdStep[];
+}
 
 export interface VdLookup {
   criterion(id: string): VdCriterion | undefined;
@@ -114,7 +118,7 @@ function normCriterion(raw: unknown): VdCriterion | undefined {
 
 export function parseDefinition(yamlText: string): VdLookup {
   let criteria: VdCriterion[] = [];
-  let flows = new Map<string, VdStep[]>();
+  let flows = new Map<string, VdFlow>();
   try {
     const doc = parse(yamlText) as { criteria?: unknown; flows?: unknown } | null;
     if (doc && Array.isArray(doc.criteria)) {
@@ -124,7 +128,10 @@ export function parseDefinition(yamlText: string): VdLookup {
       flows = new Map(
         Object.entries(doc.flows as Record<string, unknown>).map(([name, raw]) => {
           const body = (raw ?? {}) as Record<string, unknown>;
-          return [name, Array.isArray(body.steps) ? body.steps.map(normStep) : []];
+          return [name, {
+            description: str(body.description),
+            steps: Array.isArray(body.steps) ? body.steps.map(normStep) : [],
+          }];
         }),
       );
     }
@@ -137,9 +144,12 @@ export function parseDefinition(yamlText: string): VdLookup {
     byCrit.get(cid)?.checks.find((c) => c.id === chid);
   const invocationStep = (cid: string, chid: string, origin: FlowOrigin) =>
     find(cid, chid)?.steps.find((step) => step.id === origin.invocation);
-  const innerStep = (origin: FlowOrigin) => flows.get(origin.name)?.[origin.inner_index];
+  const innerStep = (origin: FlowOrigin) =>
+    flows.get(origin.name)?.steps[origin.inner_index];
   const invocationLabel = (cid: string, chid: string, origin: FlowOrigin) =>
     stepLabel(invocationStep(cid, chid, origin), origin.inner_index) ?? origin.invocation;
+  const flowLabel = (cid: string, chid: string, origin: FlowOrigin) =>
+    flows.get(origin.name)?.description ?? invocationLabel(cid, chid, origin);
   return {
     criterion: (id) => byCrit.get(id),
     check: (cid, chid) => find(cid, chid),
@@ -160,6 +170,6 @@ export function parseDefinition(yamlText: string): VdLookup {
       return stepLabel(step, i);
     },
     flowStepLabel: (flow) => stepLabel(innerStep(flow), flow.inner_index),
-    flowLabel: invocationLabel,
+    flowLabel,
   };
 }

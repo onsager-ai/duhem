@@ -251,6 +251,7 @@ manifest, an included fragment, or a leaf. Parameters are bound at each
 # flows.yml
 flows:
   sign_in:
+    description: Sign in with supplied credentials
     params:
       password: { type: string, secret: true }
       user: { type: string }

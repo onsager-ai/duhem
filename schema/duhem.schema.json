@@ -92,6 +92,13 @@
       "additionalProperties": false,
       "description": "A named, parameterized sequence of steps expanded by the loader.",
       "properties": {
+        "description": {
+          "description": "Optional prose explaining what this reusable sequence is for.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "outputs": {
           "additionalProperties": {
             "type": "string"

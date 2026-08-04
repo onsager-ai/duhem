@@ -24,6 +24,10 @@ pub type PageCatalog = BTreeMap<String, BTreeMap<String, serde_yml::Value>>;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Flow {
+    /// Optional prose explaining what this reusable sequence is for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
     /// Per-call parameters. Reuses the input type catalog and
     /// sensitivity marker; values are supplied only by the call site.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -322,6 +326,7 @@ criteria: []
 verification: catalog
 flows:
   sign_in:
+    description: Sign in with supplied credentials
     params:
       password: { type: string, secret: true }
       user: { type: string }
@@ -332,10 +337,33 @@ flows:
 criteria: []
 "#;
         let parsed = VerificationDefinition::from_yaml_str(y).expect("parse flows");
+        assert_eq!(
+            parsed.flows["sign_in"].description.as_deref(),
+            Some("Sign in with supplied credentials")
+        );
         assert!(parsed.flows["sign_in"].params["password"].secret);
         let round_trip =
             VerificationDefinition::from_yaml_str(&parsed.to_yaml_string().unwrap()).unwrap();
         assert_eq!(parsed, round_trip);
+
+        let without_description = r#"verification: catalog
+flows:
+  sign_in:
+    steps:
+    - uses: ui/click
+criteria: []
+"#;
+        let parsed_without_description =
+            VerificationDefinition::from_yaml_str(without_description).expect("parse old shape");
+        assert_eq!(
+            parsed_without_description.flows["sign_in"].description,
+            None
+        );
+        assert_eq!(
+            parsed_without_description.to_yaml_string().unwrap(),
+            without_description,
+            "a flow without description must serialize byte-identically to its old wire shape"
+        );
     }
 
     #[test]

@@ -29,7 +29,11 @@ pub(crate) fn resolve_leaf_inputs(
     manifest_decls: &BTreeMap<String, InputDecl>,
 ) -> Result<(ResolvedInputs, duhem_evidence::SecretRegistry), String> {
     let values = resolve_inputs_with_manifest(merged, profile, &definition.inputs, manifest_decls)?;
-    let secrets = secret_registry_with_manifest(&values, &definition.inputs, manifest_decls);
+    let mut secrets = secret_registry_with_manifest(&values, &definition.inputs, manifest_decls);
+    // Flow bindings must be registered before `run_started` records the
+    // composed definition snapshot. Runtime registration still covers
+    // values acquired later, but it is too late for the run header.
+    register_flow_secrets(&mut secrets, definition, Some(&values));
     Ok((values, secrets))
 }
 
@@ -210,6 +214,67 @@ pub(crate) fn secret_registry_with_manifest(
         }
     }
     registry
+}
+
+/// Register secret flow-parameter bindings before the first evidence
+/// event. Expanded steps retain the bindings in `flow_secrets`, including
+/// structured values and references to resolved inputs.
+pub(crate) fn register_flow_secrets(
+    registry: &mut duhem_evidence::SecretRegistry,
+    definition: &VerificationDefinition,
+    resolved_inputs: Option<&ResolvedInputs>,
+) {
+    for step in definition
+        .criteria
+        .iter()
+        .flat_map(|criterion| &criterion.checks)
+        .flat_map(|check| &check.steps)
+    {
+        for (index, value) in step.flow_secrets.iter().enumerate() {
+            let mut ordinal = 0usize;
+            walk_flow_secret_leaves(value, &mut |leaf| {
+                let name = if ordinal == 0 {
+                    format!("flow_param_{index}")
+                } else {
+                    format!("flow_param_{index}_{ordinal}")
+                };
+                ordinal += 1;
+                let resolved = leaf
+                    .as_str()
+                    .and_then(|raw| raw.strip_prefix("$inputs."))
+                    .and_then(reference_head)
+                    .and_then(|name| resolved_inputs.and_then(|inputs| inputs.get(name)))
+                    .cloned()
+                    .or_else(|| yml_to_json(leaf).ok());
+                if let Some(value) = resolved {
+                    registry.register_json(name, &value);
+                }
+            });
+        }
+    }
+}
+
+/// Visit every scalar leaf of a secret binding so structured flow
+/// parameters receive the same exact-value masking as scalar bindings.
+fn walk_flow_secret_leaves<F: FnMut(&serde_yml::Value)>(value: &serde_yml::Value, visit: &mut F) {
+    match value {
+        serde_yml::Value::Sequence(values) => {
+            for value in values {
+                walk_flow_secret_leaves(value, visit);
+            }
+        }
+        serde_yml::Value::Mapping(values) => {
+            for value in values.values() {
+                walk_flow_secret_leaves(value, visit);
+            }
+        }
+        leaf => visit(leaf),
+    }
+}
+
+pub(crate) fn reference_head(reference: &str) -> Option<&str> {
+    let end = reference.find(['.', '[', ')']).unwrap_or(reference.len());
+    (end > 0).then_some(&reference[..end])
 }
 
 /// Type-check a value supplied by the selected profile against its

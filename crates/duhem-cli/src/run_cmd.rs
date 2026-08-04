@@ -616,10 +616,11 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         for warning in secrets.warnings() {
             eprintln!("warning: {warning}");
         }
-        // Record the VD source snapshot so the run is self-describing
-        // (spec #302). Best-effort: an unreadable source just records no
-        // snapshot — never a run failure.
-        if let Ok(src) = std::fs::read_to_string(&leaf_path) {
+        // Record the composed VD snapshot so the run is self-describing
+        // away from its source repository (specs #302 / #387). Serialization
+        // remains best-effort: a failure records no snapshot and never fails
+        // the run.
+        if let Ok(src) = def.to_yaml_string() {
             engine = engine.with_definition_source(src);
         }
         if let Some(d) = manifest_defaults.as_ref() {

@@ -241,7 +241,7 @@ fn resolve_leaf(
                 (BTreeMap::new(), duhem_evidence::SecretRegistry::new())
             }
         };
-    register_flow_secrets(&mut secrets, &leaf.definition, Some(&resolved_inputs));
+    crate::resolve::register_flow_secrets(&mut secrets, &leaf.definition, Some(&resolved_inputs));
 
     let mut provenance = BTreeMap::new();
     for name in resolved_inputs.keys() {
@@ -427,7 +427,7 @@ fn resolve_with(
                     *value = resolved;
                     let source = expression
                         .strip_prefix("$inputs.")
-                        .and_then(reference_head)
+                        .and_then(crate::resolve::reference_head)
                         .and_then(|name| provenance.get(&format!("inputs.{name}")).cloned())
                         .or_else(|| {
                             expression.strip_prefix("$pages.").and_then(|reference| {
@@ -681,70 +681,8 @@ fn candidate_secret_registry(
             registry.register_json(name.clone(), &value);
         }
     }
-    register_flow_secrets(&mut registry, definition, None);
+    crate::resolve::register_flow_secrets(&mut registry, definition, None);
     registry
-}
-
-fn register_flow_secrets(
-    registry: &mut duhem_evidence::SecretRegistry,
-    definition: &VerificationDefinition,
-    resolved_inputs: Option<&BTreeMap<String, serde_json::Value>>,
-) {
-    for step in definition
-        .criteria
-        .iter()
-        .flat_map(|criterion| &criterion.checks)
-        .flat_map(|check| &check.steps)
-    {
-        for (index, value) in step.flow_secrets.iter().enumerate() {
-            // A secret flow param's bound value is not always a plain
-            // `$inputs.<name>` string — it may be a mapping or sequence
-            // that embeds one or more such references anywhere inside
-            // it (spec #376). Walking every leaf and resolving each
-            // reference individually keeps the registry holding the
-            // real resolved secret instead of the placeholder text,
-            // while a top-level plain string still takes exactly one
-            // trip through this loop, unchanged from before.
-            let mut ordinal = 0usize;
-            walk_flow_secret_leaves(value, &mut |leaf| {
-                let name = if ordinal == 0 {
-                    format!("flow_param_{index}")
-                } else {
-                    format!("flow_param_{index}_{ordinal}")
-                };
-                ordinal += 1;
-                let resolved = leaf
-                    .as_str()
-                    .and_then(|raw| raw.strip_prefix("$inputs."))
-                    .and_then(reference_head)
-                    .and_then(|name| resolved_inputs.and_then(|inputs| inputs.get(name)))
-                    .cloned()
-                    .or_else(|| inputs::yml_to_json(leaf).ok());
-                if let Some(value) = resolved {
-                    registry.register_json(name, &value);
-                }
-            });
-        }
-    }
-}
-
-/// Visit every scalar leaf of a `flow_secrets` binding, recursing
-/// through mappings and sequences. A plain scalar (the historical
-/// case) is its own single leaf.
-fn walk_flow_secret_leaves<F: FnMut(&serde_yml::Value)>(value: &serde_yml::Value, visit: &mut F) {
-    match value {
-        serde_yml::Value::Sequence(values) => {
-            for value in values {
-                walk_flow_secret_leaves(value, visit);
-            }
-        }
-        serde_yml::Value::Mapping(values) => {
-            for value in values.values() {
-                walk_flow_secret_leaves(value, visit);
-            }
-        }
-        leaf => visit(leaf),
-    }
 }
 
 fn redact_error(registry: &duhem_evidence::SecretRegistry, error: &str) -> String {
@@ -754,11 +692,6 @@ fn redact_error(registry: &duhem_evidence::SecretRegistry, error: &str) -> Strin
     } else {
         "input resolution failed for a secret value".to_string()
     }
-}
-
-fn reference_head(reference: &str) -> Option<&str> {
-    let end = reference.find(['.', '[', ')']).unwrap_or(reference.len());
-    (end > 0).then_some(&reference[..end])
 }
 
 fn replace_redaction_markers(value: &mut serde_json::Value) {

@@ -1111,6 +1111,116 @@ criteria:
 }
 
 #[test]
+fn composed_snapshot_contains_manifest_flow_metadata_and_masks_its_secret_binding() {
+    // Issue #387: the dashboard joins trace flow origins to the recorded
+    // snapshot's `flows:` catalog. A raw leaf snapshot omits a flow that
+    // lives only in the root manifest, so its authored labels disappear.
+    let tmp = tempfile::tempdir().unwrap();
+    let secret = "snapshot-secret-387-unique";
+    std::fs::write(
+        tmp.path().join("duhem.yml"),
+        r#"
+manifest_version: 1
+pages:
+  account:
+    heading: { text: Account }
+flows:
+  authenticate:
+    params:
+      token: { type: string, secret: true }
+    steps:
+      - id: submit-token
+        description: Submit the API token
+        uses: cli/invoke
+        with: { command: [printf, $params.token] }
+verifications:
+  - path: leaf.yml
+"#,
+    )
+    .unwrap();
+    let leaf = tmp.path().join("leaf.yml");
+    std::fs::write(
+        &leaf,
+        format!(
+            r#"
+verification: composed-snapshot
+criteria:
+  - id: AC-1
+    description: authenticates through the shared flow
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: login
+            call: authenticate
+            with: {{ token: {secret} }}
+        assertions: ["true"]
+"#
+        ),
+    )
+    .unwrap();
+    let db = tmp.path().join("duhem.db");
+    let run_id = "01J38700000000000000000000";
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&leaf)
+        .arg("--db")
+        .arg(&db)
+        .arg("--run-id")
+        .arg(run_id)
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let snapshot = rt.block_on(async {
+        use duhem_evidence::Store;
+        let store = duhem_evidence::SqliteStore::open_read_only(&db)
+            .await
+            .unwrap();
+        store
+            .run_events(run_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find_map(|event| match event.payload {
+                duhem_evidence::EventPayload::RunStarted {
+                    definition: Some(definition),
+                    ..
+                } => Some(definition),
+                _ => None,
+            })
+            .expect("run_started carries a definition snapshot")
+    });
+
+    let document = duhem_schema::VerificationDefinition::from_yaml_str(&snapshot)
+        .expect("composed snapshot remains a parseable Verification Definition");
+    let flow_step = &document.flows["authenticate"].steps[0];
+    assert_eq!(flow_step.id.as_deref(), Some("submit-token"));
+    assert_eq!(
+        flow_step.description.as_deref(),
+        Some("Submit the API token")
+    );
+    assert_eq!(document.pages["account"]["heading"]["text"], "Account");
+    assert!(
+        !snapshot.contains(secret),
+        "secret flow binding leaked into snapshot: {snapshot}"
+    );
+    assert!(
+        snapshot.contains("[redacted:flow_param_0]"),
+        "snapshot did not record the expected masking marker: {snapshot}"
+    );
+}
+
+#[test]
 fn leaf_by_path_resolves_pages_and_flows_through_root_manifest() {
     // Spec on #384: a leaf invoked by explicit path could not resolve
     // `$pages.*` or `call:` flows composed by the root manifest — the

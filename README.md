@@ -103,7 +103,7 @@ For a real-world example — including the `provision.up:` / `down:` hooks Duhem
 
 - **Criteria vs. checks.** *Criteria* are the human commitment about what "done" means; they are stable and survive implementation churn. *Checks* are how Duhem verifies that commitment; they are derivative and may change as the implementation does. Conflating the two is a defect.
 - **Verification Definition (VD).** A YAML document (criteria + checks + inputs, optionally `provision` hooks) describing one workload to verify. `duhem init` scaffolds one; `verifications/` holds worked examples.
-- **The manifest (`duhem.yml`).** Composes one or more VDs into a suite and carries shared configuration — `defaults:` (timeout / inconclusive policy / retry), `includes:`, `profiles:`, and reusable `pages:` locators. A single-file VD *is* a manifest with one leaf.
+- **The manifest (`duhem.yml`).** Composes one or more VDs into a suite and carries shared configuration — `defaults:` (timeout / inconclusive policy / retry), `includes:`, `profiles:`, reusable `pages:` locators, and reusable `flows:` step sequences invoked from a check with `call:`. A single-file VD *is* a manifest with one leaf.
 - **The verdict.** Deterministic aggregation of structured assertions into `pass` / `fail` / `inconclusive`. No LLM in the loop.
 - **Step gating.** Steps default to `if: success`; use `if: always` for
   teardown or `if: failure` for diagnostics. Gated steps stay visible as

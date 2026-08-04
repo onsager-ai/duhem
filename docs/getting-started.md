@@ -262,6 +262,92 @@ do not leak to siblings. Omit `session:` for the signed-out path. The
 captured `state` is contract-secret automatically—do not add a `secret_outputs:`
 entry—and evidence carries only the expression plus a SHA-256 digest.
 
+### Reuse a step sequence with `flows:`
+
+Session capture (above) is the right tool when every check should carry
+forward the *same* signed-in identity. Sometimes there's no single
+session to share — an admin check and a member check need to sign in as
+*different* users. Put the repeated step sequence in a `flows:` catalog
+once, parameterize what varies, and invoke it with `call:` wherever you
+need it:
+
+```yaml
+pages:
+  login:
+    username: { role: textbox, name: Username }
+    password: { role: textbox, name: Password }
+    submit: { role: button, name: Sign In }
+
+flows:
+  sign_in:
+    params:
+      user: { type: string }
+      password: { type: string, secret: true }
+    steps:
+      - uses: ui/type
+        with: { locator: $pages.login.username, text: $params.user }
+      - uses: ui/type
+        with: { locator: $pages.login.password, text: $params.password }
+      - uses: ui/click
+        with: { locator: $pages.login.submit }
+
+criteria:
+  - id: AC-1
+    description: An administrator can open the settings page.
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.login_url }
+          - call: sign_in
+            with: { user: $inputs.admin_user, password: $inputs.admin_password }
+          - uses: ui/navigate
+            with: { url: $inputs.settings_url }
+          - uses: ui/assert-element
+            with:
+              locator: { role: heading, name: Settings }
+              expected: visible
+
+  - id: AC-2
+    description: A regular member can also open the settings page.
+    checks:
+      - id: AC-2.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.login_url }
+          - call: sign_in
+            with: { user: $inputs.member_user, password: $inputs.member_password }
+          - uses: ui/navigate
+            with: { url: $inputs.settings_url }
+          - uses: ui/assert-element
+            with:
+              locator: { role: heading, name: Settings }
+              expected: visible
+```
+
+A step picks exactly one of `uses:` or `call:`. `flows:` composes the
+same way as `pages:` — declared on the root manifest, an include, or a
+leaf, root-wins on name collision. A flow body is **hygienic**: its
+steps see only `$params.*` and `$pages.*`, never the caller's
+`$inputs.*` or `$steps.*` — pass every dependency through `with:`
+explicitly, so the flow stays portable across suites. A flow may
+declare its own `outputs:` map (`$steps.<inner-id>.outputs.<name>`) to
+expose one of its inner step's results to the caller as
+`$steps.<call-id>.outputs.<name>`; inner step ids are otherwise
+private. `duhem resolve --provenance` prints the expanded steps and
+which flow each one came from — useful when a call's behavior is a
+surprise.
+
+**Running one leaf by path still resolves the catalog.** `duhem run
+path/to/leaf.yml` (or `-f`) doesn't require going through the suite
+manifest: it walks up from the leaf's own directory for a root
+manifest — the same ancestor search a path-less `duhem run` uses — and,
+if one is found, merges its `pages:`/`flows:` catalog into the leaf
+before resolving `$pages.*`/`call:`. Sibling leaves the manifest lists
+are not loaded or run; the run stays scoped to the one you asked for.
+If no manifest is found and the leaf still references an undeclared
+`$pages.*` name or flow, it fails naming exactly what's missing.
+
 ## 5. Author a real check
 
 Point it at *your* system by changing three things in `duhem.yml`:

@@ -301,6 +301,27 @@ signal either the criterion's assumptions are unstated (reformulate it
 against the real web) or the check is the wrong shape. Don't paper over
 it with a mock — stop and reconsider the criterion.
 
+#### Bring the system up first with `provision:`
+
+Most real checks need the system under test running before any check
+observes it. Declare `provision:` on the VD or the suite manifest (one
+shared environment for the whole suite) instead of assuming it's
+already up:
+
+```yaml
+provision:
+  up: ./scripts/up.sh          # required — stands up the real thing, no mocks
+  down: ./scripts/down.sh      # optional teardown, runs regardless of verdict
+  ready:
+    http: { url: http://127.0.0.1:8080/health, timeout: 120s }
+```
+
+Duhem forks `up:` once before `setup:`, polls the optional `ready:`
+probe, runs every check against the now-real environment, then forks
+`down:` after the criteria loop completes. If the environment never
+comes up, the run is `inconclusive` — never a false `pass`. Teardown
+failures are recorded as evidence and don't flip the verdict.
+
 ### 5. Mechanical judgment — no LLM in the verdict
 
 Every assertion must be a deterministic predicate the judge can evaluate.
@@ -345,6 +366,16 @@ The file can be named anything (it self-identifies via a top-level
 suite uses a `.duhem/duhem.yml` manifest, add the file to
 `verifications:`; a standalone file run via `duhem run <file>` needs no
 manifest entry.
+
+Running a leaf by path still resolves shared context: `duhem run
+<leaf-path>` walks that file's own ancestors (capped at the enclosing
+`.git`) for a root manifest, the same search the no-path form uses, and
+merges its `pages:`/`flows:` catalog into the leaf so `$pages.*` and
+`call:` references still resolve. Sibling `verifications:` entries the
+manifest lists are not loaded or run — the run stays scoped to just the
+requested leaf. A leaf with an unresolved `$pages.*` or `call:` name and
+no discoverable manifest fails at validate/run time naming exactly what
+it needs.
 
 ### Secret inputs and acquired credentials
 

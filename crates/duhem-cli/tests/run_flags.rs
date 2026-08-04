@@ -1041,6 +1041,273 @@ fn invalid_filter_pattern_errors_before_browser_launch() {
     );
 }
 
+// ---- #384: leaf-by-path resolves through the root manifest ---------
+
+/// Lay down a root manifest that composes `pages:` / `flows:`
+/// (browser-free: the flow body is a `cli/invoke`, not a UI action)
+/// plus two leaves. `leaf-a.yml` references the manifest's page and
+/// flow — the reproduction shape from issue #384. `leaf-b.yml` calls a
+/// flow that resolves *nowhere* (not in the manifest, not locally), so
+/// if it were ever loaded — even just for structural validation — the
+/// whole invocation would fail. Its presence is what lets a test prove
+/// scoping: `duhem run leaf-a.yml` succeeding is only possible if
+/// `leaf-b.yml` was never touched.
+fn manifest_with_pages_flows_and_two_leaves(dir: &std::path::Path) -> (PathBuf, PathBuf, PathBuf) {
+    let manifest = dir.join("duhem.yml");
+    std::fs::write(
+        &manifest,
+        r#"
+manifest_version: 1
+pages:
+  login:
+    heading: { text: Sign in }
+flows:
+  greet:
+    steps:
+      - uses: cli/invoke
+        with: { command: printf, args: ["hi"] }
+verifications:
+  - path: leaf-a.yml
+  - path: leaf-b.yml
+"#,
+    )
+    .unwrap();
+    let leaf_a = dir.join("leaf-a.yml");
+    std::fs::write(
+        &leaf_a,
+        r#"
+verification: leaf-a
+criteria:
+  - id: AC-1
+    description: uses the manifest's page and flow
+    checks:
+      - id: AC-1.1
+        steps:
+          - call: greet
+          - uses: ui/assert-element
+            with:
+              locator: $pages.login.heading
+              expected: visible
+              timeout: 1s
+"#,
+    )
+    .unwrap();
+    let leaf_b = dir.join("leaf-b.yml");
+    std::fs::write(
+        &leaf_b,
+        r#"
+verification: leaf-b
+criteria:
+  - id: AC-1
+    description: calls a flow that exists nowhere — must never be loaded when leaf-a runs by path
+    checks:
+      - id: AC-1.1
+        steps:
+          - call: this-flow-does-not-exist-anywhere
+"#,
+    )
+    .unwrap();
+    (manifest, leaf_a, leaf_b)
+}
+
+#[test]
+fn leaf_by_path_resolves_pages_and_flows_through_root_manifest() {
+    // Spec on #384: a leaf invoked by explicit path could not resolve
+    // `$pages.*` or `call:` flows composed by the root manifest — the
+    // no-path branch discovered the manifest; an explicit leaf path
+    // did not. Browser-free via `--dry-run`: successful load + flow
+    // expansion is the thing under test, not execution.
+    let tmp = tempfile::tempdir().unwrap();
+    let (_manifest, leaf_a, _leaf_b) = manifest_with_pages_flows_and_two_leaves(tmp.path());
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&leaf_a)
+        .arg("--dry-run")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("WOULD RUN: AC-1::AC-1.1"),
+        "stdout was {stdout:?}"
+    );
+}
+
+#[test]
+fn leaf_by_path_run_stays_scoped_to_the_requested_leaf() {
+    // Spec on #384 Test: sibling `verifications:` entries the manifest
+    // lists must not execute (or even load) when a leaf runs by path.
+    // `leaf-b.yml` calls a flow that resolves nowhere; if the
+    // implementation widened scope to the whole manifest, this run
+    // would fail loading leaf-b. It doesn't — proving leaf-b was never
+    // touched.
+    let tmp = tempfile::tempdir().unwrap();
+    let (_manifest, leaf_a, _leaf_b) = manifest_with_pages_flows_and_two_leaves(tmp.path());
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&leaf_a)
+        .arg("--dry-run")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    // Only leaf-a's own (unqualified — single-leaf dry-run doesn't
+    // prefix with a verification name) checks are planned.
+    assert!(
+        stdout.contains("WOULD RUN: AC-1::AC-1.1"),
+        "stdout was {stdout:?}"
+    );
+    assert!(
+        !stdout.contains("leaf-b"),
+        "leaf-b must never be named — it was never loaded: {stdout:?}"
+    );
+}
+
+#[test]
+fn leaf_by_path_without_discoverable_manifest_names_unresolved_references() {
+    // Spec on #384 Test: no root manifest found + unresolved
+    // `$pages.*` / flow references → a targeted error naming exactly
+    // what's missing and where it would normally be defined, not the
+    // flow expander's generic "unknown flow" parse error.
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+    let leaf = tmp.path().join("orphan.yml");
+    std::fs::write(
+        &leaf,
+        r#"
+verification: orphan
+criteria:
+  - id: AC-1
+    description: references a page and a flow that exist nowhere
+    checks:
+      - id: AC-1.1
+        steps:
+          - call: open_login_page
+          - uses: ui/assert-element
+            with:
+              locator: $pages.login.heading
+              expected: visible
+              timeout: 1s
+"#,
+    )
+    .unwrap();
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&leaf)
+        .arg("--dry-run")
+        .output()
+        .expect("spawn duhem");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("open_login_page") && stderr.contains("$pages.login.heading"),
+        "stderr should name the unresolved references: {stderr}"
+    );
+    assert!(
+        stderr.contains("no root manifest was found"),
+        "stderr should explain where they'd normally be defined: {stderr}"
+    );
+}
+
+#[test]
+fn self_contained_leaf_still_runs_without_a_manifest() {
+    // Spec on #384 Test: a leaf that declares its own `pages:` /
+    // `flows:` needs no manifest and is unaffected by the #384 fix.
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+    let leaf = tmp.path().join("standalone.yml");
+    std::fs::write(
+        &leaf,
+        r#"
+verification: standalone
+pages:
+  home:
+    heading: { text: Welcome }
+flows:
+  greet:
+    steps:
+      - uses: cli/invoke
+        with: { command: printf, args: ["hi"] }
+criteria:
+  - id: AC-1
+    description: fully self-contained
+    checks:
+      - id: AC-1.1
+        steps:
+          - call: greet
+          - uses: ui/assert-element
+            with:
+              locator: $pages.home.heading
+              expected: visible
+              timeout: 1s
+"#,
+    )
+    .unwrap();
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&leaf)
+        .arg("--dry-run")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("WOULD RUN: AC-1::AC-1.1"),
+        "stdout was {stdout:?}"
+    );
+}
+
+#[test]
+fn leaf_named_duhem_yml_is_not_mistaken_for_its_own_manifest() {
+    // Regression coverage for a bug caught while fixing #384: Pattern
+    // A conventionally names a self-contained leaf `duhem.yml` — it's
+    // exactly what `duhem init` scaffolds (`crates/duhem-cli/tests/
+    // init_smoke.rs`'s `init_then_validate_then_run_passes_against_
+    // example_com`, gated behind network + Playwright, exercises the
+    // same shape end to end). That name is also one of the manifest
+    // candidate filenames, so walking up from the leaf's own directory
+    // must not "find" the leaf as its own ancestor manifest.
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+    let leaf_dir = tmp.path().join("v");
+    std::fs::create_dir_all(&leaf_dir).unwrap();
+    let leaf = leaf_dir.join("duhem.yml");
+    std::fs::write(&leaf, ONE_CRITERION).unwrap();
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&leaf)
+        .arg("--dry-run")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("WOULD RUN: AC-1::AC-1.1"),
+        "stdout was {stdout:?}"
+    );
+}
+
 // ---- #191: target identity (project: + resolution ladder) ----------
 
 /// Open the store read-only and return the single run's

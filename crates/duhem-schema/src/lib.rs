@@ -12,7 +12,9 @@ pub mod expr;
 mod flows;
 pub mod includes;
 pub mod jsonschema;
+mod leaf_context;
 pub mod manifest;
+mod manifest_compose;
 mod manifest_inputs;
 mod manifest_path;
 pub mod project;
@@ -29,7 +31,7 @@ pub use includes::PartialRootManifest;
 pub use jsonschema::json_schema;
 pub use manifest::{
     InconclusivePolicy, LoadError, Loaded, LoadedLeaf, ManifestDefaults, ManifestEntry,
-    RetryBackoff, RetryPolicy, RootManifest, discover, load,
+    RetryBackoff, RetryPolicy, RootManifest, discover, load, load_for_run,
 };
 pub use project::{ProjectDecl, ProjectKind};
 pub use provision::{DurationSpec, HttpReadyProbe, Provision, ReadyProbe};

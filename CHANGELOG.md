@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+## v0.2.2 — 2026-08-04
+
 - [additive] Reusable flows accept an optional `description:` that the dashboard prefers for flow group labels while preserving the existing label fallback for undescribed flows. (#387)
 - [additive] A run's recorded definition snapshot is now the composed Verification Definition — the leaf plus the effective manifest-level `flows:` and `pages:` it resolved against — so a leaf run by path is self-describing away from its repo, as #302 intended. Snapshot bytes therefore no longer match the source file; parse the snapshot as the effective run definition. (#387)
 

@@ -406,6 +406,17 @@ anywhere-in-the-repo && duhem run` finds the repo-root `duhem.yml`
 (or `.duhem.yml`) without a path argument (#69). `-f path/to/manifest.yml`
 overrides discovery for an out-of-tree manifest.
 
+Running a leaf directly by path (an explicit positional path or
+`-f`/`--file`) uses this same ancestor walk from the leaf's own
+directory, not just the no-path case: if it finds a root manifest, it
+merges that manifest's composed `pages:`/`flows:` catalog into the leaf
+before flow expansion, so `$pages.*` and `call:` references the leaf
+doesn't declare locally still resolve. Sibling `verifications:` entries
+the manifest lists are never loaded or executed — the run stays scoped
+to the requested leaf. A leaf with an unresolved `$pages.*`/`call:` name
+and no discoverable manifest fails naming exactly what's missing and
+where it would normally be defined (#384/#388).
+
 ## Worked example template
 
 Use this as the skeleton for any spec that needs a worked example:

@@ -12,7 +12,7 @@ use duhem_evidence::{SqliteStore, Store};
 use duhem_judge::{RunVerdict, VerdictState, aggregate_run_set};
 use duhem_runtime::{Engine, RunOutcome, SuiteEnvironment};
 use duhem_schema::{
-    Loaded, LoadedLeaf, VerificationDefinition, load as load_definition,
+    Loaded, LoadedLeaf, VerificationDefinition, load_for_run as load_definition,
     validate_with_contract_outputs,
 };
 
@@ -126,8 +126,12 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     };
 
     // Polymorphic load: directory → first manifest candidate; manifest →
-    // expand leaves; leaf → single Verification Definition (today's
-    // behavior). Spec on issue #49. The loader annotates YAML / shape
+    // expand leaves; leaf → single Verification Definition, its
+    // `$pages.*` / flow references resolved through the nearest root
+    // manifest found walking up from its directory (issue #384) —
+    // without loading or executing any sibling `verifications:` entry
+    // that manifest lists, so a leaf-by-path run stays scoped to just
+    // this leaf. Spec on issue #49. The loader annotates YAML / shape
     // failures with the offending path; we prefix the schema version
     // so authors see at a glance which schema the loader parsed
     // against (spec on #51).

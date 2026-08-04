@@ -218,7 +218,7 @@ pub enum RetryBackoff {
 /// and dashes, beginning and ending with an alphanumeric. This keeps
 /// names addressable on the CLI (`--profile <name>`) and stable
 /// across the `$env` whitelist surface.
-fn profile_name_well_formed(name: &str) -> bool {
+pub(crate) fn profile_name_well_formed(name: &str) -> bool {
     if name.is_empty() {
         return false;
     }
@@ -399,6 +399,16 @@ pub enum LoadError {
     /// A reusable flow is structurally invalid or cannot be expanded.
     #[error("{path}: flow validation failed: {message}")]
     InvalidFlows { path: PathBuf, message: String },
+    /// A leaf loaded by explicit path (issue #384: `-f`/`--file`, or an
+    /// explicit positional file) references `$pages.*` and/or a
+    /// `call:` flow that its own `pages:` / `flows:` blocks don't
+    /// define, and walking up from its directory found no root
+    /// manifest to supply them. Distinct from `InvalidFlows` so the
+    /// diagnostic names exactly what's unresolved and where it would
+    /// normally live, instead of the flow expander's generic "unknown
+    /// flow" parse error.
+    #[error("{path}: {detail}")]
+    UnresolvedWithoutRootManifest { path: PathBuf, detail: String },
 }
 
 /// Currently-supported `manifest_version` value. Bumping this is
@@ -411,12 +421,13 @@ pub const SUPPORTED_MANIFEST_VERSION: u32 = 1;
 /// the leading-dot `.duhem.*` aliases let a manifest hide like
 /// `.gitignore` / `.editorconfig`. Earlier entries win when several
 /// exist in the same directory.
-const MANIFEST_CANDIDATES: [&str; 4] = ["duhem.yml", "duhem.yaml", ".duhem.yml", ".duhem.yaml"];
+pub(crate) const MANIFEST_CANDIDATES: [&str; 4] =
+    ["duhem.yml", "duhem.yaml", ".duhem.yml", ".duhem.yaml"];
 
 /// The first existing manifest candidate directly under `dir`, in
 /// [`MANIFEST_CANDIDATES`] priority order, or `None` when the
 /// directory holds none of them.
-fn manifest_in_dir(dir: &Path) -> Option<PathBuf> {
+pub(crate) fn manifest_in_dir(dir: &Path) -> Option<PathBuf> {
     MANIFEST_CANDIDATES
         .iter()
         .map(|name| dir.join(name))
@@ -460,24 +471,7 @@ pub fn discover(explicit: Option<&Path>, cwd: &Path) -> Result<PathBuf, LoadErro
         return Ok(path.to_path_buf());
     }
 
-    let mut searched: Vec<PathBuf> = Vec::new();
-    let mut dir = Some(cwd);
-    while let Some(current) = dir {
-        if let Some(hit) = manifest_in_dir(current) {
-            return Ok(hit);
-        }
-        for name in MANIFEST_CANDIDATES {
-            searched.push(current.join(name));
-        }
-        // Repo-boundary cap: a `.git` entry stops the walk *after* the
-        // boundary directory itself is probed (matching git's own
-        // discovery — the repo root often holds the manifest).
-        if current.join(".git").exists() {
-            break;
-        }
-        dir = current.parent();
-    }
-    Err(LoadError::ManifestNotFound { searched })
+    crate::manifest_compose::walk_ancestors_for_manifest(cwd)
 }
 
 /// Resolve a CLI `path` argument to a [`Loaded`].
@@ -494,6 +488,49 @@ pub fn discover(explicit: Option<&Path>, cwd: &Path) -> Result<PathBuf, LoadErro
 /// leaf fails the whole load with a path-tagged error so authors see
 /// the offending file.
 pub fn load(path: &Path) -> Result<Loaded, LoadError> {
+    let (path, src, shape) = resolve_and_classify(path)?;
+    match shape {
+        Shape::Manifest => load_manifest(&path, &src),
+        Shape::Leaf => load_leaf(&path, &src).map(|definition| Loaded::Leaf { path, definition }),
+        Shape::Ambiguous => Err(LoadError::AmbiguousShape { path }),
+        Shape::Unknown => Err(LoadError::UnknownShape { path }),
+    }
+}
+
+/// Like [`load`], but a leaf's `$pages.*` and flow references resolve
+/// through the nearest root manifest found walking up from its
+/// directory (issue #384: [`resolve_leaf_through_root_manifest`]),
+/// instead of failing outright when they live in files a manifest's
+/// `includes:` composes in. Sibling `verifications:` entries the
+/// found manifest lists are never loaded or executed — the run stays
+/// scoped to the requested leaf.
+///
+/// The manifest branch is byte-identical to [`load`] (a target that
+/// resolves to a manifest already sees every leaf it lists, so there
+/// is nothing to widen); only the leaf branch differs. `duhem run`
+/// uses this for its `-f`/`--file` and explicit-path targets; the
+/// no-path ancestor walk only ever resolves to a manifest, so it is
+/// unaffected. Other callers (`duhem validate`, `duhem resolve`) keep
+/// today's self-contained-leaf behavior via [`load`].
+pub fn load_for_run(path: &Path) -> Result<Loaded, LoadError> {
+    let (path, src, shape) = resolve_and_classify(path)?;
+    match shape {
+        Shape::Manifest => load_manifest(&path, &src),
+        Shape::Leaf => {
+            let mut definition = load_leaf_authored(&path, &src)?;
+            crate::leaf_context::resolve_leaf_through_root_manifest(&path, &mut definition)?;
+            Ok(Loaded::Leaf { path, definition })
+        }
+        Shape::Ambiguous => Err(LoadError::AmbiguousShape { path }),
+        Shape::Unknown => Err(LoadError::UnknownShape { path }),
+    }
+}
+
+/// Resolve a directory to its manifest candidate (`load`'s `path.is_dir()`
+/// probe), read the target file, and classify its shape. Shared by
+/// [`load`] and [`load_for_run`] so they never drift on how a target
+/// is located — only how a `Shape::Leaf` result is then loaded.
+fn resolve_and_classify(path: &Path) -> Result<(PathBuf, String, Shape), LoadError> {
     let path = if path.is_dir() {
         match manifest_in_dir(path) {
             Some(candidate) => candidate,
@@ -512,15 +549,8 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
         source: e,
     })?;
 
-    match classify_yaml(&path, &src)? {
-        Shape::Manifest => load_manifest(&path, &src),
-        Shape::Leaf => load_leaf(&path, &src).map(|definition| Loaded::Leaf {
-            path: path.clone(),
-            definition,
-        }),
-        Shape::Ambiguous => Err(LoadError::AmbiguousShape { path }),
-        Shape::Unknown => Err(LoadError::UnknownShape { path }),
-    }
+    let shape = classify_yaml(&path, &src)?;
+    Ok((path, src, shape))
 }
 
 enum Shape {
@@ -577,61 +607,7 @@ fn load_leaf(path: &Path, src: &str) -> Result<VerificationDefinition, LoadError
 }
 
 fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
-    let mut manifest = RootManifest::from_yaml_str(src).map_err(|e| LoadError::Yaml {
-        path: manifest_path.to_path_buf(),
-        source: e,
-    })?;
-    if manifest.manifest_version != SUPPORTED_MANIFEST_VERSION {
-        return Err(LoadError::UnsupportedManifestVersion {
-            path: manifest_path.to_path_buf(),
-            found: manifest.manifest_version,
-            supported: SUPPORTED_MANIFEST_VERSION,
-        });
-    }
-    // Compose `includes:` (spec #67) before any structural checks so
-    // the rest of this function operates on the *effective* manifest —
-    // root values plus include-supplied fills. Root-wins: an include
-    // only fills keys the root left absent. `manifest` is mutated in
-    // place into the merged result.
-    let manifest_parent = manifest_path.parent().unwrap_or_else(|| Path::new("."));
-    let root_includes = manifest.includes.clone();
-    let mut chain = vec![canonical_or_self(manifest_path)];
-    crate::includes::resolve_includes(
-        manifest_path,
-        manifest_parent,
-        &root_includes,
-        &mut manifest,
-        &mut chain,
-        0,
-    )?;
-    crate::manifest_inputs::validate(manifest_path, &manifest.inputs)?;
-    // Suite-wide `project:` discipline (#191): exactly one non-empty
-    // coordinate. Same load-time home as the other structural checks.
-    if let Some(project) = &manifest.project
-        && let Err(msg) = project.check()
-    {
-        return Err(LoadError::BadProjectDecl {
-            path: manifest_path.to_path_buf(),
-            message: msg,
-        });
-    }
-    // Named-profiles discipline (spec #68): well-formed names,
-    // non-empty key maps. Cheap structural checks at load time, the
-    // same place the manifest-version and path checks live.
-    for (name, keys) in &manifest.profiles {
-        if !profile_name_well_formed(name) {
-            return Err(LoadError::MalformedProfileName {
-                manifest: manifest_path.to_path_buf(),
-                name: name.clone(),
-            });
-        }
-        if keys.is_empty() {
-            return Err(LoadError::EmptyProfile {
-                manifest: manifest_path.to_path_buf(),
-                name: name.clone(),
-            });
-        }
-    }
+    let manifest = crate::manifest_compose::compose_manifest(manifest_path, src)?;
     let parent = manifest_path.parent().unwrap_or_else(|| Path::new("."));
     let manifest_canonical = canonical_or_self(manifest_path);
     // Pre-canonicalize the manifest's parent so we can verify that
@@ -744,19 +720,7 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
             let mut def = load_leaf_authored(&leaf_path, &src)?;
             // Leaf-local entries win over the effective manifest
             // catalog, element by element.
-            for (page, elements) in &manifest.pages {
-                let target = def.pages.entry(page.clone()).or_default();
-                for (element, locator) in elements {
-                    target
-                        .entry(element.clone())
-                        .or_insert_with(|| locator.clone());
-                }
-            }
-            for (name, flow) in &manifest.flows {
-                def.flows
-                    .entry(name.clone())
-                    .or_insert_with(|| flow.clone());
-            }
+            crate::manifest_compose::merge_manifest_catalogs_into_leaf(&manifest, &mut def);
             crate::flows::validate_and_expand(&mut def).map_err(|message| {
                 LoadError::InvalidFlows {
                     path: leaf_path.clone(),
@@ -1585,6 +1549,115 @@ verifications:
         match loaded {
             Loaded::Manifest { leaves, .. } => assert_eq!(leaves.len(), 1, "dedup repeated leaf"),
             _ => panic!("expected Manifest"),
+        }
+    }
+
+    // ---- #384: leaf-by-path resolves through the root manifest ------
+    //
+    // Reference-detection and manifest-composition coverage lives in
+    // `leaf_context::tests` (the module that owns that logic). What
+    // stays here is `load_for_run` dispatch behavior: parity with
+    // `load` on a manifest target, and the leaf-named-`duhem.yml`
+    // self-reference edge case.
+
+    #[test]
+    fn load_for_run_manifest_target_matches_plain_load() {
+        // #384 requirement: "do not change the no-path branch's
+        // behaviour at all" — when the target already resolves to a
+        // manifest, `load_for_run` takes the exact same branch `load`
+        // does.
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "a/duhem.yml", LEAF_A);
+        let manifest = write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+verifications:
+  - path: ./a/duhem.yml
+"#,
+        );
+        let via_load = load(&manifest).unwrap();
+        let via_run = load_for_run(&manifest).unwrap();
+        match (via_load, via_run) {
+            (Loaded::Manifest { leaves: a, .. }, Loaded::Manifest { leaves: b, .. }) => {
+                assert_eq!(a.len(), b.len());
+                assert_eq!(a[0].definition.verification, b[0].definition.verification);
+            }
+            other => panic!("expected both Manifest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_for_run_leaf_named_duhem_yml_is_not_mistaken_for_its_own_manifest() {
+        // Regression: Pattern A conventionally names a self-contained
+        // leaf `duhem.yml` (it's exactly what `duhem init` scaffolds).
+        // That name is also one of `MANIFEST_CANDIDATES`, so starting
+        // the ancestor walk at the leaf's own directory must not
+        // "find" the leaf as its own manifest and try to parse a
+        // Verification Definition as a `RootManifest`.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let leaf = write(tmp.path(), "v/duhem.yml", LEAF_A);
+
+        let loaded = load_for_run(&leaf).expect("a leaf must never resolve to itself");
+        match loaded {
+            Loaded::Leaf { definition, .. } => {
+                assert_eq!(definition.verification, "leaf-a");
+            }
+            _ => panic!("expected Leaf"),
+        }
+    }
+
+    #[test]
+    fn load_for_run_leaf_named_duhem_yml_still_finds_a_real_ancestor_manifest() {
+        // Companion to the regression above: excluding the leaf itself
+        // must not blind the walk to a *real* manifest further up —
+        // only the leaf's own path is skipped.
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+pages:
+  login:
+    heading: { text: Sign in }
+verifications:
+  - path: v/duhem.yml
+"#,
+        );
+        let leaf = write(
+            tmp.path(),
+            "v/duhem.yml",
+            r#"
+verification: leaf-a
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/assert-element
+            with:
+              locator: $pages.login.heading
+              expected: visible
+"#,
+        );
+
+        let loaded = load_for_run(&leaf).expect("resolves through the real ancestor manifest");
+        match loaded {
+            Loaded::Leaf { definition, .. } => {
+                assert!(
+                    definition
+                        .pages
+                        .get("login")
+                        .is_some_and(|e| e.contains_key("heading")),
+                    "expected the ancestor manifest's page to merge in: {:?}",
+                    definition.pages
+                );
+            }
+            _ => panic!("expected Leaf"),
         }
     }
 }

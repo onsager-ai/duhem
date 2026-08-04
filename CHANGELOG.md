@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] `duhem run <leaf-path>` resolves `$pages.*` and `call:` flow references through the nearest ancestor root manifest, matching no-path resolution; the run stays scoped to the requested leaf, and a leaf with unresolved references and no discoverable manifest fails naming exactly what's missing. (#384)
+
 ## v0.2.0 — 2026-08-03
 
 - [clarifying] Assertions and verdicts share one three-state vocabulary; `skipped` is an execution fact on steps only, and gating follows judgment rather than a raw `satisfied` observation. (#374)

@@ -764,6 +764,7 @@ pages:                        # named locators, shared by leaves
 
 flows:                        # reusable parameterized step sequences
   sign_in:
+    description: Sign in with supplied credentials
     params:
       password: { type: string, secret: true }
       user: { type: string }
@@ -813,7 +814,9 @@ winning source files.
 
 `flows:` is a catalog of named action sequences, declared on a root,
 an `includes:` fragment, or a leaf and merged by flow name under the
-same root-wins / leaf-local-wins rule. A check invokes one with
+same root-wins / leaf-local-wins rule. Each flow accepts an optional
+human-facing `description:`, typed `params:`, ordered `steps:`, and an
+`outputs:` map. A check invokes one with
 `call: <flow-name>`, an optional `description:`, an `id:`, and a
 `with:` map matching the flow's typed `params:`. `call:` is distinct
 from `uses:` so a flow cannot shadow or masquerade as a closed-catalog
@@ -838,11 +841,11 @@ suites instead of coupling it to caller input or step names.
 
 Expansion does not collapse evidence. Every executed inner action emits
 its normal step events plus a `flow` origin (`name`, invocation id,
-inner index). The recorded definition snapshot remains the authored
-file, not an expanded rewrite; the dashboard joins through flow origin
-when present, groups those steps under the invocation, and retains its
-index join for older/non-flow traces. `duhem resolve --provenance`
-prints the flat expansion and its origins for offline debugging.
+inner index). The recorded definition snapshot is the composed Verification
+Definition, not an expanded rewrite; the dashboard joins through flow origin
+when present, groups those steps under the invocation, and retains its index
+join for older/non-flow traces. `duhem resolve --provenance` prints the flat
+expansion and its origins for offline debugging.
 
 The root manifest is canonical: Duhem auto-discovers `duhem.yml` (or `.duhem.yml`) at the project root or its ancestors. Users can override with `duhem run -f path/to/manifest.yml`.
 

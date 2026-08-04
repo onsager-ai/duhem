@@ -37,10 +37,14 @@ criteria:
     const vd = parseDefinition(`
 flows:
   sign_in:
+    description: Authenticate with supplied credentials
     steps:
       - id: user
         description: Enter the username
         uses: ui/type
+      - uses: ui/click
+  undescribed:
+    steps:
       - uses: ui/click
 criteria:
   - id: AC-1
@@ -52,13 +56,39 @@ criteria:
             call: sign_in
           - id: legacy
             uses: ui/assert-url
+          - id: fallback_description
+            description: Sign in at this call site
+            call: undescribed
+          - id: fallback_id
+            call: undescribed
 `);
     const flow = { name: "sign_in", invocation: "login", inner_index: 0 };
-    expect(vd.flowLabel("AC-1", "AC-1.1", flow)).toBe("Sign in as the fixture user");
+    expect(vd.flowLabel("AC-1", "AC-1.1", flow))
+      .toBe("Authenticate with supplied credentials");
     expect(vd.stepLabel("AC-1", "AC-1.1", 0, flow))
       .toBe("Sign in as the fixture user › Enter the username");
     expect(vd.flowStepLabel(flow)).toBe("Enter the username");
     expect(vd.stepId("AC-1", "AC-1.1", 0, flow)).toBe("login__user");
     expect(vd.stepLabel("AC-1", "AC-1.1", 1)).toBe("legacy");
+
+    const describedCall = {
+      name: "undescribed",
+      invocation: "fallback_description",
+      inner_index: 0,
+    };
+    expect(vd.flowLabel("AC-1", "AC-1.1", describedCall))
+      .toBe("Sign in at this call site");
+    const identifiedCall = {
+      name: "undescribed",
+      invocation: "fallback_id",
+      inner_index: 0,
+    };
+    expect(vd.flowLabel("AC-1", "AC-1.1", identifiedCall)).toBe("fallback_id");
+    const unmatchedCall = {
+      name: "undescribed",
+      invocation: "raw_invocation",
+      inner_index: 0,
+    };
+    expect(vd.flowLabel("AC-1", "AC-1.1", unmatchedCall)).toBe("raw_invocation");
   });
 });

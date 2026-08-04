@@ -280,6 +280,7 @@ pages:
 
 flows:
   sign_in:
+    description: Sign in with supplied credentials
     params:
       user: { type: string }
       password: { type: string, secret: true }

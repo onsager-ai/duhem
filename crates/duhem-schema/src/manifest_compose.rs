@@ -51,13 +51,36 @@ pub(crate) fn walk_ancestors_for_manifest_excluding(
         for name in MANIFEST_CANDIDATES {
             let candidate = current.join(name);
             if candidate.is_file() {
-                if exclude_canonical.as_ref() != Some(&canonical_or_self(&candidate)) {
-                    return Ok(candidate);
+                if exclude_canonical.as_ref() == Some(&canonical_or_self(&candidate)) {
+                    // This candidate *is* the excluded leaf — keep
+                    // checking the other candidate names in this
+                    // directory before moving on to its ancestors.
+                    continue;
                 }
-                // This candidate *is* the excluded leaf — keep
-                // checking the other candidate names in this
-                // directory before moving on to its ancestors.
-                continue;
+                // Leaf-by-path resolution (`exclude: Some(_)`, called
+                // from `leaf_context`) additionally requires the
+                // candidate to actually be *shaped* like a root
+                // manifest. Pattern A conventionally names any
+                // self-contained leaf `duhem.yml` — the same name a
+                // real root manifest uses — so an ancestor directory
+                // can hold a candidate-named file that is itself just
+                // another leaf (e.g. a sibling regression suite), not
+                // a root manifest at all. Composing such a file as a
+                // `RootManifest` fails outright (it has no
+                // `verifications:` key), so treat it as absent here —
+                // same as the excluded-leaf case above — and keep
+                // walking its ancestors for a real one.
+                //
+                // The no-path walk (`exclude: None`, `discover`'s
+                // case) does not apply this check: it hands the first
+                // name match back unclassified and `load` sorts out
+                // its shape afterward (including running it standalone
+                // if it turns out to be a leaf) — today's behavior,
+                // left intact.
+                if exclude.is_some() && !candidate_is_root_manifest(&candidate) {
+                    continue;
+                }
+                return Ok(candidate);
             }
             searched.push(candidate);
         }
@@ -70,6 +93,26 @@ pub(crate) fn walk_ancestors_for_manifest_excluding(
         dir = current.parent();
     }
     Err(LoadError::ManifestNotFound { searched })
+}
+
+/// True when `path`'s content is shaped like a root manifest (a
+/// top-level `verifications:` key) rather than a leaf Verification
+/// Definition (`criteria:`) or something unparsable. Mirrors the
+/// `verifications:` / `criteria:` discriminator `manifest::classify_yaml`
+/// uses to dispatch `load` / `load_for_run`, reimplemented narrowly as
+/// a yes/no probe here: a read or parse failure isn't this walk's
+/// problem to report, it just means the candidate doesn't qualify and
+/// the walk keeps looking exactly as if the file were absent.
+fn candidate_is_root_manifest(path: &Path) -> bool {
+    let Ok(src) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(value) = serde_yml::from_str::<serde_yml::Value>(&src) else {
+        return false;
+    };
+    value
+        .as_mapping()
+        .is_some_and(|map| map.contains_key(serde_yml::Value::String("verifications".into())))
 }
 
 /// Parse and fully compose a root manifest from `src` — version check,

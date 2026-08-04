@@ -404,4 +404,103 @@ verifications:
             _ => panic!("expected Leaf"),
         }
     }
+
+    /// Regression for the collision the fix's own walk-exclusion logic
+    /// didn't cover: Pattern A conventionally names *any*
+    /// self-contained leaf `duhem.yml` (not just the one being
+    /// resolved), so a directory between the requested leaf and the
+    /// repo root can hold an *unrelated* leaf under that name — e.g. a
+    /// sibling regression suite's own entrypoint. Composing that file
+    /// as a `RootManifest` fails outright (no `verifications:` key),
+    /// which used to abort resolution even for a leaf with no
+    /// manifest-only references. It must be treated as absent instead,
+    /// exactly like the originally-excluded leaf.
+    #[test]
+    fn unrelated_leaf_named_duhem_yml_in_ancestor_is_not_mistaken_for_a_root_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        // An unrelated, fully self-contained leaf that happens to sit
+        // at a `MANIFEST_CANDIDATES` name one directory above the leaf
+        // under test — mirrors `verifications/<suite>/duhem.yml` with
+        // fixtures nested underneath it.
+        write(
+            tmp.path(),
+            "suite/duhem.yml",
+            "verification: unrelated suite\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        assertions: [\"true\"]\n",
+        );
+        let leaf = write(
+            tmp.path(),
+            "suite/fixtures/leaf.yml",
+            "verification: fixture leaf\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        assertions: [\"true\"]\n",
+        );
+
+        let loaded = load_for_run(&leaf)
+            .expect("an unrelated leaf-shaped ancestor must not be treated as a root manifest");
+        match loaded {
+            Loaded::Leaf { definition, .. } => {
+                assert_eq!(definition.verification, "fixture leaf");
+            }
+            _ => panic!("expected Leaf"),
+        }
+    }
+
+    /// Same collision as above, but with a genuine root manifest
+    /// further up the tree: the walk must skip the intervening
+    /// unrelated leaf and keep going, not stop (or fail) at it.
+    #[test]
+    fn walk_skips_unrelated_leaf_to_find_the_real_ancestor_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+pages:
+  login:
+    heading: { text: Sign in }
+flows:
+  greet:
+    steps:
+      - uses: cli/invoke
+        with: { command: printf, args: ["hi"] }
+verifications:
+  - path: suite/fixtures/leaf.yml
+"#,
+        );
+        write(
+            tmp.path(),
+            "suite/duhem.yml",
+            "verification: unrelated suite\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        assertions: [\"true\"]\n",
+        );
+        let leaf = write(
+            tmp.path(),
+            "suite/fixtures/leaf.yml",
+            r#"
+verification: fixture leaf
+criteria:
+  - id: AC-1
+    description: uses the real ancestor manifest's page and flow
+    checks:
+      - id: AC-1.1
+        steps:
+          - call: greet
+          - uses: ui/assert-element
+            with:
+              locator: $pages.login.heading
+              expected: visible
+"#,
+        );
+
+        let loaded = load_for_run(&leaf)
+            .expect("resolves through the real ancestor manifest past the unrelated leaf");
+        match loaded {
+            Loaded::Leaf { definition, .. } => {
+                let steps = &definition.criteria[0].checks[0].steps;
+                assert_eq!(steps.len(), 2, "got {steps:?}");
+                assert_eq!(steps[0].uses.as_deref(), Some("cli/invoke"));
+                assert_eq!(steps[1].uses.as_deref(), Some("ui/assert-element"));
+            }
+            _ => panic!("expected Leaf"),
+        }
+    }
 }

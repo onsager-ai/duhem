@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+## v0.2.1 — 2026-08-04
+
 - [additive] `duhem run <leaf-path>` resolves `$pages.*` and `call:` flow references through the nearest ancestor root manifest, matching no-path resolution; the run stays scoped to the requested leaf, and a leaf with unresolved references and no discoverable manifest fails naming exactly what's missing. (#384)
 
 ## v0.2.0 — 2026-08-03

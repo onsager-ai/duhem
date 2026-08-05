@@ -3386,6 +3386,45 @@ criteria:
     }
 
     #[tokio::test]
+    async fn metadata_does_not_affect_the_verdict() {
+        let without_metadata = def(r#"
+verification: verdict-neutral
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#);
+        let with_metadata = def(r#"
+verification: verdict-neutral
+metadata:
+  priority: 7
+  routing:
+    labels: [external, nightly]
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#);
+
+        let (mut baseline_engine, _baseline_tmp) = engine_for_test().await;
+        let baseline = baseline_engine
+            .run_with_metadata(&without_metadata, BTreeMap::new())
+            .await
+            .unwrap();
+        let (mut metadata_engine, _metadata_tmp) = engine_for_test().await;
+        let tagged = metadata_engine
+            .run_with_metadata(&with_metadata, BTreeMap::new())
+            .await
+            .unwrap();
+
+        assert_eq!(tagged.verdict, baseline.verdict);
+    }
+
+    #[tokio::test]
     async fn secret_input_masks_substituted_with_map_at_evidence_sink() {
         let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(StubAction::new("db/query", Outcome::Ok)));

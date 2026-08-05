@@ -1111,7 +1111,7 @@ criteria:
 }
 
 #[test]
-fn composed_snapshot_contains_manifest_flow_metadata_and_masks_its_secret_binding() {
+fn run_bundle_snapshot_contains_verification_metadata_and_composed_catalogs() {
     // Issue #387: the dashboard joins trace flow origins to the recorded
     // snapshot's `flows:` catalog. A raw leaf snapshot omits a flow that
     // lives only in the root manifest, so its authored labels disappear.
@@ -1144,6 +1144,11 @@ verifications:
         format!(
             r#"
 verification: composed-snapshot
+metadata:
+  priority: 7
+  routing:
+    labels: [external, nightly]
+    owner: platform
 criteria:
   - id: AC-1
     description: authenticates through the shared flow
@@ -1182,14 +1187,13 @@ criteria:
         .build()
         .unwrap();
     let snapshot = rt.block_on(async {
-        use duhem_evidence::Store;
         let store = duhem_evidence::SqliteStore::open_read_only(&db)
             .await
             .unwrap();
-        store
-            .run_events(run_id)
+        duhem_evidence::RunBundle::from_store(&store, run_id)
             .await
             .unwrap()
+            .events
             .into_iter()
             .find_map(|event| match event.payload {
                 duhem_evidence::EventPayload::RunStarted {
@@ -1203,6 +1207,15 @@ criteria:
 
     let document = duhem_schema::VerificationDefinition::from_yaml_str(&snapshot)
         .expect("composed snapshot remains a parseable Verification Definition");
+    assert_eq!(document.metadata["priority"].as_u64(), Some(7));
+    assert_eq!(
+        document.metadata["routing"]["labels"][1].as_str(),
+        Some("nightly")
+    );
+    assert_eq!(
+        document.metadata["routing"]["owner"].as_str(),
+        Some("platform")
+    );
     let flow_step = &document.flows["authenticate"].steps[0];
     assert_eq!(flow_step.id.as_deref(), Some("submit-token"));
     assert_eq!(

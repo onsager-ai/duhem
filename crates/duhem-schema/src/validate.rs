@@ -108,7 +108,7 @@ pub enum ValidationError {
     },
 
     #[error(
-        "criterion `{criterion}` / check `{check}`: {site} `{raw}` references undeclared input `{input}`"
+        "criterion `{criterion}` / check `{check}`: {site} `{raw}` references undeclared input `{input}`{help}"
     )]
     UnresolvedInputRef {
         criterion: String,
@@ -116,6 +116,7 @@ pub enum ValidationError {
         input: String,
         raw: String,
         site: RefSite,
+        help: String,
     },
 
     #[error("{site} `{raw}` references unknown page locator `{entry}`{help}")]
@@ -898,12 +899,35 @@ fn check_path(
             // The leaf's declaration surface remains closed even when
             // a parent manifest happens to declare the same name.
             if !inputs.contains_key(name) {
+                let matching_inputs: Vec<&str> = inputs
+                    .iter()
+                    .filter_map(|(input_name, declaration)| {
+                        (declaration.env.as_deref() == Some(name)).then_some(input_name.as_str())
+                    })
+                    .collect();
+                let help = match matching_inputs.as_slice() {
+                    [] => String::new(),
+                    [input_name] => format!(
+                        " — did you mean `$inputs.{input_name}`? It is declared with `env: {name}`. `$inputs.*` takes the input's declared name; `env:` only names the variable that supplies its value"
+                    ),
+                    input_names => {
+                        let suggestions = input_names
+                            .iter()
+                            .map(|input_name| format!("`$inputs.{input_name}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!(
+                            " — did you mean one of {suggestions}? They are declared with `env: {name}`. `$inputs.*` takes the input's declared name; `env:` only names the variable that supplies its value"
+                        )
+                    }
+                };
                 errs.push(ValidationError::UnresolvedInputRef {
                     criterion: c.id.clone(),
                     check: ch.id.clone(),
                     input: name.to_string(),
                     raw: raw.to_string(),
                     site: site.clone(),
+                    help,
                 });
             }
         }
@@ -1385,9 +1409,92 @@ criteria:
 "#;
         let v = parse(y);
         let errs = validate(&v).unwrap_err();
-        assert!(errs.iter().any(
-            |e| matches!(e, ValidationError::UnresolvedInputRef { input, .. } if input == "nope")
-        ));
+        let message = errs
+            .iter()
+            .find(|error| matches!(error, ValidationError::UnresolvedInputRef { .. }))
+            .expect("unresolved input error")
+            .to_string();
+        assert_eq!(
+            message,
+            "criterion `AC-1` / check `AC-1.1`: assertion `$inputs.nope == 1` references undeclared input `nope`"
+        );
+    }
+
+    #[test]
+    fn unresolved_input_ref_suggests_exact_env_match_and_explains_rule() {
+        let y = r#"
+verification: x
+inputs:
+  login_url: { type: string, env: APP_BASE_URL }
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: home
+            uses: ui/navigate
+            with: { url: $inputs.APP_BASE_URL }
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        let message = errs
+            .iter()
+            .find(|error| matches!(error, ValidationError::UnresolvedInputRef { .. }))
+            .expect("unresolved input error")
+            .to_string();
+        assert_eq!(
+            message,
+            "criterion `AC-1` / check `AC-1.1`: step `home` with: `$inputs.APP_BASE_URL` references undeclared input `APP_BASE_URL` — did you mean `$inputs.login_url`? It is declared with `env: APP_BASE_URL`. `$inputs.*` takes the input's declared name; `env:` only names the variable that supplies its value"
+        );
+    }
+
+    #[test]
+    fn unresolved_input_ref_lists_every_exact_env_match() {
+        let y = r#"
+verification: x
+inputs:
+  login_url: { type: string, env: APP_BASE_URL }
+  alternate_url: { type: string, env: APP_BASE_URL }
+  ignored_url: { type: string, env: OTHER_BASE_URL }
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.APP_BASE_URL == "https://example.test"
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        let message = errs
+            .iter()
+            .find(|error| matches!(error, ValidationError::UnresolvedInputRef { .. }))
+            .expect("unresolved input error")
+            .to_string();
+        assert_eq!(
+            message,
+            "criterion `AC-1` / check `AC-1.1`: assertion `$inputs.APP_BASE_URL == \"https://example.test\"` references undeclared input `APP_BASE_URL` — did you mean one of `$inputs.alternate_url`, `$inputs.login_url`? They are declared with `env: APP_BASE_URL`. `$inputs.*` takes the input's declared name; `env:` only names the variable that supplies its value"
+        );
+    }
+
+    #[test]
+    fn input_ref_by_declared_name_still_resolves_when_env_is_present() {
+        let y = r#"
+verification: x
+inputs:
+  login_url: { type: string, env: APP_BASE_URL }
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.login_url == "https://example.test"
+"#;
+        let v = parse(y);
+        validate(&v).expect("declared input name resolves");
     }
 
     #[test]

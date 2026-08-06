@@ -1111,7 +1111,8 @@ criteria:
 }
 
 #[test]
-fn run_bundle_snapshot_contains_verification_metadata_and_composed_catalogs() {
+fn run_bundle_snapshot_contains_verification_metadata_and_composed_catalogs_and_masks_secret_bindings()
+ {
     // Issue #387: the dashboard joins trace flow origins to the recorded
     // snapshot's `flows:` catalog. A raw leaf snapshot omits a flow that
     // lives only in the root manifest, so its authored labels disappear.

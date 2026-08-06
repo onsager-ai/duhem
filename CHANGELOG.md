@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] An undeclared `$inputs.<name>` reference now suggests every declared input whose exact `env:` matches and explains that `$inputs.*` uses declared input names. (#391)
+
 ## v0.2.2 — 2026-08-04
 
 - [additive] Reusable flows accept an optional `description:` that the dashboard prefers for flow group labels while preserving the existing label fallback for undescribed flows. (#387)

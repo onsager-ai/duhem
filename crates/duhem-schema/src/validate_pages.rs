@@ -2,7 +2,7 @@
 
 use crate::expr::{Path, PathRoot};
 use crate::validate::ValidationError;
-use crate::{PageCatalog, VerificationDefinition};
+use crate::{PageCatalog, SourceLocation, VerificationDefinition};
 
 pub(crate) fn validate_catalog_inputs(
     definition: &VerificationDefinition,
@@ -37,6 +37,7 @@ pub(crate) fn check_page_path(
     path: &Path,
     raw: &str,
     site: &str,
+    location: Option<SourceLocation>,
     errors: &mut Vec<ValidationError>,
 ) {
     let segments = path.segments();
@@ -44,6 +45,7 @@ pub(crate) fn check_page_path(
         errors.push(ValidationError::MalformedPageRef {
             site: site.to_string(),
             raw: raw.to_string(),
+            location,
         });
         return;
     }
@@ -73,6 +75,7 @@ pub(crate) fn check_page_path(
         raw: raw.to_string(),
         entry: format!("$pages.{page}.{element}"),
         help,
+        location,
     });
 }
 

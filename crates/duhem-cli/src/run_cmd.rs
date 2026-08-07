@@ -266,16 +266,10 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         if let Err(errs) = validate_with_contract_outputs(&leaf.definition, &|u| {
             crate::contract_check::contract_outputs(u)
         }) {
-            let plural = if errs.len() == 1 { "" } else { "s" };
             eprintln!(
-                "{}: [schema v{}] {} validation error{plural}:",
-                leaf.path.display(),
-                duhem_schema::SCHEMA_VERSION,
-                errs.len()
+                "{}",
+                crate::validate_cmd::format_validation_errors(Some(&leaf.path), &errs)
             );
-            for e in errs {
-                eprintln!("  - {e}");
-            }
             return ExitCode::FAILURE;
         }
         let (inputs, secrets) = match resolve_leaf_inputs(

@@ -23,11 +23,11 @@
 # A `changes` job scopes each lane to its own paths, but the two lanes
 # are scoped asymmetrically on purpose:
 #
-#   - cli-regression watches the whole `crates/**` tree. The CLI binary
-#     links the entire workspace, so any crate can change the bytes its
-#     VD asserts on (onsager-ai/duhem#400) — an enumerated crate list is
-#     exactly the kind of thing that silently goes stale the next time a
-#     new crate starts emitting CLI-visible output. The lane is fully
+#   - cli-regression watches the whole `crates/**` tree. Many workspace
+#     crates can affect the CLI's visible output — not only the ones
+#     `duhem-cli` depends on directly today — and an allowlist of crate
+#     names is exactly the kind of thing that silently goes stale as the
+#     dependency graph evolves (onsager-ai/duhem#400). The lane is fully
 #     offline + page-free (no Node / Playwright), so watching more paths
 #     is cheap.
 #   - dashboard-regression stays narrow (`crates/duhem-dashboard/**`
@@ -42,6 +42,8 @@ on:
   pull_request:
     paths:
       - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - 'verifications/duhem-cli/**'
       - 'verifications/duhem-dashboard/**'
       - 'verifications/defaults-example/**'
@@ -50,6 +52,8 @@ on:
     branches: [main]
     paths:
       - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - 'verifications/duhem-cli/**'
       - 'verifications/duhem-dashboard/**'
       - 'verifications/defaults-example/**'
@@ -80,6 +84,8 @@ jobs:
           filters: |
             cli:
               - 'crates/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
               - 'verifications/duhem-cli/**'
               - 'verifications/defaults-example/**'
               - '.github/workflows/self-verify.yml'

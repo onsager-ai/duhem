@@ -20,17 +20,28 @@
 # safety net, not an independent trust anchor — the Onsager seam holds
 # that role. See the caveat headers in the VDs' `duhem.yml`.
 #
-# A `changes` job scopes each lane to its own paths so a CLI-only PR
-# never pays the dashboard lane's SPA-build + Chromium-install cost, and
-# vice versa.
+# A `changes` job scopes each lane to its own paths, but the two lanes
+# are scoped asymmetrically on purpose:
+#
+#   - cli-regression watches the whole `crates/**` tree. The CLI binary
+#     links the entire workspace, so any crate can change the bytes its
+#     VD asserts on (onsager-ai/duhem#400) — an enumerated crate list is
+#     exactly the kind of thing that silently goes stale the next time a
+#     new crate starts emitting CLI-visible output. The lane is fully
+#     offline + page-free (no Node / Playwright), so watching more paths
+#     is cheap.
+#   - dashboard-regression stays narrow (`crates/duhem-dashboard/**`
+#     only): its SPA-build + Chromium-install cost is real, so it only
+#     runs when the dashboard crate itself changes.
+#
+# Do not "tidy" this asymmetry away — it is deliberate, not an oversight.
 
 name: self-verify
 
 on:
   pull_request:
     paths:
-      - 'crates/duhem-cli/**'
-      - 'crates/duhem-dashboard/**'
+      - 'crates/**'
       - 'verifications/duhem-cli/**'
       - 'verifications/duhem-dashboard/**'
       - 'verifications/defaults-example/**'
@@ -38,8 +49,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'crates/duhem-cli/**'
-      - 'crates/duhem-dashboard/**'
+      - 'crates/**'
       - 'verifications/duhem-cli/**'
       - 'verifications/duhem-dashboard/**'
       - 'verifications/defaults-example/**'
@@ -69,7 +79,7 @@ jobs:
         with:
           filters: |
             cli:
-              - 'crates/duhem-cli/**'
+              - 'crates/**'
               - 'verifications/duhem-cli/**'
               - 'verifications/defaults-example/**'
               - '.github/workflows/self-verify.yml'

@@ -6,8 +6,7 @@
 //! manifest is validated as a manifest (manifest_version, entry/path
 //! discipline, profiles/defaults/includes, glob expansion) plus
 //! each resolved leaf — instead of being mis-parsed as a leaf and
-//! failing with `unknown field manifest_version` (#150). A leaf path
-//! keeps today's behavior byte-for-byte.
+//! failing with `unknown field manifest_version` (#150).
 //!
 //! Lives in its own module so `main.rs` stays under the per-file token
 //! budget.
@@ -32,13 +31,13 @@ pub(crate) fn run_validate(path: Option<&Path>) -> Result<String, String> {
     let loaded = duhem_schema::load(&target).map_err(format_load_error)?;
 
     match loaded {
-        // Single leaf: today's behavior, byte-for-byte — `OK` on
-        // success, the un-prefixed validation-error preamble on failure.
+        // Single leaf: `OK` on success; failures carry the same source
+        // provenance as a manifest leaf and `duhem run`.
         Loaded::Leaf { path, definition } => {
             validate_with_contract_outputs(&definition, &|u| {
                 crate::contract_check::contract_outputs(u)
             })
-            .map_err(|errs| format_validation_errors(None, &errs))?;
+            .map_err(|errs| format_validation_errors(Some(&path), &errs))?;
             let cerrs = crate::contract_check::field_errors(&definition);
             if !cerrs.is_empty() {
                 return Err(format!(
@@ -51,7 +50,6 @@ pub(crate) fn run_validate(path: Option<&Path>) -> Result<String, String> {
             for w in crate::contract_check::lint_warnings(&definition) {
                 eprintln!("warning: {w}");
             }
-            let _ = path;
             Ok("OK".to_string())
         }
         // Manifest: `load` already enforced the manifest-structural
@@ -134,31 +132,26 @@ fn format_load_error(e: LoadError) -> String {
     }
 }
 
-/// Format a leaf's structural validation errors. With `path` (a
-/// manifest leaf) the preamble names the offending file; without it (a
-/// single-leaf validate) the preamble is today's byte-for-byte form.
-fn format_validation_errors(path: Option<&Path>, errs: &[ValidationError]) -> String {
-    let plural = if errs.len() == 1 { "" } else { "s" };
-    // Preamble names the schema version the file was validated against —
-    // when authors hit a validation error, the next question is "which
-    // schema?", and a downstream VD that pinned a different version needs
-    // to see the mismatch.
-    let mut s = match path {
-        Some(p) => format!(
-            "{}: [schema v{SCHEMA_VERSION}] {} validation error{plural}:",
-            p.display(),
-            errs.len()
-        ),
-        None => format!(
-            "[schema v{SCHEMA_VERSION}] {} validation error{plural}:",
-            errs.len()
-        ),
-    };
-    for e in errs {
-        s.push_str("\n  - ");
-        s.push_str(&e.to_string());
-    }
-    s
+/// Format each structural validation error as an independent diagnostic.
+/// Exact marks use the same `<path>:<line>:<col>:` prefix as YAML parse
+/// failures; unlocated variants retain a file-level `<path>:` fallback.
+pub(crate) fn format_validation_errors(path: Option<&Path>, errs: &[ValidationError]) -> String {
+    errs.iter()
+        .map(|error| match (path, error.location()) {
+            (Some(path), Some(location)) => format!(
+                "{}:{}:{}: [schema v{SCHEMA_VERSION}] validation error: {error}",
+                path.display(),
+                location.line,
+                location.column,
+            ),
+            (Some(path), None) => format!(
+                "{}: [schema v{SCHEMA_VERSION}] validation error: {error}",
+                path.display()
+            ),
+            (None, _) => format!("[schema v{SCHEMA_VERSION}] validation error: {error}"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]
@@ -251,17 +244,16 @@ criteria:
     }
 
     #[test]
-    fn leaf_validation_error_omits_path_prefix() {
-        // Byte-for-byte: a single-leaf validate keeps the un-prefixed
-        // preamble (no `<path>:` lead) it had before #150.
+    fn leaf_validation_error_has_path_fallback() {
         let tmp = tempfile::tempdir().unwrap();
         let leaf = tmp.path().join("v.yml");
         std::fs::write(&leaf, "verification: x\ncriteria: []\n").unwrap();
         let err = run_validate(Some(&leaf)).unwrap_err();
         assert!(
-            err.starts_with("[schema v"),
-            "leaf preamble is un-prefixed: {err}"
+            err.starts_with(&format!("{}: [schema v", leaf.display())),
+            "leaf fallback names its file: {err}"
         );
+        assert!(!err.contains(":0:0:"), "never fabricate a zero span: {err}");
     }
 
     #[test]

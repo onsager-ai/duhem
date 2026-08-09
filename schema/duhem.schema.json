@@ -612,6 +612,11 @@
           "description": "Declared inputs. Map keys are alphabetized on round-trip (BTreeMap); fixtures should be authored alphabetized.",
           "type": "object"
         },
+        "metadata": {
+          "additionalProperties": true,
+          "description": "Opaque consumer-defined data. Duhem never interprets this map; it is recorded in run evidence, must never affect a verdict, and must not count as a change if a diff command is added in future.",
+          "type": "object"
+        },
         "pages": {
           "additionalProperties": {
             "additionalProperties": true,

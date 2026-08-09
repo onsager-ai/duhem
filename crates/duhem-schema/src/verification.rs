@@ -53,6 +53,13 @@ pub struct VerificationDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spec_ref: Option<String>,
 
+    /// Opaque consumer-defined data. Duhem never interprets this map;
+    /// it is recorded in run evidence, must never affect a verdict, and
+    /// must not count as a change if a diff command is added in future.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(with = "std::collections::BTreeMap<String, serde_json::Value>")]
+    pub metadata: BTreeMap<String, serde_yml::Value>,
+
     /// Optional declared target coordinate (#191): what this
     /// verification verifies (a repo, a service URL, an image, or a
     /// locally-named project). Top rung of the identity-resolution
@@ -275,6 +282,7 @@ criteria:
         let v = VerificationDefinition {
             verification: "x".into(),
             spec_ref: None,
+            metadata: BTreeMap::new(),
             project: None,
             provision: None,
             inputs,
@@ -286,6 +294,55 @@ criteria:
         let y = v.to_yaml_string().unwrap();
         let back = VerificationDefinition::from_yaml_str(&y).unwrap();
         assert_eq!(v, back);
+    }
+
+    #[test]
+    fn metadata_round_trips_opaque_nested_values() {
+        let y = r#"
+verification: tagged
+metadata:
+  attempts: 3
+  labels: [external, nightly]
+  routing:
+    owner: platform
+    regions: [eu, us]
+criteria: []
+"#;
+        let parsed = VerificationDefinition::from_yaml_str(y).expect("parse metadata map");
+        assert_eq!(parsed.metadata["attempts"].as_u64(), Some(3));
+        assert_eq!(parsed.metadata["labels"][1].as_str(), Some("nightly"));
+        assert_eq!(
+            parsed.metadata["routing"]["regions"][0].as_str(),
+            Some("eu")
+        );
+
+        let round_trip =
+            VerificationDefinition::from_yaml_str(&parsed.to_yaml_string().unwrap()).unwrap();
+        assert_eq!(round_trip.metadata, parsed.metadata);
+    }
+
+    #[test]
+    fn absent_metadata_keeps_wire_shape() {
+        let parsed = VerificationDefinition::from_yaml_str("verification: x\ncriteria: []\n")
+            .expect("parse definition without metadata");
+        assert!(parsed.metadata.is_empty());
+        assert!(
+            !parsed.to_yaml_string().unwrap().contains("metadata:"),
+            "an absent optional field must not change the serialized wire shape"
+        );
+    }
+
+    #[test]
+    fn metadata_container_must_be_a_map() {
+        for invalid in ["metadata: a string\n", "metadata: [a, b]\n"] {
+            let y = format!("verification: x\n{invalid}criteria: []\n");
+            let err = VerificationDefinition::from_yaml_str(&y).unwrap_err();
+            let message = err.to_string();
+            assert!(
+                message.contains("invalid type") && message.contains("map"),
+                "expected a map-type error for `{invalid}`, got: {message}"
+            );
+        }
     }
 
     #[test]

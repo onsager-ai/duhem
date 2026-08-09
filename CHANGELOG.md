@@ -30,6 +30,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 
 - [clarifying] An undeclared `$inputs.<name>` reference now suggests every declared input whose exact `env:` matches and explains that `$inputs.*` uses declared input names. (#391)
+- [additive] Verification Definitions accept an optional opaque `metadata:` map that is recorded in run evidence for downstream consumers and never affects verdicts. (#386)
 
 ## v0.2.2 — 2026-08-04
 

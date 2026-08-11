@@ -16,6 +16,6 @@ criteria:
             uses: cli/invoke
             with:
               command: [sleep, '12']
-              within: 60s
+              timeout: 60s
         assertions:
           - $steps.hold.outputs.exit_code == 0

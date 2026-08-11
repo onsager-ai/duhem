@@ -25,9 +25,9 @@
 #
 #   duhem validate verifications/implicit-judgment-example/duhem.yml
 #
-# The runtime behavior (implicit true -> Pass, false -> Fail, skipped ->
-# Inconclusive, manual binding opts out) is covered by the engine unit
-# tests in `crates/duhem-runtime/src/engine/runner.rs`.
+# The runtime behavior (implicit true -> Pass, false -> Fail, gated ->
+# absent from aggregation, manual binding opts out of judgment + gating) is covered
+# by the engine unit tests in `crates/duhem-runtime/src/engine/runner.rs`.
 
 verification: Implicit judgment — terse vs explicit
 
@@ -46,19 +46,22 @@ criteria:
       - id: AC-1.1
         description: Navigate and confirm the form rendered.
         steps:
-          - uses: ui/navigate
+          - description: Open the sign-in page
+            uses: ui/navigate
             with:
               url: $inputs.login_url
-          - uses: ui/assert-element
+          - description: The Username field is offered
+            uses: ui/assert-element
             with:
               locator: { role: textbox, name: Username }
               expected: visible
-              within: 20s
-          - uses: ui/assert-element
+              timeout: 20s
+          - description: The Sign In button is offered
+            uses: ui/assert-element
             with:
               locator: { role: button, name: Sign In }
               expected: visible
-              within: 10s
+              timeout: 10s
 
   - id: AC-2
     description: |
@@ -82,7 +85,7 @@ criteria:
             with:
               locator: { role: button, name: Sign In }
               expected: visible
-              within: 10s
+              timeout: 10s
             outputs:
               satisfied: satisfied
           - id: sso_signin
@@ -90,7 +93,7 @@ criteria:
             with:
               locator: { role: button, name: Continue with SSO }
               expected: visible
-              within: 10s
+              timeout: 10s
             outputs:
               satisfied: satisfied
         assertions:

@@ -250,6 +250,95 @@ describe("CheckSummary", () => {
 });
 
 describe("Timeline", () => {
+  it("groups expanded steps under their recorded flow invocation", () => {
+    const flow = { name: "sign_in", invocation: "login", inner_index: 0 };
+    const events: TraceEvent[] = [
+      {
+        seq: 1,
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "step_started",
+        criterion_id: "AC-1",
+        check_id: "AC-1.1",
+        step_index: 0,
+        uses: "ui/type",
+        flow,
+      },
+      {
+        seq: 2,
+        ts: "2026-01-01T00:00:00.010Z",
+        kind: "step_finished",
+        step_index: 0,
+        outcome: "ok",
+      },
+      {
+        seq: 3,
+        ts: "2026-01-01T00:00:00.020Z",
+        kind: "step_started",
+        criterion_id: "AC-1",
+        check_id: "AC-1.1",
+        step_index: 1,
+        uses: "ui/click",
+        flow: { ...flow, inner_index: 1 },
+      },
+      {
+        seq: 4,
+        ts: "2026-01-01T00:00:00.030Z",
+        kind: "step_finished",
+        step_index: 1,
+        outcome: "ok",
+      },
+      {
+        seq: 5,
+        ts: "2026-01-01T00:00:00.040Z",
+        kind: "step_started",
+        step_index: 2,
+        uses: "ui/assert-url",
+      },
+      {
+        seq: 6,
+        ts: "2026-01-01T00:00:00.050Z",
+        kind: "step_finished",
+        step_index: 2,
+        outcome: "ok",
+      },
+    ];
+
+    const { container, getByTestId } = render(<Timeline events={events} />);
+    const group = getByTestId("flow-group");
+    expect(group.getAttribute("data-flow-invocation")).toBe("login");
+    expect(group.getAttribute("data-flow-name")).toBe("sign_in");
+    expect(group.textContent).toContain("login");
+    expect(group.querySelectorAll('[data-testid="step-group"]')).toHaveLength(2);
+    expect(container.querySelectorAll(':scope > ol.timeline > [data-testid="step-group"]'))
+      .toHaveLength(1);
+  });
+
+  it("renders a gated step as skipped from its execution trace", () => {
+    const events: TraceEvent[] = [
+      {
+        seq: 1,
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "step_started",
+        step_index: 1,
+        uses: "ui/click",
+        with: { role: "button", name: "Cleanup" },
+      },
+      {
+        seq: 2,
+        ts: "2026-01-01T00:00:00.010Z",
+        kind: "step_finished",
+        step_index: 1,
+        outcome: { skipped: { reason: "blocked by failed step `login`" } },
+      },
+    ];
+    const { container, getByTestId } = render(<Timeline events={events} />);
+    const group = getByTestId("step-group");
+    expect(group.className).toContain("tone-skipped");
+    expect(group.className).not.toContain("tone-fail");
+    expect(getByTestId("step-outcome").textContent).toBe("skipped");
+    expect(container.querySelector(".ev-glyph-skipped")).not.toBeNull();
+  });
+
   it("renders each event as a legible row in trace order, raw one click away", () => {
     const events: TraceEvent[] = [
       {
@@ -295,7 +384,7 @@ describe("Timeline", () => {
     const labels = [...container.querySelectorAll(".ev-label")]
       .filter((el) => !el.closest(".step-inner"))
       .map((el) => el.textContent);
-    expect(labels).toEqual(["navigate", "assertion failed", "verdict: fail"]);
+    expect(labels).toEqual(["ui/navigate #0", "assertion failed", "verdict: fail"]);
     // The failing assertion row surfaces its recorded operands as an
     // expected/actual pair (not a raw sentence) and carries the fail tone.
     const cmp = container.querySelector(".ev.tone-fail [data-testid='assert-cmp']");
@@ -321,7 +410,7 @@ describe("Timeline", () => {
         step_index: 0,
         uses: "ui/assert-element",
         layer: "ui",
-        with: { locator: { text: "Manager" }, expected: "not_exists", within: "5s" },
+        with: { locator: { text: "Manager" }, expected: "not_exists", timeout: "5s" },
       },
       { seq: 2, ts: "2026-01-01T00:00:00.100Z", kind: "step_observation", step_index: 0, output_name: "satisfied", value: false },
       { seq: 3, ts: "2026-01-01T00:00:00.150Z", kind: "step_observation", step_index: 0, output_name: "count", value: 1 },
@@ -356,7 +445,7 @@ describe("Timeline", () => {
     const topLabels = [...container.querySelectorAll(".ev-label")]
       .filter((e) => !e.closest(".step-inner"))
       .map((e) => e.textContent);
-    expect(topLabels).toEqual(["assert-element", "verdict: fail"]);
+    expect(topLabels).toEqual(["ui/assert-element #0", "verdict: fail"]);
   });
 
   it("nests a request/response inspector under an api step, response open on 5xx (#280 follow-up)", () => {

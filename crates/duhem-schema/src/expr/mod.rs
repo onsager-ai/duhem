@@ -122,6 +122,9 @@ pub enum PathRoot {
     /// `$inputs.<input_name>` — bound by the Verification Definition's
     /// `inputs:` block.
     Inputs,
+    /// `$pages.<page>.<element>` — a named locator from the effective
+    /// Verification Definition catalog.
+    Pages,
     /// `$env.<name>` — whitelisted environment variables. The schema
     /// crate treats the catalog as open; the runtime spec owns the
     /// whitelist.
@@ -139,6 +142,7 @@ impl PathRoot {
             Self::Steps => "steps",
             Self::Setup => "setup",
             Self::Inputs => "inputs",
+            Self::Pages => "pages",
             Self::Env => "env",
             Self::Runtime => "runtime",
         }

@@ -38,7 +38,7 @@ criteria:
         steps:
           - id: home
             uses: api/call
-            with: { method: GET, url: $inputs.base_url, within: 15s }
+            with: { method: GET, url: $inputs.base_url, timeout: 15s }
         assertions:
           - $steps.home.outputs.status == 200
           - $runtime.contains($steps.home.outputs.body_text, "Example")
@@ -54,7 +54,7 @@ criteria:
         steps:
           - id: page
             uses: api/call
-            with: { method: GET, url: $inputs.base_url, within: 15s }
+            with: { method: GET, url: $inputs.base_url, timeout: 15s }
             outputs: { code: status }
         assertions:
           - $steps.page.outputs.code == 200

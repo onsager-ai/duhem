@@ -223,7 +223,7 @@ Common shape (terse):
       with:
         method: POST
         path: /workspaces
-        within: 3s
+        timeout: 3s
       # no outputs: block — status / body resolve directly; add a binding
       # only to alias a deep path, e.g. outputs: { workspace_id: body.id }
   assertions:
@@ -239,7 +239,7 @@ Authoring rules:
 - Reference outputs by their fully-qualified path,
   `$steps.<id>.outputs.<name>`; `outputs:` blocks are only for a rename
   or a deep-extraction alias, not for re-declaring native fields.
-- Timeouts (`within:`) are explicit on steps that observe
+- Timeouts (`timeout:`) are explicit on steps that observe
   something asynchronous.
 - Use role-based locators (`{role: "button", name: "..."}`)
   rather than CSS or XPath — UI churn invalidates the latter
@@ -260,6 +260,65 @@ Authoring rules:
   masked from response bodies, DOM snapshots, and other recorded text
   at the evidence boundary. Screenshots/video remain unmasked pixels,
   so keep credentials out of rendered UI (or use `--capture off`).
+
+#### Share locators instead of copying them
+
+Put locators reused by multiple leaves in an ordinary manifest include:
+
+```yaml
+# pages.yml
+pages:
+  login:
+    username: { role: textbox, name: Username }
+    submit: { role: button, name: Sign In }
+
+# leaf step
+- uses: ui/type
+  with: { locator: $pages.login.username, text: $inputs.user }
+```
+
+The catalog is exactly two levels (`page → element`), with no
+`locators:` container. Root entries win over includes; leaf-local
+entries win over the composed manifest. A locator may contain
+`$inputs.*`, but every leaf receiving it must declare those names.
+Validate dangling references offline; use `duhem resolve --provenance`
+to inspect the effective catalog and each winning source file.
+
+#### Share step flows instead of copying sequences
+
+Put a repeated action sequence in a `flows:` catalog on the root
+manifest, an included fragment, or a leaf. Bind its typed parameters at
+each `call:`:
+
+```yaml
+flows:
+  sign_in:
+    params:
+      password: { type: string, secret: true }
+      user: { type: string }
+    steps:
+      - uses: ui/type
+        with: { locator: $pages.login.username, text: $params.user }
+      - uses: ui/click
+        with: { locator: $pages.login.submit }
+      - id: landed
+        uses: ui/assert-element
+        with: { locator: $pages.login.welcome, expected: visible }
+    outputs:
+      signed_in: $steps.landed.outputs.satisfied
+
+- id: login
+  call: sign_in
+  with: { user: $inputs.user, password: $inputs.password }
+```
+
+Flow step bodies are hygienic: they may reference `$params.*` and
+`$pages.*` only, never the caller's `$inputs.*` or `$steps.*`. Pass
+every dependency explicitly. The exception is the flow's `outputs:`
+map, where `$steps.*` selects the inner value exposed to callers as
+`$steps.<call-id>.outputs.<declared-name>`. Inner ids are private, and
+`secret: true` params are masked like secret inputs. Inspect the flat
+expanded sequence and flow origins with `duhem resolve --provenance`.
 
 ### 4. The holistic-environment tax
 
@@ -295,7 +354,7 @@ be a deterministic predicate evaluable by the judge. Allowed forms
 (§10.6):
 
 - Boolean expression: `$steps.X.outputs.Y == 200`
-- Type check: `type_check: {value: ..., is: uuid|email|datetime|...}`
+- Type check: `type_check: {value: ..., is: uuid|string|integer|float|boolean|object|array|null}`
 - Pattern match: `matches: {value: ..., pattern: ...}`
 - Set membership: `in: {value: ..., set: [...]}`
 - Existence: `exists: $steps.X.outputs.Y`
@@ -347,6 +406,17 @@ anywhere-in-the-repo && duhem run` finds the repo-root `duhem.yml`
 (or `.duhem.yml`) without a path argument (#69). `-f path/to/manifest.yml`
 overrides discovery for an out-of-tree manifest.
 
+Running a leaf directly by path (an explicit positional path or
+`-f`/`--file`) uses this same ancestor walk from the leaf's own
+directory, not just the no-path case: if it finds a root manifest, it
+merges that manifest's composed `pages:`/`flows:` catalog into the leaf
+before flow expansion, so `$pages.*` and `call:` references the leaf
+doesn't declare locally still resolve. Sibling `verifications:` entries
+the manifest lists are never loaded or executed — the run stays scoped
+to the requested leaf. A leaf with an unresolved `$pages.*`/`call:` name
+and no discoverable manifest fails naming exactly what's missing and
+where it would normally be defined (#384/#388).
+
 ## Worked example template
 
 Use this as the skeleton for any spec that needs a worked example:
@@ -359,7 +429,8 @@ inputs:
   # named inputs — e.g. test fixture values, defaults
   example_input:
     type: string
-    default: "fixture-{{$runtime.uuid()}}"
+    # Defaults are literal; use $runtime.uuid() in a step's with:.
+    default: "fixture-workspace"
 
 setup:
   # once-per-verification preconditions — real environment, no mocks

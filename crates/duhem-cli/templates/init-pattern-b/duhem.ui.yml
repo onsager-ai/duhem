@@ -37,7 +37,7 @@ criteria:
             with:
               locator: { role: heading, name: "Example Domain" }
               expected: visible
-              within: 5s
+              timeout: 5s
         # No `outputs:`/`assertions:` — a `ui/assert-*` step IS the
         # judgment (#253): the check passes iff the element is visible.
         # Bind `satisfied` and assert it yourself only for manual

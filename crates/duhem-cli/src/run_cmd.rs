@@ -11,13 +11,13 @@ use duhem_evidence::{RunLineage, RunOrigin, RunScope};
 use duhem_judge::{RunVerdict, VerdictState, aggregate_run_set};
 use duhem_runtime::{Engine, RunOutcome, SuiteEnvironment, SuiteRunConfig};
 use duhem_schema::{
-    Loaded, LoadedLeaf, VerificationDefinition, load as load_definition,
+    Loaded, LoadedLeaf, VerificationDefinition, load_for_run as load_definition,
     validate_with_contract_outputs,
 };
 
-use crate::environment;
 use crate::filter::CliCheckFilter;
 use crate::inputs;
+use crate::profile;
 use crate::reporter::{self, Reporter};
 use crate::resolve::{render_input_value, resolve_leaf_inputs};
 use crate::run_scope::Scope;
@@ -43,7 +43,7 @@ pub struct RunArgs {
     pub db: Option<PathBuf>,
     pub run_id: Option<String>,
     pub reporter: Reporter,
-    pub environment: Option<String>,
+    pub profile: Option<String>,
     pub dry_run: bool,
     pub no_env_up: bool,
     pub keep_env: bool,
@@ -68,7 +68,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         db,
         run_id: pinned_run_id,
         reporter,
-        environment: requested_environment,
+        profile: requested_profile,
         dry_run,
         no_env_up,
         keep_env,
@@ -125,8 +125,12 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     };
 
     // Polymorphic load: directory → first manifest candidate; manifest →
-    // expand leaves; leaf → single Verification Definition (today's
-    // behavior). Spec on issue #49. The loader annotates YAML / shape
+    // expand leaves; leaf → single Verification Definition, its
+    // `$pages.*` / flow references resolved through the nearest root
+    // manifest found walking up from its directory (issue #384) —
+    // without loading or executing any sibling `verifications:` entry
+    // that manifest lists, so a leaf-by-path run stays scoped to just
+    // this leaf. Spec on issue #49. The loader annotates YAML / shape
     // failures with the offending path; we prefix the schema version
     // so authors see at a glance which schema the loader parsed
     // against (spec on #51).
@@ -169,18 +173,18 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         }
     };
 
-    // Named-environment selection (spec #68). On a manifest we pick the
-    // run's environment from the manifest's `environments:` block and
-    // the `--environment` flag; the projection feeds both input
+    // Named-profile selection (spec #68). On a manifest we pick the
+    // run's profile from the manifest's `profiles:` block and
+    // the `--profile` flag; the projection feeds both input
     // resolution and the `$env.<key>` whitelist. On a single leaf there
-    // is no manifest, so nothing is selected; a `--environment` passed
+    // is no manifest, so nothing is selected; a `--profile` passed
     // there is inert (warned below).
-    let mut selected_env: Option<environment::SelectedEnvironment> = None;
+    let mut selected_profile: Option<profile::SelectedProfile> = None;
     let (leaves, scope): (Vec<LoadedLeaf>, Scope) = match loaded {
         Loaded::Leaf { path, definition } => {
-            if requested_environment.is_some() {
+            if requested_profile.is_some() {
                 eprintln!(
-                    "warning: --environment has no effect when running a single verification (no manifest with an `environments:` block)"
+                    "warning: --profile has no effect when running a single verification (no manifest with a `profiles:` block)"
                 );
             }
             (vec![LoadedLeaf { path, definition }], Scope::SingleLeaf)
@@ -191,15 +195,12 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             leaves,
             warnings,
         } => {
-            match environment::select_environment(
-                &manifest.environments,
-                requested_environment.as_deref(),
-            ) {
+            match profile::select_profile(&manifest.profiles, requested_profile.as_deref()) {
                 Ok(sel) => {
                     if let Some(s) = &sel {
-                        eprintln!("environment: {}", s.name);
+                        eprintln!("profile: {}", s.name);
                     }
-                    selected_env = sel;
+                    selected_profile = sel;
                 }
                 Err(e) => {
                     eprintln!("{e}");
@@ -211,7 +212,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 leaves,
                 Scope::Manifest {
                     warnings,
-                    environment: manifest.environment,
+                    provision: manifest.provision,
                     manifest_dir,
                     defaults: manifest.defaults,
                     project: manifest.project,
@@ -220,15 +221,15 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             )
         }
     };
-    // Input-resolution view of the selected environment (precedence
+    // Input-resolution view of the selected profile (precedence
     // layer 3); empty when nothing is selected so the resolution chain
-    // is unchanged on environment-free runs.
-    let env_inputs: BTreeMap<String, serde_json::Value> = selected_env
+    // is unchanged on profile-free runs.
+    let env_inputs: BTreeMap<String, serde_json::Value> = selected_profile
         .as_ref()
         .map(|s| s.inputs.clone())
         .unwrap_or_default();
     // `$env.<key>` whitelist seed (string-valued keys only).
-    let env_whitelist: BTreeMap<String, String> = selected_env
+    let env_whitelist: BTreeMap<String, String> = selected_profile
         .as_ref()
         .map(|s| s.env.clone())
         .unwrap_or_default();
@@ -309,7 +310,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         for (_name, path, definition, inputs, _secrets) in &resolved {
             if let Some(missing) = definition
                 .inputs
-                .keys()
+                .iter()
+                .filter(|(_, decl)| !decl.inherit)
+                .map(|(name, _)| name)
                 .find(|name| !inputs.contains_key(*name))
             {
                 eprintln!("{}: missing required input: `{missing}`", path.display());
@@ -354,7 +357,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
         // RESOLVED INPUTS (spec #155): the post-precedence input map
-        // (`--inputs` last-wins > selected environment > VD `default:`),
+        // (`--inputs` last-wins > selected profile > VD `default:`),
         // one `name = value` per line so a black-box VD can assert the
         // winning value directly off stdout — the value-level assertion
         // that was only reachable indirectly before (via type levers).
@@ -450,7 +453,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         .as_ref()
         .map(|parent| parent.scope.clone());
     if let Scope::Manifest {
-        environment,
+        provision: environment,
         manifest_dir,
         ..
     } = &scope
@@ -521,7 +524,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 suite_env = Some(session);
             }
             Err(e) => {
-                eprintln!("suite environment: {e}");
+                eprintln!("suite provision: {e}");
                 return ExitCode::FAILURE;
             }
         }
@@ -529,7 +532,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     let suite_managed = matches!(
         &scope,
         Scope::Manifest {
-            environment: Some(_),
+            provision: Some(_),
             ..
         }
     );
@@ -574,14 +577,17 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // dependency + startup cost) entirely. `uses_requires_page` is
         // the same classifier the engine uses to gate the per-check
         // browser, so this never starves a UI step of a page.
-        let has_missing_input = def.inputs.keys().any(|name| !inputs.contains_key(name));
+        let has_missing_input = def
+            .inputs
+            .iter()
+            .any(|(name, decl)| !decl.inherit && !inputs.contains_key(name));
         let needs_browser = !has_missing_input
             && def
                 .criteria
                 .iter()
                 .flat_map(|c| &c.checks)
                 .flat_map(|ch| &ch.steps)
-                .any(|s| duhem_actions::uses_requires_page(&s.uses));
+                .any(|s| duhem_actions::uses_requires_page(s.uses_name()));
 
         // One browser per leaf when needed. Phase-0 leaves run serially
         // (#49) and `RunBrowser` is non-`Clone`, so a fresh launch per
@@ -608,17 +614,23 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             .skip_env_up(no_env_up || suite_managed)
             .keep_env(keep_env || suite_managed)
             .with_env(env_whitelist.clone())
-            .with_inherited(def.inherits.clone())
+            .with_inherited(
+                def.inputs
+                    .iter()
+                    .filter(|(_, decl)| decl.inherit)
+                    .map(|(name, _)| name.clone()),
+            )
             .with_capture(capture)
             .with_secret_registry(secrets.clone())
             .with_child_store_path(db_path.clone());
         for warning in secrets.warnings() {
             eprintln!("warning: {warning}");
         }
-        // Record the VD source snapshot so the run is self-describing
-        // (spec #302). Best-effort: an unreadable source just records no
-        // snapshot — never a run failure.
-        if let Ok(src) = std::fs::read_to_string(&leaf_path) {
+        // Record the composed VD snapshot so the run is self-describing
+        // away from its source repository (specs #302 / #387). Serialization
+        // remains best-effort: a failure records no snapshot and never fails
+        // the run.
+        if let Ok(src) = def.to_yaml_string() {
             engine = engine.with_definition_source(src);
         }
         if let Some(d) = manifest_defaults.as_ref() {

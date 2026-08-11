@@ -477,7 +477,9 @@ impl<B: Backend> TtyRenderer<B> {
                     .assertion(check_id, *step_index, state, detail.as_deref());
                 (false, true)
             }
-            EventPayload::CheckFinished { check_id, verdict } => {
+            EventPayload::CheckFinished {
+                check_id, verdict, ..
+            } => {
                 self.board.finish_check(check_id, verdict);
                 (false, true)
             }
@@ -678,11 +680,11 @@ fn expectation(with: &std::collections::BTreeMap<String, serde_json::Value>) -> 
     None
 }
 
-/// `within:` is shared by the action families and reaches evidence as a
+/// `timeout:` is shared by the action families and reaches evidence as a
 /// resolved JSON scalar. Keep the parser deliberately narrow: an unknown
 /// value merely omits the bar, never affects execution or rendering.
 fn timeout(with: &std::collections::BTreeMap<String, serde_json::Value>) -> Option<Duration> {
-    let raw = with.get("within")?;
+    let raw = with.get("timeout")?;
     if let Some(ms) = raw.as_u64() {
         return Some(Duration::from_millis(ms));
     }
@@ -1102,6 +1104,7 @@ criteria:
                 step_index: 0,
                 uses: "cli/invoke".into(),
                 layer: None,
+                flow: None,
                 with: Default::default(),
             },
         )));
@@ -1152,6 +1155,8 @@ criteria:
                 EventPayload::CheckFinished {
                     check_id: "AC-1.1".into(),
                     verdict: VerdictState::Pass,
+                    session_source: None,
+                    session_digest: None,
                 },
             ),
             evt(
@@ -1168,6 +1173,8 @@ criteria:
                 EventPayload::CheckFinished {
                     check_id: "AC-2.1".into(),
                     verdict: VerdictState::Fail,
+                    session_source: None,
+                    session_digest: None,
                 },
             ),
             evt(
@@ -1233,7 +1240,7 @@ criteria:
             let check = format!("{criterion}.1");
             board.start_step(&criterion, &check, 0, "cli/invoke", &with);
             board.finish_step(&duhem_evidence::StepOutcome::Ok);
-            board.assertion(&check, Some(0), &VerdictState::Pass, None);
+            board.assertion(&check, Some(0), &duhem_judge::VerdictState::Pass, None);
             board.finish_check(&check, &VerdictState::Pass);
             board.finish_criterion(&criterion, &VerdictState::Pass);
         }
@@ -1242,7 +1249,7 @@ criteria:
         board.assertion(
             "AC-6.1",
             Some(0),
-            &VerdictState::Fail,
+            &duhem_judge::VerdictState::Fail,
             Some("expected HTTP 402, received 500"),
         );
         board.finish_check("AC-6.1", &VerdictState::Fail);
@@ -1285,7 +1292,7 @@ criteria:
     async fn tty_line_shows_check_step_expectation_and_timeout_budget() {
         let mut with = std::collections::BTreeMap::new();
         with.insert("expected".into(), serde_json::json!("visible"));
-        with.insert("within".into(), serde_json::json!("60s"));
+        with.insert("timeout".into(), serde_json::json!("60s"));
         let mut renderer = tty_renderer(120, 12);
         assert!(!renderer.event(evt(
             1,
@@ -1296,6 +1303,7 @@ criteria:
                 step_index: 0,
                 uses: "ui/assert-element".into(),
                 layer: Some("ui".into()),
+                flow: None,
                 with,
             },
         )));
@@ -1339,6 +1347,7 @@ criteria:
                 step_index: 0,
                 uses: "cli/invoke".into(),
                 layer: None,
+                flow: None,
                 with: Default::default(),
             },
         )));
@@ -1453,6 +1462,7 @@ criteria:
                 step_index: 0,
                 uses: "cli/invoke".into(),
                 layer: None,
+                flow: None,
                 with: Default::default(),
             },
         ))

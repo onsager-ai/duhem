@@ -14,10 +14,10 @@
 //! - `assert_element_not_exists_with_present_alert_returns_false`
 //! - `assert_element_timeout_returns_satisfied_false_quickly` —
 //!   covers the §11.1 "wait-with-timeout, not poll" structural
-//!   choice: a missed `within:` is *not* `Outcome::Timeout`. It
+//!   choice: a missed `timeout:` is *not* `Outcome::Timeout`. It
 //!   yields `Outcome::Ok` with `satisfied: false` (a conclusive
 //!   "we waited and it never appeared" observation), and elapsed
-//!   wall time stays inside a loose multiple of `within:`.
+//!   wall time stays inside a loose multiple of `timeout:`.
 //! - `type_fills_input_then_assert_element_reads_it_back`
 //! - `select_by_value_label_index_dispatches_to_playwright`
 //! - `assert_url_passes_on_navigation_and_times_out_on_stale_url`
@@ -181,7 +181,7 @@ async fn assert_element_visible_present_satisfies() {
                 r#"
 locator: { role: alert, text: "Created" }
 expected: visible
-within: 2s
+timeout: 2s
 "#,
             ),
         )
@@ -219,7 +219,7 @@ async fn assert_element_not_exists_with_present_alert_returns_false() {
                 r#"
 locator: { role: alert, text: "Created" }
 expected: not_exists
-within: 500ms
+timeout: 500ms
 "#,
             ),
         )
@@ -254,7 +254,7 @@ async fn assert_element_timeout_returns_satisfied_false_quickly() {
                 r#"
 locator: { role: alert, text: "never" }
 expected: visible
-within: 200ms
+timeout: 200ms
 "#,
             ),
         )
@@ -268,7 +268,7 @@ within: 200ms
         r.outputs.get("satisfied").and_then(|v| v.as_bool()),
         Some(false)
     );
-    // Loose upper bound — verifies we honored `within: 200ms` rather
+    // Loose upper bound — verifies we honored `timeout: 200ms` rather
     // than the 5s default.
     assert!(
         elapsed < Duration::from_millis(2_000),
@@ -361,7 +361,7 @@ text: "s3cret!"
                 r#"
 locator: { testid: save-btn }
 expected: visible
-within: 3s
+timeout: 3s
 "#,
             ),
         )
@@ -381,7 +381,7 @@ within: 3s
                 r#"
 locator: { css: "button#save" }
 expected: visible
-within: 3s
+timeout: 3s
 "#,
             ),
         )
@@ -486,7 +486,7 @@ async fn assert_url_passes_on_navigation_and_times_out_on_stale_url() {
     let r = AssertUrl
         .invoke(
             &ctx,
-            &yaml(r#"{ equals: "http://does.not/match", within: 200ms }"#),
+            &yaml(r#"{ equals: "http://does.not/match", timeout: 200ms }"#),
         )
         .await
         .unwrap();
@@ -496,7 +496,7 @@ async fn assert_url_passes_on_navigation_and_times_out_on_stale_url() {
         r.outputs.get("satisfied").and_then(|v| v.as_bool()),
         Some(false)
     );
-    // Loose upper bound — verifies we honored `within: 200ms`.
+    // Loose upper bound — verifies we honored `timeout: 200ms`.
     assert!(
         elapsed < Duration::from_millis(2_000),
         "elapsed = {elapsed:?}"
@@ -509,7 +509,7 @@ async fn assert_url_passes_on_navigation_and_times_out_on_stale_url() {
         .await
         .unwrap();
     let r = AssertUrl
-        .invoke(&ctx, &yaml(r#"{ matches: "/thanks", within: 2s }"#))
+        .invoke(&ctx, &yaml(r#"{ matches: "/thanks", timeout: 2s }"#))
         .await
         .unwrap();
     assert_eq!(r.outcome, Outcome::Ok);
@@ -534,7 +534,7 @@ async fn assert_state_loaded_resolves_when_ready_state_is_complete() {
         .await
         .unwrap();
     let r = AssertState
-        .invoke(&ctx, &yaml(r#"{ state: loaded, within: 2s }"#))
+        .invoke(&ctx, &yaml(r#"{ state: loaded, timeout: 2s }"#))
         .await
         .unwrap();
     assert_eq!(r.outcome, Outcome::Ok);
@@ -567,7 +567,7 @@ async fn assert_state_authenticated_observes_cookie_marker_present_and_absent() 
                 r#"
 state: authenticated
 marker: { kind: cookie, name: "session" }
-within: 200ms
+timeout: 200ms
 "#,
             ),
         )
@@ -595,7 +595,7 @@ within: 200ms
                 r#"
 state: authenticated
 marker: { kind: cookie, name: "session" }
-within: 1s
+timeout: 1s
 "#,
             ),
         )
@@ -615,7 +615,7 @@ within: 1s
                 r#"
 state: signed_out
 marker: { kind: cookie, name: "session" }
-within: 200ms
+timeout: 200ms
 "#,
             ),
         )
@@ -650,7 +650,7 @@ async fn assert_state_signed_out_observes_local_storage_marker_present_and_absen
                 r#"
 state: signed_out
 marker: { kind: local_storage, name: "auth_token" }
-within: 200ms
+timeout: 200ms
 "#,
             ),
         )
@@ -676,7 +676,7 @@ within: 200ms
                 r#"
 state: authenticated
 marker: { kind: local_storage, name: "auth_token" }
-within: 1s
+timeout: 1s
 "#,
             ),
         )
@@ -694,7 +694,7 @@ within: 1s
                 r#"
 state: signed_out
 marker: { kind: local_storage, name: "auth_token" }
-within: 200ms
+timeout: 200ms
 "#,
             ),
         )

@@ -12,11 +12,18 @@
 
 manifest_version: 1
 
+# Shared named locators and reusable step sequences. The included
+# sign-in flow is a canonical shape to adapt or remove for a page-free
+# suite.
+includes:
+  - pages.yml
+  - flows.yml
+
 # Optional shared environment: provision your product's real stack once,
 # every leaf runs against it, torn down once (§11 up:/down: hooks). Omit
 # this block for a page-free CLI suite that needs no server. Example:
 #
-# environment:
+# provision:
 #   up: ./.duhem/scripts/up.sh
 #   down: ./.duhem/scripts/down.sh
 #   ready:

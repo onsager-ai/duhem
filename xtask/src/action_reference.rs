@@ -59,10 +59,13 @@ fn render() -> String {
         "Version-exact ground truth for authoring a Verification Definition — every\nbuilt-in action's `with:` fields, `outputs`, contract-declared secret outputs,\nand a worked example. Generated from the action contracts, so it always matches\nwhat `duhem validate` / `duhem run` accept. `duhem describe <uses>` prints the\nsame for one action; `duhem actions` lists the catalog.\n\n",
     );
     s.push_str(
-        "Bind an output with `outputs: { <name>: <field> }`, then read it in an\nassertion as `$steps.<id>.outputs.<name>`. Assert over **scalar** outputs\n(`status`, `body_text`, `satisfied`, `exit_code`, …); helpers like\n`$runtime.contains(...)` cover membership.\n\n",
+        "Bind an output with `outputs: { <name>: <field> }`, then read it in an\nassertion as `$steps.<id>.outputs.<name>`. Assert over **scalar** outputs\n(`status`, `body_text`, `satisfied`, `exit_code`, …); helpers like\n`$runtime.contains(...)` cover membership. Substitution in a `with:` value is\nwhole-string only; compose values with `$runtime.format(...)` or\n`$runtime.concat(...)` instead of embedding a reference in a larger string.\n\n",
     );
     s.push_str(
-        "An action contract may declare a scalar output path secret by default. Those\nvalues join the masking registry before the producing step writes evidence and\nneed no authored `secret:` entry. When present, the contract's paths are listed\nas **secret outputs (masked by contract)** below.\n\n",
+        "`uses:` always names one of the closed-catalog actions below. Reusable\n`flows:` use the distinct `call:` key and expand into these actions before\nruntime dispatch; a flow can never shadow an action name.\n\n",
+    );
+    s.push_str(
+        "An action contract may declare an output path secret by default, including a\nstructured credential such as browser storage state. The value joins the masking\nregistry before the producing step writes evidence and needs no authored `secret_outputs:`\nentry. When present, the contract's paths are listed as **secret outputs (masked\nby contract)** below. Author-declared `steps[].secret_outputs` paths remain scalar-only.\n\n",
     );
 
     let cat = catalog();

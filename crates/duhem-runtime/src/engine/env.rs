@@ -1,7 +1,7 @@
 //! Environment-provisioning lifecycle — operator-supplied `up:` /
 //! `down:` scripts + a readiness probe.
 //!
-//! Per the spec on issue #50, `environment:` brings Stage 3
+//! Per the spec on issue #50, `provision:` brings Stage 3
 //! ("Provision Environment") from `docs/duhem-spec.md` §9 under the
 //! runtime's control. `up:` runs once before `setup:`; `ready:` is
 //! polled before `setup:` starts; `down:` runs once after the last
@@ -26,7 +26,7 @@ use duhem_evidence::{
     EventPayload, EvidenceWriter, RunLineage, RunScope, run_started_with_definition_and_lineage,
 };
 use duhem_judge::InconclusiveCause;
-use duhem_schema::{Environment, HttpReadyProbe, ReadyProbe};
+use duhem_schema::{HttpReadyProbe, Provision, ReadyProbe};
 use tokio::process::Command;
 use tracing::debug;
 
@@ -38,7 +38,7 @@ use crate::engine::runner::EngineError;
 /// field on the event.
 const PROBE_KIND_HTTP: &str = "http";
 
-/// Why `environment.up:` / `ready:` aborted the run. Same shape as
+/// Why `provision.up:` / `ready:` aborted the run. Same shape as
 /// `setup::AbortReason` — the engine maps the trigger to a
 /// `RunVerdict::Inconclusive(cause)` and records evidence accordingly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,7 +81,7 @@ pub(crate) struct EnvUpResult {
 /// operator brought the SUT up by hand.
 pub(crate) async fn bring_environment_up(
     writer: &mut EvidenceWriter,
-    env: &Environment,
+    env: &Provision,
     vd_dir: Option<&Path>,
     run: &RunState,
     skip_env_up: bool,
@@ -164,7 +164,7 @@ pub(crate) async fn bring_environment_up(
 /// (e.g. a failed `up:` provisioned nothing).
 pub(crate) async fn tear_environment_down(
     writer: &mut EvidenceWriter,
-    env: &Environment,
+    env: &Provision,
     vd_dir: Option<&Path>,
     keep_env: bool,
     should_tear_down: bool,
@@ -205,7 +205,7 @@ pub(crate) async fn tear_environment_down(
 /// stack. Suite-level `up:` / `ready:` / `down:` evidence is recorded
 /// as its own run in the store, distinct from each leaf's run.
 pub struct SuiteEnvironment {
-    env: Option<Environment>,
+    env: Option<Provision>,
     dir: Option<PathBuf>,
     writer: EvidenceWriter,
     run: RunState,
@@ -215,7 +215,7 @@ pub struct SuiteEnvironment {
 
 /// Identity, lineage, and optional shared environment for a manifest run.
 pub struct SuiteRunConfig<'a> {
-    pub environment: Option<&'a Environment>,
+    pub environment: Option<&'a Provision>,
     pub definition_path: &'a str,
     pub manifest_dir: Option<&'a Path>,
     pub run_id: String,
@@ -387,7 +387,7 @@ fn resolve_script_path(path: &Path, vd_dir: Option<&Path>) -> PathBuf {
 /// The child's cwd is the Verification Definition's directory when
 /// known (so author-relative paths inside the script — `./scripts/`,
 /// fixture lookups, etc. — resolve from the same anchor as
-/// `environment.up:` itself). When the VD path is unknown, the
+/// `provision.up:` itself). When the VD path is unknown, the
 /// runtime inherits cwd from the parent process; we deliberately do
 /// NOT set cwd to `script.parent()`, which would (a) contradict the
 /// "cwd = VD directory" contract and (b) silently break the
@@ -640,7 +640,7 @@ mod tests {
         write_script("up.sh", "up");
         write_script("down.sh", "down");
 
-        let env = Environment {
+        let env = Provision {
             up: PathBuf::from("up.sh"),
             down: Some(PathBuf::from("down.sh")),
             ready: None,
@@ -699,7 +699,7 @@ mod tests {
             std::fs::write(&p, "#!/bin/sh\nexit 0\n").unwrap();
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let env = Environment {
+        let env = Provision {
             up: PathBuf::from("up.sh"),
             down: Some(PathBuf::from("down.sh")),
             ready: None,

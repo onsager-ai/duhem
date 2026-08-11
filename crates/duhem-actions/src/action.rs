@@ -24,9 +24,9 @@ use crate::browser::Page;
 
 use crate::error::ActionError;
 
-/// Default `within:` per spec — applies whenever an action's `with:`
+/// Default `timeout:` per spec — applies whenever an action's `with:`
 /// schema omits an explicit timeout.
-pub const DEFAULT_WITHIN: Duration = Duration::from_secs(5);
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Per-check execution context handed to every `Action::invoke`.
 ///
@@ -60,16 +60,16 @@ impl<'a> ActionCtx<'a> {
     }
 }
 
-/// Per-action lifecycle outcome. Maps onto
-/// `AssertionOutcome::{Ok, Error, Inconclusive(Timeout)}` in the
-/// judge spec — `Timeout` is the structural reason actions prefer
-/// wait-with-timeout over hard-fail polling.
+/// In-process step execution outcome. This stays distinct from the
+/// serialized evidence `StepOutcome`, but the runtime mechanically pins
+/// both types to the same vocabulary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Outcome {
     Ok,
     Error,
     Timeout,
+    Skipped { reason: String },
 }
 
 /// One observation captured during an action invocation. Phase 0 is
@@ -110,6 +110,16 @@ impl ActionResult {
     pub fn error() -> Self {
         Self {
             outcome: Outcome::Error,
+            outputs: BTreeMap::new(),
+            observations: Vec::new(),
+        }
+    }
+
+    pub fn skipped(reason: impl Into<String>) -> Self {
+        Self {
+            outcome: Outcome::Skipped {
+                reason: reason.into(),
+            },
             outputs: BTreeMap::new(),
             observations: Vec::new(),
         }
@@ -196,8 +206,8 @@ impl FieldSpec {
 }
 
 /// Machine-readable contract for one action — the `with:` fields it
-/// accepts, the `outputs` it produces, and which scalar output paths
-/// are sensitive by construction. Defined next to the action via
+/// accepts, the `outputs` it produces, and which output paths are
+/// sensitive by construction. Defined next to the action via
 /// [`Action::contract`] so it can't drift from `invoke`, and consumed
 /// by runtime registration plus the authoring surfaces (spec #355).
 #[derive(Debug, Clone)]
@@ -208,9 +218,11 @@ pub struct ActionContract {
     pub with: Vec<FieldSpec>,
     /// Output names surfaced as `$steps.<id>.outputs.<name>`.
     pub outputs: Vec<&'static str>,
-    /// Scalar output paths registered as secrets after invocation,
-    /// without requiring an authored step-level `secret:` declaration.
-    /// This is contract metadata, not a Verification Definition field.
+    /// Output paths registered as secrets after invocation, without
+    /// requiring an authored step-level `secret:` declaration. Unlike
+    /// authored `steps[].secret_outputs` (scalar-only), a trusted action
+    /// contract may declare a structured credential output; the
+    /// evidence registry replaces that exact JSON subtree.
     pub secret_outputs: Vec<&'static str>,
     /// A minimal, copyable example step.
     pub example: &'static str,

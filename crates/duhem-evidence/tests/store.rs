@@ -46,6 +46,7 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
         step_index: 0,
         uses: "ui/click".into(),
         layer: None,
+        flow: None,
         with,
     })
     .await
@@ -69,6 +70,8 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
         verdict: VerdictState::Pass,
+        session_source: None,
+        session_digest: None,
     })
     .await
     .unwrap();
@@ -660,6 +663,7 @@ async fn write_scoped_run(
         step_index: 0,
         uses: "api/call".into(),
         layer: None,
+        flow: None,
         with: BTreeMap::new(),
     })
     .await
@@ -988,6 +992,7 @@ async fn step_pair(
         step_index,
         uses: uses.into(),
         layer: layer.map(str::to_string),
+        flow: None,
         with: BTreeMap::new(),
     })
     .await
@@ -1025,6 +1030,8 @@ async fn spans_fold_a_checks_layer_chain_in_order() {
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
         verdict: VerdictState::Pass,
+        session_source: None,
+        session_digest: None,
     })
     .await
     .unwrap();
@@ -1165,6 +1172,8 @@ async fn writer_tee_mirrors_persisted_events_in_order() {
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
         verdict: VerdictState::Pass,
+        session_source: None,
+        session_digest: None,
     })
     .await
     .unwrap();
@@ -1192,6 +1201,8 @@ async fn writer_tee_mirrors_persisted_events_in_order() {
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.2".into(),
         verdict: VerdictState::Pass,
+        session_source: None,
+        session_digest: None,
     })
     .await
     .expect_err("run is sealed after run_finished — the store, not the tee, rejects");
@@ -1233,6 +1244,7 @@ async fn secret_registry_masks_events_artifacts_and_bundle_exports() {
             step_index: 0,
             uses: "db/query".into(),
             layer: Some("data".into()),
+            flow: None,
             with: BTreeMap::from([
                 ("connection".to_string(), serde_json::json!(secret)),
                 ("encoded".to_string(), serde_json::json!(encoded)),
@@ -1344,6 +1356,7 @@ async fn non_secret_text_is_recorded_verbatim() {
             step_index: 0,
             uses: "db/query".into(),
             layer: Some("data".into()),
+            flow: None,
             with: BTreeMap::from([("connection".into(), serde_json::json!(visible))]),
         })
         .await
@@ -1376,6 +1389,7 @@ async fn mid_run_secret_registration_is_not_retroactive() {
             step_index: 0,
             uses: "fake/prior".into(),
             layer: None,
+            flow: None,
             with: BTreeMap::from([("note".into(), serde_json::json!(token))]),
         })
         .await

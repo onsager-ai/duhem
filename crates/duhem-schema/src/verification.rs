@@ -11,9 +11,37 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::criterion::Criterion;
-use crate::environment::Environment;
 use crate::project::ProjectDecl;
+use crate::provision::Provision;
 use crate::step::Step;
+
+/// Named UI locators grouped by page (or any other author-chosen
+/// surface such as a modal or navigation bar). Locator bodies stay
+/// untyped here; `duhem-actions` owns the authoritative locator schema.
+pub type PageCatalog = BTreeMap<String, BTreeMap<String, serde_yml::Value>>;
+
+/// A named, parameterized sequence of steps expanded by the loader.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Flow {
+    /// Optional prose explaining what this reusable sequence is for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Per-call parameters. Reuses the input type catalog and
+    /// sensitivity marker; values are supplied only by the call site.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, InputDecl>,
+
+    /// Ordered action/flow invocations that make up this flow.
+    pub steps: Vec<Step>,
+
+    /// Caller-visible output name to an inner `$steps.*` output.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub outputs: BTreeMap<String, String>,
+}
+
+pub type FlowCatalog = BTreeMap<String, Flow>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -25,6 +53,13 @@ pub struct VerificationDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spec_ref: Option<String>,
 
+    /// Opaque consumer-defined data. Duhem never interprets this map;
+    /// it is recorded in run evidence, must never affect a verdict, and
+    /// must not count as a change if a diff command is added in future.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(with = "std::collections::BTreeMap<String, serde_json::Value>")]
+    pub metadata: BTreeMap<String, serde_yml::Value>,
+
     /// Optional declared target coordinate (#191): what this
     /// verification verifies (a repo, a service URL, an image, or a
     /// locally-named project). Top rung of the identity-resolution
@@ -34,30 +69,32 @@ pub struct VerificationDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<ProjectDecl>,
 
-    /// Optional operator-supplied environment lifecycle hooks. When
-    /// present, the runtime forks `environment.up:` before `setup:`,
-    /// polls `environment.ready:`, and forks `environment.down:`
+    /// Optional operator-supplied provisioning lifecycle hooks. When
+    /// present, the runtime forks `provision.up:` before `setup:`,
+    /// polls `provision.ready:`, and forks `provision.down:`
     /// (if declared) after the criteria loop. Absent → no behavior
     /// change vs setup-only definitions; the wire shape for
-    /// `environment:`-less VDs is byte-identical to today.
+    /// `provision:`-less VDs is byte-identical to today.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment: Option<Environment>,
+    pub provision: Option<Provision>,
 
     /// Declared inputs. Map keys are alphabetized on round-trip
     /// (BTreeMap); fixtures should be authored alphabetized.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, InputDecl>,
 
-    /// Inherited input names (spec #135). A leaf under a manifest may
-    /// list input names it pulls from the parent manifest's resolution
-    /// chain (#68: selected `environments:` keys, `--inputs`
-    /// `KEY=VALUE` / `@file`) instead of redeclaring them under `inputs:`.
-    /// This is dependency injection — the manifest provides, the leaf
-    /// declares what it needs — not class inheritance: one level deep,
-    /// names only, no local `default:`. An inherited name resolves and
-    /// reads as `$inputs.<name>` exactly like a locally-declared input.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub inherits: Vec<String>,
+    /// Leaf-local named locators. When loaded through a manifest these
+    /// overlay the composed manifest catalog by page and element name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(
+        with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
+    )]
+    pub pages: PageCatalog,
+
+    /// Leaf-local reusable flows. When loaded through a manifest these
+    /// overlay the composed manifest catalog by flow name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub flows: FlowCatalog,
 
     /// Optional setup steps run once before the criteria.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -73,15 +110,15 @@ pub struct VerificationDefinition {
 pub struct InputDecl {
     /// The declared type from the v1 catalog. Unknown names parse-fail
     /// at `from_yaml_str` per the type-catalog spec.
-    #[serde(rename = "type")]
-    pub kind: InputType,
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    pub kind: Option<InputType>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<serde_json::Value>")]
     pub default: Option<serde_yml::Value>,
 
     /// Process-environment fallback (specs #346 / #354). This sits
-    /// below a selected Duhem environment and above `default:` in
+    /// below a selected Duhem profile and above `default:` in
     /// resolution precedence. The declaration may be leaf-local or
     /// suite-wide on a manifest; it never becomes a global override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -93,6 +130,13 @@ pub struct InputDecl {
     /// structural findings.
     #[serde(default, skip_serializing_if = "is_false")]
     pub secret: bool,
+
+    /// Pull this name from the parent manifest's declaration and value
+    /// resolution ladder. Inherited inputs intentionally omit `type:`
+    /// and `default:` because the manifest owns both; `secret: true`
+    /// may add protection at the consuming leaf.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub inherit: bool,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -202,6 +246,18 @@ criteria:
     }
 
     #[test]
+    fn rejects_pre_naming_pass_top_level_fields() {
+        for old in [
+            "environment:\n  up: ./scripts/up.sh\n",
+            "inherits: [base_url]\n",
+        ] {
+            let y = format!("verification: x\n{old}criteria: []\n");
+            let err = VerificationDefinition::from_yaml_str(&y).unwrap_err();
+            assert!(format!("{err}").contains("unknown field"), "got: {err}");
+        }
+    }
+
+    #[test]
     fn yaml_error_carries_location() {
         // Tab where YAML expects spaces is one common source of error
         // with a real line/column.
@@ -216,19 +272,22 @@ criteria:
         inputs.insert(
             "name".into(),
             InputDecl {
-                kind: InputType::String,
+                kind: Some(InputType::String),
                 default: Some(serde_yml::Value::String("hi".into())),
                 env: None,
                 secret: false,
+                inherit: false,
             },
         );
         let v = VerificationDefinition {
             verification: "x".into(),
             spec_ref: None,
+            metadata: BTreeMap::new(),
             project: None,
-            environment: None,
+            provision: None,
             inputs,
-            inherits: vec![],
+            pages: BTreeMap::new(),
+            flows: BTreeMap::new(),
             setup: vec![],
             criteria: vec![],
         };
@@ -238,12 +297,139 @@ criteria:
     }
 
     #[test]
-    fn round_trip_preserves_inherits() {
+    fn metadata_round_trips_opaque_nested_values() {
+        let y = r#"
+verification: tagged
+metadata:
+  attempts: 3
+  labels: [external, nightly]
+  routing:
+    owner: platform
+    regions: [eu, us]
+criteria: []
+"#;
+        let parsed = VerificationDefinition::from_yaml_str(y).expect("parse metadata map");
+        assert_eq!(parsed.metadata["attempts"].as_u64(), Some(3));
+        assert_eq!(parsed.metadata["labels"][1].as_str(), Some("nightly"));
+        assert_eq!(
+            parsed.metadata["routing"]["regions"][0].as_str(),
+            Some("eu")
+        );
+
+        let round_trip =
+            VerificationDefinition::from_yaml_str(&parsed.to_yaml_string().unwrap()).unwrap();
+        assert_eq!(round_trip.metadata, parsed.metadata);
+    }
+
+    #[test]
+    fn absent_metadata_keeps_wire_shape() {
+        let parsed = VerificationDefinition::from_yaml_str("verification: x\ncriteria: []\n")
+            .expect("parse definition without metadata");
+        assert!(parsed.metadata.is_empty());
+        assert!(
+            !parsed.to_yaml_string().unwrap().contains("metadata:"),
+            "an absent optional field must not change the serialized wire shape"
+        );
+    }
+
+    #[test]
+    fn metadata_container_must_be_a_map() {
+        for invalid in ["metadata: a string\n", "metadata: [a, b]\n"] {
+            let y = format!("verification: x\n{invalid}criteria: []\n");
+            let err = VerificationDefinition::from_yaml_str(&y).unwrap_err();
+            let message = err.to_string();
+            assert!(
+                message.contains("invalid type") && message.contains("map"),
+                "expected a map-type error for `{invalid}`, got: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn pages_round_trip_and_absent_pages_keep_wire_shape() {
+        let absent = VerificationDefinition::from_yaml_str("verification: x\ncriteria: []\n")
+            .expect("parse absent");
+        assert!(absent.pages.is_empty());
+        assert!(
+            !absent.to_yaml_string().unwrap().contains("pages:"),
+            "an absent additive field must not change the wire shape"
+        );
+
+        let y = r#"
+verification: catalog
+pages:
+  login:
+    submit: { role: button, name: Sign In }
+criteria: []
+"#;
+        let parsed = VerificationDefinition::from_yaml_str(y).expect("parse pages");
+        assert_eq!(
+            parsed.pages["login"]["submit"]["name"].as_str(),
+            Some("Sign In")
+        );
+        let round_trip =
+            VerificationDefinition::from_yaml_str(&parsed.to_yaml_string().unwrap()).unwrap();
+        assert_eq!(parsed, round_trip);
+    }
+
+    #[test]
+    fn flows_round_trip_and_absent_flows_keep_wire_shape() {
+        let absent = VerificationDefinition::from_yaml_str("verification: x\ncriteria: []\n")
+            .expect("parse absent");
+        assert!(absent.flows.is_empty());
+        assert!(!absent.to_yaml_string().unwrap().contains("flows:"));
+
+        let y = r#"
+verification: catalog
+flows:
+  sign_in:
+    description: Sign in with supplied credentials
+    params:
+      password: { type: string, secret: true }
+      user: { type: string }
+    steps:
+      - uses: ui/type
+        with: { text: $params.user }
+    outputs: {}
+criteria: []
+"#;
+        let parsed = VerificationDefinition::from_yaml_str(y).expect("parse flows");
+        assert_eq!(
+            parsed.flows["sign_in"].description.as_deref(),
+            Some("Sign in with supplied credentials")
+        );
+        assert!(parsed.flows["sign_in"].params["password"].secret);
+        let round_trip =
+            VerificationDefinition::from_yaml_str(&parsed.to_yaml_string().unwrap()).unwrap();
+        assert_eq!(parsed, round_trip);
+
+        let without_description = r#"verification: catalog
+flows:
+  sign_in:
+    steps:
+    - uses: ui/click
+criteria: []
+"#;
+        let parsed_without_description =
+            VerificationDefinition::from_yaml_str(without_description).expect("parse old shape");
+        assert_eq!(
+            parsed_without_description.flows["sign_in"].description,
+            None
+        );
+        assert_eq!(
+            parsed_without_description.to_yaml_string().unwrap(),
+            without_description,
+            "a flow without description must serialize byte-identically to its old wire shape"
+        );
+    }
+
+    #[test]
+    fn round_trip_preserves_inherited_input() {
         let y = r#"
 verification: leaf
-inherits:
-  - base_url
-  - region
+inputs:
+  base_url: { inherit: true }
+  region: { inherit: true }
 criteria:
   - id: AC-1
     description: x
@@ -253,11 +439,8 @@ criteria:
           - $inputs.base_url == "x"
 "#;
         let v = VerificationDefinition::from_yaml_str(y).expect("parse");
-        assert_eq!(
-            v.inherits,
-            vec!["base_url".to_string(), "region".to_string()]
-        );
-        assert!(v.inputs.is_empty());
+        assert!(v.inputs["base_url"].inherit);
+        assert!(v.inputs["region"].inherit);
         let back = VerificationDefinition::from_yaml_str(&v.to_yaml_string().unwrap()).unwrap();
         assert_eq!(v, back);
     }
@@ -269,15 +452,15 @@ criteria:
             let v = VerificationDefinition::from_yaml_str(&y)
                 .unwrap_or_else(|e| panic!("`{name}` should parse: {e}"));
             let decl = v.inputs.get("k").expect("input decl present");
-            assert_eq!(decl.kind.as_str(), name);
+            assert_eq!(decl.kind.expect("type present").as_str(), name);
         }
     }
 
     #[test]
-    fn parses_environment_block() {
+    fn parses_provision_block() {
         let y = r#"
 verification: with-env
-environment:
+provision:
   up: ./scripts/up.sh
   down: ./scripts/down.sh
   ready:
@@ -292,17 +475,17 @@ criteria:
         assertions: ["true"]
 "#;
         let v = VerificationDefinition::from_yaml_str(y).expect("parse");
-        let env = v.environment.expect("environment present");
+        let env = v.provision.expect("provision present");
         assert_eq!(env.up.to_str(), Some("./scripts/up.sh"));
         assert!(env.down.is_some());
         assert!(env.ready.is_some());
     }
 
     #[test]
-    fn environment_without_up_is_a_parse_error() {
+    fn provision_without_up_is_a_parse_error() {
         let y = r#"
 verification: with-env
-environment:
+provision:
   down: ./scripts/down.sh
 criteria:
   - id: AC-1
@@ -311,7 +494,7 @@ criteria:
       - id: AC-1.1
         assertions: ["true"]
 "#;
-        // `up:` is required when `environment:` is present.
+        // `up:` is required when `provision:` is present.
         assert!(VerificationDefinition::from_yaml_str(y).is_err());
     }
 

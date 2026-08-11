@@ -3,9 +3,9 @@
 
 verification: first manifest input consumer
 
-inherits:
-  - password
-  - username
+inputs:
+  password: { inherit: true, secret: true }
+  username: { inherit: true }
 
 criteria:
   - id: AC-1

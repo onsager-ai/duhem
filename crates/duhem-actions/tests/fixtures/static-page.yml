@@ -29,7 +29,7 @@ setup:
     with:
       locator: { role: "button", name: "Create" }
       expected: visible
-      within: 2s
+      timeout: 2s
 
 criteria:
   - id: AC-1
@@ -48,7 +48,7 @@ criteria:
             with:
               locator: { role: "alert", text: "Created" }
               expected: visible
-              within: 2s
+              timeout: 2s
         assertions:
           - $steps.banner.outputs.satisfied == true
           - $setup.probe.outputs.satisfied == true
@@ -77,10 +77,10 @@ criteria:
             with: { role: "button", name: "Submit" }
           - id: landed
             uses: ui/assert-url
-            with: { matches: "/thanks", within: 2s }
+            with: { matches: "/thanks", timeout: 2s }
           - id: loaded
             uses: ui/assert-state
-            with: { state: loaded, within: 2s }
+            with: { state: loaded, timeout: 2s }
         assertions:
           - $steps.landed.outputs.satisfied == true
           - $steps.loaded.outputs.satisfied == true

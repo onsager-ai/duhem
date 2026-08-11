@@ -1,10 +1,10 @@
-//! `Step` — one action invocation inside a check's execution sequence.
+//! `Step` — one action or reusable-flow invocation inside a check.
 //!
 //! `uses:` is an opaque string at v0.1; the typed action catalog lands
 //! in `spec(actions): ui/* action types v1` and turns this into an
 //! enum. `with:` stays untyped (`serde_yml::Value`) until the action
 //! catalog gives it a per-action schema. `outputs:` maps a local alias
-//! to a runtime extraction path; `secret:` names scalar output paths
+//! to a runtime extraction path; `secret_outputs:` names scalar output paths
 //! that must join the evidence writer's registry before this step emits
 //! evidence (spec #355).
 
@@ -12,6 +12,37 @@ use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+/// Loader-only provenance attached to an action expanded from a
+/// reusable flow. It is deliberately skipped on the authored Step wire
+/// shape: the evidence crate owns the public event representation, and
+/// `duhem resolve --provenance` renders this metadata separately.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpandedFlowOrigin {
+    pub name: String,
+    pub invocation: String,
+    pub inner_index: u32,
+}
+
+/// Closed dispatch condition for a step. This is deliberately not an
+/// expression language: the runtime decides it from recorded outcomes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StepCondition {
+    /// Run only while no earlier step in this sequence has failed.
+    #[default]
+    Success,
+    /// Run regardless of an earlier step failure.
+    Always,
+    /// Run only after an earlier step failure.
+    Failure,
+}
+
+impl StepCondition {
+    pub fn is_default(&self) -> bool {
+        matches!(self, Self::Success)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -24,9 +55,31 @@ pub struct Step {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
 
-    /// Action type identifier (e.g. `ui/click`). At v0.1 this is any
-    /// non-empty string; the catalog spec types it later.
-    pub uses: String,
+    /// Optional prose explaining what this action is for. Unlike
+    /// [`Step::id`], this is a human-facing display label and is never
+    /// used as a reference symbol.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Dispatch condition, serialized as `if:`. Omission is
+    /// byte-identical to `if: success`.
+    #[serde(
+        rename = "if",
+        default,
+        skip_serializing_if = "StepCondition::is_default"
+    )]
+    pub condition: StepCondition,
+
+    /// Action type identifier (e.g. `ui/click`). Exactly one of this
+    /// field and [`Step::call`] is required; the structural validator
+    /// owns the friendly exactly-one diagnostic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uses: Option<String>,
+
+    /// Reusable flow name. The loader expands this invocation into
+    /// ordinary action steps before the runtime sees the definition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<String>,
 
     /// Action-specific arguments. Untyped at the schema layer; the
     /// per-action `with:` schema lives with the action implementation.
@@ -54,7 +107,31 @@ pub struct Step {
     /// objects and arrays because exact-serialization masking would
     /// give a false impression that the subtree was protected.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub secret: Vec<String>,
+    pub secret_outputs: Vec<String>,
+
+    /// Origin of an expanded action step. Not part of the authored VD
+    /// schema; the runtime copies it into `StepStarted.flow`.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub flow: Option<ExpandedFlowOrigin>,
+
+    /// Secret parameter bindings inherited from the enclosing flow
+    /// call. Kept off wire and registered before `StepStarted` so
+    /// literal credentials receive the same sink-level masking as
+    /// declared secret inputs.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub flow_secrets: Vec<serde_yml::Value>,
+}
+
+impl Step {
+    /// The catalog action on an executable (already-expanded) step.
+    /// Loaders and validators guarantee this before runtime dispatch.
+    pub fn uses_name(&self) -> &str {
+        self.uses
+            .as_deref()
+            .expect("executable step must have `uses:` after flow expansion")
+    }
 }
 
 fn is_null(v: &serde_yml::Value) -> bool {
@@ -72,10 +149,45 @@ uses: ui/click
 with: { role: button, name: Create }
 "#;
         let s: Step = serde_yml::from_str(yaml).expect("parse");
-        assert_eq!(s.uses, "ui/click");
+        assert_eq!(s.uses.as_deref(), Some("ui/click"));
+        assert!(s.call.is_none());
         assert!(s.id.is_none());
+        assert!(s.description.is_none());
+        assert_eq!(s.condition, StepCondition::Success);
         assert!(s.outputs.is_empty());
-        assert!(s.secret.is_empty());
+        assert!(s.secret_outputs.is_empty());
+    }
+
+    #[test]
+    fn description_is_optional_and_absence_preserves_canonical_bytes() {
+        let old_shape = "id: open\nuses: ui/navigate\nwith:\n  url: /login\n";
+        let step: Step = serde_yml::from_str(old_shape).expect("parse old shape");
+        assert!(step.description.is_none());
+        assert_eq!(serde_yml::to_string(&step).expect("serialize"), old_shape);
+
+        let described = "id: open\ndescription: Open the sign-in page\nuses: ui/navigate\n";
+        let step: Step = serde_yml::from_str(described).expect("parse description");
+        assert_eq!(step.description.as_deref(), Some("Open the sign-in page"));
+        assert_eq!(serde_yml::to_string(&step).expect("serialize"), described);
+    }
+
+    #[test]
+    fn condition_is_closed_and_default_is_wire_empty() {
+        let old_shape = "uses: ui/click\n";
+        let step: Step = serde_yml::from_str(old_shape).expect("parse default");
+        assert_eq!(step.condition, StepCondition::Success);
+        assert_eq!(serde_yml::to_string(&step).expect("serialize"), old_shape);
+
+        for (wire, expected) in [
+            ("success", StepCondition::Success),
+            ("always", StepCondition::Always),
+            ("failure", StepCondition::Failure),
+        ] {
+            let step: Step =
+                serde_yml::from_str(&format!("if: {wire}\nuses: ui/click\n")).expect(wire);
+            assert_eq!(step.condition, expected);
+        }
+        assert!(serde_yml::from_str::<Step>("if: expression\nuses: ui/click\n").is_err());
     }
 
     #[test]
@@ -84,14 +196,14 @@ with: { role: button, name: Create }
 id: login
 uses: api/call
 with: { method: POST, url: /login }
-secret:
+secret_outputs:
   - body.data
   - body.items[0].key
 "#;
         let s: Step = serde_yml::from_str(yaml).expect("parse");
-        assert_eq!(s.secret, ["body.data", "body.items[0].key"]);
+        assert_eq!(s.secret_outputs, ["body.data", "body.items[0].key"]);
         let out = serde_yml::to_string(&s).expect("serialize");
-        assert!(out.contains("secret:\n- body.data\n- body.items[0].key"));
+        assert!(out.contains("secret_outputs:\n- body.data\n- body.items[0].key"));
     }
 
     #[test]
@@ -122,8 +234,28 @@ extra: nope
     }
 
     #[test]
-    fn rejects_missing_uses() {
+    fn rejects_pre_naming_pass_secret_field() {
+        let yaml = r#"
+uses: api/call
+with: { method: GET, url: / }
+secret: [body]
+"#;
+        let err = serde_yml::from_str::<Step>(yaml).unwrap_err();
+        assert!(format!("{err}").contains("secret"), "got: {err}");
+    }
+
+    #[test]
+    fn parses_call_for_validator_to_check() {
+        let step: Step = serde_yml::from_str("call: sign_in\n").expect("parse call");
+        assert_eq!(step.call.as_deref(), Some("sign_in"));
+        assert!(step.uses.is_none());
+    }
+
+    #[test]
+    fn parses_missing_dispatch_for_validator_to_check() {
         let yaml = "with: {}\n";
-        assert!(serde_yml::from_str::<Step>(yaml).is_err());
+        let step = serde_yml::from_str::<Step>(yaml).expect("parse");
+        assert!(step.uses.is_none());
+        assert!(step.call.is_none());
     }
 }

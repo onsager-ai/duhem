@@ -21,7 +21,7 @@
 
 verification: duhem-dashboard fixture run
 
-environment:
+provision:
   up: ./serve-up.sh
   down: ./serve-down.sh
   ready:
@@ -44,34 +44,34 @@ criteria:
             uses: ui/navigate
             with:
               url: http://127.0.0.1:7979/
-              within: 15s
+              timeout: 15s
           - id: overview-visible
             uses: ui/assert-element
             with:
               locator: {role: heading, name: Verification workspace}
               expected: visible
-              within: 15s
+              timeout: 15s
           - id: open-activity
             uses: ui/click
             with:
               role: link
               name: Activity
-              within: 15s
+              timeout: 15s
           - id: activity-visible
             uses: ui/assert-element
             with:
               locator: {role: heading, name: Recent verification activity}
               expected: visible
-              within: 15s
+              timeout: 15s
           - id: show-evidence
             uses: ui/click
             with:
               role: button
               name: Show evidence summary
-              within: 15s
+              timeout: 15s
           - id: evidence-visible
             uses: ui/assert-element
             with:
               locator: {role: heading, name: Replay evidence ready}
               expected: visible
-              within: 15s
+              timeout: 15s

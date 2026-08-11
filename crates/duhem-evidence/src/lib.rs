@@ -30,8 +30,9 @@ pub mod writer;
 
 pub use bundle::{BUNDLE_VERSION, BundleArtifact, BundleRun, RunBundle};
 pub use event::{
-    BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, HEARTBEAT_PERIOD, ORPHAN_THRESHOLD,
-    ObservationValue, RunOrigin, RunStatus, SCHEMA_VERSION, StepOutcome, VerdictState,
+    BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, FlowOrigin, HEARTBEAT_PERIOD,
+    ORPHAN_THRESHOLD, ObservationValue, RunOrigin, RunStatus, SCHEMA_VERSION, StepOutcome,
+    VerdictState,
 };
 pub use reader::{ReadError, Trace};
 pub use replay::{ReplayDivergence, ReplayError, ReplayedRun, replay};

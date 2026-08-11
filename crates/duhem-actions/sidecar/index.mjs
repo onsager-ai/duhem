@@ -300,6 +300,11 @@ async function dispatch(req) {
         dir = mkdtempSync(join(os.tmpdir(), 'duhem-video-'))
         opts = { recordVideo: { dir } }
       }
+      // A session seed is a copied baseline, not a shared context:
+      // every request still creates a new BrowserContext (#347).
+      if (req.storageState !== undefined) {
+        opts.storageState = req.storageState
+      }
       let ctx
       try {
         ctx = await browser.newContext(opts)
@@ -394,6 +399,9 @@ async function dispatch(req) {
     case 'cookies':
       return await page(req).context().cookies()
 
+    case 'getStorageState':
+      return await page(req).context().storageState()
+
     case 'screenshot':
       // Full-page PNG, base64 over the pipe. Fed to the runtime's
       // failure-evidence capture (spec #202) — evidence for humans
@@ -428,7 +436,7 @@ async function dispatch(req) {
     case 'pollNetwork': {
       // Return recorded responses from `cursor` onward plus the new
       // cursor (buffer length). `observe.rs` polls this within its
-      // `within:` window. The buffer is per-page and the page is
+      // `timeout:` window. The buffer is per-page and the page is
       // per-check, so it only ever holds this check's own traffic.
       const buf = networkBuffers.get(req.pageId)
       if (!buf) throw new Error(`unknown pageId: ${req.pageId}`)

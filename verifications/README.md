@@ -33,15 +33,18 @@ composition.
 | 2 | [`implicit-outputs-example`](implicit-outputs-example/) | Reference `$steps.<id>.outputs.<field>` with **no `outputs:` ceremony** — the validator resolves it against the action contract | network (`api/call` → example.com) | #267 |
 | 3 | [`implicit-judgment-example`](implicit-judgment-example/) | Judging steps (`ui/assert-*`, `api/poll`) **self-assert** — an all-assert check needs no `assertions:` block; contrasts terse vs. explicit authoring | browser + a local login app on `:8080` | #253 |
 | 4 | [`includes-example`](includes-example/) | `includes:` composition — a shared committed fragment plus a per-developer override, under the root-wins merge rule | network | #67 |
-| 5 | [`environments-example`](environments-example/) | Named `environments:` — declare configs, select one (`--environment`), feed the leaf input chain and the `$env.*` whitelist | network | #68 |
-| 6 | [`inherits-example`](inherits-example/) | Inherited inputs — a leaf lists input *names* under `inherits:` and reads suite-wide values the manifest provides (a DI container) | network | #135 |
+| 5 | [`environments-example`](environments-example/) | Named `profiles:` — declare configs, select one (`--profile`), feed the leaf input chain and the `$env.*` whitelist | network | #68 |
+| 6 | [`inherits-example`](inherits-example/) | Inherited inputs — a leaf marks names `inherit: true` under `inputs:` and reads suite-wide values the manifest provides (a DI container) | network | #135 |
 | 7 | [`manifest-inputs-example`](manifest-inputs-example/) | Manifest input declarations — attach type, process `env:`, and `secret: true` once to a credential inherited by multiple leaves | local process (`cli/invoke`) + `DUHEM_EXAMPLE_PASSWORD` | #354 |
-| 8 | [`secret-outputs-example`](secret-outputs-example/) | Mark a scalar output from a login step `secret:` before using it in a later authenticated request | network (`api/call`) | #355 |
+| 8 | [`secret-outputs-example`](secret-outputs-example/) | Mark a scalar output from a login step `secret_outputs:` before using it in a later authenticated request | network (`api/call`) | #355 |
+| 9 | [`step-gating-example`](step-gating-example/) | Gate ordinary work, failure-only diagnostics, and unconditional cleanup with the closed `if:` vocabulary | local process (`cli/invoke`) | #365 |
+| 10 | [`pages-example`](pages-example/) | Share a two-level `pages:` locator catalog through `includes:` and consume the same entry from sibling leaves | browser + inline fixture pages | #366 |
+| 11 | [`flows-example`](flows-example/) | Reuse a parameterized `flows:` sign-in sequence from sibling leaves while preserving expanded-step evidence | browser + inline fixture pages | #367 |
 
 ## Self-verification suites — Duhem's dogfood
 
 Real VDs that gate this repo's CI. Bigger, multi-step, and pointed at a
-real system stood up by `environment:` hooks. This is what production
+real system stood up by `provision:` hooks. This is what production
 Duhem usage looks like — and, being Duhem-on-Duhem, it catches
 *regressions* in the shipped tool, which is why it self-gates here.
 

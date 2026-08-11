@@ -1,10 +1,13 @@
-//! Runtime registration of scalar step outputs as secrets (spec #355).
+//! Runtime registration of step outputs as secrets (specs #355 / #347).
 //!
 //! A declaration names a path into the raw action result, not an
 //! `outputs:` alias. Validation can prove only that the path starts at
 //! a contract-declared output; the returned JSON shape is known here.
-//! Resolve and check every path before mutating the writer so an invalid
-//! object/array declaration leaves no partially registered step state.
+//! Authored paths remain scalar-only: an author naming a response
+//! subtree would create a false sense of broad protection. An action
+//! contract may deliberately declare a structured output (the
+//! `ui/capture-session.state` credential object); the registry replaces
+//! that exact JSON subtree as one value at every evidence sink.
 
 use std::collections::BTreeSet;
 
@@ -23,13 +26,9 @@ pub(crate) fn register(
     contract_paths: &[&str],
     outputs: &std::collections::BTreeMap<String, serde_json::Value>,
 ) -> Result<(), EngineError> {
-    let paths: BTreeSet<&str> = step
-        .secret
-        .iter()
-        .map(String::as_str)
-        .chain(contract_paths.iter().copied())
-        .collect();
-    if paths.is_empty() {
+    let authored: BTreeSet<&str> = step.secret_outputs.iter().map(String::as_str).collect();
+    let contract: BTreeSet<&str> = contract_paths.iter().copied().collect();
+    if authored.is_empty() && contract.is_empty() {
         return Ok(());
     }
 
@@ -37,8 +36,8 @@ pub(crate) fn register(
         .id
         .clone()
         .unwrap_or_else(|| format!("step-{step_index}"));
-    let mut resolved = Vec::with_capacity(paths.len());
-    for path in paths {
+    let mut resolved = Vec::with_capacity(authored.len() + contract.len());
+    for path in authored.iter().chain(contract.iter()) {
         let value = crate::engine::extract::resolve(outputs, path).ok_or_else(|| {
             EngineError::SecretOutputMissing {
                 step: step_name.clone(),
@@ -50,7 +49,9 @@ pub(crate) fn register(
             serde_json::Value::Array(_) => Some("array"),
             _ => None,
         };
-        if let Some(shape) = shape {
+        if authored.contains(path)
+            && let Some(shape) = shape
+        {
             return Err(EngineError::SecretOutputNotScalar {
                 path: path.to_string(),
                 shape,

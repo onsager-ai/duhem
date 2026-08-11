@@ -27,12 +27,12 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::time::sleep;
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT};
 use crate::error::ActionError;
-use crate::with::WithinSpec;
+use crate::with::TimeoutSpec;
 
 /// Inter-poll sleep while waiting for the URL to match. Small
-/// enough that a 200ms `within:` produces multiple samples;
+/// enough that a 200ms `timeout:` produces multiple samples;
 /// large enough that we don't burn CPU against a stable URL.
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -52,7 +52,7 @@ enum With {
 struct EqualsArgs {
     equals: String,
     #[serde(default)]
-    within: Option<WithinSpec>,
+    timeout: Option<TimeoutSpec>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,7 +62,7 @@ struct MatchesArgs {
     /// `try_into` below so invalid patterns surface at parse time.
     matches: String,
     #[serde(default)]
-    within: Option<WithinSpec>,
+    timeout: Option<TimeoutSpec>,
 }
 
 #[derive(Debug)]
@@ -82,7 +82,7 @@ impl Plan {
         match w {
             With::Equals(a) => Ok(Plan {
                 matcher: Matcher::Equals(a.equals),
-                timeout: a.within.map(Into::into).unwrap_or(DEFAULT_WITHIN),
+                timeout: a.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT),
             }),
             With::Matches(a) => {
                 let re = Regex::new(&a.matches).map_err(|e| ActionError::InvalidWith {
@@ -91,7 +91,7 @@ impl Plan {
                 })?;
                 Ok(Plan {
                     matcher: Matcher::Matches(re),
-                    timeout: a.within.map(Into::into).unwrap_or(DEFAULT_WITHIN),
+                    timeout: a.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT),
                 })
             }
         }
@@ -123,7 +123,7 @@ impl Action for AssertUrl {
             with: vec![
                 FieldSpec::optional("equals"),
                 FieldSpec::optional("matches"),
-                FieldSpec::optional("within"),
+                FieldSpec::optional("timeout"),
             ],
             outputs: vec!["satisfied", "actual"],
             secret_outputs: vec![],
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn parses_equals() {
-        let yaml = r#"{ equals: "http://x/done", within: 2s }"#;
+        let yaml = r#"{ equals: "http://x/done", timeout: 2s }"#;
         let w: With = serde_yml::from_str(yaml).unwrap();
         let plan = Plan::from_with(w).unwrap();
         assert!(matches!(plan.matcher, Matcher::Equals(ref s) if s == "http://x/done"));
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn rejects_neither_set_at_parse_time() {
-        let yaml = r#"{ within: 1s }"#;
+        let yaml = r#"{ timeout: 1s }"#;
         assert!(serde_yml::from_str::<With>(yaml).is_err());
     }
 

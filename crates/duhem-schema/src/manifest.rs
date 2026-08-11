@@ -14,9 +14,14 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::environment::{DurationSpec, Environment};
+use crate::manifest_path::{
+    canonical_or_self, is_under, validate_entry_path, validate_glob_pattern,
+};
 use crate::project::ProjectDecl;
-use crate::verification::{InputDecl, SchemaError, VerificationDefinition};
+use crate::provision::{DurationSpec, Provision};
+use crate::verification::{
+    FlowCatalog, InputDecl, PageCatalog, SchemaError, VerificationDefinition,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -35,7 +40,7 @@ pub struct RootManifest {
     ///
     /// Composition is **root-wins**: an include fills only the keys
     /// this manifest leaves absent (for nested maps like
-    /// `environments:`, key-by-key, still root-wins per leaf key).
+    /// `profiles:`, key-by-key, still root-wins per leaf key).
     /// Manifest `inputs:` declarations overlay by input name.
     /// `verifications:` (and `includes:` themselves) are *concatenated*
     /// rather than overlaid — the root's entries first, then each
@@ -46,28 +51,28 @@ pub struct RootManifest {
     /// `includes:` behaves byte-identically to before.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub includes: Vec<PathBuf>,
-    /// Optional environment shared by the whole suite. When present, the
+    /// Optional provisioning lifecycle shared by the whole suite. When present, the
     /// runtime provisions it **once** (`up:` + `ready:`) before any leaf
     /// runs and tears it down **once** after the last leaf — instead of
     /// each leaf standing up its own. Leaves keep their own
-    /// `environment:` so they stay runnable standalone; a manifest run
+    /// `provision:` so they stay runnable standalone; a manifest run
     /// suppresses per-leaf provisioning and points every leaf at this
     /// shared stack. Additive: a manifest without it behaves as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment: Option<Environment>,
-    /// Named environment configs (`docs/duhem-spec.md` §10.4, spec
-    /// #68). Each key under `environments:` is an environment name
+    pub provision: Option<Provision>,
+    /// Named configuration profiles (`docs/duhem-spec.md` §10.4, spec
+    /// #68). Each key under `profiles:` is a profile name
     /// (e.g. `staging`, `prod`) whose value is a free-form
     /// `key: value` map. A key inherited through a manifest `inputs:`
     /// declaration is type-checked; all other keys remain conventionally
     /// typed for backward compatibility.
     ///
-    /// When an environment is selected for a run (CLI `--environment`,
+    /// When a profile is selected for a run (CLI `--profile`,
     /// or auto-selected when exactly one is declared) its keys feed
-    /// the leaf input-resolution chain (an env key `base_url`
+    /// the leaf input-resolution chain (a profile key `base_url`
     /// populates a declared input `base_url` when no higher-precedence
     /// source supplies it) and its string-valued keys are whitelisted
-    /// for `$env.<key>`. Additive: a manifest without `environments:`
+    /// for `$env.<key>`. Additive: a manifest without `profiles:`
     /// behaves byte-identically to before.
     ///
     /// `serde_yml::Value` has no `JsonSchema` impl, so the field is
@@ -78,15 +83,26 @@ pub struct RootManifest {
     #[schemars(
         with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
     )]
-    pub environments: BTreeMap<String, BTreeMap<String, serde_yml::Value>>,
+    pub profiles: BTreeMap<String, BTreeMap<String, serde_yml::Value>>,
     /// Suite-wide input declarations (spec #354). The manifest owns
     /// type, process-`env:` fallback, and sensitivity; selected
-    /// `environments:` entries continue to own values. A leaf opts into
-    /// a declaration by listing its name under `inherits:`, preserving
-    /// names-only dependency injection and the behavior of suites that
-    /// omit this block.
+    /// `profiles:` entries continue to own values. A leaf opts into
+    /// a declaration with `inputs.<name>.inherit: true`, preserving
+    /// explicit dependency injection and a closed leaf declaration set.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, InputDecl>,
+    /// Named locator catalog shared by every leaf in the suite.
+    /// Entries merge by page and element name under the root-wins rule;
+    /// a leaf-local entry overlays the composed manifest value.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(
+        with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
+    )]
+    pub pages: PageCatalog,
+    /// Suite-wide reusable step flows. Entries merge by name under
+    /// root-wins; a leaf-local flow with the same name wins.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub flows: FlowCatalog,
     /// Suite-wide defaults (`docs/duhem-spec.md` §10.4, spec #66).
     /// A single `defaults:` block that every leaf the manifest expands
     /// to inherits — so an author sets the timeout budget, the
@@ -96,8 +112,8 @@ pub struct RootManifest {
     /// Each sub-key is optional and, when absent, reproduces today's
     /// behavior exactly:
     ///
-    /// - `timeout:` is the per-step `within:` fallback. A step that
-    ///   declares its own `within:` wins; a step that doesn't picks up
+    /// - `timeout:` is the per-step `timeout:` fallback. A step that
+    ///   declares its own `timeout:` wins; a step that doesn't picks up
     ///   this default; with neither, the engine's built-in 5s last
     ///   resort applies.
     /// - `inconclusive_policy:` decides how a criterion-level
@@ -108,7 +124,7 @@ pub struct RootManifest {
     /// - `retry:` re-runs a whole check from step 0 when it comes back
     ///   `inconclusive` for a *retry-eligible* cause (timeout or an
     ///   environment error); a `fail` never retries.
-    /// - `environment:` names a key under the sibling `environments:`
+    /// - `profile:` names a key under the sibling `profiles:`
     ///   block. Cross-key validation is deferred to engine-time lookup
     ///   (spec #66 Out-of-scope), so any string is accepted here.
     ///
@@ -134,15 +150,15 @@ pub struct RootManifest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ManifestDefaults {
-    /// Name of an environment under the sibling `environments:` block
+    /// Name of a profile under the sibling `profiles:` block
     /// to use for the suite. Accepted as any string here; the lookup
-    /// against `environments:` happens at engine-time (spec #66
+    /// against `profiles:` happens at engine-time (spec #66
     /// Out-of-scope), so an unknown name is not a parse error.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment: Option<String>,
-    /// Per-step `within:` fallback for every leaf. A step's own
-    /// `within:` always wins; this only fills in when a step omits it.
-    /// Same duration wire shape as `environment.ready.http.timeout`
+    pub profile: Option<String>,
+    /// Per-step `timeout:` fallback for every leaf. A step's own
+    /// `timeout:` always wins; this only fills in when a step omits it.
+    /// Same duration wire shape as `provision.ready.http.timeout`
     /// (integer milliseconds or a suffixed string like `30s` / `2m`).
     /// Absent → the engine's built-in 5s default still applies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -198,11 +214,11 @@ pub enum RetryBackoff {
     Linear,
 }
 
-/// A well-formed environment name is lowercase ASCII letters, digits,
+/// A well-formed profile name is lowercase ASCII letters, digits,
 /// and dashes, beginning and ending with an alphanumeric. This keeps
-/// names addressable on the CLI (`--environment <name>`) and stable
+/// names addressable on the CLI (`--profile <name>`) and stable
 /// across the `$env` whitelist surface.
-fn env_name_well_formed(name: &str) -> bool {
+pub(crate) fn profile_name_well_formed(name: &str) -> bool {
     if name.is_empty() {
         return false;
     }
@@ -347,17 +363,17 @@ pub enum LoadError {
     /// looked.
     #[error("no manifest found in the current directory or its ancestors; searched {searched:?}")]
     ManifestNotFound { searched: Vec<PathBuf> },
-    /// An `environments:` key is not a well-formed environment name
+    /// A `profiles:` key is not a well-formed profile name
     /// (lowercase letters, digits, dashes; alphanumeric at both ends).
     #[error(
-        "{manifest}: environment name `{name}` is not well-formed (use lowercase letters, digits, and dashes)"
+        "{manifest}: profile name `{name}` is not well-formed (use lowercase letters, digits, and dashes)"
     )]
-    MalformedEnvironmentName { manifest: PathBuf, name: String },
-    /// An `environments:` entry declares an empty key map. A named
-    /// environment with no keys supplies nothing and is almost
+    MalformedProfileName { manifest: PathBuf, name: String },
+    /// A `profiles:` entry declares an empty key map. A named
+    /// profile with no keys supplies nothing and is almost
     /// certainly an authoring mistake.
-    #[error("{manifest}: environment `{name}` declares no keys")]
-    EmptyEnvironment { manifest: PathBuf, name: String },
+    #[error("{manifest}: profile `{name}` declares no keys")]
+    EmptyProfile { manifest: PathBuf, name: String },
     /// An `includes:` chain re-enters a file already on the chain —
     /// resolving it would loop forever. Both ends are named: the file
     /// that declared the offending include and the include target it
@@ -380,6 +396,19 @@ pub enum LoadError {
     /// Manifest declarations use the leaf input authoring rules.
     #[error("{path}: manifest input validation failed: {message}")]
     InvalidManifestInputs { path: PathBuf, message: String },
+    /// A reusable flow is structurally invalid or cannot be expanded.
+    #[error("{path}: flow validation failed: {message}")]
+    InvalidFlows { path: PathBuf, message: String },
+    /// A leaf loaded by explicit path (issue #384: `-f`/`--file`, or an
+    /// explicit positional file) references `$pages.*` and/or a
+    /// `call:` flow that its own `pages:` / `flows:` blocks don't
+    /// define, and walking up from its directory found no root
+    /// manifest to supply them. Distinct from `InvalidFlows` so the
+    /// diagnostic names exactly what's unresolved and where it would
+    /// normally live, instead of the flow expander's generic "unknown
+    /// flow" parse error.
+    #[error("{path}: {detail}")]
+    UnresolvedWithoutRootManifest { path: PathBuf, detail: String },
 }
 
 /// Currently-supported `manifest_version` value. Bumping this is
@@ -392,12 +421,13 @@ pub const SUPPORTED_MANIFEST_VERSION: u32 = 1;
 /// the leading-dot `.duhem.*` aliases let a manifest hide like
 /// `.gitignore` / `.editorconfig`. Earlier entries win when several
 /// exist in the same directory.
-const MANIFEST_CANDIDATES: [&str; 4] = ["duhem.yml", "duhem.yaml", ".duhem.yml", ".duhem.yaml"];
+pub(crate) const MANIFEST_CANDIDATES: [&str; 4] =
+    ["duhem.yml", "duhem.yaml", ".duhem.yml", ".duhem.yaml"];
 
 /// The first existing manifest candidate directly under `dir`, in
 /// [`MANIFEST_CANDIDATES`] priority order, or `None` when the
 /// directory holds none of them.
-fn manifest_in_dir(dir: &Path) -> Option<PathBuf> {
+pub(crate) fn manifest_in_dir(dir: &Path) -> Option<PathBuf> {
     MANIFEST_CANDIDATES
         .iter()
         .map(|name| dir.join(name))
@@ -441,24 +471,7 @@ pub fn discover(explicit: Option<&Path>, cwd: &Path) -> Result<PathBuf, LoadErro
         return Ok(path.to_path_buf());
     }
 
-    let mut searched: Vec<PathBuf> = Vec::new();
-    let mut dir = Some(cwd);
-    while let Some(current) = dir {
-        if let Some(hit) = manifest_in_dir(current) {
-            return Ok(hit);
-        }
-        for name in MANIFEST_CANDIDATES {
-            searched.push(current.join(name));
-        }
-        // Repo-boundary cap: a `.git` entry stops the walk *after* the
-        // boundary directory itself is probed (matching git's own
-        // discovery — the repo root often holds the manifest).
-        if current.join(".git").exists() {
-            break;
-        }
-        dir = current.parent();
-    }
-    Err(LoadError::ManifestNotFound { searched })
+    crate::manifest_compose::walk_ancestors_for_manifest(cwd)
 }
 
 /// Resolve a CLI `path` argument to a [`Loaded`].
@@ -475,6 +488,49 @@ pub fn discover(explicit: Option<&Path>, cwd: &Path) -> Result<PathBuf, LoadErro
 /// leaf fails the whole load with a path-tagged error so authors see
 /// the offending file.
 pub fn load(path: &Path) -> Result<Loaded, LoadError> {
+    let (path, src, shape) = resolve_and_classify(path)?;
+    match shape {
+        Shape::Manifest => load_manifest(&path, &src),
+        Shape::Leaf => load_leaf(&path, &src).map(|definition| Loaded::Leaf { path, definition }),
+        Shape::Ambiguous => Err(LoadError::AmbiguousShape { path }),
+        Shape::Unknown => Err(LoadError::UnknownShape { path }),
+    }
+}
+
+/// Like [`load`], but a leaf's `$pages.*` and flow references resolve
+/// through the nearest root manifest found walking up from its
+/// directory (issue #384: [`resolve_leaf_through_root_manifest`]),
+/// instead of failing outright when they live in files a manifest's
+/// `includes:` composes in. Sibling `verifications:` entries the
+/// found manifest lists are never loaded or executed — the run stays
+/// scoped to the requested leaf.
+///
+/// The manifest branch is byte-identical to [`load`] (a target that
+/// resolves to a manifest already sees every leaf it lists, so there
+/// is nothing to widen); only the leaf branch differs. `duhem run`
+/// uses this for its `-f`/`--file` and explicit-path targets; the
+/// no-path ancestor walk only ever resolves to a manifest, so it is
+/// unaffected. Other callers (`duhem validate`, `duhem resolve`) keep
+/// today's self-contained-leaf behavior via [`load`].
+pub fn load_for_run(path: &Path) -> Result<Loaded, LoadError> {
+    let (path, src, shape) = resolve_and_classify(path)?;
+    match shape {
+        Shape::Manifest => load_manifest(&path, &src),
+        Shape::Leaf => {
+            let mut definition = load_leaf_authored(&path, &src)?;
+            crate::leaf_context::resolve_leaf_through_root_manifest(&path, &mut definition)?;
+            Ok(Loaded::Leaf { path, definition })
+        }
+        Shape::Ambiguous => Err(LoadError::AmbiguousShape { path }),
+        Shape::Unknown => Err(LoadError::UnknownShape { path }),
+    }
+}
+
+/// Resolve a directory to its manifest candidate (`load`'s `path.is_dir()`
+/// probe), read the target file, and classify its shape. Shared by
+/// [`load`] and [`load_for_run`] so they never drift on how a target
+/// is located — only how a `Shape::Leaf` result is then loaded.
+fn resolve_and_classify(path: &Path) -> Result<(PathBuf, String, Shape), LoadError> {
     let path = if path.is_dir() {
         match manifest_in_dir(path) {
             Some(candidate) => candidate,
@@ -493,15 +549,8 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
         source: e,
     })?;
 
-    match classify_yaml(&path, &src)? {
-        Shape::Manifest => load_manifest(&path, &src),
-        Shape::Leaf => load_leaf(&path, &src).map(|definition| Loaded::Leaf {
-            path: path.clone(),
-            definition,
-        }),
-        Shape::Ambiguous => Err(LoadError::AmbiguousShape { path }),
-        Shape::Unknown => Err(LoadError::UnknownShape { path }),
-    }
+    let shape = classify_yaml(&path, &src)?;
+    Ok((path, src, shape))
 }
 
 enum Shape {
@@ -539,69 +588,26 @@ fn classify_yaml(path: &Path, src: &str) -> Result<Shape, LoadError> {
     })
 }
 
-fn load_leaf(path: &Path, src: &str) -> Result<VerificationDefinition, LoadError> {
+fn load_leaf_authored(path: &Path, src: &str) -> Result<VerificationDefinition, LoadError> {
     VerificationDefinition::from_yaml_str(src).map_err(|e| LoadError::Yaml {
         path: path.to_path_buf(),
         source: e,
     })
 }
 
-fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
-    let mut manifest = RootManifest::from_yaml_str(src).map_err(|e| LoadError::Yaml {
-        path: manifest_path.to_path_buf(),
-        source: e,
+fn load_leaf(path: &Path, src: &str) -> Result<VerificationDefinition, LoadError> {
+    let mut definition = load_leaf_authored(path, src)?;
+    crate::flows::validate_and_expand(&mut definition).map_err(|message| {
+        LoadError::InvalidFlows {
+            path: path.to_path_buf(),
+            message,
+        }
     })?;
-    if manifest.manifest_version != SUPPORTED_MANIFEST_VERSION {
-        return Err(LoadError::UnsupportedManifestVersion {
-            path: manifest_path.to_path_buf(),
-            found: manifest.manifest_version,
-            supported: SUPPORTED_MANIFEST_VERSION,
-        });
-    }
-    // Compose `includes:` (spec #67) before any structural checks so
-    // the rest of this function operates on the *effective* manifest —
-    // root values plus include-supplied fills. Root-wins: an include
-    // only fills keys the root left absent. `manifest` is mutated in
-    // place into the merged result.
-    let manifest_parent = manifest_path.parent().unwrap_or_else(|| Path::new("."));
-    let root_includes = manifest.includes.clone();
-    let mut chain = vec![canonical_or_self(manifest_path)];
-    crate::includes::resolve_includes(
-        manifest_path,
-        manifest_parent,
-        &root_includes,
-        &mut manifest,
-        &mut chain,
-        0,
-    )?;
-    crate::manifest_inputs::validate(manifest_path, &manifest.inputs)?;
-    // Suite-wide `project:` discipline (#191): exactly one non-empty
-    // coordinate. Same load-time home as the other structural checks.
-    if let Some(project) = &manifest.project
-        && let Err(msg) = project.check()
-    {
-        return Err(LoadError::BadProjectDecl {
-            path: manifest_path.to_path_buf(),
-            message: msg,
-        });
-    }
-    // Named-environments discipline (spec #68): well-formed names,
-    // non-empty key maps. Cheap structural checks at load time, the
-    // same place the manifest-version and path checks live.
-    for (name, keys) in &manifest.environments {
-        if !env_name_well_formed(name) {
-            return Err(LoadError::MalformedEnvironmentName {
-                manifest: manifest_path.to_path_buf(),
-                name: name.clone(),
-            });
-        }
-        if keys.is_empty() {
-            return Err(LoadError::EmptyEnvironment {
-                manifest: manifest_path.to_path_buf(),
-                name: name.clone(),
-            });
-        }
-    }
+    Ok(definition)
+}
+
+fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
+    let manifest = crate::manifest_compose::compose_manifest(manifest_path, src)?;
     let parent = manifest_path.parent().unwrap_or_else(|| Path::new("."));
     let manifest_canonical = canonical_or_self(manifest_path);
     // Pre-canonicalize the manifest's parent so we can verify that
@@ -711,7 +717,16 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
                     });
                 }
             }
-            let def = load_leaf(&leaf_path, &src)?;
+            let mut def = load_leaf_authored(&leaf_path, &src)?;
+            // Leaf-local entries win over the effective manifest
+            // catalog, element by element.
+            crate::manifest_compose::merge_manifest_catalogs_into_leaf(&manifest, &mut def);
+            crate::flows::validate_and_expand(&mut def).map_err(|message| {
+                LoadError::InvalidFlows {
+                    path: leaf_path.clone(),
+                    message,
+                }
+            })?;
             leaves.push(LoadedLeaf {
                 path: leaf_path,
                 definition: def,
@@ -732,68 +747,6 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
         leaves,
         warnings,
     })
-}
-
-/// Validate a `glob:` pattern under the same discipline as `path:`
-/// entries: no absolute roots, no `..` segments. Wildcard chars (`*`,
-/// `?`, `[`, `]`) inside literal path components are fine; the check
-/// runs purely on the path-segment shape of the pattern.
-fn validate_glob_pattern(manifest: &Path, pattern: &str) -> Result<(), LoadError> {
-    let candidate = Path::new(pattern);
-    if candidate.is_absolute() {
-        return Err(LoadError::UnconstrainedGlob {
-            manifest: manifest.to_path_buf(),
-            pattern: pattern.to_string(),
-        });
-    }
-    for component in candidate.components() {
-        if matches!(component, std::path::Component::ParentDir) {
-            return Err(LoadError::UnconstrainedGlob {
-                manifest: manifest.to_path_buf(),
-                pattern: pattern.to_string(),
-            });
-        }
-    }
-    Ok(())
-}
-
-/// `true` when `candidate`'s canonicalized path lives under `root`'s
-/// canonicalized path. Falls back to lexical comparison when
-/// canonicalization fails (the same fallback `canonical_or_self`
-/// uses), which is good enough to catch the symlinked-escape case in
-/// practice and identical for the lexical-only test inputs.
-fn is_under(root: &Path, candidate: &Path) -> bool {
-    let c = canonical_or_self(candidate);
-    c.starts_with(root)
-}
-
-pub(crate) fn validate_entry_path(manifest: &Path, entry: &Path) -> Result<(), LoadError> {
-    if entry.is_absolute() {
-        return Err(LoadError::AbsolutePath {
-            manifest: manifest.to_path_buf(),
-            entry: entry.to_path_buf(),
-        });
-    }
-    // Reject any `..` segment in the entry — silently allowing
-    // escapes would make `duhem run` reach files outside the
-    // verifications directory, which is a real surprise vector.
-    for component in entry.components() {
-        if matches!(component, std::path::Component::ParentDir) {
-            return Err(LoadError::PathEscape {
-                manifest: manifest.to_path_buf(),
-                entry: entry.to_path_buf(),
-            });
-        }
-    }
-    Ok(())
-}
-
-/// Best-effort canonicalization. Falls back to the input when the
-/// file doesn't yet exist (e.g. unit tests using temp paths that may
-/// or may not have been created). Identity comparison is "same
-/// canonical path or, failing that, same lexical path."
-pub(crate) fn canonical_or_self(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
@@ -850,6 +803,38 @@ verifications:
             ManifestEntry::Glob { glob } => assert_eq!(glob, "./**/duhem.yml"),
             _ => panic!("expected glob entry"),
         }
+    }
+
+    #[test]
+    fn pages_round_trip_and_absence_keeps_manifest_wire_shape() {
+        let absent =
+            RootManifest::from_yaml_str("manifest_version: 1\nverifications: []\n").unwrap();
+        assert!(absent.pages.is_empty());
+        assert!(!serde_yml::to_string(&absent).unwrap().contains("pages:"));
+
+        let parsed = RootManifest::from_yaml_str(
+            "manifest_version: 1\npages:\n  login:\n    submit: { role: button, name: Sign In }\nverifications: []\n",
+        )
+        .expect("parse pages");
+        let round_trip =
+            RootManifest::from_yaml_str(&serde_yml::to_string(&parsed).unwrap()).unwrap();
+        assert_eq!(parsed, round_trip);
+    }
+
+    #[test]
+    fn flows_round_trip_and_absence_keeps_manifest_wire_shape() {
+        let absent =
+            RootManifest::from_yaml_str("manifest_version: 1\nverifications: []\n").unwrap();
+        assert!(absent.flows.is_empty());
+        assert!(!serde_yml::to_string(&absent).unwrap().contains("flows:"));
+
+        let parsed = RootManifest::from_yaml_str(
+            "manifest_version: 1\nflows:\n  shared:\n    steps:\n      - uses: cli/invoke\nverifications: []\n",
+        )
+        .expect("parse flows");
+        let round_trip =
+            RootManifest::from_yaml_str(&serde_yml::to_string(&parsed).unwrap()).unwrap();
+        assert_eq!(parsed, round_trip);
     }
 
     #[test]
@@ -1191,10 +1176,10 @@ verifications:
     }
 
     #[test]
-    fn environments_round_trip_preserves_nested_maps() {
+    fn profiles_round_trip_preserves_nested_maps() {
         let y = r#"
 manifest_version: 1
-environments:
+profiles:
   staging:
     base_url: https://staging.example.com
     db_url: postgres://staging-db
@@ -1204,8 +1189,8 @@ environments:
 verifications: []
 "#;
         let m = RootManifest::from_yaml_str(y).expect("parse");
-        assert_eq!(m.environments.len(), 2);
-        let staging = &m.environments["staging"];
+        assert_eq!(m.profiles.len(), 2);
+        let staging = &m.profiles["staging"];
         assert_eq!(
             staging["base_url"],
             serde_yml::Value::String("https://staging.example.com".into())
@@ -1213,33 +1198,40 @@ verifications: []
         assert_eq!(staging["db_url"].as_str(), Some("postgres://staging-db"));
         assert_eq!(staging["workers"].as_u64(), Some(3));
         assert_eq!(
-            m.environments["prod"]["base_url"].as_str(),
+            m.profiles["prod"]["base_url"].as_str(),
             Some("https://example.com")
         );
-        // deny_unknown_fields still holds alongside the new field.
-        let bad = "manifest_version: 1\nenvironments: {}\nverifications: []\nfoo: bar\n";
-        assert!(RootManifest::from_yaml_str(bad).is_err());
+        // Old schema spellings are not transitional aliases.
+        for old in [
+            "environments: {}\n",
+            "environment:\n  up: ./scripts/up.sh\n",
+            "defaults:\n  environment: staging\n",
+        ] {
+            let bad = format!("manifest_version: 1\n{old}verifications: []\n");
+            let err = RootManifest::from_yaml_str(&bad).unwrap_err();
+            assert!(format!("{err}").contains("unknown field"), "got: {err}");
+        }
     }
 
     #[test]
-    fn absent_environments_default_to_empty() {
+    fn absent_profiles_default_to_empty() {
         let y = "manifest_version: 1\nverifications: []\n";
         let m = RootManifest::from_yaml_str(y).expect("parse");
-        assert!(m.environments.is_empty());
-        // Round-trips back out without an `environments:` key.
+        assert!(m.profiles.is_empty());
+        // Round-trips back out without an `profiles:` key.
         let out = serde_yml::to_string(&m).unwrap();
-        assert!(!out.contains("environments"), "got: {out}");
+        assert!(!out.contains("profiles"), "got: {out}");
     }
 
     #[test]
-    fn malformed_environment_name_is_load_error() {
+    fn malformed_profile_name_is_load_error() {
         let tmp = tempfile::tempdir().unwrap();
         write(
             tmp.path(),
             "duhem.yml",
             r#"
 manifest_version: 1
-environments:
+profiles:
   Prod:
     base_url: https://example.com
 verifications: []
@@ -1247,33 +1239,30 @@ verifications: []
         );
         let err = load(&tmp.path().join("duhem.yml")).unwrap_err();
         assert!(
-            matches!(err, LoadError::MalformedEnvironmentName { .. }),
+            matches!(err, LoadError::MalformedProfileName { .. }),
             "got {err:?}"
         );
     }
 
     #[test]
-    fn empty_environment_key_map_is_load_error() {
+    fn empty_profile_key_map_is_load_error() {
         let tmp = tempfile::tempdir().unwrap();
         write(
             tmp.path(),
             "duhem.yml",
             r#"
 manifest_version: 1
-environments:
+profiles:
   staging: {}
 verifications: []
 "#,
         );
         let err = load(&tmp.path().join("duhem.yml")).unwrap_err();
-        assert!(
-            matches!(err, LoadError::EmptyEnvironment { .. }),
-            "got {err:?}"
-        );
+        assert!(matches!(err, LoadError::EmptyProfile { .. }), "got {err:?}");
     }
 
     #[test]
-    fn well_formed_environment_loads() {
+    fn well_formed_profile_loads() {
         let tmp = tempfile::tempdir().unwrap();
         write(tmp.path(), "a/duhem.yml", LEAF_A);
         write(
@@ -1281,7 +1270,7 @@ verifications: []
             "duhem.yml",
             r#"
 manifest_version: 1
-environments:
+profiles:
   staging:
     base_url: https://staging.example.com
 verifications:
@@ -1291,7 +1280,7 @@ verifications:
         let loaded = load(&tmp.path().join("duhem.yml")).unwrap();
         match loaded {
             Loaded::Manifest { manifest, .. } => {
-                assert!(manifest.environments.contains_key("staging"));
+                assert!(manifest.profiles.contains_key("staging"));
             }
             _ => panic!("expected Manifest"),
         }
@@ -1411,7 +1400,7 @@ verifications:
         let y = r#"
 manifest_version: 1
 defaults:
-  environment: staging
+  profile: staging
   timeout: 30s
   inconclusive_policy: warn
   retry:
@@ -1421,7 +1410,7 @@ verifications: []
 "#;
         let m = RootManifest::from_yaml_str(y).expect("parse");
         let d = m.defaults.as_ref().expect("defaults present");
-        assert_eq!(d.environment.as_deref(), Some("staging"));
+        assert_eq!(d.profile.as_deref(), Some("staging"));
         assert_eq!(
             std::time::Duration::from(d.timeout.unwrap()),
             std::time::Duration::from_secs(30)
@@ -1445,7 +1434,7 @@ verifications: []
 "#;
         let m = RootManifest::from_yaml_str(y).expect("parse");
         let d = m.defaults.unwrap();
-        assert!(d.environment.is_none());
+        assert!(d.profile.is_none());
         assert!(d.inconclusive_policy.is_none());
         assert!(d.retry.is_none());
         assert!(d.timeout.is_some());
@@ -1560,6 +1549,115 @@ verifications:
         match loaded {
             Loaded::Manifest { leaves, .. } => assert_eq!(leaves.len(), 1, "dedup repeated leaf"),
             _ => panic!("expected Manifest"),
+        }
+    }
+
+    // ---- #384: leaf-by-path resolves through the root manifest ------
+    //
+    // Reference-detection and manifest-composition coverage lives in
+    // `leaf_context::tests` (the module that owns that logic). What
+    // stays here is `load_for_run` dispatch behavior: parity with
+    // `load` on a manifest target, and the leaf-named-`duhem.yml`
+    // self-reference edge case.
+
+    #[test]
+    fn load_for_run_manifest_target_matches_plain_load() {
+        // #384 requirement: "do not change the no-path branch's
+        // behaviour at all" — when the target already resolves to a
+        // manifest, `load_for_run` takes the exact same branch `load`
+        // does.
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "a/duhem.yml", LEAF_A);
+        let manifest = write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+verifications:
+  - path: ./a/duhem.yml
+"#,
+        );
+        let via_load = load(&manifest).unwrap();
+        let via_run = load_for_run(&manifest).unwrap();
+        match (via_load, via_run) {
+            (Loaded::Manifest { leaves: a, .. }, Loaded::Manifest { leaves: b, .. }) => {
+                assert_eq!(a.len(), b.len());
+                assert_eq!(a[0].definition.verification, b[0].definition.verification);
+            }
+            other => panic!("expected both Manifest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_for_run_leaf_named_duhem_yml_is_not_mistaken_for_its_own_manifest() {
+        // Regression: Pattern A conventionally names a self-contained
+        // leaf `duhem.yml` (it's exactly what `duhem init` scaffolds).
+        // That name is also one of `MANIFEST_CANDIDATES`, so starting
+        // the ancestor walk at the leaf's own directory must not
+        // "find" the leaf as its own manifest and try to parse a
+        // Verification Definition as a `RootManifest`.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let leaf = write(tmp.path(), "v/duhem.yml", LEAF_A);
+
+        let loaded = load_for_run(&leaf).expect("a leaf must never resolve to itself");
+        match loaded {
+            Loaded::Leaf { definition, .. } => {
+                assert_eq!(definition.verification, "leaf-a");
+            }
+            _ => panic!("expected Leaf"),
+        }
+    }
+
+    #[test]
+    fn load_for_run_leaf_named_duhem_yml_still_finds_a_real_ancestor_manifest() {
+        // Companion to the regression above: excluding the leaf itself
+        // must not blind the walk to a *real* manifest further up —
+        // only the leaf's own path is skipped.
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+pages:
+  login:
+    heading: { text: Sign in }
+verifications:
+  - path: v/duhem.yml
+"#,
+        );
+        let leaf = write(
+            tmp.path(),
+            "v/duhem.yml",
+            r#"
+verification: leaf-a
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/assert-element
+            with:
+              locator: $pages.login.heading
+              expected: visible
+"#,
+        );
+
+        let loaded = load_for_run(&leaf).expect("resolves through the real ancestor manifest");
+        match loaded {
+            Loaded::Leaf { definition, .. } => {
+                assert!(
+                    definition
+                        .pages
+                        .get("login")
+                        .is_some_and(|e| e.contains_key("heading")),
+                    "expected the ancestor manifest's page to merge in: {:?}",
+                    definition.pages
+                );
+            }
+            _ => panic!("expected Leaf"),
         }
     }
 }

@@ -17,6 +17,7 @@ import {
 } from "../api";
 import { foldRun } from "../fold";
 import { groupTimeline, stepStatus } from "../format";
+import { flowOrigin } from "../definition";
 import { cn } from "@/lib/utils";
 import { StatusBadge, VerdictBadge } from "../ui";
 import { DefinitionProvider, useVd } from "./definition-context";
@@ -239,9 +240,12 @@ function TreeGroup({
                     if (node.kind !== "step") return null;
                     const started = node.events[0];
                     const uses = typeof started.uses === "string" ? started.uses : "step";
-                    const authored = vd?.stepId(criterion.id, chk.id, node.stepIndex);
-                    const label = authored ?? uses.split("/").pop() ?? uses;
-                    const key = authored ?? String(node.stepIndex);
+                    const flow = flowOrigin(started.flow);
+                    const authoredId = vd?.stepId(criterion.id, chk.id, node.stepIndex, flow);
+                    const label =
+                      vd?.stepLabel(criterion.id, chk.id, node.stepIndex, flow) ??
+                      `${uses} #${node.stepIndex}`;
+                    const key = authoredId ?? String(node.stepIndex);
                     const stepSearch = new URLSearchParams(search);
                     stepSearch.set("step", key);
                     const status = stepStatus(node);
@@ -256,6 +260,8 @@ function TreeGroup({
                     return (
                       <Link
                         key={node.stepIndex}
+                        data-flow-invocation={flow?.invocation}
+                        data-flow-name={flow?.name}
                         to={{
                           pathname: checkHref(runId, criterion.id, chk.id),
                           search: `?${stepSearch.toString()}`,

@@ -513,11 +513,36 @@ impl RunBrowser {
         self
     }
 
-    /// Allocate a fresh context + page for one check.
+    /// Allocate a fresh unauthenticated context + page for one check.
+    /// Kept as the session-less entry point so an absent `session:`
+    /// follows the pre-#347 protocol byte-for-byte.
     pub async fn open_check(&self) -> Result<CheckBrowser, ActionError> {
+        self.open_check_inner(None).await
+    }
+
+    /// Allocate a fresh context seeded from Playwright storage state.
+    /// Seeding copies a declared baseline; the returned context is
+    /// still isolated from every sibling check (spec #347).
+    pub async fn open_check_with_storage_state(
+        &self,
+        storage_state: &serde_json::Value,
+    ) -> Result<CheckBrowser, ActionError> {
+        self.open_check_inner(Some(storage_state)).await
+    }
+
+    async fn open_check_inner(
+        &self,
+        storage_state: Option<&serde_json::Value>,
+    ) -> Result<CheckBrowser, ActionError> {
+        let params = match storage_state {
+            Some(state) => {
+                json!({ "recordVideo": self.record_video, "storageState": state })
+            }
+            None => json!({ "recordVideo": self.record_video }),
+        };
         let ctx = self
             .conn
-            .request("newContext", json!({ "recordVideo": self.record_video }))
+            .request("newContext", params)
             .await
             .map_err(|e| ActionError::Playwright(format!("context: {e}")))?;
         let context_id = ctx
@@ -714,6 +739,13 @@ impl Page {
         serde_json::from_value(v).map_err(|e| PwError(format!("cookies decode: {e}")))
     }
 
+    /// Playwright `BrowserContext::storageState` for this page's
+    /// isolated context. Returned as opaque JSON so the action and
+    /// runtime never interpret cookie/local-storage credentials.
+    pub async fn storage_state(&self) -> Result<serde_json::Value, PwError> {
+        self.conn.request("getStorageState", self.p()).await
+    }
+
     /// Full-page PNG of the current viewport state. Failure-evidence
     /// capture (spec #202) — evidence for humans/agents, never judge
     /// input.
@@ -742,7 +774,7 @@ impl Page {
     }
 
     /// Bounding rect of `selector`'s first match (spec #214), or `None`
-    /// when it isn't present/visible within `timeout_ms`. CSS px,
+    /// when it isn't present or visible within `timeout_ms`. CSS px,
     /// document-relative — the element-highlight overlay maps these
     /// onto the full-page screenshot.
     pub async fn bounding_box(
@@ -768,7 +800,7 @@ impl Page {
 
     /// Drain recorded network responses from `cursor` onward. Returns
     /// the batch plus the next cursor; `api/observe` polls this within
-    /// its `within:` window. See [`NetworkEvent`].
+    /// its `timeout:` window. See [`NetworkEvent`].
     pub async fn poll_network(&self, cursor: u64) -> Result<NetworkBatch, PwError> {
         let mut req = self.p();
         req["cursor"] = json!(cursor);

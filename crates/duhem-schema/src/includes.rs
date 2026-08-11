@@ -11,11 +11,10 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::environment::Environment;
-use crate::manifest::{
-    LoadError, ManifestEntry, RootManifest, canonical_or_self, validate_entry_path,
-};
-use crate::verification::{InputDecl, SchemaError};
+use crate::manifest::{LoadError, ManifestEntry, RootManifest};
+use crate::manifest_path::{canonical_or_self, validate_entry_path};
+use crate::provision::Provision;
+use crate::verification::{FlowCatalog, InputDecl, PageCatalog, SchemaError};
 
 /// An `includes:` target — a manifest fragment composed into a root
 /// manifest (spec #67). Structurally a [`RootManifest`] with every
@@ -31,21 +30,30 @@ pub struct PartialRootManifest {
     /// include's parent directory. See [`RootManifest::includes`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub includes: Vec<PathBuf>,
-    /// Shared suite environment to fill in when the root manifest
-    /// declares none. See [`RootManifest::environment`].
+    /// Shared suite provisioning lifecycle to fill in when the root manifest
+    /// declares none. See [`RootManifest::provision`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment: Option<Environment>,
-    /// Named environment configs, overlaid key-by-key under the
-    /// root-wins rule. See [`RootManifest::environments`].
+    pub provision: Option<Provision>,
+    /// Named configuration profiles, overlaid key-by-key under the
+    /// root-wins rule. See [`RootManifest::profiles`].
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     #[schemars(
         with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
     )]
-    pub environments: BTreeMap<String, BTreeMap<String, serde_yml::Value>>,
+    pub profiles: BTreeMap<String, BTreeMap<String, serde_yml::Value>>,
     /// Suite-wide input declarations, merged by name under the same
     /// root-wins rule as other manifest maps.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, InputDecl>,
+    /// Named locators, merged by page and element under root-wins.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(
+        with = "std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>"
+    )]
+    pub pages: PageCatalog,
+    /// Reusable flows, merged by name under root-wins.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub flows: FlowCatalog,
     /// Verification entries concatenated onto the root manifest's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub verifications: Vec<ManifestEntry>,
@@ -150,19 +158,19 @@ pub(crate) fn resolve_includes(
 /// Root-wins merge of one include (`incoming`) into `effective`.
 ///
 /// Each optional/scalar field is filled only when `effective` still
-/// lacks it; nested environment maps overlay key-by-key and input
+/// lacks it; nested profile maps overlay key-by-key and input
 /// declarations overlay by name, again filling only absent keys;
 /// list-shaped fields (`verifications:`, `includes:`) are concatenated.
 /// Adding a future field to the merge (e.g. `defaults:`) is a one-block
 /// addition here.
 fn merge_partial(effective: &mut RootManifest, incoming: &PartialRootManifest) {
     // Scalar/optional fields: root-wins, fill-if-absent.
-    if effective.environment.is_none() {
-        effective.environment = incoming.environment.clone();
+    if effective.provision.is_none() {
+        effective.provision = incoming.provision.clone();
     }
     // Nested map: overlay key-by-key, still root-wins per leaf key.
-    for (name, keys) in &incoming.environments {
-        let slot = effective.environments.entry(name.clone()).or_default();
+    for (name, keys) in &incoming.profiles {
+        let slot = effective.profiles.entry(name.clone()).or_default();
         for (key, value) in keys {
             slot.entry(key.clone()).or_insert_with(|| value.clone());
         }
@@ -172,6 +180,20 @@ fn merge_partial(effective: &mut RootManifest, incoming: &PartialRootManifest) {
             .inputs
             .entry(name.clone())
             .or_insert_with(|| decl.clone());
+    }
+    for (page, elements) in &incoming.pages {
+        let target = effective.pages.entry(page.clone()).or_default();
+        for (element, locator) in elements {
+            target
+                .entry(element.clone())
+                .or_insert_with(|| locator.clone());
+        }
+    }
+    for (name, flow) in &incoming.flows {
+        effective
+            .flows
+            .entry(name.clone())
+            .or_insert_with(|| flow.clone());
     }
     // List-shaped fields: concatenate (root's already present first).
     effective
@@ -230,6 +252,36 @@ criteria:
     }
 
     #[test]
+    fn partial_pages_round_trip_and_absence_keeps_wire_shape() {
+        let absent = PartialRootManifest::from_yaml_str("{}\n").expect("parse absent");
+        assert!(absent.pages.is_empty());
+        assert!(!serde_yml::to_string(&absent).unwrap().contains("pages:"));
+
+        let parsed = PartialRootManifest::from_yaml_str(
+            "pages:\n  login:\n    submit: { role: button, name: Sign In }\n",
+        )
+        .expect("parse pages");
+        let round_trip =
+            PartialRootManifest::from_yaml_str(&serde_yml::to_string(&parsed).unwrap()).unwrap();
+        assert_eq!(parsed, round_trip);
+    }
+
+    #[test]
+    fn partial_flows_round_trip_and_absence_keeps_wire_shape() {
+        let absent = PartialRootManifest::from_yaml_str("{}\n").expect("parse absent");
+        assert!(absent.flows.is_empty());
+        assert!(!serde_yml::to_string(&absent).unwrap().contains("flows:"));
+
+        let parsed = PartialRootManifest::from_yaml_str(
+            "flows:\n  shared:\n    steps:\n      - uses: cli/invoke\n",
+        )
+        .expect("parse flows");
+        let round_trip =
+            PartialRootManifest::from_yaml_str(&serde_yml::to_string(&parsed).unwrap()).unwrap();
+        assert_eq!(parsed, round_trip);
+    }
+
+    #[test]
     fn includes_merge_is_root_wins_then_first_include_wins() {
         // staging.db_url is declared by the root → root wins.
         // staging.base_url is declared by both includes → the first
@@ -241,7 +293,7 @@ criteria:
             tmp.path(),
             ".duhem.a.yml",
             r#"
-environments:
+profiles:
   staging:
     base_url: from-a
     db_url: from-a
@@ -251,7 +303,7 @@ environments:
             tmp.path(),
             ".duhem.b.yml",
             r#"
-environments:
+profiles:
   staging:
     base_url: from-b
     workers: 3
@@ -265,7 +317,7 @@ manifest_version: 1
 includes:
   - ./.duhem.a.yml
   - ./.duhem.b.yml
-environments:
+profiles:
   staging:
     db_url: from-root
 verifications:
@@ -275,13 +327,143 @@ verifications:
         let loaded = load(&tmp.path().join("duhem.yml")).unwrap();
         match loaded {
             Loaded::Manifest { manifest, .. } => {
-                let staging = &manifest.environments["staging"];
+                let staging = &manifest.profiles["staging"];
                 assert_eq!(staging["db_url"].as_str(), Some("from-root"));
                 assert_eq!(staging["base_url"].as_str(), Some("from-a"));
                 assert_eq!(staging["workers"].as_u64(), Some(3));
             }
             _ => panic!("expected Manifest"),
         }
+    }
+
+    #[test]
+    fn pages_merge_root_first_and_leaf_local_wins() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            ".duhem.pages.yml",
+            r#"
+pages:
+  login:
+    submit: { role: button, name: Included }
+    username: { role: textbox, name: Username }
+"#,
+        );
+        write(
+            tmp.path(),
+            "leaf/duhem.yml",
+            r#"
+verification: leaf
+pages:
+  login:
+    submit: { role: button, name: Leaf }
+criteria:
+  - id: AC-1
+    description: trivial
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#,
+        );
+        write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+includes: [./.duhem.pages.yml]
+pages:
+  login:
+    submit: { role: button, name: Root }
+verifications:
+  - path: ./leaf/duhem.yml
+"#,
+        );
+
+        let Loaded::Manifest {
+            manifest, leaves, ..
+        } = load(&tmp.path().join("duhem.yml")).unwrap()
+        else {
+            panic!("expected manifest");
+        };
+        assert_eq!(
+            manifest.pages["login"]["submit"]["name"].as_str(),
+            Some("Root"),
+            "root wins over include"
+        );
+        assert_eq!(
+            leaves[0].definition.pages["login"]["submit"]["name"].as_str(),
+            Some("Leaf"),
+            "leaf-local wins over the composed manifest"
+        );
+        assert_eq!(
+            leaves[0].definition.pages["login"]["username"]["name"].as_str(),
+            Some("Username"),
+            "non-conflicting include entries reach the leaf"
+        );
+    }
+
+    #[test]
+    fn flows_merge_root_first_and_leaf_local_wins() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            ".duhem.flows.yml",
+            r#"
+flows:
+  shared:
+    steps:
+      - uses: cli/invoke
+        with: { command: included }
+"#,
+        );
+        write(
+            tmp.path(),
+            "leaf/duhem.yml",
+            r#"
+verification: leaf
+flows:
+  shared:
+    steps:
+      - uses: cli/invoke
+        with: { command: leaf }
+criteria:
+  - id: AC-1
+    description: trivial
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#,
+        );
+        write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+includes: [./.duhem.flows.yml]
+flows:
+  shared:
+    steps:
+      - uses: cli/invoke
+        with: { command: root }
+verifications:
+  - path: ./leaf/duhem.yml
+"#,
+        );
+
+        let Loaded::Manifest {
+            manifest, leaves, ..
+        } = load(&tmp.path().join("duhem.yml")).unwrap()
+        else {
+            panic!("expected manifest");
+        };
+        assert_eq!(
+            manifest.flows["shared"].steps[0].with["command"].as_str(),
+            Some("root")
+        );
+        assert_eq!(
+            leaves[0].definition.flows["shared"].steps[0].with["command"].as_str(),
+            Some("leaf")
+        );
     }
 
     #[test]
@@ -510,9 +692,9 @@ verifications: []
             } => {
                 assert_eq!(leaves.len(), 1, "one leaf");
                 assert!(
-                    manifest.environments.contains_key("staging"),
-                    "merged environments present: {:?}",
-                    manifest.environments
+                    manifest.profiles.contains_key("staging"),
+                    "merged profiles present: {:?}",
+                    manifest.profiles
                 );
             }
             _ => panic!("expected Manifest"),

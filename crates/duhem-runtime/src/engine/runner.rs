@@ -1,22 +1,9 @@
-//! `Engine::run` — the v1 minimal step executor.
+//! `Engine::run`: execute, evaluate, aggregate, and emit evidence.
 //!
-//! Owns the "load → execute → evaluate → aggregate → emit" lifecycle
-//! per the spec on issue #15. The function walks
-//! `def.criteria × Criterion.checks × Check.steps` in order, lazily
-//! opens a `CheckBrowser` only when a step in the check has a known
-//! action, evaluates each `Assertion` via the shim + `eval()`, and
-//! folds outcomes via `aggregate_check / aggregate_criterion /
-//! aggregate_run` from `duhem-judge`. Errors only surface for
-//! runtime-itself failures (browser launch refused, evidence not
-//! writable); a failing artifact is a `RunVerdict::Fail`, not an
-//! `Err`.
-//!
-//! Per-step error policy (alignment ratification on the issue):
-//! `Outcome::Error` aborts the rest of the *check* (sibling checks
-//! still run); the check's verdict is whatever `aggregate_check`
-//! produces over the partial assertion outcomes. `Outcome::Timeout`
-//! does *not* abort — assertions still evaluate and propagate
-//! `Inconclusive(MissingObservation)` naturally.
+//! Per-step failure policy (spec #365/#377): execution errors/timeouts
+//! and failed implicit judgments block later `if: success` steps in this
+//! check. `if: always` and `if: failure` opt out; sibling checks have
+//! independent state.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -40,19 +27,21 @@ pub use crate::engine::outcome::{
     CapturedArtifact, CheckFailure, CheckFilter, EngineError, FailedAssertion, RunOutcome,
 };
 pub(crate) use crate::engine::outcome::{
-    StepEvidence, append_implicit_judgment, evaluate_explicit_assertions,
-    implicit_judgment_outcomes, step_label,
+    StepEvidence, append_implicit_judgment, display_step_label, evaluate_explicit_assertions,
+    implicit_judgment_for_step, implicit_judgment_outcomes, step_label,
 };
 
 use crate::engine::capture::{
     CapturePolicy, Storyboard, TargetLocator, finalize_capture, target_from_step,
 };
 use crate::engine::context::{RunContext, RunState, json_to_value};
+use crate::engine::gating::{skip_reason as gate_skip_reason, step_failed};
 use crate::engine::registry::{ActionRegistry, default_registry};
-use crate::engine::template::substitute_with;
+use crate::engine::session::SessionResolution;
+use crate::engine::template::{page_reference, substitute_with};
 use crate::engine::translate::{
-    RETRY_BACKOFF_BASE, apply_default_within, check_is_retryable, outcome_to_evidence, retry_delay,
-    with_to_evidence_map,
+    RETRY_BACKOFF_BASE, apply_default_timeout, check_is_retryable, outcome_to_evidence,
+    retry_delay, with_to_evidence_map,
 };
 use crate::eval::Value;
 
@@ -101,32 +90,33 @@ pub struct Engine {
     /// (all-`None`) records an unattributed run; #191's resolution
     /// ladder populates it.
     scope: RunScope,
+    /// Lineage — parent run id plus `suite` / `invocation` origin — for
+    /// nested `duhem run` invocations (#348).
     lineage: RunLineage,
+    /// Store location inherited by nested `duhem run` subprocesses; see
+    /// [`Engine::with_child_store_path`].
     child_store_path: Option<PathBuf>,
-    /// Skip `environment.up:` + readiness probe (the `--no-env-up`
+    /// Skip `provision.up:` + readiness probe (the `--no-env-up`
     /// escape hatch on issue #50). The operator is presumed to have
     /// brought the SUT up already. Teardown still runs unless
     /// [`Engine::keep_env`] is also set.
     skip_env_up: bool,
-    /// Skip `environment.down:` (the `--keep-env` debug flag on
+    /// Skip `provision.down:` (the `--keep-env` debug flag on
     /// issue #50). Useful when an author wants the SUT to outlive the
     /// run for triage.
     keep_env: bool,
     /// `$env.<key>` whitelist seed for this run (spec #68). Empty by
     /// default — env access from assertions is opt-in. The CLI seeds
-    /// this from the selected named environment's string-valued keys.
+    /// this from the selected named profile's string-valued keys.
     env: BTreeMap<String, String>,
-    /// Names the leaf declared under `inherits:` (spec #135). Used to
-    /// turn a generic unresolved `$inputs.<name>` into the loud,
-    /// specific "declared `inherits:` but nothing provides it" error
-    /// with the suite/--inputs remedy. Empty for a leaf with no
-    /// `inherits:` block, so non-inheriting runs keep today's behavior.
+    /// Leaf inputs declared `inherit: true`, used for the specific
+    /// unbound-inheritance diagnostic (spec #135).
     inherited: std::collections::HashSet<String>,
-    /// Manifest `defaults.timeout` (spec #66): per-step `within:`
-    /// fallback. A step's own `within:` wins; absent here, the action's
-    /// built-in `DEFAULT_WITHIN` (5s) applies. `None` keeps today's
+    /// Manifest `defaults.timeout` (spec #66): per-step `timeout:`
+    /// fallback. A step's own `timeout:` wins; absent here, the action's
+    /// built-in `DEFAULT_TIMEOUT` (5s) applies. `None` keeps today's
     /// behavior.
-    default_within: Option<Duration>,
+    default_timeout: Option<Duration>,
     /// Manifest `defaults.inconclusive_policy` (spec #66). `Block`
     /// (today's behavior) is the default.
     inconclusive_policy: InconclusivePolicy,
@@ -174,7 +164,7 @@ impl Engine {
             keep_env: false,
             env: BTreeMap::new(),
             inherited: std::collections::HashSet::new(),
-            default_within: None,
+            default_timeout: None,
             inconclusive_policy: InconclusivePolicy::Block,
             retry: None,
             retry_backoff_base: RETRY_BACKOFF_BASE,
@@ -228,7 +218,9 @@ impl Engine {
         }
         let missing_declared = def
             .inputs
-            .keys()
+            .iter()
+            .filter(|(_, decl)| !decl.inherit)
+            .map(|(name, _)| name)
             .find(|name| !inputs.contains_key(*name))
             .cloned();
         let mut input_values: BTreeMap<String, Value> = BTreeMap::new();
@@ -237,12 +229,8 @@ impl Engine {
                 .ok_or_else(|| EngineError::InputUnrepresentable { name: k.clone() })?;
             input_values.insert(k.clone(), val);
         }
-        // Loud, specific guard for unresolved inherited inputs (spec
-        // #135): an `inherits:` name that the chain bound nothing for
-        // (no manifest environment, no `--inputs`) fails here — before
-        // any browser launch or network call — naming the input as
-        // inherited and giving the suite / `--inputs` remedy, instead
-        // of surfacing later as a generic deep failure.
+        // Keep unresolved inherited inputs a specific pre-flight error
+        // before any browser launch or network call (spec #135).
         if !self.inherited.is_empty()
             && let Some(name) =
                 crate::engine::inherit::first_unbound_inherited(def, &self.inherited, &input_values)
@@ -252,7 +240,8 @@ impl Engine {
         let mut run_state = match self.seed {
             Some(s) => RunState::new_with_seed(input_values, s),
             None => RunState::new(input_values),
-        };
+        }
+        .with_pages(&def.pages);
         // Seed the `$env.<key>` whitelist from the selected named
         // environment (spec #68). Empty unless the CLI set it, so
         // environment-free runs keep today's "no `$env` access"
@@ -319,14 +308,14 @@ impl Engine {
             }
 
             // Resolve the Verification Definition's directory so relative
-            // `environment.up:` / `down:` paths anchor at the same place
+            // `provision.up:` / `down:` paths anchor at the same place
             // an author would `cd` to before running the script by hand.
             let vd_dir: Option<PathBuf> = self
                 .definition_path
                 .as_deref()
                 .and_then(|p| Path::new(p).parent().map(Path::to_path_buf));
 
-            // `environment:` lifecycle precedes `setup:` (spec on
+            // `provision:` lifecycle precedes `setup:` (spec on
             // issue #50). On `up:` failure or `ready:` timeout we record
             // the verdict as `Inconclusive`, skip setup + criteria, and
             // delegate the teardown decision to `bring_environment_up`'s
@@ -334,7 +323,7 @@ impl Engine {
             // `--no-env-up` run still gets its `down:` invocation unless
             // `--keep-env` is also on).
             let mut env_should_tear_down = false;
-            if let Some(env) = def.environment.as_ref() {
+            if let Some(env) = def.provision.as_ref() {
                 let r = crate::engine::env::bring_environment_up(
                     &mut writer,
                     env,
@@ -397,7 +386,7 @@ impl Engine {
                         state: VerdictState::Inconclusive(reason.cause()),
                         criteria: Vec::new(),
                     };
-                    if let Some(env) = def.environment.as_ref() {
+                    if let Some(env) = def.provision.as_ref() {
                         crate::engine::env::tear_environment_down(
                             &mut writer,
                             env,
@@ -447,7 +436,7 @@ impl Engine {
             }
 
             let run_verdict = aggregate_run(criterion_verdicts);
-            if let Some(env) = def.environment.as_ref() {
+            if let Some(env) = def.provision.as_ref() {
                 crate::engine::env::tear_environment_down(
                     &mut writer,
                     env,
@@ -513,7 +502,7 @@ impl Engine {
         failures: &mut Vec<CheckFailure>,
         warnings: &mut Vec<String>,
     ) -> Result<CriterionVerdict, EngineError> {
-        let mut check_verdicts: Vec<CheckVerdict> = Vec::new();
+        let mut check_verdicts = Vec::new();
         for check in &criterion.checks {
             // Filtered-out checks emit no events and don't contribute
             // to verdict aggregation. A criterion with all checks
@@ -524,13 +513,20 @@ impl Engine {
             {
                 continue;
             }
+            // Session expressions resolve after setup has populated the
+            // run state and before any check context exists. A retry
+            // reuses the same immutable baseline but still opens a new
+            // context for every attempt.
+            let session = crate::engine::session::resolve(check, run);
             let cv = self
-                .run_check_with_retry(writer, run, &criterion.id, check, failures)
+                .run_check_with_retry(writer, run, &criterion.id, check, &session, failures)
                 .await?;
             writer
                 .append(EventPayload::CheckFinished {
                     check_id: check.id.clone(),
                     verdict: cv.state,
+                    session_source: session.source.clone(),
+                    session_digest: session.digest(),
                 })
                 .await?;
             check_verdicts.push(cv);
@@ -565,6 +561,7 @@ impl Engine {
         run: &RunState,
         criterion_id: &str,
         check: &Check,
+        session: &SessionResolution,
         failures: &mut Vec<CheckFailure>,
     ) -> Result<CheckVerdict, EngineError> {
         let max = self.retry.map(|r| r.max).unwrap_or(0);
@@ -572,13 +569,13 @@ impl Engine {
             .retry
             .map(|r| r.backoff)
             .unwrap_or(RetryBackoff::Exponential);
-        let mut attempt: u32 = 0;
+        let mut attempt = 0;
         loop {
             // Discard any failures a prior (retried) attempt left behind
             // so only the final attempt's detail reaches the reporter.
             let failures_mark = failures.len();
             let cv = self
-                .run_check(writer, run, criterion_id, check, failures)
+                .run_check(writer, run, criterion_id, check, session, failures)
                 .await?;
             if attempt < max && check_is_retryable(cv.state) {
                 failures.truncate(failures_mark);
@@ -599,6 +596,7 @@ impl Engine {
         run: &RunState,
         criterion_id: &str,
         check: &Check,
+        session: &SessionResolution,
         failures: &mut Vec<CheckFailure>,
     ) -> Result<CheckVerdict, EngineError> {
         let mut ctx = RunContext::new(run);
@@ -609,7 +607,7 @@ impl Engine {
         let any_unknown = check
             .steps
             .iter()
-            .any(|s| !self.registry.contains_key(s.uses.as_str()));
+            .any(|s| !self.registry.contains_key(s.uses_name()));
 
         // A step that requires a page (production wrapper around a
         // real `Action`) but has no browser attached is an
@@ -619,7 +617,7 @@ impl Engine {
         // check.
         let needs_browser = check.steps.iter().any(|s| {
             self.registry
-                .get(s.uses.as_str())
+                .get(s.uses_name())
                 .map(|d| d.requires_page())
                 .unwrap_or(false)
         });
@@ -627,15 +625,15 @@ impl Engine {
 
         // Track per-check environment failures from open_check, too:
         // a browser was attached but allocating a context failed.
-        let mut environment_failed = browser_missing;
+        let mut environment_failed = browser_missing || session.failed;
 
         let mut check_browser = None;
         if !any_unknown
-            && !browser_missing
+            && !environment_failed
             && !check.steps.is_empty()
             && let Some(b) = self.browser.as_ref()
         {
-            match b.open_check().await {
+            match session.open_check(b).await {
                 Ok(cb) => check_browser = Some(cb),
                 Err(e) => {
                     debug!(error = %e, "open_check failed; check will surface as Inconclusive(EnvironmentError)");
@@ -649,18 +647,21 @@ impl Engine {
         // can't run (unknown action, environment failure) — evidence
         // is more useful when it records what the author wrote, not
         // what the engine got around to invoking.
-        let mut step_aborted = false;
+        let mut failed_by: Option<String> = None;
         let mut targets: Vec<TargetLocator> = Vec::new();
         let mut storyboard = Storyboard::default();
         // Per-step evidence (resolved `with:` + outputs) for implicit
         // judgment (#280). Empty = the step didn't run.
         let mut step_evidence = vec![StepEvidence::empty(); check.steps.len()];
         for (idx, step) in check.steps.iter().enumerate() {
+            let gate_reason = gate_skip_reason(step.condition, failed_by.as_deref());
             // Resolve template references in `with:` against whatever
-            // context we have. Cheap and same-shape for every code
-            // path, so we don't bifurcate evidence on it.
+            // context available without bifurcating evidence.
             let mut resolved_with = step.with.clone();
-            if let Err(u) = substitute_with(&mut resolved_with, &ctx) {
+            let catalog_reference = page_reference(&step.with);
+            if gate_reason.is_none()
+                && let Err(u) = substitute_with(&mut resolved_with, &ctx)
+            {
                 return Err(EngineError::UnresolvedReference {
                     reference: u.reference,
                     context: u
@@ -671,27 +672,29 @@ impl Engine {
                 });
             }
             // Manifest `defaults.timeout` (spec #66): fill the step's
-            // `within:` when it doesn't declare its own. A per-step
-            // `within:` already in the payload wins; this only fills the
+            // `timeout:` when it doesn't declare its own. A per-step
+            // `timeout:` already in the payload wins; this only fills the
             // gap. With no manifest default, the action's built-in
-            // `DEFAULT_WITHIN` (5s) remains the last resort.
-            if let Some(default) = self.default_within {
-                apply_default_within(&mut resolved_with, default);
+            // `DEFAULT_TIMEOUT` (5s) remains the last resort.
+            if gate_reason.is_none()
+                && let Some(default) = self.default_timeout
+            {
+                apply_default_timeout(&mut resolved_with, default);
             }
 
             // Collect ui/assert-element targets for the element-highlight
             // overlay (spec #214) — but only for steps that actually run.
-            // A skipped step (env failure, an earlier abort, unknown
-            // action) never "looked" for anything, so recording its
+            // A gated or otherwise unexecuted step never "looked" for
+            // anything, so recording its
             // locator would be misleading evidence.
-            let will_run = !environment_failed
-                && !step_aborted
-                && self.registry.contains_key(step.uses.as_str());
-            if will_run && let Some(t) = target_from_step(&step.uses, &resolved_with) {
+            let will_run = gate_reason.is_none()
+                && !environment_failed
+                && self.registry.contains_key(step.uses_name());
+            if will_run && let Some(t) = target_from_step(step.uses_name(), &resolved_with) {
                 targets.push(t);
             }
 
-            let known = self.registry.contains_key(step.uses.as_str());
+            let known = self.registry.contains_key(step.uses_name());
             let step_started_ms = if will_run && !matches!(self.capture, CapturePolicy::Off) {
                 match check_browser.as_ref() {
                     Some(cb) => Some(storyboard.step_started(&cb.page).await),
@@ -705,30 +708,43 @@ impl Engine {
             // action's contract without a second registry lookup. The
             // invocation itself stays *after* `StepStarted` — see the
             // registration comment below.
-            let dispatcher = if !known || environment_failed || step_aborted {
+            let dispatcher = if gate_reason.is_some() || !known || environment_failed {
                 None
             } else {
                 Some(
                     self.registry
-                        .get(step.uses.as_str())
+                        .get(step.uses_name())
                         .expect("known checked above"),
                 )
             };
+
+            crate::engine::flow::register_secrets(writer, step, &ctx);
 
             writer
                 .append(EventPayload::StepStarted {
                     criterion_id: criterion_id.to_string(),
                     check_id: check.id.clone(),
                     step_index: idx as u32,
-                    uses: step.uses.clone(),
-                    // Honest evidence (#192): the layer comes from the
-                    // executed action's catalog family, never from
-                    // parsing intent; out-of-catalog `uses` stays
-                    // untagged.
-                    layer: duhem_actions::layer_for_uses(&step.uses).map(str::to_string),
+                    uses: step.uses_name().to_string(),
+                    // Layer comes only from the executed action's catalog (#192).
+                    layer: duhem_actions::layer_for_uses(step.uses_name()).map(str::to_string),
                     with: with_to_evidence_map(&resolved_with),
+                    flow: crate::engine::flow::origin(step),
                 })
                 .await?;
+
+            if let Some(reason) = gate_reason {
+                writer
+                    .append(EventPayload::StepFinished {
+                        step_index: idx as u32,
+                        outcome: duhem_evidence::StepOutcome::Skipped {
+                            reason: reason.clone(),
+                        },
+                    })
+                    .await?;
+                step_evidence[idx] = StepEvidence::skipped(reason);
+                continue;
+            }
 
             // Invoke after `StepStarted` is persisted, then register any
             // acquired secret before anything carrying this step's
@@ -743,6 +759,7 @@ impl Engine {
             // whole duration, the `… still in <uses>` heartbeat (#305)
             // could never fire, and `step_started.ts` would be stamped
             // at completion, collapsing event-derived durations.
+            let dispatcher_judges = dispatcher.is_some_and(|dispatcher| dispatcher.judges());
             let execution = match dispatcher {
                 None => None,
                 Some(dispatcher) => {
@@ -789,7 +806,12 @@ impl Engine {
                     step_evidence[idx] = StepEvidence {
                         with: resolved_with.clone(),
                         outputs: r.outputs.clone(),
+                        skip_reason: None,
+                        catalog_reference,
                     };
+                    if let Outcome::Skipped { reason } = &r.outcome {
+                        step_evidence[idx].skip_reason = Some(reason.clone());
+                    }
                     r.outcome.clone()
                 }
                 // Step can't run (or invocation failed) — emit a
@@ -815,8 +837,18 @@ impl Engine {
                     .await;
             }
 
-            if matches!(outcome, Outcome::Error) {
-                step_aborted = true;
+            let judgment = implicit_judgment_for_step(
+                step,
+                idx,
+                dispatcher_judges,
+                &step_evidence[idx],
+                false,
+                false,
+                false,
+            )
+            .map(|outcome| outcome.state);
+            if failed_by.is_none() && step_failed(&outcome, judgment) {
+                failed_by = Some(display_step_label(step, idx));
             }
         }
 
@@ -835,6 +867,7 @@ impl Engine {
             any_unknown,
             environment_failed,
             browser_missing,
+            &step_evidence,
             &mut assertion_outcomes,
             &mut failed,
         )
@@ -1075,6 +1108,7 @@ criteria:
                 Outcome::Ok => ActionResult::ok(),
                 Outcome::Error => ActionResult::error(),
                 Outcome::Timeout => ActionResult::timeout(),
+                Outcome::Skipped { ref reason } => ActionResult::skipped(reason.clone()),
             };
             for (k, v) in &self.outputs {
                 r = r.with_output(k, v.clone());
@@ -1134,7 +1168,7 @@ criteria:
             keep_env: false,
             env: BTreeMap::new(),
             inherited: std::collections::HashSet::new(),
-            default_within: None,
+            default_timeout: None,
             inconclusive_policy: InconclusivePolicy::Block,
             retry: None,
             // Zero backoff so retry-loop tests run instantly.
@@ -1180,6 +1214,37 @@ criteria:
             check.state,
             VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
         ));
+    }
+
+    #[tokio::test]
+    async fn unresolved_page_reference_is_an_engine_error() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/read", Outcome::Ok)));
+        let v = def(r#"
+verification: pages
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: inspect
+            uses: fake/read
+            with: { locator: $pages.login.missing }
+        assertions: ["true"]
+"#);
+        let error = engine.run(&v, BTreeMap::new()).await.unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                EngineError::UnresolvedReference {
+                    reference,
+                    step,
+                    ..
+                } if reference == "$pages.login.missing" && step == "inspect"
+            ),
+            "got: {error}"
+        );
     }
 
     /// #299: a subscribed progress sink receives the run's evidence
@@ -1266,7 +1331,7 @@ criteria:
         steps:
           - id: login
             uses: fake/login
-            secret: [body.data]
+            secret_outputs: [body.data]
           - id: read
             uses: fake/read
             with:
@@ -1303,7 +1368,7 @@ criteria:
         steps:
           - id: login
             uses: fake/deep
-            secret:
+            secret_outputs:
               - body.items[0].key
         assertions: ["true"]
 "#);
@@ -1383,13 +1448,13 @@ criteria:
         steps:
           - id: login
             uses: fake/login
-            secret: [body]
+            secret_outputs: [body]
         assertions: ["true"]
 "#);
         let err = engine.run(&v, BTreeMap::new()).await.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "secret: `body` resolved to an object, not a value.\n\
+            "secret_outputs: `body` resolved to an object, not a value.\n\
              Name the scalar that is sensitive, e.g. `body.data`.\n\
              Registering a whole object would mask only its exact\n\
              serialization, which is almost never what appears in evidence."
@@ -2150,8 +2215,8 @@ criteria:
         assert_eq!(verdict.state, VerdictState::Fail);
     }
 
-    /// Spec on #50: `environment.up:` exits 0, criteria run normally,
-    /// and `environment.down:` is invoked after the criteria loop.
+    /// Spec on #50: `provision.up:` exits 0, criteria run normally,
+    /// and `provision.down:` is invoked after the criteria loop.
     /// Both scripts emit the `Env*` evidence events.
     #[tokio::test]
     async fn env_up_success_runs_criteria_and_invokes_down() {
@@ -2176,7 +2241,7 @@ criteria:
             f,
             r#"
 verification: env-up-success
-environment:
+provision:
   up: ./scripts/up.sh
   down: ./scripts/down.sh
 criteria:
@@ -2234,9 +2299,9 @@ criteria:
         assert!(down_finished < run_finished);
     }
 
-    /// Spec on #50: a non-zero `environment.up:` exit aborts the run
+    /// Spec on #50: a non-zero `provision.up:` exit aborts the run
     /// with `Inconclusive(EnvironmentError)`; no setup or criterion
-    /// runs; `environment.down:` is NOT invoked (nothing came up).
+    /// runs; `provision.down:` is NOT invoked (nothing came up).
     #[tokio::test]
     async fn env_up_failure_yields_inconclusive_and_skips_down() {
         use std::fs::Permissions;
@@ -2259,7 +2324,7 @@ criteria:
             f,
             r#"
 verification: env-up-fail
-environment:
+provision:
   up: ./scripts/up.sh
   down: ./scripts/down.sh
 criteria:
@@ -2330,7 +2395,7 @@ criteria:
             f,
             r#"
 verification: env-ready-timeout
-environment:
+provision:
   up: ./scripts/up.sh
   down: ./scripts/down.sh
   ready:
@@ -2407,7 +2472,7 @@ criteria:
             f,
             r#"
 verification: skip-env-up
-environment:
+provision:
   up: ./scripts/up.sh
 criteria:
   - id: AC-1
@@ -2480,7 +2545,7 @@ criteria:
             f,
             r#"
 verification: skip-env-up-still-tears-down
-environment:
+provision:
   up: ./scripts/up.sh
   down: ./scripts/down.sh
 criteria:
@@ -2535,7 +2600,7 @@ criteria:
         );
     }
 
-    /// Spec on #50: a VD without `environment:` produces a
+    /// Spec on #50: a VD without `provision:` produces a
     /// byte-shape-identical trace to today's setup-only definitions
     /// (no `Env*` events).
     #[tokio::test]
@@ -2562,7 +2627,7 @@ criteria:
                     | duhem_evidence::EventPayload::EnvDownFinished { .. }
             )
         });
-        assert!(!saw_env, "VDs without `environment:` emit no Env* events");
+        assert!(!saw_env, "VDs without `provision:` emit no Env* events");
     }
 
     /// Spec #68: a seeded `$env` whitelist (`Engine::with_env`) is
@@ -2600,15 +2665,15 @@ criteria:
         assert_ne!(bare_outcome.verdict.state, VerdictState::Pass);
     }
 
-    /// Spec #135: a leaf referencing an `inherits:` name that nothing
+    /// Spec #135: a leaf referencing an `inherit: true` input that nothing
     /// bound fails LOUDLY with the specific remedy — not a generic deep
     /// failure — before any check runs.
     #[tokio::test]
     async fn unbound_inherited_input_errors_loudly() {
         let v = def(r#"
 verification: leaf
-inherits:
-  - login_url
+inputs:
+  login_url: { inherit: true }
 criteria:
   - id: AC-1
     description: x
@@ -2618,7 +2683,7 @@ criteria:
           - $inputs.login_url == "x"
 "#);
         let (engine, _tmp) = engine_for_test().await;
-        let mut engine = engine.with_inherited(v.inherits.clone());
+        let mut engine = engine.with_inherited(["login_url".to_string()]);
         let err = engine
             .run_with_metadata(&v, BTreeMap::new())
             .await
@@ -2629,7 +2694,7 @@ criteria:
         );
         let msg = err.to_string();
         assert!(msg.contains("login_url"), "{msg}");
-        assert!(msg.contains("inherits:"), "{msg}");
+        assert!(msg.contains("inherit: true"), "{msg}");
         assert!(msg.contains("--inputs"), "{msg}");
     }
 
@@ -2641,8 +2706,8 @@ criteria:
     async fn bound_inherited_input_passes() {
         let v = def(r#"
 verification: leaf
-inherits:
-  - login_url
+inputs:
+  login_url: { inherit: true }
 criteria:
   - id: AC-1
     description: x
@@ -2652,7 +2717,7 @@ criteria:
           - $inputs.login_url == "https://example.test/login"
 "#);
         let (engine, _tmp) = engine_for_test().await;
-        let mut engine = engine.with_inherited(v.inherits.clone());
+        let mut engine = engine.with_inherited(["login_url".to_string()]);
         let mut inputs = BTreeMap::new();
         inputs.insert(
             "login_url".to_string(),
@@ -2668,8 +2733,8 @@ criteria:
     async fn inherited_under_default_carveout_does_not_trip_guard() {
         let v = def(r#"
 verification: leaf
-inherits:
-  - maybe
+inputs:
+  maybe: { inherit: true }
 criteria:
   - id: AC-1
     description: x
@@ -2679,23 +2744,23 @@ criteria:
           - $runtime.default($inputs.maybe, "x") == "x"
 "#);
         let (engine, _tmp) = engine_for_test().await;
-        let mut engine = engine.with_inherited(v.inherits.clone());
+        let mut engine = engine.with_inherited(["maybe".to_string()]);
         let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
         assert_eq!(outcome.verdict.state, VerdictState::Pass);
     }
 
     // -- manifest defaults: timeout / retry / inconclusive_policy (#66) ------
 
-    /// Stub that records the `within` (integer ms) it was handed in its
+    /// Stub that records the `timeout` (integer ms) it was handed in its
     /// `with:` payload — `u64::MAX` when the payload omits it. Lets the
     /// timeout-threading tests observe what the engine injected.
-    struct WithinCapture {
+    struct TimeoutCapture {
         uses: &'static str,
         seen: Arc<AtomicU64>,
     }
 
     #[async_trait]
-    impl Dispatch for WithinCapture {
+    impl Dispatch for TimeoutCapture {
         fn uses(&self) -> &'static str {
             self.uses
         }
@@ -2710,7 +2775,7 @@ criteria:
             _child_env: &BTreeMap<String, String>,
         ) -> Result<ActionResult, ActionError> {
             let ms = with
-                .get(serde_yml::Value::String("within".to_string()))
+                .get(serde_yml::Value::String("timeout".to_string()))
                 .and_then(|v| v.as_u64())
                 .unwrap_or(u64::MAX);
             self.seen.store(ms, Ordering::SeqCst);
@@ -2721,9 +2786,9 @@ criteria:
     #[tokio::test]
     async fn default_timeout_fills_within_when_step_omits_it() {
         let (mut engine, _tmp) = engine_for_test().await;
-        engine.default_within = Some(Duration::from_secs(7));
+        engine.default_timeout = Some(Duration::from_secs(7));
         let seen = Arc::new(AtomicU64::new(0));
-        engine.register_test_action(Box::new(WithinCapture {
+        engine.register_test_action(Box::new(TimeoutCapture {
             uses: "fake/cap",
             seen: seen.clone(),
         }));
@@ -2744,16 +2809,16 @@ criteria:
         assert_eq!(
             seen.load(Ordering::SeqCst),
             7_000,
-            "default timeout fills within"
+            "default timeout fills timeout"
         );
     }
 
     #[tokio::test]
-    async fn per_step_within_wins_over_default_timeout() {
+    async fn per_step_timeout_wins_over_default_timeout() {
         let (mut engine, _tmp) = engine_for_test().await;
-        engine.default_within = Some(Duration::from_secs(7));
+        engine.default_timeout = Some(Duration::from_secs(7));
         let seen = Arc::new(AtomicU64::new(0));
-        engine.register_test_action(Box::new(WithinCapture {
+        engine.register_test_action(Box::new(TimeoutCapture {
             uses: "fake/cap",
             seen: seen.clone(),
         }));
@@ -2766,12 +2831,12 @@ criteria:
       - id: AC-1.1
         steps:
           - uses: fake/cap
-            with: { within: 2000 }
+            with: { timeout: 2000 }
         assertions:
           - "true"
 "#);
         engine.run(&v, BTreeMap::new()).await.unwrap();
-        assert_eq!(seen.load(Ordering::SeqCst), 2_000, "per-step within wins");
+        assert_eq!(seen.load(Ordering::SeqCst), 2_000, "per-step timeout wins");
     }
 
     #[tokio::test]
@@ -3000,10 +3065,89 @@ criteria:
     }
 
     #[tokio::test]
-    async fn implicit_is_inconclusive_when_step_was_skipped() {
-        // An earlier step errors and aborts the check; the judging
-        // step never runs, so its implicit assertion can't observe —
-        // Inconclusive(MissingObservation), never a silent Pass.
+    async fn bound_satisfied_false_does_not_gate_its_disjunction_partner() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/no", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(false))
+                .judging(),
+        ));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/yes", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(true))
+                .judging(),
+        ));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: a
+            uses: fake/no
+            outputs:
+              satisfied: satisfied
+          - id: b
+            uses: fake/yes
+            outputs:
+              satisfied: satisfied
+        assertions:
+          - $steps.a.outputs.satisfied == true || $steps.b.outputs.satisfied == true
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            verdict.state,
+            VerdictState::Pass,
+            "disjunction must still evaluate"
+        );
+    }
+
+    #[tokio::test]
+    async fn implicit_judgment_example_ac_2_is_exercised_by_runtime() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/navigate", Outcome::Ok)));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/no", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(false))
+                .judging(),
+        ));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/yes", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(true))
+                .judging(),
+        ));
+
+        let mut v = def(include_str!(
+            "../../../../verifications/implicit-judgment-example/duhem.yml"
+        ));
+        v.criteria.retain(|criterion| criterion.id == "AC-2");
+        let steps = &mut v.criteria[0].checks[0].steps;
+        steps[0].uses = Some("fake/navigate".to_string());
+        steps[1].uses = Some("fake/no".to_string());
+        steps[2].uses = Some("fake/yes".to_string());
+
+        let verdict = engine
+            .run(
+                &v,
+                BTreeMap::from([(
+                    "login_url".to_string(),
+                    serde_json::json!("http://127.0.0.1/login"),
+                )]),
+            )
+            .await
+            .unwrap();
+        let events = read_only_run_events(&engine).await;
+        assert_eq!(verdict.state, VerdictState::Pass, "events: {events:#?}");
+    }
+
+    #[tokio::test]
+    async fn skipped_implicit_assertion_leaves_an_empty_aggregation() {
+        // An earlier step errors and gates the judging step. The
+        // skipped implicit assertion is absence, not a synthetic
+        // MissingObservation verdict; with nothing else judged the
+        // check is inconclusive because its aggregation is empty.
         let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(StubAction::new("fake/error", Outcome::Error)));
         engine.register_test_action(Box::new(
@@ -3025,7 +3169,194 @@ criteria:
         let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
         assert!(matches!(
             verdict.criteria[0].checks[0].state,
-            VerdictState::Inconclusive(InconclusiveCause::MissingObservation)
+            VerdictState::Inconclusive(InconclusiveCause::EmptyAggregation)
+        ));
+        let assertion_count = read_only_run_events(&engine)
+            .await
+            .iter()
+            .filter(|event| matches!(event.payload, EventPayload::AssertionEvaluated { .. }))
+            .count();
+        assert_eq!(
+            assertion_count, 0,
+            "a skipped judging step contributes no assertion"
+        );
+    }
+
+    #[tokio::test]
+    async fn unbound_judging_satisfied_false_gates_success_steps() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/assert", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(false))
+                .judging(),
+        ));
+        let tracker = StubAction::new("fake/tracker", Outcome::Ok);
+        let tracker_calls = tracker.invocations.clone();
+        engine.register_test_action(Box::new(tracker));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: assertion
+            description: The required state is present
+            uses: fake/assert
+          - id: after
+            uses: fake/tracker
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Fail);
+        assert_eq!(tracker_calls.load(Ordering::SeqCst), 0);
+
+        let skipped = read_only_run_events(&engine)
+            .await
+            .into_iter()
+            .find_map(|event| match event.payload {
+                EventPayload::StepFinished {
+                    step_index: 1,
+                    outcome: duhem_evidence::StepOutcome::Skipped { reason },
+                } => Some(reason),
+                _ => None,
+            })
+            .expect("the gated step is recorded");
+        assert!(
+            skipped.contains("The required state is present"),
+            "skip reason must name the causing step: {skipped}"
+        );
+    }
+
+    #[tokio::test]
+    async fn timeout_gates_later_success_step() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/timeout", Outcome::Timeout)));
+        let tracker = StubAction::new("fake/tracker", Outcome::Ok);
+        let tracker_calls = tracker.invocations.clone();
+        engine.register_test_action(Box::new(tracker));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: wait
+            uses: fake/timeout
+          - uses: fake/tracker
+        assertions: ["true"]
+"#);
+        engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(tracker_calls.load(Ordering::SeqCst), 0);
+        assert!(read_only_run_events(&engine).await.iter().any(|event| {
+            matches!(
+                event.payload,
+                EventPayload::StepFinished {
+                    step_index: 1,
+                    outcome: duhem_evidence::StepOutcome::Skipped { .. },
+                }
+            )
+        }));
+    }
+
+    #[tokio::test]
+    async fn always_and_failure_run_after_failure_but_failure_skips_when_clean() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/error", Outcome::Error)));
+        let always = StubAction::new("fake/always", Outcome::Ok);
+        let always_calls = always.invocations.clone();
+        engine.register_test_action(Box::new(always));
+        let failure = StubAction::new("fake/failure", Outcome::Ok);
+        let failure_calls = failure.invocations.clone();
+        engine.register_test_action(Box::new(failure));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/error
+          - uses: fake/always
+            if: always
+          - uses: fake/failure
+            if: failure
+        assertions: ["true"]
+"#);
+        engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(always_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(failure_calls.load(Ordering::SeqCst), 1);
+
+        let (mut clean_engine, _tmp) = engine_for_test().await;
+        clean_engine.register_test_action(Box::new(StubAction::new("fake/ok", Outcome::Ok)));
+        let clean_failure = StubAction::new("fake/failure", Outcome::Ok);
+        let clean_failure_calls = clean_failure.invocations.clone();
+        clean_engine.register_test_action(Box::new(clean_failure));
+        let clean = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/ok
+          - uses: fake/failure
+            if: failure
+        assertions: ["true"]
+"#);
+        let verdict = clean_engine.run(&clean, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Pass);
+        assert_eq!(clean_failure_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn explicit_assertion_on_skipped_step_is_absent() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/assert", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(false))
+                .judging(),
+        ));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/produce", Outcome::Ok).with_output("value", serde_json::json!(1)),
+        ));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/assert
+          - id: later
+            uses: fake/produce
+        assertions:
+          - $steps.later.outputs.value == 1
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Fail);
+        let assertions = read_only_run_events(&engine)
+            .await
+            .into_iter()
+            .filter(|event| matches!(event.payload, EventPayload::AssertionEvaluated { .. }))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            assertions.len(),
+            1,
+            "only the first step's implicit failed judgment is recorded"
+        );
+        assert!(matches!(
+            assertions[0].payload,
+            EventPayload::AssertionEvaluated {
+                assertion_index: 1,
+                state: VerdictState::Fail,
+                ..
+            }
         ));
     }
 
@@ -3080,6 +3411,45 @@ criteria:
     }
 
     #[tokio::test]
+    async fn metadata_does_not_affect_the_verdict() {
+        let without_metadata = def(r#"
+verification: verdict-neutral
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#);
+        let with_metadata = def(r#"
+verification: verdict-neutral
+metadata:
+  priority: 7
+  routing:
+    labels: [external, nightly]
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#);
+
+        let (mut baseline_engine, _baseline_tmp) = engine_for_test().await;
+        let baseline = baseline_engine
+            .run_with_metadata(&without_metadata, BTreeMap::new())
+            .await
+            .unwrap();
+        let (mut metadata_engine, _metadata_tmp) = engine_for_test().await;
+        let tagged = metadata_engine
+            .run_with_metadata(&with_metadata, BTreeMap::new())
+            .await
+            .unwrap();
+
+        assert_eq!(tagged.verdict, baseline.verdict);
+    }
+
+    #[tokio::test]
     async fn secret_input_masks_substituted_with_map_at_evidence_sink() {
         let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(StubAction::new("db/query", Outcome::Ok)));
@@ -3117,6 +3487,100 @@ criteria:
         });
         assert_eq!(connection, Some(&serde_json::json!("[redacted:db_dsn]")));
         assert!(!serde_json::to_string(&events).unwrap().contains(secret));
+    }
+
+    #[tokio::test]
+    async fn failing_flow_step_records_provenance_and_masks_secret_param() {
+        let (mut engine, tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/login", Outcome::Error)));
+        engine.register_test_action(Box::new(StubAction::new("fake/after", Outcome::Ok)));
+        engine.register_test_action(Box::new(StubAction::new("fake/outside", Outcome::Ok)));
+        let path = tmp.path().join("flow.yml");
+        std::fs::write(
+            &path,
+            r#"
+verification: flow evidence
+flows:
+  sign_in:
+    params:
+      password: { type: string, secret: true }
+    steps:
+      - id: submit
+        uses: fake/login
+        with: { password: $params.password }
+      - uses: fake/after
+criteria:
+  - id: AC-1
+    description: sign in succeeds
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: login
+            call: sign_in
+            with: { password: correct-horse-battery-staple }
+          - uses: fake/outside
+        assertions: ["true"]
+"#,
+        )
+        .unwrap();
+        let duhem_schema::Loaded::Leaf { definition, .. } =
+            duhem_schema::load(&path).expect("load and expand")
+        else {
+            panic!("expected leaf");
+        };
+
+        let outcome = engine
+            .run_with_metadata(&definition, BTreeMap::new())
+            .await
+            .unwrap();
+        let events = Trace::from_store(engine.store.as_ref().unwrap().as_ref(), &outcome.run_id)
+            .await
+            .unwrap()
+            .into_events();
+        let started = events.iter().find_map(|event| match &event.payload {
+            EventPayload::StepStarted { with, flow, .. } => Some((with, flow)),
+            _ => None,
+        });
+        let (with, flow) = started.expect("expanded step started");
+        assert_eq!(
+            with.get("password"),
+            Some(&serde_json::json!("[redacted:flow parameter fake/login:0]"))
+        );
+        assert_eq!(
+            flow.as_ref().map(|origin| (
+                origin.name.as_str(),
+                origin.invocation.as_str(),
+                origin.inner_index
+            )),
+            Some(("sign_in", "login", 0))
+        );
+        assert!(events.iter().any(|event| matches!(
+            event.payload,
+            EventPayload::StepFinished {
+                outcome: duhem_evidence::StepOutcome::Error,
+                ..
+            }
+        )));
+        let skipped: Vec<u32> = events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                EventPayload::StepFinished {
+                    step_index,
+                    outcome: duhem_evidence::StepOutcome::Skipped { .. },
+                } => Some(*step_index),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            skipped,
+            vec![1, 2],
+            "flow failure gates the rest of the flow and the check"
+        );
+        assert!(
+            !serde_json::to_string(&events)
+                .unwrap()
+                .contains("correct-horse-battery-staple")
+        );
     }
 
     #[tokio::test]

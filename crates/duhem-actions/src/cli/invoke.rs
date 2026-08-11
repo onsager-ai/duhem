@@ -25,7 +25,7 @@
 //! - `stdin` (optional): string written to the child's stdin, then
 //!   closed (EOF). Omitted → stdin is `/dev/null`, so a command that
 //!   reads stdin gets EOF immediately instead of hanging.
-//! - `within` (optional): wall-clock budget. Exceeding it kills the
+//! - `timeout` (optional): wall-clock budget. Exceeding it kills the
 //!   child and returns `Outcome::Timeout`.
 //!
 //! Outputs (fixed schema):
@@ -38,7 +38,7 @@
 //! Outcome mapping mirrors `api/call`: a completed process is
 //! `Outcome::Ok` *regardless of exit code* — the code is data on the
 //! result, and `exit_code == 0` is judged by an assertion, not the
-//! action. `within:` exceeded → `Outcome::Timeout`. A spawn / I/O
+//! action. `timeout:` exceeded → `Outcome::Timeout`. A spawn / I/O
 //! failure (binary not found, permission denied, broken pipe) →
 //! `ActionError::Process`, which the engine maps to `Outcome::Error`.
 //!
@@ -57,9 +57,9 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use tokio::io::AsyncWriteExt;
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT};
 use crate::error::ActionError;
-use crate::with::WithinSpec;
+use crate::with::TimeoutSpec;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -72,7 +72,7 @@ pub(crate) struct With {
     #[serde(default)]
     stdin: Option<String>,
     #[serde(default)]
-    within: Option<WithinSpec>,
+    timeout: Option<TimeoutSpec>,
 }
 
 /// A command is either a shell string (run via `sh -c`) or an argv
@@ -103,7 +103,7 @@ impl Action for Invoke {
                 FieldSpec::optional("cwd"),
                 FieldSpec::optional("env"),
                 FieldSpec::optional("stdin"),
-                FieldSpec::optional("within"),
+                FieldSpec::optional("timeout"),
             ],
             outputs: vec!["exit_code", "stdout", "stderr"],
             secret_outputs: vec![],
@@ -128,7 +128,7 @@ impl Action for Invoke {
 /// Runs the command. Factored out from `Action::invoke` so the process
 /// behavior can be unit-tested without an `ActionCtx`.
 pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
-    let timeout: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
+    let timeout: Duration = with.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
 
     let mut cmd = match &with.command {
         Command::Shell(s) => {
@@ -321,8 +321,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slow_command_past_within_yields_timeout() {
-        let r = execute(parse_with(r#"{ command: "sleep 5", within: 100ms }"#))
+    async fn slow_command_past_timeout_yields_timeout() {
+        let r = execute(parse_with(r#"{ command: "sleep 5", timeout: 100ms }"#))
             .await
             .unwrap();
         assert_eq!(r.outcome, Outcome::Timeout);

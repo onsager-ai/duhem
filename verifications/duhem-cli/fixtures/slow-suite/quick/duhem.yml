@@ -15,6 +15,6 @@ criteria:
             uses: cli/invoke
             with:
               command: ['true']
-              within: 30s
+              timeout: 30s
         assertions:
           - $steps.instant.outputs.exit_code == 0

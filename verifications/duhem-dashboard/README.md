@@ -33,7 +33,7 @@ trust role.
 | **AC-5**  | A selected step restores and synchronizes its screenshot and replay evidence. | SPA Replay |
 | **AC-6**  | A completed unjudged suite reports `finished` with no invented verdict. | Static JSON API |
 
-No mocks at the boundary (`docs/duhem-spec.md` §8): `environment.up`
+No mocks at the boundary (`docs/duhem-spec.md` §8): `provision.up`
 runs the offline `fixture/dashboard-fixture.yml` through the real
 `duhem run` pipeline to record a genuine run in the production evidence
 store (#189), then launches the real `duhem dashboard` over it.

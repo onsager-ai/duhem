@@ -19,7 +19,7 @@
 //! ref; `key=@literal` keeps `@literal` as a *literal* value (the `@`
 //! only triggers file-loading as a bare leading token, never after
 //! `=`). The merged map (see [`merge_inputs`]) is precedence layer 1 in
-//! `resolve::resolve_inputs`, above the selected environment and the
+//! `resolve::resolve_inputs`, above the selected profile and the
 //! VD `default:`.
 
 use std::collections::BTreeMap;

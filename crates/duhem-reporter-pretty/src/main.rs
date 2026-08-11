@@ -115,7 +115,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use duhem_summary::CriterionSummary;
+    use duhem_summary::{CheckFailureSummary, CriterionSummary, FailedAssertionSummary};
 
     #[test]
     fn renders_pass_run_to_a_2_column_table() {
@@ -166,5 +166,31 @@ mod tests {
         render(&s, &mut buf).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("inconclusive:timeout"), "got: {out}");
+    }
+
+    #[test]
+    fn renders_described_step_in_failure_detail() {
+        let s = RunSummary::new(
+            "r",
+            VerdictState::Fail,
+            vec![CriterionSummary {
+                id: "AC-1".into(),
+                verdict: VerdictState::Fail,
+            }],
+            PathBuf::from("."),
+        )
+        .with_failures(vec![CheckFailureSummary {
+            criterion_id: "AC-1".into(),
+            check_id: "AC-1.1".into(),
+            assertions: vec![FailedAssertionSummary {
+                expr: "implicit: step `The Username field is offered` satisfied == true".into(),
+                verdict: VerdictState::Fail,
+                detail: Some("expected textbox \"Username\" to be visible".into()),
+            }],
+        }]);
+        let mut buf = Vec::new();
+        render(&s, &mut buf).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("The Username field is offered"), "got: {out}");
     }
 }

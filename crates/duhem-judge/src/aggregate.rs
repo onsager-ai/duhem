@@ -100,7 +100,7 @@ where
 
 /// Roll up one check's per-assertion outcomes into a `CheckVerdict`.
 pub fn aggregate_check(outcome: &CheckOutcome) -> CheckVerdict {
-    let state = fold_verdicts(outcome.assertions.iter().map(|a| a.state));
+    let state = fold_verdicts(outcome.assertions.iter().map(|assertion| assertion.state));
     CheckVerdict {
         check_id: outcome.check_id.clone(),
         state,
@@ -337,7 +337,7 @@ mod tests {
     fn aggregate_check_pass() {
         let out = CheckOutcome {
             check_id: "c1".into(),
-            assertions: vec![ao(VerdictState::Pass), ao(VerdictState::Pass)],
+            assertions: vec![ao(VerdictState::Pass)],
         };
         assert_eq!(aggregate_check(&out).state, VerdictState::Pass);
     }
@@ -346,7 +346,7 @@ mod tests {
     fn aggregate_check_fail() {
         let out = CheckOutcome {
             check_id: "c1".into(),
-            assertions: vec![ao(VerdictState::Pass), ao(VerdictState::Fail)],
+            assertions: vec![ao(VerdictState::Fail), ao(VerdictState::Pass), ao(TIMEOUT)],
         };
         assert_eq!(aggregate_check(&out).state, VerdictState::Fail);
     }

@@ -1,6 +1,6 @@
 # Duhem
 
-**Holistic verification for AI-delivered software.**
+**Holistic verification for AI-built software.**
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/onsager-ai/duhem/actions/workflows/ci.yml/badge.svg)](https://github.com/onsager-ai/duhem/actions/workflows/ci.yml)
@@ -8,14 +8,14 @@
 
 Duhem sits between AI coding agents and production. It captures human intent as acceptance criteria, translates them into mechanically-judged checks that exercise the real delivery web — code + prompts + tool wiring + data + runtime — and gates merge/deploy on the verdict.
 
-Two commitments shape everything:
-
-- **Holistic.** A check exercises the whole delivery web at once. Duhem does not pretend the web decomposes into independently testable units, and it does not mock the web at verification time.
-- **Mechanical judgment, not LLM judgment.** AI may help author criteria and checks, and humans review them — but the verdict is produced by deterministic evaluation of structured assertions. There is no LLM in the judging loop.
+- **Runnable specs.** A Verification Definition is one artifact — readable intent bound to runnable checks. What you read *is* what runs *is* what gates the merge, so spec, tests, and code can't drift apart.
+- **Holistic, no mocks.** Checks drive the real shipped artifact — code + prompts + tools + data + runtime — through its real interfaces, all at once. A green means the real system worked, not that a stand-in did.
+- **Mechanical judgment — no LLM in the judge.** AI can help draft criteria; a human owns them; pass/fail is deterministic evaluation of structured assertions. No AI grading its own homework, no confident-but-wrong green.
+- **Agent-native.** You write *what* to verify, not the program that verifies it — anchored to intent, not implementation, so it doesn't rot when an agent refactors underneath.
 
 ## It caught a real one
 
-Crawlab Pro gates its `:edge` Docker image on a Duhem suite before it can promote to `:stable`. One build's gate went red: the environment wouldn't come up. The cause was nearly invisible — a new image shipped without `envsubst`, so the startup script silently rendered an **empty** nginx config and the whole web front went dead on its expected port. The part that matters: the backend was fine and the product's *own* healthcheck reported **healthy** — a human clicking through, or the container's self-check, would have shipped it. Duhem didn't. No working front, no green. It refused the build *before* it could reach `:stable`, the same gate then verified the fix, and it now runs on every build.
+Crawlab Pro gates its `:edge` Docker image on a Duhem suite before it can promote to `:stable`. One build's gate went red: the environment wouldn't come up. The cause was nearly invisible — a new image shipped without `envsubst`, so the startup script silently rendered an **empty** nginx config and the whole web front went dead on its expected port. The part that matters: the backend was fine and the product's *own* healthcheck reported **healthy** — a human clicking through, or the container's self-check, would have shipped it. Duhem didn't: no working front, no green. It refused the build before it could reach `:stable`, so no user was hit; the same gate then verified the fix and now runs on every build.
 
 **That's the class of bug this exists for: a self-masking regression that everything else — including the product's own healthcheck — was calling healthy.** Full write-up: [*Your AI Says "All Tests Pass" — But Do They?*](https://marvinzhang.dev/blog/introducing-duhem).
 
@@ -88,16 +88,28 @@ WOULD RUN: checks::AC-1::AC-1.1
 WOULD RUN: checks::AC-2::AC-2.1
 ```
 
+For the composed values behind that plan, use
+`duhem resolve . --provenance`; add `--format json` for the stable
+machine-readable form. It resolves includes, profiles, inputs, named
+`pages:` locators, and
+default timeouts without running provisioning or opening a browser,
+and masks every secret as `••••••`.
+
 `duhem run` auto-discovers the manifest: with no path it walks the current directory and its ancestors (capped at the enclosing `.git`) for a `duhem.yml` / `.duhem.yml`, so `cd anywhere-in-the-repo && duhem run` finds the repo-root manifest — same as `git`, `cargo`, `pnpm`. Pass an explicit path to override, or `-f path/to/manifest.yml` for an out-of-tree manifest.
 
-For a real-world example — including the `up:` / `down:` environment hooks Duhem sequences around a check — see [`verifications/duhem-dashboard/`](verifications/duhem-dashboard/). Product suites live co-located in their own repos under `.duhem/` (e.g. `onsager-ai/chreode/.duhem/`); [`templates/product-repo/`](templates/product-repo/) is the drop-in skeleton.
+For a real-world example — including the `provision.up:` / `down:` hooks Duhem sequences around a check — see [`verifications/duhem-dashboard/`](verifications/duhem-dashboard/). Product suites live co-located in their own repos under `.duhem/` (e.g. `onsager-ai/chreode/.duhem/`); [`templates/product-repo/`](templates/product-repo/) is the drop-in skeleton.
 
 ## Core concepts
 
 - **Criteria vs. checks.** *Criteria* are the human commitment about what "done" means; they are stable and survive implementation churn. *Checks* are how Duhem verifies that commitment; they are derivative and may change as the implementation does. Conflating the two is a defect.
-- **Verification Definition (VD).** A YAML document (criteria + checks + inputs, optionally `environment` hooks) describing one workload to verify. `duhem init` scaffolds one; `verifications/` holds worked examples.
-- **The manifest (`duhem.yml`).** Composes one or more VDs into a suite and carries shared configuration — `defaults:` (timeout / inconclusive policy / retry), `includes:`, `environments:`. A single-file VD *is* a manifest with one leaf.
+- **Verification Definition (VD).** A YAML document (criteria + checks + inputs, optionally `provision` hooks) describing one workload to verify. `duhem init` scaffolds one; `verifications/` holds worked examples.
+- **The manifest (`duhem.yml`).** Composes one or more VDs into a suite and carries shared configuration — `defaults:` (timeout / inconclusive policy / retry), `includes:`, `profiles:`, reusable `pages:` locators, and reusable `flows:` step sequences invoked from a check with `call:`. A single-file VD *is* a manifest with one leaf.
 - **The verdict.** Deterministic aggregation of structured assertions into `pass` / `fail` / `inconclusive`. No LLM in the loop.
+- **Step gating.** Steps default to `if: success`; use `if: always` for
+  teardown or `if: failure` for diagnostics. Gated steps stay visible as
+  skipped evidence and contribute no assertion verdict. Gating follows
+  execution failure or a failed implicit judgment, not a raw
+  `satisfied: false` observation bound for manual composition.
 
 The canonical reference is [`docs/duhem-spec.md`](docs/duhem-spec.md) — start with §1 (Why), §4 (Solution Overview), §7 (Core Concepts), §8 (Holistic Verification Principle), and §10 (VD shape).
 
@@ -112,6 +124,7 @@ duhem init       Scaffold a runnable Verification Definition skeleton
 duhem actions    List the built-in action catalog
 duhem describe   Print one action's contract (with-fields, outputs, example)
 duhem validate   Parse and structurally validate a Verification Definition file
+duhem resolve    Print the fully composed document without executing it
 duhem run        Execute a Verification Definition end-to-end
 duhem browser    Provision the Playwright sidecar + Chromium for ui/* checks
 duhem dashboard  Browse run evidence in a read-only web dashboard (serve + static export)
@@ -121,7 +134,7 @@ duhem mcp        Serve the action contract + validate over MCP (stdio) for AI au
 duhem --version  Print the CLI and schema version
 ```
 
-Run `duhem <command> --help` for the full flag surface (filters, inputs, environment selection, reporters, evidence directory, env-hook control).
+Run `duhem <command> --help` for the full flag surface (filters, inputs, profile selection, reporters, evidence directory, provision-hook control).
 
 ## Status
 
@@ -133,7 +146,7 @@ Schema is **v0.x** — breaking changes are expected before v0.5. The live schem
 
 Duhem is open source and **early — v0.x, breaking changes expected, and we'll help you migrate.** If you own a business-critical, complex, AI-built system where a silent regression is expensive, we'd like a few people to try it and shape it with us — direct support, a direct line to the people building it. (If you can verify by looking, you don't need Duhem — and we'd rather tell you that than sell it to you.)
 
-Reach out by [opening an issue](https://github.com/onsager-ai/duhem/issues), or add me on WeChat at **`tikazyq1`** with a note saying "Duhem".
+Reach out by [opening an issue](https://github.com/onsager-ai/duhem/issues), or add me on WeChat at **`tikazyq1`** with a note saying "Duhem". More on why this exists: [*Your AI Says "All Tests Pass" — But Do They?*](https://marvinzhang.dev/blog/introducing-duhem).
 
 ## Contributing
 

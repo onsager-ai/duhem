@@ -21,6 +21,6 @@ criteria:
               # Far longer than the suite's worst-case wall clock; the
               # run is killed by down.sh, never awaited.
               command: [sleep, "600"]
-              within: 900s
+              timeout: 900s
         assertions:
           - $steps.hold.outputs.exit_code == 0

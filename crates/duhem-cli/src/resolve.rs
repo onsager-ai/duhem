@@ -1,11 +1,11 @@
 //! Input resolution for `duhem run`: combine the merged `--inputs`
 //! tokens (`KEY=VALUE` + `@file`, last-wins — see `inputs::merge_inputs`),
-//! a selected named environment, a leaf- or manifest-declared process
+//! a selected named profile, a leaf- or manifest-declared process
 //! `env:` fallback, and the applicable declaration's `default:` into
 //! the engine's typed input map.
 //!
 //! Precedence, highest first (spec #68 / #151 / #346):
-//!   --inputs  >  selected environment  >  process `env:`  >  default
+//!   --inputs  >  selected profile  >  process `env:`  >  default
 //!
 //! Lives in its own module so `main.rs` stays under the per-file token
 //! budget.
@@ -24,37 +24,30 @@ pub(crate) type ResolvedInputs = BTreeMap<String, serde_json::Value>;
 /// registering it at the evidence boundary.
 pub(crate) fn resolve_leaf_inputs(
     merged: &BTreeMap<String, InputValue>,
-    env: &BTreeMap<String, serde_json::Value>,
+    profile: &BTreeMap<String, serde_json::Value>,
     definition: &VerificationDefinition,
     manifest_decls: &BTreeMap<String, InputDecl>,
 ) -> Result<(ResolvedInputs, duhem_evidence::SecretRegistry), String> {
-    let values = resolve_inputs_with_manifest(
-        merged,
-        env,
-        &definition.inputs,
-        &definition.inherits,
-        manifest_decls,
-    )?;
-    let secrets = secret_registry_with_manifest(
-        &values,
-        &definition.inputs,
-        &definition.inherits,
-        manifest_decls,
-    );
+    let values = resolve_inputs_with_manifest(merged, profile, &definition.inputs, manifest_decls)?;
+    let mut secrets = secret_registry_with_manifest(&values, &definition.inputs, manifest_decls);
+    // Flow bindings must be registered before `run_started` records the
+    // composed definition snapshot. Runtime registration still covers
+    // values acquired later, but it is too late for the run header.
+    register_flow_secrets(&mut secrets, definition, Some(&values));
     Ok((values, secrets))
 }
 
 /// Resolve the merged `--inputs` map (spec #151) + an optional
-/// selected-environment key map against the Verification Definition's
+/// selected-profile key map against the Verification Definition's
 /// `inputs:` block. Precedence, highest first (spec #68 / #151):
 ///
 /// 1. `--inputs` (the last-wins merge of `KEY=VALUE` + `@file` tokens):
 ///    a [`InputValue::Raw`] string is coerced per the declared
 ///    `InputType`; a [`InputValue::Typed`] value (from an `@file`) is
 ///    shape-validated against it.
-/// 2. Selected environment's key `k` (spec #68) → validated against
-///    the declared `InputType`. An environment key that matches no
-///    declared input is *not* an error here (the environment may carry
+/// 2. Selected profile's key `k` (spec #68) → validated against
+///    the declared `InputType`. A profile key that matches no
+///    declared input is *not* an error here (the profile may carry
 ///    keys that are only consumed via `$env.<key>`, not as inputs); it
 ///    simply doesn't feed input resolution.
 /// 3. The process variable named by the leaf's `env:` declaration,
@@ -65,30 +58,28 @@ pub(crate) fn resolve_leaf_inputs(
 ///    `Inconclusive(EnvironmentError)` before executing the workload.
 ///
 /// Unknown inputs from `--inputs` remain hard errors (those name an
-/// input explicitly); the environment map is consulted only for keys
+/// input explicitly); the profile map is consulted only for keys
 /// that *are* declared inputs.
 #[cfg(test)]
 pub(crate) fn resolve_inputs(
     merged: &BTreeMap<String, InputValue>,
-    env: &BTreeMap<String, serde_json::Value>,
+    profile: &BTreeMap<String, serde_json::Value>,
     decls: &BTreeMap<String, InputDecl>,
-    inherits: &[String],
 ) -> Result<BTreeMap<String, serde_json::Value>, String> {
-    resolve_inputs_with_manifest(merged, env, decls, inherits, &BTreeMap::new())
+    resolve_inputs_with_manifest(merged, profile, decls, &BTreeMap::new())
 }
 
 /// Resolve inputs with suite-wide declarations available to inherited
 /// names (spec #354). A declaration is consulted only when the leaf
-/// lists that name under `inherits:`; an empty manifest map is exactly
+/// marks that name `inherit: true`; an empty manifest map is exactly
 /// the pre-#354 behavior.
 pub(crate) fn resolve_inputs_with_manifest(
     merged: &BTreeMap<String, InputValue>,
-    env: &BTreeMap<String, serde_json::Value>,
+    profile: &BTreeMap<String, serde_json::Value>,
     decls: &BTreeMap<String, InputDecl>,
-    inherits: &[String],
     manifest_decls: &BTreeMap<String, InputDecl>,
 ) -> Result<BTreeMap<String, serde_json::Value>, String> {
-    resolve_inputs_with_manifest_env(merged, env, decls, inherits, manifest_decls, |name| {
+    resolve_inputs_with_manifest_env(merged, profile, decls, manifest_decls, |name| {
         std::env::var(name).ok()
     })
 }
@@ -98,51 +89,41 @@ pub(crate) fn resolve_inputs_with_manifest(
 #[cfg(test)]
 pub(crate) fn resolve_inputs_with_env(
     merged: &BTreeMap<String, InputValue>,
-    env: &BTreeMap<String, serde_json::Value>,
+    profile: &BTreeMap<String, serde_json::Value>,
     decls: &BTreeMap<String, InputDecl>,
-    inherits: &[String],
     process_env: impl Fn(&str) -> Option<String>,
 ) -> Result<BTreeMap<String, serde_json::Value>, String> {
-    resolve_inputs_with_manifest_env(merged, env, decls, inherits, &BTreeMap::new(), process_env)
+    resolve_inputs_with_manifest_env(merged, profile, decls, &BTreeMap::new(), process_env)
 }
 
 /// Pure manifest-aware resolution seam used by tests to supply process
 /// environment values without mutating process-global state.
 pub(crate) fn resolve_inputs_with_manifest_env(
     merged: &BTreeMap<String, InputValue>,
-    env: &BTreeMap<String, serde_json::Value>,
+    profile: &BTreeMap<String, serde_json::Value>,
     decls: &BTreeMap<String, InputDecl>,
-    inherits: &[String],
     manifest_decls: &BTreeMap<String, InputDecl>,
     process_env: impl Fn(&str) -> Option<String>,
 ) -> Result<BTreeMap<String, serde_json::Value>, String> {
-    // An `--inputs` key is "known" if it names a declared input *or* an
-    // inherited name (spec #135) — an inherited name has no local
-    // `InputDecl`, but the leaf still accepts a value for it on the
-    // precedence chain.
-    let is_known = |name: &str| decls.contains_key(name) || inherits.iter().any(|n| n == name);
     for name in merged.keys() {
-        if !is_known(name) {
+        if !decls.contains_key(name) {
             return Err(format!("unknown input: `{name}`"));
         }
     }
     let mut out = BTreeMap::new();
-    for (name, decl) in decls {
-        if let Some(value) = resolve_decl(name, decl, merged, env, &process_env)? {
+    for (name, decl) in decls.iter().filter(|(_, decl)| !decl.inherit) {
+        if let Some(value) = resolve_decl(name, decl, merged, profile, &process_env)? {
             out.insert(name.clone(), value);
         }
     }
     // Inherited names use a manifest declaration when one exists
     // (spec #354), enforcing its type and full precedence chain. Without
     // one they retain the names-only #135 behavior byte-for-byte:
-    // `--inputs` raw strings stay raw, selected environment values stay
+    // `--inputs` raw strings stay raw, selected profile values stay
     // unchecked, and there is no process/default layer.
-    for name in inherits {
-        if out.contains_key(name) {
-            continue;
-        }
+    for (name, _) in decls.iter().filter(|(_, decl)| decl.inherit) {
         if let Some(decl) = manifest_decls.get(name) {
-            if let Some(value) = resolve_decl(name, decl, merged, env, &process_env)? {
+            if let Some(value) = resolve_decl(name, decl, merged, profile, &process_env)? {
                 out.insert(name.clone(), value);
             }
         } else if let Some(value) = merged.get(name) {
@@ -154,8 +135,8 @@ pub(crate) fn resolve_inputs_with_manifest_env(
                 InputValue::Typed(typed) => typed.clone(),
             };
             out.insert(name.clone(), v);
-        } else if let Some(env_value) = env.get(name) {
-            out.insert(name.clone(), env_value.clone());
+        } else if let Some(profile_value) = profile.get(name) {
+            out.insert(name.clone(), profile_value.clone());
         }
     }
     Ok(out)
@@ -165,32 +146,33 @@ fn resolve_decl(
     name: &str,
     decl: &InputDecl,
     merged: &BTreeMap<String, InputValue>,
-    env: &BTreeMap<String, serde_json::Value>,
+    profile: &BTreeMap<String, serde_json::Value>,
     process_env: &impl Fn(&str) -> Option<String>,
 ) -> Result<Option<serde_json::Value>, String> {
+    let kind = decl
+        .kind
+        .ok_or_else(|| format!("input `{name}`: missing `type:` declaration"))?;
     if let Some(value) = merged.get(name) {
         let resolved = match value {
-            InputValue::Raw(raw_value) => coerce_input(name, decl.kind, raw_value)?,
+            InputValue::Raw(raw_value) => coerce_input(name, kind, raw_value)?,
             InputValue::Typed(typed) => {
-                validate_file_value(name, decl.kind, typed)?;
+                validate_file_value(name, kind, typed)?;
                 typed.clone()
             }
         };
         Ok(Some(resolved))
-    } else if let Some(env_value) = env.get(name) {
-        validate_env_value(name, decl.kind, env_value)?;
-        Ok(Some(env_value.clone()))
+    } else if let Some(profile_value) = profile.get(name) {
+        validate_profile_value(name, kind, profile_value)?;
+        Ok(Some(profile_value.clone()))
     } else if let Some(env_name) = &decl.env
         && let Some(raw_value) = process_env(env_name)
     {
-        coerce_input(name, decl.kind, &raw_value)
-            .map(Some)
-            .map_err(|_| {
-                format!(
-                    "input `{name}` (from env `{env_name}`): expected {}, got `{raw_value}`",
-                    decl.kind
-                )
-            })
+        coerce_input(name, kind, &raw_value).map(Some).map_err(|_| {
+            format!(
+                "input `{name}` (from env `{env_name}`): expected {}, got `{raw_value}`",
+                kind
+            )
+        })
     } else if let Some(default) = &decl.default {
         yml_to_json(default)
             .map(Some)
@@ -207,7 +189,7 @@ pub(crate) fn secret_registry(
     values: &BTreeMap<String, serde_json::Value>,
     decls: &BTreeMap<String, InputDecl>,
 ) -> duhem_evidence::SecretRegistry {
-    secret_registry_with_manifest(values, decls, &[], &BTreeMap::new())
+    secret_registry_with_manifest(values, decls, &BTreeMap::new())
 }
 
 /// Build the run-scoped registry immediately after manifest-aware
@@ -217,20 +199,15 @@ pub(crate) fn secret_registry(
 pub(crate) fn secret_registry_with_manifest(
     values: &BTreeMap<String, serde_json::Value>,
     decls: &BTreeMap<String, InputDecl>,
-    inherits: &[String],
     manifest_decls: &BTreeMap<String, InputDecl>,
 ) -> duhem_evidence::SecretRegistry {
     let mut registry = duhem_evidence::SecretRegistry::new();
     for (name, decl) in decls {
-        if decl.secret
-            && let Some(value) = values.get(name)
-        {
-            registry.register_json(name.clone(), value);
-        }
-    }
-    for name in inherits {
-        if let Some(decl) = manifest_decls.get(name)
-            && decl.secret
+        let manifest_secret = decl.inherit
+            && manifest_decls
+                .get(name)
+                .is_some_and(|manifest| manifest.secret);
+        if (decl.secret || manifest_secret)
             && let Some(value) = values.get(name)
         {
             registry.register_json(name.clone(), value);
@@ -239,10 +216,75 @@ pub(crate) fn secret_registry_with_manifest(
     registry
 }
 
-/// Type-check a value supplied by the selected environment against its
+/// Register secret flow-parameter bindings before the first evidence
+/// event. Expanded steps retain the bindings in `flow_secrets`, including
+/// structured values and references to resolved inputs.
+pub(crate) fn register_flow_secrets(
+    registry: &mut duhem_evidence::SecretRegistry,
+    definition: &VerificationDefinition,
+    resolved_inputs: Option<&ResolvedInputs>,
+) {
+    for step in definition
+        .criteria
+        .iter()
+        .flat_map(|criterion| &criterion.checks)
+        .flat_map(|check| &check.steps)
+    {
+        for (index, value) in step.flow_secrets.iter().enumerate() {
+            let mut ordinal = 0usize;
+            walk_flow_secret_leaves(value, &mut |leaf| {
+                let name = if ordinal == 0 {
+                    format!("flow_param_{index}")
+                } else {
+                    format!("flow_param_{index}_{ordinal}")
+                };
+                ordinal += 1;
+                let resolved = leaf
+                    .as_str()
+                    .and_then(|raw| raw.strip_prefix("$inputs."))
+                    .and_then(reference_head)
+                    .and_then(|name| resolved_inputs.and_then(|inputs| inputs.get(name)))
+                    .cloned()
+                    .or_else(|| yml_to_json(leaf).ok());
+                if let Some(value) = resolved {
+                    registry.register_json(name, &value);
+                }
+            });
+        }
+    }
+}
+
+/// Visit every scalar leaf of a secret binding so structured flow
+/// parameters receive the same exact-value masking as scalar bindings.
+fn walk_flow_secret_leaves<F: FnMut(&serde_yml::Value)>(value: &serde_yml::Value, visit: &mut F) {
+    match value {
+        serde_yml::Value::Sequence(values) => {
+            for value in values {
+                walk_flow_secret_leaves(value, visit);
+            }
+        }
+        serde_yml::Value::Mapping(values) => {
+            for value in values.values() {
+                walk_flow_secret_leaves(value, visit);
+            }
+        }
+        leaf => visit(leaf),
+    }
+}
+
+pub(crate) fn reference_head(reference: &str) -> Option<&str> {
+    let end = reference.find(['.', '[', ')']).unwrap_or(reference.len());
+    (end > 0).then_some(&reference[..end])
+}
+
+/// Type-check a value supplied by the selected profile against its
 /// declared `InputType` — same shape rule as an `--inputs @file` value,
-/// with an error string that points at the environment as the source.
-fn validate_env_value(name: &str, kind: InputType, v: &serde_json::Value) -> Result<(), String> {
+/// with an error string that points at the profile as the source.
+fn validate_profile_value(
+    name: &str,
+    kind: InputType,
+    v: &serde_json::Value,
+) -> Result<(), String> {
     let actual = json_shape_name(v);
     let ok = match kind {
         InputType::String => matches!(v, serde_json::Value::String(_)),
@@ -256,7 +298,7 @@ fn validate_env_value(name: &str, kind: InputType, v: &serde_json::Value) -> Res
         Ok(())
     } else {
         Err(format!(
-            "input `{name}` (from environment): expected {kind}, got {actual}"
+            "input `{name}` (from profile): expected {kind}, got {actual}"
         ))
     }
 }
@@ -421,22 +463,16 @@ mod tests {
 
     #[test]
     fn manifest_declaration_enforces_type_only_when_present() {
-        let inherited = vec!["count".to_string()];
+        let leaf = decls("  count: { inherit: true }");
         let raw = BTreeMap::from([(
             "count".to_string(),
             InputValue::Raw("not-an-integer".to_string()),
         )]);
         let declared = decls("  count: { type: integer }");
 
-        let err = resolve_inputs_with_manifest_env(
-            &raw,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &inherited,
-            &declared,
-            |_| None,
-        )
-        .unwrap_err();
+        let err =
+            resolve_inputs_with_manifest_env(&raw, &BTreeMap::new(), &leaf, &declared, |_| None)
+                .unwrap_err();
         assert!(
             err.contains("count") && err.contains("integer"),
             "manifest declaration owns the diagnostic: {err}"
@@ -445,8 +481,7 @@ mod tests {
         let legacy = resolve_inputs_with_manifest_env(
             &raw,
             &BTreeMap::new(),
-            &BTreeMap::new(),
-            &inherited,
+            &leaf,
             &BTreeMap::new(),
             |_| None,
         )
@@ -460,7 +495,7 @@ mod tests {
 
     #[test]
     fn manifest_declaration_uses_documented_precedence() {
-        let inherited = vec!["count".to_string()];
+        let leaf = decls("  count: { inherit: true }");
         let declared = decls("  count: { type: integer, env: APP_COUNT, default: 1 }");
         let selected = BTreeMap::from([("count".to_string(), serde_json::json!(2))]);
         let process = |name: &str| (name == "APP_COUNT").then(|| "3".to_string());
@@ -468,8 +503,7 @@ mod tests {
         let from_default = resolve_inputs_with_manifest_env(
             &BTreeMap::new(),
             &BTreeMap::new(),
-            &BTreeMap::new(),
-            &inherited,
+            &leaf,
             &declared,
             |_| None,
         )
@@ -479,8 +513,7 @@ mod tests {
         let from_process = resolve_inputs_with_manifest_env(
             &BTreeMap::new(),
             &BTreeMap::new(),
-            &BTreeMap::new(),
-            &inherited,
+            &leaf,
             &declared,
             process,
         )
@@ -490,8 +523,7 @@ mod tests {
         let from_selected = resolve_inputs_with_manifest_env(
             &BTreeMap::new(),
             &selected,
-            &BTreeMap::new(),
-            &inherited,
+            &leaf,
             &declared,
             process,
         )
@@ -499,21 +531,15 @@ mod tests {
         assert_eq!(from_selected["count"], serde_json::json!(2));
 
         let explicit = BTreeMap::from([("count".to_string(), InputValue::Raw("4".to_string()))]);
-        let from_flag = resolve_inputs_with_manifest_env(
-            &explicit,
-            &selected,
-            &BTreeMap::new(),
-            &inherited,
-            &declared,
-            process,
-        )
-        .unwrap();
+        let from_flag =
+            resolve_inputs_with_manifest_env(&explicit, &selected, &leaf, &declared, process)
+                .unwrap();
         assert_eq!(from_flag["count"], serde_json::json!(4));
     }
 
     #[test]
     fn manifest_secret_is_registered_for_each_inheriting_leaf() {
-        let inherited = vec!["password".to_string()];
+        let leaf = decls("  password: { inherit: true }");
         let declared = decls("  password: { type: string, secret: true }");
         let values = BTreeMap::from([(
             "password".to_string(),
@@ -521,12 +547,27 @@ mod tests {
         )]);
 
         for _leaf in 0..2 {
-            let registry =
-                secret_registry_with_manifest(&values, &BTreeMap::new(), &inherited, &declared);
+            let registry = secret_registry_with_manifest(&values, &leaf, &declared);
             assert_eq!(
                 registry.mask("high-entropy-value").text,
                 "[redacted:password]"
             );
         }
+    }
+
+    #[test]
+    fn leaf_can_add_secret_protection_to_inherited_input() {
+        let leaf = decls("  password: { inherit: true, secret: true }");
+        let declared = decls("  password: { type: string }");
+        let values = BTreeMap::from([(
+            "password".to_string(),
+            serde_json::json!("high-entropy-value"),
+        )]);
+
+        let registry = secret_registry_with_manifest(&values, &leaf, &declared);
+        assert_eq!(
+            registry.mask("high-entropy-value").text,
+            "[redacted:password]"
+        );
     }
 }

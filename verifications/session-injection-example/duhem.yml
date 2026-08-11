@@ -1,0 +1,62 @@
+# Browser session injection — worked authoring example (spec #347).
+#
+# Setup authenticates once against the real app and captures the
+# resulting Playwright storage state. Each authenticated check still
+# receives a fresh BrowserContext seeded from that immutable baseline;
+# omitting `session:` remains the signed-out path.
+
+verification: Authenticated workspace management
+spec_ref: https://github.com/onsager-ai/duhem/issues/347
+
+inputs:
+  admin_password:
+    type: string
+    env: APP_ADMIN_PASSWORD
+    secret: true
+  base_url:
+    type: string
+    default: http://localhost:3000
+
+setup:
+  - id: goto_login
+    uses: ui/navigate
+    with:
+      url: $runtime.format("{}/login", $inputs.base_url)
+  - id: fill_password
+    uses: ui/type
+    with:
+      locator: { label: Password }
+      text: $inputs.admin_password
+  - id: submit
+    uses: ui/click
+    with: { role: button, name: Sign in }
+  - id: session
+    uses: ui/capture-session
+
+criteria:
+  - id: AC-1
+    description: A signed-out visitor is sent to the login page.
+    checks:
+      - id: AC-1.1
+        description: Visit the workspace list without a session and observe the login redirect.
+        steps:
+          - uses: ui/navigate
+            with:
+              url: $runtime.format("{}/workspaces", $inputs.base_url)
+          - uses: ui/assert-url
+            with: { matches: "/login" }
+
+  - id: AC-2
+    description: An admin can see the workspace list.
+    checks:
+      - id: AC-2.1
+        description: Seed a fresh context from the acquired login and observe the workspace list.
+        session: $setup.session.outputs.state
+        steps:
+          - uses: ui/navigate
+            with:
+              url: $runtime.format("{}/workspaces", $inputs.base_url)
+          - uses: ui/assert-element
+            with:
+              locator: { role: heading, name: Workspaces }
+              expected: visible

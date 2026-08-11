@@ -1,8 +1,8 @@
 # Manifest input declarations — worked example (spec #354).
 #
 # The suite declares a shared credential once. Both leaves consume its
-# name through `inherits:` without restating its type, process source,
-# or sensitivity. `environments:` remains a value map; here it supplies
+# name through `inputs.<name>.inherit: true` without restating its type, process source,
+# or sensitivity. `profiles:` remains a value map; here it supplies
 # the non-secret username while the credential comes from the process.
 #
 # Run from the repository root:
@@ -24,7 +24,7 @@ inputs:
   username:
     type: string
 
-environments:
+profiles:
   default:
     username: admin
 

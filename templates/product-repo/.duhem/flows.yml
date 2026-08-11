@@ -1,0 +1,19 @@
+# Shared reusable step flows. A flow receives every dependency through
+# `params:`; its body may reference only `$params.*` and `$pages.*`.
+flows:
+  sign_in:
+    params:
+      password: { type: string, secret: true }
+      user: { type: string }
+    steps:
+      - uses: ui/type
+        with: { locator: $pages.login.username, text: $params.user }
+      - uses: ui/type
+        with: { locator: $pages.login.password, text: $params.password }
+      - uses: ui/click
+        with: { locator: $pages.login.submit }
+      - id: landed
+        uses: ui/assert-element
+        with: { locator: $pages.login.welcome, expected: visible }
+    outputs:
+      signed_in: $steps.landed.outputs.satisfied

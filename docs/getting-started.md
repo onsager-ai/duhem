@@ -119,7 +119,7 @@ criteria:
         steps:              # ordered actions that exercise the system
           - id: home
             uses: api/call
-            with: { method: GET, url: $inputs.base_url, within: 15s }
+            with: { method: GET, url: $inputs.base_url, timeout: 15s }
         assertions:         # structured, mechanically judged — no LLM
           - $steps.home.outputs.status == 200   # no outputs: block needed
 ```
@@ -136,20 +136,26 @@ criteria:
   (`outputs: { code: status }`) or bind a *deep extraction* to a short
   alias (`outputs: { project_id: body.data._id }`) so you write the path
   once instead of repeating it across assertions.
+- **Step gating** defaults to `if: success`: after an earlier step errors,
+  times out, or produces a failed implicit judgment, later default steps
+  in that check are recorded as skipped. Binding `satisfied` for manual
+  composition opts out of both implicit judgment and gating. Use
+  `if: always` for teardown and `if: failure` for failure-only
+  diagnostics. Gate state is per check and never affects sibling checks.
 - **`assertions`** are evaluated deterministically — no model in the
   judging loop. They're also **optional**: a `ui/assert-*` (or `api/poll`)
   step *is* the judgment, so an all-assert check needs no `assertions:`
   block at all. Bind `satisfied` and assert it yourself only for manual
   control (e.g. a disjunction across steps).
 - **Sensitive inputs** use `env: VARIABLE_NAME` with `secret: true`.
-  Values resolve from `--inputs` → selected environment → process
+  Values resolve from `--inputs` → selected profile → process
   `env:` → `default:` and registered secret values are masked from
   recorded text and terminal output. A secret input cannot have a
   committed `default:`. Screenshots/video and transformations beyond
   base64, percent encoding, and JSON escaping remain outside the
   substring-masking guarantee. For a credential shared by a suite,
   declare it once under the root manifest's `inputs:` and list its name
-  under each consuming leaf's `inherits:`:
+  under each consuming leaf's `inputs:` with `inherit: true`:
 
   ```yaml
   # .duhem/duhem.yml
@@ -158,25 +164,47 @@ criteria:
       type: string
       env: APP_PASSWORD
       secret: true
-  environments:
+  profiles:
     staging:
       username: admin
 
   # a leaf Verification Definition
-  inherits: [password]
+  inputs:
+    password: { inherit: true, secret: true }
   ```
 
-  A declared inherited value uses the same precedence and type checks
-  as a leaf input. An inherited name with no manifest declaration keeps
-  the existing names-only behavior.
-- **Credentials returned by a step** use `secret:` on the producing
+  A declared inherited value uses the manifest declaration's precedence
+  and type checks. The leaf declaration remains required, so a typoed
+  `$inputs.*` reference cannot silently bind a same-named manifest input.
+- **Shared UI locators** live under a two-level `pages:` catalog in the
+  root manifest, an ordinary include, or a leaf. Reference an entry as a
+  whole locator value:
+
+  ```yaml
+  # pages.yml, listed under the root manifest's includes:
+  pages:
+    login:
+      username: { role: textbox, name: Username }
+      submit: { role: button, name: Sign In }
+
+  # a leaf step
+  - uses: ui/type
+    with: { locator: $pages.login.username, text: $inputs.user }
+  ```
+
+  Root entries win over includes; leaf-local entries win over the
+  composed manifest. A catalog locator may contain `$inputs.*`, but
+  every leaf receiving it must declare those names. `duhem validate`
+  catches dangling names offline (with a nearby-name suggestion), and
+  `duhem resolve --provenance` shows each winning entry's source file.
+- **Credentials returned by a step** use `secret_outputs:` on the producing
   step. Name the sensitive scalar output path, not its containing
   object or array:
 
   ```yaml
   - id: login
     uses: api/call
-    secret: [body.data]
+    secret_outputs: [body.data]
     with:
       method: POST
       url: $inputs.login_url
@@ -194,8 +222,132 @@ criteria:
   become `[redacted:login.body.data]`. A path such as `body` (object) or
   `body.items` (array) fails; name one scalar leaf such as
   `body.items[0].key`. Some actions may mark credential outputs secret
-  in their contract, in which case no authored `secret:` entry is
+  in their contract, in which case no authored `secret_outputs:` entry is
   needed.
+
+### Reuse a real browser login
+
+For UI behind authentication, log in once during `setup:`, capture the
+resulting browser state, and seed each authenticated check explicitly:
+
+```yaml
+setup:
+  - uses: ui/navigate
+    with: { url: $inputs.login_url }
+  - uses: ui/type
+    with: { locator: { label: Password }, text: $inputs.password }
+  - uses: ui/click
+    with: { role: button, name: Sign in }
+  - id: session
+    uses: ui/capture-session
+
+criteria:
+  - id: AC-1
+    description: An administrator can see the workspace list.
+    checks:
+      - id: AC-1.1
+        session: $setup.session.outputs.state
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.workspaces_url }
+          - uses: ui/assert-element
+            with:
+              locator: { role: heading, name: Workspaces }
+              expected: visible
+```
+
+`session:` must be one whole `$` reference; inline cookie/state literals
+are rejected. Each check still gets a fresh isolated context, so mutations
+do not leak to siblings. Omit `session:` for the signed-out path. The
+captured `state` is contract-secret automatically—do not add a `secret_outputs:`
+entry—and evidence carries only the expression plus a SHA-256 digest.
+
+### Reuse a step sequence with `flows:`
+
+Session capture (above) is the right tool when every check should carry
+forward the *same* signed-in identity. Sometimes there's no single
+session to share — an admin check and a member check need to sign in as
+*different* users. Put the repeated step sequence in a `flows:` catalog
+once, parameterize what varies, and invoke it with `call:` wherever you
+need it:
+
+```yaml
+pages:
+  login:
+    username: { role: textbox, name: Username }
+    password: { role: textbox, name: Password }
+    submit: { role: button, name: Sign In }
+
+flows:
+  sign_in:
+    description: Sign in with supplied credentials
+    params:
+      user: { type: string }
+      password: { type: string, secret: true }
+    steps:
+      - uses: ui/type
+        with: { locator: $pages.login.username, text: $params.user }
+      - uses: ui/type
+        with: { locator: $pages.login.password, text: $params.password }
+      - uses: ui/click
+        with: { locator: $pages.login.submit }
+
+criteria:
+  - id: AC-1
+    description: An administrator can open the settings page.
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.login_url }
+          - call: sign_in
+            with: { user: $inputs.admin_user, password: $inputs.admin_password }
+          - uses: ui/navigate
+            with: { url: $inputs.settings_url }
+          - uses: ui/assert-element
+            with:
+              locator: { role: heading, name: Settings }
+              expected: visible
+
+  - id: AC-2
+    description: A regular member can also open the settings page.
+    checks:
+      - id: AC-2.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.login_url }
+          - call: sign_in
+            with: { user: $inputs.member_user, password: $inputs.member_password }
+          - uses: ui/navigate
+            with: { url: $inputs.settings_url }
+          - uses: ui/assert-element
+            with:
+              locator: { role: heading, name: Settings }
+              expected: visible
+```
+
+A step picks exactly one of `uses:` or `call:`. `flows:` composes the
+same way as `pages:` — declared on the root manifest, an include, or a
+leaf, root-wins on name collision. A flow body is **hygienic**: its
+steps see only `$params.*` and `$pages.*`, never the caller's
+`$inputs.*` or `$steps.*` — pass every dependency through `with:`
+explicitly, so the flow stays portable across suites. A flow may
+declare its own `outputs:` map (`$steps.<inner-id>.outputs.<name>`) to
+expose one of its inner step's results to the caller as
+`$steps.<call-id>.outputs.<name>`; inner step ids are otherwise
+private. `duhem resolve --provenance` prints the expanded steps and
+which flow each one came from — useful when a call's behavior is a
+surprise.
+
+**Running one leaf by path still resolves the catalog.** `duhem run
+path/to/leaf.yml` (or `-f`) doesn't require going through the suite
+manifest: it walks up from the leaf's own directory for a root
+manifest — the same ancestor search a path-less `duhem run` uses — and,
+if one is found, merges its `pages:`/`flows:` catalog into the leaf
+before resolving `$pages.*`/`call:`. Sibling leaves the manifest lists
+are not loaded or run; the run stays scoped to the one you asked for.
+If no manifest is found and the leaf still references an undeclared
+`$pages.*` name or flow, it fails naming exactly what's missing.
 
 ## 5. Author a real check
 
@@ -241,8 +393,35 @@ Point it at *your* system by changing three things in `duhem.yml`:
    regular expression instead of a literal, use
    `$runtime.matches(body_text, "Example ?Domain")`.
 
-Then `duhem validate` (catch shape errors early) and `duhem run`. A
-type error in an assertion — say `contains` against a number — is a
+   Substitution in a `with:` value is whole-string only. An embedded
+   reference such as `"#row-$inputs.id"` stays literal — it is not an
+   error, and the action receives it verbatim. Compose a value with
+   `$runtime.format(fmt, args...)` or `$runtime.concat(args...)` instead:
+
+   ```yaml
+   - uses: ui/navigate
+     with:
+       url: $runtime.format("{}/{}/{}", $inputs.base_url, "projects", $steps.create.outputs.body.id)
+   ```
+
+Then `duhem validate` (catch shape errors early) and `duhem run`. When
+composition or input precedence is surprising, inspect the exact
+pre-execution document first:
+
+```bash
+duhem resolve . --profile staging --provenance
+duhem resolve . --profile staging --format json > resolved.json
+```
+
+`resolve` merges includes, expands leaves, resolves inherited and
+profile/process/default inputs, substitutes static step values, and
+fills default timeouts. Secret values stay `••••••`; validation
+failures are reported inside the output. It never launches a browser,
+runs `provision:` hooks, writes evidence, or performs network I/O.
+JSON is the stable machine-readable form; YAML is optimized for
+humans.
+
+A type error in an assertion — say `contains` against a number — is a
 `fail` that names the mismatch, not a silent pass.
 
 ## 6. Verifying a real workload that needs a running system
@@ -252,7 +431,7 @@ can declare environment hooks that provision it once and tear it down
 after:
 
 ```yaml
-environment:
+provision:
   up: ./scripts/up.sh          # stand up the real thing (no mocks)
   down: ./scripts/down.sh
   ready:

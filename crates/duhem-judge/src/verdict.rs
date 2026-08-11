@@ -33,7 +33,7 @@ pub enum VerdictState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InconclusiveCause {
-    /// A step or assertion exceeded its `within` budget.
+    /// A step or assertion exceeded its `timeout` budget.
     Timeout,
     /// An assertion referenced a step output that was never produced.
     MissingObservation,
@@ -59,7 +59,7 @@ impl InconclusiveCause {
         }
     }
 
-    fn from_wire(s: &str) -> Option<Self> {
+    pub(crate) fn from_wire(s: &str) -> Option<Self> {
         Some(match s {
             "timeout" => InconclusiveCause::Timeout,
             "missing_observation" => InconclusiveCause::MissingObservation,

@@ -4,8 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use duhem_actions::{ActionError, ExistenceState, Locator};
-use duhem_evidence::{EventPayload, EvidenceWriter, StoreError, VerdictState, WriterError};
-use duhem_judge::{AssertionOutcome, InconclusiveCause, RunVerdict};
+use duhem_evidence::{EventPayload, EvidenceWriter, StoreError, WriterError};
+use duhem_judge::{AssertionOutcome, InconclusiveCause, RunVerdict, VerdictState};
 use duhem_schema::{Expr, PathRoot};
 use thiserror::Error;
 
@@ -58,13 +58,13 @@ pub enum EngineError {
         context: String,
     },
     /// A `$inputs.<name>` reference names an input the leaf declared
-    /// under `inherits:` (spec #135), but nothing on the resolution
-    /// chain bound it — no manifest environment was selected and no
+    /// with `inherit: true` (spec #135), but nothing on the resolution
+    /// chain bound it — no manifest profile was selected and no
     /// `--inputs` supplied it. Distinct from the generic
     /// `UnresolvedReference` so the remedy (run the suite, or pass
     /// `--inputs`) is named instead of a deep network failure.
     #[error(
-        "input `{name}` is declared `inherits:` but no environment or --inputs provides it; run the suite (e.g. `duhem run verifications/<suite>`) or pass `--inputs {name}=...`"
+        "input `{name}` is declared `inherit: true` but no profile or --inputs provides it; run the suite (e.g. `duhem run verifications/<suite>`) or pass `--inputs {name}=...`"
     )]
     UnresolvedInheritedInput { name: String },
     /// A validated secret path started at a declared output, but the
@@ -75,7 +75,7 @@ pub enum EngineError {
     /// Registering an aggregate's serialization would look protected
     /// while missing the values that actually recur in evidence.
     #[error(
-        "secret: `{path}` resolved to an {shape}, not a value.\nName the scalar that is sensitive, e.g. `{path}.data`.\nRegistering a whole {shape} would mask only its exact\nserialization, which is almost never what appears in evidence."
+        "secret_outputs: `{path}` resolved to an {shape}, not a value.\nName the scalar that is sensitive, e.g. `{path}.data`.\nRegistering a whole {shape} would mask only its exact\nserialization, which is almost never what appears in evidence."
     )]
     SecretOutputNotScalar { path: String, shape: &'static str },
 }
@@ -103,6 +103,13 @@ pub(crate) struct StepEvidence {
     pub with: serde_yml::Value,
     /// The action's outputs (`satisfied`, `count`, …) for this step.
     pub outputs: BTreeMap<String, serde_json::Value>,
+    /// Why this step was gated out. A skipped step contributes no
+    /// assertion verdict; this distinguishes it from an unrun step
+    /// whose observation is genuinely missing.
+    pub skip_reason: Option<String>,
+    /// Authored catalog coordinate, retained after the map is spliced
+    /// so a failure points back to the one shared entry to edit.
+    pub catalog_reference: Option<String>,
 }
 
 impl StepEvidence {
@@ -112,6 +119,17 @@ impl StepEvidence {
         StepEvidence {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
+            skip_reason: None,
+            catalog_reference: None,
+        }
+    }
+
+    pub fn skipped(reason: String) -> Self {
+        StepEvidence {
+            with: serde_yml::Value::Null,
+            outputs: BTreeMap::new(),
+            skip_reason: Some(reason),
+            catalog_reference: None,
         }
     }
 
@@ -134,6 +152,63 @@ pub(crate) struct ImplicitOutcome {
     pub detail: Option<String>,
 }
 
+/// Compute one step's implicit judgment, if the step contributes one.
+/// This is also the single source of truth for gating: binding an output
+/// named `satisfied` suppresses both the implicit assertion and any gate
+/// derived from that assertion.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn implicit_judgment_for_step(
+    step: &duhem_schema::Step,
+    step_index: usize,
+    action_judges: bool,
+    evidence: &StepEvidence,
+    any_unknown: bool,
+    environment_failed: bool,
+    browser_missing: bool,
+) -> Option<ImplicitOutcome> {
+    if !action_judges || step.outputs.contains_key("satisfied") || evidence.skip_reason.is_some() {
+        return None;
+    }
+
+    let label = display_step_label(step, step_index);
+    let (state, detail) = if any_unknown {
+        (
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+            Some("unknown_action".to_string()),
+        )
+    } else if environment_failed {
+        (
+            VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+            Some(if browser_missing {
+                "browser_unavailable".to_string()
+            } else {
+                "check_browser_failed".to_string()
+            }),
+        )
+    } else {
+        match evidence.satisfied() {
+            Some(true) => (VerdictState::Pass, None),
+            Some(false) => (
+                VerdictState::Fail,
+                Some(judging_fail_detail(step, evidence, &label)),
+            ),
+            None => (
+                VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+                Some(format!(
+                    "step `{label}` did not run or produced no `satisfied`"
+                )),
+            ),
+        }
+    };
+
+    Some(ImplicitOutcome {
+        label,
+        step_index,
+        state,
+        detail,
+    })
+}
+
 /// Compute the implicit assertion outcomes for a check's judging steps
 /// (spec #253): one entry per step whose action judges (its contract
 /// emits `satisfied`, tested via `is_judging`) and that hasn't bound
@@ -149,59 +224,22 @@ pub(crate) fn implicit_judgment_outcomes(
     environment_failed: bool,
     browser_missing: bool,
 ) -> Vec<ImplicitOutcome> {
-    let mut out = Vec::new();
-    for (idx, step) in check.steps.iter().enumerate() {
-        // Opt out when the author binds an output *named* `satisfied`
-        // (the key `$steps.<id>.outputs.satisfied` resolves against),
-        // regardless of which extraction it maps to — that's the author
-        // taking manual control of the satisfied signal.
-        let judging = is_judging(step.uses.as_str()) && !step.outputs.contains_key("satisfied");
-        if !judging {
-            continue;
-        }
-        let label = step_label(step, idx);
-        let (state, detail) = if any_unknown {
-            (
-                VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
-                Some("unknown_action".to_string()),
+    check
+        .steps
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, step)| {
+            implicit_judgment_for_step(
+                step,
+                idx,
+                is_judging(step.uses_name()),
+                &step_evidence[idx],
+                any_unknown,
+                environment_failed,
+                browser_missing,
             )
-        } else if environment_failed {
-            (
-                VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
-                Some(if browser_missing {
-                    "browser_unavailable".to_string()
-                } else {
-                    "check_browser_failed".to_string()
-                }),
-            )
-        } else {
-            let ev = &step_evidence[idx];
-            match ev.satisfied() {
-                Some(true) => (VerdictState::Pass, None),
-                // The step ran and judged the artifact *not* satisfied.
-                // Speak the reason — the authored intent plus what was
-                // observed — so the reporter shows why, not a bare
-                // `actual false, expected true`.
-                Some(false) => (
-                    VerdictState::Fail,
-                    Some(judging_fail_detail(step, ev, &label)),
-                ),
-                None => (
-                    VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
-                    Some(format!(
-                        "step `{label}` did not run or produced no `satisfied`"
-                    )),
-                ),
-            }
-        };
-        out.push(ImplicitOutcome {
-            label,
-            step_index: idx,
-            state,
-            detail,
-        });
-    }
-    out
+        })
+        .collect()
 }
 
 /// A human, semantic failure detail for a judging step whose implicit
@@ -213,7 +251,7 @@ pub(crate) fn implicit_judgment_outcomes(
 /// the step's `with:` can't be read (a `$`-ref that never resolved, an
 /// action we don't specially humanize).
 fn judging_fail_detail(step: &duhem_schema::Step, ev: &StepEvidence, label: &str) -> String {
-    let specialized = match step.uses.as_str() {
+    let specialized = match step.uses_name() {
         "ui/assert-element" => assert_element_fail_detail(ev),
         _ => intent_fail_detail(step, ev),
     };
@@ -226,42 +264,53 @@ fn generic_fail_detail(label: &str) -> String {
 }
 
 /// Optional ` within 5s` suffix, read from the step's resolved `with:`.
-fn within_suffix(ev: &StepEvidence) -> String {
+fn timeout_suffix(ev: &StepEvidence) -> String {
     ev.with
-        .get("within")
+        .get("timeout")
         .and_then(|v| v.as_str())
         .map(|s| format!(" within {s}"))
         .unwrap_or_default()
 }
 
 /// `ui/assert-element`: "expected text \"Manager\" to be absent within
-/// 5s, but 1 still matched". Reads the locator / `expected` / `within`
+/// 5s, but 1 still matched". Reads the locator / `expected` / `timeout`
 /// from the resolved `with:` and the observed `count` from the outputs.
 fn assert_element_fail_detail(ev: &StepEvidence) -> Option<String> {
     let loc: Locator = serde_yml::from_value(ev.with.get("locator")?.clone()).ok()?;
     let expected: ExistenceState = serde_yml::from_value(ev.with.get("expected")?.clone()).ok()?;
-    let desc = loc.describe();
-    let within = within_suffix(ev);
+    let resolved = loc.describe();
+    let desc = ev
+        .catalog_reference
+        .as_ref()
+        .map(|reference| format!("`{reference}` ({resolved})"))
+        .unwrap_or(resolved);
+    let timeout_clause = timeout_suffix(ev);
     let count = ev.outputs.get("count").and_then(|v| v.as_u64());
     Some(match expected {
         ExistenceState::NotExists => match count {
-            Some(n) => format!("expected {desc} to be absent{within}, but {n} still matched"),
-            None => format!("expected {desc} to be absent{within}, but it was present"),
+            Some(n) => {
+                format!("expected {desc} to be absent{timeout_clause}, but {n} still matched")
+            }
+            None => format!("expected {desc} to be absent{timeout_clause}, but it was present"),
         },
         ExistenceState::Hidden => match count {
             Some(n) => {
-                format!("expected {desc} to be hidden{within}, but it stayed visible ({n} present)")
+                format!(
+                    "expected {desc} to be hidden{timeout_clause}, but it stayed visible ({n} present)"
+                )
             }
-            None => format!("expected {desc} to be hidden{within}, but it stayed visible"),
+            None => format!("expected {desc} to be hidden{timeout_clause}, but it stayed visible"),
         },
         ExistenceState::Exists => {
-            format!("expected {desc} to appear{within}, but none was found")
+            format!("expected {desc} to appear{timeout_clause}, but none was found")
         }
         ExistenceState::Visible => match count {
             Some(n) if n > 0 => {
-                format!("expected {desc} to be visible{within}, but it stayed hidden ({n} present)")
+                format!(
+                    "expected {desc} to be visible{timeout_clause}, but it stayed hidden ({n} present)"
+                )
             }
-            _ => format!("expected {desc} to be visible{within}, but it never appeared"),
+            _ => format!("expected {desc} to be visible{timeout_clause}, but it never appeared"),
         },
     })
 }
@@ -296,7 +345,7 @@ fn intent_fail_detail(step: &duhem_schema::Step, ev: &StepEvidence) -> Option<St
     if intent.is_empty() {
         return None;
     }
-    let within = within_suffix(ev);
+    let timeout_clause = timeout_suffix(ev);
     let observed = ev
         .outputs
         .get("status")
@@ -304,8 +353,8 @@ fn intent_fail_detail(step: &duhem_schema::Step, ev: &StepEvidence) -> Option<St
         .map(|st| format!(" — last status {st}"))
         .unwrap_or_default();
     Some(format!(
-        "`{}`: expected {}{within}, but it did not hold{observed}",
-        step.uses,
+        "`{}`: expected {}{timeout_clause}, but it did not hold{observed}",
+        step.uses_name(),
         intent.join(" ")
     ))
 }
@@ -325,6 +374,7 @@ pub(crate) async fn evaluate_explicit_assertions(
     any_unknown: bool,
     environment_failed: bool,
     browser_missing: bool,
+    step_evidence: &[StepEvidence],
     assertion_outcomes: &mut Vec<AssertionOutcome>,
     failed: &mut Vec<FailedAssertion>,
 ) -> Result<(), EngineError> {
@@ -335,6 +385,9 @@ pub(crate) async fn evaluate_explicit_assertions(
         // (an explicit `$steps.update.outputs.status == 200` IS about the
         // `update` step, #279 follow-up).
         let step_index = owning_step_index(&expr, check);
+        if skipped_reference_reason(&expr, check, step_evidence).is_some() {
+            continue;
+        }
         let (state, detail) = if any_unknown {
             (
                 VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
@@ -422,6 +475,22 @@ fn steps_referenced(expr: &Expr, out: &mut BTreeSet<String>) {
     }
 }
 
+fn skipped_reference_reason(
+    expr: &Expr,
+    check: &duhem_schema::Check,
+    evidence: &[StepEvidence],
+) -> Option<String> {
+    let mut refs = BTreeSet::new();
+    steps_referenced(expr, &mut refs);
+    check.steps.iter().enumerate().find_map(|(index, step)| {
+        let id = step.id.as_ref()?;
+        if !refs.contains(id) {
+            return None;
+        }
+        evidence.get(index)?.skip_reason.clone()
+    })
+}
+
 /// If an explicit assertion references exactly one step (`$steps.<id>`),
 /// return that step's 0-based index in the check — so the reporter folds
 /// the assertion onto its step and propagates status (an assertion on a
@@ -493,7 +562,16 @@ pub(crate) async fn append_implicit_judgment(
 pub(crate) fn step_label(step: &duhem_schema::Step, idx: usize) -> String {
     step.id
         .clone()
-        .unwrap_or_else(|| format!("{} #{idx}", step.uses))
+        .unwrap_or_else(|| format!("{} #{idx}", step.uses_name()))
+}
+
+/// A step's human-facing label for reports and run views. Authored
+/// prose wins, then the reference id, then the action/index fallback.
+/// Engine diagnostics deliberately keep using [`step_label`].
+pub(crate) fn display_step_label(step: &duhem_schema::Step, idx: usize) -> String {
+    step.description
+        .clone()
+        .unwrap_or_else(|| step_label(step, idx))
 }
 
 /// Predicate that decides whether the engine should execute a given
@@ -582,6 +660,8 @@ mod fail_detail_tests {
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.clone()))
                 .collect(),
+            skip_reason: None,
+            catalog_reference: None,
         }
     }
 
@@ -591,7 +671,7 @@ mod fail_detail_tests {
         // because the element WAS present. The message must say what it
         // looked for and how many it found — not `actual false`.
         let e = ev(
-            r#"{ locator: { text: "Manager" }, expected: not_exists, within: "5s" }"#,
+            r#"{ locator: { text: "Manager" }, expected: not_exists, timeout: "5s" }"#,
             &[("satisfied", json!(false)), ("count", json!(1))],
         );
         assert_eq!(
@@ -615,7 +695,7 @@ mod fail_detail_tests {
     #[test]
     fn assert_element_visible_distinguishes_present_from_absent() {
         let present = ev(
-            r#"{ locator: { role: button, name: Go }, expected: visible, within: "2s" }"#,
+            r#"{ locator: { role: button, name: Go }, expected: visible, timeout: "2s" }"#,
             &[("satisfied", json!(false)), ("count", json!(3))],
         );
         assert_eq!(
@@ -635,9 +715,22 @@ mod fail_detail_tests {
     }
 
     #[test]
+    fn catalog_locator_failure_names_entry_and_resolved_locator() {
+        let mut e = ev(
+            r#"{ locator: { role: button, name: Sign In }, expected: visible }"#,
+            &[("satisfied", json!(false)), ("count", json!(0))],
+        );
+        e.catalog_reference = Some("$pages.login.submit".to_string());
+        let detail = assert_element_fail_detail(&e).unwrap();
+        assert!(detail.contains("`$pages.login.submit`"), "{detail}");
+        assert!(detail.contains("role=button \"Sign In\""), "{detail}");
+        assert!(detail.contains("never appeared"), "{detail}");
+    }
+
+    #[test]
     fn assert_element_hidden_reports_still_visible() {
         let e = ev(
-            r#"{ locator: { testid: banner }, expected: hidden, within: "1s" }"#,
+            r#"{ locator: { testid: banner }, expected: hidden, timeout: "1s" }"#,
             &[("satisfied", json!(false)), ("count", json!(1))],
         );
         assert_eq!(
@@ -652,7 +745,7 @@ mod fail_detail_tests {
     fn poll_intent_names_endpoint_and_last_status() {
         let s = step("api/poll");
         let e = ev(
-            r#"{ method: GET, url: "http://x/job", until: "$response.body.done == true", within: "30s" }"#,
+            r#"{ method: GET, url: "http://x/job", until: "$response.body.done == true", timeout: "30s" }"#,
             &[("satisfied", json!(false)), ("status", json!(500))],
         );
         assert_eq!(
@@ -725,5 +818,64 @@ mod step_correlation_tests {
         );
         let e = assertion_to_expr(&c.assertions[0]);
         assert_eq!(owning_step_index(&e, &c), None);
+    }
+}
+
+#[cfg(test)]
+mod step_label_tests {
+    use super::*;
+
+    fn step(yaml: &str) -> duhem_schema::Step {
+        serde_yml::from_str(yaml).expect("step")
+    }
+
+    #[test]
+    fn display_label_prefers_description_then_id_then_action_index() {
+        let described = step("id: submit\ndescription: Submit the sign-in form\nuses: ui/click\n");
+        assert_eq!(display_step_label(&described, 3), "Submit the sign-in form");
+        assert_eq!(
+            display_step_label(&step("id: submit\nuses: ui/click\n"), 3),
+            "submit"
+        );
+        assert_eq!(
+            display_step_label(&step("uses: ui/click\n"), 3),
+            "ui/click #3"
+        );
+    }
+
+    #[test]
+    fn unresolved_reference_diagnostic_stays_id_first() {
+        let described = step("id: submit\ndescription: Submit the sign-in form\nuses: ui/click\n");
+        let error = EngineError::UnresolvedReference {
+            reference: "$inputs.missing".to_string(),
+            step: step_label(&described, 0),
+            context: String::new(),
+        };
+        let message = error.to_string();
+        assert!(message.contains("step `submit`"), "{message}");
+        assert!(!message.contains("Submit the sign-in form"), "{message}");
+    }
+
+    #[test]
+    fn implicit_failure_uses_the_display_label() {
+        let check: duhem_schema::Check = serde_yml::from_str(
+            "id: AC-1.1\nsteps:\n  - id: username\n    description: The Username field is offered\n    uses: ui/assert-element\n",
+        )
+        .expect("check");
+        let evidence = vec![StepEvidence {
+            with: serde_yml::Value::Null,
+            outputs: BTreeMap::from([("satisfied".to_string(), serde_json::json!(false))]),
+            skip_reason: None,
+            catalog_reference: None,
+        }];
+        let outcomes = implicit_judgment_outcomes(&check, |_| true, &evidence, false, false, false);
+        assert_eq!(outcomes[0].label, "The Username field is offered");
+        assert!(
+            outcomes[0]
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("The Username field is offered")
+        );
     }
 }

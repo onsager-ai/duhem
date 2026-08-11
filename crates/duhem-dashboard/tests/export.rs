@@ -139,6 +139,7 @@ async fn export_refuses_traversal_shaped_ids() {
         step_index: 0,
         uses: "api/call".into(),
         layer: None,
+        flow: None,
         with: BTreeMap::new(),
     })
     .await
@@ -152,6 +153,8 @@ async fn export_refuses_traversal_shaped_ids() {
     w.append(EventPayload::CheckFinished {
         check_id: "../pwn".into(),
         verdict: VerdictState::Pass,
+        session_source: None,
+        session_digest: None,
     })
     .await
     .unwrap();

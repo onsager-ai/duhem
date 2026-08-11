@@ -1,6 +1,6 @@
 //! `api/stream` — follow an open-ended Server-Sent-Events (SSE) /
 //! chunked `text/event-stream` from an in-progress source, collecting
-//! events until a terminal condition or the `within:` budget, then
+//! events until a terminal condition or the `timeout:` budget, then
 //! expose them as outputs for mechanical assertion.
 //!
 //! This is the live-follow analogue of `api/call`: where `api/call`
@@ -21,7 +21,7 @@
 //! - `method`: HTTP method (default `GET`).
 //! - `headers`: request headers (e.g. an auth token).
 //! - `body`: optional request body (JSON for non-string YAML).
-//! - `within`: wall-clock collection budget (default [`DEFAULT_WITHIN`]).
+//! - `timeout`: wall-clock collection budget (default [`DEFAULT_TIMEOUT`]).
 //!   Reaching it **ends collection** and is *not* a failure by itself —
 //!   the events gathered so far are surfaced and the outcome is
 //!   `Outcome::Ok`.
@@ -33,7 +33,7 @@
 //!
 //! Closed and deterministic-by-timeout: no LLM, no scripting. The only
 //! ways collection ends are `until_event`, `max_events`, the server
-//! closing the stream, or the `within:` budget — every one mechanical.
+//! closing the stream, or the `timeout:` budget — every one mechanical.
 //!
 //! Outputs (fixed schema):
 //!
@@ -56,7 +56,7 @@
 //!
 //! Outcome mapping:
 //!
-//! - Collection ends by any terminal (including `within:`) → `Outcome::Ok`.
+//! - Collection ends by any terminal (including `timeout:`) → `Outcome::Ok`.
 //!   Like `api/call`'s status, the *contents* of the stream are data,
 //!   not a verdict — the assertion is where the ordered events and the
 //!   terminal event get judged.
@@ -73,9 +73,9 @@ use async_trait::async_trait;
 use reqwest::Method;
 use serde::Deserialize;
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN, Observation};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT, Observation};
 use crate::error::ActionError;
-use crate::with::WithinSpec;
+use crate::with::TimeoutSpec;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -88,7 +88,7 @@ pub(crate) struct With {
     #[serde(default)]
     body: Option<serde_yml::Value>,
     #[serde(default)]
-    within: Option<WithinSpec>,
+    timeout: Option<TimeoutSpec>,
     /// Stop once an SSE event with this `event:` name arrives.
     #[serde(default)]
     until_event: Option<String>,
@@ -119,7 +119,7 @@ impl Action for Stream {
                 FieldSpec::required("url"),
                 FieldSpec::optional("headers"),
                 FieldSpec::optional("body"),
-                FieldSpec::optional("within"),
+                FieldSpec::optional("timeout"),
                 FieldSpec::optional("until_event"),
                 FieldSpec::optional("max_events"),
             ],
@@ -177,11 +177,11 @@ impl StopReason {
 /// `Action::invoke` so the network behavior can be unit-tested without
 /// constructing a Playwright `Page`.
 pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
-    let budget: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
+    let budget: Duration = with.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
     let method = parse_method(&with.method)?;
 
     // No client-level `.timeout()`: that caps the whole request and
-    // would abort a long-lived stream. The `within:` budget is enforced
+    // would abort a long-lived stream. The `timeout:` budget is enforced
     // per-chunk via `tokio::time::timeout` against a fixed deadline.
     let client = reqwest::Client::builder()
         .build()
@@ -456,12 +456,12 @@ mod tests {
         assert!(w.max_events.is_none());
 
         let w = parse_with(
-            r#"{ method: POST, url: "http://x/", headers: { A: b }, within: 9s, until_event: done, max_events: 4 }"#,
+            r#"{ method: POST, url: "http://x/", headers: { A: b }, timeout: 9s, until_event: done, max_events: 4 }"#,
         );
         assert_eq!(w.method, "POST");
         assert_eq!(w.until_event.as_deref(), Some("done"));
         assert_eq!(w.max_events, Some(4));
-        let d: Duration = w.within.unwrap().into();
+        let d: Duration = w.timeout.unwrap().into();
         assert_eq!(d, Duration::from_secs(9));
     }
 
@@ -566,7 +566,7 @@ mod tests {
             "event: trace\ndata: {\"seq\":1}\n\nevent: trace\ndata: {\"kind\":\"run_finished\",\"verdict\":\"pass\"}\n\n",
         )
         .await;
-        let r = execute(parse_with(&format!(r#"{{ url: "{url}", within: 5s }}"#)))
+        let r = execute(parse_with(&format!(r#"{{ url: "{url}", timeout: 5s }}"#)))
             .await
             .unwrap();
         assert_eq!(r.outcome, crate::action::Outcome::Ok);
@@ -595,7 +595,7 @@ mod tests {
         )
         .await;
         let r = execute(parse_with(&format!(
-            r#"{{ url: "{url}", within: 5s, until_event: done }}"#
+            r#"{{ url: "{url}", timeout: 5s, until_event: done }}"#
         )))
         .await
         .unwrap();
@@ -618,7 +618,7 @@ mod tests {
     async fn max_events_caps_collection() {
         let url = serve_body("data: 1\n\ndata: 2\n\ndata: 3\n\ndata: 4\n\n").await;
         let r = execute(parse_with(&format!(
-            r#"{{ url: "{url}", within: 5s, max_events: 2 }}"#
+            r#"{{ url: "{url}", timeout: 5s, max_events: 2 }}"#
         )))
         .await
         .unwrap();
@@ -635,7 +635,7 @@ mod tests {
     #[tokio::test]
     async fn within_budget_ends_collection_without_failing() {
         // The server emits one event, then holds the connection open
-        // (never closing, never sending more). The `within:` budget must
+        // (never closing, never sending more). The `timeout:` budget must
         // end collection with the event captured and `Outcome::Ok`.
         let app = Router::new().route(
             "/live",
@@ -655,9 +655,11 @@ mod tests {
         );
         let url = spawn(app).await;
         let started = Instant::now();
-        let r = execute(parse_with(&format!(r#"{{ url: "{url}", within: 300ms }}"#)))
-            .await
-            .unwrap();
+        let r = execute(parse_with(&format!(
+            r#"{{ url: "{url}", timeout: 300ms }}"#
+        )))
+        .await
+        .unwrap();
         assert!(started.elapsed() < Duration::from_secs(3), "budget bounded");
         assert_eq!(r.outcome, crate::action::Outcome::Ok);
         assert_eq!(
@@ -680,7 +682,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         drop(listener);
         let r = execute(parse_with(&format!(
-            r#"{{ url: "http://{addr}/live", within: 2s }}"#
+            r#"{{ url: "http://{addr}/live", timeout: 2s }}"#
         )))
         .await;
         match r {
@@ -692,7 +694,7 @@ mod tests {
     #[tokio::test]
     async fn non_json_data_is_null_data_with_raw_text_preserved() {
         let url = serve_body("event: note\ndata: not json\n\n").await;
-        let r = execute(parse_with(&format!(r#"{{ url: "{url}", within: 5s }}"#)))
+        let r = execute(parse_with(&format!(r#"{{ url: "{url}", timeout: 5s }}"#)))
             .await
             .unwrap();
         let last = r.outputs.get("last_event").unwrap();

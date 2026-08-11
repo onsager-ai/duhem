@@ -4,7 +4,7 @@
 //! Routes through the same polymorphic `duhem_schema::discover` +
 //! `load` pipeline that `duhem run` uses, so a path that resolves to a
 //! manifest is validated as a manifest (manifest_version, entry/path
-//! discipline, environments/defaults/includes, glob expansion) plus
+//! discipline, profiles/defaults/includes, glob expansion) plus
 //! each resolved leaf — instead of being mis-parsed as a leaf and
 //! failing with `unknown field manifest_version` (#150). A leaf path
 //! keeps today's behavior byte-for-byte.
@@ -56,7 +56,7 @@ pub(crate) fn run_validate(path: Option<&Path>) -> Result<String, String> {
         }
         // Manifest: `load` already enforced the manifest-structural
         // rules (manifest_version, entry/glob path discipline,
-        // environment names, include cycles) and eagerly parsed every
+        // profile names, include cycles) and eagerly parsed every
         // leaf. All that's left is the per-leaf *structural* validation.
         // Each failing leaf is reported with its path so the author sees
         // the offending file; every leaf is checked so one save → one

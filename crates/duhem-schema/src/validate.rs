@@ -14,7 +14,7 @@ use thiserror::Error;
 use crate::criterion::{Check, Criterion};
 use crate::expr::{Expr, Path, PathRoot};
 use crate::step::Step;
-use crate::verification::{InputDecl, InputType, VerificationDefinition};
+use crate::verification::{FlowCatalog, InputDecl, InputType, PageCatalog, VerificationDefinition};
 
 /// Where a `$...` reference was authored. Renders into a
 /// [`ValidationError`] message so a `with:` ref names its step rather
@@ -23,6 +23,8 @@ use crate::verification::{InputDecl, InputType, VerificationDefinition};
 pub enum RefSite {
     /// Inside a check's `assertions:` list.
     Assertion,
+    /// The check-level browser-session seed expression.
+    Session,
     /// Inside a step's `with:` payload. Carries the step's label —
     /// its `id` when declared, else `step <index>`.
     StepWith { step: String },
@@ -32,6 +34,7 @@ impl std::fmt::Display for RefSite {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RefSite::Assertion => write!(f, "assertion"),
+            RefSite::Session => write!(f, "session:"),
             RefSite::StepWith { step } => write!(f, "step `{step}` with:"),
         }
     }
@@ -70,7 +73,9 @@ pub enum ValidationError {
         name: String,
     },
 
-    #[error("{site}: step `{step}` secret path `{path}` names undeclared action output `{output}`")]
+    #[error(
+        "{site}: step `{step}` secret output path `{path}` names undeclared action output `{output}`"
+    )]
     UndeclaredSecretOutput {
         site: String,
         step: String,
@@ -110,6 +115,27 @@ pub enum ValidationError {
         input: String,
         raw: String,
         site: RefSite,
+    },
+
+    #[error("{site} `{raw}` references unknown page locator `{entry}`{help}")]
+    UnresolvedPageRef {
+        site: String,
+        raw: String,
+        entry: String,
+        help: String,
+    },
+
+    #[error("{site} `{raw}`: malformed `$pages` reference (expected `$pages.<page>.<element>`)")]
+    MalformedPageRef { site: String, raw: String },
+
+    #[error(
+        "page locator `$pages.{page}.{element}` references input `{input}`, but leaf `{verification}` does not declare it"
+    )]
+    PageInputUndeclared {
+        verification: String,
+        page: String,
+        element: String,
+        input: String,
     },
 
     #[error(
@@ -169,6 +195,15 @@ pub enum ValidationError {
     },
 
     #[error(
+        "criterion `{criterion}` / check `{check}`: session `{value}` must be a whole-string `$` reference (for example `$setup.login.outputs.state` or `$inputs.session_state`)"
+    )]
+    InvalidSessionReference {
+        criterion: String,
+        check: String,
+        value: String,
+    },
+
+    #[error(
         "input `{input}`: default value type `{actual}` does not match declared type `{declared}`"
     )]
     InputDefaultTypeMismatch {
@@ -178,23 +213,36 @@ pub enum ValidationError {
     },
 
     #[error(
-        "input `{input}`: `secret: true` cannot be combined with `default:` — supply the value via `env:`, a selected environment, or `--inputs`"
+        "input `{input}`: `secret: true` cannot be combined with `default:` — supply the value via `env:`, a selected profile, or `--inputs`"
     )]
     SecretInputHasDefault { input: String },
 
     #[error("input `{input}`: env name `{name}` is invalid — expected `[A-Z_][A-Z0-9_]*`")]
     InvalidInputEnvName { input: String, name: String },
 
-    #[error(
-        "inherited input `{name}` is also declared locally under `inputs:` — list it in one place, not both"
-    )]
-    InheritedInputAlsoDeclared { name: String },
+    #[error("input `{input}`: `type:` is required unless `inherit: true`")]
+    InputMissingType { input: String },
 
-    #[error("`inherits:` entry #{index} is empty — list input names, e.g. `inherits: [base_url]`")]
-    EmptyInheritedName { index: usize },
+    #[error(
+        "input `{input}`: `inherit: true` cannot be combined with `type:` — declare the type under manifest `inputs.{input}`"
+    )]
+    InheritedInputHasType { input: String },
+
+    #[error(
+        "input `{input}`: `inherit: true` cannot be combined with `default:` — declare the default under manifest `inputs.{input}`"
+    )]
+    InheritedInputHasDefault { input: String },
+
+    #[error(
+        "manifest input `{input}` cannot set `inherit: true` — inheritance is declared by a consuming leaf"
+    )]
+    ManifestInputCannotInherit { input: String },
 
     #[error("{0}")]
     BadProjectDecl(String),
+
+    #[error("{message}")]
+    InvalidFlow { message: String },
 }
 
 /// Run every structural rule. Always reports as many errors as
@@ -223,6 +271,12 @@ pub fn validate_with_contract_outputs(
 ) -> Result<(), Vec<ValidationError>> {
     let mut errs = Vec::new();
 
+    errs.extend(
+        crate::flows::validate_authored(v)
+            .into_iter()
+            .map(|message| ValidationError::InvalidFlow { message }),
+    );
+
     if v.criteria.is_empty() {
         errs.push(ValidationError::NoCriteria);
     }
@@ -236,38 +290,41 @@ pub fn validate_with_contract_outputs(
 
     let setup_outputs = collect_setup_outputs(&v.setup, outputs_for, &mut errs);
 
-    errs.extend(input_decl_errors(&v.inputs));
+    errs.extend(input_decl_errors(&v.inputs, true));
+    crate::validate_pages::validate_catalog_inputs(v, &mut errs);
 
-    // Inherited input names (spec #135). They satisfy `$inputs.<name>`
-    // references just like a locally-declared input, so they join the
-    // resolvable-name set below. Two well-formedness rules first: a name
-    // may not appear in both `inputs:` and `inherits:` (declare it once),
-    // and an inherited name may not be empty.
-    let mut inherited: HashSet<&str> = HashSet::new();
-    for (index, name) in v.inherits.iter().enumerate() {
-        if name.is_empty() {
-            errs.push(ValidationError::EmptyInheritedName { index });
-            continue;
-        }
-        if v.inputs.contains_key(name) {
-            errs.push(ValidationError::InheritedInputAlsoDeclared { name: name.clone() });
-        }
-        inherited.insert(name.as_str());
+    // Setup has no criterion/check scope, but its page references still
+    // resolve against the same effective leaf catalog.
+    for (idx, step) in v.setup.iter().enumerate() {
+        let step_name = step_label(step, idx);
+        walk_with_refs(&step.with, &mut |expr, raw| {
+            walk_checkable_paths(expr, &mut |path| {
+                if path.root == PathRoot::Pages {
+                    crate::validate_pages::check_page_path(
+                        &v.pages,
+                        path,
+                        raw,
+                        &format!("setup step `{step_name}` with:"),
+                        &mut errs,
+                    );
+                }
+            });
+        });
     }
 
+    let definition_scope = DefinitionScope {
+        inputs: &v.inputs,
+        pages: &v.pages,
+        flows: &v.flows,
+        setup_outputs: &setup_outputs,
+        outputs_for,
+    };
     let mut seen_criteria: HashSet<&str> = HashSet::new();
     for c in &v.criteria {
         if !seen_criteria.insert(c.id.as_str()) {
             errs.push(ValidationError::DuplicateCriterionId { id: c.id.clone() });
         }
-        validate_criterion(
-            c,
-            &v.inputs,
-            &inherited,
-            &setup_outputs,
-            outputs_for,
-            &mut errs,
-        );
+        validate_criterion(c, &definition_scope, &mut errs);
     }
 
     if errs.is_empty() { Ok(()) } else { Err(errs) }
@@ -279,9 +336,33 @@ pub fn validate_with_contract_outputs(
 /// safety and type rules must not drift. The manifest loader calls this
 /// before resolving leaves; the leaf validator folds the same findings
 /// into its complete structural punch list.
-pub(crate) fn input_decl_errors(inputs: &BTreeMap<String, InputDecl>) -> Vec<ValidationError> {
+pub(crate) fn input_decl_errors(
+    inputs: &BTreeMap<String, InputDecl>,
+    allow_inherit: bool,
+) -> Vec<ValidationError> {
     let mut errs = Vec::new();
     for (name, decl) in inputs {
+        if decl.inherit {
+            if !allow_inherit {
+                errs.push(ValidationError::ManifestInputCannotInherit {
+                    input: name.clone(),
+                });
+            }
+            if decl.kind.is_some() {
+                errs.push(ValidationError::InheritedInputHasType {
+                    input: name.clone(),
+                });
+            }
+            if decl.default.is_some() {
+                errs.push(ValidationError::InheritedInputHasDefault {
+                    input: name.clone(),
+                });
+            }
+        } else if decl.kind.is_none() {
+            errs.push(ValidationError::InputMissingType {
+                input: name.clone(),
+            });
+        }
         if decl.secret && decl.default.is_some() {
             errs.push(ValidationError::SecretInputHasDefault {
                 input: name.clone(),
@@ -295,15 +376,13 @@ pub(crate) fn input_decl_errors(inputs: &BTreeMap<String, InputDecl>) -> Vec<Val
                 name: env_name.clone(),
             });
         }
-        if let Some(default) = &decl.default {
+        if let (Some(default), Some(declared)) = (&decl.default, decl.kind) {
             let unwrapped = unwrap_tagged(default);
             match yml_shape(unwrapped) {
-                Some(actual)
-                    if actual != decl.kind && !matches_with_promotion(decl.kind, actual) =>
-                {
+                Some(actual) if actual != declared && !matches_with_promotion(declared, actual) => {
                     errs.push(ValidationError::InputDefaultTypeMismatch {
                         input: name.clone(),
-                        declared: decl.kind,
+                        declared,
                         actual: yml_shape_name(unwrapped).to_string(),
                     });
                 }
@@ -315,7 +394,7 @@ pub(crate) fn input_decl_errors(inputs: &BTreeMap<String, InputDecl>) -> Vec<Val
                 None => {
                     errs.push(ValidationError::InputDefaultTypeMismatch {
                         input: name.clone(),
-                        declared: decl.kind,
+                        declared,
                         actual: yml_shape_name(unwrapped).to_string(),
                     });
                 }
@@ -342,7 +421,9 @@ fn valid_env_name(name: &str) -> bool {
 /// nested-extraction alias) still contributes its own name.
 fn effective_outputs(s: &Step, outputs_for: &dyn Fn(&str) -> Vec<String>) -> HashSet<String> {
     let mut set: HashSet<String> = s.outputs.keys().cloned().collect();
-    set.extend(outputs_for(&s.uses));
+    if let Some(uses) = s.uses.as_deref() {
+        set.extend(outputs_for(uses));
+    }
     set
 }
 
@@ -358,7 +439,7 @@ fn collect_setup_outputs<'a>(
     let mut seen: HashSet<&str> = HashSet::new();
     let mut outputs: HashMap<&str, HashSet<String>> = HashMap::new();
     for (idx, s) in setup.iter().enumerate() {
-        let contract_outputs = outputs_for(&s.uses);
+        let contract_outputs = s.uses.as_deref().map(outputs_for).unwrap_or_default();
         check_secret_paths(s, &contract_outputs, "setup", &step_label(s, idx), errs);
         if let Some(id) = &s.id {
             if !seen.insert(id.as_str()) {
@@ -440,14 +521,15 @@ fn matches_with_promotion(declared: InputType, actual: InputType) -> bool {
     matches!((declared, actual), (InputType::Number, InputType::Integer))
 }
 
-fn validate_criterion(
-    c: &Criterion,
-    inputs: &BTreeMap<String, InputDecl>,
-    inherited: &HashSet<&str>,
-    setup_outputs: &HashMap<&str, HashSet<String>>,
-    outputs_for: &dyn Fn(&str) -> Vec<String>,
-    errs: &mut Vec<ValidationError>,
-) {
+struct DefinitionScope<'a> {
+    inputs: &'a BTreeMap<String, InputDecl>,
+    pages: &'a PageCatalog,
+    flows: &'a FlowCatalog,
+    setup_outputs: &'a HashMap<&'a str, HashSet<String>>,
+    outputs_for: &'a dyn Fn(&str) -> Vec<String>,
+}
+
+fn validate_criterion(c: &Criterion, scope: &DefinitionScope<'_>, errs: &mut Vec<ValidationError>) {
     let mut seen_checks: HashSet<&str> = HashSet::new();
     for ch in &c.checks {
         if !seen_checks.insert(ch.id.as_str()) {
@@ -456,7 +538,7 @@ fn validate_criterion(
                 id: ch.id.clone(),
             });
         }
-        validate_check(c, ch, inputs, inherited, setup_outputs, outputs_for, errs);
+        validate_check(c, ch, scope, errs);
     }
 }
 
@@ -468,21 +550,22 @@ struct PathScope<'a> {
     step_outputs: &'a HashMap<&'a str, HashSet<String>>,
     setup_outputs: &'a HashMap<&'a str, HashSet<String>>,
     inputs: &'a BTreeMap<String, InputDecl>,
-    /// Inherited input names (spec #135). An `$inputs.<name>` for a
-    /// name in here resolves like a declared input — the manifest's
-    /// chain binds it at run time.
-    inherited: &'a HashSet<&'a str>,
+    pages: &'a PageCatalog,
 }
 
 fn validate_check(
     c: &Criterion,
     ch: &Check,
-    inputs: &BTreeMap<String, InputDecl>,
-    inherited: &HashSet<&str>,
-    setup_outputs: &HashMap<&str, HashSet<String>>,
-    outputs_for: &dyn Fn(&str) -> Vec<String>,
+    definition: &DefinitionScope<'_>,
     errs: &mut Vec<ValidationError>,
 ) {
+    let DefinitionScope {
+        inputs,
+        pages,
+        flows,
+        setup_outputs,
+        outputs_for,
+    } = *definition;
     // A check with neither assertions nor steps can never produce a
     // verdict (the judge would see an empty aggregation). With steps
     // but no assertions the schema layer accepts — whether one of the
@@ -499,7 +582,7 @@ fn validate_check(
     let mut seen_step_ids: HashSet<&str> = HashSet::new();
 
     for (idx, s) in ch.steps.iter().enumerate() {
-        let contract_outputs = outputs_for(&s.uses);
+        let contract_outputs = s.uses.as_deref().map(outputs_for).unwrap_or_default();
         check_secret_paths(
             s,
             &contract_outputs,
@@ -530,7 +613,15 @@ fn validate_check(
                     id: id.clone(),
                 });
             }
-            step_outputs.insert(id.as_str(), effective_outputs(s, outputs_for));
+            let outputs = if let Some(call) = s.call.as_deref() {
+                flows
+                    .get(call)
+                    .map(|flow| flow.outputs.keys().cloned().collect())
+                    .unwrap_or_default()
+            } else {
+                effective_outputs(s, outputs_for)
+            };
+            step_outputs.insert(id.as_str(), outputs);
         }
     }
 
@@ -540,8 +631,27 @@ fn validate_check(
         step_outputs: &step_outputs,
         setup_outputs,
         inputs,
-        inherited,
+        pages,
     };
+
+    // A browser session is acquired state, not an inline fixture. Only
+    // a whole-string path reference is accepted: literals and runtime
+    // calls could fabricate auth state at the authoring boundary. Once
+    // parsed, the ordinary reference checker supplies the same
+    // undeclared input/setup diagnostics as `with:` (#134).
+    if let Some(raw) = &ch.session {
+        match crate::expr::parse(raw) {
+            Ok(Expr::Path(path)) => {
+                check_path(&scope, &path, raw, &RefSite::Session, errs);
+            }
+            _ => errs.push(ValidationError::InvalidSessionReference {
+                criterion: c.id.clone(),
+                check: ch.id.clone(),
+                value: raw.clone(),
+            }),
+        }
+    }
+
     for assertion in &ch.assertions {
         assertion.walk_exprs(|expr_str| {
             let raw = expr_str.raw.as_str();
@@ -571,7 +681,7 @@ fn validate_check(
 
 /// A secret path always starts at a raw output from the action
 /// contract. Authored `outputs:` aliases are deliberately excluded:
-/// `secret:` describes the produced value, not a parallel alias
+/// `secret_outputs:` describes the produced value, not a parallel alias
 /// channel (spec #355). Deeper shape remains a runtime fact.
 fn check_secret_paths(
     step: &Step,
@@ -580,7 +690,7 @@ fn check_secret_paths(
     step_name: &str,
     errs: &mut Vec<ValidationError>,
 ) {
-    for path in &step.secret {
+    for path in &step.secret_outputs {
         let output = secret_path_head(path);
         if output.is_empty() || !contract_outputs.iter().any(|name| name == output) {
             errs.push(ValidationError::UndeclaredSecretOutput {
@@ -688,7 +798,7 @@ fn check_path(
         step_outputs,
         setup_outputs,
         inputs,
-        inherited,
+        pages,
     } = *scope;
     match path.root {
         PathRoot::Steps => {
@@ -781,10 +891,10 @@ fn check_path(
                 return;
             }
             let name = segs[0].as_str();
-            // `$inputs.<name>` resolves against `inputs:` ∪ `inherits:`
-            // (spec #135): an inherited name is bound by the parent
-            // manifest's chain at run time, so it is not a typo here.
-            if !inputs.contains_key(name) && !inherited.contains(name) {
+            // Every local and inherited input is declared in `inputs:`.
+            // The leaf's declaration surface remains closed even when
+            // a parent manifest happens to declare the same name.
+            if !inputs.contains_key(name) {
                 errs.push(ValidationError::UnresolvedInputRef {
                     criterion: c.id.clone(),
                     check: ch.id.clone(),
@@ -793,6 +903,15 @@ fn check_path(
                     site: site.clone(),
                 });
             }
+        }
+        PathRoot::Pages => {
+            crate::validate_pages::check_page_path(
+                pages,
+                path,
+                raw,
+                &format!("criterion `{}` / check `{}`: {site}", c.id, ch.id),
+                errs,
+            );
         }
         PathRoot::Env | PathRoot::Runtime => {
             // `$env` and `$runtime` are open catalogs at the schema
@@ -824,6 +943,109 @@ mod tests {
         } else {
             Vec::new()
         }
+    }
+
+    fn catalog_vd(reference: &str) -> VerificationDefinition {
+        parse(&format!(
+            r#"
+verification: catalog leaf
+pages:
+  login:
+    submit: {{ role: button, name: Sign In }}
+    username: {{ role: textbox, name: Username }}
+criteria:
+  - id: AC-1
+    description: shared locator
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: target
+            uses: ui/assert-element
+            with: {{ locator: {reference}, expected: visible }}
+"#
+        ))
+    }
+
+    #[test]
+    fn page_reference_resolves_offline() {
+        validate(&catalog_vd("$pages.login.submit")).expect("known entry resolves");
+    }
+
+    #[test]
+    fn dangling_page_reference_names_step_and_entry() {
+        let errors = validate(&catalog_vd("$pages.login.typo")).unwrap_err();
+        let message = errors
+            .iter()
+            .find(|error| matches!(error, ValidationError::UnresolvedPageRef { .. }))
+            .expect("page error")
+            .to_string();
+        assert!(message.contains("step `target`"), "{message}");
+        assert!(message.contains("$pages.login.typo"), "{message}");
+    }
+
+    #[test]
+    fn page_reference_requires_page_and_element_segments() {
+        let errors = validate(&catalog_vd("$pages.login")).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| matches!(error, ValidationError::MalformedPageRef { .. })),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn page_reference_suggests_only_a_near_name() {
+        let near = validate(&catalog_vd("$pages.login.usernme")).unwrap_err();
+        let near_message = near
+            .iter()
+            .find(|error| matches!(error, ValidationError::UnresolvedPageRef { .. }))
+            .unwrap()
+            .to_string();
+        assert!(
+            near_message.contains("did you mean `username`?"),
+            "{near_message}"
+        );
+
+        let far = validate(&catalog_vd("$pages.login.completely_different")).unwrap_err();
+        let far_message = far
+            .iter()
+            .find(|error| matches!(error, ValidationError::UnresolvedPageRef { .. }))
+            .unwrap()
+            .to_string();
+        assert!(!far_message.contains("did you mean"), "{far_message}");
+    }
+
+    #[test]
+    fn catalog_input_must_be_declared_by_the_leaf() {
+        let vd = parse(
+            r#"
+verification: missing input leaf
+pages:
+  projects:
+    row_delete:
+      role: button
+      name: Delete
+      scope: { role: row, text: $inputs.project_name }
+criteria:
+  - id: AC-1
+    description: shared locator
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/click
+            with: { locator: $pages.projects.row_delete }
+"#,
+        );
+        let errors = validate(&vd).unwrap_err();
+        let message = errors
+            .iter()
+            .find(|error| matches!(error, ValidationError::PageInputUndeclared { .. }))
+            .expect("catalog input error")
+            .to_string();
+        assert!(message.contains("$pages.projects.row_delete"), "{message}");
+        assert!(message.contains("missing input leaf"), "{message}");
+        assert!(message.contains("project_name"), "{message}");
     }
 
     /// A step that binds NO `outputs:` yet asserts over `status`.
@@ -868,7 +1090,7 @@ criteria:
         steps:
           - id: login
             uses: api/call
-            secret: [token.value]
+            secret_outputs: [token.value]
             with: { method: POST, url: https://example.com/login }
         assertions: ["true"]
 "#,
@@ -898,7 +1120,7 @@ criteria:
         steps:
           - id: login
             uses: api/call
-            secret:
+            secret_outputs:
               - body.items[0].key
             with: { method: POST, url: https://example.com/login }
         assertions: ["true"]
@@ -1330,6 +1552,89 @@ criteria:
             )),
             "got: {errs:?}"
         );
+    }
+
+    #[test]
+    fn session_rejects_inline_state_and_runtime_calls() {
+        for session in [
+            r#"{"cookies":[],"origins":[]}"#,
+            "$runtime.format(\"{}\", $inputs.state)",
+        ] {
+            let y = format!(
+                r#"
+verification: x
+inputs:
+  state: {{ type: object }}
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        session: '{session}'
+        assertions: ["true"]
+"#
+            );
+            let errs = validate(&parse(&y)).unwrap_err();
+            assert!(
+                errs.iter()
+                    .any(|e| matches!(e, ValidationError::InvalidSessionReference { .. })),
+                "expected whole-reference error for {session:?}, got {errs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn session_accepts_declared_input_and_setup_output_references() {
+        let y = r#"
+verification: x
+inputs:
+  state: { type: object }
+setup:
+  - id: login
+    uses: ui/capture-session
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        session: $inputs.state
+        assertions: ["true"]
+      - id: AC-1.2
+        session: $setup.login.outputs.state
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        validate_with_contract_outputs(&v, &|uses| {
+            if uses == "ui/capture-session" {
+                vec!["state".to_string()]
+            } else {
+                Vec::new()
+            }
+        })
+        .expect("declared whole-string references validate");
+    }
+
+    #[test]
+    fn dangling_session_setup_reference_reuses_missing_ref_error() {
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        session: $setup.nope.outputs.state
+        assertions: ["true"]
+"#;
+        let errs = validate(&parse(y)).unwrap_err();
+        assert!(errs.iter().any(|e| matches!(
+            e,
+            ValidationError::UnresolvedSetupStepRef {
+                step,
+                site: RefSite::Session,
+                ..
+            } if step == "nope"
+        )));
     }
 
     #[test]
@@ -1825,12 +2130,12 @@ criteria:
 
     #[test]
     fn inherited_input_ref_resolves() {
-        // `$inputs.base_url` with `base_url` listed under `inherits:`
-        // (and no local `inputs:` for it) is not a typo (spec #135).
+        // `$inputs.base_url` with `base_url` declared `inherit: true`
+        // is not a typo (spec #135).
         let y = r#"
 verification: leaf
-inherits:
-  - base_url
+inputs:
+  base_url: { inherit: true }
 criteria:
   - id: AC-1
     description: a
@@ -1844,13 +2149,11 @@ criteria:
     }
 
     #[test]
-    fn inherited_input_also_declared_fails() {
+    fn inherited_input_with_type_fails() {
         let y = r#"
 verification: leaf
 inputs:
-  base_url: { type: string }
-inherits:
-  - base_url
+  base_url: { inherit: true, type: string }
 criteria:
   - id: AC-1
     description: a
@@ -1864,18 +2167,18 @@ criteria:
         assert!(
             errs.iter().any(|e| matches!(
                 e,
-                ValidationError::InheritedInputAlsoDeclared { name } if name == "base_url"
+                ValidationError::InheritedInputHasType { input } if input == "base_url"
             )),
             "got: {errs:?}"
         );
     }
 
     #[test]
-    fn empty_inherited_name_fails() {
+    fn inherited_input_with_default_fails() {
         let y = r#"
 verification: leaf
-inherits:
-  - ""
+inputs:
+  base_url: { inherit: true, default: "https://example.test" }
 criteria:
   - id: AC-1
     description: a
@@ -1886,20 +2189,22 @@ criteria:
         let v = parse(y);
         let errs = validate(&v).unwrap_err();
         assert!(
-            errs.iter()
-                .any(|e| matches!(e, ValidationError::EmptyInheritedName { .. })),
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::InheritedInputHasDefault { input } if input == "base_url"
+            )),
             "got: {errs:?}"
         );
     }
 
     #[test]
     fn bare_input_ref_not_inherited_still_typo() {
-        // A `$inputs.x` neither in `inputs:` nor `inherits:` is still a
-        // typo error (#134), distinct from the inherited case.
+        // A `$inputs.x` absent from the leaf's `inputs:` is still a typo
+        // error (#134), distinct from the inherited case.
         let y = r#"
 verification: leaf
-inherits:
-  - base_url
+inputs:
+  base_url: { inherit: true }
 criteria:
   - id: AC-1
     description: a

@@ -8,31 +8,38 @@
 
 pub mod assertion;
 pub mod criterion;
-pub mod environment;
 pub mod expr;
+mod flows;
 pub mod includes;
 pub mod jsonschema;
+mod leaf_context;
 pub mod manifest;
+mod manifest_compose;
 mod manifest_inputs;
+mod manifest_path;
 pub mod project;
+pub mod provision;
 pub mod step;
 pub mod validate;
+mod validate_pages;
 pub mod verification;
 
 pub use assertion::{Assertion, TypeCheckKind};
 pub use criterion::{Check, Criterion};
-pub use environment::{DurationSpec, Environment, HttpReadyProbe, ReadyProbe};
 pub use expr::{BinOp, Expr, ExprStr, Literal, ParseError, Path, PathRoot, UnaryOp};
 pub use includes::PartialRootManifest;
 pub use jsonschema::json_schema;
 pub use manifest::{
     InconclusivePolicy, LoadError, Loaded, LoadedLeaf, ManifestDefaults, ManifestEntry,
-    RetryBackoff, RetryPolicy, RootManifest, discover, load,
+    RetryBackoff, RetryPolicy, RootManifest, discover, load, load_for_run,
 };
 pub use project::{ProjectDecl, ProjectKind};
-pub use step::Step;
+pub use provision::{DurationSpec, HttpReadyProbe, Provision, ReadyProbe};
+pub use step::{ExpandedFlowOrigin, Step, StepCondition};
 pub use validate::{ValidationError, validate, validate_with_contract_outputs};
-pub use verification::{InputDecl, InputType, SchemaError, VerificationDefinition};
+pub use verification::{
+    Flow, FlowCatalog, InputDecl, InputType, PageCatalog, SchemaError, VerificationDefinition,
+};
 
 /// Current Verification Definition schema version. Pre-1.0 per
 /// `docs/duhem-spec.md` §11.3 — breaking changes bump the minor under
@@ -49,7 +56,7 @@ pub const SCHEMA_VERSION: &str = schema_version!();
 #[macro_export]
 macro_rules! schema_version {
     () => {
-        "0.1.10"
+        "0.2.2"
     };
 }
 

@@ -11,7 +11,7 @@ runtime), and gates merge/deploy on the verdict.
 > `duhem-schema`, `duhem-actions`, `duhem-evidence`, `duhem-summary`,
 > `duhem-dashboard`, `duhem-reporter-pretty`, `duhem-reporter-junit`)
 > plus an internal `xtask` build helper; the CLI exposes `init` /
-> `actions` / `describe` / `validate` / `run` / `browser` /
+> `actions` / `describe` / `validate` / `resolve` / `run` / `browser` /
 > `dashboard` (serve + static export; live SSE) / `export` / `ship` /
 > `mcp` / `--version`; the `ui/*`, `api/*`, `db/*`, and `cli/*` action
 > families are implemented (`ui/navigate` / `click` / `type` /

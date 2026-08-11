@@ -30,7 +30,7 @@ criteria:
       with:
         method: POST
         path: /workspaces
-        within: '3s'
+        timeout: '3s'
       outputs:
         status: response.status
         workspace_id: response.body.id

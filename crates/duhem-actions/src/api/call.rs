@@ -35,12 +35,12 @@
 //!
 //! Outcome mapping:
 //!
-//! - HTTP completes within `within:` → `Outcome::Ok`. The status code
+//! - HTTP completes within `timeout:` → `Outcome::Ok`. The status code
 //!   is data on the response, not a verdict — a `500` response is
 //!   still `Outcome::Ok` from the action's standpoint, and the
 //!   assertion is where `200 vs. 500` gets judged. Same shape as
 //!   `ui/click` against a button that triggers a 500 page.
-//! - `within:` exceeded → `Outcome::Timeout`.
+//! - `timeout:` exceeded → `Outcome::Timeout`.
 //! - DNS / TCP / TLS / malformed method / malformed URL / non-string
 //!   body keys → `ActionError::Http`, which the engine maps to
 //!   `Outcome::Error`.
@@ -56,9 +56,9 @@ use reqwest::Method;
 use reqwest::header::CONTENT_TYPE;
 use serde::Deserialize;
 
-use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_WITHIN, Observation};
+use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT, Observation};
 use crate::error::ActionError;
-use crate::with::WithinSpec;
+use crate::with::TimeoutSpec;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -82,7 +82,7 @@ pub(crate) struct With {
     #[serde(default)]
     body: Option<serde_yml::Value>,
     #[serde(default)]
-    within: Option<WithinSpec>,
+    timeout: Option<TimeoutSpec>,
 }
 
 /// A single query-parameter value. Restricted to scalars — a query
@@ -163,7 +163,7 @@ impl Action for Call {
                 FieldSpec::optional("headers"),
                 FieldSpec::optional("query"),
                 FieldSpec::optional("body"),
-                FieldSpec::optional("within"),
+                FieldSpec::optional("timeout"),
             ],
             outputs: vec!["status", "body", "body_text"],
             secret_outputs: vec![],
@@ -189,7 +189,7 @@ impl Action for Call {
 /// network behavior can be unit-tested without constructing a
 /// Playwright `Page`.
 pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
-    let timeout: Duration = with.within.map(Into::into).unwrap_or(DEFAULT_WITHIN);
+    let timeout: Duration = with.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
 
     // Uppercase ASCII before parsing so authors who type `get` /
     // `post` get the conventional `GET` / `POST` instead of a
@@ -379,7 +379,7 @@ mod tests {
         assert!(w.headers.is_empty());
         assert!(w.query.is_empty());
         assert!(w.body.is_none());
-        assert!(w.within.is_none());
+        assert!(w.timeout.is_none());
     }
 
     #[test]
@@ -393,7 +393,7 @@ headers:
   Authorization: "Bearer t"
 body:
   hello: world
-within: 3s
+timeout: 3s
 "#,
         );
         assert_eq!(w.method, "POST");
@@ -403,7 +403,7 @@ within: 3s
         );
         let body = w.body.as_ref().expect("body");
         assert!(body.is_mapping());
-        let d: Duration = w.within.unwrap().into();
+        let d: Duration = w.timeout.unwrap().into();
         assert_eq!(d, Duration::from_secs(3));
     }
 
@@ -411,6 +411,13 @@ within: 3s
     fn rejects_unknown_field() {
         let r: Result<With, _> = serde_yml::from_str(r#"{ method: GET, url: "x", color: red }"#);
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn rejects_pre_naming_pass_within_field() {
+        let err =
+            serde_yml::from_str::<With>(r#"{ method: GET, url: "x", within: 3s }"#).unwrap_err();
+        assert!(err.to_string().contains("within"), "got: {err}");
     }
 
     // --- query parameters --------------------------------------------
@@ -536,7 +543,7 @@ method: POST
 url: "{}"
 headers: {{ Content-Type: application/json }}
 body: {{ hello: world }}
-within: 2s
+timeout: 2s
 "#,
             url(&fx, "/echo")
         )))
@@ -572,7 +579,7 @@ method: POST
 url: "{}"
 headers: {{ Content-Type: text/plain }}
 body: "literal-string-payload"
-within: 2s
+timeout: 2s
 "#,
             url(&fx, "/echo")
         )))
@@ -598,7 +605,7 @@ within: 2s
         let addr = listener.local_addr().unwrap();
         drop(listener);
         let r = execute(parse_with(&format!(
-            r#"{{ method: GET, url: "http://{addr}/", within: 2s }}"#
+            r#"{{ method: GET, url: "http://{addr}/", timeout: 2s }}"#
         )))
         .await;
         match r {
@@ -649,7 +656,7 @@ query:
   size: 10
   page: 1
   q: "a b"
-within: 2s
+timeout: 2s
 "#,
             url(&fx, "/list")
         )))
@@ -684,7 +691,7 @@ within: 2s
         );
         let fx = start(app).await;
         let r = execute(parse_with(&format!(
-            r#"{{ method: get, url: "{}", within: 2s }}"#,
+            r#"{{ method: get, url: "{}", timeout: 2s }}"#,
             url(&fx, "/m")
         )))
         .await
@@ -710,7 +717,7 @@ within: 2s
         );
         let fx = start(app).await;
         let r = execute(parse_with(&format!(
-            r#"{{ method: GET, url: "{}", within: 2s }}"#,
+            r#"{{ method: GET, url: "{}", timeout: 2s }}"#,
             url(&fx, "/bad-json")
         )))
         .await
@@ -725,7 +732,7 @@ within: 2s
     }
 
     #[tokio::test]
-    async fn slow_server_past_within_yields_timeout() {
+    async fn slow_server_past_timeout_yields_timeout() {
         let app = Router::new().route(
             "/slow",
             any(|| async {
@@ -735,7 +742,7 @@ within: 2s
         );
         let fx = start(app).await;
         let r = execute(parse_with(&format!(
-            r#"{{ method: GET, url: "{}", within: 100ms }}"#,
+            r#"{{ method: GET, url: "{}", timeout: 100ms }}"#,
             url(&fx, "/slow")
         )))
         .await
@@ -760,7 +767,7 @@ within: 2s
         );
         let fx = start(app).await;
         let r = execute(parse_with(&format!(
-            r#"{{ method: GET, url: "{}", within: 2s }}"#,
+            r#"{{ method: GET, url: "{}", timeout: 2s }}"#,
             url(&fx, "/boom")
         )))
         .await

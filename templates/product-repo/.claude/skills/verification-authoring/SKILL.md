@@ -177,8 +177,9 @@ Common shape (terse):
   description: <what slice of the web this check exercises>
   steps:
     - id: create
+      description: Create the workspace through the public API
       uses: api/call
-      with: { method: POST, url: $inputs.api_base/workspaces, within: 3s }
+      with: { method: POST, url: $inputs.api_base/workspaces, timeout: 3s }
       # no outputs: block — status / body / body.id resolve directly
   assertions:
     - $steps.create.outputs.status == 200
@@ -190,8 +191,20 @@ Authoring rules:
 - Reference outputs by their fully-qualified path,
   `$steps.<id>.outputs.<name>`; add `outputs:` only for a rename or a
   deep-extraction alias.
-- Timeouts (`within:`) are explicit on steps that observe something
+- Use optional step `description:` for reader-facing intent. It labels
+  reports ahead of `id` and `<uses> #<index>`; keep `id` terse and
+  stable because references, diagnostics, and dashboard links use it.
+- Timeouts (`timeout:`) are explicit on steps that observe something
   asynchronous.
+- Steps default to `if: success`: an earlier execution `Error` /
+  `Timeout` or failed implicit judgment gates the remaining default
+  steps in that check. Binding a judging step's `satisfied` output opts
+  out of both implicit judgment and gating, so a false observation can
+  still participate in a later disjunction. Explicit `assertions:` are
+  evaluated after the step sequence and cannot gate steps. Use
+  `if: always` for teardown and `if: failure` for diagnostics that
+  should run only after failure. Do not invent expressions under `if:`;
+  its closed vocabulary is `success | always | failure`.
 - Use role-based locators (`{ role: "button", name: "…" }`) for `ui/*`
   rather than CSS or XPath — UI churn invalidates the latter while
   role-based selectors track the user-visible affordance.
@@ -202,6 +215,73 @@ Authoring rules:
   DOM, and network HAR). Captures are evidence for humans/agents, never
   judge input; an authored output under `capture/` is rejected at
   validate time.
+
+#### Share locators instead of copying them
+
+When two leaves use the same locator, declare it once in an ordinary
+manifest include and reference it as `$pages.<group>.<name>`:
+
+```yaml
+# .duhem/pages.yml (included by .duhem/duhem.yml)
+pages:
+  login:
+    username: { role: textbox, name: Username }
+    submit: { role: button, name: Sign In }
+
+# a leaf step
+- uses: ui/type
+  with: { locator: $pages.login.username, text: $inputs.user }
+```
+
+The catalog is flat below each group; do not add a `locators:` layer.
+A leaf-local entry wins over a shared entry of the same name. Catalog
+entries may use `$inputs.*` for dynamic scope text, but every leaf that
+receives that catalog must declare each referenced input. `duhem
+validate` catches dangling `$pages.*` names offline and suggests nearby
+entries; `duhem resolve --provenance` lists the effective catalog and
+the source file of each winning entry.
+
+#### Share step flows instead of copying sequences
+
+Put a repeated action sequence in a `flows:` catalog on the root
+manifest, an included fragment, or a leaf. Parameters are bound at each
+`call:` and reuse the input type catalog:
+
+```yaml
+# flows.yml
+flows:
+  sign_in:
+    description: Sign in with supplied credentials
+    params:
+      password: { type: string, secret: true }
+      user: { type: string }
+    steps:
+      - uses: ui/type
+        with: { locator: $pages.login.username, text: $params.user }
+      - uses: ui/click
+        with: { locator: $pages.login.submit }
+      - id: landed
+        uses: ui/assert-element
+        with: { locator: $pages.login.welcome, expected: visible }
+    outputs:
+      signed_in: $steps.landed.outputs.satisfied
+
+# leaf check
+- id: login
+  description: Sign in as the fixture user
+  call: sign_in
+  with: { user: $inputs.user, password: $inputs.password }
+```
+
+A flow body is hygienic: step `with:` values may reference only
+`$params.*` and `$pages.*`, never the caller's `$inputs.*` or
+`$steps.*`. Pass every dependency explicitly. The one intentional
+`$steps.*` use is in the flow's own `outputs:` map, which defines the
+entire caller-visible interface. Callers read only
+`$steps.<call-id>.outputs.<declared-name>`; inner step ids are private.
+`secret: true` parameters receive the same evidence masking as secret
+inputs. Use `duhem resolve --provenance` to inspect the expanded action
+sequence and its flow origins.
 
 ### 4. The holistic-environment tax — no mocks of the web
 
@@ -222,13 +302,34 @@ signal either the criterion's assumptions are unstated (reformulate it
 against the real web) or the check is the wrong shape. Don't paper over
 it with a mock — stop and reconsider the criterion.
 
+#### Bring the system up first with `provision:`
+
+Most real checks need the system under test running before any check
+observes it. Declare `provision:` on the VD or the suite manifest (one
+shared environment for the whole suite) instead of assuming it's
+already up:
+
+```yaml
+provision:
+  up: ./scripts/up.sh          # required — stands up the real thing, no mocks
+  down: ./scripts/down.sh      # optional teardown, runs regardless of verdict
+  ready:
+    http: { url: http://127.0.0.1:8080/health, timeout: 120s }
+```
+
+Duhem forks `up:` once before `setup:`, polls the optional `ready:`
+probe, runs every check against the now-real environment, then forks
+`down:` after the criteria loop completes. If the environment never
+comes up, the run is `inconclusive` — never a false `pass`. Teardown
+failures are recorded as evidence and don't flip the verdict.
+
 ### 5. Mechanical judgment — no LLM in the verdict
 
 Every assertion must be a deterministic predicate the judge can evaluate.
 Allowed forms:
 
 - Boolean expression: `$steps.X.outputs.Y == 200`
-- Type check: `type_check: { value: …, is: uuid|email|datetime|… }`
+- Type check: `type_check: { value: …, is: uuid|string|integer|float|boolean|object|array|null }`
 - Pattern match: `$runtime.matches(value, "regex")`
 - Membership: `$runtime.contains(haystack, needle)` — literal substring
   on a string, element membership on an array
@@ -267,6 +368,16 @@ suite uses a `.duhem/duhem.yml` manifest, add the file to
 `verifications:`; a standalone file run via `duhem run <file>` needs no
 manifest entry.
 
+Running a leaf by path still resolves shared context: `duhem run
+<leaf-path>` walks that file's own ancestors (capped at the enclosing
+`.git`) for a root manifest, the same search the no-path form uses, and
+merges its `pages:`/`flows:` catalog into the leaf so `$pages.*` and
+`call:` references still resolve. Sibling `verifications:` entries the
+manifest lists are not loaded or run — the run stays scoped to just the
+requested leaf. A leaf with an unresolved `$pages.*` or `call:` name and
+no discoverable manifest fails at validate/run time naming exactly what
+it needs.
+
 ### Secret inputs and acquired credentials
 
 Never commit a credential as an input `default:` or pass it in a
@@ -281,7 +392,7 @@ inputs:
     secret: true
 ```
 
-Resolution is `--inputs` → selected environment → declared `env:` →
+Resolution is `--inputs` → selected profile → declared `env:` →
 `default:`. Registered secret values, plus their base64,
 percent-encoded, and JSON-string-escaped forms, are exact-substring
 masked from recorded text and terminal output. Screenshots/video are
@@ -304,13 +415,15 @@ verifications:
   - path: database/duhem.yml
 
 # .duhem/database/duhem.yml
-inherits: [db_dsn]
+inputs:
+  db_dsn: { inherit: true, secret: true }
 ```
 
-The manifest declaration owns type checking, `env:`, `default:`, and
-`secret:`; selected `environments:` entries continue to supply values.
-Resolution is `--inputs` → selected environment → manifest `env:` →
-manifest `default:`. A secret declaration cannot carry `default:`.
+The manifest declaration owns type checking, `env:`, and `default:`;
+the leaf may add `secret: true`, and selected `profiles:` entries
+continue to supply values. Resolution is `--inputs` → selected profile
+→ manifest `env:` → manifest `default:`. An inherited leaf declaration
+cannot carry `type:` or `default:`.
 
 When a login or setup action returns a credential, declare its scalar
 output path on the producing step:
@@ -318,7 +431,7 @@ output path on the producing step:
 ```yaml
 - id: login
   uses: api/call
-  secret: [body.data]
+  secret_outputs: [body.data]
   with:
     method: POST
     url: $inputs.login_url
@@ -331,7 +444,7 @@ output path on the producing step:
     headers: { Authorization: $steps.login.outputs.body.data }
 ```
 
-`secret:` paths start at an output declared by the action contract and
+`secret_outputs:` paths start at an output declared by the action contract and
 must resolve to one scalar. `body.data` and `body.items[0].key` are
 valid scalar leaves; `body` when it is an object and `body.items` when
 it is an array are errors. Do not name a whole response subtree: exact
@@ -340,7 +453,46 @@ masking every leaf can swallow unrelated values. Registration happens
 before the producing step records its response, so its own observations
 and later references become `[redacted:login.body.data]`. An action may
 also mark a credential output secret in its contract, requiring no
-authored `secret:` entry.
+authored `secret_outputs:` entry.
+
+### Reuse an acquired browser session
+
+Authenticate once in `setup:`, capture the resulting Playwright
+storage state, and seed each authenticated check explicitly:
+
+```yaml
+setup:
+  - uses: ui/navigate
+    with: { url: "$inputs.base_url/login" }
+  - uses: ui/type
+    with: { locator: { label: Password }, text: $inputs.password }
+  - uses: ui/click
+    with: { locator: { role: button, name: Sign in } }
+  - id: session
+    uses: ui/capture-session
+
+criteria:
+  - id: AC-1
+    description: An authenticated user sees the workspace list.
+    checks:
+      - id: AC-1.1
+        session: $setup.session.outputs.state
+        steps:
+          - uses: ui/navigate
+            with: { url: "$inputs.base_url/workspaces" }
+          - uses: ui/assert-element
+            with:
+              locator: { role: heading, name: Workspaces }
+              expected: visible
+```
+
+`session:` must be one whole-string `$` reference. Do not hand-author
+cookies or local storage: acquire the state by exercising the real
+login surface. Each check still receives a fresh browser context
+seeded from that baseline, so mutations do not cross between checks.
+Omit `session:` for the signed-out path. `ui/capture-session` marks its
+structured `state` output secret by contract; do not add an authored
+`secret_outputs:` entry for it.
 
 ## Worked example template
 
@@ -405,6 +557,18 @@ criteria:
   catalog and per-action contract. Author against these, not memory.
 - `duhem validate <dir>` — field-checks your VD and names valid options
   on a miss.
+- `duhem resolve <dir> --provenance` — prints the merged, resolved
+  document without running it. Use this when an include, profile,
+  inherited input, or default produced a surprising value:
+
+  ```bash
+  duhem resolve .duhem --profile staging --provenance
+  duhem resolve .duhem --profile staging --format json > resolved.json
+  ```
+
+  Secrets remain `••••••`, and validation failures appear in the
+  output. The command has no browser, provisioning, evidence-write, or
+  network side effects.
 - `duhem run <dir>` — runs the suite (exit 0 == pass). Add
   `--reporter json` for a per-criterion verdict breakdown; the default
   reporter prints only the overall pass/fail.

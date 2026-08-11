@@ -126,7 +126,9 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                         detail: detail.clone(),
                     });
             }
-            EventPayload::CheckFinished { check_id, verdict } => {
+            EventPayload::CheckFinished {
+                check_id, verdict, ..
+            } => {
                 recorded_checks.insert(check_id.clone(), *verdict);
             }
             EventPayload::CriterionFinished {

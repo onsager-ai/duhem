@@ -120,6 +120,12 @@ impl Value {
 /// implements this; the evaluator never reaches past it.
 pub trait EvalContext {
     fn input(&self, name: &str) -> Option<&Value>;
+    /// Lookup one effective named locator. The default keeps custom
+    /// evaluator contexts source-compatible when they do not expose a
+    /// page catalog.
+    fn page(&self, _page: &str, _element: &str) -> Option<&Value> {
+        None
+    }
     fn output(&self, step_id: &str, output: &str) -> Option<&Value>;
     /// Lookup `$setup.<step_id>.outputs.<name>` against the run-level
     /// setup block. Run-scoped and read-only across checks (#20).
@@ -248,6 +254,14 @@ fn eval_path(p: &Path, ctx: &dyn EvalContext) -> EvalRes {
                 .cloned()
                 .ok_or_else(|| InconclusiveCause::MissingInput(name.to_string()))?;
             navigate(base, name, &p.segments[1.min(p.segments.len())..])
+        }
+        PathRoot::Pages => {
+            let page = p.segments.first().map(String::as_str).unwrap_or("");
+            let element = p.segments.get(1).map(String::as_str).unwrap_or("");
+            let base = ctx.page(page, element).cloned().ok_or_else(|| {
+                InconclusiveCause::MissingField(format!("pages.{page}.{element}"))
+            })?;
+            navigate(base, element, &p.segments[2.min(p.segments.len())..])
         }
         PathRoot::Steps => {
             // Schema validator guarantees the leading
@@ -1308,6 +1322,71 @@ mod tests {
         assert_eq!(
             run(
                 r#"$runtime.format("{}/{}", $inputs.base, $steps.create.outputs.body.data._id) == "http://h/projects/abc123""#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn format_composes_three_variadic_args() {
+        let ctx = TestCtx::new()
+            .with_input("base", Value::Str("http://h".into()))
+            .with_output("create", "id", Value::Str("abc123".into()));
+        assert_eq!(
+            run(
+                r#"$runtime.format("{}/{}/{}", $inputs.base, "projects", $steps.create.outputs.id) == "http://h/projects/abc123""#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn format_repeated_value_requires_repeated_arg() {
+        let ctx = TestCtx::new().with_input("id", Value::Str("abc123".into()));
+        assert_eq!(
+            run(
+                r#"$runtime.format("{}/{}", $inputs.id, $inputs.id) == "abc123/abc123""#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn format_has_no_placeholder_escaping() {
+        // A conventional `{{}}` escape still contains a `{}` placeholder,
+        // so strict arity counts it along with the intended placeholder.
+        let ctx = TestCtx::new();
+        assert!(matches!(
+            run(r#"$runtime.format("{{}}/{}", "value")"#, &ctx),
+            EvalResult::Inconclusive(InconclusiveCause::BadFormat(_))
+        ));
+    }
+
+    #[test]
+    fn format_leftover_braces_are_literal() {
+        // A doubled brace is not an escape: it adds a placeholder and leaves
+        // stray braces, so a literal `{}` has no format-string route.
+        let ctx = TestCtx::new();
+        assert_eq!(
+            run(
+                r#"$runtime.format("{{}}/{}", "first", "second") == "{first}/second""#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn format_accepts_fmt_from_reference() {
+        let ctx = TestCtx::new()
+            .with_input("url_tpl", Value::Str("https://example.com/items/{}".into()))
+            .with_input("id", Value::Int(7));
+        assert_eq!(
+            run(
+                r#"$runtime.format($inputs.url_tpl, $inputs.id) == "https://example.com/items/7""#,
                 &ctx
             ),
             EvalResult::True

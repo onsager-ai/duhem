@@ -1,0 +1,11 @@
+verification: Named locator catalog — second consumer
+criteria:
+  - id: AC-1
+    description: The same shared locator can address the fixture from a sibling leaf.
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/navigate
+            with: { url: "data:text/html,<h1>Catalog Fixture</h1>" }
+          - uses: ui/assert-element
+            with: { locator: $pages.fixture.heading, expected: visible }

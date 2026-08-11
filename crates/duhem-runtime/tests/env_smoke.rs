@@ -1,12 +1,12 @@
-//! End-to-end smoke for `environment:` lifecycle.
+//! End-to-end smoke for `provision:` lifecycle.
 //!
-//! Drives `Engine::run` against a VD with `environment.up:` /
+//! Drives `Engine::run` against a VD with `provision.up:` /
 //! `down:` / `ready:` while a real `axum` server stands in for the
 //! SUT. Covers the happy path (up exits 0 → ready 200 → criteria
 //! pass → down exits 0) and the readiness-success path with a
 //! probe.
 //!
-//! Not `#[ignore]`'d — `environment:` plumbing doesn't need a
+//! Not `#[ignore]`'d — `provision:` plumbing doesn't need a
 //! Playwright browser, and the VD here declares no `Step.uses`, so
 //! the engine never tries to launch one. This test runs in standard
 //! `cargo test` without `npx playwright install`.
@@ -59,7 +59,7 @@ async fn environment_lifecycle_runs_up_ready_down_end_to_end() {
         f,
         r#"
 verification: env-smoke
-environment:
+provision:
   up: ./scripts/up.sh
   down: ./scripts/down.sh
   ready:
@@ -164,7 +164,7 @@ async fn environment_url_resolves_inputs_template() {
 verification: env-templated-url
 inputs:
   health_url: {{ type: string }}
-environment:
+provision:
   up: ./scripts/up.sh
   ready:
     http:

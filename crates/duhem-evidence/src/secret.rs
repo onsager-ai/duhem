@@ -46,6 +46,11 @@ pub struct MaskedText {
 #[derive(Clone, Default)]
 pub struct SecretRegistry {
     patterns: BTreeMap<String, String>,
+    /// Canonical JSON serialization → source name for structured
+    /// contract-declared secrets. Event payloads are trees, so their
+    /// matching subtree must be replaced before leaf-by-leaf text
+    /// masking would expose its shape (spec #347).
+    structured: BTreeMap<String, String>,
     matcher: Option<AhoCorasick>,
     matcher_names: Vec<String>,
     risky: BTreeMap<String, Vec<&'static str>>,
@@ -57,7 +62,7 @@ impl SecretRegistry {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.patterns.is_empty()
+        self.patterns.is_empty() && self.structured.is_empty()
     }
 
     /// Register one resolved secret value and its common encoded forms.
@@ -109,13 +114,35 @@ impl SecretRegistry {
         self.rebuild();
     }
 
-    /// Register the stable textual form of a resolved JSON input.
+    /// Register the stable textual form of a resolved JSON value.
+    /// Objects and arrays additionally retain their canonical tree
+    /// shape so an event carrying that exact value is replaced as one
+    /// secret, rather than leaking its fields while masking leaves.
     pub fn register_json(&mut self, source_name: impl Into<String>, value: &serde_json::Value) {
-        let text = match value {
-            serde_json::Value::String(s) => s.clone(),
-            other => serde_json::to_string(other).expect("JSON value serializes"),
-        };
-        self.register(source_name, &text);
+        let source_name = source_name.into();
+        match value {
+            serde_json::Value::String(s) => self.register(source_name, s),
+            serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+                let text = serde_json::to_string(value).expect("JSON value serializes");
+                self.structured
+                    .entry(text.clone())
+                    .and_modify(|owner| {
+                        if source_name < *owner {
+                            *owner = source_name.clone();
+                        }
+                    })
+                    .or_insert_with(|| source_name.clone());
+                // Also cover the same canonical serialization when it
+                // appears inside a recorded text blob.
+                self.register(source_name, &text);
+            }
+            other => {
+                self.register(
+                    source_name,
+                    &serde_json::to_string(other).expect("JSON value serializes"),
+                );
+            }
+        }
     }
 
     /// Human-readable warnings for collision-prone declarations. Values
@@ -180,6 +207,16 @@ impl SecretRegistry {
     }
 
     fn mask_json_into(&self, value: &mut serde_json::Value, counts: &mut BTreeMap<String, u64>) {
+        if matches!(
+            value,
+            serde_json::Value::Array(_) | serde_json::Value::Object(_)
+        ) && let Ok(canonical) = serde_json::to_string(value)
+            && let Some(source) = self.structured.get(&canonical)
+        {
+            *value = serde_json::Value::String(format!("[redacted:{source}]"));
+            *counts.entry(source.clone()).or_insert(0) += 1;
+            return;
+        }
         match value {
             serde_json::Value::String(text) => {
                 let masked = self.mask(text);
@@ -271,5 +308,30 @@ mod tests {
         registry.register("strong", "0123456789abcdef0123456789abcdef");
         assert_eq!(registry.warnings().len(), 2);
         assert!(registry.mask("abcd TEST").text.contains("[redacted:short]"));
+    }
+
+    #[test]
+    fn structured_json_is_replaced_as_one_secret() {
+        let state = serde_json::json!({
+            "cookies": [{"name": "session", "value": "credential-347"}],
+            "origins": []
+        });
+        let mut registry = SecretRegistry::new();
+        registry.register_json("login.state", &state);
+
+        let mut event = serde_json::json!({
+            "kind": "setup_step_observation",
+            "value": state,
+        });
+        let counts = registry.mask_json(&mut event);
+        assert_eq!(event["value"], "[redacted:login.state]");
+        assert_eq!(counts.get("login.state"), Some(&1));
+
+        let text = serde_json::to_string(&serde_json::json!({
+            "cookies": [{"name": "session", "value": "credential-347"}],
+            "origins": []
+        }))
+        .unwrap();
+        assert_eq!(registry.mask(&text).text, "[redacted:login.state]");
     }
 }

@@ -81,13 +81,13 @@ pub enum StepOutcome {
     Ok,
     Error,
     Timeout,
+    Skipped { reason: String },
 }
 
-/// Verdict shape for `assertion_evaluated.state` and the three
-/// `*_finished.verdict` fields. Re-exported from `duhem-judge` so the
-/// evidence wire format and the judge's output share one canonical
-/// type — the wire token is `"pass"` / `"fail"` /
-/// `"inconclusive:<cause>"` (`docs/duhem-spec.md` §7.6).
+/// Assertion and finished-verdict fields share the same three-state
+/// judgment vocabulary (`docs/duhem-spec.md` §7.6). A step that did not
+/// run has no assertion event; its absence is carried by
+/// [`StepOutcome::Skipped`] instead.
 pub use duhem_judge::VerdictState;
 
 /// Either an inline JSON value (small observations) or a reference to
@@ -128,6 +128,14 @@ pub struct Event {
     /// populated.
     #[serde(flatten)]
     pub payload: EventPayload,
+}
+
+/// Authored reusable-flow boundary for one expanded action step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowOrigin {
+    pub name: String,
+    pub invocation: String,
+    pub inner_index: u32,
 }
 
 /// The closed set of event payloads. `#[serde(tag = "kind")]` puts the
@@ -237,6 +245,10 @@ pub enum EventPayload {
         layer: Option<String>,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         with: BTreeMap<String, serde_json::Value>,
+        /// Reusable-flow origin for an expanded action. Absent on
+        /// ordinary steps and on traces recorded before spec #367.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        flow: Option<FlowOrigin>,
     },
     StepObservation {
         step_index: u32,
@@ -281,6 +293,16 @@ pub enum EventPayload {
     CheckFinished {
         check_id: String,
         verdict: VerdictState,
+        /// Literal `session:` expression selected by the check. The
+        /// credential value is never recorded; this source proves which
+        /// declared baseline was requested (spec #347).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_source: Option<String>,
+        /// Lowercase SHA-256 of the resolved storage-state JSON. Lets
+        /// traces prove two isolated contexts began from the same
+        /// baseline without carrying that baseline.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_digest: Option<String>,
     },
     CriterionFinished {
         criterion_id: String,
@@ -414,6 +436,23 @@ mod tests {
     }
 
     #[test]
+    fn skipped_step_outcome_round_trips_with_reason() {
+        let evt = Event {
+            seq: 2,
+            ts: ts(),
+            payload: EventPayload::StepFinished {
+                step_index: 1,
+                outcome: StepOutcome::Skipped {
+                    reason: "blocked by failed step `login`".into(),
+                },
+            },
+        };
+        let line = serde_json::to_string(&evt).unwrap();
+        assert!(line.contains(r#""skipped":{"reason":"blocked by failed step `login`"}"#));
+        assert_eq!(serde_json::from_str::<Event>(&line).unwrap(), evt);
+    }
+
+    #[test]
     fn unknown_kind_is_a_hard_error() {
         let bad = r#"{"seq":0,"ts":"2026-05-08T12:00:00.000Z","kind":"made_up"}"#;
         assert!(serde_json::from_str::<Event>(bad).is_err());
@@ -431,6 +470,29 @@ mod tests {
             }
         );
         assert_eq!(serde_json::to_string(&event).unwrap(), old);
+    }
+
+    #[test]
+    fn check_session_metadata_is_additive_and_credential_free() {
+        let old = r#"{"seq":7,"ts":"2026-05-08T12:00:00.000Z","kind":"check_finished","check_id":"AC-1.1","verdict":"pass"}"#;
+        let event: Event = serde_json::from_str(old).unwrap();
+        assert_eq!(serde_json::to_string(&event).unwrap(), old);
+
+        let seeded = Event {
+            seq: 8,
+            ts: ts(),
+            payload: EventPayload::CheckFinished {
+                check_id: "AC-2.1".into(),
+                verdict: VerdictState::Pass,
+                session_source: Some("$setup.session.outputs.state".into()),
+                session_digest: Some("a".repeat(64)),
+            },
+        };
+        let line = serde_json::to_string(&seeded).unwrap();
+        assert!(line.contains(r#""session_source":"$setup.session.outputs.state""#));
+        assert!(line.contains(&format!(r#""session_digest":"{}""#, "a".repeat(64))));
+        assert!(!line.contains("cookies"));
+        assert_eq!(serde_json::from_str::<Event>(&line).unwrap(), seeded);
     }
 
     #[test]
@@ -556,7 +618,9 @@ mod tests {
         assert!(
             EventPayload::CheckFinished {
                 check_id: "x".into(),
-                verdict: VerdictState::Pass
+                verdict: VerdictState::Pass,
+                session_source: None,
+                session_digest: None,
             }
             .is_finished()
         );
@@ -569,6 +633,35 @@ mod tests {
                 }
             }
             .is_finished()
+        );
+    }
+
+    #[test]
+    fn step_started_flow_origin_is_optional_and_round_trips() {
+        let old = r#"{"kind":"step_started","criterion_id":"AC-1","check_id":"AC-1.1","step_index":0,"uses":"ui/click"}"#;
+        let parsed: EventPayload = serde_json::from_str(old).expect("old trace parses");
+        assert!(matches!(
+            parsed,
+            EventPayload::StepStarted { flow: None, .. }
+        ));
+
+        let payload = EventPayload::StepStarted {
+            criterion_id: "AC-1".into(),
+            check_id: "AC-1.1".into(),
+            step_index: 0,
+            uses: "ui/click".into(),
+            layer: Some("ui".into()),
+            with: BTreeMap::new(),
+            flow: Some(FlowOrigin {
+                name: "sign_in".into(),
+                invocation: "login".into(),
+                inner_index: 2,
+            }),
+        };
+        let json = serde_json::to_string(&payload).expect("serialize");
+        assert_eq!(
+            serde_json::from_str::<EventPayload>(&json).expect("round trip"),
+            payload
         );
     }
 }

@@ -12,6 +12,7 @@ import { compactValue, formatEvent, groupTimeline, parseComparison, stepStatus, 
 import { EventIcon } from "../components/EventIcon";
 import { RunScaffold } from "./RunScaffold";
 import { useVd } from "./definition-context";
+import { flowOrigin, type FlowOrigin } from "../definition";
 
 // The check's wall-clock span — first recorded event to last.
 function checkDurationMs(timeline: TraceEvent[]): number | null {
@@ -431,15 +432,19 @@ function StepGroup({
   );
   const fe = formatEvent(started, prevOf(started));
   const status = stepStatus(node);
-  // Overlay the authored step `id` from the recorded VD snapshot (#302):
-  // a named step reads by its intent (`refund`), with the action verb
-  // demoted into the detail. Anonymous steps keep the verb as the label.
+  // Overlay authored intent from the recorded VD snapshot (#302).
+  // Description is prose for readers; id remains the stable reference.
   const vd = useVd();
   const cid = typeof started.criterion_id === "string" ? started.criterion_id : "";
   const chid = typeof started.check_id === "string" ? started.check_id : "";
-  const stepId = vd?.stepId(cid, chid, node.stepIndex);
-  const label = stepId ?? fe.label;
-  const detailText = stepId ? [fe.label, fe.detail].filter(Boolean).join(" · ") : fe.detail;
+  const uses = typeof started.uses === "string" ? started.uses : "step";
+  const flow = flowOrigin(started.flow);
+  const label = (
+    flow
+      ? vd?.flowStepLabel(flow)
+      : vd?.stepLabel(cid, chid, node.stepIndex)
+  ) ?? `${uses} #${node.stepIndex}`;
+  const detailText = [fe.label, fe.detail].filter(Boolean).join(" · ");
   const statusObs = scalarObs.find(
     (observation) => observation.name === "status" && typeof observation.value === "number",
   );
@@ -453,6 +458,8 @@ function StepGroup({
       id={`step-${node.stepIndex}`}
       className={`ev step-group tone-${status.tone}${selected ? " step-selected" : ""}`}
       data-testid="step-group"
+      data-flow-invocation={flow?.invocation}
+      data-flow-name={flow?.name}
     >
       <details open={status.failed || selected}>
         <summary className="step-summary md:sticky md:top-0 md:z-20 md:border-b md:bg-background/95 md:backdrop-blur">
@@ -554,6 +561,88 @@ function StepGroup({
   );
 }
 
+type StepNode = Extract<TimelineNode, { kind: "step" }>;
+type FlowGroupNode = {
+  kind: "flow";
+  key: string;
+  origin: FlowOrigin;
+  steps: StepNode[];
+};
+
+function groupFlowSteps(nodes: TimelineNode[]): (TimelineNode | FlowGroupNode)[] {
+  const grouped: (TimelineNode | FlowGroupNode)[] = [];
+  for (const node of nodes) {
+    if (node.kind !== "step") {
+      grouped.push(node);
+      continue;
+    }
+    const origin = flowOrigin(node.events[0].flow);
+    if (!origin) {
+      grouped.push(node);
+      continue;
+    }
+    const previous = grouped[grouped.length - 1];
+    if (
+      previous?.kind === "flow" &&
+      previous.origin.name === origin.name &&
+      previous.origin.invocation === origin.invocation
+    ) {
+      previous.steps.push(node);
+      continue;
+    }
+    grouped.push({
+      kind: "flow",
+      key: `flow:${origin.name}:${origin.invocation}:${node.stepIndex}`,
+      origin,
+      steps: [node],
+    });
+  }
+  return grouped;
+}
+
+function FlowGroup({
+  group,
+  prevOf,
+  artifacts,
+  selectedStep,
+}: {
+  group: FlowGroupNode;
+  prevOf: (evt: TraceEvent) => TraceEvent | undefined;
+  artifacts: ArtifactRef[];
+  selectedStep?: number;
+}) {
+  const vd = useVd();
+  const started = group.steps[0].events[0];
+  const criterionId = typeof started.criterion_id === "string" ? started.criterion_id : "";
+  const checkId = typeof started.check_id === "string" ? started.check_id : "";
+  const label =
+    vd?.flowLabel(criterionId, checkId, group.origin) ?? group.origin.invocation;
+  return (
+    <li
+      className="flow-group"
+      data-testid="flow-group"
+      data-flow-invocation={group.origin.invocation}
+      data-flow-name={group.origin.name}
+    >
+      <div className="flow-group-header">
+        <span className="flow-group-label">{label}</span>
+        <code>{group.origin.name}</code>
+      </div>
+      <ol className="flow-step-list">
+        {group.steps.map((node) => (
+          <StepGroup
+            key={node.key}
+            node={node}
+            prevOf={prevOf}
+            artifacts={artifacts}
+            selected={selectedStep === node.stepIndex}
+          />
+        ))}
+      </ol>
+    </li>
+  );
+}
+
 export function Timeline({
   events,
   artifacts = [],
@@ -563,13 +652,21 @@ export function Timeline({
   artifacts?: ArtifactRef[];
   selectedStep?: number;
 }) {
-  const nodes = groupTimeline(events);
+  const nodes = groupFlowSteps(groupTimeline(events));
   const idx = new Map(events.map((e, i) => [e.seq, i]));
   const prevOf = (evt: TraceEvent) => events[(idx.get(evt.seq) ?? 0) - 1];
   return (
     <ol className="timeline">
       {nodes.map((n) =>
-        n.kind === "step" ? (
+        n.kind === "flow" ? (
+          <FlowGroup
+            key={n.key}
+            group={n}
+            prevOf={prevOf}
+            artifacts={artifacts}
+            selectedStep={selectedStep}
+          />
+        ) : n.kind === "step" ? (
           <StepGroup
             key={n.key}
             node={n}
@@ -1334,12 +1431,16 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
       if (node.kind !== "step") return [];
       const started = node.events[0];
       const uses = typeof started.uses === "string" ? started.uses : "step";
-      const authored = vd?.stepId(check.criterion_id, check.check_id, node.stepIndex);
+      const flow = flowOrigin(started.flow);
+      const authoredId = vd?.stepId(check.criterion_id, check.check_id, node.stepIndex, flow);
+      const label =
+        vd?.stepLabel(check.criterion_id, check.check_id, node.stepIndex, flow) ??
+        `${uses} #${node.stepIndex}`;
       return [[
         node.stepIndex,
         {
-          key: authored ?? String(node.stepIndex),
-          label: authored ?? uses.split("/").pop() ?? uses,
+          key: authoredId ?? String(node.stepIndex),
+          label,
         },
       ] as const];
     }),

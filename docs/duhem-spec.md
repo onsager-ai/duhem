@@ -148,13 +148,41 @@ Assertions are pure boolean predicates over named values produced by steps. They
 
 A single action Duhem performs on the system under test, or an observation it captures. Steps are typed by the action they invoke (`uses:` field), e.g., `ui/click`, `api/observe`, `db/query`, `event/wait`.
 
-Steps may produce named outputs that subsequent steps and assertions reference.
+Steps may carry an optional human-facing `description:` explaining why
+the action is present. Reports label a step by `description`, then its
+reference `id`, then `<uses> #<index>`; engine diagnostics remain keyed
+to `id` so they point at a stable YAML token. Steps may produce named
+outputs that subsequent steps and assertions reference.
+
+Steps also accept a closed `if:` condition. `success` is the default and
+runs only while no earlier step in the same check has failed; `always`
+runs regardless (for teardown); `failure` runs only after an earlier
+failure (for diagnostics). A step failure means `Error`, `Timeout`, or a
+failed implicit judgment. An authored `satisfied` output is only an
+observation until judgment promotes it: binding that output for manual
+composition suppresses the implicit judgment and therefore does not gate.
+The state is scoped to one check, so a failed check never gates a sibling
+check. `setup:` uses the same vocabulary and scopes state to its own
+sequence.
 
 ### 7.6 Verdict
 
 The aggregated outcome of a verification run.
 
-- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Both are folded by the same three-state rule; a check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
+Duhem keeps three layers distinct:
+
+| Layer | Question | Values |
+| --- | --- | --- |
+| Execution | Did the step run? | `ok` · `error` · `timeout` · `skipped` |
+| Observation | What did it see? | Arbitrary outputs; `satisfied` is one boolean among them |
+| Judgment | What do we conclude? | `pass` · `fail` · `inconclusive` |
+
+`satisfied` is not a verdict. An author may combine a false observation
+with another true observation in a passing disjunction. The two coincide
+only when an unbound judging output is promoted into an implicit
+assertion.
+
+- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Every evaluated assertion carries the same three-state `VerdictState` as the final verdict. An assertion that is not evaluated because one of its operands comes from a skipped step is omitted; absence is not a fourth state. Aggregation applies fail → inconclusive → pass precedence directly, and an empty assertion set becomes `inconclusive:empty_aggregation`. A check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
 - **Per-criterion verdict**: aggregated from its checks (any check `fail` → criterion `fail`; any `inconclusive` and no `fail` → criterion `inconclusive`; all `pass` → criterion `pass`).
 - **Per-run verdict**: aggregated from all criteria, same rules.
 
@@ -166,7 +194,11 @@ A `fail` verdict on a holistic check tells you the web is broken. It does not te
 
 The structured trace produced during a verification run. Append-only. Never edited.
 
-Evidence includes: each step’s inputs and outputs, each assertion’s predicate and evaluated result, screenshots/DOM snapshots/HAR files where applicable, video recordings (UI runs), and timing data.
+Evidence includes: each authored step and whether it ran, each executed
+step’s inputs and outputs, each assertion’s predicate and evaluated
+result, screenshots/DOM snapshots/HAR files where applicable, video
+recordings (UI runs), and timing data. A gated step is recorded as
+`skipped` with the gate reason; it is never silently omitted.
 
 Browser capture is a retained session, not only a final failure frame. For every executed step while a browser page exists, the runner makes one best-effort post-step screenshot. `duhem run --capture on-failure` records those frames temporarily and retains the complete storyboard only when the check is non-passing; `always` retains it for every browser check; `off` retains none. Captures are bounded, and identical PNG bytes converge on one content address. A screenshot failure or timeout is recorded as unavailable, warns, and never changes the verdict. Page-free steps honestly state that no browser frame exists.
 
@@ -207,6 +239,18 @@ So Duhem’s checks are integration-or-larger by design. We don’t oppose unit 
 ### What this implies for environments
 
 Verification environments must be production-equivalent. Duhem provides primitives for spinning up environments that include the real database engine (not in-memory mock), the real message bus (not stubs), the real upstream services (or production-faithful contract tests of them), and the real authentication layer.
+
+> **Alignment note (2026-07-28, #347 — acquired browser sessions).**
+> Replaying browser storage state does not bypass the authentication
+> layer when that state was acquired by authenticating against the real
+> identity provider during `setup:`. `ui/capture-session` makes that
+> ambient result an explicit credential value; each consuming check
+> receives a fresh context seeded from the declared baseline. Hand-writing
+> an inline cookie would mock auth, so `session:` mechanically accepts
+> only a whole-string `$` reference. At least one criterion should still
+> exercise login itself; that authoring discipline remains human-reviewed
+> rather than inferred by the judge. v1 deliberately keeps `session:`
+> per check—there is no Verification-Definition or manifest cascade.
 
 This makes verification expensive relative to unit tests. That cost is acknowledged. It is the unavoidable price of holistic verification — and it is much cheaper than a production incident.
 
@@ -374,23 +418,23 @@ This content-based identification lets Duhem coexist with other YAML in the repo
 
 ### 10.3 Verification Definition structure
 
-Values like `$inputs.workspace_name` below are **runtime expressions** (§10.7). Substitution is whole-string only: a `with:` value that is *exactly* a bare `$…` reference (or a `$runtime.<fn>(…)` call) is resolved to its evaluated scalar; everything else passes through literally. There is no embedded `{{…}}` interpolation — to compose a value, use `$runtime.format(…)` / `$runtime.concat(…)` (§10.7), not string templating. Input `default:` values are taken literally and are never evaluated as expressions.
+Values like `$inputs.workspace_name` below are **runtime expressions** (§10.7). Substitution is whole-string only: a `with:` value that is *exactly* a bare `$…` reference (or a `$runtime.<fn>(…)` call) is resolved to its evaluated value; everything else passes through literally. `$pages.<page>.<element>` is the deliberate map-valued case: the locator node is spliced first, then any `$inputs.*` inside that node resolves in the leaf's context. There is no embedded `{{…}}` interpolation — to compose a scalar, use `$runtime.format(…)` / `$runtime.concat(…)` (§10.7), not string templating. Input `default:` values are taken literally and are never evaluated as expressions.
 
 #### Inputs, acquired values, and secret masking
 
-An input may declare `env: VARIABLE_NAME` as a process-environment fallback. Resolution order is `--inputs` (last merged value) → selected Duhem environment → the input's process `env:` → `default:`. Because `env:` is below both explicit sources, adding it never changes a run that already supplied the input. An unset input with no remaining source is an environment failure at run time and produces `inconclusive:environment_error`; it is not a validation failure or a product `fail`.
+An input may declare `env: VARIABLE_NAME` as a process-environment fallback. Resolution order is `--inputs` (last merged value) → selected Duhem profile → the input's process `env:` → `default:`. Because `env:` is below both explicit sources, adding it never changes a run that already supplied the input. An unset input with no remaining source is an environment failure at run time and produces `inconclusive:environment_error`; it is not a validation failure or a product `fail`.
 
-For a value shared across a manifest suite, put the same declaration shape under the manifest's top-level `inputs:` and let each consuming leaf list the name under `inherits:`. The manifest declaration owns `type`, `env:`, `default:`, and `secret:` while the selected `environments:` entry continues to supply a value. Resolution is `--inputs` → selected environment → manifest `env:` → manifest `default:`. The declared type is enforced for that inherited name; an inherited name with no manifest declaration retains names-only, unchecked resolution for compatibility.
+For a value shared across a manifest suite, put the full declaration under the manifest's top-level `inputs:` and let each consuming leaf declare the name as `{ inherit: true }` under its own `inputs:`. The manifest declaration owns `type`, `env:`, and `default:` while the leaf may add `secret: true`; the selected `profiles:` entry continues to supply a value. Resolution is `--inputs` → selected profile → manifest `env:` → manifest `default:`. The leaf opt-in keeps its declaration surface closed: a `$inputs.<name>` it did not declare remains a validation error even when the manifest declares that name.
 
-`secret: true` registers the resolved value for exact, case-sensitive substring masking. Secret inputs cannot have `default:` values: credentials belong in process or selected environments, or in an explicit operator-supplied input. Duhem also registers the value's standard-base64, percent-encoded, and JSON-string-escaped forms. Every matching recorded text occurrence becomes `[redacted:<input_name>]` at the two output boundaries: evidence (event payloads, text artifact blobs, and bundle exports) and terminal presentation. Each text artifact records non-zero replacement counts by input name; the dashboard renders those counts so aggressive masking is visible. Values shorter than eight characters or equal (case-insensitively) to the small default list `admin`, `changeme`, `password`, `secret`, `test`, or `token` warn at run time because they commonly over-mask durable evidence. The threshold and list are defaults that may become tunable later, not validation gates.
+`secret: true` registers the resolved value for exact, case-sensitive substring masking. Secret inputs cannot have `default:` values: credentials belong in process or selected profiles, or in an explicit operator-supplied input. Duhem also registers the value's standard-base64, percent-encoded, and JSON-string-escaped forms. Every matching recorded text occurrence becomes `[redacted:<input_name>]` at the two output boundaries: evidence (event payloads, text artifact blobs, and bundle exports) and terminal presentation. Each text artifact records non-zero replacement counts by input name; the dashboard renders those counts so aggressive masking is visible. Values shorter than eight characters or equal (case-insensitively) to the small default list `admin`, `changeme`, `password`, `secret`, `test`, or `token` warn at run time because they commonly over-mask durable evidence. The threshold and list are defaults that may become tunable later, not validation gates.
 
 Credentials acquired by an action use the same registry. A step's optional
-`secret:` list names paths into its raw action outputs:
+`secret_outputs:` list names paths into its raw action outputs:
 
 ```yaml
 - id: login
   uses: api/call
-  secret: [body.data]
+  secret_outputs: [body.data]
   with:
     method: POST
     url: $inputs.login_url
@@ -406,11 +450,15 @@ Credentials acquired by an action use the same registry. A step's optional
 The path must begin with an output declared by the action contract and resolve
 to one scalar value. `body.data` and `body.items[0].key` are valid when those
 leaves are scalar; `body` when it is an object, and `body.items` when it is an
-array, are errors. Duhem does not register an aggregate's exact serialization
+array, are errors. An authored declaration does not register an aggregate's exact serialization
 or recursively mask all its leaves: the first rarely recurs byte-for-byte in
-evidence, while the second can over-mask unrelated values. An action contract
-may declare a scalar output path secret by default, so actions that
-structurally produce credentials need no authored `secret:` entry.
+evidence, while the second can over-mask unrelated values. A trusted action
+contract may declare an output path secret by default, so actions that
+structurally produce credentials need no authored `secret_outputs:` entry. Contract
+metadata may deliberately name a structured credential:
+`ui/capture-session.state` is replaced as one exact JSON subtree at the
+evidence boundary, rather than asking an author to enumerate its cookies and
+local-storage leaves.
 
 Registration happens after the action returns and before any evidence for that
 step is written. The producing step's own observations and all later events
@@ -422,6 +470,63 @@ future feature must not register an input-derived value late because that value
 could already have appeared.
 
 The guarantee is deliberately about recorded text, with two residual gaps. First, screenshots and video are pixels and are not masked; a credential rendered by the application can therefore remain visible in `capture/screenshot`, `capture/step-screenshot`, or `capture/video`. Second, transformations beyond the three registered encodings — including hashing, chunking, and application-specific reformatting — do not exact-match and are not masked. Authors should choose realistic, high-entropy fixtures and avoid rendering credentials in the application under test.
+
+#### Authenticated browser checks
+
+`ui/capture-session` has no `with:` fields and returns `state`, Playwright's
+opaque storage-state object (cookies plus per-origin local storage). The action
+contract declares `state` secret, so a VD never needs an authored `secret_outputs:`
+entry for it. Capture login once in `setup:`, then select that value on each
+authenticated check:
+
+```yaml
+verification: Authenticated workspace access
+inputs:
+  login_url: { type: string }
+  workspaces_url: { type: string }
+  password: { type: string, secret: true }
+
+setup:
+  - uses: ui/navigate
+    with: { url: $inputs.login_url }
+  - uses: ui/type
+    with: { locator: { label: Password }, text: $inputs.password }
+  - uses: ui/click
+    with: { role: button, name: Sign in }
+  - id: session
+    uses: ui/capture-session
+
+criteria:
+  - id: AC-1
+    description: An administrator can see the workspace list.
+    checks:
+      - id: AC-1.1
+        session: $setup.session.outputs.state
+        steps:
+          - description: Open the workspace list
+            uses: ui/navigate
+            with: { url: $inputs.workspaces_url }
+          - description: The Workspaces heading is offered
+            uses: ui/assert-element
+            with:
+              locator: { role: heading, name: Workspaces }
+              expected: visible
+```
+
+`session:` is optional and per check. It must be exactly one `$` path
+reference (`$setup.…` or an operator-supplied `$inputs.…`); an inline value
+fails validation, and a dangling setup/input reference uses the ordinary
+missing-reference diagnostic. A check with no `ui/*` step is valid but warns
+that its session is unused. Omission preserves the ordinary fresh signed-out
+context. Presence still creates a **fresh** context seeded from the selected
+baseline—sibling mutations never cross between checks. State that cannot be
+resolved or that Playwright rejects makes the check
+`inconclusive:environment_error`.
+
+The check's `check_finished` evidence records only `session_source` (the
+literal expression) and `session_digest` (lowercase SHA-256 of the resolved
+JSON). The digest proves that checks or runs used the same baseline without
+putting the credential into the trace, export bundle, or dashboard.
 
 **Locators.** UI actions (`ui/click`, `ui/type`, `ui/assert-element`, `ui/select`) address an element by exactly one *primary strategy*: `role` (paired with an optional `name`), `label` (associated label text — how to reach an input with no ARIA role, e.g. `type=password`), `testid` (the `data-testid` attribute), `placeholder`, `css` (a raw CSS selector escape hatch), or a standalone `text`. A `text` substring may additionally *filter* a non-text primary, and a recursive `scope:` narrows the search to inside a container. `ui/click` takes these fields inline in its `with:`; the other actions nest them under `locator:`. Two primaries at once, or none, is rejected. Each maps to the corresponding Playwright `getBy*` engine.
 
@@ -465,7 +570,7 @@ criteria:
             with:
               method: POST
               path: /workspaces
-              within: 3s
+              timeout: 3s
             outputs:
               status: response.status
               workspace_id: response.body.id
@@ -486,7 +591,7 @@ criteria:
                 text: $inputs.workspace_name
               scope: {role: "list", name: "Workspaces"}
               expected: exists
-              within: 5s
+              timeout: 5s
             outputs:
               satisfied: satisfied
         assertions:
@@ -499,7 +604,7 @@ criteria:
             id: nav_check
             with:
               matches: "^/workspaces/[0-9a-f-]+$"   # regex; step outputs are check-scoped, so match the route shape
-              within: 3s
+              timeout: 3s
             outputs:
               satisfied: satisfied
         assertions:
@@ -523,13 +628,13 @@ Notice that AC-1.1 alone exercises five different layers: UI input capture, UI b
 
 The example above writes the `id` / `outputs: { satisfied: satisfied }` / `$steps.<id>.outputs.satisfied == true` plumbing in full to show the mechanism. In practice most assert steps don’t need it — see the implicit-judgment shorthand in §10.3.2.
 
-#### 10.3.1 Environment provisioning (`environment:`)
+#### 10.3.1 Environment provisioning (`provision:`)
 
-A Verification Definition may declare an optional top-level `environment:` block of operator-supplied lifecycle hooks for the system-under-test (§9 Stage 3). When present, the runtime forks `up:` once before `setup:`, polls the optional `ready:` probe before the first criterion, and forks the optional `down:` after the criteria loop completes — regardless of verdict.
+A Verification Definition may declare an optional top-level `provision:` block of operator-supplied lifecycle hooks for the system-under-test (§9 Stage 3). When present, the runtime forks `up:` once before `setup:`, polls the optional `ready:` probe before the first criterion, and forks the optional `down:` after the criteria loop completes — regardless of verdict.
 
 ```yaml
 verification: Create workspace with a provisioned environment
-environment:
+provision:
   up: ./scripts/up.sh            # required — brings the SUT up; runs once before setup:
   down: ./scripts/down.sh        # optional — torn down after the criteria loop, regardless of verdict
   ready:                         # optional readiness probe, polled after up: exits 0
@@ -556,7 +661,7 @@ criteria:
 
 Failure policy is **inconclusive, never false**: a non-zero `up:` exit (or an unrunnable script) yields a run verdict of `Inconclusive(environment_error)`; a `ready:` probe that exhausts its `timeout:` yields `Inconclusive(timeout)`. A failed `up:` skips teardown (nothing came up to tear down); `down:` failures are recorded as evidence but never alter the verdict. Relative script paths resolve against the Verification Definition's directory. `up:`/`down:` scripts run under the runtime's sanitized subprocess environment (§9 Stage 3, §11.1 Runtime). The `ready:` catalog is closed at `http:` for v1.
 
-A manifest can also provision **one shared environment for the whole suite** rather than per-leaf — see the manifest `environment:` block in §10.4.
+A manifest can also provision **one shared environment for the whole suite** rather than per-leaf — see the manifest `provision:` block in §10.4.
 
 #### 10.3.2 Implicit judgment (judging steps)
 
@@ -571,17 +676,52 @@ An action whose contract emits a boolean `satisfied` output — `ui/assert-eleme
               locator: {role: listitem, text: $inputs.workspace_name}
               scope: {role: "list", name: "Workspaces"}
               expected: exists
-              within: 5s
+              timeout: 5s
 ```
 
 Rules:
 
 - Membership is **catalog-driven**, not name-driven: a step judges iff its action’s contract lists a `satisfied` output. Custom actions that emit `satisfied` participate automatically.
-- Binding `satisfied` in the step’s `outputs:` **opts out** — the author is taking manual control (e.g. to combine several steps into one disjunctive assertion), so the implicit assertion is suppressed and only the explicit `assertions:` judge that step. Binding any *other* output (`count`, `actual`, `body`) does not opt out.
-- A skipped, errored, unknown-action, or environment-failed judging step contributes `inconclusive` with the same cause it would give an explicit assertion — never a silent `pass`.
+- Binding `satisfied` in the step’s `outputs:` **opts out** — the author is taking manual control (e.g. to combine several steps into one disjunctive assertion), so the implicit assertion and its gate are both suppressed; only the explicit `assertions:` judge that observation. Binding any *other* output (`count`, `actual`, `body`) does not opt out.
+- A gated judging step contributes no assertion;
+  an errored, unknown-action, or environment-failed judging step
+  contributes `inconclusive` with the same cause it would give an
+  explicit assertion — never a silent `pass`.
 - `assertions:` is therefore optional. A check with neither `assertions:` nor any judging step is rejected at validate time (there is nothing to judge).
 
 Implicit and explicit judgment compose: a check may carry both, and the fold sees every outcome. This is a spelling convenience over the §7.6 verdict rule, not a new judgment path.
+
+#### 10.3.3 Step gating (`if:`)
+
+Every check starts with a clean gate state. The default `if: success`
+runs while that check has no earlier failed step. `if: always` is for
+cleanup that must run on either path, and `if: failure` is for
+diagnostics that are useful only after failure:
+
+```yaml
+steps:
+  - id: save
+    description: Save the workspace
+    uses: ui/click
+    with: { role: button, name: Save }
+  - description: Capture diagnostics only when save failed
+    uses: cli/invoke
+    if: failure
+    with: { command: ./scripts/collect-diagnostics.sh }
+  - description: Always release the test lease
+    uses: api/call
+    if: always
+    with: { method: DELETE, url: $inputs.lease_url }
+```
+
+`if:` is deliberately not an expression language. Its complete
+vocabulary is `success | always | failure`. A gated step emits a
+`StepOutcome::Skipped` evidence record with the causing step in its
+reason and contributes no implicit assertion. Explicit assertions are
+evaluated only after the step sequence and therefore cannot gate later
+steps; an explicit assertion that references a skipped step is not
+evaluated and is omitted. A check where nothing was judged remains
+inconclusive.
 
 ### 10.4 Root manifest (`duhem.yml`)
 
@@ -592,14 +732,14 @@ The root manifest is a single canonical file at the project root that aggregates
 manifest_version: 1
 
 defaults:
-  environment: staging        # default environment for runs
+  profile: staging            # default profile for runs
   timeout: 30s                # default per-step timeout
   inconclusive_policy: block  # block | warn | pass
   retry:
     max: 1
     backoff: exponential
 
-environment:                  # optional — one shared environment for the whole suite (§10.3.1)
+provision:                  # optional — one shared environment for the whole suite (§10.3.1)
   up: ./scripts/up.sh         #   provisioned once before the first leaf, torn down after the last
   down: ./scripts/down.sh
   ready:
@@ -615,6 +755,30 @@ inputs:                       # declarations for names leaves inherit
   base_url:
     type: string
 
+pages:                        # named locators, shared by leaves
+  login:
+    password: { role: textbox, name: Password }
+    username: { role: textbox, name: Username }
+    submit: { role: button, name: Sign In }
+    welcome: { role: heading, name: Welcome }
+
+flows:                        # reusable parameterized step sequences
+  sign_in:
+    description: Sign in with supplied credentials
+    params:
+      password: { type: string, secret: true }
+      user: { type: string }
+    steps:
+      - uses: ui/type
+        with: { locator: $pages.login.username, text: $params.user }
+      - uses: ui/type
+        with: { locator: $pages.login.password, text: $params.password }
+      - id: landed
+        uses: ui/assert-element
+        with: { locator: $pages.login.welcome, expected: visible }
+    outputs:
+      signed_in: $steps.landed.outputs.satisfied
+
 verifications:
   - features/create-workspace/verification.yml
   - features/login/verification.yml
@@ -625,7 +789,7 @@ includes:                           # composition: shared config from other file
   - .duhem.shared.yml               # team-shared defaults
   - .duhem.local.yml                # gitignored, per-developer overrides
 
-environments:                       # named environment configs
+profiles:                       # named configuration profiles
   staging:
     base_url: https://staging.example.com
     db_password: staging-secret      # value for the declaration above
@@ -634,7 +798,54 @@ environments:                       # named environment configs
     db_password: prod-secret
 ```
 
-Leaves consume suite inputs with names only (`inherits: [base_url, db_password]`). For an inherited name that has a manifest declaration, values resolve from `--inputs` → selected `environments:` entry → the declaration's process `env:` → its `default:`, and the declaration's `type` is enforced. A manifest input not inherited by any leaf produces an authoring warning, not an error. `secret: true` still cannot be combined with `default:`.
+Leaves consume suite inputs by declaring `inputs: { base_url: { inherit: true }, db_password: { inherit: true, secret: true } }`. Values resolve from `--inputs` → selected `profiles:` entry → the manifest declaration's process `env:` → its `default:`, and the manifest declaration's `type` is enforced. `inherit: true` rejects a leaf-local `type:` or `default:`. A manifest input not inherited by any leaf produces an authoring warning, not an error. `secret: true` still cannot be combined with `default:`.
+
+`pages:` is a two-level catalog (`page → element → locator`) with no
+intervening `locators:` key. It may be declared by the root, an
+`includes:` fragment, or a leaf; include composition is root-wins by
+page and element, then the leaf-local entry wins. Locator bodies remain
+untyped at the schema layer because the consuming action owns their
+contract. A step uses one as `locator: $pages.login.submit`. Catalog
+entries may contain `$inputs.*` (for example a row-scoped locator);
+every leaf receiving that entry must declare those inputs. Validation
+checks both input closure and dangling catalog references offline.
+`duhem resolve --provenance` lists the composed entries and their
+winning source files.
+
+`flows:` is a catalog of named action sequences, declared on a root,
+an `includes:` fragment, or a leaf and merged by flow name under the
+same root-wins / leaf-local-wins rule. Each flow accepts an optional
+human-facing `description:`, typed `params:`, ordered `steps:`, and an
+`outputs:` map. A check invokes one with
+`call: <flow-name>`, an optional `description:`, an `id:`, and a
+`with:` map matching the flow's typed `params:`. `call:` is distinct
+from `uses:` so a flow cannot shadow or masquerade as a closed-catalog
+action. Exactly one of the two keys is valid on a step.
+
+The loader expands every call into ordinary action steps before the
+runtime sees the definition. Parameters replace `$params.*`, inner ids
+are namespaced per invocation, and a flow's `outputs:` map is the whole
+caller-visible interface:
+`$steps.<call-id>.outputs.<declared-name>`. Inner ids cannot be
+referenced by the caller. A `secret: true` param joins the same
+evidence-masking boundary as a secret input. Flows may call other
+flows; cycles and chains deeper than the include-depth limit are
+offline validation errors.
+
+Flow bodies are hygienic. Step `with:` values may reference only
+`$params.*` and `$pages.*`; a `$inputs.*` or `$steps.*` dependency in
+the body is rejected with the flow name. The intentional exception is
+the flow's own `outputs:` map, whose `$steps.*` reference selects an
+inner action output to expose. This keeps a flow portable between
+suites instead of coupling it to caller input or step names.
+
+Expansion does not collapse evidence. Every executed inner action emits
+its normal step events plus a `flow` origin (`name`, invocation id,
+inner index). The recorded definition snapshot is the composed Verification
+Definition, not an expanded rewrite; the dashboard joins through flow origin
+when present, groups those steps under the invocation, and retains its index
+join for older/non-flow traces. `duhem resolve --provenance` prints the flat
+expansion and its origins for offline debugging.
 
 The root manifest is canonical: Duhem auto-discovers `duhem.yml` (or `.duhem.yml`) at the project root or its ancestors. Users can override with `duhem run -f path/to/manifest.yml`.
 
@@ -642,7 +853,7 @@ If no root manifest is present, Duhem still works on individual Verification Def
 
 ### 10.5 Action types
 
-Verification Definitions invoke pre-defined action types via `uses:`. Each action defines a typed `with:` schema (its internal `With` struct) and named outputs; the dispatch boundary itself is untyped YAML that the action downcasts inside `invoke`. The v1 catalog is **closed** (`crates/duhem-actions`); a `uses:` that names an unregistered action is a runtime "unknown action" error, not a silent skip.
+Verification Definitions invoke pre-defined action types via `uses:`. Each action defines a typed `with:` schema (its internal `With` struct) and named outputs; the dispatch boundary itself is untyped YAML that the action downcasts inside `invoke`. The v1 catalog is **closed** (`crates/duhem-actions`); a `uses:` that names an unregistered action is a runtime "unknown action" error, not a silent skip. Reusable flow invocations use the separate `call:` key (§10.4) and are expanded before dispatch, so they do not widen this catalog.
 
 #### Implemented (v1)
 
@@ -655,13 +866,14 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 - `ui/assert-element` — observe whether an element exists/is visible/has text
 - `ui/assert-url` — observe URL state
 - `ui/assert-state` — observe page-level state (authenticated, loaded, etc.)
+- `ui/capture-session` — capture cookies/local storage as a secret state value for later checks
 
 **API actions**
 
 - `api/call` — make an HTTP request actively
 - `api/observe` — passively observe an HTTP request the UI triggers (network sniffing)
 - `api/poll` — re-hit an endpoint until a response condition holds or a timeout elapses
-- `api/stream` — follow an open-ended SSE / `text/event-stream` from an in-progress source, collecting ordered events until a terminal condition (`until_event` / `max_events` / server close) or the `within:` budget; outputs `events` / `event_count` / `last_event` for mechanical assertion
+- `api/stream` — follow an open-ended SSE / `text/event-stream` from an in-progress source, collecting ordered events until a terminal condition (`until_event` / `max_events` / server close) or the `timeout:` budget; outputs `events` / `event_count` / `last_event` for mechanical assertion
 
 **Database actions**
 
@@ -700,16 +912,25 @@ An `inconclusive` result always carries a cause, distinguishing "the check could
 Borrowed from Arazzo. References available in expressions:
 
 - `$inputs.<name>` — inputs to the verification run
+- `$pages.<page>.<element>` — a named locator from the effective
+  manifest/leaf catalog. Valid only as a whole `with:` value; its map is
+  spliced before nested `$inputs.*` substitution.
+- `$params.<name>` — a reusable-flow parameter, valid only inside the
+  flow body that declares it. The loader substitutes it during static
+  expansion; it never reaches runtime evaluation.
 - `$steps.<id>.outputs.<name>` — outputs from a prior step (scoped to the declaring check)
 - `$setup.<id>.outputs.<name>` — outputs from a run-level `setup:` step (§10.3), read-only from inside any check
-- `$env.<name>` — a value from the selected named environment. The `$env` whitelist is **empty by default**. An author opts a key in by declaring it (with a string value) under a manifest `environments:` entry (§10.4) and selecting that environment with `--environment <name>` (auto-selected when the manifest declares exactly one); the selected entry's string-valued keys seed the whitelist for that run. There is no process-environment passthrough and no `--env` CLI flag. A reference to a key that isn't whitelisted evaluates to `inconclusive` (it carries a missing-env cause, §10.6), never a parse error.
+- `$env.<name>` — a value from the selected named profile. The `$env` whitelist is **empty by default**. An author opts a key in by declaring it (with a string value) under a manifest `profiles:` entry (§10.4) and selecting that profile with `--profile <name>` (`--environment` remains an alias; one profile auto-selects); the selected entry's string-valued keys seed the whitelist for that run. There is no process-environment passthrough and no `--env` CLI flag. A reference to a key that isn't whitelisted evaluates to `inconclusive` (it carries a missing-env cause, §10.6), never a parse error.
 - `$runtime.uuid()` — a stable per-run UUID / `$runtime.now()` — the run's current time as epoch milliseconds
 - `$runtime.format(fmt, args...)` — **pure** string composition: the
   `{}` placeholders in `fmt` are filled, in order, by the remaining
   scalar args (coerced to their string form). The sanctioned way to
   compose a value — e.g. a dynamic URL `$runtime.format("{}/{}",
   $inputs.base, $steps.create.outputs.body.data._id)` — without
-  scripting.
+  scripting. The placeholder count must equal the substitution-argument
+  count; a mismatch is an authoring error that surfaces as `inconclusive`
+  (`BadFormat`). `{}` is the only placeholder and has no escape in v1, so
+  a literal `{}` cannot be produced by the format string.
 - `$runtime.concat(args...)` — join the args' string forms (`format`
   without a template).
 - `$runtime.len(x)` — element count of an array / object, or character
@@ -735,12 +956,11 @@ Borrowed from Arazzo. References available in expressions:
   optional fields.
 
 The `$runtime` helper catalog is **closed** at v1: the authored helpers
-are exactly `uuid`, `now`, `format`, `concat`, `len`, `contains`, `any`,
-`lower`, `upper`, `trim`, `replace`, and `default`. The evaluator
-additionally recognizes
-`exists`, `matches`, and `type_check` as internal desugaring shims behind
-the §10.6 assertion forms (`exists:`, `matches:`, `type_check:`); these
-are not part of the authored `$runtime.<fn>(…)` surface.
+are exactly `uuid`, `now`, `format`, `concat`, `len`, `contains`, `matches`,
+`any`, `lower`, `upper`, `trim`, `replace`, and `default`. The evaluator
+additionally recognizes `exists` and `type_check` as internal desugaring
+shims behind the §10.6 assertion forms (`exists:`, `type_check:`); these are
+not part of the authored `$runtime.<fn>(…)` surface.
 
 All `$runtime` helpers are **pure** functions of their arguments — no
 I/O, clock, or randomness — so they preserve the mechanical-judgment and
@@ -768,7 +988,7 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 
 **Authoring Surface**
 
-- CLI for local authoring (`duhem-cli` — `duhem init`, `duhem validate`, `duhem run`, `duhem dashboard`)
+- CLI for local authoring (`duhem-cli` — `duhem init`, `duhem validate`, `duhem resolve`, `duhem run`, `duhem dashboard`)
 - Web UI for browsing past runs, evidence, and verdicts (`duhem-dashboard` — serve + static export, live SSE)
 - VS Code extension for inline criterion editing and check preview (roadmap)
 
@@ -776,6 +996,8 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 
 - The Verification Definition wire shape, the expression AST + parser, and the structural validator
 - The root manifest (`duhem.yml`) loader and leaf/manifest discrimination (§10.2)
+- Static expansion of reusable `flows:` into ordinary action steps,
+  with namespaced outputs and flow provenance
 - Cross-cutting dependency of the CLI, runtime, and judge; owns `duhem_schema::SCHEMA_VERSION`
 
 **Action Catalog** (`duhem-actions`)
@@ -792,7 +1014,7 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 **Runtime** (`duhem-runtime`)
 
 - Executes checks against an environment
-- **Provisions the environment**: owns the `environment.up:`/`down:` lifecycle, the `ready:` readiness probe, and the sanitized subprocess env under which operator-supplied scripts run (§9 Stage 3, §10.3.1)
+- **Provisions the environment**: owns the `provision.up:`/`down:` lifecycle, the `ready:` readiness probe, and the sanitized subprocess env under which operator-supplied scripts run (§9 Stage 3, §10.3.1)
 - Produces evidence
 - Stateless except for run records
 
@@ -827,6 +1049,8 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 - Append-only run store: the wire-format event stream, derived
   verdict/criteria/check projections, and content-addressed binary
   blobs (screenshots, videos, HAR), one database per working copy
+- Expanded flow actions remain individual step events; optional
+  `StepStarted.flow` provenance preserves the authored call boundary
 - Sole writer: the runtime; the dashboard reads through a read-only
   handle
 - Portable via `duhem export` (self-contained per-run bundle)

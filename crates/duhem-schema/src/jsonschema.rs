@@ -27,9 +27,9 @@ use schemars::schema::{
 };
 
 use crate::assertion::Assertion;
-use crate::environment::{DurationSpec, HttpReadyProbe, ReadyProbe};
 use crate::expr::ExprStr;
 use crate::manifest::RootManifest;
+use crate::provision::{DurationSpec, HttpReadyProbe, ReadyProbe};
 use crate::verification::VerificationDefinition;
 
 /// `DurationSpec` accepts either an integer (milliseconds) or a

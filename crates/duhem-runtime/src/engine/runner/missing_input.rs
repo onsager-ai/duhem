@@ -24,7 +24,7 @@ pub(super) async fn finish(
         run_id: run_id.to_string(),
         failures: Vec::new(),
         warnings: vec![format!(
-            "missing required input `{name}`; supply its declared env variable, a selected environment value, or --inputs"
+            "missing required input `{name}`; supply its declared env variable, a selected profile value, or --inputs"
         )],
     })
 }

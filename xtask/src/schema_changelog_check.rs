@@ -29,14 +29,26 @@ const SCHEMA_PATHS: &[&str] = &["crates/duhem-schema/src/", "crates/duhem-eviden
 const CHANGELOG_PATH: &str = "CHANGELOG.md";
 const ESCAPE_ENV: &str = "DUHEM_CHANGELOG_CLARIFYING";
 
-pub fn run(_args: Vec<String>) -> Result<()> {
-    let root = workspace_root()?;
+#[derive(Debug, Eq, PartialEq)]
+enum CheckMode {
+    Lint,
+    SkipClarifying,
+    Diff,
+}
 
-    if std::env::var(ESCAPE_ENV).is_ok_and(|v| !v.is_empty() && v != "0") {
-        eprintln!(
-            "schema-changelog-check: skipped via {ESCAPE_ENV} (PR self-declared as clarifying)"
-        );
-        return Ok(());
+pub fn run(args: Vec<String>) -> Result<()> {
+    let root = workspace_root()?;
+    let escape = std::env::var(ESCAPE_ENV).ok();
+
+    match check_mode(&args, escape.as_deref()) {
+        CheckMode::Lint => return crate::changelog_lint::run(&root),
+        CheckMode::SkipClarifying => {
+            eprintln!(
+                "schema-changelog-check: skipped via {ESCAPE_ENV} (PR self-declared as clarifying)"
+            );
+            return Ok(());
+        }
+        CheckMode::Diff => {}
     }
 
     let base = comparison_base();
@@ -92,6 +104,16 @@ pub fn run(_args: Vec<String>) -> Result<()> {
         entries.len()
     );
     Ok(())
+}
+
+fn check_mode(args: &[String], escape: Option<&str>) -> CheckMode {
+    if args.iter().any(|arg| arg == "--lint") {
+        CheckMode::Lint
+    } else if escape.is_some_and(|value| !value.is_empty() && value != "0") {
+        CheckMode::SkipClarifying
+    } else {
+        CheckMode::Diff
+    }
 }
 
 fn comparison_base() -> String {
@@ -353,5 +375,17 @@ mod tests {
             .filter(|a| a.line >= start && a.line <= end && is_entry_line(&a.content))
             .collect();
         assert_eq!(in_range.len(), 1);
+    }
+
+    #[test]
+    fn diff_gate_honours_clarifying_escape_but_lint_takes_precedence() {
+        let no_args = Vec::new();
+        assert_eq!(check_mode(&no_args, Some("1")), CheckMode::SkipClarifying);
+        assert_eq!(check_mode(&no_args, Some("0")), CheckMode::Diff);
+        assert_eq!(check_mode(&no_args, Some("")), CheckMode::Diff);
+        assert_eq!(check_mode(&no_args, None), CheckMode::Diff);
+
+        let lint_args = vec!["--lint".to_string()];
+        assert_eq!(check_mode(&lint_args, Some("1")), CheckMode::Lint);
     }
 }

@@ -35,6 +35,7 @@ use crate::eval::{EvalContext, Value};
 #[derive(Debug)]
 pub struct RunState {
     pub inputs: BTreeMap<String, Value>,
+    pub pages: BTreeMap<(String, String), Value>,
     pub env: BTreeMap<String, String>,
     pub uuid: String,
     /// `$setup.<step_id>.outputs.<name>` lookup map. Populated once
@@ -64,6 +65,7 @@ impl RunState {
     fn new_inner(inputs: BTreeMap<String, Value>, uuid: String) -> Self {
         Self {
             inputs,
+            pages: BTreeMap::new(),
             env: BTreeMap::new(),
             uuid,
             setup_outputs: BTreeMap::new(),
@@ -74,6 +76,21 @@ impl RunState {
     /// assertions is opt-in via this map at v1.
     pub fn with_env(mut self, env: BTreeMap<String, String>) -> Self {
         self.env = env;
+        self
+    }
+
+    /// Attach the effective named-locator catalog. YAML locator maps
+    /// are converted once at run start, then borrowed by every check.
+    pub fn with_pages(mut self, pages: &duhem_schema::PageCatalog) -> Self {
+        for (page, elements) in pages {
+            for (element, locator) in elements {
+                if let Ok(json) = serde_json::to_value(locator)
+                    && let Some(value) = json_to_value(&json)
+                {
+                    self.pages.insert((page.clone(), element.clone()), value);
+                }
+            }
+        }
         self
     }
 
@@ -111,6 +128,10 @@ impl<'r> RunContext<'r> {
 impl<'r> EvalContext for RunContext<'r> {
     fn input(&self, name: &str) -> Option<&Value> {
         self.run.inputs.get(name)
+    }
+
+    fn page(&self, page: &str, element: &str) -> Option<&Value> {
+        self.run.pages.get(&(page.to_string(), element.to_string()))
     }
 
     fn output(&self, step_id: &str, output: &str) -> Option<&Value> {
@@ -212,6 +233,25 @@ pub fn value_to_yml(v: &Value) -> serde_yml::Value {
     }
 }
 
+/// Total JSON rendering of a runtime value. Session injection uses the
+/// resolved value as opaque Playwright `storageState`; keeping this
+/// conversion beside [`json_to_value`] makes the round trip explicit.
+pub(crate) fn value_to_json(v: &Value) -> serde_json::Value {
+    match v {
+        Value::Null => serde_json::Value::Null,
+        Value::Bool(b) => serde_json::Value::Bool(*b),
+        Value::Int(i) => serde_json::json!(i),
+        Value::Float(f) => serde_json::json!(f),
+        Value::Str(s) => serde_json::Value::String(s.clone()),
+        Value::Array(items) => serde_json::Value::Array(items.iter().map(value_to_json).collect()),
+        Value::Object(map) => serde_json::Value::Object(
+            map.iter()
+                .map(|(key, value)| (key.clone(), value_to_json(value)))
+                .collect(),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,8 +267,20 @@ mod tests {
     }
 
     #[test]
+    fn json_runtime_value_round_trip_is_lossless() {
+        let json = serde_json::json!({
+            "cookies": [{"name": "session", "value": "credential"}],
+            "origins": [],
+            "enabled": true,
+            "count": 1
+        });
+        let runtime = json_to_value(&json).unwrap();
+        assert_eq!(value_to_json(&runtime), json);
+    }
+
+    #[test]
     fn env_whitelist_resolves_after_seeding() {
-        // Spec #68: a selected environment's string-valued keys seed
+        // Spec #68: a selected profile's string-valued keys seed
         // the `$env.<key>` whitelist. With the map populated,
         // `EvalContext::env` resolves; an unseeded key stays `None`.
         let mut env = BTreeMap::new();
@@ -241,7 +293,7 @@ mod tests {
 
     #[test]
     fn empty_env_whitelist_resolves_nothing() {
-        // Regression: without a selected environment the whitelist is
+        // Regression: without a selected profile the whitelist is
         // empty and `$env.<key>` resolves to nothing (today's default).
         let run = RunState::new(BTreeMap::new());
         let ctx = RunContext::new(&run);

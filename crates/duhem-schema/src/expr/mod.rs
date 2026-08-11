@@ -15,8 +15,10 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub mod parse;
+mod runtime_helpers;
 
 pub use parse::{ParseError, parse};
+pub use runtime_helpers::{RuntimeHelper, RuntimeHelperArity, authored_runtime_helper_names};
 
 /// A parsed expression, with the original authored source preserved
 /// alongside it. `raw` is what we re-emit on YAML round-trip;
@@ -130,9 +132,8 @@ pub enum PathRoot {
     /// whitelist.
     Env,
     /// `$runtime.<fn>(...)` — built-in helpers exposed by the runtime
-    /// (e.g. `uuid()`, `now()`). The schema doesn't enumerate the
-    /// catalog; the runtime spec owns it. Calls (`(...)` suffix) are
-    /// only legal under this root.
+    /// (e.g. `uuid()`, `now()`). Calls (`(...)` suffix) are only legal
+    /// under this root; the closed catalog lives alongside this grammar.
     Runtime,
 }
 

@@ -23,11 +23,15 @@ mod source;
 pub mod step;
 pub mod validate;
 mod validate_pages;
+mod validate_runtime;
 pub mod verification;
 
 pub use assertion::{Assertion, TypeCheckKind};
 pub use criterion::{Check, Criterion};
-pub use expr::{BinOp, Expr, ExprStr, Literal, ParseError, Path, PathRoot, UnaryOp};
+pub use expr::{
+    BinOp, Expr, ExprStr, Literal, ParseError, Path, PathRoot, RuntimeHelper, RuntimeHelperArity,
+    UnaryOp, authored_runtime_helper_names,
+};
 pub use includes::PartialRootManifest;
 pub use jsonschema::json_schema;
 pub use manifest::{

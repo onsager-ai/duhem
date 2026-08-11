@@ -755,6 +755,34 @@ criteria:
     }
 
     #[test]
+    fn default_does_not_bypass_caller_step_addressability() {
+        let definition = authored(
+            r#"
+verification: flow
+flows:
+  greet:
+    steps:
+      - uses: cli/invoke
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: first
+            call: greet
+        assertions:
+          - $runtime.default($steps.bogus.outputs.x, "fb") == "fb"
+"#,
+        );
+        let errors = validate_authored(&definition).join("\n");
+        assert!(
+            errors.contains("references undeclared authored step `bogus`"),
+            "{errors}"
+        );
+    }
+
+    #[test]
     fn invocation_condition_applies_to_every_expanded_step() {
         let mut definition = authored(
             r#"

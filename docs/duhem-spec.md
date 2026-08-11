@@ -961,6 +961,9 @@ are exactly `uuid`, `now`, `format`, `concat`, `len`, `contains`, `matches`,
 additionally recognizes `exists` and `type_check` as internal desugaring
 shims behind the §10.6 assertion forms (`exists:`, `type_check:`); these are
 not part of the authored `$runtime.<fn>(…)` surface.
+An unknown helper, a call with the wrong arity, and a bare
+`$runtime.<fn>` reference that omits the call suffix are all validation
+errors, rejected before runtime provisioning or action I/O.
 
 All `$runtime` helpers are **pure** functions of their arguments — no
 I/O, clock, or randomness — so they preserve the mechanical-judgment and

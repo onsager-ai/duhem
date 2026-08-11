@@ -93,7 +93,7 @@ fn walk_strings<F: FnMut(&str)>(value: &serde_yml::Value, visit: &mut F) {
     }
 }
 
-fn nearest_name<'a>(sought: &str, candidates: &[&'a str]) -> Option<&'a str> {
+pub(crate) fn nearest_name<'a>(sought: &str, candidates: &[&'a str]) -> Option<&'a str> {
     let limit = if sought.chars().count() >= 5 { 2 } else { 1 };
     candidates
         .iter()

@@ -9,7 +9,7 @@
 //! from *we couldn't tell*.
 
 use chrono::{DateTime, Utc};
-use duhem_schema::{BinOp, Expr, Literal, Path, PathRoot, UnaryOp};
+use duhem_schema::{BinOp, Expr, Literal, Path, PathRoot, RuntimeHelper, UnaryOp};
 
 /// Verdict for a single boolean expression. Matches the judge's
 /// three-valued verdict shape (`pass | fail | inconclusive`).
@@ -369,7 +369,7 @@ fn nav_path(head: &str, segs: &[String], i: usize) -> String {
 fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
     // The schema parser only allows `(...)` under `$runtime`, so
     // `path.root` is `Runtime` here for any well-parsed input.
-    let helper = match path.segments.as_slice() {
+    let helper_name = match path.segments.as_slice() {
         [name] => name.as_str(),
         _ => {
             return Err(InconclusiveCause::UnknownRuntimeHelper(
@@ -377,9 +377,21 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
             ));
         }
     };
-    match (helper, args.len()) {
-        ("uuid", 0) => Ok(Value::Str(ctx.uuid().to_string())),
-        ("now", 0) => Ok(Value::Int(ctx.now().timestamp_millis())),
+    let Some(helper) = RuntimeHelper::named(helper_name) else {
+        return Err(InconclusiveCause::UnknownRuntimeHelper(
+            helper_name.to_string(),
+        ));
+    };
+    if !helper.arity().accepts(args.len()) {
+        // Schema validation rejects this before a run. Preserve the
+        // evaluator's defense-in-depth cause for callers that bypass it.
+        return Err(InconclusiveCause::UnknownRuntimeHelper(
+            helper_name.to_string(),
+        ));
+    }
+    match helper {
+        RuntimeHelper::Uuid => Ok(Value::Str(ctx.uuid().to_string())),
+        RuntimeHelper::Now => Ok(Value::Int(ctx.now().timestamp_millis())),
         // `exists(value)`: True if the value path resolves, False if any
         // underlying reference is missing — an absent output/setup
         // observation/input/env OR a present base whose nested field/index
@@ -388,7 +400,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         // a password the API must never echo). Anything else (TypeMismatch,
         // NotNavigable into a scalar) propagates as Inconclusive. The
         // closed-enum `Assertion::Exists` shim in the engine emits this call.
-        ("exists", 1) => match eval_value(&args[0], ctx) {
+        RuntimeHelper::Exists => match eval_value(&args[0], ctx) {
             Ok(_) => Ok(Value::Bool(true)),
             Err(
                 InconclusiveCause::MissingObservation { .. }
@@ -403,7 +415,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         // Both args must evaluate to strings; non-string operands
         // surface as Inconclusive(TypeMismatch) the same way the
         // comparison operators do.
-        ("matches", 2) => {
+        RuntimeHelper::Matches => {
             let v = eval_value(&args[0], ctx)?;
             let p = eval_value(&args[1], ctx)?;
             let (s, pat) = match (&v, &p) {
@@ -425,7 +437,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         // `object` / `array` kinds aren't representable in the v1
         // scalar value model and always evaluate to False — there is
         // no scalar value that *is* an object.
-        ("type_check", 2) => {
+        RuntimeHelper::TypeCheck => {
             let v = eval_value(&args[0], ctx)?;
             let kind = match eval_value(&args[1], ctx)? {
                 Value::Str(s) => s,
@@ -444,7 +456,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         // Pure and deterministic — the sanctioned way to compose a value
         // (e.g. a URL from a base + an id) without scripting:
         // `$runtime.format("{}/tasks/{}", $inputs.base, $steps.c.outputs.body.id)`.
-        ("format", n) if n >= 1 => {
+        RuntimeHelper::Format => {
             let fmt = match eval_value(&args[0], ctx)? {
                 Value::Str(s) => s,
                 other => {
@@ -462,7 +474,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         }
         // `concat(args...)`: join the args' string forms. `format`
         // without a template — `$runtime.concat($inputs.base, "/", id)`.
-        ("concat", _) => {
+        RuntimeHelper::Concat => {
             let mut out = String::new();
             for a in args {
                 out.push_str(&scalar_to_string(eval_value(a, ctx)?)?);
@@ -472,7 +484,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         // `len(x)`: element count of a collection or character count of a
         // string — `$runtime.len($steps.api.outputs.body.data) == 3`.
         // Scalars have no length and surface as `TypeMismatch`.
-        ("len", 1) => {
+        RuntimeHelper::Len => {
             let v = eval_value(&args[0], ctx)?;
             let n = match &v {
                 Value::Str(s) => s.chars().count() as i64,
@@ -503,7 +515,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         //   errors.
         //
         // Any other haystack shape (mirrors `len`) is a `TypeMismatch`.
-        ("contains", 2) => match eval_value(&args[0], ctx)? {
+        RuntimeHelper::Contains => match eval_value(&args[0], ctx)? {
             Value::Str(hay) => match eval_value(&args[1], ctx)? {
                 Value::Str(needle) => Ok(Value::Bool(hay.contains(&needle))),
                 other => Err(InconclusiveCause::TypeMismatch {
@@ -527,7 +539,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         // A non-array first arg or a non-string `field` is a
         // `TypeMismatch`; an element that is not an object, or an object
         // missing `field`, is simply not a match (false), not an error.
-        ("any", 3) => {
+        RuntimeHelper::Any => {
             let arr = match eval_value(&args[0], ctx)? {
                 Value::Array(a) => a,
                 other => {
@@ -554,19 +566,19 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
             Ok(Value::Bool(found))
         }
         // Case / whitespace normalization, for robust string comparisons.
-        ("lower", 1) => Ok(Value::Str(
+        RuntimeHelper::Lower => Ok(Value::Str(
             scalar_to_string(eval_value(&args[0], ctx)?)?.to_lowercase(),
         )),
-        ("upper", 1) => Ok(Value::Str(
+        RuntimeHelper::Upper => Ok(Value::Str(
             scalar_to_string(eval_value(&args[0], ctx)?)?.to_uppercase(),
         )),
-        ("trim", 1) => Ok(Value::Str(
+        RuntimeHelper::Trim => Ok(Value::Str(
             scalar_to_string(eval_value(&args[0], ctx)?)?
                 .trim()
                 .to_string(),
         )),
         // `replace(s, from, to)`: literal (non-regex) substring replace.
-        ("replace", 3) => {
+        RuntimeHelper::Replace => {
             let s = scalar_to_string(eval_value(&args[0], ctx)?)?;
             let from = scalar_to_string(eval_value(&args[1], ctx)?)?;
             let to = scalar_to_string(eval_value(&args[2], ctx)?)?;
@@ -576,7 +588,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         // *missing* reference (absent output / input / env / nested
         // field), else `value`. For optional fields — mirrors `exists`'s
         // missing-cause handling. A genuine type/format error propagates.
-        ("default", 2) => match eval_value(&args[0], ctx) {
+        RuntimeHelper::Default => match eval_value(&args[0], ctx) {
             Ok(v) => Ok(v),
             Err(
                 InconclusiveCause::MissingObservation { .. }
@@ -587,7 +599,6 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
             ) => eval_value(&args[1], ctx),
             Err(c) => Err(c),
         },
-        _ => Err(InconclusiveCause::UnknownRuntimeHelper(helper.to_string())),
     }
 }
 
@@ -986,6 +997,29 @@ mod tests {
             run("$runtime.bogus()", &ctx),
             EvalResult::Inconclusive(InconclusiveCause::UnknownRuntimeHelper("bogus".into()))
         );
+    }
+
+    #[test]
+    fn catalog_is_the_evaluator_dispatch_gate() {
+        let ctx = TestCtx::new();
+        for helper in RuntimeHelper::ALL {
+            let count = match helper.arity() {
+                duhem_schema::RuntimeHelperArity::Exact(count)
+                | duhem_schema::RuntimeHelperArity::Minimum(count) => count,
+                duhem_schema::RuntimeHelperArity::Range { min, .. } => min,
+            };
+            let args = vec![r#""x""#; count].join(", ");
+            let expression = format!("$runtime.{}({args})", helper.name());
+            let result = run(&expression, &ctx);
+            assert!(
+                !matches!(
+                    result,
+                    EvalResult::Inconclusive(InconclusiveCause::UnknownRuntimeHelper(_))
+                ),
+                "catalog helper `{}` was not dispatched: {result:?}",
+                helper.name()
+            );
+        }
     }
 
     #[test]

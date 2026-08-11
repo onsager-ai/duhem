@@ -927,7 +927,10 @@ Borrowed from Arazzo. References available in expressions:
   scalar args (coerced to their string form). The sanctioned way to
   compose a value — e.g. a dynamic URL `$runtime.format("{}/{}",
   $inputs.base, $steps.create.outputs.body.data._id)` — without
-  scripting.
+  scripting. The placeholder count must equal the substitution-argument
+  count; a mismatch is an authoring error that surfaces as `inconclusive`
+  (`BadFormat`). `{}` is the only placeholder and has no escape in v1, so
+  a literal `{}` cannot be produced by the format string.
 - `$runtime.concat(args...)` — join the args' string forms (`format`
   without a template).
 - `$runtime.len(x)` — element count of an array / object, or character
@@ -953,12 +956,11 @@ Borrowed from Arazzo. References available in expressions:
   optional fields.
 
 The `$runtime` helper catalog is **closed** at v1: the authored helpers
-are exactly `uuid`, `now`, `format`, `concat`, `len`, `contains`, `any`,
-`lower`, `upper`, `trim`, `replace`, and `default`. The evaluator
-additionally recognizes
-`exists`, `matches`, and `type_check` as internal desugaring shims behind
-the §10.6 assertion forms (`exists:`, `matches:`, `type_check:`); these
-are not part of the authored `$runtime.<fn>(…)` surface.
+are exactly `uuid`, `now`, `format`, `concat`, `len`, `contains`, `matches`,
+`any`, `lower`, `upper`, `trim`, `replace`, and `default`. The evaluator
+additionally recognizes `exists` and `type_check` as internal desugaring
+shims behind the §10.6 assertion forms (`exists:`, `type_check:`); these are
+not part of the authored `$runtime.<fn>(…)` surface.
 
 All `$runtime` helpers are **pure** functions of their arguments — no
 I/O, clock, or randomness — so they preserve the mechanical-judgment and

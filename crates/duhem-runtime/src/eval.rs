@@ -1329,6 +1329,71 @@ mod tests {
     }
 
     #[test]
+    fn format_composes_three_variadic_args() {
+        let ctx = TestCtx::new()
+            .with_input("base", Value::Str("http://h".into()))
+            .with_output("create", "id", Value::Str("abc123".into()));
+        assert_eq!(
+            run(
+                r#"$runtime.format("{}/{}/{}", $inputs.base, "projects", $steps.create.outputs.id) == "http://h/projects/abc123""#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn format_repeated_value_requires_repeated_arg() {
+        let ctx = TestCtx::new().with_input("id", Value::Str("abc123".into()));
+        assert_eq!(
+            run(
+                r#"$runtime.format("{}/{}", $inputs.id, $inputs.id) == "abc123/abc123""#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn format_has_no_placeholder_escaping() {
+        // A conventional `{{}}` escape still contains a `{}` placeholder,
+        // so strict arity counts it along with the intended placeholder.
+        let ctx = TestCtx::new();
+        assert!(matches!(
+            run(r#"$runtime.format("{{}}/{}", "value")"#, &ctx),
+            EvalResult::Inconclusive(InconclusiveCause::BadFormat(_))
+        ));
+    }
+
+    #[test]
+    fn format_leftover_braces_are_literal() {
+        // A doubled brace is not an escape: it adds a placeholder and leaves
+        // stray braces, so a literal `{}` has no format-string route.
+        let ctx = TestCtx::new();
+        assert_eq!(
+            run(
+                r#"$runtime.format("{{}}/{}", "first", "second") == "{first}/second""#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn format_accepts_fmt_from_reference() {
+        let ctx = TestCtx::new()
+            .with_input("url_tpl", Value::Str("https://example.com/items/{}".into()))
+            .with_input("id", Value::Int(7));
+        assert_eq!(
+            run(
+                r#"$runtime.format($inputs.url_tpl, $inputs.id) == "https://example.com/items/7""#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+    }
+
+    #[test]
     fn format_placeholder_arg_mismatch_is_bad_format() {
         let ctx = TestCtx::new();
         assert!(matches!(

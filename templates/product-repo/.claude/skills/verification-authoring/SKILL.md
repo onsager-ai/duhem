@@ -329,7 +329,7 @@ Every assertion must be a deterministic predicate the judge can evaluate.
 Allowed forms:
 
 - Boolean expression: `$steps.X.outputs.Y == 200`
-- Type check: `type_check: { value: …, is: uuid|email|datetime|… }`
+- Type check: `type_check: { value: …, is: uuid|string|integer|float|boolean|object|array|null }`
 - Pattern match: `$runtime.matches(value, "regex")`
 - Membership: `$runtime.contains(haystack, needle)` — literal substring
   on a string, element membership on an array

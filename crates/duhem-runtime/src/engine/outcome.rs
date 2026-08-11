@@ -407,8 +407,11 @@ pub(crate) async fn evaluate_explicit_assertions(
             let detail = match &r {
                 EvalResult::Inconclusive(c) => Some(eval_cause_detail(c)),
                 // A failed comparison gets its observed operands —
-                // "actual <lhs>, expected <rhs>" — so the reporter
-                // shows the values, not just the expression.
+                // `actual <lhs>, expected <rhs>` for `==`, and an
+                // operator-aware label for the right operand otherwise
+                // (`disallowed <rhs>`, `expected < <rhs>`; #407) — so
+                // the reporter shows the values, not just the
+                // expression.
                 EvalResult::False => describe_comparison(&expr, ctx),
                 EvalResult::True => None,
             };

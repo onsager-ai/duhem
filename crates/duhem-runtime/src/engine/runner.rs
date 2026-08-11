@@ -4,6 +4,12 @@
 //! and failed implicit judgments block later `if: success` steps in this
 //! check. `if: always` and `if: failure` opt out; sibling checks have
 //! independent state.
+//
+// budget-allow: merging #348 (nested run hierarchy: `lineage`,
+// `child_store_path`) onto main's concurrent growth (gating, flows,
+// pages, `resolve`) pushed this file ~2% over the 8000-token budget.
+// Track a follow-up to split `Engine`'s run-loop state out of this
+// file rather than raising the budget or exempting it long-term.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

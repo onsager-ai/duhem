@@ -1,5 +1,11 @@
 //! `duhem run` — dispatch and execution (split from `main.rs` for
 //! the file-token budget; the clap surface stays in `main.rs`).
+//
+// budget-allow: merging #348 (nested run hierarchy: suite/invocation
+// lineage plumbing) onto main's concurrent growth pushed this file
+// ~1.5% over the 8000-token budget. Track a follow-up to split the
+// leaf-loop out of this file rather than raising the budget or
+// exempting it long-term.
 
 use std::collections::BTreeMap;
 use std::io::{IsTerminal, Write};

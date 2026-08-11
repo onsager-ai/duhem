@@ -354,7 +354,7 @@ be a deterministic predicate evaluable by the judge. Allowed forms
 (§10.6):
 
 - Boolean expression: `$steps.X.outputs.Y == 200`
-- Type check: `type_check: {value: ..., is: uuid|email|datetime|...}`
+- Type check: `type_check: {value: ..., is: uuid|string|integer|float|boolean|object|array|null}`
 - Pattern match: `matches: {value: ..., pattern: ...}`
 - Set membership: `in: {value: ..., set: [...]}`
 - Existence: `exists: $steps.X.outputs.Y`
@@ -429,7 +429,8 @@ inputs:
   # named inputs — e.g. test fixture values, defaults
   example_input:
     type: string
-    default: "fixture-{{$runtime.uuid()}}"
+    # Defaults are literal; use $runtime.uuid() in a step's with:.
+    default: "fixture-workspace"
 
 setup:
   # once-per-verification preconditions — real environment, no mocks

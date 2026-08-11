@@ -59,7 +59,7 @@ fn render() -> String {
         "Version-exact ground truth for authoring a Verification Definition — every\nbuilt-in action's `with:` fields, `outputs`, contract-declared secret outputs,\nand a worked example. Generated from the action contracts, so it always matches\nwhat `duhem validate` / `duhem run` accept. `duhem describe <uses>` prints the\nsame for one action; `duhem actions` lists the catalog.\n\n",
     );
     s.push_str(
-        "Bind an output with `outputs: { <name>: <field> }`, then read it in an\nassertion as `$steps.<id>.outputs.<name>`. Assert over **scalar** outputs\n(`status`, `body_text`, `satisfied`, `exit_code`, …); helpers like\n`$runtime.contains(...)` cover membership.\n\n",
+        "Bind an output with `outputs: { <name>: <field> }`, then read it in an\nassertion as `$steps.<id>.outputs.<name>`. Assert over **scalar** outputs\n(`status`, `body_text`, `satisfied`, `exit_code`, …); helpers like\n`$runtime.contains(...)` cover membership. Substitution in a `with:` value is\nwhole-string only; compose values with `$runtime.format(...)` or\n`$runtime.concat(...)` instead of embedding a reference in a larger string.\n\n",
     );
     s.push_str(
         "`uses:` always names one of the closed-catalog actions below. Reusable\n`flows:` use the distinct `call:` key and expand into these actions before\nruntime dispatch; a flow can never shadow an action name.\n\n",

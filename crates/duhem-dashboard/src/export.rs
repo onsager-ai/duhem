@@ -46,7 +46,7 @@ pub async fn export(reader: &EvidenceReader, out: &Path) -> anyhow::Result<Expor
     let list = reader.list().await?;
     write_file(out, "api/runs.json", &serde_json::to_vec_pretty(&list)?)?;
 
-    for run_id in leaf_run_ids(&list) {
+    for run_id in all_run_ids(&list) {
         export_run(reader, out, &run_id, &mut stats).await?;
     }
 
@@ -150,12 +150,15 @@ async fn export_run(
     Ok(())
 }
 
-fn leaf_run_ids(list: &[RunsListEntry]) -> Vec<String> {
+/// Every run id in the listing, parents and descendants alike — the
+/// export walks the full recorded hierarchy, not just terminal leaves,
+/// so a parent run's own detail/trace/checks are exported too.
+fn all_run_ids(list: &[RunsListEntry]) -> Vec<String> {
     let mut ids = Vec::new();
     for entry in list {
         ids.push(entry.run_id.clone());
         if let Some(children) = &entry.children {
-            ids.extend(leaf_run_ids(children));
+            ids.extend(all_run_ids(children));
         }
     }
     ids

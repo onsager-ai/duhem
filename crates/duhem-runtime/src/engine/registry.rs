@@ -121,11 +121,17 @@ impl Dispatch for ConcreteAction {
             )));
         }
         let ctx = ActionCtx { page, step_index };
-        let mut invocation_with = with.clone();
+        // Only `cli/invoke` needs the runtime-owned env layered in, so
+        // only it pays for the clone; every other action (the hot
+        // UI/API path) invokes against the original `with` by
+        // reference.
         if self.uses == "cli/invoke" {
+            let mut invocation_with = with.clone();
             inject_child_env(&mut invocation_with, child_env);
+            self.action.invoke(&ctx, &invocation_with).await
+        } else {
+            self.action.invoke(&ctx, with).await
         }
-        self.action.invoke(&ctx, &invocation_with).await
     }
 }
 

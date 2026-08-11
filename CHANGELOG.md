@@ -30,6 +30,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 
 - [additive] Verification Definitions accept an optional opaque `metadata:` map that is recorded in run evidence for downstream consumers and never affects verdicts. (#386)
+- [breaking] validate now rejects a bare, unknown, or wrong-arity $runtime helper offline instead of failing mid-run as inconclusive. (#405)
 
 ## v0.2.2 — 2026-08-04
 

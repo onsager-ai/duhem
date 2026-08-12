@@ -159,24 +159,32 @@ pub fn eval(expr: &Expr, ctx: &dyn EvalContext) -> EvalResult {
 }
 
 /// For a comparison assertion that evaluated **false**, render the two
-/// operands' observed values — the "actual vs expected" detail an author
-/// wants under a failing assertion. Re-evaluates each side (pure, and
-/// only on the failure path) so no operand state has to be threaded
-/// through the boolean `eval`. Returns `None` for non-comparison
-/// expressions (`and`/`or` compounds, helper calls) where the
-/// expression text already localizes the failure; by convention the
-/// left operand is the observed value and the right the expected one.
+/// operands' observed values — the detail an author wants under a
+/// failing assertion. Re-evaluates each side (pure, failure path only)
+/// so no operand state is threaded through the boolean `eval`. `None`
+/// for non-comparisons (`and`/`or`, helper calls), where the expression
+/// text already localizes the failure. The left operand is the observed
+/// value; the right one's *label* is operator-aware — `Eq` wants it,
+/// `Ne` forbids it, the ordering ops bound it (restated so direction
+/// survives) — so a failing `!=` never presents one value as both
+/// actual and expected (#407).
 pub fn describe_comparison(expr: &Expr, ctx: &dyn EvalContext) -> Option<String> {
     let Expr::BinOp { op, lhs, rhs } = expr else {
         return None;
     };
-    if matches!(op, BinOp::And | BinOp::Or) {
-        return None;
-    }
+    let role = match op {
+        BinOp::Eq => "expected",
+        BinOp::Ne => "disallowed",
+        BinOp::Lt => "expected <",
+        BinOp::Le => "expected <=",
+        BinOp::Gt => "expected >",
+        BinOp::Ge => "expected >=",
+        BinOp::And | BinOp::Or => return None,
+    };
     let l = eval_value(lhs, ctx).ok()?;
     let r = eval_value(rhs, ctx).ok()?;
     Some(format!(
-        "actual {}, expected {}",
+        "actual {}, {role} {}",
         display_value(&l),
         display_value(&r)
     ))
@@ -850,12 +858,66 @@ mod tests {
         // Numeric operands are unquoted.
         assert_eq!(
             describe("3 >= 10", &ctx).as_deref(),
-            Some("actual 3, expected 10")
+            Some("actual 3, expected >= 10")
         );
         // Non-comparisons (logical compound, helper call) get no operand
         // detail — the expression text already localizes them.
         assert!(describe("true && false", &ctx).is_none());
         assert!(describe("$runtime.exists($inputs.status)", &ctx).is_none());
+    }
+
+    /// #407: the rendered failure text has to say *why* the assertion
+    /// failed, which means it must reflect the operator. The old wording
+    /// printed "actual X, expected X" for a failing `!=` — the same
+    /// value as both what was observed and what was wanted. That bug is
+    /// invisible to a pass/fail test, so assert on the string.
+    #[test]
+    fn describe_comparison_wording_is_operator_aware() {
+        let ctx = TestCtx::new().with_output("adopted", "trigger", Value::Str("resume".into()));
+
+        // The reported regression: `!=` against an equal value. The
+        // operands are identical, so the detail must not label the
+        // right-hand side "expected".
+        let ne = describe("$steps.adopted.outputs.trigger != \"resume\"", &ctx)
+            .expect("comparison detail");
+        assert_eq!(ne, "actual \"resume\", disallowed \"resume\"");
+        assert!(!ne.contains("expected"), "`!=` must not say expected: {ne}");
+
+        // Ordering operators name a bound, and keep its direction.
+        assert_eq!(
+            describe("12 < 10", &ctx).as_deref(),
+            Some("actual 12, expected < 10")
+        );
+        assert_eq!(
+            describe("12 <= 10", &ctx).as_deref(),
+            Some("actual 12, expected <= 10")
+        );
+        assert_eq!(
+            describe("3 > 10", &ctx).as_deref(),
+            Some("actual 3, expected > 10")
+        );
+
+        // `==` keeps the original wording — there the right operand
+        // genuinely is the expected value.
+        assert_eq!(
+            describe("$steps.adopted.outputs.trigger == \"stop\"", &ctx).as_deref(),
+            Some("actual \"resume\", expected \"stop\"")
+        );
+
+        // The invariant, stated directly: no failing comparison renders
+        // the same value as both observed and wanted.
+        for src in [
+            "$steps.adopted.outputs.trigger != \"resume\"",
+            "10 < 10",
+            "10 > 10",
+        ] {
+            let d = describe(src, &ctx).expect("comparison detail");
+            assert!(
+                !d.contains("actual \"resume\", expected \"resume\"")
+                    && !d.contains("actual 10, expected 10"),
+                "self-contradictory detail for `{src}`: {d}"
+            );
+        }
     }
 
     // ---- truth table over literals --------------------------------

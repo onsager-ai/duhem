@@ -22,7 +22,9 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use duhem_evidence::{EventPayload, EvidenceWriter, new_run_id};
+use duhem_evidence::{
+    EventPayload, EvidenceWriter, RunLineage, RunScope, run_started_with_definition_and_lineage,
+};
 use duhem_judge::InconclusiveCause;
 use duhem_schema::{HttpReadyProbe, Provision, ReadyProbe};
 use tokio::process::Command;
@@ -203,12 +205,23 @@ pub(crate) async fn tear_environment_down(
 /// stack. Suite-level `up:` / `ready:` / `down:` evidence is recorded
 /// as its own run in the store, distinct from each leaf's run.
 pub struct SuiteEnvironment {
-    env: Provision,
+    env: Option<Provision>,
     dir: Option<PathBuf>,
     writer: EvidenceWriter,
     run: RunState,
     should_tear_down: bool,
     aborted: Option<EnvAbortReason>,
+}
+
+/// Identity, lineage, and optional shared environment for a manifest run.
+pub struct SuiteRunConfig<'a> {
+    pub environment: Option<&'a Provision>,
+    pub definition_path: &'a str,
+    pub manifest_dir: Option<&'a Path>,
+    pub run_id: String,
+    pub scope: RunScope,
+    pub lineage: RunLineage,
+    pub skip_env_up: bool,
 }
 
 impl SuiteEnvironment {
@@ -220,54 +233,78 @@ impl SuiteEnvironment {
     /// `Engine::with_progress`, covering `tear_down` too since the
     /// writer carries it; `None` is byte-for-byte the prior behavior.
     pub async fn provision(
-        env: &Provision,
-        manifest_dir: Option<&Path>,
+        config: SuiteRunConfig<'_>,
         store: std::sync::Arc<dyn duhem_evidence::Store>,
-        skip_env_up: bool,
         progress: Option<tokio::sync::mpsc::UnboundedSender<duhem_evidence::Event>>,
     ) -> Result<Self, EngineError> {
+        let SuiteRunConfig {
+            environment,
+            definition_path,
+            manifest_dir,
+            run_id,
+            scope,
+            lineage,
+            skip_env_up,
+        } = config;
         let run = RunState::new(std::collections::BTreeMap::new());
-        // The suite's shared-environment evidence is its own run row,
-        // identified by the `<suite>` verification marker.
-        let mut writer = EvidenceWriter::begin(
+        let mut writer = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
             store,
-            new_run_id(),
-            "<suite>",
+            &run_id,
+            definition_path,
             std::collections::BTreeMap::new(),
+            scope,
+            lineage.clone(),
+            duhem_evidence::SecretRegistry::new(),
         )
         .await?;
         if let Some(tx) = progress {
             writer = writer.with_tee(tx);
         }
         writer.start_heartbeats();
-        let mut provision = Box::pin(bring_environment_up(
-            &mut writer,
-            env,
-            manifest_dir,
-            &run,
-            skip_env_up,
-        ));
-        let completed = tokio::select! {
-            signal = super::runner::termination_signal() => Err(signal),
-            result = &mut provision => Ok(result),
-        };
-        drop(provision);
-        let up = match completed {
-            Ok(result) => result?,
-            Err(signal) => {
-                writer
-                    .append(EventPayload::RunAborted {
-                        signal: signal.to_string(),
-                    })
-                    .await?;
-                writer.finish().await?;
-                return Err(EngineError::Aborted {
-                    signal: signal.to_string(),
-                });
+        writer
+            .append(run_started_with_definition_and_lineage(
+                definition_path,
+                std::collections::BTreeMap::new(),
+                None,
+                lineage,
+            ))
+            .await?;
+        let up = match environment {
+            Some(env) => {
+                let mut provision = Box::pin(bring_environment_up(
+                    &mut writer,
+                    env,
+                    manifest_dir,
+                    &run,
+                    skip_env_up,
+                ));
+                let completed = tokio::select! {
+                    signal = super::runner::termination_signal() => Err(signal),
+                    result = &mut provision => Ok(result),
+                };
+                drop(provision);
+                match completed {
+                    Ok(result) => result?,
+                    Err(signal) => {
+                        writer
+                            .append(EventPayload::RunAborted {
+                                signal: signal.to_string(),
+                            })
+                            .await?;
+                        writer.finish().await?;
+                        return Err(EngineError::Aborted {
+                            signal: signal.to_string(),
+                        });
+                    }
+                }
             }
+            None => EnvUpResult {
+                aborted: None,
+                should_tear_down: false,
+            },
         };
         Ok(Self {
-            env: env.clone(),
+            env: environment.cloned(),
             dir: manifest_dir.map(Path::to_path_buf),
             writer,
             run,
@@ -285,30 +322,32 @@ impl SuiteEnvironment {
     /// Tear the shared environment down (best-effort) and close the
     /// suite trace. `keep_env` is the manifest-level `--keep-env`.
     pub async fn tear_down(mut self, keep_env: bool) -> Result<(), EngineError> {
-        let mut teardown = Box::pin(tear_environment_down(
-            &mut self.writer,
-            &self.env,
-            self.dir.as_deref(),
-            keep_env,
-            self.should_tear_down,
-        ));
-        let completed = tokio::select! {
-            signal = super::runner::termination_signal() => Err(signal),
-            result = &mut teardown => Ok(result),
-        };
-        drop(teardown);
-        match completed {
-            Ok(result) => result?,
-            Err(signal) => {
-                self.writer
-                    .append(EventPayload::RunAborted {
+        if let Some(env) = self.env.as_ref() {
+            let mut teardown = Box::pin(tear_environment_down(
+                &mut self.writer,
+                env,
+                self.dir.as_deref(),
+                keep_env,
+                self.should_tear_down,
+            ));
+            let completed = tokio::select! {
+                signal = super::runner::termination_signal() => Err(signal),
+                result = &mut teardown => Ok(result),
+            };
+            drop(teardown);
+            match completed {
+                Ok(result) => result?,
+                Err(signal) => {
+                    self.writer
+                        .append(EventPayload::RunAborted {
+                            signal: signal.to_string(),
+                        })
+                        .await?;
+                    self.writer.finish().await?;
+                    return Err(EngineError::Aborted {
                         signal: signal.to_string(),
-                    })
-                    .await?;
-                self.writer.finish().await?;
-                return Err(EngineError::Aborted {
-                    signal: signal.to_string(),
-                });
+                    });
+                }
             }
         }
         self.writer
@@ -612,9 +651,21 @@ mod tests {
                 .unwrap(),
         );
 
-        let session = SuiteEnvironment::provision(&env, Some(&base), store.clone(), false, None)
-            .await
-            .expect("provision");
+        let session = SuiteEnvironment::provision(
+            SuiteRunConfig {
+                environment: Some(&env),
+                definition_path: "slow-suite/duhem.yml",
+                manifest_dir: Some(&base),
+                run_id: "01SUITE".to_string(),
+                scope: RunScope::default(),
+                lineage: RunLineage::default(),
+                skip_env_up: false,
+            },
+            store.clone(),
+            None,
+        )
+        .await
+        .expect("provision");
         assert!(session.aborted_cause().is_none(), "suite should be up");
         session.tear_down(false).await.expect("tear down");
 
@@ -625,7 +676,7 @@ mod tests {
             .await
             .unwrap()
             .into_iter()
-            .find(|run| run.verification == "<suite>")
+            .find(|run| run.verification == "slow-suite/duhem.yml")
             .expect("suite evidence run");
         assert_eq!(suite.status, duhem_evidence::RunStatus::Finished);
         assert_eq!(suite.verdict, None, "suite is completed but never judged");
@@ -659,10 +710,16 @@ mod tests {
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let session = SuiteEnvironment::provision(
-            &env,
-            Some(&base),
+            SuiteRunConfig {
+                environment: Some(&env),
+                definition_path: "slow-suite/duhem.yml",
+                manifest_dir: Some(&base),
+                run_id: "01SUITETEE".to_string(),
+                scope: RunScope::default(),
+                lineage: RunLineage::default(),
+                skip_env_up: false,
+            },
             std::sync::Arc::new(store),
-            false,
             Some(tx),
         )
         .await
@@ -677,6 +734,7 @@ mod tests {
         assert_eq!(
             kinds,
             vec![
+                "run_started",
                 "env_up_started",
                 "env_up_finished",
                 "env_down_started",

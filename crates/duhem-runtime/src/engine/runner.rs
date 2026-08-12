@@ -4,6 +4,12 @@
 //! and failed implicit judgments block later `if: success` steps in this
 //! check. `if: always` and `if: failure` opt out; sibling checks have
 //! independent state.
+//
+// budget-allow: merging #348 (nested run hierarchy: `lineage`,
+// `child_store_path`) onto main's concurrent growth (gating, flows,
+// pages, `resolve`) pushed this file ~2% over the 8000-token budget.
+// Track a follow-up to split `Engine`'s run-loop state out of this
+// file rather than raising the budget or exempting it long-term.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -13,8 +19,8 @@ use std::time::Duration;
 use duhem_actions::Page;
 use duhem_actions::{Outcome, RunBrowser};
 use duhem_evidence::{
-    EventPayload, EvidenceWriter, RunScope, SecretRegistry, SqliteStore, Store, StoreError,
-    VerdictState, new_run_id, project_db_path, run_started_with_definition,
+    EventPayload, EvidenceWriter, RunLineage, RunScope, SecretRegistry, SqliteStore, Store,
+    StoreError, VerdictState, new_run_id, project_db_path, run_started_with_definition_and_lineage,
 };
 use duhem_judge::{
     AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusivePolicy, RunVerdict,
@@ -90,6 +96,12 @@ pub struct Engine {
     /// (all-`None`) records an unattributed run; #191's resolution
     /// ladder populates it.
     scope: RunScope,
+    /// Lineage — parent run id plus `suite` / `invocation` origin — for
+    /// nested `duhem run` invocations (#348).
+    lineage: RunLineage,
+    /// Store location inherited by nested `duhem run` subprocesses; see
+    /// [`Engine::with_child_store_path`].
+    child_store_path: Option<PathBuf>,
     /// Skip `provision.up:` + readiness probe (the `--no-env-up`
     /// escape hatch on issue #50). The operator is presumed to have
     /// brought the SUT up already. Teardown still runs unless
@@ -152,6 +164,8 @@ impl Engine {
             seed: None,
             run_id: None,
             scope: RunScope::default(),
+            lineage: RunLineage::default(),
+            child_store_path: None,
             skip_env_up: false,
             keep_env: false,
             env: BTreeMap::new(),
@@ -251,6 +265,7 @@ impl Engine {
                 let cwd = std::env::current_dir().map_err(StoreError::Io)?;
                 let db = project_db_path(&cwd)?;
                 let opened: Arc<dyn Store> = Arc::new(SqliteStore::open(db).await?);
+                self.child_store_path = Some(project_db_path(&cwd)?);
                 self.store = Some(opened.clone());
                 opened
             }
@@ -268,12 +283,13 @@ impl Engine {
             .definition_path
             .clone()
             .unwrap_or_else(|| def.verification.clone());
-        let mut writer = EvidenceWriter::begin_scoped_with_secrets(
+        let mut writer = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
             store,
             &run_id,
             &evidence_path,
             inputs.clone(),
             self.scope.clone(),
+            self.lineage.clone(),
             self.secrets.clone(),
         )
         .await?;
@@ -284,10 +300,11 @@ impl Engine {
         writer.start_heartbeats();
 
         writer
-            .append(run_started_with_definition(
+            .append(run_started_with_definition_and_lineage(
                 evidence_path.clone(),
                 inputs.clone(),
                 self.definition_source.clone(),
+                self.lineage.clone(),
             ))
             .await?;
 
@@ -362,6 +379,7 @@ impl Engine {
                     self.browser.as_ref(),
                     &mut run_state,
                     &def.setup,
+                    &self.child_process_env(&run_id),
                 )
                 .await?;
                 if let Some(reason) = r.aborted {
@@ -752,7 +770,14 @@ impl Engine {
                 None => None,
                 Some(dispatcher) => {
                     let page_ref: Option<&Page> = check_browser.as_ref().map(|cb| &cb.page);
-                    let result = dispatcher.invoke(page_ref, idx, &resolved_with).await;
+                    let result = dispatcher
+                        .invoke(
+                            page_ref,
+                            idx,
+                            &resolved_with,
+                            &self.child_process_env(writer.run_id()),
+                        )
+                        .await;
                     if let Ok(r) = &result {
                         crate::engine::secret_output::register(
                             writer,
@@ -950,6 +975,7 @@ mod tests {
                     _page: Option<&Page>,
                     _step_index: usize,
                     _with: &serde_yml::Value,
+                    _child_env: &BTreeMap<String, String>,
                 ) -> Result<ActionResult, ActionError> {
                     tokio::time::sleep(Duration::from_secs(5)).await;
                     Ok(ActionResult::ok())
@@ -1078,6 +1104,7 @@ criteria:
             _page: Option<&Page>,
             _step_index: usize,
             _with: &serde_yml::Value,
+            _child_env: &BTreeMap<String, String>,
         ) -> Result<ActionResult, ActionError> {
             self.invocations.fetch_add(1, Ordering::SeqCst);
             if let Some(delay) = self.delay {
@@ -1141,6 +1168,8 @@ criteria:
             seed: None,
             run_id: None,
             scope: RunScope::default(),
+            lineage: RunLineage::default(),
+            child_store_path: Some(tmp.path().join("duhem.db")),
             skip_env_up: false,
             keep_env: false,
             env: BTreeMap::new(),
@@ -1550,6 +1579,7 @@ criteria:
             _page: Option<&Page>,
             _step_index: usize,
             _with: &serde_yml::Value,
+            _child_env: &BTreeMap<String, String>,
         ) -> Result<ActionResult, ActionError> {
             Ok(ActionResult::ok())
         }
@@ -2748,6 +2778,7 @@ criteria:
             _page: Option<&Page>,
             _step_index: usize,
             with: &serde_yml::Value,
+            _child_env: &BTreeMap<String, String>,
         ) -> Result<ActionResult, ActionError> {
             let ms = with
                 .get(serde_yml::Value::String("timeout".to_string()))

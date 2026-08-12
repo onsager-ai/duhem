@@ -83,6 +83,7 @@ pub(crate) async fn run_setup(
     browser: Option<&RunBrowser>,
     run: &mut RunState,
     setup: &[Step],
+    child_env: &BTreeMap<String, String>,
 ) -> Result<SetupResult, EngineError> {
     writer
         .append(EventPayload::SetupStarted {
@@ -173,9 +174,12 @@ pub(crate) async fn run_setup(
                         page_ref,
                         idx,
                         &resolved_with,
-                        step,
-                        run,
-                        writer,
+                        SetupInvocation {
+                            step,
+                            run,
+                            writer,
+                            child_env,
+                        },
                     )
                     .await?
                 }
@@ -237,18 +241,29 @@ async fn append_setup_started(
 /// for every output, and publish scalar outputs onto
 /// `RunState.setup_outputs` so checks can reference them as
 /// `$setup.<id>.outputs.<name>`.
+struct SetupInvocation<'a> {
+    step: &'a Step,
+    run: &'a mut RunState,
+    writer: &'a mut EvidenceWriter,
+    child_env: &'a BTreeMap<String, String>,
+}
+
 async fn invoke_and_record(
     dispatcher: &dyn Dispatch,
     page: Option<&Page>,
     idx: usize,
     resolved_with: &serde_yml::Value,
-    step: &Step,
-    run: &mut RunState,
-    writer: &mut EvidenceWriter,
+    invocation: SetupInvocation<'_>,
 ) -> Result<(Outcome, bool), EngineError> {
+    let SetupInvocation {
+        step,
+        run,
+        writer,
+        child_env,
+    } = invocation;
     // The caller persisted `SetupStepStarted` before dispatch so slow
     // actions and gated skips share one honest lifecycle shape.
-    let result = dispatcher.invoke(page, idx, resolved_with).await;
+    let result = dispatcher.invoke(page, idx, resolved_with, child_env).await;
     let outcome = match &result {
         Ok(r) => r.outcome.clone(),
         Err(_) => Outcome::Error,
@@ -370,6 +385,7 @@ mod tests {
             _page: Option<&Page>,
             _step_index: usize,
             _with: &serde_yml::Value,
+            _child_env: &BTreeMap<String, String>,
         ) -> Result<ActionResult, ActionError> {
             self.invocations.fetch_add(1, Ordering::SeqCst);
             let mut r = match self.outcome {
@@ -441,7 +457,7 @@ mod tests {
         );
         let mut run = RunState::new(BTreeMap::new());
         let setup = vec![step(Some("warm"), "fake/seed")];
-        let r = run_setup(&mut w, &registry, None, &mut run, &setup)
+        let r = run_setup(&mut w, &registry, None, &mut run, &setup, &BTreeMap::new())
             .await
             .unwrap();
         assert!(r.aborted.is_none());
@@ -476,7 +492,7 @@ mod tests {
         );
         let mut run = RunState::new(BTreeMap::new());
         let setup = vec![step(None, "fake/boom"), step(None, "fake/tracker")];
-        let r = run_setup(&mut w, &registry, None, &mut run, &setup)
+        let r = run_setup(&mut w, &registry, None, &mut run, &setup, &BTreeMap::new())
             .await
             .unwrap();
         assert_eq!(
@@ -521,7 +537,7 @@ mod tests {
         );
         let mut run = RunState::new(BTreeMap::new());
         let setup = vec![step(None, "fake/slow"), step(None, "fake/tracker")];
-        let r = run_setup(&mut w, &registry, None, &mut run, &setup)
+        let r = run_setup(&mut w, &registry, None, &mut run, &setup, &BTreeMap::new())
             .await
             .unwrap();
         assert_eq!(
@@ -575,7 +591,7 @@ mod tests {
             conditioned_step(None, "fake/always", duhem_schema::StepCondition::Always),
             conditioned_step(None, "fake/failure", duhem_schema::StepCondition::Failure),
         ];
-        let result = run_setup(&mut w, &registry, None, &mut run, &setup)
+        let result = run_setup(&mut w, &registry, None, &mut run, &setup, &BTreeMap::new())
             .await
             .unwrap();
         assert_eq!(always_calls.load(Ordering::SeqCst), 1);
@@ -615,7 +631,7 @@ mod tests {
             step(None, "fake/ok"),
             conditioned_step(None, "fake/failure", duhem_schema::StepCondition::Failure),
         ];
-        let result = run_setup(&mut w, &registry, None, &mut run, &setup)
+        let result = run_setup(&mut w, &registry, None, &mut run, &setup, &BTreeMap::new())
             .await
             .unwrap();
         assert_eq!(failure_calls.load(Ordering::SeqCst), 0);
@@ -650,7 +666,7 @@ mod tests {
             step(Some("precondition"), "fake/assert"),
             step(None, "fake/after"),
         ];
-        let result = run_setup(&mut w, &registry, None, &mut run, &setup)
+        let result = run_setup(&mut w, &registry, None, &mut run, &setup, &BTreeMap::new())
             .await
             .unwrap();
         assert_eq!(after_calls.load(Ordering::SeqCst), 0);

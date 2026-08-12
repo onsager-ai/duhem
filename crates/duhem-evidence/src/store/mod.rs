@@ -28,7 +28,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use crate::event::{Event, ORPHAN_THRESHOLD, RunStatus, VerdictState};
+use crate::event::{Event, ORPHAN_THRESHOLD, RunOrigin, RunStatus, VerdictState};
 use crate::writer::Sha256Hex;
 
 #[derive(Debug, Error)]
@@ -53,6 +53,8 @@ pub enum StoreError {
     BadVerdict(String),
     #[error("bad run status token {0:?} in store")]
     BadRunStatus(String),
+    #[error("bad run origin token {0:?} in store")]
+    BadRunOrigin(String),
 }
 
 /// Header recorded at `begin_run` — the store-level successor of the
@@ -68,6 +70,8 @@ pub struct RunMeta {
     pub schema_version: String,
     pub inputs: BTreeMap<String, serde_json::Value>,
     pub started_at: DateTime<Utc>,
+    /// Parent + creation mode for nested runs (#348).
+    pub lineage: RunLineage,
     /// Scoping + provenance (#190). Defaults to unattributed; #191's
     /// resolution ladder populates it for real runs.
     pub scope: RunScope,
@@ -92,6 +96,14 @@ pub struct RunScope {
     pub target_sha: Option<String>,
 }
 
+/// Recorded relationship to another run. Root and pre-lineage runs
+/// carry neither field.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RunLineage {
+    pub parent_run_id: Option<String>,
+    pub origin: Option<RunOrigin>,
+}
+
 /// One run as the store knows it: runtime lifecycle and judge verdict
 /// are independent projections over the append-only event stream.
 #[derive(Debug, Clone)]
@@ -108,6 +120,8 @@ pub struct RunRecord {
     /// Last persisted proof of runtime ownership. `run_started` is the
     /// initial heartbeat for traces that have not emitted a beat yet.
     pub last_heartbeat_at: DateTime<Utc>,
+    /// Recorded lineage (#348).
+    pub lineage: RunLineage,
     /// Scoping + provenance (#190). All-`None` for runs recorded
     /// before the scoping migration or without attribution.
     pub scope: RunScope,

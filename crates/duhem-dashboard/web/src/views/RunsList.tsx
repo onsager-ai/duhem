@@ -1,5 +1,5 @@
 // Runs list (#86, reskinned #284): faceted filters held in URL state
-// (bookmarkable), run-set rows expanding to their leaves (#49), and
+// (bookmarkable), recorded parent runs expanding to descendants, and
 // lifecycle status independent from verdict — on TanStack Table + shadcn.
 // Data comes from the shell's shared, visibility-polled runs context
 // (#298/#303), so the list stays live without its own fetch.
@@ -155,15 +155,24 @@ const columns: ColumnDef<RunsListEntry>[] = [
                 )}
               />
             </button>
-            <span className="font-semibold">{e.verification}</span>
+            <Link
+              to={`/run/${encodeURIComponent(e.run_id)}`}
+              className="block max-w-[22ch] truncate font-mono text-xs font-semibold hover:underline sm:max-w-[30ch]"
+              title={e.run_id}
+            >
+              {e.run_id}
+            </Link>
             <span className="text-xs text-muted-foreground">
-              {e.children?.length ?? 0} runs
+              {e.children?.length ?? 0} children
             </span>
+            {e.origin && (
+              <span className="text-xs text-muted-foreground">{e.origin}</span>
+            )}
           </div>
         );
       }
       return (
-        <div style={pad}>
+        <div className="flex items-center gap-1.5" style={pad}>
           <Link
             to={`/run/${encodeURIComponent(e.run_id)}`}
             className="block max-w-[22ch] truncate font-mono text-xs hover:underline sm:max-w-[30ch]"
@@ -171,6 +180,9 @@ const columns: ColumnDef<RunsListEntry>[] = [
           >
             {e.run_id}
           </Link>
+          {e.origin && (
+            <span className="text-xs text-muted-foreground">{e.origin}</span>
+          )}
         </div>
       );
     },
@@ -245,7 +257,7 @@ function RunsTable({
     state: { sorting, expanded },
     onSortingChange: setSorting,
     onExpandedChange: setExpanded,
-    getSubRows: (row) => (row.kind === "run-set" ? row.children : undefined),
+    getSubRows: (row) => row.children,
     getRowId: (row, index, parent) =>
       `${parent ? `${parent.id}.` : ""}${row.kind}:${row.run_id}:${index}`,
     getCoreRowModel: getCoreRowModel(),
@@ -376,25 +388,27 @@ export default function RunsList() {
     [runs, verification, verdicts, statuses, from, to],
   );
   const filteredGroups = useMemo(
-    () =>
-      (runs ?? []).flatMap((entry) => {
-        if (entry.kind !== "run-set") {
-          return matchesFilters(
-            entry,
-            verification,
-            verdicts,
-            statuses,
-            from,
-            to,
-          )
-            ? [entry]
-            : [];
+    () => {
+      const filterTree = (entry: RunsListEntry): RunsListEntry | null => {
+        const children = (entry.children ?? [])
+          .map(filterTree)
+          .filter((child): child is RunsListEntry => child !== null);
+        if (
+          children.length === 0 &&
+          !matchesFilters(entry, verification, verdicts, statuses, from, to)
+        ) {
+          return null;
         }
-        const children = (entry.children ?? []).filter((child) =>
-          matchesFilters(child, verification, verdicts, statuses, from, to),
-        );
-        return children.length > 0 ? [{ ...entry, children }] : [];
-      }),
+        return {
+          ...entry,
+          children: children.length > 0 ? children : undefined,
+          kind: children.length > 0 ? "run-set" : "leaf",
+        };
+      };
+      return (runs ?? [])
+        .map(filterTree)
+        .filter((entry): entry is RunsListEntry => entry !== null);
+    },
     [runs, verification, verdicts, statuses, from, to],
   );
 

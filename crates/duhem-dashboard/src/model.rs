@@ -8,13 +8,10 @@
 //! re-judged at the view layer.
 
 use chrono::{DateTime, Utc};
-use duhem_evidence::{Event, RunStatus, VerdictState};
+use duhem_evidence::{Event, RunOrigin, RunStatus, VerdictState};
 use serde::Serialize;
 
-/// Discriminates the two row kinds on the runs list. A `run-set` row
-/// is a verification directory grouping leaf runs (#49 manifest runs
-/// group several recorded runs); a `leaf` row is a
-/// single run.
+/// Discriminates runs with recorded children from terminal leaves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum EntryKind {
@@ -25,9 +22,8 @@ pub enum EntryKind {
 /// One row of `GET /api/runs`.
 #[derive(Debug, Clone, Serialize)]
 pub struct RunsListEntry {
-    /// Leaf rows: the run's ULID. Run-set rows: the verification
-    /// directory name (stable across requests; not addressable via
-    /// `/api/runs/:run_id`).
+    /// The recorded run's ULID. Every row, including a run-set parent,
+    /// is addressable via `/api/runs/:run_id`.
     pub run_id: String,
     pub verification: String,
     pub started_at: Option<DateTime<Utc>>,
@@ -37,6 +33,10 @@ pub struct RunsListEntry {
     pub verdict: Option<VerdictState>,
     pub kind: EntryKind,
     pub status: RunStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<RunOrigin>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub children: Option<Vec<RunsListEntry>>,
 }

@@ -393,6 +393,17 @@ Point it at *your* system by changing three things in `duhem.yml`:
    regular expression instead of a literal, use
    `$runtime.matches(body_text, "Example ?Domain")`.
 
+   Substitution in a `with:` value is whole-string only. An embedded
+   reference such as `"#row-$inputs.id"` stays literal — it is not an
+   error, and the action receives it verbatim. Compose a value with
+   `$runtime.format(fmt, args...)` or `$runtime.concat(args...)` instead:
+
+   ```yaml
+   - uses: ui/navigate
+     with:
+       url: $runtime.format("{}/{}/{}", $inputs.base_url, "projects", $steps.create.outputs.body.id)
+   ```
+
 Then `duhem validate` (catch shape errors early) and `duhem run`. When
 composition or input precedence is surprising, inspect the exact
 pre-execution document first:

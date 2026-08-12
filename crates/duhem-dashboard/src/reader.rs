@@ -6,16 +6,19 @@
 //! discipline. Every call re-queries the store (the MVP's hot-reload
 //! posture from #53 — no cache, no invalidation bug).
 //!
-//! Run grouping and rollups derive from recorded store state; the
-//! dashboard never invents a verdict.
+//! Runs are rendered as a tree from their recorded `parent_run_id`.
+//! Roots have no parent; descendants preserve their recorded
+//! `suite`/`invocation` origin. Historical rows without lineage remain
+//! independent roots. Run grouping and rollups derive from recorded
+//! store state; the dashboard never invents a verdict.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use duhem_evidence::{
     Event, EventPayload, ObservationValue, RunRecord, RunStatus, Store, VerdictState,
 };
-use duhem_judge::{RunVerdict, aggregate_run_set};
 use thiserror::Error;
 
 use crate::model::{
@@ -100,34 +103,27 @@ impl EvidenceReader {
         Ok(Some(RunEvidence { record, events }))
     }
 
-    /// `GET /api/runs`: leaf rows for verifications with one recorded
-    /// run, run-set rows (children newest-first) for verifications
-    /// with several. Unreadable runs are skipped — one corrupt run
-    /// must not take down the whole list.
+    /// `GET /api/runs`: a recorded-lineage tree. Top-level rows have
+    /// no parent; every descendant is nested under its recorded parent.
     pub async fn list(&self) -> Result<Vec<RunsListEntry>, ReaderError> {
         let records = self.store.list_runs().await?;
-
-        // Group by verification name, preserving newest-first order.
-        let mut groups: Vec<(String, Vec<RunsListEntry>)> = Vec::new();
-        for record in records {
-            let name = verification_name(&record.verification);
-            let leaf = leaf_entry_from_record(&record);
-            match groups.iter_mut().find(|(n, _)| *n == name) {
-                Some((_, rows)) => rows.push(leaf),
-                None => groups.push((name, vec![leaf])),
+        let by_id: BTreeMap<&str, &RunRecord> = records
+            .iter()
+            .map(|record| (record.run_id.as_str(), record))
+            .collect();
+        let mut child_ids: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for record in &records {
+            if let Some(parent) = record.lineage.parent_run_id.as_deref() {
+                child_ids
+                    .entry(parent)
+                    .or_default()
+                    .push(record.run_id.as_str());
             }
         }
-
-        let mut entries: Vec<RunsListEntry> = groups
-            .into_iter()
-            .map(|(name, mut rows)| {
-                if rows.len() == 1 {
-                    rows.pop().expect("one row")
-                } else {
-                    sort_newest_first(&mut rows);
-                    group_entry(name, rows)
-                }
-            })
+        let mut entries: Vec<RunsListEntry> = records
+            .iter()
+            .filter(|record| record.lineage.parent_run_id.is_none())
+            .map(|record| lineage_entry(record, &by_id, &child_ids))
             .collect();
         sort_newest_first(&mut entries);
         Ok(entries)
@@ -477,54 +473,35 @@ fn sort_newest_first(entries: &mut [RunsListEntry]) {
     entries.sort_by_key(|e| (e.started_at.is_none(), std::cmp::Reverse(e.started_at)));
 }
 
-fn leaf_entry_from_record(record: &RunRecord) -> RunsListEntry {
+fn lineage_entry(
+    record: &RunRecord,
+    by_id: &BTreeMap<&str, &RunRecord>,
+    child_ids: &BTreeMap<&str, Vec<&str>>,
+) -> RunsListEntry {
+    let mut children: Vec<RunsListEntry> = child_ids
+        .get(record.run_id.as_str())
+        .into_iter()
+        .flatten()
+        .filter_map(|id| by_id.get(id).copied())
+        .map(|child| lineage_entry(child, by_id, child_ids))
+        .collect();
+    sort_newest_first(&mut children);
+    let has_children = !children.is_empty();
     RunsListEntry {
         run_id: record.run_id.clone(),
         verification: verification_name(&record.verification),
         started_at: Some(record.started_at),
         duration_ms: record.duration_ms,
         verdict: record.verdict,
-        kind: EntryKind::Leaf,
+        kind: if has_children {
+            EntryKind::RunSet
+        } else {
+            EntryKind::Leaf
+        },
         status: record.status,
-        children: None,
-    }
-}
-
-/// Roll a verification's runs up into a run-set row. The rollup state
-/// is the judge's `aggregate_run_set` fold over the *recorded* child
-/// verdicts — the dashboard never invents a verdict. Lifecycle follows
-/// the newest child; historical unfinished runs do not contaminate the
-/// current rollup.
-fn group_entry(name: String, children: Vec<RunsListEntry>) -> RunsListEntry {
-    let verdict = if children.iter().all(|c| c.verdict.is_some()) {
-        let runs: Vec<RunVerdict> = children
-            .iter()
-            .map(|c| RunVerdict {
-                state: c.verdict.expect("checked above"),
-                // The fold reads only `state`; the children's criteria
-                // are not re-materialized for a list row.
-                criteria: Vec::new(),
-            })
-            .collect();
-        Some(aggregate_run_set(runs).state)
-    } else {
-        None
-    };
-    let status = children
-        .first()
-        .map(|c| c.status)
-        .unwrap_or(RunStatus::Finished);
-    let started_at = children.iter().filter_map(|c| c.started_at).min();
-    let duration_ms = children.iter().map(|c| c.duration_ms).sum::<Option<u64>>();
-    RunsListEntry {
-        run_id: name.clone(),
-        verification: name,
-        started_at,
-        duration_ms,
-        verdict,
-        kind: EntryKind::RunSet,
-        status,
-        children: Some(children),
+        parent_run_id: record.lineage.parent_run_id.clone(),
+        origin: record.lineage.origin,
+        children: has_children.then_some(children),
     }
 }
 

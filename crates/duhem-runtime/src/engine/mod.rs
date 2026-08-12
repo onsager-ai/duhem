@@ -16,6 +16,7 @@ pub(crate) mod gating;
 pub mod har;
 pub mod identity;
 pub mod inherit;
+pub mod lineage;
 pub mod outcome;
 pub mod registry;
 pub mod runner;
@@ -28,7 +29,7 @@ pub mod translate;
 
 pub use capture::CapturePolicy;
 pub use context::{RunContext, RunState};
-pub use env::SuiteEnvironment;
+pub use env::{SuiteEnvironment, SuiteRunConfig};
 pub use identity::resolve_scope;
 pub use runner::{
     CapturedArtifact, CheckFailure, CheckFilter, Engine, EngineError, FailedAssertion, RunOutcome,

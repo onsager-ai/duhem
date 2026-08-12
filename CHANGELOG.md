@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Run traces and the append-only evidence store record nested-run lineage (`parent_run_id` plus `suite` / `invocation` origin), and the dashboard renders that recorded hierarchy instead of grouping unrelated runs by verification basename. (#348)
 - [additive] Verification Definitions accept an optional opaque `metadata:` map that is recorded in run evidence for downstream consumers and never affects verdicts. (#386)
 - [breaking] validate now rejects a bare, unknown, or wrong-arity $runtime helper offline instead of failing mid-run as inconclusive. (#405)
 - [clarifying] A failing comparison assertion's `detail` now labels the right operand by operator — `disallowed X` for `!=` and `expected < X` / `<=` / `>` / `>=` for ordering — so a failing `!=` no longer prints the same value as both actual and expected. `==` wording is unchanged. (#407)

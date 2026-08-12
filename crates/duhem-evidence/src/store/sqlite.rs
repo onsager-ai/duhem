@@ -15,12 +15,12 @@ use sha2::{Digest, Sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Pool, Row, Sqlite};
 
-use crate::event::{Event, EventPayload, RunStatus};
+use crate::event::{Event, EventPayload, RunOrigin, RunStatus};
 use crate::writer::Sha256Hex;
 
 use super::{
-    CriterionHistoryEntry, ProjectSummary, RunMeta, RunRecord, RunScope, Span, Store, StoreError,
-    TargetStatus, derive_run_status, is_valid_sha256_hex, parse_verdict, verdict_token,
+    CriterionHistoryEntry, ProjectSummary, RunLineage, RunMeta, RunRecord, RunScope, Span, Store,
+    StoreError, TargetStatus, derive_run_status, is_valid_sha256_hex, parse_verdict, verdict_token,
     verification_key, verification_name,
 };
 
@@ -128,6 +128,14 @@ fn row_to_run_record(row: &sqlx::sqlite::SqliteRow) -> Result<RunRecord, StoreEr
         finished_at: finished_at.as_deref().map(parse_ts).transpose()?,
         duration_ms: duration_ms.map(|d| d as u64),
         last_heartbeat_at,
+        lineage: RunLineage {
+            parent_run_id: row.get("parent_run_id"),
+            origin: row
+                .get::<Option<String>, _>("origin")
+                .as_deref()
+                .map(parse_run_origin)
+                .transpose()?,
+        },
         scope: RunScope {
             project_id: row.get("project_id"),
             verifier_repo: row.get("verifier_repo"),
@@ -139,8 +147,8 @@ fn row_to_run_record(row: &sqlx::sqlite::SqliteRow) -> Result<RunRecord, StoreEr
 }
 
 const RUN_SELECT: &str = "SELECT r.run_id, r.verification, r.schema_version, r.inputs, \
-     r.started_at, r.project_id, r.verifier_repo, r.verifier_sha, r.target_repo, \
-     r.target_sha, v.verdict, t.status AS terminal_status, t.terminal_at, t.duration_ms, \
+     r.started_at, r.parent_run_id, r.origin, r.project_id, r.verifier_repo, r.verifier_sha, \
+     r.target_repo, r.target_sha, v.verdict, t.status AS terminal_status, t.terminal_at, t.duration_ms, \
      COALESCE((SELECT MAX(e.ts) FROM events e WHERE e.run_id = r.run_id \
        AND e.kind = 'run_heartbeat'), r.started_at) AS last_heartbeat_at \
      FROM runs r LEFT JOIN run_verdicts v ON v.run_id = r.run_id \
@@ -151,6 +159,21 @@ fn parse_run_status(token: &str) -> Result<RunStatus, StoreError> {
         "finished" => Ok(RunStatus::Finished),
         "aborted" => Ok(RunStatus::Aborted),
         other => Err(StoreError::BadRunStatus(other.to_string())),
+    }
+}
+
+fn parse_run_origin(token: &str) -> Result<RunOrigin, StoreError> {
+    match token {
+        "suite" => Ok(RunOrigin::Suite),
+        "invocation" => Ok(RunOrigin::Invocation),
+        other => Err(StoreError::BadRunOrigin(other.to_string())),
+    }
+}
+
+fn run_origin_token(origin: RunOrigin) -> &'static str {
+    match origin {
+        RunOrigin::Suite => "suite",
+        RunOrigin::Invocation => "invocation",
     }
 }
 
@@ -185,15 +208,17 @@ impl Store for SqliteStore {
 
         sqlx::query(
             "INSERT INTO runs (run_id, verification, schema_version, inputs, started_at, \
-             workspace_id, project_id, verification_id, verifier_repo, verifier_sha, \
-             target_repo, target_sha) \
-             VALUES (?, ?, ?, ?, ?, 'local', ?, ?, ?, ?, ?, ?)",
+             parent_run_id, origin, workspace_id, project_id, verification_id, verifier_repo, \
+             verifier_sha, target_repo, target_sha) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'local', ?, ?, ?, ?, ?, ?)",
         )
         .bind(&meta.run_id)
         .bind(&meta.verification)
         .bind(&meta.schema_version)
         .bind(serde_json::to_string(&meta.inputs)?)
         .bind(fmt_ts(&meta.started_at))
+        .bind(&meta.lineage.parent_run_id)
+        .bind(meta.lineage.origin.map(run_origin_token))
         .bind(&meta.scope.project_id)
         .bind(&verification_id)
         .bind(&meta.scope.verifier_repo)

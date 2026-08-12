@@ -28,6 +28,7 @@ mod resolve;
 mod resolve_cmd;
 mod resolve_provenance;
 mod run_cmd;
+mod run_lineage;
 mod run_scope;
 mod validate_cmd;
 

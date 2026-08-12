@@ -14,6 +14,7 @@ use thiserror::Error;
 use crate::criterion::{Check, Criterion};
 use crate::expr::{Expr, Path, PathRoot};
 use crate::step::Step;
+use crate::validate_runtime::walk_checkable_paths;
 use crate::verification::{FlowCatalog, InputDecl, InputType, PageCatalog, VerificationDefinition};
 
 /// Where a `$...` reference was authored. Renders into a
@@ -124,6 +125,34 @@ pub enum ValidationError {
         raw: String,
         entry: String,
         help: String,
+    },
+
+    #[error("{site} `{raw}` references unknown `$runtime` helper `{helper}`{help}")]
+    UnknownRuntimeHelper {
+        site: String,
+        raw: String,
+        helper: String,
+        help: String,
+    },
+
+    #[error("{site} `{raw}` references `$runtime.{helper}` without calling it; use `{call_form}`")]
+    UncalledRuntimeHelper {
+        site: String,
+        raw: String,
+        helper: String,
+        call_form: String,
+    },
+
+    #[error(
+        "{site} `{raw}` calls `$runtime.{helper}` with {given} {argument_word}; expected {expected}"
+    )]
+    WrongRuntimeHelperArity {
+        site: String,
+        raw: String,
+        helper: String,
+        given: usize,
+        argument_word: &'static str,
+        expected: String,
     },
 
     #[error("{site} `{raw}`: malformed `$pages` reference (expected `$pages.<page>.<element>`)")]
@@ -299,11 +328,19 @@ pub fn validate_with_contract_outputs(
     for (idx, step) in v.setup.iter().enumerate() {
         let step_name = step_label(step, idx);
         walk_with_refs(&step.with, &mut |expr, raw| {
-            walk_checkable_paths(expr, &mut |path| {
+            walk_checkable_paths(expr, &mut |path, arity| {
                 if path.root == PathRoot::Pages {
                     crate::validate_pages::check_page_path(
                         &v.pages,
                         path,
+                        raw,
+                        &format!("setup step `{step_name}` with:"),
+                        &mut errs,
+                    );
+                } else if path.root == PathRoot::Runtime {
+                    crate::validate_runtime::check_runtime_path(
+                        path,
+                        arity,
                         raw,
                         &format!("setup step `{step_name}` with:"),
                         &mut errs,
@@ -643,7 +680,7 @@ fn validate_check(
     if let Some(raw) = &ch.session {
         match crate::expr::parse(raw) {
             Ok(Expr::Path(path)) => {
-                check_path(&scope, &path, raw, &RefSite::Session, errs);
+                check_path(&scope, &path, None, raw, &RefSite::Session, errs);
             }
             _ => errs.push(ValidationError::InvalidSessionReference {
                 criterion: c.id.clone(),
@@ -656,8 +693,8 @@ fn validate_check(
     for assertion in &ch.assertions {
         assertion.walk_exprs(|expr_str| {
             let raw = expr_str.raw.as_str();
-            walk_checkable_paths(&expr_str.parsed, &mut |p| {
-                check_path(&scope, p, raw, &RefSite::Assertion, errs);
+            walk_checkable_paths(&expr_str.parsed, &mut |p, arity| {
+                check_path(&scope, p, arity, raw, &RefSite::Assertion, errs);
             });
         });
     }
@@ -673,8 +710,8 @@ fn validate_check(
             step: step_label(s, idx),
         };
         walk_with_refs(&s.with, &mut |expr, raw| {
-            walk_checkable_paths(expr, &mut |p| {
-                check_path(&scope, p, raw, &site, errs);
+            walk_checkable_paths(expr, &mut |p, arity| {
+                check_path(&scope, p, arity, raw, &site, errs);
             });
         });
     }
@@ -751,44 +788,10 @@ fn walk_with_refs<F: FnMut(&Expr, &str)>(with: &serde_yml::Value, visit: &mut F)
     }
 }
 
-/// Walk every checkable `Path` in `expr`, with the `default()`
-/// carve-out: the first argument of a `$runtime.default(value,
-/// fallback)` call is the author's explicit "may be absent" escape
-/// hatch (see `eval.rs`'s `default` builtin), so its paths are NOT
-/// visited — a missing ref there is the feature, not an error. Every
-/// other position is walked normally. Used for both assertions and
-/// `with:` so the carve-out is consistent across sites.
-fn walk_checkable_paths<F: FnMut(&Path)>(expr: &Expr, visit: &mut F) {
-    match expr {
-        Expr::Lit(_) => {}
-        Expr::Path(p) => visit(p),
-        Expr::Call { path, args } => {
-            visit(path);
-            let skip_first = is_default_call(path);
-            for (i, a) in args.iter().enumerate() {
-                if skip_first && i == 0 {
-                    continue;
-                }
-                walk_checkable_paths(a, visit);
-            }
-        }
-        Expr::BinOp { lhs, rhs, .. } => {
-            walk_checkable_paths(lhs, visit);
-            walk_checkable_paths(rhs, visit);
-        }
-        Expr::UnaryOp { expr, .. } => walk_checkable_paths(expr, visit),
-    }
-}
-
-/// `$runtime.default(...)` — the one builtin whose first argument
-/// tolerates a missing reference.
-fn is_default_call(path: &Path) -> bool {
-    path.root == PathRoot::Runtime && path.segments().len() == 1 && path.segments()[0] == "default"
-}
-
 fn check_path(
     scope: &PathScope<'_>,
     path: &Path,
+    arity: Option<usize>,
     raw: &str,
     site: &RefSite,
     errs: &mut Vec<ValidationError>,
@@ -937,10 +940,18 @@ fn check_path(
                 errs,
             );
         }
-        PathRoot::Env | PathRoot::Runtime => {
-            // `$env` and `$runtime` are open catalogs at the schema
-            // layer; the runtime spec validates the whitelist /
-            // helper set.
+        PathRoot::Env => {
+            // `$env` is an open catalog at the schema layer; the
+            // runtime profile validates the whitelist.
+        }
+        PathRoot::Runtime => {
+            crate::validate_runtime::check_runtime_path(
+                path,
+                arity,
+                raw,
+                &format!("criterion `{}` / check `{}`: {site}", c.id, ch.id),
+                errs,
+            );
         }
     }
 }
@@ -948,6 +959,7 @@ fn check_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::expr::authored_runtime_helper_names;
     use crate::verification::VerificationDefinition;
 
     fn parse(y: &str) -> VerificationDefinition {
@@ -1589,14 +1601,14 @@ criteria:
     checks:
       - id: AC-1.1
         assertions:
-          - exists: $env.DATABASE_URL
+          - exists: $env.ANYTHING
 "#;
         let v = parse(y);
         validate(&v).expect("$env should not fail");
     }
 
     #[test]
-    fn runtime_paths_pass() {
+    fn called_runtime_helper_validates_clean() {
         let y = r#"
 verification: x
 criteria:
@@ -1605,10 +1617,254 @@ criteria:
     checks:
       - id: AC-1.1
         assertions:
-          - exists: $runtime.uuid()
+          - $runtime.uuid() == $runtime.uuid()
 "#;
         let v = parse(y);
         validate(&v).expect("$runtime should not fail");
+    }
+
+    #[test]
+    fn bare_known_runtime_helper_must_be_called() {
+        let v = parse(
+            r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $runtime.uuid == "x"
+"#,
+        );
+        let errors = validate(&v).unwrap_err();
+        let error = errors
+            .iter()
+            .find(|error| matches!(error, ValidationError::UncalledRuntimeHelper { .. }))
+            .expect("uncalled helper error");
+        assert_eq!(
+            error.to_string(),
+            "criterion `AC-1` / check `AC-1.1`: assertion `$runtime.uuid == \"x\"` references `$runtime.uuid` without calling it; use `$runtime.uuid()`"
+        );
+    }
+
+    #[test]
+    fn bare_unknown_runtime_helper_is_one_unknown_error() {
+        let v = parse(
+            r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $runtime.formt == "x"
+"#,
+        );
+        let errors = validate(&v).unwrap_err();
+        assert_eq!(errors.len(), 1, "got: {errors:?}");
+        assert!(matches!(
+            &errors[0],
+            ValidationError::UnknownRuntimeHelper { helper, .. } if helper == "formt"
+        ));
+        assert_eq!(
+            errors[0].to_string(),
+            "criterion `AC-1` / check `AC-1.1`: assertion `$runtime.formt == \"x\"` references unknown `$runtime` helper `formt` — did you mean `format`?"
+        );
+    }
+
+    #[test]
+    fn unknown_runtime_helper_suggests_nearest_authored_name() {
+        let v = parse(
+            r#"
+verification: x
+inputs:
+  x: { type: string }
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $runtime.formt("{}", $inputs.x) == "x"
+"#,
+        );
+        let errors = validate(&v).unwrap_err();
+        let error = errors
+            .iter()
+            .find(|error| matches!(error, ValidationError::UnknownRuntimeHelper { .. }))
+            .expect("unknown helper error");
+        assert_eq!(
+            error.to_string(),
+            "criterion `AC-1` / check `AC-1.1`: assertion `$runtime.formt(\"{}\", $inputs.x) == \"x\"` references unknown `$runtime` helper `formt` — did you mean `format`?"
+        );
+    }
+
+    #[test]
+    fn unknown_runtime_helper_never_suggests_an_internal_shim() {
+        let v = parse(
+            r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $runtime.exist("x")
+"#,
+        );
+        let errors = validate(&v).unwrap_err();
+        let message = errors
+            .iter()
+            .find(|error| matches!(error, ValidationError::UnknownRuntimeHelper { .. }))
+            .expect("unknown helper error")
+            .to_string();
+        assert!(!message.contains("did you mean"), "{message}");
+    }
+
+    #[test]
+    fn wrong_runtime_helper_arity_is_not_unknown_helper() {
+        let v = parse(
+            r#"
+verification: x
+inputs:
+  a: { type: string }
+  b: { type: string }
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $runtime.len($inputs.a, $inputs.b) == 2
+"#,
+        );
+        let errors = validate(&v).unwrap_err();
+        assert!(
+            !errors
+                .iter()
+                .any(|error| matches!(error, ValidationError::UnknownRuntimeHelper { .. })),
+            "wrong arity was reported as an unknown helper: {errors:?}"
+        );
+        let error = errors
+            .iter()
+            .find(|error| matches!(error, ValidationError::WrongRuntimeHelperArity { .. }))
+            .expect("wrong arity error");
+        assert_eq!(
+            error.to_string(),
+            "criterion `AC-1` / check `AC-1.1`: assertion `$runtime.len($inputs.a, $inputs.b) == 2` calls `$runtime.len` with 2 arguments; expected exactly 1 argument"
+        );
+    }
+
+    #[test]
+    fn every_authored_runtime_helper_validates_at_correct_arity() {
+        let helpers = [
+            ("uuid", "$runtime.uuid()"),
+            ("now", "$runtime.now()"),
+            ("format", r#"$runtime.format("x")"#),
+            ("concat", "$runtime.concat()"),
+            ("len", r#"$runtime.len("x")"#),
+            ("contains", r#"$runtime.contains("x", "x")"#),
+            ("matches", r#"$runtime.matches("x", "x")"#),
+            ("any", r#"$runtime.any("x", "field", "value")"#),
+            ("lower", r#"$runtime.lower("x")"#),
+            ("upper", r#"$runtime.upper("x")"#),
+            ("trim", r#"$runtime.trim("x")"#),
+            ("replace", r#"$runtime.replace("x", "x", "y")"#),
+            ("default", r#"$runtime.default("x", "y")"#),
+        ];
+        assert_eq!(
+            helpers.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+            authored_runtime_helper_names().collect::<Vec<_>>(),
+            "authored helper test table drifted from the catalog"
+        );
+        for (_, expression) in helpers {
+            let v = parse(&format!(
+                r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - {expression}
+"#
+            ));
+            validate(&v).unwrap_or_else(|errors| {
+                panic!("authored helper `{expression}` did not validate: {errors:?}")
+            });
+        }
+    }
+
+    #[test]
+    fn variadic_runtime_helpers_validate_their_full_ranges() {
+        for expression in [
+            r#"$runtime.format("x")"#,
+            r#"$runtime.format("{}{}", "x", "y")"#,
+            "$runtime.concat()",
+            r#"$runtime.concat("x")"#,
+            r#"$runtime.concat("x", "y", "z")"#,
+        ] {
+            let v = parse(&format!(
+                r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - {expression}
+"#
+            ));
+            validate(&v).unwrap_or_else(|errors| {
+                panic!("variadic helper `{expression}` did not validate: {errors:?}")
+            });
+        }
+
+        let v = parse(
+            r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $runtime.format()
+"#,
+        );
+        assert!(matches!(
+            validate(&v).unwrap_err().as_slice(),
+            [ValidationError::WrongRuntimeHelperArity { .. }]
+        ));
+    }
+
+    #[test]
+    fn internal_runtime_shims_validate_clean() {
+        for expression in [
+            r#"$runtime.exists("x")"#,
+            r#"$runtime.type_check("x", "uuid")"#,
+        ] {
+            let v = parse(&format!(
+                r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - {expression}
+"#
+            ));
+            validate(&v).unwrap_or_else(|errors| {
+                panic!("internal shim `{expression}` did not validate: {errors:?}")
+            });
+        }
     }
 
     #[test]

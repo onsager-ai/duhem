@@ -1822,3 +1822,89 @@ fn watch_without_dashboard_base_warns_and_runs() {
         "expected the no-base warning"
     );
 }
+
+#[tokio::test]
+async fn nested_run_inherits_parent_lineage_scope_and_store() {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use duhem_evidence::{EventPayload, EvidenceWriter, RunOrigin, RunScope, SqliteStore, Store};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let child_path = fixture(
+        &tmp,
+        r#"
+verification: nested
+criteria:
+  - id: AC-1
+    description: nested command runs
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: command
+            uses: cli/invoke
+            with: {command: ["printf", "ok"]}
+        assertions:
+          - $steps.command.outputs.exit_code == 0
+"#,
+    );
+    let parent_db = tmp.path().join("parent.db");
+    let ignored_child_db = tmp.path().join("ignored-child.db");
+    let store = Arc::new(SqliteStore::open(&parent_db).await.unwrap());
+    let parent_id = "01NESTEDPARENT";
+    let parent_scope = RunScope {
+        project_id: Some("github.com/acme/target".to_string()),
+        verifier_repo: Some("github.com/acme/verifier".to_string()),
+        verifier_sha: Some("verifier-sha".to_string()),
+        target_repo: Some("github.com/acme/target".to_string()),
+        target_sha: Some("target-sha".to_string()),
+    };
+    let parent = EvidenceWriter::begin_scoped(
+        store.clone(),
+        parent_id,
+        "parent.yml",
+        BTreeMap::new(),
+        parent_scope.clone(),
+    )
+    .await
+    .unwrap();
+    drop(parent);
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&child_path)
+        .arg("--db")
+        .arg(&ignored_child_db)
+        .arg("--no-live")
+        .env(duhem_runtime::PARENT_RUN_ID_ENV, parent_id)
+        .env(duhem_runtime::PARENT_DB_PATH_ENV, &parent_db)
+        .output()
+        .expect("spawn nested duhem");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !ignored_child_db.exists(),
+        "nested --db cannot detach evidence from its parent"
+    );
+
+    let records = store.list_runs().await.unwrap();
+    let child = records
+        .iter()
+        .find(|run| run.run_id != parent_id)
+        .expect("nested child stored beside parent");
+    assert_eq!(child.lineage.parent_run_id.as_deref(), Some(parent_id));
+    assert_eq!(child.lineage.origin, Some(RunOrigin::Invocation));
+    assert_eq!(child.scope, parent_scope);
+    let events = store.run_events(&child.run_id).await.unwrap();
+    assert!(matches!(
+        &events[0].payload,
+        EventPayload::RunStarted {
+            parent_run_id: Some(id),
+            origin: Some(RunOrigin::Invocation),
+            ..
+        } if id == parent_id
+    ));
+}

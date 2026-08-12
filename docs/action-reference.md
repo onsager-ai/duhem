@@ -13,7 +13,9 @@ same for one action; `duhem actions` lists the catalog.
 Bind an output with `outputs: { <name>: <field> }`, then read it in an
 assertion as `$steps.<id>.outputs.<name>`. Assert over **scalar** outputs
 (`status`, `body_text`, `satisfied`, `exit_code`, …); helpers like
-`$runtime.contains(...)` cover membership.
+`$runtime.contains(...)` cover membership. Substitution in a `with:` value is
+whole-string only; compose values with `$runtime.format(...)` or
+`$runtime.concat(...)` instead of embedding a reference in a larger string.
 
 `uses:` always names one of the closed-catalog actions below. Reusable
 `flows:` use the distinct `call:` key and expand into these actions before

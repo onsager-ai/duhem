@@ -9,7 +9,7 @@
 //! from *we couldn't tell*.
 
 use chrono::{DateTime, Utc};
-use duhem_schema::{BinOp, Expr, Literal, Path, PathRoot, UnaryOp};
+use duhem_schema::{BinOp, Expr, Literal, Path, PathRoot, RuntimeHelper, UnaryOp};
 
 /// Verdict for a single boolean expression. Matches the judge's
 /// three-valued verdict shape (`pass | fail | inconclusive`).
@@ -159,24 +159,32 @@ pub fn eval(expr: &Expr, ctx: &dyn EvalContext) -> EvalResult {
 }
 
 /// For a comparison assertion that evaluated **false**, render the two
-/// operands' observed values — the "actual vs expected" detail an author
-/// wants under a failing assertion. Re-evaluates each side (pure, and
-/// only on the failure path) so no operand state has to be threaded
-/// through the boolean `eval`. Returns `None` for non-comparison
-/// expressions (`and`/`or` compounds, helper calls) where the
-/// expression text already localizes the failure; by convention the
-/// left operand is the observed value and the right the expected one.
+/// operands' observed values — the detail an author wants under a
+/// failing assertion. Re-evaluates each side (pure, failure path only)
+/// so no operand state is threaded through the boolean `eval`. `None`
+/// for non-comparisons (`and`/`or`, helper calls), where the expression
+/// text already localizes the failure. The left operand is the observed
+/// value; the right one's *label* is operator-aware — `Eq` wants it,
+/// `Ne` forbids it, the ordering ops bound it (restated so direction
+/// survives) — so a failing `!=` never presents one value as both
+/// actual and expected (#407).
 pub fn describe_comparison(expr: &Expr, ctx: &dyn EvalContext) -> Option<String> {
     let Expr::BinOp { op, lhs, rhs } = expr else {
         return None;
     };
-    if matches!(op, BinOp::And | BinOp::Or) {
-        return None;
-    }
+    let role = match op {
+        BinOp::Eq => "expected",
+        BinOp::Ne => "disallowed",
+        BinOp::Lt => "expected <",
+        BinOp::Le => "expected <=",
+        BinOp::Gt => "expected >",
+        BinOp::Ge => "expected >=",
+        BinOp::And | BinOp::Or => return None,
+    };
     let l = eval_value(lhs, ctx).ok()?;
     let r = eval_value(rhs, ctx).ok()?;
     Some(format!(
-        "actual {}, expected {}",
+        "actual {}, {role} {}",
         display_value(&l),
         display_value(&r)
     ))
@@ -369,7 +377,7 @@ fn nav_path(head: &str, segs: &[String], i: usize) -> String {
 fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
     // The schema parser only allows `(...)` under `$runtime`, so
     // `path.root` is `Runtime` here for any well-parsed input.
-    let helper = match path.segments.as_slice() {
+    let helper_name = match path.segments.as_slice() {
         [name] => name.as_str(),
         _ => {
             return Err(InconclusiveCause::UnknownRuntimeHelper(
@@ -377,9 +385,21 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
             ));
         }
     };
-    match (helper, args.len()) {
-        ("uuid", 0) => Ok(Value::Str(ctx.uuid().to_string())),
-        ("now", 0) => Ok(Value::Int(ctx.now().timestamp_millis())),
+    let Some(helper) = RuntimeHelper::named(helper_name) else {
+        return Err(InconclusiveCause::UnknownRuntimeHelper(
+            helper_name.to_string(),
+        ));
+    };
+    if !helper.arity().accepts(args.len()) {
+        // Schema validation rejects this before a run. Preserve the
+        // evaluator's defense-in-depth cause for callers that bypass it.
+        return Err(InconclusiveCause::UnknownRuntimeHelper(
+            helper_name.to_string(),
+        ));
+    }
+    match helper {
+        RuntimeHelper::Uuid => Ok(Value::Str(ctx.uuid().to_string())),
+        RuntimeHelper::Now => Ok(Value::Int(ctx.now().timestamp_millis())),
         // `exists(value)`: True if the value path resolves, False if any
         // underlying reference is missing — an absent output/setup
         // observation/input/env OR a present base whose nested field/index
@@ -388,7 +408,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         // a password the API must never echo). Anything else (TypeMismatch,
         // NotNavigable into a scalar) propagates as Inconclusive. The
         // closed-enum `Assertion::Exists` shim in the engine emits this call.
-        ("exists", 1) => match eval_value(&args[0], ctx) {
+        RuntimeHelper::Exists => match eval_value(&args[0], ctx) {
             Ok(_) => Ok(Value::Bool(true)),
             Err(
                 InconclusiveCause::MissingObservation { .. }
@@ -403,7 +423,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         // Both args must evaluate to strings; non-string operands
         // surface as Inconclusive(TypeMismatch) the same way the
         // comparison operators do.
-        ("matches", 2) => {
+        RuntimeHelper::Matches => {
             let v = eval_value(&args[0], ctx)?;
             let p = eval_value(&args[1], ctx)?;
             let (s, pat) = match (&v, &p) {
@@ -425,7 +445,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         // `object` / `array` kinds aren't representable in the v1
         // scalar value model and always evaluate to False — there is
         // no scalar value that *is* an object.
-        ("type_check", 2) => {
+        RuntimeHelper::TypeCheck => {
             let v = eval_value(&args[0], ctx)?;
             let kind = match eval_value(&args[1], ctx)? {
                 Value::Str(s) => s,
@@ -444,7 +464,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         // Pure and deterministic — the sanctioned way to compose a value
         // (e.g. a URL from a base + an id) without scripting:
         // `$runtime.format("{}/tasks/{}", $inputs.base, $steps.c.outputs.body.id)`.
-        ("format", n) if n >= 1 => {
+        RuntimeHelper::Format => {
             let fmt = match eval_value(&args[0], ctx)? {
                 Value::Str(s) => s,
                 other => {
@@ -462,7 +482,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         }
         // `concat(args...)`: join the args' string forms. `format`
         // without a template — `$runtime.concat($inputs.base, "/", id)`.
-        ("concat", _) => {
+        RuntimeHelper::Concat => {
             let mut out = String::new();
             for a in args {
                 out.push_str(&scalar_to_string(eval_value(a, ctx)?)?);
@@ -472,7 +492,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         // `len(x)`: element count of a collection or character count of a
         // string — `$runtime.len($steps.api.outputs.body.data) == 3`.
         // Scalars have no length and surface as `TypeMismatch`.
-        ("len", 1) => {
+        RuntimeHelper::Len => {
             let v = eval_value(&args[0], ctx)?;
             let n = match &v {
                 Value::Str(s) => s.chars().count() as i64,
@@ -503,7 +523,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         //   errors.
         //
         // Any other haystack shape (mirrors `len`) is a `TypeMismatch`.
-        ("contains", 2) => match eval_value(&args[0], ctx)? {
+        RuntimeHelper::Contains => match eval_value(&args[0], ctx)? {
             Value::Str(hay) => match eval_value(&args[1], ctx)? {
                 Value::Str(needle) => Ok(Value::Bool(hay.contains(&needle))),
                 other => Err(InconclusiveCause::TypeMismatch {
@@ -527,7 +547,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         // A non-array first arg or a non-string `field` is a
         // `TypeMismatch`; an element that is not an object, or an object
         // missing `field`, is simply not a match (false), not an error.
-        ("any", 3) => {
+        RuntimeHelper::Any => {
             let arr = match eval_value(&args[0], ctx)? {
                 Value::Array(a) => a,
                 other => {
@@ -554,19 +574,19 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
             Ok(Value::Bool(found))
         }
         // Case / whitespace normalization, for robust string comparisons.
-        ("lower", 1) => Ok(Value::Str(
+        RuntimeHelper::Lower => Ok(Value::Str(
             scalar_to_string(eval_value(&args[0], ctx)?)?.to_lowercase(),
         )),
-        ("upper", 1) => Ok(Value::Str(
+        RuntimeHelper::Upper => Ok(Value::Str(
             scalar_to_string(eval_value(&args[0], ctx)?)?.to_uppercase(),
         )),
-        ("trim", 1) => Ok(Value::Str(
+        RuntimeHelper::Trim => Ok(Value::Str(
             scalar_to_string(eval_value(&args[0], ctx)?)?
                 .trim()
                 .to_string(),
         )),
         // `replace(s, from, to)`: literal (non-regex) substring replace.
-        ("replace", 3) => {
+        RuntimeHelper::Replace => {
             let s = scalar_to_string(eval_value(&args[0], ctx)?)?;
             let from = scalar_to_string(eval_value(&args[1], ctx)?)?;
             let to = scalar_to_string(eval_value(&args[2], ctx)?)?;
@@ -576,7 +596,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
         // *missing* reference (absent output / input / env / nested
         // field), else `value`. For optional fields — mirrors `exists`'s
         // missing-cause handling. A genuine type/format error propagates.
-        ("default", 2) => match eval_value(&args[0], ctx) {
+        RuntimeHelper::Default => match eval_value(&args[0], ctx) {
             Ok(v) => Ok(v),
             Err(
                 InconclusiveCause::MissingObservation { .. }
@@ -587,7 +607,6 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
             ) => eval_value(&args[1], ctx),
             Err(c) => Err(c),
         },
-        _ => Err(InconclusiveCause::UnknownRuntimeHelper(helper.to_string())),
     }
 }
 
@@ -839,12 +858,66 @@ mod tests {
         // Numeric operands are unquoted.
         assert_eq!(
             describe("3 >= 10", &ctx).as_deref(),
-            Some("actual 3, expected 10")
+            Some("actual 3, expected >= 10")
         );
         // Non-comparisons (logical compound, helper call) get no operand
         // detail — the expression text already localizes them.
         assert!(describe("true && false", &ctx).is_none());
         assert!(describe("$runtime.exists($inputs.status)", &ctx).is_none());
+    }
+
+    /// #407: the rendered failure text has to say *why* the assertion
+    /// failed, which means it must reflect the operator. The old wording
+    /// printed "actual X, expected X" for a failing `!=` — the same
+    /// value as both what was observed and what was wanted. That bug is
+    /// invisible to a pass/fail test, so assert on the string.
+    #[test]
+    fn describe_comparison_wording_is_operator_aware() {
+        let ctx = TestCtx::new().with_output("adopted", "trigger", Value::Str("resume".into()));
+
+        // The reported regression: `!=` against an equal value. The
+        // operands are identical, so the detail must not label the
+        // right-hand side "expected".
+        let ne = describe("$steps.adopted.outputs.trigger != \"resume\"", &ctx)
+            .expect("comparison detail");
+        assert_eq!(ne, "actual \"resume\", disallowed \"resume\"");
+        assert!(!ne.contains("expected"), "`!=` must not say expected: {ne}");
+
+        // Ordering operators name a bound, and keep its direction.
+        assert_eq!(
+            describe("12 < 10", &ctx).as_deref(),
+            Some("actual 12, expected < 10")
+        );
+        assert_eq!(
+            describe("12 <= 10", &ctx).as_deref(),
+            Some("actual 12, expected <= 10")
+        );
+        assert_eq!(
+            describe("3 > 10", &ctx).as_deref(),
+            Some("actual 3, expected > 10")
+        );
+
+        // `==` keeps the original wording — there the right operand
+        // genuinely is the expected value.
+        assert_eq!(
+            describe("$steps.adopted.outputs.trigger == \"stop\"", &ctx).as_deref(),
+            Some("actual \"resume\", expected \"stop\"")
+        );
+
+        // The invariant, stated directly: no failing comparison renders
+        // the same value as both observed and wanted.
+        for src in [
+            "$steps.adopted.outputs.trigger != \"resume\"",
+            "10 < 10",
+            "10 > 10",
+        ] {
+            let d = describe(src, &ctx).expect("comparison detail");
+            assert!(
+                !d.contains("actual \"resume\", expected \"resume\"")
+                    && !d.contains("actual 10, expected 10"),
+                "self-contradictory detail for `{src}`: {d}"
+            );
+        }
     }
 
     // ---- truth table over literals --------------------------------
@@ -986,6 +1059,29 @@ mod tests {
             run("$runtime.bogus()", &ctx),
             EvalResult::Inconclusive(InconclusiveCause::UnknownRuntimeHelper("bogus".into()))
         );
+    }
+
+    #[test]
+    fn catalog_is_the_evaluator_dispatch_gate() {
+        let ctx = TestCtx::new();
+        for helper in RuntimeHelper::ALL {
+            let count = match helper.arity() {
+                duhem_schema::RuntimeHelperArity::Exact(count)
+                | duhem_schema::RuntimeHelperArity::Minimum(count) => count,
+                duhem_schema::RuntimeHelperArity::Range { min, .. } => min,
+            };
+            let args = vec![r#""x""#; count].join(", ");
+            let expression = format!("$runtime.{}({args})", helper.name());
+            let result = run(&expression, &ctx);
+            assert!(
+                !matches!(
+                    result,
+                    EvalResult::Inconclusive(InconclusiveCause::UnknownRuntimeHelper(_))
+                ),
+                "catalog helper `{}` was not dispatched: {result:?}",
+                helper.name()
+            );
+        }
     }
 
     #[test]
@@ -1322,6 +1418,71 @@ mod tests {
         assert_eq!(
             run(
                 r#"$runtime.format("{}/{}", $inputs.base, $steps.create.outputs.body.data._id) == "http://h/projects/abc123""#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn format_composes_three_variadic_args() {
+        let ctx = TestCtx::new()
+            .with_input("base", Value::Str("http://h".into()))
+            .with_output("create", "id", Value::Str("abc123".into()));
+        assert_eq!(
+            run(
+                r#"$runtime.format("{}/{}/{}", $inputs.base, "projects", $steps.create.outputs.id) == "http://h/projects/abc123""#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn format_repeated_value_requires_repeated_arg() {
+        let ctx = TestCtx::new().with_input("id", Value::Str("abc123".into()));
+        assert_eq!(
+            run(
+                r#"$runtime.format("{}/{}", $inputs.id, $inputs.id) == "abc123/abc123""#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn format_has_no_placeholder_escaping() {
+        // A conventional `{{}}` escape still contains a `{}` placeholder,
+        // so strict arity counts it along with the intended placeholder.
+        let ctx = TestCtx::new();
+        assert!(matches!(
+            run(r#"$runtime.format("{{}}/{}", "value")"#, &ctx),
+            EvalResult::Inconclusive(InconclusiveCause::BadFormat(_))
+        ));
+    }
+
+    #[test]
+    fn format_leftover_braces_are_literal() {
+        // A doubled brace is not an escape: it adds a placeholder and leaves
+        // stray braces, so a literal `{}` has no format-string route.
+        let ctx = TestCtx::new();
+        assert_eq!(
+            run(
+                r#"$runtime.format("{{}}/{}", "first", "second") == "{first}/second""#,
+                &ctx
+            ),
+            EvalResult::True
+        );
+    }
+
+    #[test]
+    fn format_accepts_fmt_from_reference() {
+        let ctx = TestCtx::new()
+            .with_input("url_tpl", Value::Str("https://example.com/items/{}".into()))
+            .with_input("id", Value::Int(7));
+        assert_eq!(
+            run(
+                r#"$runtime.format($inputs.url_tpl, $inputs.id) == "https://example.com/items/7""#,
                 &ctx
             ),
             EvalResult::True

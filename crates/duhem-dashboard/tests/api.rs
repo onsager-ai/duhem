@@ -279,6 +279,54 @@ async fn run_detail_carries_inputs_verdict_and_criteria() {
 }
 
 #[tokio::test]
+async fn run_detail_surfaces_teardown_evidence_without_changing_verdict() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let run_id = "01J0000000000000000000000T";
+    let mut writer = EvidenceWriter::begin(rw, run_id, "teardown.yml", BTreeMap::new())
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::SetupStepStarted {
+            phase: duhem_evidence::StepPhase::Teardown,
+            step_index: 0,
+            uses: "api/call".into(),
+            layer: Some("api".into()),
+            with: BTreeMap::new(),
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::SetupStepFinished {
+            phase: duhem_evidence::StepPhase::Teardown,
+            step_index: 0,
+            outcome: duhem_evidence::StepOutcome::Error,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::SetupFinished {
+            phase: duhem_evidence::StepPhase::Teardown,
+            aborted: true,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::RunFinished {
+            verdict: Some(duhem_evidence::VerdictState::Pass),
+        })
+        .await
+        .unwrap();
+    writer.finish().await.unwrap();
+
+    let (_, json) = get_json(EvidenceReader::new(ro), &format!("/api/runs/{run_id}")).await;
+    assert_eq!(json["verdict"], "pass");
+    assert_eq!(json["setup_aborted"], false);
+    assert_eq!(json["cleanup"][0]["step_index"], 0);
+    assert_eq!(json["cleanup"][0]["uses"], "api/call");
+    assert_eq!(json["cleanup"][0]["outcome"], "error");
+}
+
+#[tokio::test]
 async fn finished_unjudged_run_has_status_without_a_verdict() {
     let (_tmp, rw, ro) = common::open_stores().await;
     let run_id = "01J0000000000000000000000U";

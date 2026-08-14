@@ -225,9 +225,9 @@ enum Cmd {
         /// VDs without a `provision:` block. Spec on issue #50.
         #[arg(long = "no-env-up", default_value_t = false)]
         no_env_up: bool,
-        /// Skip `provision.down:`. Use when an author wants the
-        /// SUT to outlive the run for triage. Has no effect on VDs
-        /// without a `provision:` block. Spec on issue #50.
+        /// Skip leaf `teardown:` and `provision.down:`, leaving the
+        /// world as the run left it for triage. Spec on issues #50
+        /// and #409.
         #[arg(long = "keep-env", default_value_t = false)]
         keep_env: bool,
         /// Browser evidence retention for ui checks: every executed
@@ -514,7 +514,7 @@ mod tests {
     use super::*;
     use crate::resolve::{resolve_inputs, resolve_inputs_with_env, secret_registry};
     use crate::run_cmd::parse_truthy;
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
     use duhem_schema::{InputDecl, VerificationDefinition};
     use std::collections::BTreeMap;
 
@@ -1046,6 +1046,15 @@ mod tests {
             }
             _ => panic!("expected Run"),
         }
+    }
+
+    #[test]
+    fn keep_env_help_describes_both_cleanup_layers() {
+        let command = Cli::command();
+        let run = command.find_subcommand("run").expect("run subcommand");
+        let help = run.clone().render_long_help().to_string();
+        assert!(help.contains("Skip leaf `teardown:` and `provision.down:`"));
+        assert!(help.contains("leaving the world as the run left it"));
     }
 
     // ---- #69: manifest discovery (`-f`/`--file`, optional path) ----

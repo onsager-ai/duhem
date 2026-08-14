@@ -141,7 +141,14 @@ criteria:
   in that check are recorded as skipped. Binding `satisfied` for manual
   composition opts out of both implicit judgment and gating. Use
   `if: always` for teardown and `if: failure` for failure-only
-  diagnostics. Gate state is per check and never affects sibling checks.
+  diagnostics. Both forms still dispatch after a step-level engine error;
+  the original error aborts the run after cleanup drains. Gate state is per
+  check and never affects sibling checks. Retried checks run cleanup once
+  per attempt, so cleanup steps must be idempotent.
+- **`teardown:`** is leaf-scoped action cleanup after all criteria and
+  before `provision.down:`. It runs only after setup dispatched at least
+  one action; failures are evidence only. `--keep-env` skips both cleanup
+  layers and leaves the world as the run left it.
 - **`assertions`** are evaluated deterministically — no model in the
   judging loop. They're also **optional**: a `ui/assert-*` (or `api/poll`)
   step *is* the judgment, so an all-assert check needs no `assertions:`

@@ -8,7 +8,7 @@
 //! re-judged at the view layer.
 
 use chrono::{DateTime, Utc};
-use duhem_evidence::{Event, RunOrigin, RunStatus, VerdictState};
+use duhem_evidence::{Event, RunOrigin, RunStatus, StepOutcome, VerdictState};
 use serde::Serialize;
 
 /// Discriminates runs with recorded children from terminal leaves.
@@ -58,7 +58,17 @@ pub struct RunDetail {
     /// `GET /api/runs/:id/definition`. `false` for runs predating the
     /// snapshot field.
     pub has_definition: bool,
+    /// Teardown failures are shown as evidence and never folded into
+    /// the judge-owned verdict.
+    pub cleanup: Vec<CleanupStepDetail>,
     pub criteria: Vec<CriterionDetail>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CleanupStepDetail {
+    pub step_index: u32,
+    pub uses: String,
+    pub outcome: StepOutcome,
 }
 
 #[derive(Debug, Clone, Serialize)]

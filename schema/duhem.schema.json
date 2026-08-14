@@ -338,10 +338,10 @@
     },
     "Provision": {
       "additionalProperties": false,
-      "description": "Operator-supplied lifecycle hooks for the system-under-test.\n\n`up:` runs once before `setup:`; `down:` (if declared) runs once after the last criterion, regardless of verdict. `ready:` is a readiness probe the runtime polls between `up:` exiting zero and `setup:` starting.",
+      "description": "Operator-supplied lifecycle hooks for the system-under-test.\n\n`up:` runs once before `setup:`; `down:` (if declared) runs once after leaf `teardown:`, regardless of verdict. `ready:` is a readiness probe the runtime polls between `up:` exiting zero and `setup:` starting.",
       "properties": {
         "down": {
-          "description": "Optional path to an executable that tears the SUT down. Runs after the criteria loop regardless of verdict. Teardown failures are evidence, not verdict-altering.",
+          "description": "Optional path to an executable that tears the SUT down. Runs after leaf `teardown:` regardless of verdict. Provision-down failures are evidence, not verdict-altering.",
           "type": [
             "string",
             "null"
@@ -645,7 +645,7 @@
               "type": "null"
             }
           ],
-          "description": "Optional operator-supplied provisioning lifecycle hooks. When present, the runtime forks `provision.up:` before `setup:`, polls `provision.ready:`, and forks `provision.down:` (if declared) after the criteria loop. Absent → no behavior change vs setup-only definitions; the wire shape for `provision:`-less VDs is byte-identical to today."
+          "description": "Optional operator-supplied provisioning lifecycle hooks. When present, the runtime forks `provision.up:` before `setup:`, polls `provision.ready:`, and forks `provision.down:` (if declared) after leaf `teardown:`. Absent → no behavior change vs setup-only definitions; the wire shape for `provision:`-less VDs is byte-identical to today."
         },
         "setup": {
           "description": "Optional setup steps run once before the criteria.",
@@ -660,6 +660,13 @@
             "string",
             "null"
           ]
+        },
+        "teardown": {
+          "description": "Optional cleanup steps run after the criteria and before `provision.down:`. The runtime enters this block only after at least one setup action was dispatched.",
+          "items": {
+            "$ref": "#/definitions/Step"
+          },
+          "type": "array"
         },
         "verification": {
           "description": "Human-readable name of the verification.",

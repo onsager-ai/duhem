@@ -114,9 +114,12 @@ async fn static_page_fixture_passes_end_to_end_and_replays() {
             }
         )
     });
-    let saw_setup_finished_ok = events
-        .iter()
-        .any(|e| matches!(e.payload, EventPayload::SetupFinished { aborted: false }));
+    let saw_setup_finished_ok = events.iter().any(|e| {
+        matches!(
+            e.payload,
+            EventPayload::SetupFinished { aborted: false, .. }
+        )
+    });
     assert!(saw_setup_started, "expected setup_started event");
     assert!(
         saw_setup_step_finished_ok,

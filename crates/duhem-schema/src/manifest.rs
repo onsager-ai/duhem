@@ -844,6 +844,19 @@ verifications:
     }
 
     #[test]
+    fn teardown_is_leaf_scoped_and_rejected_on_a_manifest() {
+        let y = r#"
+manifest_version: 1
+teardown:
+  - uses: cli/invoke
+    with: { command: [sh, -c, "true"] }
+verifications: []
+"#;
+        let error = RootManifest::from_yaml_str(y).unwrap_err();
+        assert!(error.to_string().contains("unknown field `teardown`"));
+    }
+
+    #[test]
     fn load_pattern_b_resolves_explicit_paths() {
         let tmp = tempfile::tempdir().unwrap();
         write(tmp.path(), "a/duhem.yml", LEAF_A);

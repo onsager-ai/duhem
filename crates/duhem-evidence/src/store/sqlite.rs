@@ -320,6 +320,7 @@ impl Store for SqliteStore {
             | EventPayload::SetupStepFinished {
                 step_index,
                 outcome,
+                ..
             } => {
                 // Delivery-web span fold (#192): pair this finish with
                 // the most recent matching `*_step_started`; a span row

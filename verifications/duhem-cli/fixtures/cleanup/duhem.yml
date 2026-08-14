@@ -1,0 +1,64 @@
+# Cleanup that actually runs — worked example for spec #409.
+#
+# The check deliberately raises a runtime unresolved-reference error from
+# an output on a gated step. Its `if: always` step removes per-attempt
+# state, then leaf `teardown:` removes the setup directory. The inner run
+# remains an engine error; AC-15 in the parent duhem-cli self-verification
+# suite mechanically proves both cleanup layers ran.
+
+verification: cleanup that actually runs
+spec_ref: https://github.com/onsager-ai/duhem/issues/409
+
+inputs:
+  cleanup_dir:
+    type: string
+    default: target/duhem-cleanup-example
+
+setup:
+  - id: prepare_directory
+    uses: cli/invoke
+    with:
+      command: [mkdir, -p, $inputs.cleanup_dir]
+  - id: create_attempt_marker
+    uses: cli/invoke
+    with:
+      command:
+        - touch
+        - $runtime.format("{}/attempt-marker", $inputs.cleanup_dir)
+
+teardown:
+  - id: remove_setup_directory
+    uses: cli/invoke
+    with:
+      command: [rmdir, $inputs.cleanup_dir]
+
+criteria:
+  - id: AC-1
+    description: |
+      Cleanup runs after an execution abort and leaves no temporary
+      state behind, while the original abort still prevents the run
+      from being reported as a successful verification.
+    checks:
+      - id: AC-1.1
+        description: |
+          A gated step supplies no output, so the following step raises
+          an engine error. Per-attempt cleanup removes its marker before
+          leaf teardown removes the setup directory.
+        steps:
+          - id: gated_source
+            uses: cli/invoke
+            if: failure
+            with: { command: [sh, -c, "true"] }
+          - id: aborting_reference
+            uses: cli/invoke
+            with:
+              command: [sh, -c, $steps.gated_source.outputs.stdout]
+          - id: remove_attempt_marker
+            uses: cli/invoke
+            if: always
+            with:
+              command:
+                - rm
+                - -f
+                - $runtime.format("{}/attempt-marker", $inputs.cleanup_dir)
+        assertions: ["true"]

@@ -70,6 +70,9 @@ inputs:
   scaffold_dir:
     type: string
     default: target/duhem-cli-regression-scaffold
+  cleanup_dir:
+    type: string
+    default: target/duhem-cleanup-example
 
 criteria:
   - id: AC-1
@@ -770,3 +773,48 @@ criteria:
               value: $steps.resolve_manifest.outputs.stdout
               pattern: '"provenance"'
           - $steps.resolve_manifest.outputs.stderr == ""
+
+  # ==========================================================================
+  # #409 — engine-error draining plus leaf action teardown.
+  # ==========================================================================
+  - id: AC-15
+    description: |
+      Cleanup expressed through the action model runs even when execution
+      aborts, leaves no temporary state behind, and never hides the
+      original engine error.
+    checks:
+      - id: AC-15.1
+        description: |
+          The committed cleanup worked example intentionally aborts after
+          setup. Its nested run exits non-zero with the original unresolved
+          reference, while a real filesystem probe confirms `if: always`
+          and leaf `teardown:` removed all state.
+        steps:
+          - id: run_cleanup_example
+            uses: cli/invoke
+            with:
+              command:
+                - $inputs.duhem_bin
+                - run
+                - verifications/duhem-cli/fixtures/cleanup/duhem.yml
+                - --inputs
+                - $runtime.format("cleanup_dir={}", $inputs.cleanup_dir)
+                - --no-live
+              cwd: $inputs.repo_dir
+              timeout: 30s
+          - id: inspect_cleanup
+            uses: cli/invoke
+            with:
+              command:
+                - sh
+                - -c
+                - 'test ! -e "$1"'
+                - sh
+                - $inputs.cleanup_dir
+              cwd: $inputs.repo_dir
+        assertions:
+          - $steps.run_cleanup_example.outputs.exit_code != 0
+          - matches:
+              value: $steps.run_cleanup_example.outputs.stderr
+              pattern: 'unresolved reference.*gated_source'
+          - $steps.inspect_cleanup.outputs.exit_code == 0

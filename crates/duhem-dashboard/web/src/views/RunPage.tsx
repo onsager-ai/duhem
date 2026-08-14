@@ -190,6 +190,12 @@ function RunSummary({ run }: { run: RunDetail }) {
           artifact.
         </div>
       )}
+      {(run.cleanup ?? []).some((step) => step.outcome !== "ok") && (
+        <div className="border-l-2 border-muted-foreground/50 bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+          Teardown recorded cleanup failures. They are evidence only and did
+          not change this run&apos;s verdict.
+        </div>
+      )}
 
       {/* Checks and criteria use different denominators. Keep both explicit:
           criteria without checks must remain visible instead of disappearing

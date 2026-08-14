@@ -55,6 +55,15 @@ pub(crate) fn validate_authored(definition: &VerificationDefinition) -> Vec<Stri
         }
     }
 
+    for (index, step) in definition.teardown.iter().enumerate() {
+        validate_dispatch(step, &format!("teardown step {index}"), &mut errors);
+        if let Some(name) = &step.call {
+            errors.push(format!(
+                "flow `{name}` is invoked from teardown step {index}; `call:` is only valid in a check"
+            ));
+        }
+    }
+
     for (name, flow) in &definition.flows {
         validate_flow(name, flow, &definition.flows, &mut errors);
     }

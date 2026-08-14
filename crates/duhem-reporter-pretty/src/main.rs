@@ -98,6 +98,16 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
             }
         }
     }
+    if !s.cleanup.is_empty() {
+        writeln!(out)?;
+        writeln!(out, "CLEANUP (evidence only)")?;
+        for failure in &s.cleanup {
+            writeln!(out, "  {}  {}", failure.outcome, failure.step)?;
+            if let Some(detail) = &failure.detail {
+                writeln!(out, "      ({detail})")?;
+            }
+        }
+    }
     writeln!(out, "store: {} (run {})", s.store.display(), s.run_id)?;
     Ok(())
 }
@@ -115,7 +125,9 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use duhem_summary::{CheckFailureSummary, CriterionSummary, FailedAssertionSummary};
+    use duhem_summary::{
+        CheckFailureSummary, CleanupFailureSummary, CriterionSummary, FailedAssertionSummary,
+    };
 
     #[test]
     fn renders_pass_run_to_a_2_column_table() {
@@ -192,5 +204,22 @@ mod tests {
         render(&s, &mut buf).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("The Username field is offered"), "got: {out}");
+    }
+
+    #[test]
+    fn renders_cleanup_as_evidence_without_changing_verdict() {
+        let s = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from(".")).with_cleanup(
+            vec![CleanupFailureSummary {
+                step: "delete-record".into(),
+                outcome: "error".into(),
+                detail: Some("synthetic cleanup error".into()),
+            }],
+        );
+        let mut buf = Vec::new();
+        render(&s, &mut buf).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("run r — pass"), "got: {out}");
+        assert!(out.contains("CLEANUP"), "got: {out}");
+        assert!(out.contains("delete-record"), "got: {out}");
     }
 }

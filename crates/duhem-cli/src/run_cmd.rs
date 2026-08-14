@@ -589,10 +589,15 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             .any(|(name, decl)| !decl.inherit && !inputs.contains_key(name));
         let needs_browser = !has_missing_input
             && def
-                .criteria
+                .setup
                 .iter()
-                .flat_map(|c| &c.checks)
-                .flat_map(|ch| &ch.steps)
+                .chain(
+                    def.criteria
+                        .iter()
+                        .flat_map(|c| &c.checks)
+                        .flat_map(|ch| &ch.steps),
+                )
+                .chain(&def.teardown)
                 .any(|s| duhem_actions::uses_requires_page(s.uses_name()));
 
         // One browser per leaf when needed. Phase-0 leaves run serially
@@ -618,7 +623,8 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         let mut engine = Engine::new()
             .with_definition_path(leaf_path.display().to_string())
             .skip_env_up(no_env_up || suite_managed)
-            .keep_env(keep_env || suite_managed)
+            .keep_env(keep_env)
+            .skip_env_down(suite_managed)
             .with_env(env_whitelist.clone())
             .with_inherited(
                 def.inputs

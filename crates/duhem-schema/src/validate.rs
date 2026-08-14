@@ -190,6 +190,9 @@ pub enum ValidationError {
     #[error("setup: duplicate step id `{id}`")]
     DuplicateSetupStepId { id: String },
 
+    #[error("teardown: duplicate step id `{id}`")]
+    DuplicateTeardownStepId { id: String },
+
     #[error(
         "criterion `{criterion}` / check `{check}`: {site} `{raw}` references undeclared setup step `{step}`"
     )]
@@ -342,6 +345,39 @@ pub fn validate_with_contract_outputs(
                         arity,
                         raw,
                         &format!("setup step `{step_name}` with:"),
+                        &mut errs,
+                    );
+                }
+            });
+        });
+    }
+
+    let mut teardown_ids = HashSet::new();
+    for (idx, step) in v.teardown.iter().enumerate() {
+        let step_name = step_label(step, idx);
+        if let Some(id) = step.id.as_deref()
+            && !teardown_ids.insert(id)
+        {
+            errs.push(ValidationError::DuplicateTeardownStepId { id: id.to_string() });
+        }
+        let contract_outputs = step.uses.as_deref().map(outputs_for).unwrap_or_default();
+        check_secret_paths(step, &contract_outputs, "teardown", &step_name, &mut errs);
+        walk_with_refs(&step.with, &mut |expr, raw| {
+            walk_checkable_paths(expr, &mut |path, arity| {
+                if path.root == PathRoot::Pages {
+                    crate::validate_pages::check_page_path(
+                        &v.pages,
+                        path,
+                        raw,
+                        &format!("teardown step `{step_name}` with:"),
+                        &mut errs,
+                    );
+                } else if path.root == PathRoot::Runtime {
+                    crate::validate_runtime::check_runtime_path(
+                        path,
+                        arity,
+                        raw,
+                        &format!("teardown step `{step_name}` with:"),
                         &mut errs,
                     );
                 }

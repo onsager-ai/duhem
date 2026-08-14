@@ -53,6 +53,23 @@ pub const HEARTBEAT_PERIOD: Duration = Duration::from_secs(10);
 /// This is read-time policy: no `orphaned` fact is persisted.
 pub const ORPHAN_THRESHOLD: Duration = Duration::from_secs(30);
 
+/// Run-level action phase. Setup is the historical/default phase, so
+/// old setup traces remain byte-identical; teardown reuses the same
+/// lifecycle event family with an explicit discriminator.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StepPhase {
+    #[default]
+    Setup,
+    Teardown,
+}
+
+impl StepPhase {
+    pub fn is_setup(&self) -> bool {
+        *self == Self::Setup
+    }
+}
+
 /// Runtime-owned lifecycle, independent of the judge's verdict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -205,9 +222,13 @@ pub enum EventPayload {
         stderr_blob_sha256: Option<String>,
     },
     SetupStarted {
+        #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
+        phase: StepPhase,
         step_count: u32,
     },
     SetupStepStarted {
+        #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
+        phase: StepPhase,
         step_index: u32,
         uses: String,
         /// Delivery-web layer the executed action exercised (#192):
@@ -222,16 +243,22 @@ pub enum EventPayload {
         with: BTreeMap<String, serde_json::Value>,
     },
     SetupStepObservation {
+        #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
+        phase: StepPhase,
         step_index: u32,
         output_name: String,
         #[serde(flatten)]
         value: ObservationValue,
     },
     SetupStepFinished {
+        #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
+        phase: StepPhase,
         step_index: u32,
         outcome: StepOutcome,
     },
     SetupFinished {
+        #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
+        phase: StepPhase,
         aborted: bool,
     },
     StepStarted {
@@ -498,14 +525,19 @@ mod tests {
     #[test]
     fn setup_variants_round_trip() {
         let cases: Vec<EventPayload> = vec![
-            EventPayload::SetupStarted { step_count: 2 },
+            EventPayload::SetupStarted {
+                phase: StepPhase::Setup,
+                step_count: 2,
+            },
             EventPayload::SetupStepStarted {
+                phase: StepPhase::Setup,
                 step_index: 0,
                 uses: "ui/navigate".into(),
                 layer: None,
                 with: BTreeMap::new(),
             },
             EventPayload::SetupStepObservation {
+                phase: StepPhase::Setup,
                 step_index: 0,
                 output_name: "landed_at".into(),
                 value: ObservationValue::Inline {
@@ -513,10 +545,14 @@ mod tests {
                 },
             },
             EventPayload::SetupStepFinished {
+                phase: StepPhase::Setup,
                 step_index: 0,
                 outcome: StepOutcome::Ok,
             },
-            EventPayload::SetupFinished { aborted: false },
+            EventPayload::SetupFinished {
+                phase: StepPhase::Setup,
+                aborted: false,
+            },
         ];
         for payload in cases {
             let evt = Event {
@@ -525,9 +561,26 @@ mod tests {
                 payload,
             };
             let line = serde_json::to_string(&evt).unwrap();
+            assert!(!line.contains("\"phase\""), "setup wire drifted: {line}");
             let back: Event = serde_json::from_str(&line).unwrap();
             assert_eq!(evt, back, "round-trip via {line}");
         }
+    }
+
+    #[test]
+    fn teardown_reuses_setup_step_events_with_a_phase_discriminator() {
+        let event = Event {
+            seq: 1,
+            ts: ts(),
+            payload: EventPayload::SetupStepFinished {
+                phase: StepPhase::Teardown,
+                step_index: 0,
+                outcome: StepOutcome::Error,
+            },
+        };
+        let line = serde_json::to_string(&event).unwrap();
+        assert!(line.contains(r#""phase":"teardown""#), "got: {line}");
+        assert_eq!(serde_json::from_str::<Event>(&line).unwrap(), event);
     }
 
     #[test]
@@ -535,10 +588,23 @@ mod tests {
         // Setup spec on #20: `SetupFinished` fsyncs (same rule as the
         // other `*_finished` events in #10). `is_finished()` is the
         // wire on that policy.
-        assert!(EventPayload::SetupFinished { aborted: false }.is_finished());
-        assert!(EventPayload::SetupFinished { aborted: true }.is_finished());
+        assert!(
+            EventPayload::SetupFinished {
+                phase: StepPhase::Setup,
+                aborted: false
+            }
+            .is_finished()
+        );
+        assert!(
+            EventPayload::SetupFinished {
+                phase: StepPhase::Setup,
+                aborted: true
+            }
+            .is_finished()
+        );
         assert!(
             EventPayload::SetupStepFinished {
+                phase: StepPhase::Setup,
                 step_index: 0,
                 outcome: StepOutcome::Ok,
             }
@@ -546,9 +612,16 @@ mod tests {
         );
         // Setup-side started / observation events are non-finishing,
         // same as their per-check counterparts.
-        assert!(!EventPayload::SetupStarted { step_count: 1 }.is_finished());
+        assert!(
+            !EventPayload::SetupStarted {
+                phase: StepPhase::Setup,
+                step_count: 1
+            }
+            .is_finished()
+        );
         assert!(
             !EventPayload::SetupStepObservation {
+                phase: StepPhase::Setup,
                 step_index: 0,
                 output_name: "n".into(),
                 value: ObservationValue::Inline {

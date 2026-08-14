@@ -138,10 +138,17 @@ impl Engine {
         self
     }
 
-    /// Skip `provision.down:`. Used by the CLI's `--keep-env` flag
-    /// so an author can poke at the SUT after a failing run.
+    /// Skip leaf `teardown:` and `provision.down:`. Used by the CLI's
+    /// `--keep-env` flag to leave the world as the run left it.
     pub fn keep_env(mut self, keep: bool) -> Self {
         self.keep_env = keep;
+        self
+    }
+
+    /// Skip only leaf `provision.down:` because a manifest owns the
+    /// stack. Leaf action teardown remains independent and still runs.
+    pub fn skip_env_down(mut self, skip: bool) -> Self {
+        self.skip_env_down = skip;
         self
     }
 

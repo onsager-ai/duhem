@@ -32,5 +32,6 @@ pub use context::{RunContext, RunState};
 pub use env::{SuiteEnvironment, SuiteRunConfig};
 pub use identity::resolve_scope;
 pub use runner::{
-    CapturedArtifact, CheckFailure, CheckFilter, Engine, EngineError, FailedAssertion, RunOutcome,
+    CapturedArtifact, CheckFailure, CheckFilter, CleanupFailure, Engine, EngineError,
+    FailedAssertion, RunOutcome,
 };

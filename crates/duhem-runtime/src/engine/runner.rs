@@ -11,7 +11,7 @@
 // Track a follow-up to split `Engine`'s run-loop state out of this
 // file rather than raising the budget or exempting it long-term.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,7 +30,8 @@ use duhem_schema::{Check, Criterion, RetryBackoff, RetryPolicy, VerificationDefi
 use tracing::debug;
 
 pub use crate::engine::outcome::{
-    CapturedArtifact, CheckFailure, CheckFilter, EngineError, FailedAssertion, RunOutcome,
+    CapturedArtifact, CheckFailure, CheckFilter, CleanupFailure, EngineError, FailedAssertion,
+    RunOutcome,
 };
 pub(crate) use crate::engine::outcome::{
     StepEvidence, append_implicit_judgment, display_step_label, evaluate_explicit_assertions,
@@ -107,10 +108,12 @@ pub struct Engine {
     /// brought the SUT up already. Teardown still runs unless
     /// [`Engine::keep_env`] is also set.
     skip_env_up: bool,
-    /// Skip `provision.down:` (the `--keep-env` debug flag on
-    /// issue #50). Useful when an author wants the SUT to outlive the
-    /// run for triage.
+    /// Skip leaf `teardown:` and `provision.down:` (the `--keep-env`
+    /// debug flag). Leaves the world exactly as the run left it.
     keep_env: bool,
+    /// Suppress only leaf `provision.down:` when a manifest owns the
+    /// shared stack. Unlike `keep_env`, leaf teardown still runs.
+    skip_env_down: bool,
     /// `$env.<key>` whitelist seed for this run (spec #68). Empty by
     /// default — env access from assertions is opt-in. The CLI seeds
     /// this from the selected named profile's string-valued keys.
@@ -168,6 +171,7 @@ impl Engine {
             child_store_path: None,
             skip_env_up: false,
             keep_env: false,
+            skip_env_down: false,
             env: BTreeMap::new(),
             inherited: std::collections::HashSet::new(),
             default_timeout: None,
@@ -348,7 +352,7 @@ impl Engine {
                         &mut writer,
                         env,
                         vd_dir.as_deref(),
-                        self.keep_env,
+                        self.keep_env || self.skip_env_down,
                         env_should_tear_down,
                     )
                     .await?;
@@ -365,6 +369,7 @@ impl Engine {
                         // to surface.
                         failures: Vec::new(),
                         warnings: Vec::new(),
+                        cleanup: Vec::new(),
                     });
                 }
             }
@@ -372,16 +377,47 @@ impl Engine {
             // Run-level `setup:` runs once before any criterion. Skipped
             // entirely when empty so the wire shape stays byte-identical
             // for setup-free Verification Definitions (issue #20).
+            let mut setup_dispatched = false;
             if !def.setup.is_empty() {
-                let r = crate::engine::setup::run_setup(
+                let setup_result = crate::engine::setup::run_setup_tracking(
                     &mut writer,
                     &self.registry,
                     self.browser.as_ref(),
                     &mut run_state,
                     &def.setup,
                     &self.child_process_env(&run_id),
+                    &mut setup_dispatched,
                 )
-                .await?;
+                .await;
+                let r = match setup_result {
+                    Ok(result) => result,
+                    Err(error) => {
+                        let _ = self
+                            .drain_leaf_teardown(
+                                &mut writer,
+                                &mut run_state,
+                                def,
+                                setup_dispatched,
+                                &run_id,
+                            )
+                            .await;
+                        let down_result = match def.provision.as_ref() {
+                            Some(env) => {
+                                crate::engine::env::tear_environment_down(
+                                    &mut writer,
+                                    env,
+                                    vd_dir.as_deref(),
+                                    self.keep_env || self.skip_env_down,
+                                    env_should_tear_down,
+                                )
+                                .await
+                            }
+                            None => Ok(()),
+                        };
+                        let _ = down_result;
+                        return Err(error);
+                    }
+                };
                 if let Some(reason) = r.aborted {
                     // Preserve the trigger on the verdict: a setup-step
                     // `Timeout` surfaces as `Inconclusive(Timeout)`; an
@@ -392,12 +428,21 @@ impl Engine {
                         state: VerdictState::Inconclusive(reason.cause()),
                         criteria: Vec::new(),
                     };
+                    let cleanup = self
+                        .drain_leaf_teardown(
+                            &mut writer,
+                            &mut run_state,
+                            def,
+                            setup_dispatched,
+                            &run_id,
+                        )
+                        .await;
                     if let Some(env) = def.provision.as_ref() {
                         crate::engine::env::tear_environment_down(
                             &mut writer,
                             env,
                             vd_dir.as_deref(),
-                            self.keep_env,
+                            self.keep_env || self.skip_env_down,
                             env_should_tear_down,
                         )
                         .await?;
@@ -415,6 +460,7 @@ impl Engine {
                         // to surface.
                         failures: Vec::new(),
                         warnings: Vec::new(),
+                        cleanup,
                     });
                 }
             }
@@ -422,36 +468,49 @@ impl Engine {
             let mut criterion_verdicts: Vec<CriterionVerdict> = Vec::new();
             let mut failures: Vec<CheckFailure> = Vec::new();
             let mut warnings: Vec<String> = Vec::new();
-            for criterion in &def.criteria {
-                let cv = self
-                    .run_criterion(
-                        &mut writer,
-                        &run_state,
-                        criterion,
-                        &mut failures,
-                        &mut warnings,
-                    )
-                    .await?;
-                writer
-                    .append(EventPayload::CriterionFinished {
-                        criterion_id: criterion.id.clone(),
-                        verdict: cv.state,
-                    })
-                    .await?;
-                criterion_verdicts.push(cv);
+            let criteria_result: Result<(), EngineError> = async {
+                for criterion in &def.criteria {
+                    let cv = self
+                        .run_criterion(
+                            &mut writer,
+                            &run_state,
+                            criterion,
+                            &mut failures,
+                            &mut warnings,
+                        )
+                        .await?;
+                    writer
+                        .append(EventPayload::CriterionFinished {
+                            criterion_id: criterion.id.clone(),
+                            verdict: cv.state,
+                        })
+                        .await?;
+                    criterion_verdicts.push(cv);
+                }
+                Ok(())
             }
+            .await;
 
-            let run_verdict = aggregate_run(criterion_verdicts);
-            if let Some(env) = def.provision.as_ref() {
+            let cleanup = self
+                .drain_leaf_teardown(&mut writer, &mut run_state, def, setup_dispatched, &run_id)
+                .await;
+
+            let down_result = if let Some(env) = def.provision.as_ref() {
                 crate::engine::env::tear_environment_down(
                     &mut writer,
                     env,
                     vd_dir.as_deref(),
-                    self.keep_env,
+                    self.keep_env || self.skip_env_down,
                     env_should_tear_down,
                 )
-                .await?;
-            }
+                .await
+            } else {
+                Ok(())
+            };
+            criteria_result?;
+            down_result?;
+
+            let run_verdict = aggregate_run(criterion_verdicts);
             writer
                 .append(EventPayload::RunFinished {
                     verdict: Some(run_verdict.state),
@@ -463,6 +522,7 @@ impl Engine {
                 run_id,
                 failures,
                 warnings,
+                cleanup,
             })
         };
 
@@ -497,6 +557,36 @@ impl Engine {
                     signal: signal.to_string(),
                 })
             }
+        }
+    }
+
+    async fn drain_leaf_teardown(
+        &self,
+        writer: &mut EvidenceWriter,
+        run: &mut RunState,
+        def: &VerificationDefinition,
+        setup_dispatched: bool,
+        run_id: &str,
+    ) -> Vec<CleanupFailure> {
+        if self.keep_env || !setup_dispatched || def.teardown.is_empty() {
+            return Vec::new();
+        }
+        match crate::engine::setup::run_teardown(
+            writer,
+            &self.registry,
+            self.browser.as_ref(),
+            run,
+            &def.teardown,
+            &self.child_process_env(run_id),
+        )
+        .await
+        {
+            Ok(failures) => failures,
+            Err(error) => vec![CleanupFailure {
+                step: "teardown evidence".to_string(),
+                outcome: duhem_evidence::StepOutcome::Error,
+                detail: Some(error.to_string()),
+            }],
         }
     }
 
@@ -654,6 +744,8 @@ impl Engine {
         // is more useful when it records what the author wrote, not
         // what the engine got around to invoking.
         let mut failed_by: Option<String> = None;
+        let mut stored_error = None;
+        let mut cleanup_steps = BTreeSet::new();
         let mut targets: Vec<TargetLocator> = Vec::new();
         let mut storyboard = Storyboard::default();
         // Per-step evidence (resolved `with:` + outputs) for implicit
@@ -661,22 +753,28 @@ impl Engine {
         let mut step_evidence = vec![StepEvidence::empty(); check.steps.len()];
         for (idx, step) in check.steps.iter().enumerate() {
             let gate_reason = gate_skip_reason(step.condition, failed_by.as_deref());
+            let cleanup_step = failed_by.is_some() && gate_reason.is_none();
+            if cleanup_step {
+                cleanup_steps.insert(idx);
+            }
             // Resolve template references in `with:` against whatever
             // context available without bifurcating evidence.
             let mut resolved_with = step.with.clone();
             let catalog_reference = page_reference(&step.with);
-            if gate_reason.is_none()
-                && let Err(u) = substitute_with(&mut resolved_with, &ctx)
-            {
-                return Err(EngineError::UnresolvedReference {
-                    reference: u.reference,
-                    context: u
-                        .context
-                        .map(|c| format!(" (evaluating `{c}`)"))
-                        .unwrap_or_default(),
-                    step: step_label(step, idx),
-                });
-            }
+            let step_error = if gate_reason.is_none() {
+                substitute_with(&mut resolved_with, &ctx).err().map(|u| {
+                    EngineError::UnresolvedReference {
+                        reference: u.reference,
+                        context: u
+                            .context
+                            .map(|c| format!(" (evaluating `{c}`)"))
+                            .unwrap_or_default(),
+                        step: step_label(step, idx),
+                    }
+                })
+            } else {
+                None
+            };
             // Manifest `defaults.timeout` (spec #66): fill the step's
             // `timeout:` when it doesn't declare its own. A per-step
             // `timeout:` already in the payload wins; this only fills the
@@ -694,6 +792,7 @@ impl Engine {
             // anything, so recording its
             // locator would be misleading evidence.
             let will_run = gate_reason.is_none()
+                && step_error.is_none()
                 && !environment_failed
                 && self.registry.contains_key(step.uses_name());
             if will_run && let Some(t) = target_from_step(step.uses_name(), &resolved_with) {
@@ -714,15 +813,16 @@ impl Engine {
             // action's contract without a second registry lookup. The
             // invocation itself stays *after* `StepStarted` — see the
             // registration comment below.
-            let dispatcher = if gate_reason.is_some() || !known || environment_failed {
-                None
-            } else {
-                Some(
-                    self.registry
-                        .get(step.uses_name())
-                        .expect("known checked above"),
-                )
-            };
+            let dispatcher =
+                if gate_reason.is_some() || step_error.is_some() || !known || environment_failed {
+                    None
+                } else {
+                    Some(
+                        self.registry
+                            .get(step.uses_name())
+                            .expect("known checked above"),
+                    )
+                };
 
             crate::engine::flow::register_secrets(writer, step, &ctx);
 
@@ -749,6 +849,22 @@ impl Engine {
                     })
                     .await?;
                 step_evidence[idx] = StepEvidence::skipped(reason);
+                continue;
+            }
+
+            if let Some(error) = step_error {
+                writer
+                    .append(EventPayload::StepFinished {
+                        step_index: idx as u32,
+                        outcome: duhem_evidence::StepOutcome::Error,
+                    })
+                    .await?;
+                if !cleanup_step && stored_error.is_none() {
+                    stored_error = Some(error);
+                }
+                if failed_by.is_none() {
+                    failed_by = Some(display_step_label(step, idx));
+                }
                 continue;
             }
 
@@ -858,6 +974,10 @@ impl Engine {
             }
         }
 
+        if let Some(error) = stored_error {
+            return Err(error);
+        }
+
         // Explicit `assertions:` (indices 0..len), then the implicit
         // judgment of judging steps (#253) appended after them. Both
         // paths fold into the same collections and share the
@@ -874,6 +994,7 @@ impl Engine {
             environment_failed,
             browser_missing,
             &step_evidence,
+            &cleanup_steps,
             &mut assertion_outcomes,
             &mut failed,
         )
@@ -889,6 +1010,7 @@ impl Engine {
             any_unknown,
             environment_failed,
             browser_missing,
+            &cleanup_steps,
         );
         append_implicit_judgment(
             writer,
@@ -1172,6 +1294,7 @@ criteria:
             child_store_path: Some(tmp.path().join("duhem.db")),
             skip_env_up: false,
             keep_env: false,
+            skip_env_down: false,
             env: BTreeMap::new(),
             inherited: std::collections::HashSet::new(),
             default_timeout: None,
@@ -1250,6 +1373,285 @@ criteria:
                 } if reference == "$pages.login.missing" && step == "inspect"
             ),
             "got: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn engine_error_drains_always_and_failure_then_aborts_the_run() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/ok", Outcome::Ok)));
+        let always = StubAction::new("fake/always", Outcome::Ok);
+        let always_calls = always.invocations.clone();
+        engine.register_test_action(Box::new(always));
+        let failure = StubAction::new("fake/failure", Outcome::Ok);
+        let failure_calls = failure.invocations.clone();
+        engine.register_test_action(Box::new(failure));
+        let later = StubAction::new("fake/later", Outcome::Ok);
+        let later_calls = later.invocations.clone();
+        engine.register_test_action(Box::new(later));
+        let v = def(r#"
+verification: cleanup
+criteria:
+  - id: AC-1
+    description: cleanup drains
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/ok
+          - id: abort
+            uses: fake/ok
+            with: { value: $steps.never.outputs.value }
+          - uses: fake/always
+            if: always
+          - uses: fake/failure
+            if: failure
+        assertions: ["true"]
+  - id: AC-2
+    description: engine errors still abort the run
+    checks:
+      - id: AC-2.1
+        steps: [{ uses: fake/later }]
+        assertions: ["true"]
+"#);
+        let error = engine.run(&v, BTreeMap::new()).await.unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                EngineError::UnresolvedReference { reference, step, .. }
+                    if reference == "$steps.never.outputs.value" && step == "abort"
+            ),
+            "got: {error}"
+        );
+        assert_eq!(always_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(failure_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(later_calls.load(Ordering::SeqCst), 0);
+
+        let events = read_only_run_events(&engine).await;
+        for index in [2, 3] {
+            assert!(events.iter().any(|event| matches!(
+                &event.payload,
+                EventPayload::StepStarted { step_index, .. } if *step_index == index
+            )));
+            assert!(events.iter().any(|event| matches!(
+                &event.payload,
+                EventPayload::StepFinished {
+                    step_index,
+                    outcome: duhem_evidence::StepOutcome::Ok,
+                } if *step_index == index
+            )));
+        }
+    }
+
+    #[tokio::test]
+    async fn drained_cleanup_judgment_is_evidence_not_verdict() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/error", Outcome::Error)));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/cleanup", Outcome::Ok)
+                .with_output("satisfied", serde_json::json!(false))
+                .judging(),
+        ));
+        let v = def(r#"
+verification: cleanup verdict
+criteria:
+  - id: AC-1
+    description: cleanup cannot fail the artifact
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: failed
+            uses: fake/error
+          - uses: fake/cleanup
+            if: always
+        assertions:
+          - $steps.failed.outputs.value == 1
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation)
+        );
+    }
+
+    #[tokio::test]
+    async fn teardown_runs_on_criteria_engine_error_and_preserves_the_original() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/setup", Outcome::Ok)
+                .with_output("token", serde_json::json!("synthetic-token")),
+        ));
+        engine.register_test_action(Box::new(StubAction::new("fake/check", Outcome::Ok)));
+        engine.register_test_action(Box::new(StubAction::new("fake/teardown", Outcome::Ok)));
+        let v = def(r#"
+verification: teardown after abort
+setup:
+  - id: prepared
+    uses: fake/setup
+teardown:
+  - id: cleanup
+    uses: fake/teardown
+    with: { token: $setup.prepared.outputs.token }
+  - id: cleanup-error
+    uses: fake/teardown
+    with: { value: $setup.never.outputs.value }
+criteria:
+  - id: AC-1
+    description: abort
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: original
+            uses: fake/check
+            with: { value: $steps.never.outputs.value }
+        assertions: ["true"]
+"#);
+        let error = engine.run(&v, BTreeMap::new()).await.unwrap_err();
+        assert!(matches!(
+            &error,
+            EngineError::UnresolvedReference { reference, step, .. }
+                if reference == "$steps.never.outputs.value" && step == "original"
+        ));
+        let events = read_only_run_events(&engine).await;
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            EventPayload::SetupStepFinished {
+                phase: duhem_evidence::StepPhase::Teardown,
+                step_index: 0,
+                outcome: duhem_evidence::StepOutcome::Ok,
+            }
+        )));
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            EventPayload::SetupStepFinished {
+                phase: duhem_evidence::StepPhase::Teardown,
+                step_index: 1,
+                outcome: duhem_evidence::StepOutcome::Error,
+            }
+        )));
+    }
+
+    #[tokio::test]
+    async fn teardown_requires_a_dispatched_setup_action() {
+        let (mut first, _tmp) = engine_for_test().await;
+        first.register_test_action(Box::new(StubAction::new("fake/setup", Outcome::Ok)));
+        let first_cleanup = StubAction::new("fake/cleanup", Outcome::Ok);
+        let first_cleanup_calls = first_cleanup.invocations.clone();
+        first.register_test_action(Box::new(first_cleanup));
+        let no_dispatch = def(r#"
+verification: no setup dispatch
+setup:
+  - id: abort
+    uses: fake/setup
+    with: { value: $setup.never.outputs.value }
+teardown: [{ uses: fake/cleanup }]
+criteria: []
+"#);
+        assert!(first.run(&no_dispatch, BTreeMap::new()).await.is_err());
+        assert_eq!(first_cleanup_calls.load(Ordering::SeqCst), 0);
+
+        let (mut mid, _tmp) = engine_for_test().await;
+        mid.register_test_action(Box::new(StubAction::new("fake/setup", Outcome::Ok)));
+        let mid_cleanup = StubAction::new("fake/cleanup", Outcome::Ok);
+        let mid_cleanup_calls = mid_cleanup.invocations.clone();
+        mid.register_test_action(Box::new(mid_cleanup));
+        let partial = def(r#"
+verification: partial setup
+setup:
+  - uses: fake/setup
+  - id: abort
+    uses: fake/setup
+    with: { value: $setup.never.outputs.value }
+teardown: [{ uses: fake/cleanup }]
+criteria: []
+"#);
+        assert!(mid.run(&partial, BTreeMap::new()).await.is_err());
+        assert_eq!(mid_cleanup_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn teardown_failures_are_reported_without_changing_the_verdict() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/setup", Outcome::Ok)));
+        engine.register_test_action(Box::new(StubAction::new("fake/check", Outcome::Ok)));
+        engine.register_test_action(Box::new(StubAction::new("fake/cleanup", Outcome::Error)));
+        let v = def(r#"
+verification: teardown evidence
+setup: [{ uses: fake/setup }]
+teardown:
+  - id: action-error
+    uses: fake/cleanup
+  - id: engine-error
+    uses: fake/cleanup
+    if: always
+    with: { value: $setup.never.outputs.value }
+criteria:
+  - id: AC-1
+    description: artifact passes
+    checks:
+      - id: AC-1.1
+        steps: [{ uses: fake/check }]
+        assertions: ["true"]
+"#);
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(outcome.verdict.state, VerdictState::Pass);
+        assert_eq!(outcome.cleanup.len(), 2);
+        assert_eq!(outcome.cleanup[0].step, "action-error");
+        assert_eq!(outcome.cleanup[1].step, "engine-error");
+        assert!(
+            outcome.cleanup[1]
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("unresolved reference"))
+        );
+    }
+
+    #[tokio::test]
+    async fn keep_env_skips_leaf_teardown() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (mut engine, tmp) = engine_for_test().await;
+        engine.keep_env = true;
+        engine.register_test_action(Box::new(StubAction::new("fake/setup", Outcome::Ok)));
+        engine.register_test_action(Box::new(StubAction::new("fake/check", Outcome::Ok)));
+        let cleanup = StubAction::new("fake/cleanup", Outcome::Ok);
+        let cleanup_calls = cleanup.invocations.clone();
+        engine.register_test_action(Box::new(cleanup));
+        let up = tmp.path().join("keep-up.sh");
+        let down = tmp.path().join("keep-down.sh");
+        let down_marker = tmp.path().join("down-ran");
+        std::fs::write(&up, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::write(
+            &down,
+            format!("#!/bin/sh\ntouch '{}'\n", down_marker.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&up, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&down, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let v = def(&format!(
+            r#"
+verification: keep world
+provision:
+  up: "{}"
+  down: "{}"
+setup: [{{ uses: fake/setup }}]
+teardown: [{{ uses: fake/cleanup }}]
+criteria:
+  - id: AC-1
+    description: pass
+    checks:
+      - id: AC-1.1
+        steps: [{{ uses: fake/check }}]
+        assertions: ["true"]
+"#,
+            up.display(),
+            down.display()
+        ));
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Pass);
+        assert_eq!(cleanup_calls.load(Ordering::SeqCst), 0);
+        assert!(
+            !down_marker.exists(),
+            "--keep-env must skip provision.down:"
         );
     }
 
@@ -1902,7 +2304,7 @@ criteria:
         let saw_aborted = events.iter().any(|e| {
             matches!(
                 &e.payload,
-                duhem_evidence::EventPayload::SetupFinished { aborted: true }
+                duhem_evidence::EventPayload::SetupFinished { aborted: true, .. }
             )
         });
         assert!(saw_aborted, "expected SetupFinished aborted=true");
@@ -1956,7 +2358,7 @@ criteria:
         let saw_aborted = events.iter().any(|e| {
             matches!(
                 &e.payload,
-                duhem_evidence::EventPayload::SetupFinished { aborted: true }
+                duhem_evidence::EventPayload::SetupFinished { aborted: true, .. }
             )
         });
         assert!(saw_aborted, "expected SetupFinished aborted=true");
@@ -2222,7 +2624,7 @@ criteria:
     }
 
     /// Spec on #50: `provision.up:` exits 0, criteria run normally,
-    /// and `provision.down:` is invoked after the criteria loop.
+    /// leaf `teardown:` and `provision.down:` run after the criteria loop.
     /// Both scripts emit the `Env*` evidence events.
     #[tokio::test]
     async fn env_up_success_runs_criteria_and_invokes_down() {

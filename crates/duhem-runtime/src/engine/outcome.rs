@@ -223,11 +223,13 @@ pub(crate) fn implicit_judgment_outcomes(
     any_unknown: bool,
     environment_failed: bool,
     browser_missing: bool,
+    cleanup_steps: &BTreeSet<usize>,
 ) -> Vec<ImplicitOutcome> {
     check
         .steps
         .iter()
         .enumerate()
+        .filter(|(idx, _)| !cleanup_steps.contains(idx))
         .filter_map(|(idx, step)| {
             implicit_judgment_for_step(
                 step,
@@ -375,6 +377,7 @@ pub(crate) async fn evaluate_explicit_assertions(
     environment_failed: bool,
     browser_missing: bool,
     step_evidence: &[StepEvidence],
+    cleanup_steps: &BTreeSet<usize>,
     assertion_outcomes: &mut Vec<AssertionOutcome>,
     failed: &mut Vec<FailedAssertion>,
 ) -> Result<(), EngineError> {
@@ -431,20 +434,35 @@ pub(crate) async fn evaluate_explicit_assertions(
                 expr: Some(assertion.display()),
             })
             .await?;
-        if !matches!(state, VerdictState::Pass) {
+        let cleanup_assertion = references_cleanup_step(&expr, check, cleanup_steps);
+        if !cleanup_assertion && !matches!(state, VerdictState::Pass) {
             failed.push(FailedAssertion {
                 expr: assertion.display(),
                 state,
                 detail: detail.clone(),
             });
         }
-        assertion_outcomes.push(AssertionOutcome {
-            assertion_index: i,
-            state,
-            detail,
-        });
+        if !cleanup_assertion {
+            assertion_outcomes.push(AssertionOutcome {
+                assertion_index: i,
+                state,
+                detail,
+            });
+        }
     }
     Ok(())
+}
+
+fn references_cleanup_step(
+    expr: &Expr,
+    check: &duhem_schema::Check,
+    cleanup_steps: &BTreeSet<usize>,
+) -> bool {
+    let mut refs = BTreeSet::new();
+    steps_referenced(expr, &mut refs);
+    check.steps.iter().enumerate().any(|(index, step)| {
+        cleanup_steps.contains(&index) && step.id.as_ref().is_some_and(|id| refs.contains(id))
+    })
 }
 
 /// Collect the distinct `$steps.<id>` step ids referenced anywhere in an
@@ -609,6 +627,17 @@ pub struct RunOutcome {
     /// manifest default. Empty unless `warn` softened something. The
     /// reporter surfaces these in the run summary.
     pub warnings: Vec<String>,
+    /// Failures observed while draining leaf `teardown:`. They are
+    /// retained for reporters but never enter verdict aggregation.
+    pub cleanup: Vec<CleanupFailure>,
+}
+
+/// One non-verdict-altering teardown failure.
+#[derive(Debug, Clone)]
+pub struct CleanupFailure {
+    pub step: String,
+    pub outcome: duhem_evidence::StepOutcome,
+    pub detail: Option<String>,
 }
 
 /// One assertion that failed or was inconclusive within a check.
@@ -871,7 +900,15 @@ mod step_label_tests {
             skip_reason: None,
             catalog_reference: None,
         }];
-        let outcomes = implicit_judgment_outcomes(&check, |_| true, &evidence, false, false, false);
+        let outcomes = implicit_judgment_outcomes(
+            &check,
+            |_| true,
+            &evidence,
+            false,
+            false,
+            false,
+            &BTreeSet::new(),
+        );
         assert_eq!(outcomes[0].label, "The Username field is offered");
         assert!(
             outcomes[0]

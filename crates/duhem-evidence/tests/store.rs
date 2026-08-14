@@ -551,7 +551,10 @@ async fn a_finished_run_is_sealed_against_further_events() {
     .unwrap();
 
     let err = w
-        .append(EventPayload::SetupStarted { step_count: 1 })
+        .append(EventPayload::SetupStarted {
+            phase: duhem_evidence::StepPhase::Setup,
+            step_count: 1,
+        })
         .await
         .expect_err("appending after run_finished must fail");
     assert!(
@@ -607,9 +610,12 @@ async fn events_after_supports_live_tailing() {
     w.append(run_started("x.yml", BTreeMap::new()))
         .await
         .unwrap();
-    w.append(EventPayload::SetupStarted { step_count: 1 })
-        .await
-        .unwrap();
+    w.append(EventPayload::SetupStarted {
+        phase: duhem_evidence::StepPhase::Setup,
+        step_count: 1,
+    })
+    .await
+    .unwrap();
 
     let all = store.events_after(RUN_ID, -1).await.unwrap();
     assert_eq!(all.len(), 2);
@@ -1124,6 +1130,7 @@ async fn setup_phase_spans_carry_no_check_id() {
         .await
         .unwrap();
     w.append(EventPayload::SetupStepStarted {
+        phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         uses: "cli/invoke".into(),
         layer: Some("runtime".into()),
@@ -1132,6 +1139,7 @@ async fn setup_phase_spans_carry_no_check_id() {
     .await
     .unwrap();
     w.append(EventPayload::SetupStepFinished {
+        phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         outcome: StepOutcome::Ok,
     })

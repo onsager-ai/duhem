@@ -14,7 +14,8 @@
 //!
 //! Scope: criterion-level verdicts, plus a `failures` list that
 //! carries the *non-passing* checks and their failing assertions so a
-//! reporter can explain a `fail` without querying the evidence store.
+//! reporter can explain a `fail` without querying the evidence store,
+//! and non-verdict-altering leaf-cleanup failures.
 //! The full per-check / per-step event stream still lives in the
 //! store (the evidence is the evidence; the summary carries only what
 //! a verdict line needs to be legible).
@@ -65,6 +66,11 @@ pub struct RunSummary {
     /// addition. Additive — `SCHEMA_VERSION` is unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// Non-verdict-altering failures from leaf `teardown:`. Additive:
+    /// older plugins ignore the field and old summaries deserialize it
+    /// as empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cleanup: Vec<CleanupFailureSummary>,
 }
 
 impl RunSummary {
@@ -98,6 +104,7 @@ impl RunSummary {
             store,
             failures: Vec::new(),
             warnings: Vec::new(),
+            cleanup: Vec::new(),
         }
     }
 
@@ -112,6 +119,20 @@ impl RunSummary {
         self.warnings = warnings;
         self
     }
+
+    pub fn with_cleanup(mut self, cleanup: Vec<CleanupFailureSummary>) -> Self {
+        self.cleanup = cleanup;
+        self
+    }
+}
+
+/// One teardown step that failed without changing the run verdict.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CleanupFailureSummary {
+    pub step: String,
+    pub outcome: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 /// One criterion's verdict slot inside a `RunSummary`.
@@ -252,6 +273,26 @@ mod tests {
             r#"{"schema_version":"2","run_id":"r","verdict":"pass","criteria":[],"store":"."}"#;
         let back: RunSummary = serde_json::from_str(bare).unwrap();
         assert!(back.warnings.is_empty());
+    }
+
+    #[test]
+    fn cleanup_round_trips_and_defaults_empty() {
+        let bare =
+            r#"{"schema_version":"2","run_id":"r","verdict":"pass","criteria":[],"store":"."}"#;
+        let back: RunSummary = serde_json::from_str(bare).unwrap();
+        assert!(back.cleanup.is_empty());
+
+        let s = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from(".")).with_cleanup(
+            vec![CleanupFailureSummary {
+                step: "delete-record".into(),
+                outcome: "error".into(),
+                detail: Some("synthetic cleanup error".into()),
+            }],
+        );
+        let line = serde_json::to_string(&s).unwrap();
+        let back: RunSummary = serde_json::from_str(&line).unwrap();
+        assert_eq!(back, s);
+        assert_eq!(back.verdict, VerdictState::Pass);
     }
 
     #[test]

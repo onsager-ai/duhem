@@ -23,7 +23,8 @@ use duhem_judge::RunSetVerdict;
 use duhem_runtime::CheckFailure;
 use duhem_runtime::RunOutcome;
 use duhem_summary::{
-    CheckFailureSummary, CriterionSummary, FailedAssertionSummary, RunSetSummary, RunSummary,
+    CheckFailureSummary, CleanupFailureSummary, CriterionSummary, FailedAssertionSummary,
+    RunSetSummary, RunSummary,
 };
 
 /// Selectable reporter. Built-ins are tagged variants; plugins carry
@@ -112,6 +113,7 @@ pub fn render(
             writeln!(out, "{}", outcome.verdict.state)?;
             write_failures(out, &outcome.failures)?;
             write_warnings(out, &outcome.warnings)?;
+            write_cleanup(out, &outcome.cleanup)?;
             Ok(())
         }
         Reporter::Quiet => Ok(()),
@@ -266,6 +268,33 @@ fn write_warnings(out: &mut dyn Write, warnings: &[String]) -> Result<(), Render
     Ok(())
 }
 
+fn write_cleanup(
+    out: &mut dyn Write,
+    cleanup: &[duhem_runtime::CleanupFailure],
+) -> Result<(), RenderError> {
+    for failure in cleanup {
+        writeln!(
+            out,
+            "  cleanup: {} ({})",
+            failure.step,
+            cleanup_outcome(&failure.outcome)
+        )?;
+        if let Some(detail) = &failure.detail {
+            writeln!(out, "      ({detail})")?;
+        }
+    }
+    Ok(())
+}
+
+fn cleanup_outcome(outcome: &duhem_evidence::StepOutcome) -> &'static str {
+    match outcome {
+        duhem_evidence::StepOutcome::Ok => "ok",
+        duhem_evidence::StepOutcome::Error => "error",
+        duhem_evidence::StepOutcome::Timeout => "timeout",
+        duhem_evidence::StepOutcome::Skipped { .. } => "skipped",
+    }
+}
+
 fn build_summary(o: &RunOutcome, store_db: &std::path::Path) -> RunSummary {
     let failures = o
         .failures
@@ -299,6 +328,16 @@ fn build_summary(o: &RunOutcome, store_db: &std::path::Path) -> RunSummary {
     )
     .with_failures(failures)
     .with_warnings(o.warnings.clone())
+    .with_cleanup(
+        o.cleanup
+            .iter()
+            .map(|failure| CleanupFailureSummary {
+                step: failure.step.clone(),
+                outcome: cleanup_outcome(&failure.outcome).to_string(),
+                detail: failure.detail.clone(),
+            })
+            .collect(),
+    )
 }
 
 /// Spawn a plugin subprocess, write the `RunSummary` JSON line to its
@@ -448,6 +487,7 @@ mod tests {
             run_id: "01J000000000000000000RUN".into(),
             failures: Vec::new(),
             warnings: Vec::new(),
+            cleanup: Vec::new(),
         }
     }
 
@@ -511,6 +551,26 @@ mod tests {
         );
         let v: serde_json::Value = serde_json::from_str(s.trim()).unwrap();
         assert_eq!(v["verdict"], "inconclusive:missing_observation");
+    }
+
+    #[test]
+    fn reporters_surface_cleanup_without_changing_the_verdict() {
+        let mut o = outcome(VerdictState::Pass);
+        o.cleanup.push(duhem_runtime::CleanupFailure {
+            step: "delete-record".into(),
+            outcome: duhem_evidence::StepOutcome::Error,
+            detail: Some("synthetic cleanup error".into()),
+        });
+
+        let default = capture(&Reporter::Default, &o);
+        assert!(default.starts_with("pass\n"), "got: {default}");
+        assert!(default.contains("cleanup: delete-record (error)"));
+
+        let json = capture(&Reporter::Json, &o);
+        let value: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
+        assert_eq!(value["verdict"], "pass");
+        assert_eq!(value["cleanup"][0]["step"], "delete-record");
+        assert_eq!(value["cleanup"][0]["outcome"], "error");
     }
 
     #[test]

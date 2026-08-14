@@ -4,7 +4,7 @@
 //! implicit before this landed: `duhem run` assumed the SUT was
 //! already up. v1 closes that gap with operator-supplied scripts and
 //! a readiness probe the runtime sequences around `setup:` and the
-//! criteria loop (spec on issue #50). The schema only declares the
+//! criteria and leaf teardown (specs on issues #50 and #409). The schema only declares the
 //! wire shape; the runtime spec owns lifecycle.
 
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// Operator-supplied lifecycle hooks for the system-under-test.
 ///
 /// `up:` runs once before `setup:`; `down:` (if declared) runs once
-/// after the last criterion, regardless of verdict. `ready:` is a
+/// after leaf `teardown:`, regardless of verdict. `ready:` is a
 /// readiness probe the runtime polls between `up:` exiting zero and
 /// `setup:` starting.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -28,7 +28,7 @@ pub struct Provision {
     pub up: PathBuf,
 
     /// Optional path to an executable that tears the SUT down. Runs
-    /// after the criteria loop regardless of verdict. Teardown
+    /// after leaf `teardown:` regardless of verdict. Provision-down
     /// failures are evidence, not verdict-altering.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub down: Option<PathBuf>,

@@ -203,8 +203,11 @@ Authoring rules:
   still participate in a later disjunction. Explicit `assertions:` are
   evaluated after the step sequence and cannot gate steps. Use
   `if: always` for teardown and `if: failure` for diagnostics that
-  should run only after failure. Do not invent expressions under `if:`;
-  its closed vocabulary is `success | always | failure`.
+  should run only after failure. Both still run after a step-level
+  engine error before the original error aborts the run. A retried
+  check runs its cleanup once per attempt, so cleanup steps must be
+  idempotent. Do not invent expressions under `if:`; its closed
+  vocabulary is `success | always | failure`.
 - Use role-based locators (`{ role: "button", name: "…" }`) for `ui/*`
   rather than CSS or XPath — UI churn invalidates the latter while
   role-based selectors track the user-visible affordance.

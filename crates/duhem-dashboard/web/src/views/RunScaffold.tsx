@@ -3,7 +3,7 @@
 // inside Results. The criteria → checks rail is deliberately scoped to
 // Results; Summary and Definition get the full content width.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronRight, FileText, ListChecks, LayoutList } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -16,9 +16,19 @@ import {
   type TraceEvent,
 } from "../api";
 import { foldRun } from "../fold";
-import { groupTimeline, stepStatus } from "../format";
+import { deliveryLayerLabel, groupTimeline, stepStatus } from "../format";
 import { flowOrigin } from "../definition";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  buildSuiteTree,
+  countSuiteStatuses,
+  filterSuiteTree,
+  SUITE_STATUSES,
+  type SuiteCriterionNode,
+  type SuiteStatus,
+} from "../suite-tree";
 import { StatusBadge, VerdictBadge } from "../ui";
 import { DefinitionProvider, useVd } from "./definition-context";
 
@@ -103,17 +113,25 @@ function criterionHref(runId: string, criterionId: string): string {
 // glance (and every check link is in the DOM without interaction).
 function TreeGroup({
   runId,
-  criterion,
+  group,
   activePair,
   activeCriterion,
   activeStep,
 }: {
   runId: string;
-  criterion: RunDetail["criteria"][number];
+  group: SuiteCriterionNode;
   activePair?: string;
   activeCriterion?: string;
   activeStep?: string;
 }) {
+  const criterion = useMemo(
+    () => ({
+      ...group.criterion,
+      checks: group.checks.map((node) => node.check),
+    }),
+    [group.checks, group.criterion],
+  );
+  const { contextOnly } = group;
   const hasChecks = criterion.checks.length > 0;
   const [open, setOpen] = useState(hasChecks);
   const vd = useVd();
@@ -156,7 +174,7 @@ function TreeGroup({
     </>
   );
   return (
-    <div>
+    <div data-filter-context={contextOnly ? "true" : undefined}>
       <div
         className="criterion-tree-parent flex min-w-0 items-start gap-0.5 md:sticky md:top-0 md:z-10 md:bg-background/95 md:backdrop-blur"
         data-testid="criterion-parent"
@@ -249,6 +267,7 @@ function TreeGroup({
                     const stepSearch = new URLSearchParams(search);
                     stepSearch.set("step", key);
                     const status = stepStatus(node);
+                    const layer = deliveryLayerLabel(started.layer);
                     const verdict =
                       status.tone === "ok"
                         ? "pass"
@@ -276,6 +295,15 @@ function TreeGroup({
                         )}
                       >
                         <span className="min-w-0 flex-1 truncate">{label}</span>
+                        {layer && (
+                          <Badge
+                            variant="outline"
+                            className="px-1.5 font-mono text-[0.65rem]"
+                            data-testid="step-layer"
+                          >
+                            {layer}
+                          </Badge>
+                        )}
                         <VerdictBadge verdict={verdict} compact />
                       </Link>
                     );
@@ -304,23 +332,75 @@ function RunTree({
   activeCriterion?: string;
   activeStep?: string;
 }) {
+  const [activeStatuses, setActiveStatuses] = useState<Set<SuiteStatus>>(
+    () => new Set(),
+  );
+  const tree = useMemo(() => buildSuiteTree(run.criteria), [run.criteria]);
+  const counts = useMemo(() => countSuiteStatuses(tree), [tree]);
+  const filtered = useMemo(
+    () => filterSuiteTree(tree, activeStatuses),
+    [activeStatuses, tree],
+  );
+  const toggleStatus = (status: SuiteStatus) => {
+    setActiveStatuses((current) => {
+      const next = new Set(current);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      return next;
+    });
+  };
   return (
-    <nav
-      aria-label="criteria and checks"
-      data-testid="run-tree"
-      className="run-results-nav min-w-0 max-w-full space-y-0.5 overflow-x-hidden py-2 pr-3 supports-[overflow:clip]:overflow-x-clip"
-    >
-      {run.criteria.map((c) => (
-        <TreeGroup
-          key={c.id}
-          runId={run.run_id}
-          criterion={c}
-          activePair={activePair}
-          activeCriterion={activeCriterion}
-          activeStep={activeStep}
-        />
-      ))}
-    </nav>
+    <div className="min-w-0 max-w-full">
+      <div
+        role="group"
+        aria-label="Filter suites by status"
+        data-testid="suite-filter"
+        className="flex flex-wrap gap-1.5 border-b py-2 pr-3"
+      >
+        {SUITE_STATUSES.map((status) => {
+          const active = activeStatuses.has(status);
+          return (
+            <Button
+              key={status}
+              type="button"
+              size="sm"
+              variant={active ? "secondary" : "outline"}
+              className="h-7 rounded-full px-2.5 capitalize"
+              aria-pressed={active}
+              aria-label={`${status}, ${counts[status]} check${counts[status] === 1 ? "" : "s"}`}
+              data-testid={`suite-filter-${status}`}
+              onClick={() => toggleStatus(status)}
+            >
+              {status}
+              <Badge variant={status} className="min-w-5 px-1 tabular-nums">
+                {counts[status]}
+              </Badge>
+            </Button>
+          );
+        })}
+      </div>
+      <nav
+        aria-label="criteria and checks"
+        data-testid="run-tree"
+        className="run-results-nav min-w-0 max-w-full space-y-0.5 overflow-x-hidden py-2 pr-3 supports-[overflow:clip]:overflow-x-clip"
+      >
+        {filtered.map((group) => (
+          <TreeGroup
+            key={group.criterion.id}
+            runId={run.run_id}
+            group={group}
+            activePair={activePair}
+            activeCriterion={activeCriterion}
+            activeStep={activeStep}
+          />
+        ))}
+        {filtered.length === 0 && (
+          <p className="px-2 py-3 text-xs text-muted-foreground">
+            No suite nodes match the selected statuses.
+          </p>
+        )}
+      </nav>
+    </div>
   );
 }
 

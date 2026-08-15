@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] Run reports add a criterion-grouped suites tree with status-count filters and labeled check metadata, including collapsed delivery-web spans; this is a read-side presentation change only, with no schema or evidence-wire change. (#280)
 - [additive] Verification Definitions accept leaf-scoped `teardown:` action steps after criteria and before `provision.down:`; `if: always` / `if: failure` now drain after step engine errors before the original error aborts the run. (#409)
 - [additive] Run traces and the append-only evidence store record nested-run lineage (`parent_run_id` plus `suite` / `invocation` origin), and the dashboard renders that recorded hierarchy instead of grouping unrelated runs by verification basename. (#348)
 - [additive] Verification Definitions accept an optional opaque `metadata:` map that is recorded in run evidence for downstream consumers and never affects verdicts. (#386)

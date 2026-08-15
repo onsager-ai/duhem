@@ -6,9 +6,16 @@
 import { ChevronDown, ChevronRight, Maximize2, Minimize2, X } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { fetchCheck, type ArtifactRef, type CheckDetail, type SpanModel, type TraceEvent } from "../api";
 import { VerdictBadge, formatDuration, isImageArtifact } from "../ui";
-import { compactValue, formatEvent, groupTimeline, parseComparison, stepStatus, summarizeCheck, type TimelineNode } from "../format";
+import { compactValue, deliveryLayerLabel, describeWith, formatEvent, groupTimeline, parseComparison, stepStatus, summarizeCheck, type TimelineNode } from "../format";
 import { EventIcon } from "../components/EventIcon";
 import { RunScaffold } from "./RunScaffold";
 import { useVd } from "./definition-context";
@@ -21,6 +28,51 @@ function checkDurationMs(timeline: TraceEvent[]): number | null {
   const b = Date.parse(timeline[timeline.length - 1].ts);
   if (Number.isNaN(a) || Number.isNaN(b)) return null;
   return b - a;
+}
+
+export function CheckMetadata({ detail }: { detail: CheckDetail }) {
+  const duration = checkDurationMs(detail.timeline);
+  return (
+    <Card
+      className="mb-4 gap-3 rounded-lg py-4 shadow-none"
+      aria-label="Check metadata"
+      data-testid="check-metadata"
+    >
+      <CardHeader className="px-4">
+        <CardTitle className="text-sm">Metadata</CardTitle>
+      </CardHeader>
+      <CardContent className="px-4">
+        <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+          <div>
+            <dt className="text-xs text-muted-foreground">Criterion</dt>
+            <dd className="mt-0.5 break-all font-mono" data-testid="metadata-criterion">
+              {detail.criterion_id}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted-foreground">Check ID</dt>
+            <dd className="mt-0.5 break-all font-mono" data-testid="metadata-check-id">
+              {detail.check_id}
+            </dd>
+          </div>
+          <div className="min-w-0 sm:col-span-2">
+            <dt className="text-xs text-muted-foreground">
+              Delivery-web layer span
+            </dt>
+            <dd className="mt-1 min-w-0" data-testid="metadata-layer-span">
+              <SpanChain spans={detail.spans} showLabel={false} />
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted-foreground">Duration</dt>
+            <dd className="mt-0.5 font-medium tabular-nums" data-testid="metadata-duration">
+              {duration === null ? "—" : formatDuration(duration)}
+            </dd>
+          </div>
+        </dl>
+      </CardContent>
+    </Card>
+  );
 }
 
 // Plain-language "what happened", derived mechanically from the
@@ -444,7 +496,8 @@ function StepGroup({
       ? vd?.flowStepLabel(flow)
       : vd?.stepLabel(cid, chid, node.stepIndex)
   ) ?? `${uses} #${node.stepIndex}`;
-  const detailText = [fe.label, fe.detail].filter(Boolean).join(" · ");
+  const layer = deliveryLayerLabel(started.layer);
+  const detailText = [fe.label, describeWith(started.with)].filter(Boolean).join(" · ");
   const statusObs = scalarObs.find(
     (observation) => observation.name === "status" && typeof observation.value === "number",
   );
@@ -470,6 +523,15 @@ function StepGroup({
               <EventIcon name={status.icon} />
             </span>
             <span className="ev-label">{label}</span>
+            {layer && (
+              <Badge
+                variant="outline"
+                className="mx-1 px-1.5 font-mono text-[0.65rem]"
+                data-testid="step-layer"
+              >
+                {layer}
+              </Badge>
+            )}
             <span className="ev-detail">
               {detailText && (
                 <span className="ev-detail-text" title={detailText}>
@@ -686,11 +748,17 @@ export function Timeline({
 // the check actually crossed, colored by outcome; the first broken
 // layer carries its detail. Empty spans = a pre-tag or untagged run —
 // say "layer unknown", never guess.
-export function SpanChain({ spans }: { spans: SpanModel[] }) {
+export function SpanChain({
+  spans,
+  showLabel = true,
+}: {
+  spans: SpanModel[];
+  showLabel?: boolean;
+}) {
   if (spans.length === 0) {
     return (
       <p className="kv muted" data-testid="spanchain-unknown">
-        delivery web: layer unknown (run predates layer tags or steps are untagged)
+        {showLabel && "delivery web: "}layer unknown (run predates layer tags or steps are untagged)
       </p>
     );
   }
@@ -709,7 +777,7 @@ export function SpanChain({ spans }: { spans: SpanModel[] }) {
   }, []);
   return (
     <div className="spanchain" data-testid="spanchain">
-      <span className="span-label">Delivery web</span>
+      {showLabel && <span className="span-label">Delivery web</span>}
       <span className="span-path">
         {groups.map((s, i) => (
           <span className="span-segment" key={s.seq}>
@@ -720,7 +788,7 @@ export function SpanChain({ spans }: { spans: SpanModel[] }) {
                 s.detail ? ` — ${s.detail}` : ""
               }`}
             >
-              {s.layer}
+              {deliveryLayerLabel(s.layer)}
               {s.count > 1 && <span className="span-count">{s.count} steps</span>}
               {!s.ok && <X className="span-x" aria-hidden="true" />}
             </span>
@@ -1475,18 +1543,6 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
               {critDesc}
             </p>
           )}
-          <p className="kv check-meta" data-testid="check-meta">
-            {(() => {
-              const duration = checkDurationMs(check.timeline);
-              const steps = check.timeline.filter((event) => event.kind === "step_started").length;
-              const layers = new Set(check.spans.map((span) => span.layer)).size;
-              return [
-                duration !== null ? `⏱ ${formatDuration(duration)}` : null,
-                `${steps} step${steps === 1 ? "" : "s"}`,
-                layers > 0 ? `${layers} layer${layers === 1 ? "" : "s"}` : null,
-              ].filter(Boolean).join(" · ");
-            })()}
-          </p>
           <nav className="check-view-tabs" role="tablist" aria-label="Check evidence views">
             <Link
               to={{ search: queryWith(params, { view: undefined }) }}
@@ -1504,9 +1560,9 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
             </Link>
           </nav>
         </div>
+        <CheckMetadata detail={check} />
         {view === "steps" ? (
           <>
-            <SpanChain spans={check.spans} />
             <CheckSummary detail={check} />
             <Timeline
               events={check.timeline}

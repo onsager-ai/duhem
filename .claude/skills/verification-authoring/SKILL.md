@@ -241,6 +241,11 @@ Authoring rules:
   or a deep-extraction alias, not for re-declaring native fields.
 - Timeouts (`timeout:`) are explicit on steps that observe
   something asynchronous.
+- Steps default to `if: success`; use `if: always` for per-attempt
+  cleanup and `if: failure` for failure-only diagnostics. Both still
+  run after a step-level engine error before the original error aborts
+  the run. A retried check runs its cleanup once per attempt, so cleanup
+  steps must be idempotent.
 - Use role-based locators (`{role: "button", name: "..."}`)
   rather than CSS or XPath — UI churn invalidates the latter
   while role-based selectors track the user-visible affordance.

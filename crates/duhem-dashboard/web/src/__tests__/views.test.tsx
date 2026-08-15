@@ -849,7 +849,7 @@ describe("SpanChain (④)", () => {
     expect(chain.textContent).toContain("api");
     // Failure detail stays in the tooltip; the horizontal path remains compact.
     const failNode = chain.querySelector(".span-fail");
-    expect(failNode?.textContent).toContain("data");
+    expect(failNode?.textContent).toContain("db");
     expect(failNode?.getAttribute("title")).toContain("timeout");
   });
 
@@ -868,6 +868,19 @@ describe("SpanChain (④)", () => {
     expect(chain.querySelectorAll(".span-node")).toHaveLength(1);
     expect(chain.textContent).toContain("12 steps");
     expect(chain.querySelector(".span-node")?.className).toContain("span-fail");
+  });
+
+  it("keeps non-adjacent visits to the same layer as separate nodes", () => {
+    render(
+      <SpanChain
+        spans={[
+          { seq: 1, layer: "ui", ok: true },
+          { seq: 2, layer: "api", ok: true },
+          { seq: 3, layer: "ui", ok: true },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("spanchain").querySelectorAll(".span-node")).toHaveLength(3);
   });
 
   it("says layer unknown for a pre-tag run instead of guessing", () => {

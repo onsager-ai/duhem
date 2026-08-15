@@ -59,6 +59,7 @@ const CHECK = {
       check_id: "AC-5.1",
       step_index: 0,
       uses: "ui/navigate",
+      layer: "ui",
     },
     {
       seq: 2,
@@ -178,6 +179,36 @@ describe("run report tree", () => {
     ).toBe(true);
   });
 
+  it("shows status-check counts and filters the tree by multiple active chips", async () => {
+    stub();
+    renderAt("/run/R1/results");
+    const tree = await screen.findByTestId("run-tree");
+    const pass = screen.getByTestId("suite-filter-pass");
+    const fail = screen.getByTestId("suite-filter-fail");
+    const inconclusive = screen.getByTestId("suite-filter-inconclusive");
+
+    expect(pass.textContent).toContain("2");
+    expect(fail.textContent).toContain("1");
+    expect(inconclusive.textContent).toContain("1");
+
+    fireEvent.click(fail);
+    expect(fail.getAttribute("aria-pressed")).toBe("true");
+    expect(within(tree).getByRole("link", { name: "AC-5.1" })).toBeTruthy();
+    expect(within(tree).queryByRole("link", { name: "AC-5.2" })).toBeNull();
+    expect(within(tree).queryByRole("link", { name: "AC-7.1" })).toBeNull();
+
+    fireEvent.click(inconclusive);
+    expect(inconclusive.getAttribute("aria-pressed")).toBe("true");
+    expect(within(tree).getByRole("link", { name: "AC-7.1" })).toBeTruthy();
+    expect(within(tree).queryByRole("link", { name: "AC-6.1" })).toBeNull();
+
+    fireEvent.click(fail);
+    fireEvent.click(pass);
+    expect(within(tree).getByRole("link", { name: "AC-5.2" })).toBeTruthy();
+    expect(within(tree).getByRole("link", { name: "AC-6.1" })).toBeTruthy();
+    expect(within(tree).queryByRole("link", { name: "AC-5.1" })).toBeNull();
+  });
+
   it("gives Summary and Definition full width without the Results tree", async () => {
     stub();
     const summary = renderAt("/run/R1");
@@ -220,11 +251,39 @@ describe("run report tree", () => {
     });
     renderAt("/run/R1/results");
     const tree = await screen.findByTestId("run-tree");
+    expect(screen.getByTestId("suite-filter-inconclusive").textContent).toContain("1");
+    fireEvent.click(screen.getByTestId("suite-filter-inconclusive"));
     const criterion = within(tree).getByRole("link", { name: /AC-8/ });
     fireEvent.click(criterion);
     const detail = await screen.findByTestId("criterion-detail");
     expect(detail.textContent).toContain("No checks were recorded");
     expect(detail.textContent).toContain("empty aggregation");
+  });
+
+  it("renders labeled check metadata and a collapsed delivery-web span", async () => {
+    stub(RUN, {
+      ...CHECK,
+      spans: [
+        { seq: 1, layer: "ui", ok: true },
+        { seq: 2, layer: "ui", ok: true },
+        { seq: 3, layer: "api", ok: true },
+        { seq: 4, layer: "data", ok: false, detail: "query failed" },
+        { seq: 5, layer: "data", ok: true },
+        { seq: 6, layer: "runtime", ok: true },
+      ],
+    });
+    renderAt("/run/R1/check/AC-5%3A%3AAC-5.1");
+
+    const metadata = await screen.findByTestId("check-metadata");
+    expect(within(metadata).getByTestId("metadata-criterion").textContent).toBe("AC-5");
+    expect(within(metadata).getByTestId("metadata-check-id").textContent).toBe("AC-5.1");
+    expect(within(metadata).getByTestId("metadata-duration").textContent).toBe("20ms");
+    const span = within(metadata).getByTestId("metadata-layer-span");
+    expect(span.querySelectorAll(".span-node")).toHaveLength(4);
+    expect(span.textContent).toContain("ui2 steps");
+    expect(span.textContent).toContain("api");
+    expect(span.textContent).toContain("db2 steps");
+    expect(span.textContent).toContain("runtime");
   });
 
   it("totals the run's checks by verdict family in the summary tiles", async () => {
@@ -312,6 +371,9 @@ describe("run report tree", () => {
     const step = within(tree).getByRole("link", { name: "open-page" });
     expect(step.getAttribute("aria-current")).toBe("step");
     expect(step.textContent).toContain("fail");
+    expect(
+      screen.getAllByTestId("step-layer").some((badge) => badge.textContent === "ui"),
+    ).toBe(true);
   });
 
   it("renders a video-relative step timeline that seeks and selects markers", async () => {

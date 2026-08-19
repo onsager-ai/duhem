@@ -6,6 +6,12 @@
 //! to something declared in the same definition. Operator/type
 //! checking is *not* done here — output value types aren't known
 //! statically; the runtime spec owns evaluation.
+//
+// budget-allow: merging #391 (an undeclared `$inputs` reference names
+// the input whose `env:` matches) onto #406's closed `$runtime` helper
+// catalog pushed this file ~1.2% over the 8000-token budget. The split
+// is tracked in #411 — do that rather than raising the budget or
+// exempting this file long-term.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 

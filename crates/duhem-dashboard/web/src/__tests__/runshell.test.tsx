@@ -188,6 +188,7 @@ describe("run report tree", () => {
     const inconclusive = screen.getByTestId("suite-filter-inconclusive");
     const rail = tree.closest(".run-results-rail");
 
+    expect(rail).toBe(tree);
     expect(rail?.className).toContain("md:overflow-y-auto");
     expect(rail?.contains(pass)).toBe(false);
     expect(tree.className).toContain("pb-6");
@@ -368,16 +369,27 @@ describe("run report tree", () => {
   });
 
   it("stacks step headers below check context without clipping timestamps", async () => {
+    let resize: ResizeObserverCallback | undefined;
+    const observeContext = vi.fn();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) {
+        resize = callback;
+      }
+      observe = observeContext;
+      disconnect = vi.fn();
+    });
     stub();
     const { container } = renderAt("/run/R1/check/AC-5%3A%3AAC-5.1");
     await waitFor(() => expect(container.querySelector(".step-summary")).toBeTruthy());
+    const surface = container.querySelector(".run-detail-surface") as HTMLElement;
     const context = container.querySelector(".check-context") as HTMLElement;
     const summary = container.querySelector(".step-summary") as HTMLElement;
-    const contextTop = context.className.split(" ").find((name) => name.startsWith("md:top-"));
-    const summaryTop = summary.className.split(" ").find((name) => name.startsWith("md:top-"));
+    Object.defineProperty(context, "offsetHeight", { configurable: true, value: 218 });
+    resize?.([], {} as ResizeObserver);
 
-    expect(contextTop).toBe("md:top-0");
-    expect(summaryTop).not.toBe(contextTop);
+    expect(observeContext).toHaveBeenCalledWith(context);
+    expect(surface.style.getPropertyValue("--check-context-height")).toBe("218px");
+    expect(summary.className).toContain("md:top-[var(--check-context-height)]");
     expect(context.className).toContain("md:z-20");
     expect(summary.className).toContain("md:z-10");
     expect(summary.querySelector(".ev-time")?.className).toContain("min-w-max");

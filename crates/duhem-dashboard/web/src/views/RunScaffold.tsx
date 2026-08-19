@@ -350,7 +350,7 @@ function RunTree({
     });
   };
   return (
-    <div className="min-w-0 max-w-full">
+    <div className="min-w-0 max-w-full md:flex md:min-h-0 md:flex-1 md:flex-col">
       <div
         role="group"
         aria-label="Filter suites by status"
@@ -379,27 +379,29 @@ function RunTree({
           );
         })}
       </div>
-      <nav
-        aria-label="criteria and checks"
-        data-testid="run-tree"
-        className="run-results-nav min-w-0 max-w-full space-y-0.5 overflow-x-hidden py-2 pr-3 supports-[overflow:clip]:overflow-x-clip"
-      >
-        {filtered.map((group) => (
-          <TreeGroup
-            key={group.criterion.id}
-            runId={run.run_id}
-            group={group}
-            activePair={activePair}
-            activeCriterion={activeCriterion}
-            activeStep={activeStep}
-          />
-        ))}
-        {filtered.length === 0 && (
-          <p className="px-2 py-3 text-xs text-muted-foreground">
-            No suite nodes match the selected statuses.
-          </p>
-        )}
-      </nav>
+      <div className="run-results-rail min-w-0 max-w-full md:min-h-0 md:flex-1 md:overflow-y-auto">
+        <nav
+          aria-label="criteria and checks"
+          data-testid="run-tree"
+          className="run-results-nav min-w-0 max-w-full space-y-0.5 overflow-x-hidden pb-6 pt-2 pr-3 supports-[overflow:clip]:overflow-x-clip"
+        >
+          {filtered.map((group) => (
+            <TreeGroup
+              key={group.criterion.id}
+              runId={run.run_id}
+              group={group}
+              activePair={activePair}
+              activeCriterion={activeCriterion}
+              activeStep={activeStep}
+            />
+          ))}
+          {filtered.length === 0 && (
+            <p className="px-2 py-3 text-xs text-muted-foreground">
+              No suite nodes match the selected statuses.
+            </p>
+          )}
+        </nav>
+      </div>
     </div>
   );
 }
@@ -535,7 +537,7 @@ export function RunScaffold({
             </p>
           ) : (
           <div className="run-results-grid grid min-w-0 max-w-full md:grid-cols-[17rem_minmax(0,1fr)]">
-            <aside className="run-results-rail min-w-0 max-w-full border-b md:max-h-[calc(100vh-10.5rem)] md:overflow-y-auto md:border-b-0 md:border-r">
+            <aside className="min-w-0 max-w-full border-b md:flex md:max-h-[calc(100vh-10.5rem)] md:min-h-0 md:flex-col md:border-b-0 md:border-r">
               <RunTree
                 run={run}
                 activePair={activePair}

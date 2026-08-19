@@ -186,6 +186,11 @@ describe("run report tree", () => {
     const pass = screen.getByTestId("suite-filter-pass");
     const fail = screen.getByTestId("suite-filter-fail");
     const inconclusive = screen.getByTestId("suite-filter-inconclusive");
+    const rail = tree.closest(".run-results-rail");
+
+    expect(rail?.className).toContain("md:overflow-y-auto");
+    expect(rail?.contains(pass)).toBe(false);
+    expect(tree.className).toContain("pb-6");
 
     expect(pass.textContent).toContain("2");
     expect(fail.textContent).toContain("1");
@@ -360,6 +365,22 @@ describe("run report tree", () => {
     expect(
       within(tree).getByRole("link", { name: "AC-5.2" }).getAttribute("aria-current"),
     ).toBeNull();
+  });
+
+  it("stacks step headers below check context without clipping timestamps", async () => {
+    stub();
+    const { container } = renderAt("/run/R1/check/AC-5%3A%3AAC-5.1");
+    await waitFor(() => expect(container.querySelector(".step-summary")).toBeTruthy());
+    const context = container.querySelector(".check-context") as HTMLElement;
+    const summary = container.querySelector(".step-summary") as HTMLElement;
+    const contextTop = context.className.split(" ").find((name) => name.startsWith("md:top-"));
+    const summaryTop = summary.className.split(" ").find((name) => name.startsWith("md:top-"));
+
+    expect(contextTop).toBe("md:top-0");
+    expect(summaryTop).not.toBe(contextTop);
+    expect(context.className).toContain("md:z-20");
+    expect(summary.className).toContain("md:z-10");
+    expect(summary.querySelector(".ev-time")?.className).toContain("min-w-max");
   });
 
   it("expands only the active check into status-propagated step links", async () => {

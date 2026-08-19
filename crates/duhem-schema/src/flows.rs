@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::assertion::Assertion;
 use crate::includes::MAX_INCLUDE_DEPTH;
+use crate::source::StepSourceOrigin;
 use crate::step::{ExpandedFlowOrigin, Step};
 use crate::verification::{Flow, FlowCatalog, InputDecl, InputType, VerificationDefinition};
 
@@ -22,8 +23,8 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
     }
 
     let catalog = definition.flows.clone();
-    for criterion in &mut definition.criteria {
-        for check in &mut criterion.checks {
+    for (criterion_index, criterion) in definition.criteria.iter_mut().enumerate() {
+        for (check_index, check) in criterion.checks.iter_mut().enumerate() {
             let authored = std::mem::take(&mut check.steps);
             let mut counter = 0usize;
             let expanded = expand_sequence(authored, &catalog, "", None, None, &[], &mut counter);
@@ -35,6 +36,11 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
             if let Some(session) = &mut check.session {
                 *session = rewrite_string(session, &expanded.projections);
             }
+            definition.source_map.record_expanded_step_origins(
+                criterion_index,
+                check_index,
+                expanded.origins,
+            );
         }
     }
     Ok(())
@@ -340,6 +346,7 @@ fn validate_flow_graph(catalog: &FlowCatalog, errors: &mut Vec<String>) {
 #[derive(Default)]
 struct Expansion {
     steps: Vec<Step>,
+    origins: Vec<StepSourceOrigin>,
     projections: BTreeMap<String, String>,
 }
 
@@ -370,6 +377,15 @@ fn expand_sequence(
             }
             step.flow_secrets = inherited_secrets.to_vec();
             result.steps.push(step);
+            result.origins.push(match current_flow {
+                Some(name) => StepSourceOrigin::FlowDefinition {
+                    name: name.to_string(),
+                    step_index: inner_index,
+                },
+                None => StepSourceOrigin::AuthoredCheck {
+                    step_index: inner_index,
+                },
+            });
             continue;
         }
 
@@ -434,6 +450,7 @@ fn expand_sequence(
             }
         }
         result.steps.append(&mut expanded.steps);
+        result.origins.append(&mut expanded.origins);
     }
     result
 }

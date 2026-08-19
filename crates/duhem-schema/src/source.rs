@@ -42,6 +42,13 @@ struct SourceNode {
     scalar: Option<String>,
 }
 
+/// Stable authored coordinate for a step after flow expansion.
+#[derive(Debug, Clone)]
+pub(crate) enum StepSourceOrigin {
+    AuthoredCheck { step_index: usize },
+    FlowDefinition { name: String, step_index: usize },
+}
+
 /// Exact YAML-node marks keyed by their structural path.
 ///
 /// This is public only because `VerificationDefinition` is publicly
@@ -52,6 +59,7 @@ struct SourceNode {
 #[derive(Debug, Clone, Default)]
 pub struct SourceMap {
     nodes: BTreeMap<Vec<SourcePathSegment>, SourceNode>,
+    expanded_step_origins: BTreeMap<(usize, usize, usize), StepSourceOrigin>,
 }
 
 // Source provenance is not part of a Verification Definition's semantic
@@ -122,20 +130,27 @@ impl SourceMap {
         self.scalar_location(&check_path(criterion_index, check_index, field), expected)
     }
 
+    pub(crate) fn record_expanded_step_origins(
+        &mut self,
+        criterion_index: usize,
+        check_index: usize,
+        origins: Vec<StepSourceOrigin>,
+    ) {
+        for (expanded_index, origin) in origins.into_iter().enumerate() {
+            self.expanded_step_origins
+                .insert((criterion_index, check_index, expanded_index), origin);
+        }
+    }
+
     pub(crate) fn step_with_location(
         &self,
         step: &Step,
+        criterion_index: usize,
+        check_index: usize,
         step_index: usize,
         value_path: &[SourcePathSegment],
         raw: &str,
     ) -> Option<SourceLocation> {
-        // Expanded flow steps do not occupy the invocation's source path.
-        // Their coordinate requires expansion provenance, so fall back rather
-        // than borrowing the invocation's mark.
-        if step.flow.is_some() {
-            return None;
-        }
-
         let steps_index = value_path
             .iter()
             .position(|segment| matches!(segment, SourcePathSegment::Key(key) if key == "steps"))?;
@@ -149,7 +164,37 @@ impl SourceMap {
             identity_path.last(),
             Some(&SourcePathSegment::index(step_index))
         );
-        let (field, expected) = if let Some(id) = step.id.as_deref() {
+        let mut authored_value_path = value_path.to_vec();
+        let flow_definition =
+            match self
+                .expanded_step_origins
+                .get(&(criterion_index, check_index, step_index))
+            {
+                Some(StepSourceOrigin::AuthoredCheck { step_index }) => {
+                    *identity_path.last_mut()? = SourcePathSegment::index(*step_index);
+                    authored_value_path[steps_index + 1] = SourcePathSegment::index(*step_index);
+                    false
+                }
+                Some(StepSourceOrigin::FlowDefinition { name, step_index }) => {
+                    identity_path = vec![
+                        SourcePathSegment::key("flows"),
+                        SourcePathSegment::key(name),
+                        SourcePathSegment::key("steps"),
+                        SourcePathSegment::index(*step_index),
+                    ];
+                    authored_value_path = identity_path.clone();
+                    authored_value_path.extend_from_slice(&value_path[with_index..]);
+                    true
+                }
+                None if step.flow.is_some() => return None,
+                None => false,
+            };
+        let (field, expected) = if flow_definition {
+            // Expanded ids are namespaced at each invocation, while `uses:`
+            // remains byte-identical to the flow definition. The stable path
+            // plus scalar equality proves the definition-site identity.
+            ("uses", step.uses.as_deref()?)
+        } else if let Some(id) = step.id.as_deref() {
             ("id", id)
         } else if let Some(uses) = step.uses.as_deref() {
             ("uses", uses)
@@ -158,7 +203,7 @@ impl SourceMap {
         };
         identity_path.push(SourcePathSegment::key(field));
         self.scalar_location(&identity_path, expected)?;
-        self.scalar_location(value_path, raw)
+        self.scalar_location(&authored_value_path, raw)
     }
 
     pub(crate) fn assertion_location(

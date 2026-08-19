@@ -833,7 +833,9 @@ fn validate_check(
         source_path.push(SourcePathSegment::key("with"));
         crate::source::walk_with_refs(&s.with, &mut source_path, &mut |expr, raw, path| {
             let location = source_context_matches
-                .then(|| source_map.step_with_location(s, idx, path, raw))
+                .then(|| {
+                    source_map.step_with_location(s, criterion_index, check_index, idx, path, raw)
+                })
                 .flatten();
             walk_checkable_paths(expr, &mut |p, arity| {
                 check_path(&scope, p, arity, raw, &site, location, errs);

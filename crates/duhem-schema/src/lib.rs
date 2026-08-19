@@ -22,6 +22,7 @@ pub mod provision;
 mod source;
 pub mod step;
 pub mod validate;
+mod validate_error;
 mod validate_pages;
 mod validate_runtime;
 pub mod verification;

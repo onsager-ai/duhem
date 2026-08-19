@@ -101,6 +101,25 @@ fn render(s: &RunSummary) -> String {
             }
         }
     }
+    if !s.cleanup.is_empty() {
+        let detail = s
+            .cleanup
+            .iter()
+            .map(|failure| {
+                let suffix = failure
+                    .detail
+                    .as_deref()
+                    .map(|detail| format!(": {detail}"))
+                    .unwrap_or_default();
+                format!("{} {}{}", failure.outcome, failure.step, suffix)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        out.push_str(&format!(
+            "  <system-err>{}</system-err>\n",
+            xml_escape(&detail)
+        ));
+    }
     out.push_str("</testsuite>\n");
     out
 }
@@ -118,7 +137,7 @@ mod tests {
     use std::path::PathBuf;
 
     use duhem_judge::InconclusiveCause;
-    use duhem_summary::CriterionSummary;
+    use duhem_summary::{CleanupFailureSummary, CriterionSummary};
 
     #[test]
     fn pass_run_produces_empty_testcase_per_criterion() {
@@ -188,5 +207,20 @@ mod tests {
         let xml = render(&s);
         assert!(xml.contains("&lt;AC&amp;1&gt;"), "{xml}");
         assert!(!xml.contains("<AC&1>"), "raw should not appear: {xml}");
+    }
+
+    #[test]
+    fn cleanup_is_system_error_evidence_not_a_test_failure() {
+        let s = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from(".")).with_cleanup(
+            vec![CleanupFailureSummary {
+                step: "delete-record".into(),
+                outcome: "error".into(),
+                detail: Some("synthetic cleanup error".into()),
+            }],
+        );
+        let xml = render(&s);
+        assert!(xml.contains("failures=\"0\""), "{xml}");
+        assert!(xml.contains("<system-err>"), "{xml}");
+        assert!(xml.contains("delete-record"), "{xml}");
     }
 }

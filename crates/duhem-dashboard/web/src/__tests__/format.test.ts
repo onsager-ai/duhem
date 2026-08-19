@@ -20,6 +20,13 @@ const ev = (kind: string, extra: Record<string, unknown> = {}, seq = 1): TraceEv
 });
 
 describe("formatEvent", () => {
+  it("presents the recorded data layer as the db delivery-web tag", () => {
+    const f = formatEvent(
+      ev("step_started", { uses: "db/query", layer: "data", with: {} }),
+    );
+    expect(f.detail).toBe("db");
+  });
+
   it("renders a navigate step as a verb + url, muted", () => {
     const f = formatEvent(ev("step_started", { uses: "ui/navigate", layer: "ui", with: { url: "http://x/" } }));
     expect(f.icon).toBe("action");

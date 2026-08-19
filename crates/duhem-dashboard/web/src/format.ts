@@ -95,6 +95,14 @@ export function compactValue(v: unknown): string {
   return String(v);
 }
 
+// The evidence wire historically records the database family as `data`.
+// Keep that wire stable while presenting the product vocabulary used by the
+// dashboard and authoring surface: ui / api / db / runtime.
+export function deliveryLayerLabel(layer: unknown): string | null {
+  if (typeof layer !== "string" || layer.length === 0) return null;
+  return layer === "data" ? "db" : layer;
+}
+
 /** A role/name/text/css locator as `role=button, text "Go"`. */
 function describeLocator(loc: Record<string, unknown>): string {
   const parts: string[] = [];
@@ -214,7 +222,7 @@ export function formatEvent(
     case "step_started":
     case "setup_step_started": {
       const uses = str(evt.uses) ?? "step";
-      const layer = str(evt.layer);
+      const layer = deliveryLayerLabel(evt.layer);
       const args = describeWith(evt.with);
       const detail = [layer, args].filter(Boolean).join(" · ");
       return { ...base, icon: "action", label: actionVerb(uses), detail, tone: "muted" };

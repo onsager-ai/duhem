@@ -6,11 +6,12 @@
 //! to something declared in the same definition. Operator/type
 //! checking is *not* done here — output value types aren't known
 //! statically; the runtime spec owns evaluation.
-
-// budget-allow: merging #401 (source-location threading) with #406
-// ($runtime helper catalog validation) landed both in this file at
-// once, pushing it slightly over budget; split tracked separately
-// rather than done opportunistically in a merge-conflict resolution.
+//
+// budget-allow: merging #391 (an undeclared `$inputs` reference names
+// the input whose `env:` matches) onto #406's closed `$runtime` helper
+// catalog pushed this file ~1.2% over the 8000-token budget. The split
+// is tracked in #411 — do that rather than raising the budget or
+// exempting this file long-term.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -117,7 +118,7 @@ pub enum ValidationError {
     },
 
     #[error(
-        "criterion `{criterion}` / check `{check}`: {site} `{raw}` references undeclared input `{input}`"
+        "criterion `{criterion}` / check `{check}`: {site} `{raw}` references undeclared input `{input}`{help}"
     )]
     UnresolvedInputRef {
         criterion: String,
@@ -125,6 +126,7 @@ pub enum ValidationError {
         input: String,
         raw: String,
         site: RefSite,
+        help: String,
         location: Option<SourceLocation>,
     },
 
@@ -143,7 +145,6 @@ pub enum ValidationError {
         raw: String,
         helper: String,
         help: String,
-        location: Option<SourceLocation>,
     },
 
     #[error("{site} `{raw}` references `$runtime.{helper}` without calling it; use `{call_form}`")]
@@ -152,7 +153,6 @@ pub enum ValidationError {
         raw: String,
         helper: String,
         call_form: String,
-        location: Option<SourceLocation>,
     },
 
     #[error(
@@ -165,7 +165,6 @@ pub enum ValidationError {
         given: usize,
         argument_word: &'static str,
         expected: String,
-        location: Option<SourceLocation>,
     },
 
     #[error("{site} `{raw}`: malformed `$pages` reference (expected `$pages.<page>.<element>`)")]
@@ -209,6 +208,9 @@ pub enum ValidationError {
 
     #[error("setup: duplicate step id `{id}`")]
     DuplicateSetupStepId { id: String },
+
+    #[error("teardown: duplicate step id `{id}`")]
+    DuplicateTeardownStepId { id: String },
 
     #[error(
         "criterion `{criterion}` / check `{check}`: {site} `{raw}` references undeclared setup step `{step}`"
@@ -312,10 +314,7 @@ impl ValidationError {
             | Self::UnresolvedSetupStepRef { location, .. }
             | Self::UnresolvedSetupStepOutput { location, .. }
             | Self::MalformedSetupRef { location, .. }
-            | Self::InvalidSessionReference { location, .. }
-            | Self::UnknownRuntimeHelper { location, .. }
-            | Self::UncalledRuntimeHelper { location, .. }
-            | Self::WrongRuntimeHelperArity { location, .. } => *location,
+            | Self::InvalidSessionReference { location, .. } => *location,
             _ => None,
         }
     }
@@ -396,7 +395,46 @@ pub fn validate_with_contract_outputs(
                         arity,
                         raw,
                         &format!("setup step `{step_name}` with:"),
+                        &mut errs,
+                    );
+                }
+            });
+        });
+    }
+
+    let mut teardown_ids = HashSet::new();
+    for (idx, step) in v.teardown.iter().enumerate() {
+        let step_name = step_label(step, idx);
+        if let Some(id) = step.id.as_deref()
+            && !teardown_ids.insert(id)
+        {
+            errs.push(ValidationError::DuplicateTeardownStepId { id: id.to_string() });
+        }
+        let contract_outputs = step.uses.as_deref().map(outputs_for).unwrap_or_default();
+        check_secret_paths(step, &contract_outputs, "teardown", &step_name, &mut errs);
+        let mut source_path = vec![
+            SourcePathSegment::key("teardown"),
+            SourcePathSegment::index(idx),
+            SourcePathSegment::key("with"),
+        ];
+        crate::source::walk_with_refs(&step.with, &mut source_path, &mut |expr, raw, path| {
+            let location = v.source_map.scalar_location(path, raw);
+            walk_checkable_paths(expr, &mut |path, arity| {
+                if path.root == PathRoot::Pages {
+                    crate::validate_pages::check_page_path(
+                        &v.pages,
+                        path,
+                        raw,
+                        &format!("teardown step `{step_name}` with:"),
                         location,
+                        &mut errs,
+                    );
+                } else if path.root == PathRoot::Runtime {
+                    crate::validate_runtime::check_runtime_path(
+                        path,
+                        arity,
+                        raw,
+                        &format!("teardown step `{step_name}` with:"),
                         &mut errs,
                     );
                 }
@@ -961,12 +999,35 @@ fn check_path(
             // The leaf's declaration surface remains closed even when
             // a parent manifest happens to declare the same name.
             if !inputs.contains_key(name) {
+                let matching_inputs: Vec<&str> = inputs
+                    .iter()
+                    .filter_map(|(input_name, declaration)| {
+                        (declaration.env.as_deref() == Some(name)).then_some(input_name.as_str())
+                    })
+                    .collect();
+                let help = match matching_inputs.as_slice() {
+                    [] => String::new(),
+                    [input_name] => format!(
+                        " — did you mean `$inputs.{input_name}`? It is declared with `env: {name}`. `$inputs.*` takes the input's declared name; `env:` only names the variable that supplies its value"
+                    ),
+                    input_names => {
+                        let suggestions = input_names
+                            .iter()
+                            .map(|input_name| format!("`$inputs.{input_name}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!(
+                            " — did you mean one of {suggestions}? They are declared with `env: {name}`. `$inputs.*` takes the input's declared name; `env:` only names the variable that supplies its value"
+                        )
+                    }
+                };
                 errs.push(ValidationError::UnresolvedInputRef {
                     criterion: c.id.clone(),
                     check: ch.id.clone(),
                     input: name.to_string(),
                     raw: raw.to_string(),
                     site: site.clone(),
+                    help,
                     location,
                 });
             }
@@ -991,7 +1052,6 @@ fn check_path(
                 arity,
                 raw,
                 &format!("criterion `{}` / check `{}`: {site}", c.id, ch.id),
-                location,
                 errs,
             );
         }
@@ -1451,9 +1511,92 @@ criteria:
 "#;
         let v = parse(y);
         let errs = validate(&v).unwrap_err();
-        assert!(errs.iter().any(
-            |e| matches!(e, ValidationError::UnresolvedInputRef { input, .. } if input == "nope")
-        ));
+        let message = errs
+            .iter()
+            .find(|error| matches!(error, ValidationError::UnresolvedInputRef { .. }))
+            .expect("unresolved input error")
+            .to_string();
+        assert_eq!(
+            message,
+            "criterion `AC-1` / check `AC-1.1`: assertion `$inputs.nope == 1` references undeclared input `nope`"
+        );
+    }
+
+    #[test]
+    fn unresolved_input_ref_suggests_exact_env_match_and_explains_rule() {
+        let y = r#"
+verification: x
+inputs:
+  login_url: { type: string, env: APP_BASE_URL }
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: home
+            uses: ui/navigate
+            with: { url: $inputs.APP_BASE_URL }
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        let message = errs
+            .iter()
+            .find(|error| matches!(error, ValidationError::UnresolvedInputRef { .. }))
+            .expect("unresolved input error")
+            .to_string();
+        assert_eq!(
+            message,
+            "criterion `AC-1` / check `AC-1.1`: step `home` with: `$inputs.APP_BASE_URL` references undeclared input `APP_BASE_URL` — did you mean `$inputs.login_url`? It is declared with `env: APP_BASE_URL`. `$inputs.*` takes the input's declared name; `env:` only names the variable that supplies its value"
+        );
+    }
+
+    #[test]
+    fn unresolved_input_ref_lists_every_exact_env_match() {
+        let y = r#"
+verification: x
+inputs:
+  login_url: { type: string, env: APP_BASE_URL }
+  alternate_url: { type: string, env: APP_BASE_URL }
+  ignored_url: { type: string, env: OTHER_BASE_URL }
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.APP_BASE_URL == "https://example.test"
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        let message = errs
+            .iter()
+            .find(|error| matches!(error, ValidationError::UnresolvedInputRef { .. }))
+            .expect("unresolved input error")
+            .to_string();
+        assert_eq!(
+            message,
+            "criterion `AC-1` / check `AC-1.1`: assertion `$inputs.APP_BASE_URL == \"https://example.test\"` references undeclared input `APP_BASE_URL` — did you mean one of `$inputs.alternate_url`, `$inputs.login_url`? They are declared with `env: APP_BASE_URL`. `$inputs.*` takes the input's declared name; `env:` only names the variable that supplies its value"
+        );
+    }
+
+    #[test]
+    fn input_ref_by_declared_name_still_resolves_when_env_is_present() {
+        let y = r#"
+verification: x
+inputs:
+  login_url: { type: string, env: APP_BASE_URL }
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        assertions:
+          - $inputs.login_url == "https://example.test"
+"#;
+        let v = parse(y);
+        validate(&v).expect("declared input name resolves");
     }
 
     #[test]

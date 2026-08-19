@@ -1,6 +1,5 @@
 //! Static validation for the closed `$runtime` helper catalog.
 
-use crate::SourceLocation;
 use crate::expr::{Expr, Path, PathRoot, RuntimeHelper, authored_runtime_helper_names};
 use crate::validate::ValidationError;
 
@@ -9,7 +8,6 @@ pub(crate) fn check_runtime_path(
     arity: Option<usize>,
     raw: &str,
     site: &str,
-    location: Option<SourceLocation>,
     errors: &mut Vec<ValidationError>,
 ) {
     let helper_name = path.segments().join(".");
@@ -23,7 +21,6 @@ pub(crate) fn check_runtime_path(
             raw: raw.to_string(),
             helper: helper_name,
             help,
-            location,
         });
         return;
     };
@@ -34,7 +31,6 @@ pub(crate) fn check_runtime_path(
             raw: raw.to_string(),
             helper: helper_name,
             call_form: format!("$runtime.{}({args})", helper.name()),
-            location,
         });
         return;
     };
@@ -46,7 +42,6 @@ pub(crate) fn check_runtime_path(
             given,
             argument_word: if given == 1 { "argument" } else { "arguments" },
             expected: helper.arity().expected(),
-            location,
         });
     }
 }

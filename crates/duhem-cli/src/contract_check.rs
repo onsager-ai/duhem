@@ -27,6 +27,9 @@ pub(crate) fn field_errors(def: &VerificationDefinition) -> Vec<String> {
     for (i, s) in def.setup.iter().enumerate() {
         check_step(s, &format!("setup step {i}"), &mut errs);
     }
+    for (i, s) in def.teardown.iter().enumerate() {
+        check_step(s, &format!("teardown step {i}"), &mut errs);
+    }
     for c in &def.criteria {
         for ch in &c.checks {
             for (i, s) in ch.steps.iter().enumerate() {
@@ -148,6 +151,9 @@ pub(crate) fn lint_warnings(def: &VerificationDefinition) -> Vec<String> {
     for (i, s) in def.setup.iter().enumerate() {
         // Setup steps don't judge — only the identity-output lint applies.
         lint_step(s, None, &format!("setup step {i}"), &mut warns);
+    }
+    for (i, s) in def.teardown.iter().enumerate() {
+        lint_step(s, None, &format!("teardown step {i}"), &mut warns);
     }
     for c in &def.criteria {
         for ch in &c.checks {

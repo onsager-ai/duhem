@@ -17,6 +17,7 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
     // A live fold doesn't surface the definition; the authoritative
     // re-fetch on `run_finished` fills this in (#302).
     has_definition: false,
+    cleanup: [],
     criteria: [],
   };
   const criteria = new Map<string, CriterionDetail>();
@@ -45,7 +46,28 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
         detail.inputs = (evt.inputs as Record<string, unknown>) ?? {};
         break;
       case "setup_finished":
-        detail.setup_aborted = Boolean(evt.aborted);
+        if (evt.phase !== "teardown") {
+          detail.setup_aborted = Boolean(evt.aborted);
+        }
+        break;
+      case "setup_step_started":
+        if (evt.phase === "teardown") {
+          detail.cleanup!.push({
+            step_index: Number(evt.step_index),
+            uses: String(evt.uses),
+            outcome: "ok",
+          });
+        }
+        break;
+      case "setup_step_finished":
+        if (evt.phase === "teardown") {
+          const step = [...detail.cleanup!]
+            .reverse()
+            .find((candidate) => candidate.step_index === Number(evt.step_index));
+          if (step) {
+            step.outcome = evt.outcome as typeof step.outcome;
+          }
+        }
         break;
       case "step_started":
         noteCheck(String(evt.criterion_id), String(evt.check_id));

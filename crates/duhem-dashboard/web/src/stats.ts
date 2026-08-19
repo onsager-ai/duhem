@@ -6,6 +6,18 @@ import type { RunStatus, RunsListEntry } from "./api";
 import { verdictFamily } from "./ui";
 
 export type Family = "pass" | "fail" | "inconclusive" | null;
+export type FamilyCounts = Record<Exclude<Family, null>, number>;
+
+export function countVerdictFamilies(
+  verdicts: (string | null)[],
+): FamilyCounts {
+  const counts: FamilyCounts = { pass: 0, fail: 0, inconclusive: 0 };
+  for (const verdict of verdicts) {
+    const family = verdictFamily(verdict);
+    if (family !== null) counts[family] += 1;
+  }
+  return counts;
+}
 
 function startedMs(e: RunsListEntry): number {
   return e.started_at ? Date.parse(e.started_at) || 0 : 0;
@@ -41,16 +53,12 @@ export function computeStats(entries: RunsListEntry[]): OverviewStats {
   const leaves = flatLeaves(entries);
   const newestFirst = [...leaves].sort((a, b) => startedMs(b) - startedMs(a));
 
-  let pass = 0;
-  let fail = 0;
-  let inconclusive = 0;
+  const { pass, fail, inconclusive } = countVerdictFamilies(
+    leaves.map((entry) => entry.verdict),
+  );
   let running = 0;
   for (const e of leaves) {
     if (e.status === "running") running++;
-    const fam = verdictFamily(e.verdict);
-    if (fam === "pass") pass++;
-    else if (fam === "fail") fail++;
-    else if (fam === "inconclusive") inconclusive++;
   }
   const decided = pass + fail + inconclusive;
 

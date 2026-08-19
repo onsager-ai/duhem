@@ -45,7 +45,14 @@ export interface RunDetail {
   /** `true` when the run recorded its VD source snapshot (#302); the
    *  client then fetches it from `definitionUrl`. */
   has_definition: boolean;
+  cleanup?: CleanupStepDetail[];
   criteria: CriterionDetail[];
+}
+
+export interface CleanupStepDetail {
+  step_index: number;
+  uses: string;
+  outcome: "ok" | "error" | "timeout" | { skipped: { reason: string } };
 }
 
 export interface TraceEvent {

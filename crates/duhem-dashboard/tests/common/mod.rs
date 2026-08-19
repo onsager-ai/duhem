@@ -78,10 +78,14 @@ pub async fn write_passing_run(
     })
     .await
     .unwrap();
-    w.append(EventPayload::SetupStarted { step_count: 1 })
-        .await
-        .unwrap();
+    w.append(EventPayload::SetupStarted {
+        phase: duhem_evidence::StepPhase::Setup,
+        step_count: 1,
+    })
+    .await
+    .unwrap();
     w.append(EventPayload::SetupStepStarted {
+        phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         uses: "ui/navigate".into(),
         layer: None,
@@ -90,6 +94,7 @@ pub async fn write_passing_run(
     .await
     .unwrap();
     w.append(EventPayload::SetupStepObservation {
+        phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         output_name: "landed_at".into(),
         value: ObservationValue::Inline {
@@ -99,14 +104,18 @@ pub async fn write_passing_run(
     .await
     .unwrap();
     w.append(EventPayload::SetupStepFinished {
+        phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         outcome: StepOutcome::Ok,
     })
     .await
     .unwrap();
-    w.append(EventPayload::SetupFinished { aborted: false })
-        .await
-        .unwrap();
+    w.append(EventPayload::SetupFinished {
+        phase: duhem_evidence::StepPhase::Setup,
+        aborted: false,
+    })
+    .await
+    .unwrap();
 
     w.append(EventPayload::StepStarted {
         criterion_id: "AC-1".into(),
@@ -399,10 +408,14 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
     w.append(run_started(definition_path, BTreeMap::new()))
         .await
         .unwrap();
-    w.append(EventPayload::SetupStarted { step_count: 1 })
-        .await
-        .unwrap();
+    w.append(EventPayload::SetupStarted {
+        phase: duhem_evidence::StepPhase::Setup,
+        step_count: 1,
+    })
+    .await
+    .unwrap();
     w.append(EventPayload::SetupStepStarted {
+        phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         uses: "api/call".into(),
         layer: None,
@@ -411,14 +424,18 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
     .await
     .unwrap();
     w.append(EventPayload::SetupStepFinished {
+        phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         outcome: StepOutcome::Error,
     })
     .await
     .unwrap();
-    w.append(EventPayload::SetupFinished { aborted: true })
-        .await
-        .unwrap();
+    w.append(EventPayload::SetupFinished {
+        phase: duhem_evidence::StepPhase::Setup,
+        aborted: true,
+    })
+    .await
+    .unwrap();
     w.append(EventPayload::RunFinished {
         verdict: Some(VerdictState::Inconclusive(
             InconclusiveCause::EnvironmentError,

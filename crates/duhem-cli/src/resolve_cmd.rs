@@ -353,6 +353,22 @@ fn resolve_steps(
             provenance,
         );
     }
+    for (index, step) in definition.teardown.iter_mut().enumerate() {
+        resolve_with(
+            &mut step.with,
+            &context,
+            &format!("teardown.{index}.with"),
+            provenance,
+            errors,
+        );
+        apply_timeout(
+            &mut step.with,
+            defaults,
+            manifest_path,
+            &format!("teardown.{index}.with.timeout"),
+            provenance,
+        );
+    }
     for (criterion_index, criterion) in definition.criteria.iter_mut().enumerate() {
         for (check_index, check) in criterion.checks.iter_mut().enumerate() {
             for (step_index, step) in check.steps.iter_mut().enumerate() {

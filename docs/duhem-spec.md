@@ -723,6 +723,44 @@ steps; an explicit assertion that references a skipped step is not
 evaluated and is omitted. A check where nothing was judged remains
 inconclusive.
 
+An engine error raised while resolving or dispatching a step also closes
+the gate on that step instead of escaping the loop immediately. The
+remaining `if: always` and `if: failure` steps emit their ordinary
+started/finished evidence, then the original engine error aborts the run.
+Cleanup that runs after a failed step is evidence only: its own action or
+implicit-judgment failure cannot turn an inconclusive check into a fail.
+When a check is retried, this cleanup runs once per attempt, so cleanup
+steps must be idempotent.
+
+#### 10.3.4 Leaf cleanup (`teardown:`)
+
+A leaf Verification Definition may pair `setup:` with action-model cleanup:
+
+```yaml
+setup:
+  - id: fixture
+    uses: api/call
+    with: { method: POST, url: $inputs.records_url }
+
+teardown:
+  - uses: api/call
+    with:
+      method: DELETE
+      url: $runtime.format("{}/{}", $inputs.records_url, $setup.fixture.outputs.body.id)
+```
+
+`teardown:` runs after the criteria loop and before leaf
+`provision.down:`, including when the criteria loop aborts with an engine
+error. It runs only if at least one `setup:` action actually dispatched;
+an error before setup's first dispatch leaves nothing to undo, while a
+mid-setup abort drains teardown for work already performed. Teardown
+action failures and teardown-local engine errors are recorded as
+phase-tagged step evidence and never alter the verdict or replace the
+original error. `--keep-env` skips both `teardown:` and
+`provision.down:`—it leaves the world as the run left it. The field is
+leaf-only; root manifests do not define a suite teardown or a shared
+`$setup` output scope.
+
 ### 10.4 Root manifest (`duhem.yml`)
 
 The root manifest is a single canonical file at the project root that aggregates Verification Definitions and provides shared configuration.

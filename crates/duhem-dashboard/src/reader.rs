@@ -509,6 +509,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
     let mut inputs = serde_json::Map::new();
     let mut setup_aborted = false;
     let mut has_definition = false;
+    let mut cleanup = Vec::new();
     // First-seen orderings from the event stream itself.
     let mut criterion_order: Vec<String> = Vec::new();
     let mut checks_by_criterion: Vec<(String, Vec<CheckRef>)> = Vec::new();
@@ -555,7 +556,34 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 inputs = i.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
                 has_definition = definition.is_some();
             }
-            EventPayload::SetupFinished { aborted } => setup_aborted = *aborted,
+            EventPayload::SetupFinished { phase, aborted }
+                if phase == &duhem_evidence::StepPhase::Setup =>
+            {
+                setup_aborted = *aborted;
+            }
+            EventPayload::SetupStepStarted {
+                phase: duhem_evidence::StepPhase::Teardown,
+                step_index,
+                uses,
+                ..
+            } => cleanup.push(crate::model::CleanupStepDetail {
+                step_index: *step_index,
+                uses: uses.clone(),
+                outcome: duhem_evidence::StepOutcome::Ok,
+            }),
+            EventPayload::SetupStepFinished {
+                phase: duhem_evidence::StepPhase::Teardown,
+                step_index,
+                outcome,
+            } => {
+                if let Some(step) = cleanup
+                    .iter_mut()
+                    .rev()
+                    .find(|step| step.step_index == *step_index)
+                {
+                    step.outcome = outcome.clone();
+                }
+            }
             EventPayload::StepStarted {
                 criterion_id,
                 check_id,
@@ -639,6 +667,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         status: run.record.status,
         setup_aborted,
         has_definition,
+        cleanup,
         criteria,
     }
 }

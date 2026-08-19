@@ -6,18 +6,18 @@
 [![CI](https://github.com/onsager-ai/duhem/actions/workflows/ci.yml/badge.svg)](https://github.com/onsager-ai/duhem/actions/workflows/ci.yml)
 [![Schema](https://img.shields.io/badge/schema-v0.x-blue.svg)](CHANGELOG.md)
 
-Duhem sits between AI coding agents and production. It captures human intent as acceptance criteria, translates them into mechanically-judged checks that exercise the real delivery web — code + prompts + tool wiring + data + runtime — and gates merge/deploy on the verdict.
+Duhem turns your acceptance criteria into mechanically judged checks that exercise the real thing you ship — code, prompts, tools, data, and runtime, together — and gates merge on the verdict.
 
-- **Runnable specs.** A Verification Definition is one artifact — readable intent bound to runnable checks. What you read *is* what runs *is* what gates the merge, so spec, tests, and code can't drift apart.
-- **Holistic, no mocks.** Checks drive the real shipped artifact — code + prompts + tools + data + runtime — through its real interfaces, all at once. A green means the real system worked, not that a stand-in did.
-- **Mechanical judgment — no LLM in the judge.** AI can help draft criteria; a human owns them; pass/fail is deterministic evaluation of structured assertions. No AI grading its own homework, no confident-but-wrong green.
-- **Agent-native.** You write *what* to verify, not the program that verifies it — anchored to intent, not implementation, so it doesn't rot when an agent refactors underneath.
+- **Runnable specs.** A Verification Definition is one artifact: readable intent bound to runnable checks. The thing you read *is* the thing that runs *is* the thing that gates the merge — spec, tests, and code can't drift apart.
+- **Holistic, no mocks.** Duhem drives the real shipped artifact through its real interfaces — the whole delivery web at once. A green means the real system worked, not that a stand-in did.
+- **Mechanical judgment — no LLM in the verdict.** AI can help draft criteria; a human owns them; pass/fail is deterministic. No AI grading its own homework, no confident-but-wrong green.
+- **Built for agent-native development.** You write *what* to verify, not the program that verifies it — anchored to intent, not implementation, so it doesn't rot when an agent refactors underneath.
 
 ## It caught a real one
 
-Crawlab Pro gates its `:edge` Docker image on a Duhem suite before it can promote to `:stable`. One build's gate went red: the environment wouldn't come up. The cause was nearly invisible — a new image shipped without `envsubst`, so the startup script silently rendered an **empty** nginx config and the whole web front went dead on its expected port. The part that matters: the backend was fine and the product's *own* healthcheck reported **healthy** — a human clicking through, or the container's self-check, would have shipped it. Duhem didn't: no working front, no green. It refused the build before it could reach `:stable`, so no user was hit; the same gate then verified the fix and now runs on every build.
+Crawlab Pro gates its `:edge` image on a Duhem suite before promoting to `:stable`. On one build the gate went red: the environment wouldn't come up. The cause was almost invisible — a new image shipped without `envsubst`, so the startup script silently rendered an **empty** nginx config and the whole web front went dead on its expected port. The backend was fine and the product's *own* healthcheck reported **healthy**. A human clicking through, or the container's self-check, would have shipped it. Duhem didn't — no working front, no green. The bug was fixed, the same gate verified the fix, and it now runs automatically on every build; the bad build never reached a stable user.
 
-**That's the class of bug this exists for: a self-masking regression that everything else — including the product's own healthcheck — was calling healthy.** Full write-up: [*Your AI Says "All Tests Pass" — But Do They?*](https://marvinzhang.dev/blog/introducing-duhem).
+**It caught a self-masking regression that everything else — including the product's own healthcheck — was calling healthy.** Full write-up: [*Your AI Says "All Tests Pass" — But Do They?*](https://marvinzhang.dev/blog/introducing-duhem).
 
 <p align="center">
   <img src="demo/self-masking/demo.gif" alt="Terminal recording: /health returns healthy, but 'duhem run' fails because the web front serves the wrong page; after the fix, 'duhem run' passes." width="600">
@@ -102,11 +102,13 @@ For a real-world example — including the `provision.up:` / `down:` hooks Duhem
 ## Core concepts
 
 - **Criteria vs. checks.** *Criteria* are the human commitment about what "done" means; they are stable and survive implementation churn. *Checks* are how Duhem verifies that commitment; they are derivative and may change as the implementation does. Conflating the two is a defect.
-- **Verification Definition (VD).** A YAML document (criteria + checks + inputs, optionally `provision` hooks) describing one workload to verify. `duhem init` scaffolds one; `verifications/` holds worked examples.
+- **Verification Definition (VD).** A YAML document (criteria + checks + inputs, optionally `setup`, leaf `teardown`, and `provision` hooks) describing one workload to verify. `duhem init` scaffolds one; `verifications/` holds worked examples.
 - **The manifest (`duhem.yml`).** Composes one or more VDs into a suite and carries shared configuration — `defaults:` (timeout / inconclusive policy / retry), `includes:`, `profiles:`, reusable `pages:` locators, and reusable `flows:` step sequences invoked from a check with `call:`. A single-file VD *is* a manifest with one leaf.
 - **The verdict.** Deterministic aggregation of structured assertions into `pass` / `fail` / `inconclusive`. No LLM in the loop.
 - **Step gating.** Steps default to `if: success`; use `if: always` for
-  teardown or `if: failure` for diagnostics. Gated steps stay visible as
+  per-attempt cleanup or `if: failure` for diagnostics. These cleanup
+  steps also drain after an engine error before the original error aborts
+  the run. Gated steps stay visible as
   skipped evidence and contribute no assertion verdict. Gating follows
   execution failure or a failed implicit judgment, not a raw
   `satisfied: false` observation bound for manual composition.
@@ -144,7 +146,7 @@ Schema is **v0.x** — breaking changes are expected before v0.5. The live schem
 
 ## Trying it on a real system?
 
-Duhem is open source and **early — v0.x, breaking changes expected, and we'll help you migrate.** If you own a business-critical, complex, AI-built system where a silent regression is expensive, we'd like a few people to try it and shape it with us — direct support, a direct line to the people building it. (If you can verify by looking, you don't need Duhem — and we'd rather tell you that than sell it to you.)
+Duhem is open source and **early — v0.x, expect breaking changes, we'll migrate you.** We're looking for a small number of technical owners running real, business-critical, AI-built systems to try it and shape it with us: direct support, a direct line to the people building it. If you can verify by looking, you don't need Duhem — and we'd rather tell you that than sell it to you.
 
 Reach out by [opening an issue](https://github.com/onsager-ai/duhem/issues), or add me on WeChat at **`tikazyq1`** with a note saying "Duhem". More on why this exists: [*Your AI Says "All Tests Pass" — But Do They?*](https://marvinzhang.dev/blog/introducing-duhem).
 

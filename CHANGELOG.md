@@ -29,11 +29,14 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] Run reports add a criterion-grouped suites tree with status-count filters and labeled check metadata, including collapsed delivery-web spans; this is a read-side presentation change only, with no schema or evidence-wire change. (#280)
+- [additive] Verification Definitions accept leaf-scoped `teardown:` action steps after criteria and before `provision.down:`; `if: always` / `if: failure` now drain after step engine errors before the original error aborts the run. (#409)
 - [additive] Run traces and the append-only evidence store record nested-run lineage (`parent_run_id` plus `suite` / `invocation` origin), and the dashboard renders that recorded hierarchy instead of grouping unrelated runs by verification basename. (#348)
-- [clarifying] Semantic validation diagnostics now emit one file-tagged line per error and include exact line and column spans for offending reference values when recoverable; the grouped `N validation error(s):` preamble and count are removed. (#393)
 - [additive] Verification Definitions accept an optional opaque `metadata:` map that is recorded in run evidence for downstream consumers and never affects verdicts. (#386)
+- [clarifying] An undeclared `$inputs.<name>` reference now suggests every declared input whose exact `env:` matches and explains that `$inputs.*` uses declared input names. (#391)
 - [breaking] validate now rejects a bare, unknown, or wrong-arity $runtime helper offline instead of failing mid-run as inconclusive. (#405)
 - [clarifying] A failing comparison assertion's `detail` now labels the right operand by operator — `disallowed X` for `!=` and `expected < X` / `<=` / `>` / `>=` for ordering — so a failing `!=` no longer prints the same value as both actual and expected. `==` wording is unchanged. (#407)
+- [clarifying] Semantic validation diagnostics now emit one file-tagged line per error and include exact line and column spans for offending reference values when recoverable; the grouped `N validation error(s):` preamble and count are removed. (#393)
 
 ## v0.2.2 — 2026-08-04
 

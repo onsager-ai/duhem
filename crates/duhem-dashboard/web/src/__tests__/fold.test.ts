@@ -56,4 +56,20 @@ describe("foldRun", () => {
     expect(aborted.setup_aborted).toBe(true);
     expect(aborted.verdict).toBe("inconclusive:environment_error");
   });
+
+  it("folds teardown steps without treating teardown as setup", () => {
+    const done = foldRun("r1", [
+      trace[0],
+      { seq: 1, ts: "2026-06-10T10:00:01.000Z", kind: "setup_finished", aborted: false },
+      { seq: 2, ts: "2026-06-10T10:00:02.000Z", kind: "setup_step_started", phase: "teardown", step_index: 0, uses: "api/call" },
+      { seq: 3, ts: "2026-06-10T10:00:03.000Z", kind: "setup_step_finished", phase: "teardown", step_index: 0, outcome: "error" },
+      { seq: 4, ts: "2026-06-10T10:00:04.000Z", kind: "setup_finished", phase: "teardown", aborted: true },
+      { seq: 5, ts: "2026-06-10T10:00:05.000Z", kind: "run_finished", verdict: "pass" },
+    ]);
+    expect(done.setup_aborted).toBe(false);
+    expect(done.cleanup).toEqual([
+      { step_index: 0, uses: "api/call", outcome: "error" },
+    ]);
+    expect(done.verdict).toBe("pass");
+  });
 });

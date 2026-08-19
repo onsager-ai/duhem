@@ -21,4 +21,10 @@ pub(super) fn mask_run_outcome(writer: &EvidenceWriter, outcome: &mut RunOutcome
             }
         }
     }
+    for failure in &mut outcome.cleanup {
+        failure.step = writer.mask_text(&failure.step);
+        if let Some(detail) = &mut failure.detail {
+            *detail = writer.mask_text(detail);
+        }
+    }
 }

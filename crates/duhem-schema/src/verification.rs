@@ -80,7 +80,7 @@ pub struct VerificationDefinition {
     /// Optional operator-supplied provisioning lifecycle hooks. When
     /// present, the runtime forks `provision.up:` before `setup:`,
     /// polls `provision.ready:`, and forks `provision.down:`
-    /// (if declared) after the criteria loop. Absent → no behavior
+    /// (if declared) after leaf `teardown:`. Absent → no behavior
     /// change vs setup-only definitions; the wire shape for
     /// `provision:`-less VDs is byte-identical to today.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -107,6 +107,12 @@ pub struct VerificationDefinition {
     /// Optional setup steps run once before the criteria.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub setup: Vec<Step>,
+
+    /// Optional cleanup steps run after the criteria and before
+    /// `provision.down:`. The runtime enters this block only after at
+    /// least one setup action was dispatched.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub teardown: Vec<Step>,
 
     /// At least one criterion is required (enforced by the validator,
     /// not the type system, so we can produce a friendly error).
@@ -246,6 +252,7 @@ criteria:
         assert_eq!(v.criteria.len(), 1);
         assert!(v.inputs.is_empty());
         assert!(v.setup.is_empty());
+        assert!(v.teardown.is_empty());
     }
 
     #[test]
@@ -300,6 +307,7 @@ criteria:
             pages: BTreeMap::new(),
             flows: BTreeMap::new(),
             setup: vec![],
+            teardown: vec![],
             criteria: vec![],
         };
         let y = v.to_yaml_string().unwrap();
@@ -341,6 +349,28 @@ criteria: []
             !parsed.to_yaml_string().unwrap().contains("metadata:"),
             "an absent optional field must not change the serialized wire shape"
         );
+    }
+
+    #[test]
+    fn teardown_round_trips_and_absence_keeps_wire_shape() {
+        let source = "verification: x\ncriteria: []\n";
+        let absent = VerificationDefinition::from_yaml_str(source).expect("parse absent");
+        assert!(absent.teardown.is_empty());
+        assert_eq!(absent.to_yaml_string().unwrap(), source);
+
+        let authored = r#"
+verification: x
+teardown:
+  - id: remove-fixture
+    uses: cli/invoke
+    with: { command: [sh, -c, "true"] }
+criteria: []
+"#;
+        let parsed = VerificationDefinition::from_yaml_str(authored).expect("parse teardown");
+        assert_eq!(parsed.teardown.len(), 1);
+        let round_trip =
+            VerificationDefinition::from_yaml_str(&parsed.to_yaml_string().unwrap()).unwrap();
+        assert_eq!(round_trip, parsed);
     }
 
     #[test]

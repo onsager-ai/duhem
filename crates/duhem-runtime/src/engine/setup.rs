@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 
 use duhem_actions::Page;
 use duhem_actions::{Outcome, RunBrowser};
-use duhem_evidence::{EventPayload, EvidenceWriter};
+use duhem_evidence::{EventPayload, EvidenceWriter, StepOutcome, StepPhase};
 use duhem_judge::InconclusiveCause;
 use duhem_schema::Step;
 use tracing::debug;
@@ -31,7 +31,8 @@ use crate::engine::context::RunState;
 use crate::engine::gating::{skip_reason as gate_skip_reason, step_failed};
 use crate::engine::registry::{ActionRegistry, Dispatch};
 use crate::engine::runner::{
-    EngineError, StepEvidence, display_step_label, implicit_judgment_for_step, step_label,
+    CleanupFailure, EngineError, StepEvidence, display_step_label, implicit_judgment_for_step,
+    step_label,
 };
 use crate::engine::template::substitute_with;
 use crate::engine::translate::{outcome_to_evidence, with_to_evidence_map};
@@ -64,6 +65,7 @@ impl AbortReason {
 }
 
 /// Outcome of walking the run-level `setup:` block.
+#[derive(Debug)]
 pub(crate) struct SetupResult {
     /// `Some(reason)` when any step produced `Outcome::Error` or
     /// `Outcome::Timeout` (or an environmental precondition failed)
@@ -72,11 +74,17 @@ pub(crate) struct SetupResult {
     pub aborted: Option<AbortReason>,
 }
 
+struct LifecycleResult {
+    aborted: Option<AbortReason>,
+    cleanup: Vec<CleanupFailure>,
+}
+
 /// Execute every step in `setup` once, emitting `Setup*` evidence
 /// events and recording any outputs onto `run.setup_outputs`.
 /// Caller is responsible for skipping the call entirely when
 /// `setup.is_empty()` so the wire shape stays byte-identical for
 /// setup-free definitions.
+#[cfg(test)]
 pub(crate) async fn run_setup(
     writer: &mut EvidenceWriter,
     registry: &ActionRegistry,
@@ -85,35 +93,110 @@ pub(crate) async fn run_setup(
     setup: &[Step],
     child_env: &BTreeMap<String, String>,
 ) -> Result<SetupResult, EngineError> {
+    let mut dispatched = false;
+    run_setup_tracking(
+        writer,
+        registry,
+        browser,
+        run,
+        setup,
+        child_env,
+        &mut dispatched,
+    )
+    .await
+}
+
+pub(crate) async fn run_setup_tracking(
+    writer: &mut EvidenceWriter,
+    registry: &ActionRegistry,
+    browser: Option<&RunBrowser>,
+    run: &mut RunState,
+    setup: &[Step],
+    child_env: &BTreeMap<String, String>,
+    dispatched: &mut bool,
+) -> Result<SetupResult, EngineError> {
+    let result = run_lifecycle_steps(
+        writer,
+        registry,
+        browser,
+        run,
+        setup,
+        child_env,
+        StepPhase::Setup,
+        dispatched,
+    )
+    .await?;
+    Ok(SetupResult {
+        aborted: result.aborted,
+    })
+}
+
+/// Drain leaf cleanup without allowing action failures or step-local
+/// engine errors to replace the run's verdict or an earlier error.
+pub(crate) async fn run_teardown(
+    writer: &mut EvidenceWriter,
+    registry: &ActionRegistry,
+    browser: Option<&RunBrowser>,
+    run: &mut RunState,
+    teardown: &[Step],
+    child_env: &BTreeMap<String, String>,
+) -> Result<Vec<CleanupFailure>, EngineError> {
+    let mut dispatched = false;
+    Ok(run_lifecycle_steps(
+        writer,
+        registry,
+        browser,
+        run,
+        teardown,
+        child_env,
+        StepPhase::Teardown,
+        &mut dispatched,
+    )
+    .await?
+    .cleanup)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_lifecycle_steps(
+    writer: &mut EvidenceWriter,
+    registry: &ActionRegistry,
+    browser: Option<&RunBrowser>,
+    run: &mut RunState,
+    steps: &[Step],
+    child_env: &BTreeMap<String, String>,
+    phase: StepPhase,
+    dispatched: &mut bool,
+) -> Result<LifecycleResult, EngineError> {
     writer
         .append(EventPayload::SetupStarted {
-            step_count: setup.len() as u32,
+            phase,
+            step_count: steps.len() as u32,
         })
         .await?;
 
     // Decide up front whether any step in this block needs a real
     // page. Mirrors the per-check logic in `Engine::run_check` so
     // setup behaves the same way on an env-failure path.
-    let needs_browser = setup.iter().any(|s| {
+    let needs_browser = steps.iter().any(|s| {
         registry
             .get(s.uses_name())
             .map(|d| d.requires_page())
             .unwrap_or(false)
     });
-    let any_unknown = setup.iter().any(|s| !registry.contains_key(s.uses_name()));
+    let any_unknown = steps.iter().any(|s| !registry.contains_key(s.uses_name()));
     let browser_missing = needs_browser && browser.is_none();
     let mut environment_failed = browser_missing || any_unknown;
 
     // Setup gets its own browser context, never shared with checks.
     let mut setup_browser = None;
     if !environment_failed
-        && !setup.is_empty()
+        && !steps.is_empty()
         && let Some(b) = browser
     {
         match b.open_check().await {
             Ok(cb) => setup_browser = Some(cb),
             Err(e) => {
-                debug!(error = %e, "open_check for setup failed");
+                debug!(error = %e, ?phase, "open_check for lifecycle steps failed");
                 environment_failed = true;
             }
         }
@@ -129,8 +212,12 @@ pub(crate) async fn run_setup(
         None
     };
     let mut failed_by = environment_failed.then(|| "setup environment".to_string());
-    for (idx, step) in setup.iter().enumerate() {
+    let mut stored_error = None;
+    let mut cleanup = Vec::new();
+    for (idx, step) in steps.iter().enumerate() {
         let gate_reason = gate_skip_reason(step.condition, failed_by.as_deref());
+        let cleanup_step =
+            phase == StepPhase::Teardown || (failed_by.is_some() && gate_reason.is_none());
         // Setup steps see the run state (inputs, env, uuid, plus any
         // outputs already published by earlier setup steps in this
         // same block). The view is read-only against the run state —
@@ -138,40 +225,46 @@ pub(crate) async fn run_setup(
         // template substitution.
         let ctx = crate::engine::context::RunContext::new(run);
         let mut resolved_with = step.with.clone();
-        if gate_reason.is_none()
-            && let Err(u) = substitute_with(&mut resolved_with, &ctx)
-        {
-            return Err(EngineError::UnresolvedReference {
-                reference: u.reference,
-                context: u
-                    .context
-                    .map(|c| format!(" (evaluating `{c}`)"))
-                    .unwrap_or_default(),
-                step: step_label(step, idx),
-            });
-        }
+        let step_error = if gate_reason.is_none() {
+            substitute_with(&mut resolved_with, &ctx).err().map(|u| {
+                EngineError::UnresolvedReference {
+                    reference: u.reference,
+                    context: u
+                        .context
+                        .map(|c| format!(" (evaluating `{c}`)"))
+                        .unwrap_or_default(),
+                    step: step_label(step, idx),
+                }
+            })
+        } else {
+            None
+        };
 
-        append_setup_started(writer, step, idx, &resolved_with).await?;
+        append_setup_started(writer, phase, step, idx, &resolved_with).await?;
         if let Some(reason) = gate_reason {
             writer
                 .append(EventPayload::SetupStepFinished {
+                    phase,
                     step_index: idx as u32,
-                    outcome: duhem_evidence::StepOutcome::Skipped { reason },
+                    outcome: StepOutcome::Skipped { reason },
                 })
                 .await?;
             continue;
         }
 
-        let (outcome, failed) = if environment_failed {
+        let mut error_detail = step_error.as_ref().map(ToString::to_string);
+        let (outcome, failed) = if step_error.is_some() || environment_failed {
             (Outcome::Error, true)
         } else {
             match registry.get(step.uses_name()) {
                 None => (Outcome::Error, true),
                 Some(dispatcher) => {
+                    *dispatched = true;
                     let page_ref: Option<&Page> = setup_browser.as_ref().map(|cb| &cb.page);
-                    invoke_and_record(
+                    match invoke_and_record(
                         dispatcher.as_ref(),
                         page_ref,
+                        phase,
                         idx,
                         &resolved_with,
                         SetupInvocation {
@@ -181,17 +274,50 @@ pub(crate) async fn run_setup(
                             child_env,
                         },
                     )
-                    .await?
+                    .await
+                    {
+                        Ok(result) => result,
+                        Err(error) => {
+                            error_detail = Some(error.to_string());
+                            if !cleanup_step && stored_error.is_none() {
+                                stored_error = Some(error);
+                            }
+                            (Outcome::Error, true)
+                        }
+                    }
                 }
             }
         };
 
+        if let Some(error) = step_error
+            && !cleanup_step
+            && stored_error.is_none()
+        {
+            stored_error = Some(error);
+        }
+
+        let evidence_outcome = outcome_to_evidence(&outcome);
         writer
             .append(EventPayload::SetupStepFinished {
+                phase,
                 step_index: idx as u32,
-                outcome: outcome_to_evidence(&outcome),
+                outcome: evidence_outcome.clone(),
             })
             .await?;
+
+        if phase == StepPhase::Teardown && failed {
+            let detail = error_detail.or_else(|| match &outcome {
+                Outcome::Timeout => Some("action timed out".to_string()),
+                Outcome::Error => Some("action returned an error".to_string()),
+                Outcome::Ok => Some("judging action reported failure".to_string()),
+                Outcome::Skipped { .. } => None,
+            });
+            cleanup.push(CleanupFailure {
+                step: display_step_label(step, idx),
+                outcome: evidence_outcome,
+                detail,
+            });
+        }
 
         if aborted.is_none() {
             aborted = match outcome {
@@ -213,20 +339,26 @@ pub(crate) async fn run_setup(
 
     writer
         .append(EventPayload::SetupFinished {
+            phase,
             aborted: aborted.is_some(),
         })
         .await?;
-    Ok(SetupResult { aborted })
+    if let Some(error) = stored_error {
+        return Err(error);
+    }
+    Ok(LifecycleResult { aborted, cleanup })
 }
 
 async fn append_setup_started(
     writer: &mut EvidenceWriter,
+    phase: StepPhase,
     step: &Step,
     idx: usize,
     resolved_with: &serde_yml::Value,
 ) -> Result<(), EngineError> {
     writer
         .append(EventPayload::SetupStepStarted {
+            phase,
             step_index: idx as u32,
             uses: step.uses_name().to_string(),
             // Same honesty contract as the per-check tag (#192).
@@ -251,6 +383,7 @@ struct SetupInvocation<'a> {
 async fn invoke_and_record(
     dispatcher: &dyn Dispatch,
     page: Option<&Page>,
+    phase: StepPhase,
     idx: usize,
     resolved_with: &serde_yml::Value,
     invocation: SetupInvocation<'_>,
@@ -290,7 +423,8 @@ async fn invoke_and_record(
             // Setup observations get their own event variant so
             // readers can attribute the observation to the
             // run-level setup block, not a per-check step.
-            append_setup_observation(writer, idx as u32, name.clone(), value.clone()).await?;
+            append_setup_observation(writer, phase, idx as u32, name.clone(), value.clone())
+                .await?;
         }
     }
     let outputs = result
@@ -327,6 +461,7 @@ async fn invoke_and_record(
 /// only the event variant differs.
 async fn append_setup_observation(
     writer: &mut EvidenceWriter,
+    phase: StepPhase,
     step_index: u32,
     output_name: String,
     value: serde_json::Value,
@@ -344,6 +479,7 @@ async fn append_setup_observation(
     };
     writer
         .append(EventPayload::SetupStepObservation {
+            phase,
             step_index,
             output_name,
             value: obs,
@@ -671,5 +807,58 @@ mod tests {
             .unwrap();
         assert_eq!(after_calls.load(Ordering::SeqCst), 0);
         assert_eq!(result.aborted, Some(AbortReason::Environment));
+    }
+
+    #[tokio::test]
+    async fn setup_engine_error_drains_always_and_failure_then_propagates() {
+        let (mut w, _tmp) = make_writer().await;
+        let mut registry: ActionRegistry = BTreeMap::new();
+        registry.insert(
+            "fake/ok",
+            Box::new(StubAction {
+                uses: "fake/ok",
+                outcome: Outcome::Ok,
+                outputs: vec![],
+                invocations: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
+        let always_calls = Arc::new(AtomicUsize::new(0));
+        registry.insert(
+            "fake/always",
+            Box::new(StubAction {
+                uses: "fake/always",
+                outcome: Outcome::Ok,
+                outputs: vec![],
+                invocations: always_calls.clone(),
+            }),
+        );
+        let failure_calls = Arc::new(AtomicUsize::new(0));
+        registry.insert(
+            "fake/failure",
+            Box::new(StubAction {
+                uses: "fake/failure",
+                outcome: Outcome::Ok,
+                outputs: vec![],
+                invocations: failure_calls.clone(),
+            }),
+        );
+        let mut abort = step(Some("abort"), "fake/ok");
+        abort.with = serde_yml::from_str("value: $setup.never.outputs.value").unwrap();
+        let setup = vec![
+            abort,
+            conditioned_step(None, "fake/always", duhem_schema::StepCondition::Always),
+            conditioned_step(None, "fake/failure", duhem_schema::StepCondition::Failure),
+        ];
+        let mut run = RunState::new(BTreeMap::new());
+        let error = run_setup(&mut w, &registry, None, &mut run, &setup, &BTreeMap::new())
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            EngineError::UnresolvedReference { reference, step, .. }
+                if reference == "$setup.never.outputs.value" && step == "abort"
+        ));
+        assert_eq!(always_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(failure_calls.load(Ordering::SeqCst), 1);
     }
 }

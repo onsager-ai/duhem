@@ -41,6 +41,12 @@ composition.
 | 10 | [`pages-example`](pages-example/) | Share a two-level `pages:` locator catalog through `includes:` and consume the same entry from sibling leaves | browser + inline fixture pages | #366 |
 | 11 | [`flows-example`](flows-example/) | Reuse a parameterized `flows:` sign-in sequence from sibling leaves while preserving expanded-step evidence | browser + inline fixture pages | #367 |
 
+The CLI self-verification suite also carries the leaf-scoped cleanup
+worked example at
+[`duhem-cli/fixtures/cleanup/duhem.yml`](duhem-cli/fixtures/cleanup/duhem.yml):
+`if: always` drains after an engine error, then `teardown:` runs before
+environment shutdown (#409).
+
 ## Self-verification suites — Duhem's dogfood
 
 Real VDs that gate this repo's CI. Bigger, multi-step, and pointed at a

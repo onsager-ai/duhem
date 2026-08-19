@@ -19,6 +19,7 @@ mod manifest_inputs;
 mod manifest_path;
 pub mod project;
 pub mod provision;
+mod source;
 pub mod step;
 pub mod validate;
 mod validate_pages;
@@ -39,6 +40,7 @@ pub use manifest::{
 };
 pub use project::{ProjectDecl, ProjectKind};
 pub use provision::{DurationSpec, HttpReadyProbe, Provision, ReadyProbe};
+pub use source::{SourceLocation, SourceMap};
 pub use step::{ExpandedFlowOrigin, Step, StepCondition};
 pub use validate::{ValidationError, validate, validate_with_contract_outputs};
 pub use verification::{

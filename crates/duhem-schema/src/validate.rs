@@ -17,8 +17,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use thiserror::Error;
 
+use crate::SourceLocation;
 use crate::criterion::{Check, Criterion};
 use crate::expr::{Expr, Path, PathRoot};
+use crate::source::SourcePathSegment;
 use crate::step::Step;
 use crate::validate_runtime::walk_checkable_paths;
 use crate::verification::{FlowCatalog, InputDecl, InputType, PageCatalog, VerificationDefinition};
@@ -99,6 +101,7 @@ pub enum ValidationError {
         step: String,
         raw: String,
         site: RefSite,
+        location: Option<SourceLocation>,
     },
 
     #[error(
@@ -111,6 +114,7 @@ pub enum ValidationError {
         output: String,
         raw: String,
         site: RefSite,
+        location: Option<SourceLocation>,
     },
 
     #[error(
@@ -123,6 +127,7 @@ pub enum ValidationError {
         raw: String,
         site: RefSite,
         help: String,
+        location: Option<SourceLocation>,
     },
 
     #[error("{site} `{raw}` references unknown page locator `{entry}`{help}")]
@@ -131,6 +136,7 @@ pub enum ValidationError {
         raw: String,
         entry: String,
         help: String,
+        location: Option<SourceLocation>,
     },
 
     #[error("{site} `{raw}` references unknown `$runtime` helper `{helper}`{help}")]
@@ -162,7 +168,11 @@ pub enum ValidationError {
     },
 
     #[error("{site} `{raw}`: malformed `$pages` reference (expected `$pages.<page>.<element>`)")]
-    MalformedPageRef { site: String, raw: String },
+    MalformedPageRef {
+        site: String,
+        raw: String,
+        location: Option<SourceLocation>,
+    },
 
     #[error(
         "page locator `$pages.{page}.{element}` references input `{input}`, but leaf `{verification}` does not declare it"
@@ -182,6 +192,7 @@ pub enum ValidationError {
         check: String,
         raw: String,
         site: RefSite,
+        location: Option<SourceLocation>,
     },
 
     #[error(
@@ -192,6 +203,7 @@ pub enum ValidationError {
         check: String,
         raw: String,
         site: RefSite,
+        location: Option<SourceLocation>,
     },
 
     #[error("setup: duplicate step id `{id}`")]
@@ -209,6 +221,7 @@ pub enum ValidationError {
         step: String,
         raw: String,
         site: RefSite,
+        location: Option<SourceLocation>,
     },
 
     #[error(
@@ -221,6 +234,7 @@ pub enum ValidationError {
         output: String,
         raw: String,
         site: RefSite,
+        location: Option<SourceLocation>,
     },
 
     #[error(
@@ -231,6 +245,7 @@ pub enum ValidationError {
         check: String,
         raw: String,
         site: RefSite,
+        location: Option<SourceLocation>,
     },
 
     #[error(
@@ -240,6 +255,7 @@ pub enum ValidationError {
         criterion: String,
         check: String,
         value: String,
+        location: Option<SourceLocation>,
     },
 
     #[error(
@@ -282,6 +298,26 @@ pub enum ValidationError {
 
     #[error("{message}")]
     InvalidFlow { message: String },
+}
+
+impl ValidationError {
+    /// Exact source position of the offending scalar, when proven.
+    pub fn location(&self) -> Option<SourceLocation> {
+        match self {
+            Self::UnresolvedStepRef { location, .. }
+            | Self::UnresolvedStepOutput { location, .. }
+            | Self::UnresolvedInputRef { location, .. }
+            | Self::UnresolvedPageRef { location, .. }
+            | Self::MalformedPageRef { location, .. }
+            | Self::MalformedStepRef { location, .. }
+            | Self::MalformedInputRef { location, .. }
+            | Self::UnresolvedSetupStepRef { location, .. }
+            | Self::UnresolvedSetupStepOutput { location, .. }
+            | Self::MalformedSetupRef { location, .. }
+            | Self::InvalidSessionReference { location, .. } => *location,
+            _ => None,
+        }
+    }
 }
 
 /// Run every structural rule. Always reports as many errors as
@@ -336,7 +372,13 @@ pub fn validate_with_contract_outputs(
     // resolve against the same effective leaf catalog.
     for (idx, step) in v.setup.iter().enumerate() {
         let step_name = step_label(step, idx);
-        walk_with_refs(&step.with, &mut |expr, raw| {
+        let mut source_path = vec![
+            SourcePathSegment::key("setup"),
+            SourcePathSegment::index(idx),
+            SourcePathSegment::key("with"),
+        ];
+        crate::source::walk_with_refs(&step.with, &mut source_path, &mut |expr, raw, path| {
+            let location = v.source_map.scalar_location(path, raw);
             walk_checkable_paths(expr, &mut |path, arity| {
                 if path.root == PathRoot::Pages {
                     crate::validate_pages::check_page_path(
@@ -344,6 +386,7 @@ pub fn validate_with_contract_outputs(
                         path,
                         raw,
                         &format!("setup step `{step_name}` with:"),
+                        location,
                         &mut errs,
                     );
                 } else if path.root == PathRoot::Runtime {
@@ -369,7 +412,13 @@ pub fn validate_with_contract_outputs(
         }
         let contract_outputs = step.uses.as_deref().map(outputs_for).unwrap_or_default();
         check_secret_paths(step, &contract_outputs, "teardown", &step_name, &mut errs);
-        walk_with_refs(&step.with, &mut |expr, raw| {
+        let mut source_path = vec![
+            SourcePathSegment::key("teardown"),
+            SourcePathSegment::index(idx),
+            SourcePathSegment::key("with"),
+        ];
+        crate::source::walk_with_refs(&step.with, &mut source_path, &mut |expr, raw, path| {
+            let location = v.source_map.scalar_location(path, raw);
             walk_checkable_paths(expr, &mut |path, arity| {
                 if path.root == PathRoot::Pages {
                     crate::validate_pages::check_page_path(
@@ -377,6 +426,7 @@ pub fn validate_with_contract_outputs(
                         path,
                         raw,
                         &format!("teardown step `{step_name}` with:"),
+                        location,
                         &mut errs,
                     );
                 } else if path.root == PathRoot::Runtime {
@@ -396,15 +446,16 @@ pub fn validate_with_contract_outputs(
         inputs: &v.inputs,
         pages: &v.pages,
         flows: &v.flows,
+        source_map: &v.source_map,
         setup_outputs: &setup_outputs,
         outputs_for,
     };
     let mut seen_criteria: HashSet<&str> = HashSet::new();
-    for c in &v.criteria {
+    for (criterion_index, c) in v.criteria.iter().enumerate() {
         if !seen_criteria.insert(c.id.as_str()) {
             errs.push(ValidationError::DuplicateCriterionId { id: c.id.clone() });
         }
-        validate_criterion(c, &definition_scope, &mut errs);
+        validate_criterion(c, criterion_index, &definition_scope, &mut errs);
     }
 
     if errs.is_empty() { Ok(()) } else { Err(errs) }
@@ -605,20 +656,26 @@ struct DefinitionScope<'a> {
     inputs: &'a BTreeMap<String, InputDecl>,
     pages: &'a PageCatalog,
     flows: &'a FlowCatalog,
+    source_map: &'a crate::SourceMap,
     setup_outputs: &'a HashMap<&'a str, HashSet<String>>,
     outputs_for: &'a dyn Fn(&str) -> Vec<String>,
 }
 
-fn validate_criterion(c: &Criterion, scope: &DefinitionScope<'_>, errs: &mut Vec<ValidationError>) {
+fn validate_criterion(
+    c: &Criterion,
+    criterion_index: usize,
+    scope: &DefinitionScope<'_>,
+    errs: &mut Vec<ValidationError>,
+) {
     let mut seen_checks: HashSet<&str> = HashSet::new();
-    for ch in &c.checks {
+    for (check_index, ch) in c.checks.iter().enumerate() {
         if !seen_checks.insert(ch.id.as_str()) {
             errs.push(ValidationError::DuplicateCheckId {
                 criterion: c.id.clone(),
                 id: ch.id.clone(),
             });
         }
-        validate_check(c, ch, scope, errs);
+        validate_check(c, criterion_index, ch, check_index, scope, errs);
     }
 }
 
@@ -635,7 +692,9 @@ struct PathScope<'a> {
 
 fn validate_check(
     c: &Criterion,
+    criterion_index: usize,
     ch: &Check,
+    check_index: usize,
     definition: &DefinitionScope<'_>,
     errs: &mut Vec<ValidationError>,
 ) {
@@ -643,9 +702,12 @@ fn validate_check(
         inputs,
         pages,
         flows,
+        source_map,
         setup_outputs,
         outputs_for,
     } = *definition;
+    let source_context_matches =
+        source_map.check_context_matches(criterion_index, &c.id, check_index, &ch.id);
     // A check with neither assertions nor steps can never produce a
     // verdict (the judge would see an empty aggregation). With steps
     // but no assertions the schema layer accepts — whether one of the
@@ -720,23 +782,38 @@ fn validate_check(
     // parsed, the ordinary reference checker supplies the same
     // undeclared input/setup diagnostics as `with:` (#134).
     if let Some(raw) = &ch.session {
+        let location = source_context_matches
+            .then(|| source_map.check_scalar_location(criterion_index, check_index, "session", raw))
+            .flatten();
         match crate::expr::parse(raw) {
             Ok(Expr::Path(path)) => {
-                check_path(&scope, &path, None, raw, &RefSite::Session, errs);
+                check_path(&scope, &path, None, raw, &RefSite::Session, location, errs);
             }
             _ => errs.push(ValidationError::InvalidSessionReference {
                 criterion: c.id.clone(),
                 check: ch.id.clone(),
                 value: raw.clone(),
+                location,
             }),
         }
     }
 
-    for assertion in &ch.assertions {
+    for (assertion_index, assertion) in ch.assertions.iter().enumerate() {
         assertion.walk_exprs(|expr_str| {
             let raw = expr_str.raw.as_str();
+            let location = source_context_matches
+                .then(|| {
+                    source_map.assertion_location(
+                        criterion_index,
+                        check_index,
+                        assertion_index,
+                        assertion,
+                        raw,
+                    )
+                })
+                .flatten();
             walk_checkable_paths(&expr_str.parsed, &mut |p, arity| {
-                check_path(&scope, p, arity, raw, &RefSite::Assertion, errs);
+                check_path(&scope, p, arity, raw, &RefSite::Assertion, location, errs);
             });
         });
     }
@@ -751,9 +828,15 @@ fn validate_check(
         let site = RefSite::StepWith {
             step: step_label(s, idx),
         };
-        walk_with_refs(&s.with, &mut |expr, raw| {
+        let mut source_path = crate::source::check_path(criterion_index, check_index, "steps");
+        source_path.push(SourcePathSegment::index(idx));
+        source_path.push(SourcePathSegment::key("with"));
+        crate::source::walk_with_refs(&s.with, &mut source_path, &mut |expr, raw, path| {
+            let location = source_context_matches
+                .then(|| source_map.step_with_location(s, idx, path, raw))
+                .flatten();
             walk_checkable_paths(expr, &mut |p, arity| {
-                check_path(&scope, p, arity, raw, &site, errs);
+                check_path(&scope, p, arity, raw, &site, location, errs);
             });
         });
     }
@@ -797,45 +880,13 @@ fn step_label(s: &Step, idx: usize) -> String {
     s.id.clone().unwrap_or_else(|| format!("step {idx}"))
 }
 
-/// Walk a step's untyped `with:` tree, invoking `visit(expr, raw)` for
-/// every string scalar that parses as a *substitutable* expression
-/// (`Expr::Path | Expr::Call`) — matching the runtime's
-/// `is_substitutable_expr`. Strings that don't lead with `$`, don't
-/// parse, or are non-substitutable (comparisons, literals) are not
-/// cross-references and are skipped — conservatively, so we never
-/// reject a value the runtime would pass through untouched.
-fn walk_with_refs<F: FnMut(&Expr, &str)>(with: &serde_yml::Value, visit: &mut F) {
-    match with {
-        serde_yml::Value::String(s) => {
-            if !s.trim_start().starts_with('$') {
-                return;
-            }
-            if let Ok(expr) = crate::expr::parse(s)
-                && matches!(expr, Expr::Path(_) | Expr::Call { .. })
-            {
-                visit(&expr, s);
-            }
-        }
-        serde_yml::Value::Sequence(seq) => {
-            for v in seq {
-                walk_with_refs(v, visit);
-            }
-        }
-        serde_yml::Value::Mapping(map) => {
-            for (_k, v) in map {
-                walk_with_refs(v, visit);
-            }
-        }
-        _ => {}
-    }
-}
-
 fn check_path(
     scope: &PathScope<'_>,
     path: &Path,
     arity: Option<usize>,
     raw: &str,
     site: &RefSite,
+    location: Option<SourceLocation>,
     errs: &mut Vec<ValidationError>,
 ) {
     let PathScope {
@@ -859,6 +910,7 @@ fn check_path(
                     check: ch.id.clone(),
                     raw: raw.to_string(),
                     site: site.clone(),
+                    location,
                 });
                 return;
             }
@@ -871,6 +923,7 @@ fn check_path(
                     step: step_id.to_string(),
                     raw: raw.to_string(),
                     site: site.clone(),
+                    location,
                 }),
                 Some(outputs) => {
                     if !outputs.contains(output_name) {
@@ -881,6 +934,7 @@ fn check_path(
                             output: output_name.to_string(),
                             raw: raw.to_string(),
                             site: site.clone(),
+                            location,
                         });
                     }
                 }
@@ -896,6 +950,7 @@ fn check_path(
                     check: ch.id.clone(),
                     raw: raw.to_string(),
                     site: site.clone(),
+                    location,
                 });
                 return;
             }
@@ -908,6 +963,7 @@ fn check_path(
                     step: step_id.to_string(),
                     raw: raw.to_string(),
                     site: site.clone(),
+                    location,
                 }),
                 Some(outputs) => {
                     if !outputs.contains(output_name) {
@@ -918,6 +974,7 @@ fn check_path(
                             output: output_name.to_string(),
                             raw: raw.to_string(),
                             site: site.clone(),
+                            location,
                         });
                     }
                 }
@@ -933,6 +990,7 @@ fn check_path(
                     check: ch.id.clone(),
                     raw: raw.to_string(),
                     site: site.clone(),
+                    location,
                 });
                 return;
             }
@@ -970,6 +1028,7 @@ fn check_path(
                     raw: raw.to_string(),
                     site: site.clone(),
                     help,
+                    location,
                 });
             }
         }
@@ -979,6 +1038,7 @@ fn check_path(
                 path,
                 raw,
                 &format!("criterion `{}` / check `{}`: {site}", c.id, ch.id),
+                location,
                 errs,
             );
         }

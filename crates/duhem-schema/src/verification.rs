@@ -10,6 +10,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::SourceMap;
 use crate::criterion::Criterion;
 use crate::project::ProjectDecl;
 use crate::provision::Provision;
@@ -46,6 +47,13 @@ pub type FlowCatalog = BTreeMap<String, Flow>;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VerificationDefinition {
+    /// Deserializer-retained YAML marks for semantic diagnostics. This is
+    /// provenance only: it is absent from the wire shape and semantic equality.
+    #[doc(hidden)]
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub source_map: SourceMap,
+
     /// Human-readable name of the verification.
     pub verification: String,
 
@@ -210,7 +218,9 @@ impl VerificationDefinition {
     /// Parse a Verification Definition from YAML source. Does not run
     /// the structural validator; call `crate::validate()` for that.
     pub fn from_yaml_str(src: &str) -> Result<Self, SchemaError> {
-        serde_yml::from_str(src).map_err(SchemaError::from)
+        let mut definition: Self = serde_yml::from_str(src).map_err(SchemaError::from)?;
+        definition.source_map = SourceMap::from_yaml(src);
+        Ok(definition)
     }
 
     /// Re-emit a parsed Verification Definition as YAML. Order is
@@ -287,6 +297,7 @@ criteria:
             },
         );
         let v = VerificationDefinition {
+            source_map: SourceMap::default(),
             verification: "x".into(),
             spec_ref: None,
             metadata: BTreeMap::new(),

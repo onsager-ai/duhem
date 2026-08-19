@@ -4,7 +4,7 @@
 // panel (screenshots inline, network HAR as a request table).
 
 import { ChevronDown, ChevronRight, Maximize2, Minimize2, X } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -515,7 +515,7 @@ function StepGroup({
       data-flow-name={flow?.name}
     >
       <details open={status.failed || selected}>
-        <summary className="step-summary md:sticky md:top-0 md:z-20 md:border-b md:bg-background/95 md:backdrop-blur">
+        <summary className="step-summary md:sticky md:top-[var(--check-context-height)] md:z-10 md:border-b md:bg-background/95 md:backdrop-blur">
           {/* Primary line: status icon + action. Successful steps rely on
               the green check alone; only exceptional outcomes need text. */}
           <span className="ev-row">
@@ -552,7 +552,7 @@ function StepGroup({
                 </span>
               )}
             </span>
-            <span className="ev-time" title={started.ts}>
+            <span className="ev-time min-w-max" title={started.ts}>
               {fe.delta ?? ""}
             </span>
             <ChevronRight className="ev-caret" aria-hidden="true" />
@@ -1471,6 +1471,8 @@ export default function CheckPage() {
 function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
   const [check, setCheck] = useState<CheckDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const contextRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const [criterionId, checkId] = pair.split("::", 2);
@@ -1482,6 +1484,20 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
     setError(null);
     fetchCheck(runId, criterionId, checkId).then(setCheck, (e) => setError(String(e)));
   }, [runId, pair]);
+
+  useLayoutEffect(() => {
+    const surface = surfaceRef.current;
+    const context = contextRef.current;
+    if (surface === null || context === null) return;
+    const updateHeight = () => {
+      surface.style.setProperty("--check-context-height", `${context.offsetHeight}px`);
+    };
+    updateHeight();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(context);
+    return () => observer.disconnect();
+  }, [check]);
 
   const vd = useVd();
   const [params] = useSearchParams();
@@ -1528,8 +1544,8 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
 
   return (
     <>
-      <div className="run-detail-surface">
-        <div className="check-context sticky top-0 z-10 mb-3 border-b bg-background/95 pb-3 backdrop-blur md:-ml-4 md:pl-4">
+      <div ref={surfaceRef} className="run-detail-surface">
+        <div ref={contextRef} className="check-context mb-3 border-b bg-background/95 pb-3 backdrop-blur md:sticky md:top-0 md:z-20 md:-ml-4 md:pl-4">
           <h2 className="flex flex-wrap items-center gap-2 text-base font-semibold">
             <span>{check.criterion_id}</span>
             <span className="text-muted-foreground">/</span>

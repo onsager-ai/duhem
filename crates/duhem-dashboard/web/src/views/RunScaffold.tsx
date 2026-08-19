@@ -174,7 +174,7 @@ function TreeGroup({
     </>
   );
   return (
-    <div data-filter-context={contextOnly ? "true" : undefined}>
+    <div className="md:-mb-14" data-filter-context={contextOnly ? "true" : undefined}>
       <div
         className="criterion-tree-parent flex min-w-0 items-start gap-0.5 md:sticky md:top-0 md:z-10 md:bg-background/95 md:backdrop-blur"
         data-testid="criterion-parent"
@@ -315,6 +315,9 @@ function TreeGroup({
           })}
         </div>
       )}
+      {/* Preserve the sticky runway the filter row supplied before it moved
+          outside the scroller; the parent margin cancels visible spacing. */}
+      <div className="criterion-sticky-runway hidden h-14 md:block" aria-hidden="true" />
     </div>
   );
 }
@@ -350,7 +353,7 @@ function RunTree({
     });
   };
   return (
-    <div className="min-w-0 max-w-full">
+    <>
       <div
         role="group"
         aria-label="Filter suites by status"
@@ -382,7 +385,7 @@ function RunTree({
       <nav
         aria-label="criteria and checks"
         data-testid="run-tree"
-        className="run-results-nav min-w-0 max-w-full space-y-0.5 overflow-x-hidden py-2 pr-3 supports-[overflow:clip]:overflow-x-clip"
+        className="run-results-rail run-results-nav min-w-0 max-w-full space-y-0.5 overflow-x-hidden pb-6 pr-3 supports-[overflow:clip]:overflow-x-clip md:min-h-0 md:overflow-y-auto"
       >
         {filtered.map((group) => (
           <TreeGroup
@@ -400,7 +403,7 @@ function RunTree({
           </p>
         )}
       </nav>
-    </div>
+    </>
   );
 }
 
@@ -535,7 +538,7 @@ export function RunScaffold({
             </p>
           ) : (
           <div className="run-results-grid grid min-w-0 max-w-full md:grid-cols-[17rem_minmax(0,1fr)]">
-            <aside className="run-results-rail min-w-0 max-w-full border-b md:max-h-[calc(100vh-10.5rem)] md:overflow-y-auto md:border-b-0 md:border-r">
+            <aside className="min-w-0 max-w-full border-b md:grid md:max-h-[calc(100vh-10.5rem)] md:grid-rows-[auto_minmax(0,1fr)] md:border-b-0 md:border-r">
               <RunTree
                 run={run}
                 activePair={activePair}

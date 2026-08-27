@@ -342,14 +342,22 @@ the collision patterns to watch, and the CI-failure table they reference.
 
 ### Check gate
 
-The default pre-push gate (exactly what reviewers and CI run) is:
+The pre-push gate is:
 
 ```bash
-just check        # = just lint (fmt-check + clippy -D warnings +
-                  #   xtask check-file-budget + skill-scrub +
-                  #   dx-drift --mode=warn) then just test
-                  #   (cargo test --workspace)
+just preflight    # = just lint + just test + just self-verify
+                  #   + xtask schema-changelog-check (strict)
 ```
+
+**Do not substitute `just check`.** It is the fast inner-loop gate and
+green there does *not* imply green CI. Two gaps, both of which have
+shipped red branches:
+
+- `just lint` runs `schema-changelog-check` advisory (`--lint`); CI runs
+  it strict. A missing CHANGELOG entry passes locally and fails CI.
+- `just check` never runs Duhem's own self-verification suite. On #437 a
+  schema change rejected an in-tree example VD while every static check
+  and unit test stayed green; only CI caught it.
 
 Run it on the merged tree (after `pre-push` step 1), not the branch
 alone. Then add the gates the diff calls for:
@@ -359,14 +367,16 @@ alone. Then add the gates the diff calls for:
 
   ```bash
   cargo run -p xtask -- schema-drift            # docs §10 ↔ code
-  cargo run -p xtask -- schema-changelog-check  # CHANGELOG.md touch gate
   ```
+
+  (`schema-changelog-check` is already in `just preflight`.)
 
 - **VD-touching**: run each modified Verification Definition through
   `cargo run -p duhem-cli -- validate <path>`.
 - **Browser-action-touching** (`crates/duhem-actions/**` `ui/*` or the
   Playwright sidecar): `just test browser-actions` (the `#[ignore]`'d
-  browser smoke suites; `just check` skips them). Requires
+  browser smoke suites; neither `just check` nor `just preflight` runs
+  them). Requires
   `npx playwright install chromium` once per host.
 
 Treat any warning as a blocker; don't `#[allow(dead_code)]` / `@ts-ignore`

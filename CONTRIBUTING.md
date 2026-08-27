@@ -20,18 +20,35 @@ If a change introduces new product surface (a new action type, a new schema fiel
 Duhem uses [`just`](https://github.com/casey/just) as its task runner over a Cargo workspace.
 
 ```sh
-just build    # cargo build --workspace
-just check    # the pre-push gate: lint + tests
-just test     # cargo test --workspace (skips #[ignore]'d tests)
-just lint     # fmt --check + clippy -D warnings + file-budget
+just build       # cargo build --workspace
+just check       # fast inner loop: lint + tests
+just preflight   # the pre-push gate: everything CI runs
+just test        # cargo test --workspace (skips #[ignore]'d tests)
+just lint        # static checks (advisory changelog mode)
+just self-verify # run Duhem against its own Verification Definitions
 ```
 
-`just check` is what you should run before pushing — it mirrors CI:
+**`just preflight` is what you should run before pushing.** `just check`
+is the fast inner-loop gate; passing it does *not* mean CI will pass.
+Two things differ, and both have bitten real branches:
+
+- `schema-changelog-check` runs advisory (`--lint`) inside `just lint`
+  so an in-progress change is not blocked on a CHANGELOG entry it does
+  not have yet. CI runs it strict.
+- Nothing in `just check` runs Duhem's own self-verification suite.
+  That is where the expensive breakage hides: a change can pass every
+  static check and every unit test while breaking the Verification
+  Definitions Duhem uses to verify itself.
+
+`just preflight` runs:
 
 - `cargo fmt --all -- --check`
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - the file-budget check (`xtask check-file-budget`)
+- `xtask skill-scrub` and `xtask dx-drift`
 - `cargo test --workspace`
+- `just self-verify` — `verifications/duhem-cli` against a freshly built CLI
+- `xtask schema-changelog-check` in its strict form
 
 Browser-backed (`ui/*`) test lanes need Node ≥ 20 plus the Playwright sidecar's Chromium, installed once per host:
 
@@ -39,7 +56,7 @@ Browser-backed (`ui/*`) test lanes need Node ≥ 20 plus the Playwright sidecar'
 (cd crates/duhem-actions/sidecar && npm ci && npx playwright install chromium)
 ```
 
-`just test browser-actions` exercises the generic `ui/*` and `api/observe` action lane. `just dashboard test` exercises the dashboard frontend, crate, and CLI lane. The core `just check` gate does not require either one.
+`just test browser-actions` exercises the generic `ui/*` and `api/observe` action lane. `just dashboard test` exercises the dashboard frontend, crate, and CLI lane. Neither `just check` nor `just preflight` requires either one.
 
 For dashboard development, `just dashboard dev` starts the Rust API on
 port 7878 and the Vite frontend with hot reload on port 5173. Dashboard

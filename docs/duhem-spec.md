@@ -772,6 +772,7 @@ manifest_version: 1
 defaults:
   profile: staging            # default profile for runs
   timeout: 30s                # default per-step timeout
+  max_wait: 60s               # ui/wait duration ceiling (default: 60s)
   inconclusive_policy: block  # block | warn | pass
   retry:
     max: 1
@@ -905,7 +906,7 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 - `ui/assert-url` — observe URL state
 - `ui/assert-state` — observe page-level state (authenticated, loaded, etc.)
 - `ui/capture-session` — capture cookies/local storage as a secret state value for later checks
-- `ui/wait` — wait for a fixed `duration` (`TimeoutSpec`, e.g. `500ms` or `2s`) without requiring a browser page. Prefer `ui/assert-element` with `timeout:`; fixed waits are a debugging and transitional-authoring escape hatch capped at 60 seconds.
+- `ui/wait` — wait for a fixed `duration` (`TimeoutSpec`, e.g. `500ms` or `2s`) without requiring a browser page. Prefer `ui/assert-element` with `timeout:`; fixed waits are a debugging and transitional-authoring escape hatch with a 60-second default ceiling that root-manifest `defaults.max_wait` may raise or lower.
 
 **API actions**
 

@@ -26,12 +26,16 @@ impl Engine {
     }
 
     /// Apply a manifest's `defaults:` block (spec #66): the per-step
-    /// `timeout:` fallback (`timeout`), the inconclusive policy, and the
-    /// retry posture. `defaults.profile` is not consumed here (its
+    /// `timeout:` fallback (`timeout`), the `ui/wait` ceiling (`max_wait`),
+    /// the inconclusive policy, and the retry posture. `defaults.profile` is not consumed here (its
     /// `profiles:` lookup is out of scope). Absent sub-keys leave
     /// today's behavior in place.
     pub fn with_defaults(mut self, defaults: &duhem_schema::ManifestDefaults) -> Self {
         self.default_timeout = defaults.timeout.map(Duration::from);
+        self.max_wait = defaults
+            .max_wait
+            .map(Duration::from)
+            .unwrap_or(Duration::from_secs(60));
         self.retry = defaults.retry;
         self.inconclusive_policy = match defaults.inconclusive_policy {
             Some(duhem_schema::InconclusivePolicy::Block) | None => InconclusivePolicy::Block,
@@ -180,5 +184,30 @@ impl Engine {
 impl Default for Engine {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest_with_max_wait(raw: &str) -> duhem_schema::RootManifest {
+        duhem_schema::RootManifest::from_yaml_str(&format!(
+            "manifest_version: 1\ndefaults:\n  max_wait: {raw}\nverifications: []\n"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn manifest_max_wait_raises_and_lowers_engine_ceiling() {
+        let raised = manifest_with_max_wait("5m");
+        let engine = Engine::new().with_defaults(raised.defaults.as_ref().unwrap());
+        assert_eq!(engine.max_wait, Duration::from_secs(300));
+
+        let lowered = manifest_with_max_wait("5s");
+        let engine = Engine::new().with_defaults(lowered.defaults.as_ref().unwrap());
+        assert_eq!(engine.max_wait, Duration::from_secs(5));
+
+        assert_eq!(Engine::new().max_wait, Duration::from_secs(60));
     }
 }

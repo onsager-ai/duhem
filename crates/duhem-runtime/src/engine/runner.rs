@@ -43,7 +43,7 @@ use crate::engine::capture::{
 };
 use crate::engine::context::{RunContext, RunState, json_to_value};
 use crate::engine::gating::{skip_reason as gate_skip_reason, step_failed};
-use crate::engine::registry::{ActionRegistry, default_registry};
+use crate::engine::registry::{ActionRegistry, default_registry, enforce_wait_ceiling};
 use crate::engine::session::SessionResolution;
 use crate::engine::template::{page_reference, substitute_with};
 use crate::engine::translate::{
@@ -126,6 +126,9 @@ pub struct Engine {
     /// built-in `DEFAULT_TIMEOUT` (5s) applies. `None` keeps today's
     /// behavior.
     default_timeout: Option<Duration>,
+    /// Effective ceiling for `ui/wait` fixed delays. Manifest
+    /// `defaults.max_wait` may raise or lower the built-in 60s policy.
+    max_wait: Duration,
     /// Manifest `defaults.inconclusive_policy` (spec #66). `Block`
     /// (today's behavior) is the default.
     inconclusive_policy: InconclusivePolicy,
@@ -175,6 +178,7 @@ impl Engine {
             env: BTreeMap::new(),
             inherited: std::collections::HashSet::new(),
             default_timeout: None,
+            max_wait: Duration::from_secs(60),
             inconclusive_policy: InconclusivePolicy::Block,
             retry: None,
             retry_backoff_base: RETRY_BACKOFF_BASE,
@@ -885,25 +889,31 @@ impl Engine {
             let execution = match dispatcher {
                 None => None,
                 Some(dispatcher) => {
-                    let page_ref: Option<&Page> = check_browser.as_ref().map(|cb| &cb.page);
-                    let result = dispatcher
-                        .invoke(
-                            page_ref,
-                            idx,
-                            &resolved_with,
-                            &self.child_process_env(writer.run_id()),
-                        )
-                        .await;
-                    if let Ok(r) = &result {
-                        crate::engine::secret_output::register(
-                            writer,
-                            step,
-                            idx,
-                            &dispatcher.secret_outputs(),
-                            &r.outputs,
-                        )?;
+                    if step.uses_name() == "ui/wait"
+                        && let Err(error) = enforce_wait_ceiling(&resolved_with, self.max_wait)
+                    {
+                        Some(Err(error))
+                    } else {
+                        let page_ref: Option<&Page> = check_browser.as_ref().map(|cb| &cb.page);
+                        let result = dispatcher
+                            .invoke(
+                                page_ref,
+                                idx,
+                                &resolved_with,
+                                &self.child_process_env(writer.run_id()),
+                            )
+                            .await;
+                        if let Ok(r) = &result {
+                            crate::engine::secret_output::register(
+                                writer,
+                                step,
+                                idx,
+                                &dispatcher.secret_outputs(),
+                                &r.outputs,
+                            )?;
+                        }
+                        Some(result)
                     }
-                    Some(result)
                 }
             };
 
@@ -1308,6 +1318,7 @@ criteria:
             env: BTreeMap::new(),
             inherited: std::collections::HashSet::new(),
             default_timeout: None,
+            max_wait: Duration::from_secs(60),
             inconclusive_policy: InconclusivePolicy::Block,
             retry: None,
             // Zero backoff so retry-loop tests run instantly.

@@ -145,8 +145,9 @@ pub struct RootManifest {
 
 /// Suite-wide defaults declared once on the root manifest (spec #66).
 /// Every sub-key is optional; an absent sub-key falls back to today's
-/// behavior (`timeout` → the engine's 5s default, `inconclusive_policy`
-/// → `block`, `retry.max` → `0`).
+/// behavior (`timeout` → the engine's 5s default, `max_wait` → the
+/// engine's 60s ceiling, `inconclusive_policy` → `block`, `retry.max`
+/// → `0`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ManifestDefaults {
@@ -163,6 +164,12 @@ pub struct ManifestDefaults {
     /// Absent → the engine's built-in 5s default still applies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<DurationSpec>,
+    /// Ceiling for `ui/wait`'s `duration:`. A fixed wait longer than this
+    /// is rejected at dispatch rather than slept through. Same duration
+    /// wire shape as `timeout:` (integer milliseconds or a suffixed string
+    /// like `30s` / `2m`). Absent → the built-in 60s ceiling applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_wait: Option<DurationSpec>,
     /// How a criterion-level `inconclusive` verdict is treated at run
     /// aggregation. Absent → `block` (today's behavior).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1415,6 +1422,7 @@ manifest_version: 1
 defaults:
   profile: staging
   timeout: 30s
+  max_wait: 5m
   inconclusive_policy: warn
   retry:
     max: 2
@@ -1428,10 +1436,17 @@ verifications: []
             std::time::Duration::from(d.timeout.unwrap()),
             std::time::Duration::from_secs(30)
         );
+        assert_eq!(
+            std::time::Duration::from(d.max_wait.unwrap()),
+            std::time::Duration::from_secs(300)
+        );
         assert_eq!(d.inconclusive_policy, Some(InconclusivePolicy::Warn));
         let r = d.retry.as_ref().expect("retry present");
         assert_eq!(r.max, 2);
         assert_eq!(r.backoff, RetryBackoff::Exponential);
+        let encoded = serde_yml::to_string(&m).expect("serialize");
+        let reparsed = RootManifest::from_yaml_str(&encoded).expect("reparse");
+        assert_eq!(reparsed, m);
     }
 
     #[test]
@@ -1450,6 +1465,7 @@ verifications: []
         assert!(d.profile.is_none());
         assert!(d.inconclusive_policy.is_none());
         assert!(d.retry.is_none());
+        assert!(d.max_wait.is_none());
         assert!(d.timeout.is_some());
     }
 

@@ -54,6 +54,164 @@ criteria:
         assertions: ["true"]
 "#;
 
+const ENV_INPUT_VD: &str = r#"
+verification: env-file
+inputs:
+  token:
+    type: string
+    env: DUHEM_ENV_FILE_TEST_TOKEN
+    secret: true
+criteria:
+  - id: AC-1
+    description: input sourcing
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+
+#[test]
+fn discovered_env_feeds_declared_input_and_masks_secret() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ENV_INPUT_VD);
+    let secret = "file-secret-442-unique";
+    std::fs::write(
+        tmp.path().join(".env"),
+        format!("DUHEM_ENV_FILE_TEST_TOKEN={secret}\n"),
+    )
+    .unwrap();
+    std::fs::create_dir(tmp.path().join(".git")).unwrap();
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--dry-run")
+        .current_dir(tmp.path())
+        .env_remove("DUHEM_ENV_FILE_TEST_TOKEN")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!combined.contains(secret), "secret leaked: {combined}");
+    assert!(
+        combined.contains("RESOLVED INPUT: token = [redacted:token]"),
+        "output was {combined:?}"
+    );
+}
+
+#[test]
+fn env_discovery_starts_at_discovered_manifest_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("v.yml"), ENV_INPUT_VD).unwrap();
+    std::fs::write(
+        tmp.path().join("duhem.yml"),
+        "manifest_version: 1\nverifications:\n  - path: ./v.yml\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join(".env"),
+        "DUHEM_ENV_FILE_TEST_TOKEN=manifest-root-secret\n",
+    )
+    .unwrap();
+    std::fs::create_dir(tmp.path().join(".git")).unwrap();
+    let nested = tmp.path().join("nested/deep");
+    std::fs::create_dir_all(&nested).unwrap();
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg("--dry-run")
+        .current_dir(&nested)
+        .env_remove("DUHEM_ENV_FILE_TEST_TOKEN")
+        .output()
+        .expect("spawn duhem");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.status.success(), "output={combined}");
+    assert!(combined.contains("RESOLVED INPUT: v::token = [redacted:token]"));
+    assert!(!combined.contains("manifest-root-secret"));
+}
+
+#[test]
+fn exported_environment_beats_env_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ENV_INPUT_VD);
+    std::fs::write(
+        tmp.path().join(".env"),
+        "DUHEM_ENV_FILE_TEST_TOKEN=file-value\n",
+    )
+    .unwrap();
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--dry-run")
+        .current_dir(tmp.path())
+        .env("DUHEM_ENV_FILE_TEST_TOKEN", "exported-value")
+        .output()
+        .expect("spawn duhem");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.status.success(), "output={combined}");
+    assert!(!combined.contains("file-value"));
+    assert!(!combined.contains("exported-value"));
+    assert!(combined.contains("[redacted:token]"));
+}
+
+#[test]
+fn explicit_and_disabled_env_file_controls_work() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ENV_INPUT_VD);
+    let selected = tmp.path().join("selected.env");
+    std::fs::write(&selected, "DUHEM_ENV_FILE_TEST_TOKEN=selected\n").unwrap();
+    let explicit = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--dry-run")
+        .arg("--env-file")
+        .arg(&selected)
+        .env_remove("DUHEM_ENV_FILE_TEST_TOKEN")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        explicit.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&explicit.stderr)
+    );
+    assert!(String::from_utf8_lossy(&explicit.stdout).contains("[redacted:token]"));
+
+    std::fs::write(
+        tmp.path().join(".env"),
+        "DUHEM_ENV_FILE_TEST_TOKEN=ignored\n",
+    )
+    .unwrap();
+    let disabled = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--dry-run")
+        .arg("--no-env-file")
+        .current_dir(tmp.path())
+        .env_remove("DUHEM_ENV_FILE_TEST_TOKEN")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        !disabled.status.success(),
+        "disabled sourcing should leave the required input unbound"
+    );
+    assert!(String::from_utf8_lossy(&disabled.stderr).contains("missing required input: `token`"));
+}
+
 #[test]
 #[ignore = "requires `npx playwright install chromium`; `duhem run` launches a browser unconditionally"]
 fn default_reporter_matches_pre_spec_output_byte_for_byte() {

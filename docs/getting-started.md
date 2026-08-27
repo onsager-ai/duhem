@@ -30,6 +30,45 @@ To manage the browser yourself (air-gapped hosts, a pinned system
 Chromium), set `DUHEM_NO_BROWSER_INSTALL=1` to turn auto-provision off and
 `DUHEM_BROWSER_EXECUTABLE=/path/to/chrome` to point at your binary.
 
+### Environment files and operational knobs
+
+`duhem run` loads the nearest `.env` starting at the root-manifest directory
+(or the current directory when there is no manifest) and walking upward only
+as far as the enclosing `.git` boundary. A variable already exported in the
+real process environment always wins. Use `--env-file <path>` to select a file
+explicitly or `--no-env-file` to disable loading.
+
+The in-tree parser deliberately supports only `KEY=VALUE`, an optional
+`export ` prefix, blank lines, full-line `#` comments, trailing ` #` comments
+on unquoted values, single- and double-quoted values, and `\n` / `\t` escapes
+inside double quotes. Whitespace around keys and unquoted values is trimmed.
+It rejects variable interpolation (`${OTHER}`) and multi-line values with a
+line-numbered error. `.env` inheritance chains are not followed. This explicit
+subset keeps sourcing predictable; the parser can later be replaced behind
+the same seam.
+
+Ambient variables are reserved for **operational knobs**: settings that change
+how Duhem executes without changing what a check claims. The closed browser
+execution set is:
+
+- `DUHEM_HEADED=1|true` — show the browser;
+- `DUHEM_SLOW_MO=<milliseconds>` — delay Playwright operations for observation;
+- `DUHEM_NODE=<command>` — select the Node executable;
+- `DUHEM_SIDECAR_DIR=<path>` — select the Playwright sidecar;
+- `DUHEM_NO_BROWSER_INSTALL=1|true` — suppress automatic browser installation;
+- `DUHEM_BROWSER_EXECUTABLE=<path>`, `DUHEM_BROWSER_CHANNEL=<name>`, and
+  `DUHEM_BROWSER_ARGS="..."` — select/configure the browser process.
+
+Timeouts, base URLs, credentials, and other **semantic parameters** change
+what is verified, so Duhem never reads ambient variables as global overrides
+for them. Declare an `inputs:` entry with `env:` and reference
+`$inputs.<name>` instead; this makes the dependency visible in the VD and uses
+the existing `--inputs` → profile → `env:` → `default:` precedence ladder.
+Mark credentials `secret: true`; values sourced from `.env` then enter the
+same masking registry as every other secret input. Suite-wide `timeout:` is a
+`defaults:` setting on the root manifest, while a leaf without a manifest uses
+the engine default. There is intentionally no `DUHEM_DEFAULT_TIMEOUT`.
+
 ## 2. Scaffold your first Verification Definition
 
 ```bash

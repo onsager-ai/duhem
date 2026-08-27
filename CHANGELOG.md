@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] `duhem run` discovers `.env` values for declared `env:` inputs without overriding exported variables, adds `--env-file` / `--no-env-file`, and supports the operational `DUHEM_SLOW_MO` browser delay. (#442)
 - [additive] `setup:` and `teardown:` steps accept value-based `if:` expressions with static reference validation and fail-closed evaluation; check-step expressions remain rejected. (#440)
 - [clarifying] Verification Definitions are total: validation requires a computable per-check worst-case step bound, and `duhem resolve` reports it; existing flow depth and cycle guards are instances of this enforceable commitment. (#444)
 - [clarifying] `duhem run` now reports a `$pages.<page>.<element>.<field>` reference as malformed rather than unresolved, so its diagnostic matches `duhem validate` instead of blaming a missing local definition. (#438)

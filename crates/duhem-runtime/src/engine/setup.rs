@@ -24,7 +24,7 @@ use duhem_actions::Page;
 use duhem_actions::{Outcome, RunBrowser};
 use duhem_evidence::{EventPayload, EvidenceWriter, StepOutcome, StepPhase};
 use duhem_judge::InconclusiveCause;
-use duhem_schema::Step;
+use duhem_schema::{Step, StepCondition};
 use tracing::debug;
 
 use crate::engine::context::RunState;
@@ -215,7 +215,35 @@ async fn run_lifecycle_steps(
     let mut stored_error = None;
     let mut cleanup = Vec::new();
     for (idx, step) in steps.iter().enumerate() {
-        let gate_reason = gate_skip_reason(step.condition, failed_by.as_deref());
+        // The outcome gate runs first — including for value expressions,
+        // which carry `success` semantics (see `gating::skip_reason`).
+        // Only once it passes is the expression itself evaluated, so a
+        // step blocked by an earlier failure is gated cleanly rather
+        // than failing on operands that failure left unresolvable.
+        let mut condition_error = None;
+        let gate_reason = match gate_skip_reason(&step.condition, failed_by.as_deref()) {
+            Some(blocked) => Some(blocked),
+            None => match &step.condition {
+                StepCondition::Expr(expr) => {
+                    let ctx = crate::engine::context::RunContext::new(run);
+                    match crate::eval(&expr.parsed, &ctx) {
+                        crate::EvalResult::True => None,
+                        crate::EvalResult::False => {
+                            Some(format!("condition `{}` evaluated false", expr.raw))
+                        }
+                        crate::EvalResult::Inconclusive(cause) => {
+                            condition_error = Some(EngineError::UnresolvedReference {
+                                reference: expr.raw.clone(),
+                                context: format!(" (condition could not be evaluated: {cause:?})"),
+                                step: step_label(step, idx),
+                            });
+                            None
+                        }
+                    }
+                }
+                _ => None,
+            },
+        };
         let cleanup_step =
             phase == StepPhase::Teardown || (failed_by.is_some() && gate_reason.is_none());
         // Setup steps see the run state (inputs, env, uuid, plus any
@@ -225,7 +253,9 @@ async fn run_lifecycle_steps(
         // template substitution.
         let ctx = crate::engine::context::RunContext::new(run);
         let mut resolved_with = step.with.clone();
-        let step_error = if gate_reason.is_none() {
+        let step_error = if condition_error.is_some() {
+            condition_error
+        } else if gate_reason.is_none() {
             substitute_with(&mut resolved_with, &ctx).err().map(|u| {
                 EngineError::UnresolvedReference {
                     reference: u.reference,
@@ -577,6 +607,126 @@ mod tests {
         let mut step = step(id, uses);
         step.condition = condition;
         step
+    }
+
+    fn expr_condition(source: &str) -> duhem_schema::StepCondition {
+        duhem_schema::StepCondition::Expr(duhem_schema::ExprStr::from_source(source).unwrap())
+    }
+
+    #[tokio::test]
+    async fn value_conditions_gate_setup_on_true_and_false() {
+        let (mut w, _tmp) = make_writer().await;
+        let gated_calls = Arc::new(AtomicUsize::new(0));
+        let mut registry: ActionRegistry = BTreeMap::new();
+        registry.insert(
+            "fake/seed",
+            Box::new(StubAction {
+                uses: "fake/seed",
+                outcome: Outcome::Ok,
+                outputs: vec![("n", serde_json::json!(2))],
+                invocations: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
+        registry.insert(
+            "fake/gated",
+            Box::new(StubAction {
+                uses: "fake/gated",
+                outcome: Outcome::Ok,
+                outputs: vec![],
+                invocations: gated_calls.clone(),
+            }),
+        );
+        let mut run = RunState::new(BTreeMap::new());
+        let setup = vec![
+            step(Some("existing"), "fake/seed"),
+            conditioned_step(
+                None,
+                "fake/gated",
+                expr_condition("$setup.existing.outputs.n > 0"),
+            ),
+            conditioned_step(
+                None,
+                "fake/gated",
+                expr_condition("$setup.existing.outputs.n < 0"),
+            ),
+        ];
+        let result = run_setup(&mut w, &registry, None, &mut run, &setup, &BTreeMap::new())
+            .await
+            .unwrap();
+        assert!(result.aborted.is_none());
+        assert_eq!(gated_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn value_conditions_gate_teardown() {
+        let (mut w, _tmp) = make_writer().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut registry: ActionRegistry = BTreeMap::new();
+        registry.insert(
+            "fake/cleanup",
+            Box::new(StubAction {
+                uses: "fake/cleanup",
+                outcome: Outcome::Ok,
+                outputs: vec![],
+                invocations: calls.clone(),
+            }),
+        );
+        let mut run = RunState::new(BTreeMap::new());
+        run.record_setup_output("existing", "n", crate::eval::Value::Int(1));
+        let teardown = vec![
+            conditioned_step(
+                None,
+                "fake/cleanup",
+                expr_condition("$setup.existing.outputs.n == 1"),
+            ),
+            conditioned_step(
+                None,
+                "fake/cleanup",
+                expr_condition("$setup.existing.outputs.n == 0"),
+            ),
+        ];
+        let failures = run_teardown(
+            &mut w,
+            &registry,
+            None,
+            &mut run,
+            &teardown,
+            &BTreeMap::new(),
+        )
+        .await
+        .unwrap();
+        assert!(failures.is_empty());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn unresolvable_value_condition_is_an_error_not_a_skip() {
+        let (mut w, _tmp) = make_writer().await;
+        let mut registry: ActionRegistry = BTreeMap::new();
+        registry.insert(
+            "fake/gated",
+            Box::new(StubAction {
+                uses: "fake/gated",
+                outcome: Outcome::Ok,
+                outputs: vec![],
+                invocations: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
+        let mut run = RunState::new(BTreeMap::new());
+        let setup = vec![conditioned_step(
+            None,
+            "fake/gated",
+            expr_condition("$setup.missing.outputs.n > 0"),
+        )];
+        let error = run_setup(&mut w, &registry, None, &mut run, &setup, &BTreeMap::new())
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("condition could not be evaluated"),
+            "{error}"
+        );
     }
 
     #[tokio::test]

@@ -732,8 +732,20 @@ control flow without making them Turing-complete. The existing
 `flow X forms a cycle (a -> b -> a)`) are instances of this totality
 commitment, not standalone guards.
 
-The currently available gate vocabulary remains
-`success | always | failure`. A gated step emits a
+Value-based conditions reuse the existing `Expr` grammar verbatim and
+are available on non-judging `setup:` and `teardown:` steps (Tier 1).
+They are deliberately not yet available on check steps (Tier 2): a
+condition on a step that produces judgments could shrink the check's
+claim set and create a run-dependent false green unless the run report
+makes that reduced claim set visible. Setup and teardown produce no
+judgments by design, so that risk is structurally absent there. A
+condition that cannot be evaluated fails its lifecycle step; inability
+to decide is never silently treated as false. Condition references are
+validated against declared inputs and earlier lifecycle steps and their
+action-contract outputs; forward references are invalid.
+
+The outcome gate vocabulary remains `success | always | failure`, and
+omission remains identical to `if: success`. A gated step emits a
 `StepOutcome::Skipped` evidence record with the causing step in its
 reason and contributes no implicit assertion. Explicit assertions are
 evaluated only after the step sequence and therefore cannot gate later

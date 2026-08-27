@@ -21,7 +21,7 @@ use crate::SourceLocation;
 use crate::criterion::{Check, Criterion};
 use crate::expr::{Expr, Path, PathRoot};
 use crate::source::SourcePathSegment;
-use crate::step::Step;
+use crate::step::{Step, StepCondition};
 use crate::validate_runtime::walk_checkable_paths;
 use crate::verification::{FlowCatalog, InputDecl, InputType, PageCatalog, VerificationDefinition};
 
@@ -313,6 +313,21 @@ pub enum ValidationError {
         check: String,
         reason: String,
     },
+
+    #[error("{message}")]
+    InvalidStepCondition {
+        message: String,
+        location: Option<SourceLocation>,
+    },
+
+    #[error(
+        "criterion `{criterion}` / check `{check}`: value-based conditions are not yet available on check steps"
+    )]
+    CheckStepConditionUnavailable {
+        criterion: String,
+        check: String,
+        location: Option<SourceLocation>,
+    },
 }
 
 impl ValidationError {
@@ -330,7 +345,9 @@ impl ValidationError {
             | Self::UnresolvedSetupStepOutput { location, .. }
             | Self::MalformedSetupRef { location, .. }
             | Self::InvalidSessionReference { location, .. }
-            | Self::UnknownAction { location, .. } => *location,
+            | Self::UnknownAction { location, .. }
+            | Self::InvalidStepCondition { location, .. }
+            | Self::CheckStepConditionUnavailable { location, .. } => *location,
             _ => None,
         }
     }
@@ -386,8 +403,17 @@ pub fn validate_with_contract_outputs(
 
     // Setup has no criterion/check scope, but its page references still
     // resolve against the same effective leaf catalog.
+    let mut preceding_lifecycle_outputs: HashMap<&str, HashSet<String>> = HashMap::new();
     for (idx, step) in v.setup.iter().enumerate() {
         let step_name = step_label(step, idx);
+        validate_lifecycle_condition(
+            v,
+            "setup",
+            idx,
+            step,
+            &preceding_lifecycle_outputs,
+            &mut errs,
+        );
         let mut source_path = vec![
             SourcePathSegment::key("setup"),
             SourcePathSegment::index(idx),
@@ -416,11 +442,23 @@ pub fn validate_with_contract_outputs(
                 }
             });
         });
+        if let Some(id) = step.id.as_deref() {
+            preceding_lifecycle_outputs.insert(id, effective_outputs(step, outputs_for));
+        }
     }
 
     let mut teardown_ids = HashSet::new();
+    let mut preceding_teardown_outputs = setup_outputs.clone();
     for (idx, step) in v.teardown.iter().enumerate() {
         let step_name = step_label(step, idx);
+        validate_lifecycle_condition(
+            v,
+            "teardown",
+            idx,
+            step,
+            &preceding_teardown_outputs,
+            &mut errs,
+        );
         if let Some(id) = step.id.as_deref()
             && !teardown_ids.insert(id)
         {
@@ -456,6 +494,9 @@ pub fn validate_with_contract_outputs(
                 }
             });
         });
+        if let Some(id) = step.id.as_deref() {
+            preceding_teardown_outputs.insert(id, effective_outputs(step, outputs_for));
+        }
     }
 
     let definition_scope = DefinitionScope {
@@ -494,6 +535,104 @@ pub fn validate_with_action_catalog(
     } else {
         Err(catalog_errors)
     }
+}
+
+fn validate_lifecycle_condition(
+    definition: &VerificationDefinition,
+    phase: &str,
+    index: usize,
+    step: &Step,
+    preceding: &HashMap<&str, HashSet<String>>,
+    errs: &mut Vec<ValidationError>,
+) {
+    let StepCondition::Expr(expr) = &step.condition else {
+        return;
+    };
+    let source_path = [
+        SourcePathSegment::key(phase),
+        SourcePathSegment::index(index),
+        SourcePathSegment::key("if"),
+    ];
+    let location = definition
+        .source_map
+        .scalar_location(&source_path, &expr.raw);
+    walk_checkable_paths(&expr.parsed, &mut |path, arity| {
+        let fail = |message: String, errs: &mut Vec<ValidationError>| {
+            errs.push(ValidationError::InvalidStepCondition { message, location });
+        };
+        match path.root {
+            PathRoot::Setup => {
+                let segs = path.segments();
+                if segs.len() < 3 || segs[1] != "outputs" {
+                    fail(
+                        format!(
+                            "{phase} step condition `{}` has malformed `$setup` reference (expected `$setup.<step_id>.outputs.<output>`)",
+                            expr.raw
+                        ),
+                        errs,
+                    );
+                } else if let Some(outputs) = preceding.get(segs[0].as_str()) {
+                    if !outputs.contains(&segs[2]) {
+                        fail(
+                            format!(
+                                "{phase} step condition `{}` references undeclared output `{}` on step `{}`",
+                                expr.raw, segs[2], segs[0]
+                            ),
+                            errs,
+                        );
+                    }
+                } else {
+                    fail(
+                        format!(
+                            "{phase} step condition `{}` references undeclared or forward step `{}`",
+                            expr.raw, segs[0]
+                        ),
+                        errs,
+                    );
+                }
+            }
+            PathRoot::Inputs => {
+                let segs = path.segments();
+                if segs.is_empty() || !definition.inputs.contains_key(&segs[0]) {
+                    fail(
+                        format!(
+                            "{phase} step condition `{}` references undeclared input `{}`",
+                            expr.raw,
+                            segs.first().map(String::as_str).unwrap_or("")
+                        ),
+                        errs,
+                    );
+                }
+            }
+            PathRoot::Runtime => {
+                crate::validate_runtime::check_runtime_path(
+                    path,
+                    arity,
+                    &expr.raw,
+                    &format!("{phase} step condition:"),
+                    errs,
+                );
+            }
+            PathRoot::Pages => {
+                crate::validate_pages::check_page_path(
+                    &definition.pages,
+                    path,
+                    &expr.raw,
+                    &format!("{phase} step condition:"),
+                    location,
+                    errs,
+                );
+            }
+            PathRoot::Steps => fail(
+                format!(
+                    "{phase} step condition `{}` must use `$setup` for earlier lifecycle-step outputs",
+                    expr.raw
+                ),
+                errs,
+            ),
+            PathRoot::Env => {}
+        }
+    });
 }
 
 /// Apply the shared [`InputDecl`] authoring rules to a declaration map.
@@ -766,6 +905,28 @@ fn validate_check(
     let mut seen_step_ids: HashSet<&str> = HashSet::new();
 
     for (idx, s) in ch.steps.iter().enumerate() {
+        if matches!(s.condition, StepCondition::Expr(_)) {
+            let path = [
+                SourcePathSegment::key("criteria"),
+                SourcePathSegment::index(criterion_index),
+                SourcePathSegment::key("checks"),
+                SourcePathSegment::index(check_index),
+                SourcePathSegment::key("steps"),
+                SourcePathSegment::index(idx),
+                SourcePathSegment::key("if"),
+            ];
+            let raw = match &s.condition {
+                StepCondition::Expr(e) => e.raw.as_str(),
+                _ => unreachable!(),
+            };
+            errs.push(ValidationError::CheckStepConditionUnavailable {
+                criterion: c.id.clone(),
+                check: ch.id.clone(),
+                location: source_context_matches
+                    .then(|| source_map.scalar_location(&path, raw))
+                    .flatten(),
+            });
+        }
         let contract_outputs = s.uses.as_deref().map(outputs_for).unwrap_or_default();
         check_secret_paths(
             s,
@@ -2755,5 +2916,63 @@ criteria:
 "#;
         let v = parse(y);
         validate(&v).expect("should validate");
+    }
+
+    #[test]
+    fn check_step_value_condition_is_rejected_with_a_location() {
+        let v = parse(
+            "verification: x\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        steps:\n          - uses: cli/invoke\n            if: $inputs.run == true\n        assertions: [\"true\"]\ninputs:\n  run: { type: boolean }\n",
+        );
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::CheckStepConditionUnavailable {
+                    location: Some(_),
+                    ..
+                }
+            ) && e.to_string().contains("not yet available on check steps")),
+            "{errs:?}"
+        );
+    }
+
+    #[test]
+    fn lifecycle_conditions_reject_undeclared_and_forward_references_with_locations() {
+        let v = parse(
+            "verification: x\nsetup:\n  - uses: cli/invoke\n    if: $setup.later.outputs.code == 0\n  - id: later\n    uses: cli/invoke\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        assertions: [\"true\"]\n",
+        );
+        let errs = validate_with_contract_outputs(&v, &|uses| {
+            if uses == "cli/invoke" {
+                vec!["code".into()]
+            } else {
+                Vec::new()
+            }
+        })
+        .unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::InvalidStepCondition {
+                    location: Some(_),
+                    ..
+                }
+            ) && e.to_string().contains("forward step `later`")),
+            "{errs:?}"
+        );
+
+        let v = parse(
+            "verification: x\nsetup:\n  - id: first\n    uses: cli/invoke\n  - uses: cli/invoke\n    if: $setup.first.outputs.nope == 0\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        assertions: [\"true\"]\n",
+        );
+        let errs = validate_with_contract_outputs(&v, &|_| vec!["code".into()]).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::InvalidStepCondition {
+                    location: Some(_),
+                    ..
+                }
+            ) && e.to_string().contains("undeclared output `nope`")),
+            "{errs:?}"
+        );
     }
 }

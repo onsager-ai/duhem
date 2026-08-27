@@ -187,3 +187,5 @@ preflight: lint test self-verify
     # spec example could break CI while `preflight` stayed green — which
     # is exactly what happened on #453.
     cargo run -p xtask --quiet -- schema-drift
+    # The generated action reference matches the action contracts.
+    cargo run -p xtask --quiet -- action-reference --check

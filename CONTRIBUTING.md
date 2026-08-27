@@ -49,6 +49,12 @@ Two things differ, and both have bitten real branches:
 - `cargo test --workspace`
 - `just self-verify` — `verifications/duhem-cli` against a freshly built CLI
 - `xtask schema-changelog-check` in its strict form
+- `xtask schema-drift` — docs §10 yaml blocks vs the live schema
+- `xtask action-reference --check` — generated reference vs action contracts
+
+The only things CI runs that `preflight` does not are the browser lanes
+(`just test browser-actions`) and the dashboard suite (`just dashboard
+test`), which need Chromium and Node respectively.
 
 Browser-backed (`ui/*`) test lanes need Node ≥ 20 plus the Playwright sidecar's Chromium, installed once per host:
 

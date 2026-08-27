@@ -756,7 +756,7 @@ impl Engine {
         // judgment (#280). Empty = the step didn't run.
         let mut step_evidence = vec![StepEvidence::empty(); check.steps.len()];
         for (idx, step) in check.steps.iter().enumerate() {
-            let gate_reason = gate_skip_reason(step.condition, failed_by.as_deref());
+            let gate_reason = gate_skip_reason(&step.condition, failed_by.as_deref());
             let cleanup_step = failed_by.is_some() && gate_reason.is_none();
             if cleanup_step {
                 cleanup_steps.insert(idx);

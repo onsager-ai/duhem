@@ -410,7 +410,7 @@ fn expand_sequence(
             counter,
         );
         for inner in &mut expanded.steps {
-            inner.condition = step.condition;
+            inner.condition = step.condition.clone();
         }
 
         let mut direct_ids = BTreeMap::new();

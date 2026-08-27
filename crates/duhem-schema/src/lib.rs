@@ -28,7 +28,7 @@ mod validate_runtime;
 pub mod verification;
 
 pub use assertion::{Assertion, TypeCheckKind};
-pub use criterion::{Check, Criterion};
+pub use criterion::{Check, Criterion, StepCountError};
 pub use expr::{
     BinOp, Expr, ExprStr, Literal, ParseError, Path, PathRoot, RuntimeHelper, RuntimeHelperArity,
     UnaryOp, authored_runtime_helper_names,

@@ -63,6 +63,7 @@ struct ResolveError {
 struct ResolvedVerification {
     source: String,
     document: serde_json::Value,
+    worst_case_step_counts: BTreeMap<String, usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     errors: Vec<ResolveError>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -298,6 +299,26 @@ fn resolve_leaf(
         &mut errors,
     );
 
+    let mut worst_case_step_counts = BTreeMap::new();
+    for check in definition
+        .criteria
+        .iter()
+        .flat_map(|criterion| &criterion.checks)
+    {
+        match check.worst_case_step_count() {
+            Ok(bound) => {
+                worst_case_step_counts.insert(check.id.clone(), bound);
+            }
+            Err(error) => errors.push(ResolveError {
+                stage: "validation",
+                message: format!(
+                    "check `{}` has no computable worst-case step count: {error}",
+                    check.id
+                ),
+            }),
+        }
+    }
+
     let mut document = serde_json::to_value(&definition).unwrap_or_else(|error| {
         errors.push(ResolveError {
             stage: "serialization",
@@ -321,6 +342,7 @@ fn resolve_leaf(
     ResolvedVerification {
         source: leaf.path.display().to_string(),
         document,
+        worst_case_step_counts,
         errors,
         provenance: include_provenance.then_some(provenance),
     }

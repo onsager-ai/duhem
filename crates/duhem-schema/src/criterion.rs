@@ -16,6 +16,17 @@ use serde::{Deserialize, Serialize};
 use crate::assertion::Assertion;
 use crate::step::Step;
 
+/// Why a check's worst-case execution bound could not be computed.
+///
+/// Today's flat, flow-expanded sequences cannot produce this error. Keeping
+/// the failure explicit makes totality a validator-enforced invariant when
+/// bounded control-flow constructs are added later.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum StepCountError {
+    #[error("worst-case step count exceeds the supported size")]
+    Overflow,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Criterion {
@@ -64,6 +75,18 @@ pub struct Check {
     pub assertions: Vec<Assertion>,
 }
 
+impl Check {
+    /// Compute the maximum number of actions this check can dispatch.
+    ///
+    /// Loaders expand reusable flows before validation, so each current step
+    /// contributes exactly one action to the bound.
+    pub fn worst_case_step_count(&self) -> Result<usize, StepCountError> {
+        self.steps.iter().try_fold(0usize, |bound, _| {
+            bound.checked_add(1).ok_or(StepCountError::Overflow)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +126,22 @@ checks:
         // Round-trip: an empty assertions list is not serialized.
         let out = serde_yml::to_string(&c).expect("serialize");
         assert!(!out.contains("assertions"), "got: {out}");
+    }
+
+    #[test]
+    fn flat_check_has_a_computable_worst_case_step_count() {
+        let check: Check = serde_yml::from_str(
+            r#"
+id: AC-1.1
+steps:
+  - uses: cli/invoke
+  - uses: cli/invoke
+assertions: ["true"]
+"#,
+        )
+        .expect("parse");
+
+        assert_eq!(check.worst_case_step_count(), Ok(2));
     }
 
     #[test]

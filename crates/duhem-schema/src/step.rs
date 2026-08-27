@@ -10,8 +10,10 @@
 
 use std::collections::BTreeMap;
 
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use schemars::{JsonSchema, SchemaGenerator, schema::Schema};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+use crate::ExprStr;
 
 /// Loader-only provenance attached to an action expanded from a
 /// reusable flow. It is deliberately skipped on the authored Step wire
@@ -24,10 +26,9 @@ pub struct ExpandedFlowOrigin {
     pub inner_index: u32,
 }
 
-/// Closed dispatch condition for a step. This is deliberately not an
-/// expression language: the runtime decides it from recorded outcomes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+/// Dispatch condition for a step. The three outcome gates retain their
+/// original wire form; value expressions reuse the assertion grammar.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum StepCondition {
     /// Run only while no earlier step in this sequence has failed.
     #[default]
@@ -36,6 +37,58 @@ pub enum StepCondition {
     Always,
     /// Run only after an earlier step failure.
     Failure,
+    /// Run when the existing expression grammar evaluates to true.
+    Expr(ExprStr),
+}
+
+impl Serialize for StepCondition {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Success => serializer.serialize_str("success"),
+            Self::Always => serializer.serialize_str("always"),
+            Self::Failure => serializer.serialize_str("failure"),
+            Self::Expr(expr) => expr.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for StepCondition {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        match raw.as_str() {
+            "success" => Ok(Self::Success),
+            "always" => Ok(Self::Always),
+            "failure" => Ok(Self::Failure),
+            // A bare word that is not one of the three gates is far more
+            // likely a misspelling of them than an expression, and the
+            // parser's "expected non-zero digit, '0', '\"', '$', or '('"
+            // is useless for that case. Name the real options instead.
+            _ => ExprStr::from_source(&raw).map(Self::Expr).map_err(|err| {
+                if raw
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                {
+                    serde::de::Error::custom(format!(
+                        "unknown step condition `{raw}` — expected `success`, `always`, \
+                         `failure`, or a value expression such as \
+                         `$setup.<step>.outputs.<name> > 0`"
+                    ))
+                } else {
+                    serde::de::Error::custom(err)
+                }
+            }),
+        }
+    }
+}
+
+impl JsonSchema for StepCondition {
+    fn schema_name() -> String {
+        "StepCondition".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        <String as JsonSchema>::json_schema(generator)
+    }
 }
 
 impl StepCondition {
@@ -172,7 +225,7 @@ with: { role: button, name: Create }
     }
 
     #[test]
-    fn condition_is_closed_and_default_is_wire_empty() {
+    fn legacy_conditions_and_default_wire_shape_are_unchanged() {
         let old_shape = "uses: ui/click\n";
         let step: Step = serde_yml::from_str(old_shape).expect("parse default");
         assert_eq!(step.condition, StepCondition::Success);
@@ -187,7 +240,14 @@ with: { role: button, name: Create }
                 serde_yml::from_str(&format!("if: {wire}\nuses: ui/click\n")).expect(wire);
             assert_eq!(step.condition, expected);
         }
-        assert!(serde_yml::from_str::<Step>("if: expression\nuses: ui/click\n").is_err());
+        let expression: Step =
+            serde_yml::from_str("if: $setup.existing.outputs.n > 0\nuses: ui/click\n")
+                .expect("expression");
+        assert!(matches!(expression.condition, StepCondition::Expr(_)));
+        assert_eq!(
+            serde_yml::to_string(&expression).expect("serialize"),
+            "if: $setup.existing.outputs.n > 0\nuses: ui/click\n"
+        );
     }
 
     #[test]

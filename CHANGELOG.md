@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] `duhem run` now reports a `$pages.<page>.<element>.<field>` reference as malformed rather than unresolved, so its diagnostic matches `duhem validate` instead of blaming a missing local definition. (#438)
 - [breaking] Catalog-aware validation now rejects unregistered `uses:` values; attempted error/timeout steps make verdicts inconclusive, the catalog adds page-free `ui/wait`, and root manifests may raise or lower its 60s default ceiling with `defaults.max_wait`. Migrate roadmap names or typos to registered actions. (#430, #431, #432)
 - [clarifying] Run reports add a criterion-grouped suites tree with status-count filters and labeled check metadata, including collapsed delivery-web spans; this is a read-side presentation change only, with no schema or evidence-wire change. (#280)
 - [additive] Verification Definitions accept leaf-scoped `teardown:` action steps after criteria and before `provision.down:`; `if: always` / `if: failure` now drain after step engine errors before the original error aborts the run. (#409)

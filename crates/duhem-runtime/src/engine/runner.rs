@@ -929,7 +929,8 @@ impl Engine {
                         with: resolved_with.clone(),
                         outputs: r.outputs.clone(),
                         skip_reason: None,
-                        catalog_reference,
+                        catalog_reference: catalog_reference.clone(),
+                        outcome: Some(r.outcome.clone()),
                     };
                     if let Outcome::Skipped { reason } = &r.outcome {
                         step_evidence[idx].skip_reason = Some(reason.clone());
@@ -941,6 +942,15 @@ impl Engine {
                 // alongside the assertion cause below.
                 Some(Err(_)) | None => Outcome::Error,
             };
+            // Invocation errors have no ActionResult, but their attempted
+            // outcome and resolved intent still feed execution-failure
+            // judgment. Successful/skipped results already populated the
+            // richer record above.
+            if step_evidence[idx].outcome.is_none() {
+                step_evidence[idx].with = resolved_with.clone();
+                step_evidence[idx].catalog_reference = catalog_reference;
+                step_evidence[idx].outcome = Some(outcome.clone());
+            }
 
             writer
                 .append(EventPayload::StepFinished {
@@ -963,8 +973,8 @@ impl Engine {
                 step,
                 idx,
                 dispatcher_judges,
+                dispatcher.is_some(),
                 &step_evidence[idx],
-                false,
                 false,
                 false,
             )
@@ -1006,8 +1016,8 @@ impl Engine {
         let implicit = implicit_judgment_outcomes(
             check,
             |uses| self.registry.get(uses).map(|d| d.judges()).unwrap_or(false),
+            |uses| self.registry.contains_key(uses),
             &step_evidence,
-            any_unknown,
             environment_failed,
             browser_missing,
             &cleanup_steps,
@@ -3551,11 +3561,9 @@ criteria:
     }
 
     #[tokio::test]
-    async fn skipped_implicit_assertion_leaves_an_empty_aggregation() {
-        // An earlier step errors and gates the judging step. The
-        // skipped implicit assertion is absence, not a synthetic
-        // MissingObservation verdict; with nothing else judged the
-        // check is inconclusive because its aggregation is empty.
+    async fn actuator_error_contributes_while_gated_judgment_is_absent() {
+        // The attempted actuator error poisons the verdict; the later gated
+        // judging step still contributes nothing.
         let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(StubAction::new("fake/error", Outcome::Error)));
         engine.register_test_action(Box::new(
@@ -3577,7 +3585,7 @@ criteria:
         let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
         assert!(matches!(
             verdict.criteria[0].checks[0].state,
-            VerdictState::Inconclusive(InconclusiveCause::EmptyAggregation)
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation)
         ));
         let assertion_count = read_only_run_events(&engine)
             .await
@@ -3585,8 +3593,8 @@ criteria:
             .filter(|event| matches!(event.payload, EventPayload::AssertionEvaluated { .. }))
             .count();
         assert_eq!(
-            assertion_count, 0,
-            "a skipped judging step contributes no assertion"
+            assertion_count, 1,
+            "only the attempted error contributes an assertion"
         );
     }
 

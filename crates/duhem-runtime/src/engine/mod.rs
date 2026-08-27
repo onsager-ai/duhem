@@ -18,6 +18,8 @@ pub mod identity;
 pub mod inherit;
 pub mod lineage;
 pub mod outcome;
+#[cfg(test)]
+mod outcome_regression_tests;
 pub mod registry;
 pub mod runner;
 pub(crate) mod secret_output;

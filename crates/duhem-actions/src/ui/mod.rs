@@ -51,6 +51,7 @@ pub mod click;
 pub mod navigate;
 pub mod select;
 pub mod type_;
+pub mod wait;
 
 pub use assert_element::AssertElement;
 pub use assert_state::AssertState;
@@ -60,6 +61,7 @@ pub use click::Click;
 pub use navigate::Navigate;
 pub use select::Select;
 pub use type_::Type;
+pub use wait::Wait;
 
 /// Recognize the Playwright "operation timed out" error message
 /// across actions. Playwright's Node driver doesn't differentiate

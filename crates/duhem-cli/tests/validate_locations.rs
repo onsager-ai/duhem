@@ -134,3 +134,38 @@ fn yaml_parse_error_keeps_existing_location_prefix() {
         "parse diagnostic changed: {message}"
     );
 }
+
+#[test]
+fn unknown_action_is_rejected_at_uses_location_before_run() {
+    let tmp = tempfile::tempdir().unwrap();
+    let leaf = tmp.path().join("unknown-action.yml");
+    std::fs::write(
+        &leaf,
+        r#"verification: unknown action
+criteria:
+  - id: AC-1
+    description: typo
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: wait_two_seconds
+            uses: ui/wait-nonexistent
+"#,
+    )
+    .unwrap();
+
+    for command in ["validate", "run"] {
+        let output = invoke(command, &leaf);
+        assert!(!output.status.success());
+        let message = stderr(&output);
+        assert!(
+            message.starts_with(&format!("{}:9:19: ", leaf.display())),
+            "{message}"
+        );
+        assert!(
+            message.contains("unknown action `ui/wait-nonexistent`"),
+            "{message}"
+        );
+        assert!(message.contains("see `duhem actions`"), "{message}");
+    }
+}

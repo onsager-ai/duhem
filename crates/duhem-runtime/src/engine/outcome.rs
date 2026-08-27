@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use duhem_actions::{ActionError, ExistenceState, Locator};
+use duhem_actions::{ActionError, ExistenceState, Locator, Outcome};
 use duhem_evidence::{EventPayload, EvidenceWriter, StoreError, WriterError};
 use duhem_judge::{AssertionOutcome, InconclusiveCause, RunVerdict, VerdictState};
 use duhem_schema::{Expr, PathRoot};
@@ -110,6 +110,8 @@ pub(crate) struct StepEvidence {
     /// Authored catalog coordinate, retained after the map is spliced
     /// so a failure points back to the one shared entry to edit.
     pub catalog_reference: Option<String>,
+    /// Terminal execution outcome when the step was attempted.
+    pub outcome: Option<Outcome>,
 }
 
 impl StepEvidence {
@@ -121,6 +123,7 @@ impl StepEvidence {
             outputs: BTreeMap::new(),
             skip_reason: None,
             catalog_reference: None,
+            outcome: None,
         }
     }
 
@@ -130,6 +133,7 @@ impl StepEvidence {
             outputs: BTreeMap::new(),
             skip_reason: Some(reason),
             catalog_reference: None,
+            outcome: None,
         }
     }
 
@@ -153,28 +157,42 @@ pub(crate) struct ImplicitOutcome {
 }
 
 /// Compute one step's implicit judgment, if the step contributes one.
-/// This is also the single source of truth for gating: binding an output
-/// named `satisfied` suppresses both the implicit assertion and any gate
-/// derived from that assertion.
+/// This is also the single source of truth for gating. Binding an output
+/// named `satisfied` suppresses the action's ordinary implicit assertion,
+/// but never suppresses an execution-failure contribution.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn implicit_judgment_for_step(
     step: &duhem_schema::Step,
     step_index: usize,
     action_judges: bool,
+    action_known: bool,
     evidence: &StepEvidence,
-    any_unknown: bool,
     environment_failed: bool,
     browser_missing: bool,
 ) -> Option<ImplicitOutcome> {
-    if !action_judges || step.outputs.contains_key("satisfied") || evidence.skip_reason.is_some() {
+    if evidence.skip_reason.is_some() {
         return None;
     }
 
     let label = display_step_label(step, step_index);
-    let (state, detail) = if any_unknown {
+    let execution_failure = match evidence.outcome.as_ref() {
+        Some(Outcome::Timeout) => Some((
+            VerdictState::Inconclusive(InconclusiveCause::Timeout),
+            format!("step `{label}` timed out{}", execution_deadline(evidence)),
+        )),
+        Some(Outcome::Error) => Some((
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+            format!("step `{label}` did not complete"),
+        )),
+        _ => None,
+    };
+    let (state, detail) = if !action_known {
         (
             VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
-            Some("unknown_action".to_string()),
+            Some(format!(
+                "step `{label}` uses unknown action `{}`",
+                step.uses_name()
+            )),
         )
     } else if environment_failed {
         (
@@ -185,6 +203,10 @@ pub(crate) fn implicit_judgment_for_step(
                 "check_browser_failed".to_string()
             }),
         )
+    } else if let Some((state, detail)) = execution_failure {
+        (state, Some(detail))
+    } else if !action_judges || step.outputs.contains_key("satisfied") {
+        return None;
     } else {
         match evidence.satisfied() {
             Some(true) => (VerdictState::Pass, None),
@@ -213,14 +235,14 @@ pub(crate) fn implicit_judgment_for_step(
 /// (spec #253): one entry per step whose action judges (its contract
 /// emits `satisfied`, tested via `is_judging`) and that hasn't bound
 /// `satisfied` in its `outputs:` (binding it is the manual-control
-/// opt-out). Cause mapping mirrors the explicit-assertion path — an
+/// opt-out for successful execution only). Cause mapping mirrors the explicit-assertion path — an
 /// unknown action / environment failure / unrun step never yields a
 /// silent `pass`. Kept out of `run_check` for the file-token budget.
 pub(crate) fn implicit_judgment_outcomes(
     check: &duhem_schema::Check,
     is_judging: impl Fn(&str) -> bool,
+    is_known: impl Fn(&str) -> bool,
     step_evidence: &[StepEvidence],
-    any_unknown: bool,
     environment_failed: bool,
     browser_missing: bool,
     cleanup_steps: &BTreeSet<usize>,
@@ -235,13 +257,27 @@ pub(crate) fn implicit_judgment_outcomes(
                 step,
                 idx,
                 is_judging(step.uses_name()),
+                is_known(step.uses_name()),
                 &step_evidence[idx],
-                any_unknown,
                 environment_failed,
                 browser_missing,
             )
         })
         .collect()
+}
+
+fn execution_deadline(ev: &StepEvidence) -> String {
+    for key in ["timeout", "duration"] {
+        if let Some(value) = ev.with.get(key) {
+            if let Some(value) = value.as_str() {
+                return format!(" after {value}");
+            }
+            if let Some(value) = value.as_u64() {
+                return format!(" after {value}ms");
+            }
+        }
+    }
+    String::new()
 }
 
 /// A human, semantic failure detail for a judging step whose implicit
@@ -694,6 +730,7 @@ mod fail_detail_tests {
                 .collect(),
             skip_reason: None,
             catalog_reference: None,
+            outcome: Some(Outcome::Ok),
         }
     }
 
@@ -899,12 +936,13 @@ mod step_label_tests {
             outputs: BTreeMap::from([("satisfied".to_string(), serde_json::json!(false))]),
             skip_reason: None,
             catalog_reference: None,
+            outcome: Some(Outcome::Ok),
         }];
         let outcomes = implicit_judgment_outcomes(
             &check,
             |_| true,
+            |_| true,
             &evidence,
-            false,
             false,
             false,
             &BTreeSet::new(),

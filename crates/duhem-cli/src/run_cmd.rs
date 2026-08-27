@@ -18,7 +18,7 @@ use duhem_judge::{RunVerdict, VerdictState, aggregate_run_set};
 use duhem_runtime::{Engine, RunOutcome, SuiteEnvironment, SuiteRunConfig};
 use duhem_schema::{
     Loaded, LoadedLeaf, VerificationDefinition, load_for_run as load_definition,
-    validate_with_contract_outputs,
+    validate_with_action_catalog,
 };
 
 use crate::filter::CliCheckFilter;
@@ -268,9 +268,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // YAML-parse leaf failure, this catches structural validation.
     let mut resolved: Vec<ResolvedLeaf> = Vec::with_capacity(leaves.len());
     for leaf in &leaves {
-        if let Err(errs) = validate_with_contract_outputs(&leaf.definition, &|u| {
-            crate::contract_check::contract_outputs(u)
-        }) {
+        if let Err(errs) =
+            validate_with_action_catalog(&leaf.definition, &crate::contract_check::catalog_outputs)
+        {
             eprintln!(
                 "{}",
                 crate::validate_cmd::format_validation_errors(Some(&leaf.path), &errs)

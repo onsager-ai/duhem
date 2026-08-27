@@ -28,7 +28,7 @@ use duhem_actions::Page;
 use duhem_actions::{
     Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertState, AssertUrl, Call,
     CaptureSession, Click, DbObserve, Invoke, Navigate, Observe, Poll, Query, Seed, Select, Stream,
-    Type,
+    Type, Wait,
 };
 
 /// Engine-internal dispatcher. One implementor per registered action
@@ -178,6 +178,7 @@ pub(crate) fn default_registry() -> ActionRegistry {
     insert(&mut m, ConcreteAction::new(Box::new(AssertUrl)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertState)));
     insert(&mut m, ConcreteAction::new(Box::new(CaptureSession)));
+    insert(&mut m, ConcreteAction::new(Box::new(Wait)));
     insert(&mut m, ConcreteAction::new(Box::new(Call)));
     insert(&mut m, ConcreteAction::new(Box::new(Observe)));
     insert(&mut m, ConcreteAction::new(Box::new(Poll)));
@@ -221,6 +222,7 @@ mod tests {
                 "ui/navigate",
                 "ui/select",
                 "ui/type",
+                "ui/wait",
             ]
         );
     }

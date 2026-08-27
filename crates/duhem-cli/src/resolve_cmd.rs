@@ -11,7 +11,7 @@ use duhem_runtime::engine::translate::apply_default_timeout;
 use duhem_runtime::{RunContext, RunState};
 use duhem_schema::{
     InputDecl, Loaded, LoadedLeaf, ManifestDefaults, VerificationDefinition,
-    validate_with_contract_outputs,
+    validate_with_action_catalog,
 };
 use serde::Serialize;
 
@@ -221,12 +221,18 @@ fn resolve_leaf(
     let mut errors = Vec::new();
     let candidate_secrets =
         candidate_secret_registry(&leaf.definition, manifest_inputs, merged, profile_values);
-    if let Err(validation) = validate_with_contract_outputs(&leaf.definition, &|uses| {
-        crate::contract_check::contract_outputs(uses)
-    }) {
-        errors.extend(validation.into_iter().map(|error| ResolveError {
-            stage: "validation",
-            message: error.to_string(),
+    if let Err(validation) =
+        validate_with_action_catalog(&leaf.definition, &crate::contract_check::catalog_outputs)
+    {
+        errors.extend(validation.into_iter().map(|error| {
+            let message = match error.location() {
+                Some(location) => format!("{}:{}: {error}", location.line, location.column),
+                None => error.to_string(),
+            };
+            ResolveError {
+                stage: "validation",
+                message,
+            }
         }));
     }
 

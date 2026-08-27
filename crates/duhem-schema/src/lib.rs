@@ -22,6 +22,7 @@ pub mod provision;
 mod source;
 pub mod step;
 pub mod validate;
+mod validate_actions;
 mod validate_pages;
 mod validate_runtime;
 pub mod verification;
@@ -42,7 +43,9 @@ pub use project::{ProjectDecl, ProjectKind};
 pub use provision::{DurationSpec, HttpReadyProbe, Provision, ReadyProbe};
 pub use source::{SourceLocation, SourceMap};
 pub use step::{ExpandedFlowOrigin, Step, StepCondition};
-pub use validate::{ValidationError, validate, validate_with_contract_outputs};
+pub use validate::{
+    ValidationError, validate, validate_with_action_catalog, validate_with_contract_outputs,
+};
 pub use verification::{
     Flow, FlowCatalog, InputDecl, InputType, PageCatalog, SchemaError, VerificationDefinition,
 };

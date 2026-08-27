@@ -298,6 +298,12 @@ pub enum ValidationError {
 
     #[error("{message}")]
     InvalidFlow { message: String },
+
+    #[error("unknown action `{uses}` (see `duhem actions` for the registered catalog)")]
+    UnknownAction {
+        uses: String,
+        location: Option<SourceLocation>,
+    },
 }
 
 impl ValidationError {
@@ -314,7 +320,8 @@ impl ValidationError {
             | Self::UnresolvedSetupStepRef { location, .. }
             | Self::UnresolvedSetupStepOutput { location, .. }
             | Self::MalformedSetupRef { location, .. }
-            | Self::InvalidSessionReference { location, .. } => *location,
+            | Self::InvalidSessionReference { location, .. }
+            | Self::UnknownAction { location, .. } => *location,
             _ => None,
         }
     }
@@ -459,6 +466,25 @@ pub fn validate_with_contract_outputs(
     }
 
     if errs.is_empty() { Ok(()) } else { Err(errs) }
+}
+
+/// Like [`validate_with_contract_outputs`], but also rejects action names
+/// absent from the injected catalog. `None` means unknown; `Some(vec![])`
+/// means a known actuator with no declared outputs.
+pub fn validate_with_action_catalog(
+    v: &VerificationDefinition,
+    action_for: &dyn Fn(&str) -> Option<Vec<String>>,
+) -> Result<(), Vec<ValidationError>> {
+    let mut catalog_errors = crate::validate_actions::unknown_actions(v, action_for);
+    let outputs_for = |uses: &str| action_for(uses).unwrap_or_default();
+    if let Err(mut errors) = validate_with_contract_outputs(v, &outputs_for) {
+        catalog_errors.append(&mut errors);
+    }
+    if catalog_errors.is_empty() {
+        Ok(())
+    } else {
+        Err(catalog_errors)
+    }
 }
 
 /// Apply the shared [`InputDecl`] authoring rules to a declaration map.

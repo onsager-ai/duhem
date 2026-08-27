@@ -441,13 +441,14 @@ async fn invoke_and_record(
             _ => None,
         },
         catalog_reference: None,
+        outcome: Some(outcome.clone()),
     };
     let judgment = implicit_judgment_for_step(
         step,
         idx,
         dispatcher.judges(),
+        true,
         &evidence,
-        false,
         false,
         false,
     )

@@ -328,6 +328,44 @@ pub enum ValidationError {
         check: String,
         location: Option<SourceLocation>,
     },
+
+    #[error("fixture `{fixture}` must declare at least one `{phase}:` step")]
+    EmptyFixturePhase {
+        fixture: String,
+        phase: &'static str,
+    },
+
+    #[error("criterion `{criterion}` / check `{check}` needs undeclared fixture `{fixture}`")]
+    UndeclaredFixture {
+        criterion: String,
+        check: String,
+        fixture: String,
+        location: Option<SourceLocation>,
+    },
+
+    #[error("{site}: fixture references are only valid in that fixture's own `down:` block")]
+    FixtureRefOutsideDown {
+        site: String,
+        location: Option<SourceLocation>,
+    },
+
+    #[error("fixture `{fixture}` {phase} step `{step}` may not carry `needs:`")]
+    FixtureStepNeeds {
+        fixture: String,
+        phase: &'static str,
+        step: String,
+        location: Option<SourceLocation>,
+    },
+
+    #[error(
+        "fixture `{fixture}` down step `{down_step}` references invalid fixture output `{raw}`"
+    )]
+    InvalidFixtureRef {
+        fixture: String,
+        down_step: String,
+        raw: String,
+        location: Option<SourceLocation>,
+    },
 }
 
 impl ValidationError {
@@ -348,6 +386,10 @@ impl ValidationError {
             | Self::UnknownAction { location, .. }
             | Self::InvalidStepCondition { location, .. }
             | Self::CheckStepConditionUnavailable { location, .. } => *location,
+            Self::UndeclaredFixture { location, .. }
+            | Self::FixtureRefOutsideDown { location, .. }
+            | Self::FixtureStepNeeds { location, .. }
+            | Self::InvalidFixtureRef { location, .. } => *location,
             _ => None,
         }
     }
@@ -398,6 +440,8 @@ pub fn validate_with_contract_outputs(
 
     let setup_outputs = collect_setup_outputs(&v.setup, outputs_for, &mut errs);
 
+    validate_fixtures(v, outputs_for, &mut errs);
+
     errs.extend(input_decl_errors(&v.inputs, true));
     crate::validate_pages::validate_catalog_inputs(v, &mut errs);
 
@@ -439,6 +483,11 @@ pub fn validate_with_contract_outputs(
                         &format!("setup step `{step_name}` with:"),
                         &mut errs,
                     );
+                } else if path.root == PathRoot::Fixture {
+                    errs.push(ValidationError::FixtureRefOutsideDown {
+                        site: format!("setup step `{step_name}` with:"),
+                        location,
+                    });
                 }
             });
         });
@@ -491,6 +540,11 @@ pub fn validate_with_contract_outputs(
                         &format!("teardown step `{step_name}` with:"),
                         &mut errs,
                     );
+                } else if path.root == PathRoot::Fixture {
+                    errs.push(ValidationError::FixtureRefOutsideDown {
+                        site: format!("teardown step `{step_name}` with:"),
+                        location,
+                    });
                 }
             });
         });
@@ -512,10 +566,141 @@ pub fn validate_with_contract_outputs(
         if !seen_criteria.insert(c.id.as_str()) {
             errs.push(ValidationError::DuplicateCriterionId { id: c.id.clone() });
         }
+        for (check_index, check) in c.checks.iter().enumerate() {
+            for (need_index, fixture) in check.needs.iter().enumerate() {
+                if !v.fixtures.contains_key(fixture) {
+                    let path = [
+                        SourcePathSegment::key("criteria"),
+                        SourcePathSegment::index(criterion_index),
+                        SourcePathSegment::key("checks"),
+                        SourcePathSegment::index(check_index),
+                        SourcePathSegment::key("needs"),
+                        SourcePathSegment::index(need_index),
+                    ];
+                    errs.push(ValidationError::UndeclaredFixture {
+                        criterion: c.id.clone(),
+                        check: check.id.clone(),
+                        fixture: fixture.clone(),
+                        location: v.source_map.scalar_location(&path, fixture),
+                    });
+                }
+            }
+        }
         validate_criterion(c, criterion_index, &definition_scope, &mut errs);
     }
 
     if errs.is_empty() { Ok(()) } else { Err(errs) }
+}
+
+fn validate_fixtures(
+    v: &VerificationDefinition,
+    outputs_for: &dyn Fn(&str) -> Vec<String>,
+    errs: &mut Vec<ValidationError>,
+) {
+    for (name, fixture) in &v.fixtures {
+        if fixture.up.is_empty() {
+            errs.push(ValidationError::EmptyFixturePhase {
+                fixture: name.clone(),
+                phase: "up",
+            });
+        }
+        if fixture.down.is_empty() {
+            errs.push(ValidationError::EmptyFixturePhase {
+                fixture: name.clone(),
+                phase: "down",
+            });
+        }
+        let mut up_outputs: HashMap<&str, HashSet<String>> = HashMap::new();
+        for (index, step) in fixture.up.iter().enumerate() {
+            if !step.needs.is_empty() {
+                let path = [
+                    SourcePathSegment::key("fixtures"),
+                    SourcePathSegment::key(name),
+                    SourcePathSegment::key("up"),
+                    SourcePathSegment::index(index),
+                    SourcePathSegment::key("needs"),
+                    SourcePathSegment::index(0),
+                ];
+                errs.push(ValidationError::FixtureStepNeeds {
+                    fixture: name.clone(),
+                    phase: "up",
+                    step: step_label(step, index),
+                    location: v.source_map.scalar_location(&path, &step.needs[0]),
+                });
+            }
+            if let Some(id) = step.id.as_deref() {
+                up_outputs.insert(id, effective_outputs(step, outputs_for));
+            }
+            let mut path = vec![
+                SourcePathSegment::key("fixtures"),
+                SourcePathSegment::key(name),
+                SourcePathSegment::key("up"),
+                SourcePathSegment::index(index),
+                SourcePathSegment::key("with"),
+            ];
+            crate::source::walk_with_refs(&step.with, &mut path, &mut |expr, raw, source_path| {
+                expr.walk_paths(|reference| {
+                    if reference.root == PathRoot::Fixture {
+                        errs.push(ValidationError::FixtureRefOutsideDown {
+                            site: format!(
+                                "fixture `{name}` up step `{}` with:",
+                                step_label(step, index)
+                            ),
+                            location: v.source_map.scalar_location(source_path, raw),
+                        });
+                    }
+                });
+            });
+        }
+        for (index, step) in fixture.down.iter().enumerate() {
+            if !step.needs.is_empty() {
+                let path = [
+                    SourcePathSegment::key("fixtures"),
+                    SourcePathSegment::key(name),
+                    SourcePathSegment::key("down"),
+                    SourcePathSegment::index(index),
+                    SourcePathSegment::key("needs"),
+                    SourcePathSegment::index(0),
+                ];
+                errs.push(ValidationError::FixtureStepNeeds {
+                    fixture: name.clone(),
+                    phase: "down",
+                    step: step_label(step, index),
+                    location: v.source_map.scalar_location(&path, &step.needs[0]),
+                });
+            }
+            let mut path = vec![
+                SourcePathSegment::key("fixtures"),
+                SourcePathSegment::key(name),
+                SourcePathSegment::key("down"),
+                SourcePathSegment::index(index),
+                SourcePathSegment::key("with"),
+            ];
+            crate::source::walk_with_refs(&step.with, &mut path, &mut |expr, raw, source_path| {
+                let location = v.source_map.scalar_location(source_path, raw);
+                expr.walk_paths(|reference| {
+                    if reference.root != PathRoot::Fixture {
+                        return;
+                    }
+                    let segs = reference.segments();
+                    let valid = segs.len() >= 4
+                        && segs[0] == *name
+                        && segs[2] == "outputs"
+                        && up_outputs
+                            .get(segs[1].as_str())
+                            .is_some_and(|outputs| outputs.contains(&segs[3]));
+                    if !valid {
+                        errs.push(ValidationError::InvalidFixtureRef {
+                            fixture: name.clone(),
+                            down_step: step_label(step, index),
+                            raw: raw.to_string(),
+                            location,
+                        });
+                    }
+                });
+            });
+        }
+    }
 }
 
 /// Like [`validate_with_contract_outputs`], but also rejects action names
@@ -626,6 +811,13 @@ fn validate_lifecycle_condition(
             PathRoot::Steps => fail(
                 format!(
                     "{phase} step condition `{}` must use `$setup` for earlier lifecycle-step outputs",
+                    expr.raw
+                ),
+                errs,
+            ),
+            PathRoot::Fixture => fail(
+                format!(
+                    "{phase} step condition `{}` may not reference fixture outputs",
                     expr.raw
                 ),
                 errs,
@@ -1183,6 +1375,10 @@ fn check_path(
                 }
             }
         }
+        PathRoot::Fixture => errs.push(ValidationError::FixtureRefOutsideDown {
+            site: format!("criterion `{}` / check `{}`: {site}", c.id, ch.id),
+            location,
+        }),
         PathRoot::Inputs => {
             let segs = path.segments();
             // Leading `$inputs.<name>`; deeper segments navigate into a
@@ -1310,6 +1506,100 @@ criteria:
     #[test]
     fn page_reference_resolves_offline() {
         validate(&catalog_vd("$pages.login.submit")).expect("known entry resolves");
+    }
+
+    #[test]
+    fn fixture_needs_and_output_scope_are_location_aware() {
+        let valid = parse(
+            r#"
+verification: fixtures
+fixtures:
+  project:
+    up:
+      - id: create
+        uses: api/call
+    down:
+      - uses: api/call
+        with: { url: $fixture.project.create.outputs.body.url }
+criteria:
+  - id: AC-1
+    description: fixture
+    checks:
+      - id: AC-1.1
+        needs: [project]
+        steps: [{ uses: api/call }]
+"#,
+        );
+        validate_with_contract_outputs(&valid, &api_call_outputs).unwrap();
+
+        let invalid = parse(
+            r#"
+verification: fixtures
+fixtures:
+  project:
+    up: [{ id: create, uses: api/call }]
+    down: [{ uses: api/call }]
+criteria:
+  - id: AC-1
+    description: fixture
+    checks:
+      - id: AC-1.1
+        needs: [missing]
+        steps:
+          - uses: api/call
+            with: { url: $fixture.project.create.outputs.body }
+"#,
+        );
+        let errors = validate_with_contract_outputs(&invalid, &api_call_outputs).unwrap_err();
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ValidationError::UndeclaredFixture {
+                location: Some(_),
+                ..
+            }
+        )));
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ValidationError::FixtureRefOutsideDown {
+                location: Some(_),
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn fixture_rejects_empty_phases_and_step_needs() {
+        let invalid = parse(
+            r#"
+verification: fixtures
+fixtures:
+  empty:
+    up: []
+    down: []
+  nested:
+    up: [{ uses: api/call, needs: [empty] }]
+    down: [{ uses: api/call }]
+criteria:
+  - id: AC-1
+    description: fixture
+    checks: [{ id: AC-1.1, steps: [{ uses: api/call }] }]
+"#,
+        );
+        let errors = validate_with_contract_outputs(&invalid, &api_call_outputs).unwrap_err();
+        assert_eq!(
+            errors
+                .iter()
+                .filter(|e| matches!(e, ValidationError::EmptyFixturePhase { .. }))
+                .count(),
+            2
+        );
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ValidationError::FixtureStepNeeds {
+                location: Some(_),
+                ..
+            }
+        )));
     }
 
     #[test]

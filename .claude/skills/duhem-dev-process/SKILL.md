@@ -365,11 +365,8 @@ alone. Then add the gates the diff calls for:
 - **Schema-touching** (`crates/duhem-schema/**`, `crates/duhem-evidence/**`,
   or a `SCHEMA_VERSION` bump):
 
-  ```bash
-  cargo run -p xtask -- schema-drift            # docs §10 ↔ code
-  ```
-
-  (`schema-changelog-check` is already in `just preflight`.)
+  (Both `schema-drift` and `schema-changelog-check` are already in
+  `just preflight`; no extra command needed.)
 
 - **VD-touching**: run each modified Verification Definition through
   `cargo run -p duhem-cli -- validate <path>`.

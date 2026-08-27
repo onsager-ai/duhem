@@ -121,6 +121,9 @@ pub enum PathRoot {
     /// Verification Definition's run-level `setup:` block. Run-scoped
     /// and read-only from inside any check (per issue #20).
     Setup,
+    /// `$fixture.<name>.<step_id>.outputs.<output_name>` — available
+    /// only while draining that fixture's `down:` block.
+    Fixture,
     /// `$inputs.<input_name>` — bound by the Verification Definition's
     /// `inputs:` block.
     Inputs,
@@ -142,6 +145,7 @@ impl PathRoot {
         match self {
             Self::Steps => "steps",
             Self::Setup => "setup",
+            Self::Fixture => "fixture",
             Self::Inputs => "inputs",
             Self::Pages => "pages",
             Self::Env => "env",

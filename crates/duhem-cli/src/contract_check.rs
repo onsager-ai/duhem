@@ -30,6 +30,14 @@ pub(crate) fn field_errors(def: &VerificationDefinition) -> Vec<String> {
     for (i, s) in def.teardown.iter().enumerate() {
         check_step(s, &format!("teardown step {i}"), &mut errs);
     }
+    for (name, fixture) in &def.fixtures {
+        for (i, step) in fixture.up.iter().enumerate() {
+            check_step(step, &format!("fixture `{name}` up step {i}"), &mut errs);
+        }
+        for (i, step) in fixture.down.iter().enumerate() {
+            check_step(step, &format!("fixture `{name}` down step {i}"), &mut errs);
+        }
+    }
     for c in &def.criteria {
         for ch in &c.checks {
             for (i, s) in ch.steps.iter().enumerate() {
@@ -148,6 +156,24 @@ pub(crate) fn lint_warnings(def: &VerificationDefinition) -> Vec<String> {
     }
     for (i, s) in def.teardown.iter().enumerate() {
         lint_step(s, None, &format!("teardown step {i}"), &mut warns);
+    }
+    for (name, fixture) in &def.fixtures {
+        for (i, step) in fixture.up.iter().enumerate() {
+            lint_step(
+                step,
+                None,
+                &format!("fixture `{name}` up step {i}"),
+                &mut warns,
+            );
+        }
+        for (i, step) in fixture.down.iter().enumerate() {
+            lint_step(
+                step,
+                None,
+                &format!("fixture `{name}` down step {i}"),
+                &mut warns,
+            );
+        }
     }
     for c in &def.criteria {
         for ch in &c.checks {

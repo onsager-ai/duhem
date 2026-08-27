@@ -53,6 +53,8 @@ export interface CleanupStepDetail {
   step_index: number;
   uses: string;
   outcome: "ok" | "error" | "timeout" | { skipped: { reason: string } };
+  fixture_name?: string;
+  check_id?: string;
 }
 
 export interface TraceEvent {

@@ -72,10 +72,12 @@ pub(crate) struct SetupResult {
     /// and the rest of setup was skipped. Drives the engine's
     /// "skip criteria, emit Inconclusive" path.
     pub aborted: Option<AbortReason>,
+    pub failed_step: Option<String>,
 }
 
 struct LifecycleResult {
     aborted: Option<AbortReason>,
+    failed_step: Option<String>,
     cleanup: Vec<CleanupFailure>,
 }
 
@@ -124,10 +126,12 @@ pub(crate) async fn run_setup_tracking(
         child_env,
         StepPhase::Setup,
         dispatched,
+        None,
     )
     .await?;
     Ok(SetupResult {
         aborted: result.aborted,
+        failed_step: result.failed_step,
     })
 }
 
@@ -151,6 +155,64 @@ pub(crate) async fn run_teardown(
         child_env,
         StepPhase::Teardown,
         &mut dispatched,
+        None,
+    )
+    .await?
+    .cleanup)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_fixture_up(
+    writer: &mut EvidenceWriter,
+    registry: &ActionRegistry,
+    browser: Option<&RunBrowser>,
+    run: &mut RunState,
+    fixture: &str,
+    check_id: &str,
+    steps: &[Step],
+    child_env: &BTreeMap<String, String>,
+) -> Result<SetupResult, EngineError> {
+    let mut dispatched = false;
+    let result = run_lifecycle_steps(
+        writer,
+        registry,
+        browser,
+        run,
+        steps,
+        child_env,
+        StepPhase::Setup,
+        &mut dispatched,
+        Some((fixture, check_id)),
+    )
+    .await?;
+    Ok(SetupResult {
+        aborted: result.aborted,
+        failed_step: result.failed_step,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_fixture_down(
+    writer: &mut EvidenceWriter,
+    registry: &ActionRegistry,
+    browser: Option<&RunBrowser>,
+    run: &mut RunState,
+    fixture: &str,
+    check_id: &str,
+    steps: &[Step],
+    child_env: &BTreeMap<String, String>,
+) -> Result<Vec<CleanupFailure>, EngineError> {
+    let mut dispatched = false;
+    Ok(run_lifecycle_steps(
+        writer,
+        registry,
+        browser,
+        run,
+        steps,
+        child_env,
+        StepPhase::Teardown,
+        &mut dispatched,
+        Some((fixture, check_id)),
     )
     .await?
     .cleanup)
@@ -166,11 +228,14 @@ async fn run_lifecycle_steps(
     child_env: &BTreeMap<String, String>,
     phase: StepPhase,
     dispatched: &mut bool,
+    fixture_scope: Option<(&str, &str)>,
 ) -> Result<LifecycleResult, EngineError> {
     writer
         .append(EventPayload::SetupStarted {
             phase,
             step_count: steps.len() as u32,
+            fixture_name: fixture_scope.map(|scope| scope.0.to_string()),
+            check_id: fixture_scope.map(|scope| scope.1.to_string()),
         })
         .await?;
 
@@ -270,13 +335,15 @@ async fn run_lifecycle_steps(
             None
         };
 
-        append_setup_started(writer, phase, step, idx, &resolved_with).await?;
+        append_setup_started(writer, phase, step, idx, &resolved_with, fixture_scope).await?;
         if let Some(reason) = gate_reason {
             writer
                 .append(EventPayload::SetupStepFinished {
                     phase,
                     step_index: idx as u32,
                     outcome: StepOutcome::Skipped { reason },
+                    fixture_name: fixture_scope.map(|scope| scope.0.to_string()),
+                    check_id: fixture_scope.map(|scope| scope.1.to_string()),
                 })
                 .await?;
             continue;
@@ -302,6 +369,7 @@ async fn run_lifecycle_steps(
                             run,
                             writer,
                             child_env,
+                            fixture_scope,
                         },
                     )
                     .await
@@ -332,6 +400,8 @@ async fn run_lifecycle_steps(
                 phase,
                 step_index: idx as u32,
                 outcome: evidence_outcome.clone(),
+                fixture_name: fixture_scope.map(|scope| scope.0.to_string()),
+                check_id: fixture_scope.map(|scope| scope.1.to_string()),
             })
             .await?;
 
@@ -371,12 +441,18 @@ async fn run_lifecycle_steps(
         .append(EventPayload::SetupFinished {
             phase,
             aborted: aborted.is_some(),
+            fixture_name: fixture_scope.map(|scope| scope.0.to_string()),
+            check_id: fixture_scope.map(|scope| scope.1.to_string()),
         })
         .await?;
     if let Some(error) = stored_error {
         return Err(error);
     }
-    Ok(LifecycleResult { aborted, cleanup })
+    Ok(LifecycleResult {
+        aborted,
+        failed_step: failed_by,
+        cleanup,
+    })
 }
 
 async fn append_setup_started(
@@ -385,6 +461,7 @@ async fn append_setup_started(
     step: &Step,
     idx: usize,
     resolved_with: &serde_yml::Value,
+    fixture_scope: Option<(&str, &str)>,
 ) -> Result<(), EngineError> {
     writer
         .append(EventPayload::SetupStepStarted {
@@ -394,6 +471,8 @@ async fn append_setup_started(
             // Same honesty contract as the per-check tag (#192).
             layer: duhem_actions::layer_for_uses(step.uses_name()).map(str::to_string),
             with: with_to_evidence_map(resolved_with),
+            fixture_name: fixture_scope.map(|scope| scope.0.to_string()),
+            check_id: fixture_scope.map(|scope| scope.1.to_string()),
         })
         .await?;
     Ok(())
@@ -408,6 +487,7 @@ struct SetupInvocation<'a> {
     run: &'a mut RunState,
     writer: &'a mut EvidenceWriter,
     child_env: &'a BTreeMap<String, String>,
+    fixture_scope: Option<(&'a str, &'a str)>,
 }
 
 async fn invoke_and_record(
@@ -423,6 +503,7 @@ async fn invoke_and_record(
         run,
         writer,
         child_env,
+        fixture_scope,
     } = invocation;
     // The caller persisted `SetupStepStarted` before dispatch so slow
     // actions and gated skips share one honest lifecycle shape.
@@ -446,15 +527,26 @@ async fn invoke_and_record(
         // per-check path in `runner.rs`; see `engine::extract`.
         if let Some(id) = step.id.as_deref() {
             crate::engine::extract::record_step_outputs(&step.outputs, &r.outputs, |local, v| {
-                run.record_setup_output(id, local, v);
+                if let Some((fixture, _)) = fixture_scope {
+                    run.record_fixture_output(fixture, id, local, v);
+                } else {
+                    run.record_setup_output(id, local, v);
+                }
             });
         }
         for (name, value) in &r.outputs {
             // Setup observations get their own event variant so
             // readers can attribute the observation to the
             // run-level setup block, not a per-check step.
-            append_setup_observation(writer, phase, idx as u32, name.clone(), value.clone())
-                .await?;
+            append_setup_observation(
+                writer,
+                phase,
+                idx as u32,
+                name.clone(),
+                value.clone(),
+                fixture_scope,
+            )
+            .await?;
         }
     }
     let outputs = result
@@ -473,16 +565,21 @@ async fn invoke_and_record(
         catalog_reference: None,
         outcome: Some(outcome.clone()),
     };
-    let judgment = implicit_judgment_for_step(
-        step,
-        idx,
-        dispatcher.judges(),
-        true,
-        &evidence,
-        false,
-        false,
-    )
-    .map(|outcome| outcome.state);
+    let judgment = fixture_scope
+        .is_none()
+        .then(|| {
+            implicit_judgment_for_step(
+                step,
+                idx,
+                dispatcher.judges(),
+                true,
+                &evidence,
+                false,
+                false,
+            )
+        })
+        .flatten()
+        .map(|outcome| outcome.state);
     let failed = step_failed(&outcome, judgment);
     Ok((outcome, failed))
 }
@@ -496,6 +593,7 @@ async fn append_setup_observation(
     step_index: u32,
     output_name: String,
     value: serde_json::Value,
+    fixture_scope: Option<(&str, &str)>,
 ) -> Result<(), EngineError> {
     use duhem_evidence::{BLOB_INLINE_THRESHOLD_BYTES, ObservationValue};
     let inline_bytes = serde_json::to_vec(&value).map_err(duhem_evidence::WriterError::from)?;
@@ -514,6 +612,8 @@ async fn append_setup_observation(
             step_index,
             output_name,
             value: obs,
+            fixture_name: fixture_scope.map(|scope| scope.0.to_string()),
+            check_id: fixture_scope.map(|scope| scope.1.to_string()),
         })
         .await?;
     Ok(())
@@ -586,6 +686,7 @@ mod tests {
 
     fn step(id: Option<&str>, uses: &str) -> Step {
         Step {
+            needs: vec![],
             id: id.map(String::from),
             description: None,
             condition: duhem_schema::StepCondition::Success,

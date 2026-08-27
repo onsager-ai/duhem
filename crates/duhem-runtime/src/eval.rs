@@ -1,12 +1,4 @@
-//! Three-state expression evaluator over the v0.1 schema AST.
-//!
-//! Per `docs/duhem-spec.md` §10.6 / §10.7: turns a parsed
-//! `duhem_schema::Expr` into a `True | False | Inconclusive` verdict
-//! against a runtime context (declared inputs, observed step outputs,
-//! whitelisted env, runtime helpers). Mechanical judgment only — no
-//! LLM in the loop. Inconclusive is the load-bearing third state: it
-//! lets the judge distinguish *fail* (the system did the wrong thing)
-//! from *we couldn't tell*.
+//! Three-state, mechanically judged expression evaluation.
 
 use chrono::{DateTime, Utc};
 use duhem_schema::{BinOp, Expr, Literal, Path, PathRoot, RuntimeHelper, UnaryOp};
@@ -116,32 +108,20 @@ impl Value {
     }
 }
 
-/// Runtime-side bindings for an in-flight check. The step executor
-/// implements this; the evaluator never reaches past it.
 pub trait EvalContext {
     fn input(&self, name: &str) -> Option<&Value>;
-    /// Lookup one effective named locator. The default keeps custom
-    /// evaluator contexts source-compatible when they do not expose a
-    /// page catalog.
     fn page(&self, _page: &str, _element: &str) -> Option<&Value> {
         None
     }
     fn output(&self, step_id: &str, output: &str) -> Option<&Value>;
-    /// Lookup `$setup.<step_id>.outputs.<name>` against the run-level
-    /// setup block. Run-scoped and read-only across checks (#20).
-    /// Default implementation returns `None` so the trait stays
-    /// backwards-compatible with callers built before #20; in-tree
-    /// implementations override.
     fn setup_output(&self, _step_id: &str, _output: &str) -> Option<&Value> {
         None
     }
+    fn fixture_output(&self, _fixture: &str, _step_id: &str, _output: &str) -> Option<&Value> {
+        None
+    }
     fn env(&self, name: &str) -> Option<&str>;
-    /// UUID for this run; cached on the context so a definition that
-    /// uses `$runtime.uuid()` twice gets the same value (the
-    /// `"test-ws-{{uuid}}"` author-intent pattern from
-    /// `docs/duhem-spec.md` §10.3).
     fn uuid(&self) -> &str;
-    /// Wall-clock at the call site. Sampled fresh on each call.
     fn now(&self) -> DateTime<Utc>;
 }
 
@@ -298,6 +278,19 @@ fn eval_path(p: &Path, ctx: &dyn EvalContext) -> EvalRes {
                 }
             })?;
             navigate(base, output, &p.segments[3.min(p.segments.len())..])
+        }
+        PathRoot::Fixture => {
+            let fixture = p.segments.first().map(String::as_str).unwrap_or("");
+            let step = p.segments.get(1).map(String::as_str).unwrap_or("");
+            let output = p.segments.get(3).map(String::as_str).unwrap_or("");
+            let base = ctx
+                .fixture_output(fixture, step, output)
+                .cloned()
+                .ok_or_else(|| InconclusiveCause::MissingSetupObservation {
+                    step: format!("{fixture}.{step}"),
+                    output: output.to_string(),
+                })?;
+            navigate(base, output, &p.segments[4.min(p.segments.len())..])
         }
         PathRoot::Env => {
             // `$env.<name>` is always a string; deeper segments would be

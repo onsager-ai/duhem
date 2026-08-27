@@ -599,6 +599,11 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                         .flat_map(|ch| &ch.steps),
                 )
                 .chain(&def.teardown)
+                .chain(
+                    def.fixtures
+                        .values()
+                        .flat_map(|fixture| fixture.up.iter().chain(&fixture.down)),
+                )
                 .any(|s| duhem_actions::uses_requires_page(s.uses_name()));
 
         // One browser per leaf when needed. Phase-0 leaves run serially

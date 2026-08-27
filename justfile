@@ -182,3 +182,10 @@ self-verify:
 preflight: lint test self-verify
     # The strict form of the changelog check, as CI runs it.
     cargo run -p xtask --quiet -- schema-changelog-check
+    # docs §10 yaml blocks parse and validate against the live schema.
+    # CI runs this in the `rust` job; leaving it out of the gate meant a
+    # spec example could break CI while `preflight` stayed green — which
+    # is exactly what happened on #453.
+    cargo run -p xtask --quiet -- schema-drift
+    # The generated action reference matches the action contracts.
+    cargo run -p xtask --quiet -- action-reference --check

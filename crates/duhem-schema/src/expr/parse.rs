@@ -80,6 +80,7 @@ fn expr_parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
                 .try_map(|s: &str, span| match s {
                     "steps" => Ok(PathRoot::Steps),
                     "setup" => Ok(PathRoot::Setup),
+                    "fixture" => Ok(PathRoot::Fixture),
                     "inputs" => Ok(PathRoot::Inputs),
                     "pages" => Ok(PathRoot::Pages),
                     "env" => Ok(PathRoot::Env),

@@ -258,6 +258,7 @@ async function dispatch(req) {
         .filter(Boolean)
       const baseOpts = {
         headless: req.headless !== false,
+        slowMo: Number.isFinite(req.slowMo) ? req.slowMo : undefined,
         executablePath,
         channel,
         args: extraArgs,

@@ -14,6 +14,7 @@ mod browser_cmd;
 mod contract_check;
 mod dashboard;
 mod describe_cmd;
+mod env_file;
 mod export_cmd;
 mod filter;
 mod init;
@@ -167,6 +168,13 @@ enum Cmd {
             conflicts_with = "path"
         )]
         file: Option<PathBuf>,
+        /// Load environment values from this file instead of discovering
+        /// `.env`. Existing process variables always win.
+        #[arg(long = "env-file", value_name = "PATH", conflicts_with = "no_env_file")]
+        env_file: Option<PathBuf>,
+        /// Do not discover or load a `.env` file.
+        #[arg(long = "no-env-file", default_value_t = false)]
+        no_env_file: bool,
         /// Inputs, repeatable and mixable: `KEY=VALUE` for a single
         /// input, or `@FILE` to load a YAML/JSON mapping (`.yml` /
         /// `.yaml` / `.json`). Tokens are applied left-to-right and the
@@ -387,6 +395,8 @@ fn main() -> ExitCode {
         Some(Cmd::Run {
             path,
             file,
+            env_file,
+            no_env_file,
             inputs,
             filter,
             db,
@@ -402,6 +412,15 @@ fn main() -> ExitCode {
             capture,
             capture_video,
         }) => {
+            if let Err(e) = env_file::source_for_run(
+                path.as_deref(),
+                file.as_deref(),
+                env_file.as_deref(),
+                no_env_file,
+            ) {
+                eprintln!("{e}");
+                return ExitCode::FAILURE;
+            }
             // Resolve the reporter name BEFORE we boot the tokio
             // runtime / browser: a typoed `--reporter` should exit 2
             // with `unknown reporter:` on stderr without any work
@@ -531,6 +550,41 @@ mod tests {
         for falsy in ["", "0", "false", "no", "yes", "2", "on", "headed"] {
             assert!(!parse_truthy(falsy), "`{falsy}` should be falsy");
         }
+    }
+
+    #[test]
+    fn slow_mo_accepts_milliseconds_and_rejects_semantic_values() {
+        assert_eq!(crate::run_cmd::parse_slow_mo(" 250 ").unwrap(), 250);
+        assert!(crate::run_cmd::parse_slow_mo("2s").is_err());
+        assert!(crate::run_cmd::parse_slow_mo("-1").is_err());
+    }
+
+    #[test]
+    fn env_file_flags_parse_and_conflict() {
+        let parsed =
+            Cli::try_parse_from(["duhem", "run", "v.yml", "--env-file", "ops.env"]).expect("parse");
+        match parsed.cmd {
+            Some(Cmd::Run {
+                env_file,
+                no_env_file,
+                ..
+            }) => {
+                assert_eq!(env_file, Some(PathBuf::from("ops.env")));
+                assert!(!no_env_file);
+            }
+            _ => panic!("expected Run"),
+        }
+        assert!(
+            Cli::try_parse_from([
+                "duhem",
+                "run",
+                "v.yml",
+                "--env-file",
+                "ops.env",
+                "--no-env-file"
+            ])
+            .is_err()
+        );
     }
 
     #[test]

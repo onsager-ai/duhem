@@ -424,6 +424,26 @@ Values like `$inputs.workspace_name` below are **runtime expressions** (§10.7).
 
 An input may declare `env: VARIABLE_NAME` as a process-environment fallback. Resolution order is `--inputs` (last merged value) → selected Duhem profile → the input's process `env:` → `default:`. Because `env:` is below both explicit sources, adding it never changes a run that already supplied the input. An unset input with no remaining source is an environment failure at run time and produces `inconclusive:environment_error`; it is not a validation failure or a product `fail`.
 
+`duhem run` sources that process-environment rung from a discovered `.env`
+without replacing variables already exported by the caller. Discovery starts
+at the root-manifest directory when one is available, otherwise at the current
+directory, and stops at `.git`; `--env-file` selects another file and
+`--no-env-file` disables sourcing. The supported syntax is intentionally
+limited to `KEY=VALUE`, optional `export `, blank/comment lines, trailing
+comments on unquoted values, single/double quotes, and `\n` / `\t` escapes in
+double quotes. Interpolation, multi-line values, and inheritance chains are
+not supported.
+
+Ambient configuration has a strict two-class boundary. Operational knobs may
+change *how* a run executes (headed mode, slow motion, Node/sidecar/browser
+selection, and browser-install suppression) but never its claim. Semantic
+parameters change *what* is tested or what passes: timeouts, target URLs, and
+credentials must enter through declared `inputs:` plus `env:` (or authored
+root-manifest `defaults:` for suite-wide timeouts), never through a global
+ambient override. This visibility is necessary because an identical VD must
+not silently mean something different in CI. In particular there is no
+ambient default-timeout variable.
+
 For a value shared across a manifest suite, put the full declaration under the manifest's top-level `inputs:` and let each consuming leaf declare the name as `{ inherit: true }` under its own `inputs:`. The manifest declaration owns `type`, `env:`, and `default:` while the leaf may add `secret: true`; the selected `profiles:` entry continues to supply a value. Resolution is `--inputs` → selected profile → manifest `env:` → manifest `default:`. The leaf opt-in keeps its declaration surface closed: a `$inputs.<name>` it did not declare remains a validation error even when the manifest declares that name.
 
 `secret: true` registers the resolved value for exact, case-sensitive substring masking. Secret inputs cannot have `default:` values: credentials belong in process or selected profiles, or in an explicit operator-supplied input. Duhem also registers the value's standard-base64, percent-encoded, and JSON-string-escaped forms. Every matching recorded text occurrence becomes `[redacted:<input_name>]` at the two output boundaries: evidence (event payloads, text artifact blobs, and bundle exports) and terminal presentation. Each text artifact records non-zero replacement counts by input name; the dashboard renders those counts so aggressive masking is visible. Values shorter than eight characters or equal (case-insensitively) to the small default list `admin`, `changeme`, `password`, `secret`, `test`, or `token` warn at run time because they commonly over-mask durable evidence. The threshold and list are defaults that may become tunable later, not validation gates.

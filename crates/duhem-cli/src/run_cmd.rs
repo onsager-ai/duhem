@@ -103,6 +103,13 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // visible window; anything else (or unset) stays headless. It has no
     // effect on `api/*` / page-free runs that never launch a browser.
     let headed = env_headed();
+    let slow_mo_ms = match env_slow_mo() {
+        Ok(value) => value,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     // Resolve which manifest/leaf to load (issue #69). `-f`/`--file` is
     // the explicit override — used as-is, no discovery. Otherwise
@@ -598,7 +605,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // (#49) and `RunBrowser` is non-`Clone`, so a fresh launch per
         // leaf is the cleanest model.
         let browser = if needs_browser {
-            match RunBrowser::launch(headed).await {
+            match RunBrowser::launch_with_slow_mo(headed, slow_mo_ms).await {
                 Ok(b) => Some(b.with_video(record_video)),
                 Err(e) => {
                     eprintln!("browser: {e}");
@@ -845,6 +852,21 @@ pub(crate) fn env_headed() -> bool {
     std::env::var("DUHEM_HEADED")
         .ok()
         .is_some_and(|v| parse_truthy(&v))
+}
+
+/// Read the operational `DUHEM_SLOW_MO` delay in milliseconds. This
+/// intentionally has no relationship to authored step/default timeouts.
+pub(crate) fn env_slow_mo() -> Result<Option<u64>, String> {
+    let Some(raw) = std::env::var("DUHEM_SLOW_MO").ok() else {
+        return Ok(None);
+    };
+    parse_slow_mo(&raw).map(Some)
+}
+
+pub(crate) fn parse_slow_mo(raw: &str) -> Result<u64, String> {
+    raw.trim().parse::<u64>().map_err(|_| {
+        format!("DUHEM_SLOW_MO must be a non-negative integer number of milliseconds, got `{raw}`")
+    })
 }
 
 /// The truthiness rule for `DUHEM_HEADED`. Pure (no env access) so it

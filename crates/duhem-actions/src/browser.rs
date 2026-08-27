@@ -430,12 +430,22 @@ impl RunBrowser {
     /// one once and retries — unless `DUHEM_NO_BROWSER_INSTALL` opts out,
     /// in which case the actionable error stands (#295).
     pub async fn launch(headed: bool) -> Result<Self, ActionError> {
-        match Self::launch_once(headed).await {
+        Self::launch_with_slow_mo(headed, None).await
+    }
+
+    /// Launch Chromium with an optional operational delay between
+    /// Playwright operations. The delay changes execution presentation,
+    /// never a check's authored timeout or verdict semantics.
+    pub async fn launch_with_slow_mo(
+        headed: bool,
+        slow_mo_ms: Option<u64>,
+    ) -> Result<Self, ActionError> {
+        match Self::launch_once(headed, slow_mo_ms).await {
             Ok(browser) => Ok(browser),
             Err(ActionError::Playwright(raw)) => {
                 if is_missing_browser_error(&raw) && !auto_install_disabled() {
                     match provision_browser().await {
-                        Ok(()) => Self::launch_once(headed)
+                        Ok(()) => Self::launch_once(headed, slow_mo_ms)
                             .await
                             .map_err(humanize_action_error),
                         Err(why) => Err(ActionError::Playwright(format!(
@@ -453,7 +463,7 @@ impl RunBrowser {
 
     /// One spawn+launch attempt. Returns the *raw* launch error so the
     /// caller can humanize it or decide to auto-provision (#295).
-    async fn launch_once(headed: bool) -> Result<Self, ActionError> {
+    async fn launch_once(headed: bool, slow_mo_ms: Option<u64>) -> Result<Self, ActionError> {
         let node = node_command();
         check_node_version(&node).await?;
 
@@ -493,9 +503,12 @@ impl RunBrowser {
             }),
         });
 
-        conn.request("launch", json!({ "headless": !headed }))
-            .await
-            .map_err(|e| ActionError::Playwright(e.to_string()))?;
+        conn.request(
+            "launch",
+            json!({ "headless": !headed, "slowMo": slow_mo_ms }),
+        )
+        .await
+        .map_err(|e| ActionError::Playwright(e.to_string()))?;
 
         Ok(Self {
             child,

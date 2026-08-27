@@ -81,6 +81,8 @@ pub async fn write_passing_run(
     w.append(EventPayload::SetupStarted {
         phase: duhem_evidence::StepPhase::Setup,
         step_count: 1,
+        fixture_name: None,
+        check_id: None,
     })
     .await
     .unwrap();
@@ -90,6 +92,8 @@ pub async fn write_passing_run(
         uses: "ui/navigate".into(),
         layer: None,
         with: BTreeMap::new(),
+        fixture_name: None,
+        check_id: None,
     })
     .await
     .unwrap();
@@ -100,6 +104,8 @@ pub async fn write_passing_run(
         value: ObservationValue::Inline {
             value: serde_json::json!("http://sut/"),
         },
+        fixture_name: None,
+        check_id: None,
     })
     .await
     .unwrap();
@@ -107,12 +113,16 @@ pub async fn write_passing_run(
         phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         outcome: StepOutcome::Ok,
+        fixture_name: None,
+        check_id: None,
     })
     .await
     .unwrap();
     w.append(EventPayload::SetupFinished {
         phase: duhem_evidence::StepPhase::Setup,
         aborted: false,
+        fixture_name: None,
+        check_id: None,
     })
     .await
     .unwrap();
@@ -411,6 +421,8 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
     w.append(EventPayload::SetupStarted {
         phase: duhem_evidence::StepPhase::Setup,
         step_count: 1,
+        fixture_name: None,
+        check_id: None,
     })
     .await
     .unwrap();
@@ -420,6 +432,8 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
         uses: "api/call".into(),
         layer: None,
         with: BTreeMap::new(),
+        fixture_name: None,
+        check_id: None,
     })
     .await
     .unwrap();
@@ -427,12 +441,16 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
         phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         outcome: StepOutcome::Error,
+        fixture_name: None,
+        check_id: None,
     })
     .await
     .unwrap();
     w.append(EventPayload::SetupFinished {
         phase: duhem_evidence::StepPhase::Setup,
         aborted: true,
+        fixture_name: None,
+        check_id: None,
     })
     .await
     .unwrap();

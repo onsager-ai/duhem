@@ -61,6 +61,10 @@ pub struct Check {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
 
+    /// Fixtures instantiated for this check, in bring-up order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub needs: Vec<String>,
+
     /// Ordered sequence of action invocations.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<Step>,

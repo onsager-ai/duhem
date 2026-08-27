@@ -17,6 +17,24 @@ pub(crate) fn unknown_actions(
         action_for,
         &mut errors,
     );
+    for (name, fixture) in &definition.fixtures {
+        check_steps(
+            definition,
+            &fixture.up,
+            &format!("fixtures.{name}.up"),
+            &[],
+            action_for,
+            &mut errors,
+        );
+        check_steps(
+            definition,
+            &fixture.down,
+            &format!("fixtures.{name}.down"),
+            &[],
+            action_for,
+            &mut errors,
+        );
+    }
     check_steps(
         definition,
         &definition.teardown,
@@ -56,7 +74,7 @@ fn check_steps(
             continue;
         }
         let mut path = if scope.is_empty() {
-            vec![SourcePathSegment::key(collection)]
+            collection.split('.').map(SourcePathSegment::key).collect()
         } else {
             vec![
                 SourcePathSegment::key("criteria"),

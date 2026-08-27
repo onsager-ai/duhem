@@ -397,6 +397,21 @@ fn resolve_steps(
             provenance,
         );
     }
+    for (fixture_name, fixture) in &mut definition.fixtures {
+        for (phase, steps) in [("up", &mut fixture.up), ("down", &mut fixture.down)] {
+            for (index, step) in steps.iter_mut().enumerate() {
+                let path = format!("fixtures.{fixture_name}.{phase}.{index}.with");
+                resolve_with(&mut step.with, &context, &path, provenance, errors);
+                apply_timeout(
+                    &mut step.with,
+                    defaults,
+                    manifest_path,
+                    &format!("{path}.timeout"),
+                    provenance,
+                );
+            }
+        }
+    }
     for (criterion_index, criterion) in definition.criteria.iter_mut().enumerate() {
         for (check_index, check) in criterion.checks.iter_mut().enumerate() {
             for (step_index, step) in check.steps.iter_mut().enumerate() {

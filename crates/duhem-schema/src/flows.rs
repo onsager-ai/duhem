@@ -63,6 +63,20 @@ pub(crate) fn validate_authored(definition: &VerificationDefinition) -> Vec<Stri
             ));
         }
     }
+    for (fixture, lifecycle) in &definition.fixtures {
+        for (phase, steps) in [("up", &lifecycle.up), ("down", &lifecycle.down)] {
+            for (index, step) in steps.iter().enumerate() {
+                validate_dispatch(
+                    step,
+                    &format!("fixture `{fixture}` {phase} step {index}"),
+                    &mut errors,
+                );
+                if step.call.is_some() {
+                    errors.push(format!("flow invocation from fixture `{fixture}` {phase} step {index} is not allowed"));
+                }
+            }
+        }
+    }
 
     for (name, flow) in &definition.flows {
         validate_flow(name, flow, &definition.flows, &mut errors);

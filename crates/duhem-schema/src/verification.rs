@@ -46,6 +46,17 @@ pub type FlowCatalog = BTreeMap<String, Flow>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct Fixture {
+    /// Actions that establish one fresh instance for a check.
+    pub up: Vec<Step>,
+    /// Best-effort cleanup actions for that instance.
+    pub down: Vec<Step>,
+}
+
+pub type FixtureCatalog = BTreeMap<String, Fixture>;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct VerificationDefinition {
     /// Deserializer-retained YAML marks for semantic diagnostics. This is
     /// provenance only: it is absent from the wire shape and semantic equality.
@@ -113,6 +124,11 @@ pub struct VerificationDefinition {
     /// least one setup action was dispatched.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub teardown: Vec<Step>,
+
+    /// Named, per-check lifecycle resources. Each check gets a fresh
+    /// instance of every fixture named by its `needs:` list.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub fixtures: FixtureCatalog,
 
     /// At least one criterion is required (enforced by the validator,
     /// not the type system, so we can produce a friendly error).
@@ -308,6 +324,7 @@ criteria:
             flows: BTreeMap::new(),
             setup: vec![],
             teardown: vec![],
+            fixtures: BTreeMap::new(),
             criteria: vec![],
         };
         let y = v.to_yaml_string().unwrap();
@@ -371,6 +388,31 @@ criteria: []
         let round_trip =
             VerificationDefinition::from_yaml_str(&parsed.to_yaml_string().unwrap()).unwrap();
         assert_eq!(round_trip, parsed);
+    }
+
+    #[test]
+    fn fixtures_round_trip_and_absence_keeps_wire_shape() {
+        let source = "verification: x\ncriteria: []\n";
+        let absent = VerificationDefinition::from_yaml_str(source).unwrap();
+        assert!(absent.fixtures.is_empty());
+        assert_eq!(absent.to_yaml_string().unwrap(), source);
+
+        let source = r#"verification: x
+fixtures:
+  project:
+    up:
+      - id: create
+        uses: api/call
+    down:
+      - uses: api/call
+        with: {url: $fixture.project.create.outputs.body.url}
+criteria: []
+"#;
+        let parsed = VerificationDefinition::from_yaml_str(source).unwrap();
+        assert_eq!(parsed.fixtures["project"].up.len(), 1);
+        let round_trip =
+            VerificationDefinition::from_yaml_str(&parsed.to_yaml_string().unwrap()).unwrap();
+        assert_eq!(round_trip.fixtures, parsed.fixtures);
     }
 
     #[test]

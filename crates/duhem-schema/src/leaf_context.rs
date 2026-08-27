@@ -162,6 +162,11 @@ fn unresolved_leaf_references(def: &VerificationDefinition) -> (Vec<String>, Vec
     for step in &def.teardown {
         visit_step(step, def, &mut flows, &mut pages);
     }
+    for fixture in def.fixtures.values() {
+        for step in fixture.up.iter().chain(&fixture.down) {
+            visit_step(step, def, &mut flows, &mut pages);
+        }
+    }
     for criterion in &def.criteria {
         for check in &criterion.checks {
             for step in &check.steps {

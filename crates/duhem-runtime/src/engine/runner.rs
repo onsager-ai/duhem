@@ -472,15 +472,18 @@ impl Engine {
             let mut criterion_verdicts: Vec<CriterionVerdict> = Vec::new();
             let mut failures: Vec<CheckFailure> = Vec::new();
             let mut warnings: Vec<String> = Vec::new();
+            let mut fixture_cleanup: Vec<CleanupFailure> = Vec::new();
             let criteria_result: Result<(), EngineError> = async {
                 for criterion in &def.criteria {
                     let cv = self
                         .run_criterion(
                             &mut writer,
-                            &run_state,
+                            &mut run_state,
+                            &def.fixtures,
                             criterion,
                             &mut failures,
                             &mut warnings,
+                            &mut fixture_cleanup,
                         )
                         .await?;
                     writer
@@ -495,9 +498,11 @@ impl Engine {
             }
             .await;
 
-            let cleanup = self
+            let mut cleanup = self
                 .drain_leaf_teardown(&mut writer, &mut run_state, def, setup_dispatched, &run_id)
                 .await;
+            fixture_cleanup.append(&mut cleanup);
+            let cleanup = fixture_cleanup;
 
             let down_result = if let Some(env) = def.provision.as_ref() {
                 crate::engine::env::tear_environment_down(
@@ -594,13 +599,16 @@ impl Engine {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_criterion(
         &mut self,
         writer: &mut EvidenceWriter,
-        run: &RunState,
+        run: &mut RunState,
+        fixtures: &duhem_schema::FixtureCatalog,
         criterion: &Criterion,
         failures: &mut Vec<CheckFailure>,
         warnings: &mut Vec<String>,
+        cleanup: &mut Vec<CleanupFailure>,
     ) -> Result<CriterionVerdict, EngineError> {
         let mut check_verdicts = Vec::new();
         for check in &criterion.checks {
@@ -619,7 +627,16 @@ impl Engine {
             // context for every attempt.
             let session = crate::engine::session::resolve(check, run);
             let cv = self
-                .run_check_with_retry(writer, run, &criterion.id, check, &session, failures)
+                .run_check_with_retry(
+                    writer,
+                    run,
+                    fixtures,
+                    &criterion.id,
+                    check,
+                    &session,
+                    failures,
+                    cleanup,
+                )
                 .await?;
             writer
                 .append(EventPayload::CheckFinished {
@@ -655,14 +672,17 @@ impl Engine {
     /// [`check_is_retryable`]). Each attempt re-emits the check's
     /// step / assertion events; only the final attempt's failing
     /// assertions stay in `failures`.
+    #[allow(clippy::too_many_arguments)]
     async fn run_check_with_retry(
         &mut self,
         writer: &mut EvidenceWriter,
-        run: &RunState,
+        run: &mut RunState,
+        fixtures: &duhem_schema::FixtureCatalog,
         criterion_id: &str,
         check: &Check,
         session: &SessionResolution,
         failures: &mut Vec<CheckFailure>,
+        cleanup: &mut Vec<CleanupFailure>,
     ) -> Result<CheckVerdict, EngineError> {
         let max = self.retry.map(|r| r.max).unwrap_or(0);
         let backoff = self
@@ -674,9 +694,71 @@ impl Engine {
             // Discard any failures a prior (retried) attempt left behind
             // so only the final attempt's detail reaches the reporter.
             let failures_mark = failures.len();
-            let cv = self
-                .run_check(writer, run, criterion_id, check, session, failures)
+            run.clear_fixture_outputs();
+            let mut active = Vec::new();
+            let mut fixture_abort = None;
+            for name in &check.needs {
+                let fixture = &fixtures[name];
+                active.push(name.as_str());
+                let result = crate::engine::setup::run_fixture_up(
+                    writer,
+                    &self.registry,
+                    self.browser.as_ref(),
+                    run,
+                    name,
+                    &check.id,
+                    &fixture.up,
+                    &self.child_process_env(writer.run_id()),
+                )
                 .await?;
+                if let Some(reason) = result.aborted {
+                    fixture_abort = Some((
+                        name.clone(),
+                        reason,
+                        result
+                            .failed_step
+                            .unwrap_or_else(|| "fixture environment".to_string()),
+                    ));
+                    break;
+                }
+            }
+            let cv = if let Some((name, reason, step)) = fixture_abort {
+                failures.push(CheckFailure {
+                    criterion_id: criterion_id.to_string(),
+                    check_id: check.id.clone(),
+                    assertions: vec![FailedAssertion {
+                        expr: format!("fixture `{name}` up completed"),
+                        state: VerdictState::Inconclusive(reason.cause()),
+                        detail: Some(format!("fixture `{name}` up failed at step `{step}`")),
+                    }],
+                    captures: Vec::new(),
+                });
+                CheckVerdict {
+                    check_id: check.id.clone(),
+                    state: VerdictState::Inconclusive(reason.cause()),
+                }
+            } else {
+                self.run_check(writer, run, criterion_id, check, session, failures)
+                    .await?
+            };
+            for name in active.into_iter().rev() {
+                let fixture = &fixtures[name];
+                let mut failures = crate::engine::setup::run_fixture_down(
+                    writer,
+                    &self.registry,
+                    self.browser.as_ref(),
+                    run,
+                    name,
+                    &check.id,
+                    &fixture.down,
+                    &self.child_process_env(writer.run_id()),
+                )
+                .await?;
+                for failure in &mut failures {
+                    failure.step = format!("fixture `{name}`: {}", failure.step);
+                }
+                cleanup.append(&mut failures);
+            }
             if attempt < max && check_is_retryable(cv.state) {
                 failures.truncate(failures_mark);
                 attempt += 1;
@@ -1269,6 +1351,196 @@ criteria:
         token: &'static str,
     }
 
+    struct RecordingAction {
+        uses: &'static str,
+        label: &'static str,
+        outcome: Outcome,
+        log: Arc<std::sync::Mutex<Vec<&'static str>>>,
+        judges: bool,
+        outputs: Vec<(&'static str, serde_json::Value)>,
+    }
+
+    #[async_trait]
+    impl Dispatch for RecordingAction {
+        fn uses(&self) -> &'static str {
+            self.uses
+        }
+        fn requires_page(&self) -> bool {
+            false
+        }
+        fn judges(&self) -> bool {
+            self.judges
+        }
+        async fn invoke(
+            &self,
+            _page: Option<&Page>,
+            _step_index: usize,
+            with: &serde_yml::Value,
+            _env: &BTreeMap<String, String>,
+        ) -> Result<ActionResult, ActionError> {
+            if self.label == "down" {
+                assert_eq!(with["token"].as_str(), Some("fresh"));
+            }
+            self.log.lock().unwrap().push(self.label);
+            let mut result = match self.outcome {
+                Outcome::Ok => ActionResult::ok(),
+                Outcome::Error => ActionResult::error(),
+                Outcome::Timeout => ActionResult::timeout(),
+                Outcome::Skipped { ref reason } => ActionResult::skipped(reason.clone()),
+            };
+            for (name, value) in &self.outputs {
+                result = result.with_output(name, value.clone());
+            }
+            Ok(result)
+        }
+    }
+
+    #[tokio::test]
+    async fn fixtures_are_fresh_ordered_and_contribute_no_judgments() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        for action in [
+            RecordingAction {
+                uses: "fake/up",
+                label: "up",
+                outcome: Outcome::Ok,
+                log: log.clone(),
+                judges: true,
+                outputs: vec![
+                    ("token", serde_json::json!("fresh")),
+                    ("satisfied", serde_json::json!(false)),
+                ],
+            },
+            RecordingAction {
+                uses: "fake/up2",
+                label: "up2",
+                outcome: Outcome::Ok,
+                log: log.clone(),
+                judges: false,
+                outputs: vec![("token", serde_json::json!("fresh"))],
+            },
+            RecordingAction {
+                uses: "fake/check",
+                label: "check",
+                outcome: Outcome::Ok,
+                log: log.clone(),
+                judges: true,
+                outputs: vec![("satisfied", serde_json::json!(true))],
+            },
+            RecordingAction {
+                uses: "fake/down",
+                label: "down",
+                outcome: Outcome::Ok,
+                log: log.clone(),
+                judges: false,
+                outputs: vec![],
+            },
+            RecordingAction {
+                uses: "fake/down2",
+                label: "down2",
+                outcome: Outcome::Ok,
+                log: log.clone(),
+                judges: false,
+                outputs: vec![],
+            },
+        ] {
+            engine.register_test_action(Box::new(action));
+        }
+        let v = def(r#"
+verification: fixtures
+fixtures:
+  resource:
+    up: [{ id: create, uses: fake/up }]
+    down:
+      - uses: fake/down
+        with: { token: $fixture.resource.create.outputs.token }
+  second:
+    up: [{ id: create, uses: fake/up2 }]
+    down:
+      - uses: fake/down2
+        with: { token: $fixture.second.create.outputs.token }
+criteria:
+  - id: AC-1
+    description: fresh fixture
+    checks:
+      - { id: AC-1.1, needs: [resource, second], steps: [{ uses: fake/check }] }
+      - { id: AC-1.2, needs: [resource], steps: [{ uses: fake/check }] }
+"#);
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(outcome.verdict.state, VerdictState::Pass);
+        assert_eq!(
+            *log.lock().unwrap(),
+            vec!["up", "up2", "check", "down2", "down", "up", "check", "down"]
+        );
+    }
+
+    #[tokio::test]
+    async fn fixture_up_failure_is_inconclusive_and_still_drains_down() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        let up = StubAction::new("fake/up", Outcome::Error);
+        let check = StubAction::new("fake/check", Outcome::Ok)
+            .judging()
+            .with_output("satisfied", serde_json::json!(true));
+        let check_calls = check.invocations.clone();
+        let down = StubAction::new("fake/down", Outcome::Ok);
+        let down_calls = down.invocations.clone();
+        for action in [up, check, down] {
+            engine.register_test_action(Box::new(action));
+        }
+        let v = def(r#"
+verification: fixtures
+fixtures:
+  resource:
+    up: [{ id: create, uses: fake/up }]
+    down: [{ uses: fake/down }]
+criteria:
+  - id: AC-1
+    description: fixture failure
+    checks: [{ id: AC-1.1, needs: [resource], steps: [{ uses: fake/check }] }]
+"#);
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            outcome.verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::EnvironmentError)
+        );
+        assert_eq!(check_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(down_calls.load(Ordering::SeqCst), 1);
+        assert!(
+            outcome.failures[0].assertions[0]
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("resource")
+        );
+    }
+
+    #[tokio::test]
+    async fn fixture_down_failure_does_not_change_check_verdict() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/up", Outcome::Ok)));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/check", Outcome::Ok)
+                .judging()
+                .with_output("satisfied", serde_json::json!(false)),
+        ));
+        engine.register_test_action(Box::new(StubAction::new("fake/down", Outcome::Error)));
+        let v = def(r#"
+verification: fixtures
+fixtures:
+  resource:
+    up: [{ uses: fake/up }]
+    down: [{ id: remove, uses: fake/down }]
+criteria:
+  - id: AC-1
+    description: cleanup does not judge
+    checks: [{ id: AC-1.1, needs: [resource], steps: [{ uses: fake/check }] }]
+"#);
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(outcome.verdict.state, VerdictState::Fail);
+        assert_eq!(outcome.cleanup.len(), 1);
+        assert!(outcome.cleanup[0].step.contains("fixture `resource`"));
+    }
+
     #[async_trait]
     impl Action for ContractSecretAction {
         fn uses(&self) -> &'static str {
@@ -1539,6 +1811,7 @@ criteria:
                 phase: duhem_evidence::StepPhase::Teardown,
                 step_index: 0,
                 outcome: duhem_evidence::StepOutcome::Ok,
+                ..
             }
         )));
         assert!(events.iter().any(|event| matches!(
@@ -1547,6 +1820,7 @@ criteria:
                 phase: duhem_evidence::StepPhase::Teardown,
                 step_index: 1,
                 outcome: duhem_evidence::StepOutcome::Error,
+                ..
             }
         )));
     }

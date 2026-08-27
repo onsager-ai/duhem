@@ -292,6 +292,8 @@ async fn run_detail_surfaces_teardown_evidence_without_changing_verdict() {
             uses: "api/call".into(),
             layer: Some("api".into()),
             with: BTreeMap::new(),
+            fixture_name: None,
+            check_id: None,
         })
         .await
         .unwrap();
@@ -300,6 +302,8 @@ async fn run_detail_surfaces_teardown_evidence_without_changing_verdict() {
             phase: duhem_evidence::StepPhase::Teardown,
             step_index: 0,
             outcome: duhem_evidence::StepOutcome::Error,
+            fixture_name: None,
+            check_id: None,
         })
         .await
         .unwrap();
@@ -307,6 +311,8 @@ async fn run_detail_surfaces_teardown_evidence_without_changing_verdict() {
         .append(EventPayload::SetupFinished {
             phase: duhem_evidence::StepPhase::Teardown,
             aborted: true,
+            fixture_name: None,
+            check_id: None,
         })
         .await
         .unwrap();

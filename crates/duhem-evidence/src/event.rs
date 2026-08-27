@@ -225,6 +225,10 @@ pub enum EventPayload {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
         phase: StepPhase,
         step_count: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fixture_name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        check_id: Option<String>,
     },
     SetupStepStarted {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
@@ -241,6 +245,10 @@ pub enum EventPayload {
         layer: Option<String>,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         with: BTreeMap<String, serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fixture_name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        check_id: Option<String>,
     },
     SetupStepObservation {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
@@ -249,17 +257,29 @@ pub enum EventPayload {
         output_name: String,
         #[serde(flatten)]
         value: ObservationValue,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fixture_name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        check_id: Option<String>,
     },
     SetupStepFinished {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
         phase: StepPhase,
         step_index: u32,
         outcome: StepOutcome,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fixture_name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        check_id: Option<String>,
     },
     SetupFinished {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
         phase: StepPhase,
         aborted: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fixture_name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        check_id: Option<String>,
     },
     StepStarted {
         criterion_id: String,
@@ -528,6 +548,8 @@ mod tests {
             EventPayload::SetupStarted {
                 phase: StepPhase::Setup,
                 step_count: 2,
+                fixture_name: None,
+                check_id: None,
             },
             EventPayload::SetupStepStarted {
                 phase: StepPhase::Setup,
@@ -535,6 +557,8 @@ mod tests {
                 uses: "ui/navigate".into(),
                 layer: None,
                 with: BTreeMap::new(),
+                fixture_name: None,
+                check_id: None,
             },
             EventPayload::SetupStepObservation {
                 phase: StepPhase::Setup,
@@ -543,15 +567,21 @@ mod tests {
                 value: ObservationValue::Inline {
                     value: serde_json::json!("http://x/"),
                 },
+                fixture_name: None,
+                check_id: None,
             },
             EventPayload::SetupStepFinished {
                 phase: StepPhase::Setup,
                 step_index: 0,
                 outcome: StepOutcome::Ok,
+                fixture_name: None,
+                check_id: None,
             },
             EventPayload::SetupFinished {
                 phase: StepPhase::Setup,
                 aborted: false,
+                fixture_name: None,
+                check_id: None,
             },
         ];
         for payload in cases {
@@ -576,6 +606,8 @@ mod tests {
                 phase: StepPhase::Teardown,
                 step_index: 0,
                 outcome: StepOutcome::Error,
+                fixture_name: None,
+                check_id: None,
             },
         };
         let line = serde_json::to_string(&event).unwrap();
@@ -591,14 +623,18 @@ mod tests {
         assert!(
             EventPayload::SetupFinished {
                 phase: StepPhase::Setup,
-                aborted: false
+                aborted: false,
+                fixture_name: None,
+                check_id: None
             }
             .is_finished()
         );
         assert!(
             EventPayload::SetupFinished {
                 phase: StepPhase::Setup,
-                aborted: true
+                aborted: true,
+                fixture_name: None,
+                check_id: None
             }
             .is_finished()
         );
@@ -607,6 +643,8 @@ mod tests {
                 phase: StepPhase::Setup,
                 step_index: 0,
                 outcome: StepOutcome::Ok,
+                fixture_name: None,
+                check_id: None,
             }
             .is_finished()
         );
@@ -615,7 +653,9 @@ mod tests {
         assert!(
             !EventPayload::SetupStarted {
                 phase: StepPhase::Setup,
-                step_count: 1
+                step_count: 1,
+                fixture_name: None,
+                check_id: None
             }
             .is_finished()
         );
@@ -627,6 +667,8 @@ mod tests {
                 value: ObservationValue::Inline {
                     value: serde_json::json!(1),
                 },
+                fixture_name: None,
+                check_id: None,
             }
             .is_finished()
         );

@@ -42,6 +42,7 @@ pub struct RunState {
     /// by `Engine::run` from the run-level `setup:` block (issue #20)
     /// before any criterion runs; read-only from inside a check.
     pub setup_outputs: BTreeMap<(String, String), Value>,
+    pub fixture_outputs: BTreeMap<(String, String, String), Value>,
 }
 
 impl RunState {
@@ -69,6 +70,7 @@ impl RunState {
             env: BTreeMap::new(),
             uuid,
             setup_outputs: BTreeMap::new(),
+            fixture_outputs: BTreeMap::new(),
         }
     }
 
@@ -99,6 +101,23 @@ impl RunState {
     pub fn record_setup_output(&mut self, step_id: &str, name: &str, value: Value) {
         self.setup_outputs
             .insert((step_id.to_string(), name.to_string()), value);
+    }
+
+    pub fn record_fixture_output(
+        &mut self,
+        fixture: &str,
+        step_id: &str,
+        name: &str,
+        value: Value,
+    ) {
+        self.fixture_outputs.insert(
+            (fixture.to_string(), step_id.to_string(), name.to_string()),
+            value,
+        );
+    }
+
+    pub fn clear_fixture_outputs(&mut self) {
+        self.fixture_outputs.clear();
     }
 }
 
@@ -142,6 +161,14 @@ impl<'r> EvalContext for RunContext<'r> {
         self.run
             .setup_outputs
             .get(&(step_id.to_string(), output.to_string()))
+    }
+
+    fn fixture_output(&self, fixture: &str, step_id: &str, output: &str) -> Option<&Value> {
+        self.run.fixture_outputs.get(&(
+            fixture.to_string(),
+            step_id.to_string(),
+            output.to_string(),
+        ))
     }
 
     fn env(&self, name: &str) -> Option<&str> {

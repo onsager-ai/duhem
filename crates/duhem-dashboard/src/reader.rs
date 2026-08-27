@@ -510,7 +510,6 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
     let mut setup_aborted = false;
     let mut has_definition = false;
     let mut cleanup = Vec::new();
-    // First-seen orderings from the event stream itself.
     let mut criterion_order: Vec<String> = Vec::new();
     let mut checks_by_criterion: Vec<(String, Vec<CheckRef>)> = Vec::new();
     // A check belongs to exactly one criterion (replay rejects
@@ -556,31 +555,40 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 inputs = i.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
                 has_definition = definition.is_some();
             }
-            EventPayload::SetupFinished { phase, aborted }
-                if phase == &duhem_evidence::StepPhase::Setup =>
-            {
+            EventPayload::SetupFinished {
+                phase,
+                aborted,
+                fixture_name,
+                ..
+            } if phase == &duhem_evidence::StepPhase::Setup && fixture_name.is_none() => {
                 setup_aborted = *aborted;
             }
             EventPayload::SetupStepStarted {
                 phase: duhem_evidence::StepPhase::Teardown,
                 step_index,
                 uses,
+                fixture_name,
+                check_id,
                 ..
             } => cleanup.push(crate::model::CleanupStepDetail {
                 step_index: *step_index,
                 uses: uses.clone(),
                 outcome: duhem_evidence::StepOutcome::Ok,
+                fixture_name: fixture_name.clone(),
+                check_id: check_id.clone(),
             }),
             EventPayload::SetupStepFinished {
                 phase: duhem_evidence::StepPhase::Teardown,
                 step_index,
                 outcome,
+                fixture_name,
+                check_id,
             } => {
-                if let Some(step) = cleanup
-                    .iter_mut()
-                    .rev()
-                    .find(|step| step.step_index == *step_index)
-                {
+                if let Some(step) = cleanup.iter_mut().rev().find(|step| {
+                    step.step_index == *step_index
+                        && step.fixture_name == *fixture_name
+                        && step.check_id == *check_id
+                }) {
                     step.outcome = outcome.clone();
                 }
             }

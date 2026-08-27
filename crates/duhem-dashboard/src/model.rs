@@ -69,6 +69,10 @@ pub struct CleanupStepDetail {
     pub step_index: u32,
     pub uses: String,
     pub outcome: StepOutcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fixture_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub check_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

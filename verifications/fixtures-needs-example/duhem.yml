@@ -1,0 +1,47 @@
+# Per-check fixtures — worked example (#449)
+
+verification: Per-check fixture lifecycle
+spec_ref: https://github.com/onsager-ai/duhem/issues/441
+
+fixtures:
+  scratch_file:
+    up:
+      - id: create
+        uses: cli/invoke
+        with:
+          command:
+            - sh
+            - -c
+            - 'touch "$1"; printf %s "$1"'
+            - --
+            - '$runtime.format("/tmp/duhem-fixture-{}", $runtime.uuid())'
+    down:
+      - uses: cli/invoke
+        with:
+          command:
+            - sh
+            - -c
+            - 'rm -f "$1"'
+            - --
+            - $fixture.scratch_file.create.outputs.stdout
+
+criteria:
+  - id: AC-1
+    description: |
+      Every check that requests a temporary resource receives one before its
+      work begins, and the resource is removed after the check completes.
+    checks:
+      - id: AC-1.1
+        needs: [scratch_file]
+        steps:
+          - id: inspect
+            uses: cli/invoke
+            with:
+              command:
+                - sh
+                - -c
+                - 'test -f "$1"'
+                - --
+                - '$runtime.format("/tmp/duhem-fixture-{}", $runtime.uuid())'
+        assertions:
+          - $steps.inspect.outputs.exit_code == 0

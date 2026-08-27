@@ -47,7 +47,8 @@ pub use validate::{
     ValidationError, validate, validate_with_action_catalog, validate_with_contract_outputs,
 };
 pub use verification::{
-    Flow, FlowCatalog, InputDecl, InputType, PageCatalog, SchemaError, VerificationDefinition,
+    Fixture, FixtureCatalog, Flow, FlowCatalog, InputDecl, InputType, PageCatalog, SchemaError,
+    VerificationDefinition,
 };
 
 /// Current Verification Definition schema version. Pre-1.0 per

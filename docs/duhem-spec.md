@@ -811,6 +811,57 @@ original error. `--keep-env` skips both `teardown:` and
 leaf-only; root manifests do not define a suite teardown or a shared
 `$setup` output scope.
 
+#### 10.3.5 Per-check fixtures (`fixtures:` and `needs:`)
+
+A leaf may declare named lifecycle resources once and let each consuming check
+request a fresh instance:
+
+```yaml
+fixtures:
+  test_project:
+    up:
+      - id: create
+        uses: api/call
+        with: { method: POST, url: /projects, body: { name: probe } }
+    down:
+      - uses: api/call
+        with:
+          method: DELETE
+          url: $fixture.test_project.create.outputs.body.url
+
+criteria:
+  - id: AC-1
+    description: A project can be inspected.
+    checks:
+      - id: AC-1.1
+        needs: [test_project]
+        steps: []
+        assertions: ["true"]
+```
+
+`fixtures:` is a map of name to non-empty `up:` and `down:` step lists.
+`needs:` names declared fixtures in bring-up order. Each check (and each retry
+attempt) receives fresh instances: fixture `up:` runs in `needs:` order, then
+the check steps run, then fixture `down:` runs in reverse order. Leaf `setup:`
+precedes every fixture and leaf `teardown:` follows every fixture. Fixtures do
+not share state, nest, or depend on other fixtures in v1; a fixture step cannot
+carry `needs:`.
+
+Fixture steps are lifecycle actions and contribute no implicit judgments, even
+when their action contract judges. Their failure semantics are:
+
+| Event | Check result |
+| --- | --- |
+| A fixture `up:` step fails | `inconclusive` with the existing timeout or environment-error cause; check steps do not run |
+| A fixture `down:` step fails | failure remains in attributed evidence; the check verdict is unchanged |
+| The check fails or is inconclusive | every activated fixture still runs `down:` |
+
+Fixture lifecycle events carry both the fixture name and consuming check id.
+Only a fixture's own `down:` may read its `up:` outputs, through
+`$fixture.<fixture_name>.<step_id>.outputs.<name>`. References from checks,
+leaf lifecycle blocks, another fixture, or the fixture's own `up:` are
+validation errors. The action contract must declare the referenced output.
+
 ### 10.4 Root manifest (`duhem.yml`)
 
 The root manifest is a single canonical file at the project root that aggregates Verification Definitions and provides shared configuration.
@@ -1009,6 +1060,7 @@ Borrowed from Arazzo. References available in expressions:
   expansion; it never reaches runtime evaluation.
 - `$steps.<id>.outputs.<name>` — outputs from a prior step (scoped to the declaring check)
 - `$setup.<id>.outputs.<name>` — outputs from a run-level `setup:` step (§10.3), read-only from inside any check
+- `$fixture.<fixture_name>.<step_id>.outputs.<name>` — outputs from one fixture instance's `up:` steps, valid only in that same fixture's `down:` block (§10.3.5)
 - `$env.<name>` — a value from the selected named profile. The `$env` whitelist is **empty by default**. An author opts a key in by declaring it (with a string value) under a manifest `profiles:` entry (§10.4) and selecting that profile with `--profile <name>` (`--environment` remains an alias; one profile auto-selects); the selected entry's string-valued keys seed the whitelist for that run. There is no process-environment passthrough and no `--env` CLI flag. A reference to a key that isn't whitelisted evaluates to `inconclusive` (it carries a missing-env cause, §10.6), never a parse error.
 - `$runtime.uuid()` — a stable per-run UUID / `$runtime.now()` — the run's current time as epoch milliseconds
 - `$runtime.format(fmt, args...)` — **pure** string composition: the

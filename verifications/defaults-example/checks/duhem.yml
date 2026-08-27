@@ -35,9 +35,16 @@ criteria:
     checks:
       - id: AC-2.1
         description: |
-          The step uses an action with no runtime observation, so every
-          assertion here is `inconclusive(missing_observation)`.
+          The step cannot execute, so it contributes
+          `inconclusive(missing_observation)` (§7.6) and the check
+          cannot aggregate to `pass` however its own assertions land.
         steps:
-          - uses: noop/unobservable
+          - id: unobservable
+            uses: cli/invoke
+            with:
+              command:
+                - ./no-such-binary-defaults-example
+              cwd: .
+              timeout: 5s
         assertions:
           - "true"

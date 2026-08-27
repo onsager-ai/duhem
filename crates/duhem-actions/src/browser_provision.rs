@@ -12,6 +12,8 @@
 //! file-token budget; [`crate::browser::RunBrowser::launch`] is the sole
 //! caller.
 
+use std::io::Write;
+
 use tokio::process::Command;
 
 use crate::browser::sidecar_dir;
@@ -103,16 +105,60 @@ struct ProvisionLock {
     _file: std::fs::File,
 }
 
+const INSTALL_LOCK: &str = ".duhem-install.lock";
+
+/// A Playwright directory can exist after an interrupted `npm ci` while
+/// containing none of the package. Treat only its parseable package manifest
+/// as an installed dependency tree.
+fn sidecar_deps_usable(dir: &std::path::Path) -> bool {
+    let manifest = dir.join("node_modules/playwright/package.json");
+    std::fs::read(manifest)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|json| json.get("name")?.as_str().map(str::to_owned))
+        .is_some_and(|name| name == "playwright")
+}
+
+fn recorded_lock_owner(dir: &std::path::Path) -> Option<u32> {
+    std::fs::read_to_string(dir.join(INSTALL_LOCK))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+#[cfg(target_os = "linux")]
+fn process_is_running(pid: u32) -> bool {
+    std::path::Path::new("/proc").join(pid.to_string()).exists()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_is_running(_pid: u32) -> bool {
+    // The advisory lock remains authoritative on platforms without procfs.
+    true
+}
+
+fn recorded_lock_is_stale(dir: &std::path::Path) -> bool {
+    recorded_lock_owner(dir).is_some_and(|pid| !process_is_running(pid))
+}
+
 impl ProvisionLock {
     fn acquire(dir: &std::path::Path) -> Option<Self> {
-        let file = std::fs::OpenOptions::new()
+        if recorded_lock_is_stale(dir) {
+            eprintln!("[duhem] recovering stale Playwright sidecar install lock");
+        }
+        let mut file = std::fs::OpenOptions::new()
             .create(true)
+            .read(true)
             .write(true)
             .truncate(false)
-            .open(dir.join(".duhem-install.lock"))
+            .open(dir.join(INSTALL_LOCK))
             .ok()?;
         // Blocks until the exclusive advisory lock is free (std, Rust 1.89+).
         file.lock().ok()?;
+        file.set_len(0).ok()?;
+        writeln!(file, "{}", std::process::id()).ok()?;
+        file.sync_data().ok()?;
         Some(Self { _file: file })
     }
 }
@@ -137,8 +183,9 @@ pub(crate) async fn provision_browser() -> Result<(), String> {
     );
     let _lock = ProvisionLock::acquire(&dir);
 
-    // 1. Sidecar npm deps (playwright), only if absent.
-    if !dir.join("node_modules").join("playwright").exists() {
+    // 1. Sidecar npm deps (playwright), reinstalling a partial tree left by
+    //    an interrupted npm invocation.
+    if !sidecar_deps_usable(&dir) {
         let out = run_capture("npm", &["ci"], &dir, &[]).await?;
         if !out.ok {
             let retry = run_capture("npm", &["install"], &dir, &[]).await?;
@@ -179,7 +226,24 @@ pub(crate) async fn provision_browser() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_missing_browser_error, is_unsupported_distro_error, no_install_truthy};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::{
+        INSTALL_LOCK, is_missing_browser_error, is_unsupported_distro_error, no_install_truthy,
+        recorded_lock_is_stale, sidecar_deps_usable,
+    };
+
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_dir(label: &str) -> std::path::PathBuf {
+        let id = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "duhem-browser-provision-{label}-{}-{id}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     #[test]
     fn missing_browser_triggers_auto_provision() {
@@ -217,5 +281,36 @@ mod tests {
         for off in ["", "0", "false", "no", "yes", "2"] {
             assert!(!no_install_truthy(off), "should not opt out: {off:?}");
         }
+    }
+
+    #[test]
+    fn partial_tree_with_stale_lock_requires_reinstall() {
+        let dir = temp_dir("partial-deps");
+        std::fs::create_dir_all(dir.join("node_modules/playwright")).unwrap();
+        std::fs::write(dir.join(INSTALL_LOCK), format!("{}\n", u32::MAX)).unwrap();
+        assert!(!sidecar_deps_usable(&dir));
+        #[cfg(target_os = "linux")]
+        assert!(recorded_lock_is_stale(&dir));
+
+        std::fs::write(
+            dir.join("node_modules/playwright/package.json"),
+            r#"{"name":"playwright"}"#,
+        )
+        .unwrap();
+        assert!(sidecar_deps_usable(&dir));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dead_lock_owner_is_stale() {
+        let dir = temp_dir("stale-lock");
+        let dead_pid = u32::MAX;
+        std::fs::write(dir.join(INSTALL_LOCK), format!("{dead_pid}\n")).unwrap();
+        assert!(recorded_lock_is_stale(&dir));
+
+        std::fs::write(dir.join(INSTALL_LOCK), format!("{}\n", std::process::id())).unwrap();
+        assert!(!recorded_lock_is_stale(&dir));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

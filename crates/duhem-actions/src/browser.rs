@@ -843,6 +843,7 @@ mod humanize_tests {
     #[test]
     fn missing_sidecar_deps_points_at_browser_install() {
         let msg = humanize_launch_error("Cannot find package 'playwright' imported from …");
+        assert!(msg.contains("Playwright sidecar"), "got: {msg}");
         assert!(msg.contains("duhem browser install"), "got: {msg}");
     }
 

@@ -1,0 +1,11 @@
+# `## Unreleased` is append-only, so every concurrent branch adds its
+# bullet at the same offset and every merge conflicts — mechanically,
+# on changes that never actually disagree. The `union` driver keeps
+# both sides' lines instead of raising a conflict.
+#
+# Safe here because entries are independent one-line bullets that are
+# only ever added. It would be the wrong choice for a file where two
+# branches might edit the *same* line and one side must win: union
+# would silently keep both. Review the resulting order at release time
+# — union preserves both sides but does not promise their sequence.
+CHANGELOG.md merge=union

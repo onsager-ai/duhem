@@ -8,7 +8,9 @@ default:
     @printf '  just build                   Build the workspace\n'
     @printf '  just lint                    Run static checks\n'
     @printf '  just test [browser-actions]  Run tests\n'
-    @printf '  just check                   Run lint + test before pushing\n\n'
+    @printf '  just check                   Run lint + test (fast inner loop)\n'
+    @printf '  just self-verify             Run Duhem against its own VDs\n'
+    @printf '  just preflight               Full CI-equivalent gate before pushing\n\n'
     @printf '  just dashboard [dev|build|test]  Develop, build, or test the dashboard\n'
     @printf '  just worktree [add|list]     Manage task worktrees\n'
 
@@ -145,8 +147,12 @@ test target="workspace":
             ;;
     esac
 
-# Static checks. Mirrors what CI runs.
+# Static checks, tuned for fast iteration (not CI-equivalent).
 lint:
+    # NOT the same as CI: `schema-changelog-check` runs here in `--lint`
+    # (advisory) mode so an in-progress change is not blocked on a
+    # CHANGELOG entry it does not have yet. CI runs it strict.
+    # `just preflight` closes that gap.
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo run -p xtask --quiet -- check-file-budget --mode=fail
@@ -154,5 +160,25 @@ lint:
     cargo run -p xtask --quiet -- skill-scrub
     cargo run -p xtask --quiet -- dx-drift --mode=warn
 
-# Cheap pre-push gate: lint + test.
+# Fast inner-loop gate: lint + test. Green here does NOT imply green CI.
 check: lint test
+
+# Run Duhem's own self-verification suite against a freshly built CLI.
+self-verify:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # `just check` does not do this, and it is where real breakage hides:
+    # a change can pass every static check and every unit test while
+    # breaking the VDs Duhem uses to verify itself. That is exactly what
+    # happened on #437 — catalog-aware validation rejected an in-tree
+    # example — and only CI caught it.
+    cargo build --release -p duhem-cli
+    db="$(mktemp -d)/self-verify.db"
+    ./target/release/duhem run verifications/duhem-cli \
+        --db "$db" \
+        --inputs duhem_bin="$PWD/target/release/duhem"
+
+# Full CI-equivalent gate. Slower than `check` on purpose; run before pushing.
+preflight: lint test self-verify
+    # The strict form of the changelog check, as CI runs it.
+    cargo run -p xtask --quiet -- schema-changelog-check

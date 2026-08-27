@@ -304,6 +304,15 @@ pub enum ValidationError {
         uses: String,
         location: Option<SourceLocation>,
     },
+
+    #[error(
+        "criterion `{criterion}` / check `{check}` has no computable worst-case step count: {reason}"
+    )]
+    UncomputableStepCount {
+        criterion: String,
+        check: String,
+        reason: String,
+    },
 }
 
 impl ValidationError {
@@ -734,6 +743,13 @@ fn validate_check(
     } = *definition;
     let source_context_matches =
         source_map.check_context_matches(criterion_index, &c.id, check_index, &ch.id);
+    if let Err(error) = ch.worst_case_step_count() {
+        errs.push(ValidationError::UncomputableStepCount {
+            criterion: c.id.clone(),
+            check: ch.id.clone(),
+            reason: error.to_string(),
+        });
+    }
     // A check with neither assertions nor steps can never produce a
     // verdict (the judge would see an empty aggregation). With steps
     // but no assertions the schema layer accepts — whether one of the

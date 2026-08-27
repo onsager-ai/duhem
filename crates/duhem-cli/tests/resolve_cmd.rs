@@ -126,6 +126,7 @@ fn resolves_includes_profiles_secrets_validation_and_provenance_without_side_eff
 
     let value: serde_json::Value = serde_json::from_str(&text).unwrap();
     let leaf = &value["verifications"][0];
+    assert_eq!(leaf["worst_case_step_counts"]["AC-1.1"], 2);
     assert_eq!(
         leaf["document"]["inputs"]["base_url"],
         "https://staging.example"

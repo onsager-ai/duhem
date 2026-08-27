@@ -714,8 +714,26 @@ steps:
     with: { method: DELETE, url: $inputs.lease_url }
 ```
 
-`if:` is deliberately not an expression language. Its complete
-vocabulary is `success | always | failure`. A gated step emits a
+**A Verification Definition is total.** Every VD provably terminates,
+and the maximum number of steps a check can execute is computable from
+the Verification Definition alone, before the run. Validation rejects a
+definition whenever that bound cannot be computed; `duhem resolve`
+reports the per-check worst-case step count. Today the bound is the flat
+step count after flow expansion.
+
+This boundary forbids `while` and every other condition-driven form of
+repetition, recursion of any kind, unbounded iteration, unbounded
+nesting, and any construct that would make the step-count bound
+uncomputable. It permits value-based conditions, bounded iteration over
+a finite set, and the existing `Expr` grammar unchanged. Bounded
+iteration without recursion is primitive recursion: it gives VDs real
+control flow without making them Turing-complete. The existing
+`MAX_FLOW_DEPTH` limit and rejection of flow cycles (for example,
+`flow X forms a cycle (a -> b -> a)`) are instances of this totality
+commitment, not standalone guards.
+
+The currently available gate vocabulary remains
+`success | always | failure`. A gated step emits a
 `StepOutcome::Skipped` evidence record with the causing step in its
 reason and contributes no implicit assertion. Explicit assertions are
 evaluated only after the step sequence and therefore cannot gate later

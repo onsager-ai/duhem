@@ -221,7 +221,9 @@ fn collect_unresolved_page_paths(
         }
         let segments = path.segments();
         if segments.len() != 2 {
-            out.insert(format!("$pages.{}", segments.join(".")));
+            // Shape errors are static validation failures, not missing
+            // catalog entries. Leave them for `check_page_path`, which
+            // reports `MalformedPageRef` with the authored source mark.
             return;
         }
         let (page, element) = (&segments[0], &segments[1]);

@@ -171,6 +171,21 @@ Capture the current browser context storage state for a later check.
   uses: ui/capture-session
 ```
 
+### `ui/wait`
+
+Wait for a fixed duration within the suite ceiling (debugging escape hatch; prefer an assertion timeout).
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `duration` | yes | — |
+
+**outputs:** (none)
+
+```yaml
+- uses: ui/wait
+  with: { duration: 500ms }
+```
+
 ## `api/*`
 
 ### `api/call`

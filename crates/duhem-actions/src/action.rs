@@ -140,7 +140,7 @@ impl ActionResult {
 /// only when a step needs it, and the CLI skips launching the
 /// Playwright sidecar entirely for page-free verifications.
 pub fn uses_requires_page(uses: &str) -> bool {
-    uses.starts_with("ui/") || uses == "api/observe"
+    (uses.starts_with("ui/") && uses != "ui/wait") || uses == "api/observe"
 }
 
 /// Which layer of the delivery web a `Step.uses` action exercises
@@ -309,6 +309,7 @@ mod tests {
         assert!(uses_requires_page("api/observe"));
         // Everything else is page-free.
         for u in [
+            "ui/wait",
             "api/call",
             "api/poll",
             "api/stream",

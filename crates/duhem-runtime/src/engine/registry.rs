@@ -22,14 +22,22 @@
 //! optimization deferred to a follow-up spec.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use duhem_actions::Page;
 use duhem_actions::{
     Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertState, AssertUrl, Call,
     CaptureSession, Click, DbObserve, Invoke, Navigate, Observe, Poll, Query, Seed, Select, Stream,
-    Type,
+    Type, Wait,
 };
+use serde::Deserialize;
+use serde::de::Error as _;
+
+#[derive(Deserialize)]
+struct WaitWith {
+    duration: duhem_schema::DurationSpec,
+}
 
 /// Engine-internal dispatcher. One implementor per registered action
 /// (`Step.uses`).
@@ -136,6 +144,49 @@ impl Dispatch for ConcreteAction {
     }
 }
 
+pub(crate) fn enforce_wait_ceiling(
+    with: &serde_yml::Value,
+    max_wait: Duration,
+) -> Result<(), ActionError> {
+    let duration_label = with
+        .as_mapping()
+        .and_then(|mapping| mapping.get(serde_yml::Value::String("duration".into())))
+        .map(|value| match value {
+            serde_yml::Value::String(raw) => raw.clone(),
+            _ => serde_yml::to_string(value)
+                .unwrap_or_else(|_| "<unprintable>".into())
+                .trim()
+                .to_owned(),
+        });
+    let Ok(wait) = serde_yml::from_value::<WaitWith>(with.clone()) else {
+        return Ok(()); // The action owns ordinary `with:` validation.
+    };
+    let duration = Duration::from(wait.duration);
+    if duration <= max_wait {
+        return Ok(());
+    }
+    Err(ActionError::InvalidWith {
+        action: "ui/wait",
+        source: serde_yml::Error::custom(format!(
+            "ui/wait duration `{}` exceeds the {} ceiling; raise `defaults.max_wait` in the root manifest, or use `ui/assert-element` with `timeout:` to wait for a condition",
+            duration_label.unwrap_or_else(|| format!("{}ms", duration.as_millis())),
+            format_duration(max_wait)
+        )),
+    })
+}
+
+fn format_duration(duration: Duration) -> String {
+    if duration == Duration::from_secs(60) {
+        "60s".to_string()
+    } else if duration.subsec_nanos() == 0 && duration.as_secs().is_multiple_of(60) {
+        format!("{}m", duration.as_secs() / 60)
+    } else if duration.subsec_nanos() == 0 {
+        format!("{}s", duration.as_secs())
+    } else {
+        format!("{}ms", duration.as_millis())
+    }
+}
+
 /// Layer runtime-owned process context onto `cli/invoke` after authored
 /// fields resolve. Runtime values win so a nested run cannot detach
 /// itself from the parent store or lineage.
@@ -178,6 +229,7 @@ pub(crate) fn default_registry() -> ActionRegistry {
     insert(&mut m, ConcreteAction::new(Box::new(AssertUrl)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertState)));
     insert(&mut m, ConcreteAction::new(Box::new(CaptureSession)));
+    insert(&mut m, ConcreteAction::new(Box::new(Wait)));
     insert(&mut m, ConcreteAction::new(Box::new(Call)));
     insert(&mut m, ConcreteAction::new(Box::new(Observe)));
     insert(&mut m, ConcreteAction::new(Box::new(Poll)));
@@ -221,7 +273,34 @@ mod tests {
                 "ui/navigate",
                 "ui/select",
                 "ui/type",
+                "ui/wait",
             ]
         );
+    }
+
+    #[test]
+    fn wait_ceiling_is_inclusive_configurable_and_reports_effective_value() {
+        let sixty = serde_yml::from_str("duration: 60s").unwrap();
+        enforce_wait_ceiling(&sixty, Duration::from_secs(60)).unwrap();
+
+        let sixty_one = serde_yml::from_str("duration: 61s").unwrap();
+        let started = std::time::Instant::now();
+        let error = enforce_wait_ceiling(&sixty_one, Duration::from_secs(60)).unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(error.to_string().contains("61s"));
+        assert!(error.to_string().contains("60s ceiling"));
+
+        let two_minutes = serde_yml::from_str("duration: 2m").unwrap();
+        enforce_wait_ceiling(&two_minutes, Duration::from_secs(300)).unwrap();
+
+        let thirty = serde_yml::from_str("duration: 30s").unwrap();
+        let error = enforce_wait_ceiling(&thirty, Duration::from_secs(5)).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("5s ceiling"), "{message}");
+        assert!(message.contains("defaults.max_wait"), "{message}");
+
+        let six_minutes = serde_yml::from_str("duration: 6m").unwrap();
+        let error = enforce_wait_ceiling(&six_minutes, Duration::from_secs(300)).unwrap_err();
+        assert!(error.to_string().contains("5m ceiling"));
     }
 }

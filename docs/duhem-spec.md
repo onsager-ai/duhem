@@ -182,7 +182,7 @@ with another true observation in a passing disjunction. The two coincide
 only when an unbound judging output is promoted into an implicit
 assertion.
 
-- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Every evaluated assertion carries the same three-state `VerdictState` as the final verdict. An assertion that is not evaluated because one of its operands comes from a skipped step is omitted; absence is not a fourth state. Aggregation applies fail → inconclusive → pass precedence directly, and an empty assertion set becomes `inconclusive:empty_aggregation`. A check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
+- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Every evaluated assertion carries the same three-state `VerdictState` as the final verdict. An assertion that is not evaluated because one of its operands comes from a skipped step is omitted; absence is not a fourth state. A step that terminates in `error` or `timeout` contributes an `inconclusive` judgment naming that step, whether or not its action judges. Execution failure of an actuator is an observability gap, not an absence: the steps it was meant to enable never ran, so the check's claims were never exercised. A check whose step sequence aborted therefore cannot aggregate to `pass`. Gated-out steps (`if:` did not match) and cleanup steps (`if: always` after a failure) are exempt — they contribute nothing, as above. An environment failure likewise contributes an `inconclusive` judgment for every non-exempt step, not only judging ones: when the environment never came up, no step observed anything. Aggregation applies fail → inconclusive → pass precedence directly, and an empty assertion set becomes `inconclusive:empty_aggregation`. A check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
 - **Per-criterion verdict**: aggregated from its checks (any check `fail` → criterion `fail`; any `inconclusive` and no `fail` → criterion `inconclusive`; all `pass` → criterion `pass`).
 - **Per-run verdict**: aggregated from all criteria, same rules.
 
@@ -772,6 +772,7 @@ manifest_version: 1
 defaults:
   profile: staging            # default profile for runs
   timeout: 30s                # default per-step timeout
+  max_wait: 60s               # ui/wait duration ceiling (default: 60s)
   inconclusive_policy: block  # block | warn | pass
   retry:
     max: 1
@@ -891,7 +892,7 @@ If no root manifest is present, Duhem still works on individual Verification Def
 
 ### 10.5 Action types
 
-Verification Definitions invoke pre-defined action types via `uses:`. Each action defines a typed `with:` schema (its internal `With` struct) and named outputs; the dispatch boundary itself is untyped YAML that the action downcasts inside `invoke`. The v1 catalog is **closed** (`crates/duhem-actions`); a `uses:` that names an unregistered action is a runtime "unknown action" error, not a silent skip. Reusable flow invocations use the separate `call:` key (§10.4) and are expanded before dispatch, so they do not widen this catalog.
+Verification Definitions invoke pre-defined action types via `uses:`. Each action defines a typed `with:` schema (its internal `With` struct) and named outputs; the dispatch boundary itself is untyped YAML that the action downcasts inside `invoke`. The v1 catalog is **closed** (`crates/duhem-actions`); catalog-aware validation rejects a `uses:` that names an unregistered action before execution, and the runtime still records it as an inconclusive missing observation if reached without pre-flight validation. Reusable flow invocations use the separate `call:` key (§10.4) and are expanded before dispatch, so they do not widen this catalog.
 
 #### Implemented (v1)
 
@@ -905,6 +906,7 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 - `ui/assert-url` — observe URL state
 - `ui/assert-state` — observe page-level state (authenticated, loaded, etc.)
 - `ui/capture-session` — capture cookies/local storage as a secret state value for later checks
+- `ui/wait` — wait for a fixed `duration` (`TimeoutSpec`, e.g. `500ms` or `2s`) without requiring a browser page. Prefer `ui/assert-element` with `timeout:`; fixed waits are a debugging and transitional-authoring escape hatch with a 60-second default ceiling that root-manifest `defaults.max_wait` may raise or lower.
 
 **API actions**
 
@@ -924,11 +926,10 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 
 #### Planned (Phase 2+ — §14)
 
-Roadmap surfaces that are **not** registered today; a `uses:` naming one errors at runtime. They are listed here so authors can see the intended direction, not author against them yet.
+Roadmap surfaces that are **not** registered today; a `uses:` naming one fails catalog-aware validation. They are listed here so authors can see the intended direction, not author against them yet.
 
 - `event/wait` — wait for an event on a topic, capture payload
 - `event/publish` — publish an event for setup
-- `wait` — wait for a duration
 
 There is intentionally no standalone `assert` action: a top-level assertion not tied to a step is expressed through the §10.6 assertion forms attached to a check, not a dedicated action type.
 

@@ -114,16 +114,10 @@ fn check_step(s: &Step, site: &str, errs: &mut Vec<String>) {
     }
 }
 
-/// The action-contract output resolver for `duhem_schema`'s
-/// implicit-output inference (spec #267): the output names a `uses:`
-/// declares, or empty for an unknown/custom action (which then resolves
-/// against the step's authored `outputs:` only). Passed to
-/// `duhem_schema::validate_with_contract_outputs` so `duhem validate` /
-/// `run` accept `$steps.<id>.outputs.<field>` with no `outputs:` block.
-pub(crate) fn contract_outputs(uses: &str) -> Vec<String> {
-    contract_for(uses)
-        .map(|c| c.outputs.iter().map(|s| s.to_string()).collect())
-        .unwrap_or_default()
+/// The injected action catalog for structural validation. `Some([])` is a
+/// known actuator; `None` is an unregistered action.
+pub(crate) fn catalog_outputs(uses: &str) -> Option<Vec<String>> {
+    contract_for(uses).map(|c| c.outputs.iter().map(|s| s.to_string()).collect())
 }
 
 /// Non-fatal authoring lints (spec #267) — the ceremony the terser
@@ -302,8 +296,8 @@ mod tests {
     }
 
     #[test]
-    fn unknown_action_is_skipped() {
-        // No contract → no field errors (run-time is the backstop).
+    fn unknown_action_has_no_contract_field_errors() {
+        // Catalog-aware schema validation owns the unknown-action error.
         let d = vd("          - { uses: custom/thing, with: { anything: 1 } }");
         assert!(field_errors(&d).is_empty());
     }
@@ -339,9 +333,9 @@ mod tests {
     }
 
     #[test]
-    fn no_assertions_with_unknown_action_is_accepted() {
-        // Under-enforce: a custom action may judge; the runtime
-        // surfaces a truly-unknown `uses` as Inconclusive.
+    fn contract_field_check_defers_unknown_action_to_schema_validation() {
+        // This layer cannot inspect a missing contract; the catalog-aware
+        // schema validation invoked alongside it rejects the action.
         let d = vd_no_assertions("          - { uses: custom/thing, with: { x: 1 } }");
         assert!(field_errors(&d).is_empty(), "{:?}", field_errors(&d));
     }

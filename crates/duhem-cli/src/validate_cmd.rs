@@ -14,7 +14,7 @@
 use std::path::Path;
 
 use duhem_schema::{
-    LoadError, Loaded, SCHEMA_VERSION, ValidationError, validate_with_contract_outputs,
+    LoadError, Loaded, SCHEMA_VERSION, ValidationError, validate_with_action_catalog,
 };
 
 /// Validate the target a `duhem validate [path]` invocation points at.
@@ -34,10 +34,8 @@ pub(crate) fn run_validate(path: Option<&Path>) -> Result<String, String> {
         // Single leaf: `OK` on success; failures carry the same source
         // provenance as a manifest leaf and `duhem run`.
         Loaded::Leaf { path, definition } => {
-            validate_with_contract_outputs(&definition, &|u| {
-                crate::contract_check::contract_outputs(u)
-            })
-            .map_err(|errs| format_validation_errors(Some(&path), &errs))?;
+            validate_with_action_catalog(&definition, &crate::contract_check::catalog_outputs)
+                .map_err(|errs| format_validation_errors(Some(&path), &errs))?;
             let cerrs = crate::contract_check::field_errors(&definition);
             if !cerrs.is_empty() {
                 return Err(format!(
@@ -72,9 +70,10 @@ pub(crate) fn run_validate(path: Option<&Path>) -> Result<String, String> {
             }
             let mut errors: Vec<String> = Vec::new();
             for leaf in &leaves {
-                if let Err(errs) = validate_with_contract_outputs(&leaf.definition, &|u| {
-                    crate::contract_check::contract_outputs(u)
-                }) {
+                if let Err(errs) = validate_with_action_catalog(
+                    &leaf.definition,
+                    &crate::contract_check::catalog_outputs,
+                ) {
                     errors.push(format_validation_errors(Some(&leaf.path), &errs));
                 }
                 let cerrs = crate::contract_check::field_errors(&leaf.definition);

@@ -190,7 +190,8 @@ setup:
     with: { command: [sh, -c, "true"] }
 teardown:
   - id: broken-cleanup
-    uses: synthetic/missing-action
+    uses: cli/invoke
+    with: { command: [duhem-definitely-missing-cleanup-binary] }
 criteria:
   - id: AC-1
     description: the verified behavior still passes

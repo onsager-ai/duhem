@@ -173,7 +173,7 @@ Capture the current browser context storage state for a later check.
 
 ### `ui/wait`
 
-Wait for a fixed duration (debugging escape hatch; prefer an assertion timeout).
+Wait up to 60s for a fixed duration (debugging escape hatch; prefer an assertion timeout).
 
 | `with:` field | required | values |
 |---|:---:|---|

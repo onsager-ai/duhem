@@ -973,7 +973,7 @@ impl Engine {
                 step,
                 idx,
                 dispatcher_judges,
-                dispatcher.is_some(),
+                self.registry.contains_key(step.uses_name()),
                 &step_evidence[idx],
                 false,
                 false,

@@ -75,6 +75,31 @@ fn unknown_action_without_assertions_names_label_and_uses() {
 }
 
 #[test]
+fn environment_failure_contributes_for_each_non_gated_actuator() {
+    let check = check(
+        "  - id: first\n    uses: ui/click\n  - id: gated\n    uses: ui/type\n  - id: second\n    uses: ui/select\n",
+    );
+    let evidence = vec![
+        evidence(Outcome::Error, "{}"),
+        StepEvidence::skipped("if condition did not match".into()),
+        evidence(Outcome::Error, "{}"),
+    ];
+    let outcomes = implicit_judgment_outcomes(
+        &check,
+        |_| false,
+        |_| true,
+        &evidence,
+        true,
+        false,
+        &BTreeSet::new(),
+    );
+    assert_eq!(outcomes.len(), 2);
+    assert!(outcomes.iter().all(|outcome| {
+        outcome.state == VerdictState::Inconclusive(InconclusiveCause::EnvironmentError)
+    }));
+}
+
+#[test]
 fn gating_cleanup_and_manual_control_obey_execution_failure_rules() {
     let check = check(
         "  - id: gated\n    uses: ui/click\n  - id: cleanup\n    uses: ui/click\n  - id: manual\n    uses: ui/assert-url\n    outputs: { satisfied: satisfied }\n",

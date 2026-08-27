@@ -817,6 +817,7 @@ A leaf may declare named lifecycle resources once and let each consuming check
 request a fresh instance:
 
 ```yaml
+verification: Per-check fixtures
 fixtures:
   test_project:
     up:

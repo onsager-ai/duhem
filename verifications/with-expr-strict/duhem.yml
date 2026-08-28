@@ -1,0 +1,23 @@
+verification: strict-with-expressions
+spec_ref: https://github.com/onsager-ai/duhem/issues/461
+criteria:
+  - id: AC-1
+    description: |
+      Runtime expressions accept familiar string quote forms and deliver
+      their composed values to actions without alteration.
+    checks:
+      - id: AC-1.1
+        description: |
+          A single-quoted format expression crosses schema parsing, runtime
+          substitution, and real process invocation end to end.
+        steps:
+          - id: single_quoted_format
+            uses: cli/invoke
+            with:
+              command:
+                - sh
+                - -c
+                - $runtime.format('printf {}', 'single-quoted-expression')
+        assertions:
+          - $steps.single_quoted_format.outputs.exit_code == 0
+          - $steps.single_quoted_format.outputs.stdout == "single-quoted-expression"

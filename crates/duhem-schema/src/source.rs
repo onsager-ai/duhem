@@ -387,6 +387,38 @@ pub(crate) fn walk_with_refs<F: FnMut(&Expr, &str, &[SourcePathSegment])>(
     }
 }
 
+/// Walk every string scalar inside an untyped `with:` value while
+/// retaining its structural YAML path. Callers use this broader walk
+/// for syntax checks before [`walk_with_refs`] narrows parsed values to
+/// substitutable path/call expressions.
+pub(crate) fn walk_with_strings<F: FnMut(&str, &[SourcePathSegment])>(
+    with: &serde_yml::Value,
+    source_path: &mut Vec<SourcePathSegment>,
+    visit: &mut F,
+) {
+    match with {
+        serde_yml::Value::String(raw) => visit(raw, source_path),
+        serde_yml::Value::Sequence(values) => {
+            for (index, value) in values.iter().enumerate() {
+                source_path.push(SourcePathSegment::index(index));
+                walk_with_strings(value, source_path, visit);
+                source_path.pop();
+            }
+        }
+        serde_yml::Value::Mapping(values) => {
+            for (key, value) in values {
+                let Some(key) = key.as_str() else {
+                    continue;
+                };
+                source_path.push(SourcePathSegment::key(key));
+                walk_with_strings(value, source_path, visit);
+                source_path.pop();
+            }
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

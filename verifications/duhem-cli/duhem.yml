@@ -818,3 +818,28 @@ criteria:
               value: $steps.run_cleanup_example.outputs.stderr
               pattern: 'unresolved reference.*gated_source'
           - $steps.inspect_cleanup.outputs.exit_code == 0
+
+  # ==========================================================================
+  # #461 — strict `$`-leading `with:` expressions and single-quoted strings.
+  # ==========================================================================
+  - id: AC-16
+    description: |
+      Runtime expressions accept either quote form for string literals and
+      deliver the composed value to the invoked program without alteration.
+    checks:
+      - id: AC-16.1
+        description: |
+          A single-quoted `$runtime.format` expression crosses schema parsing,
+          runtime substitution, and real process invocation end to end.
+        steps:
+          - id: single_quoted_format
+            uses: cli/invoke
+            with:
+              command:
+                - sh
+                - -c
+                - $runtime.format('printf {}', 'single-quoted-expression')
+              cwd: $inputs.repo_dir
+        assertions:
+          - $steps.single_quoted_format.outputs.exit_code == 0
+          - $steps.single_quoted_format.outputs.stdout == "single-quoted-expression"

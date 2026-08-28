@@ -63,6 +63,47 @@ criteria:
 }
 
 #[test]
+fn malformed_with_expression_is_identical_at_validate_and_run() {
+    let tmp = tempfile::tempdir().unwrap();
+    let leaf = tmp.path().join("bad-expression.yml");
+    std::fs::write(
+        &leaf,
+        r#"verification: bad expression
+criteria:
+  - id: AC-1
+    description: malformed expression
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: invoke
+            uses: cli/invoke
+            with:
+              command: $inputs.foo bar
+        assertions: ["true"]
+"#,
+    )
+    .unwrap();
+
+    let validate = invoke("validate", &leaf);
+    assert!(!validate.status.success());
+    let message = stderr(&validate);
+    assert!(
+        message.starts_with(&format!("{}:11:24: [schema v", leaf.display())),
+        "got: {message}"
+    );
+    assert!(message.contains("`$inputs.foo bar` is not a valid expression"));
+    assert!(message.contains("expression parse error:"));
+
+    let run = invoke("run", &leaf);
+    assert!(!run.status.success());
+    assert_eq!(
+        stderr(&run),
+        message,
+        "run and validate must reject the same malformed expression"
+    );
+}
+
+#[test]
 fn semantic_reference_after_multi_step_flow_uses_authored_step_location() {
     let tmp = tempfile::tempdir().unwrap();
     let leaf = tmp.path().join("bad-after-flow.yml");

@@ -40,6 +40,14 @@ pub enum ValidationError {
     #[error("verification has no criteria")]
     NoCriteria,
 
+    #[error("{site} `{raw}` is not a valid expression: {context}")]
+    InvalidWithExpression {
+        raw: String,
+        context: String,
+        site: RefSite,
+        location: Option<SourceLocation>,
+    },
+
     #[error("duplicate criterion id `{id}`")]
     DuplicateCriterionId { id: String },
 
@@ -358,7 +366,8 @@ impl ValidationError {
     /// Exact source position of the offending scalar, when proven.
     pub fn location(&self) -> Option<SourceLocation> {
         match self {
-            Self::UnresolvedStepRef { location, .. }
+            Self::InvalidWithExpression { location, .. }
+            | Self::UnresolvedStepRef { location, .. }
             | Self::UnresolvedStepOutput { location, .. }
             | Self::UnresolvedInputRef { location, .. }
             | Self::UnresolvedPageRef { location, .. }

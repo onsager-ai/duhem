@@ -209,6 +209,24 @@ the minimal form:
   block. Bind `satisfied` and assert it yourself only for manual control.
   A check with neither `assertions:` nor a judging step is rejected at
   validate time.
+- **`ui/extract` is deliberately *non*-judging.** It reads an attribute,
+  DOM property, or text into `outputs.value`; it emits no `satisfied`,
+  so it does **not** satisfy the rule above. A check whose only step is
+  `ui/extract` needs an explicit `assertions:` block — extraction
+  observes, `assertions:` judges, and that separation is the point.
+  Use `field:` for the everyday cases (`checked`, `value`, `href`,
+  `class`, `aria-*`, `data-*`); it resolves through a closed documented
+  table, and a name outside that table is a validation error rather than
+  a guess. Reach for `attribute:` / `property:` when you need to be
+  exact about which one you mean — they genuinely differ (a ticked
+  checkbox has the `checked` *property* `true` while the *attribute* may
+  be absent entirely).
+- **For a simple state check, prefer `ui/assert-element`'s `expect:`.**
+  `expect: { field: checked, equals: true }` judges in one step and
+  keeps `satisfied`, so you need no step id, no output binding, and no
+  check-level assertion. Reach for `ui/extract` when the value has to
+  travel — into a later step, or into a check-level `assertions:` block
+  alongside other evidence.
 
 Common shape (terse):
 

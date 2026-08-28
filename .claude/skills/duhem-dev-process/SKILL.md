@@ -10,13 +10,17 @@ change starts as a GitHub spec issue on `onsager-ai/duhem`, proceeds
 through a PR that references it, and closes when the PR merges.
 
 Duhem is in **Phase 0 — Foundation** (per `docs/duhem-spec.md` §14). The
-Cargo workspace ships nine product crates (`duhem-cli`,
+Cargo workspace ships ten product crates (`duhem-cli`,
 `duhem-runtime`, `duhem-judge`, `duhem-schema`, `duhem-actions`,
-`duhem-evidence`, `duhem-summary`, `duhem-reporter-pretty`,
-`duhem-reporter-junit`) plus an internal `xtask` build helper; the
-CLI exposes `init` / `run` / `validate` / `--version`; the `ui/*` and
-`api/*` action families (`ui/navigate`, `ui/click`, `ui/type`,
-`ui/select`, `ui/assert-*`, `api/call`, `api/observe`) and the
+`duhem-evidence`, `duhem-summary`, `duhem-dashboard`,
+`duhem-reporter-pretty`, `duhem-reporter-junit`) plus an internal
+`xtask` build helper; the CLI exposes `init` / `actions` / `describe` /
+`validate` / `resolve` / `run` / `browser` / `dashboard` / `export` /
+`ship` / `mcp` / `--version`; the `ui/*`, `api/*`, `db/*` and `cli/*`
+action families (`ui/navigate` / `click` / `type` / `select` / `wait` /
+`extract` / `capture-session` / `assert-*`,
+`api/call` / `observe` / `poll` / `stream`,
+`db/query` / `observe` / `seed`, `cli/invoke`) and the
 `up:` / `down:` environment hooks are wired in; and product
 Verification Definitions are co-located with the products they verify
 (Chreode ships them in `onsager-ai/chreode/.duhem/`; epic #225). The
@@ -347,6 +351,9 @@ The pre-push gate is:
 ```bash
 just preflight    # = just lint + just test + just self-verify
                   #   + xtask schema-changelog-check (strict)
+                  #   + xtask schema-drift
+                  #   + xtask action-reference --check
+                  # ...all run against a merge preview, not the branch.
 ```
 
 **Do not substitute `just check`.** It is the fast inner-loop gate and
@@ -359,8 +366,23 @@ shipped red branches:
   schema change rejected an in-tree example VD while every static check
   and unit test stayed green; only CI caught it.
 
-Run it on the merged tree (after `pre-push` step 1), not the branch
-alone. Then add the gates the diff calls for:
+**`preflight` gates the merge result for you** (#475). It fetches
+`origin/main`, merges it into a scratch worktree, and runs every stage
+there — you do not merge by hand first. A fetch failure *refuses* rather
+than silently falling back to a branch-only gate.
+
+This matters because a branch-only green does not compose. #468 and #470
+each added to the same file, each passed its own `preflight`, and each
+was honestly green against a `main` that lacked the other; together they
+went over the file budget and broke `main` (#472). Any check whose
+subject is a property of the *merged tree* — the file budget, schema
+drift, the generated action reference, and every test — is measured
+wrongly on the branch alone.
+
+Two things the gate does not do: it cannot see a branch that lands
+*after* your fetch, so a green means "green against `main` as of this
+fetch"; and it refuses outright when offline. Then add the gates the
+diff calls for:
 
 - **Schema-touching** (`crates/duhem-schema/**`, `crates/duhem-evidence/**`,
   or a `SCHEMA_VERSION` bump):
@@ -373,8 +395,12 @@ alone. Then add the gates the diff calls for:
 - **Browser-action-touching** (`crates/duhem-actions/**` `ui/*` or the
   Playwright sidecar): `just test browser-actions` (the `#[ignore]`'d
   browser smoke suites; neither `just check` nor `just preflight` runs
-  them). Requires
-  `npx playwright install chromium` once per host.
+  them). Requires **both** `npm ci` in
+  `crates/duhem-actions/sidecar` *and* `npx playwright install chromium`,
+  and each git worktree needs its own `npm ci` — worktrees get their own
+  working copy, so a sidecar installed in one is absent in the next. The
+  usual symptom is `ERR_MODULE_NOT_FOUND: playwright`, which looks like a
+  missing browser and is almost always a missing `node_modules/`.
 
 Treat any warning as a blocker; don't `#[allow(dead_code)]` / `@ts-ignore`
 past it.
@@ -383,7 +409,12 @@ past it.
 
 - **`docs/duhem-spec.md`**: merge by section / by intent, not line-by-line.
 - **`CHANGELOG.md`**: both branches' entries land under
-  `## Unreleased` — concatenate, don't pick one.
+  `## Unreleased` — concatenate, don't pick one. `.gitattributes` sets
+  `merge=union` so local merges and rebases do this automatically, but
+  **GitHub's merge button does not read merge drivers**: with parallel
+  branches open, each one after the first will report a changelog
+  conflict on GitHub and must be rebased locally, where the driver
+  applies.
 - **Schema fixtures** (`crates/duhem-schema/fixtures/**`,
   `crates/duhem-actions/tests/fixtures/**`): YAML key-order conflicts are
   usually false alarms; re-validate via `duhem validate` or the owning

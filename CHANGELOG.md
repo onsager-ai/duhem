@@ -34,6 +34,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 - [breaking] `$`-leading `with:` values must parse as expressions before validation or execution, and expression string literals accept single or double quotes. (#461)
 - [clarifying] `duhem run <directory>` discovers the nearest ancestor manifest and runs only its entries beneath that directory, preserving manifest context and rejecting an empty selection. (#464)
 - [additive] Headed browser runs follow a maximized real window, while headless runs use a declared suite viewport with a 1280×720 default and record the effective mode in evidence. (#463)
+- [clarifying] Run-report step detail synchronizes rail selection with scrolling, leads with outcome-specific evidence, and keeps run-scoped raw step data collapsed by default. (#465)
 - [clarifying] A semantic validation error on a step that follows a multi-step `flows:` invocation now reports its authored `file:line:col` instead of falling back to the filename alone. (#408)
 - [clarifying] `duhem-schema`'s validation error vocabulary and lifecycle-surface validators move into `validate_error.rs` and `validate_lifecycle.rs`; `validate.rs` now meets the per-file token budget without an exemption. Public paths are unchanged. (#411)
 - [additive] `duhem run` discovers `.env` values for declared `env:` inputs without overriding exported variables, adds `--env-file` / `--no-env-file`, and supports the operational `DUHEM_SLOW_MO` browser delay. (#442)

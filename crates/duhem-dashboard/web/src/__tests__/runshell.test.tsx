@@ -80,6 +80,18 @@ const CHECK = {
   artifacts: [],
 };
 
+const TRIAGE_CHECK = {
+  ...CHECK,
+  timeline: [
+    { seq: 1, ts: "t1", kind: "step_started", criterion_id: "AC-5", check_id: "AC-5.1", step_index: 0, uses: "ui/navigate" },
+    { seq: 2, ts: "t2", kind: "step_finished", step_index: 0, outcome: "ok" },
+    { seq: 3, ts: "t3", kind: "step_started", criterion_id: "AC-5", check_id: "AC-5.1", step_index: 1, uses: "ui/click" },
+    { seq: 4, ts: "t4", kind: "step_finished", step_index: 1, outcome: "error" },
+    { seq: 5, ts: "t5", kind: "step_started", criterion_id: "AC-5", check_id: "AC-5.1", step_index: 2, uses: "ui/wait", with: { timeout: "5s" } },
+    { seq: 6, ts: "t6", kind: "step_finished", step_index: 2, outcome: "timeout" },
+  ],
+};
+
 function stub(run = RUN, check: Record<string, unknown> = CHECK) {
   vi.stubGlobal(
     "fetch",
@@ -407,6 +419,69 @@ describe("run report tree", () => {
     expect(
       screen.getAllByTestId("step-layer").some((badge) => badge.textContent === "ui"),
     ).toBe(true);
+  });
+
+  it("scrolls rail selections below small and large measured sticky contexts", async () => {
+    let resize: ResizeObserverCallback | undefined;
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) { resize = callback; }
+      observe = vi.fn();
+      disconnect = vi.fn();
+    });
+    const scrollTo = vi.fn();
+    stub(RUN, TRIAGE_CHECK);
+    const { container } = renderAt("/run/R1/check/AC-5%3A%3AAC-5.1");
+    const rail = await screen.findByTestId("run-tree");
+    await waitFor(() => expect(container.querySelectorAll("[data-step-index]")).toHaveLength(3));
+    const detail = container.querySelector(".run-results-detail") as HTMLElement;
+    const context = container.querySelector(".check-context") as HTMLElement;
+    Object.assign(detail, { scrollTo, scrollTop: 20 });
+    vi.spyOn(detail, "getBoundingClientRect").mockReturnValue({ top: 10 } as DOMRect);
+
+    for (const [height, name, top] of [[48, "submit-form", 210], [196, "ui/wait #2", 410]] as const) {
+      Object.defineProperty(context, "offsetHeight", { configurable: true, value: height });
+      resize?.([], {} as ResizeObserver);
+      const target = container.querySelector(`[data-step-index="${name === "submit-form" ? 1 : 2}"]`) as HTMLElement;
+      vi.spyOn(target, "getBoundingClientRect").mockReturnValue({ top } as DOMRect);
+      fireEvent.click(within(rail).getByRole("link", { name }));
+      await waitFor(() => expect(scrollTo).toHaveBeenLastCalledWith({
+        top: 20 + top - 10 - height,
+        behavior: "auto",
+      }));
+      expect(target.className).toContain("step-selected");
+    }
+  });
+
+  it("updates the highlighted rail row from detail scrolling and arrow-key navigation", async () => {
+    stub(RUN, TRIAGE_CHECK);
+    const { container } = renderAt("/run/R1/check/AC-5%3A%3AAC-5.1?step=open-page");
+    const rail = await screen.findByTestId("run-tree");
+    await waitFor(() => expect(container.querySelectorAll("[data-step-index]")).toHaveLength(3));
+    const detail = container.querySelector(".run-results-detail") as HTMLElement;
+    const groups = container.querySelectorAll<HTMLElement>("[data-step-index]");
+    vi.spyOn(detail, "getBoundingClientRect").mockReturnValue({ top: 0 } as DOMRect);
+    vi.spyOn(groups[0], "getBoundingClientRect").mockReturnValue({ top: -100 } as DOMRect);
+    vi.spyOn(groups[1], "getBoundingClientRect").mockReturnValue({ top: -1 } as DOMRect);
+    vi.spyOn(groups[2], "getBoundingClientRect").mockReturnValue({ top: 300 } as DOMRect);
+    fireEvent.scroll(detail);
+    await waitFor(() => expect(within(rail).getByRole("link", { name: "submit-form" }).getAttribute("aria-current")).toBe("step"));
+    fireEvent.keyDown(within(rail).getByRole("link", { name: "submit-form" }), { key: "ArrowDown" });
+    await waitFor(() => expect(within(rail).getByRole("link", { name: "ui/wait #2" }).getAttribute("aria-current")).toBe("step"));
+    expect(container.querySelector('[data-step-index="2"]')?.className).toContain("step-selected");
+  });
+
+  it("keeps raw step data collapsed by default and expanded across steps only within a run", async () => {
+    stub(RUN, TRIAGE_CHECK);
+    const first = renderAt("/run/R1/check/AC-5%3A%3AAC-5.1?step=open-page");
+    const raws = await screen.findAllByTestId("step-raw") as HTMLDetailsElement[];
+    expect(raws.every((raw) => !raw.open)).toBe(true);
+    fireEvent.click(within(raws[0]).getByText(/Raw step data/));
+    await waitFor(() => expect(raws.every((raw) => raw.open)).toBe(true));
+    fireEvent.click((await screen.findByTestId("run-tree")).querySelector('[aria-label="submit-form"]')!);
+    await waitFor(() => expect(screen.getAllByTestId("step-raw").every((raw) => (raw as HTMLDetailsElement).open)).toBe(true));
+    first.unmount();
+    renderAt("/run/R2/check/AC-5%3A%3AAC-5.1?step=open-page");
+    await waitFor(() => expect(screen.getAllByTestId("step-raw").every((raw) => !(raw as HTMLDetailsElement).open)).toBe(true));
   });
 
   it("renders a video-relative step timeline that seeks and selects markers", async () => {

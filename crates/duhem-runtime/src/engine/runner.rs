@@ -1183,8 +1183,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn sigterm_records_an_aborted_terminal() {
         const CHILD: &str = "DUHEM_SIGNAL_TEST_CHILD";
+        const READY_FILE: &str = "DUHEM_SIGNAL_TEST_READY_FILE";
         if std::env::var_os(CHILD).is_some() {
-            struct SlowAction;
+            struct SlowAction {
+                ready_file: PathBuf,
+            }
 
             #[async_trait]
             impl Dispatch for SlowAction {
@@ -1203,13 +1206,16 @@ mod tests {
                     _with: &serde_yml::Value,
                     _child_env: &BTreeMap<String, String>,
                 ) -> Result<ActionResult, ActionError> {
+                    std::fs::write(&self.ready_file, b"ready").unwrap();
                     tokio::time::sleep(Duration::from_secs(5)).await;
                     Ok(ActionResult::ok())
                 }
             }
 
             let (mut engine, tmp) = engine_for_test().await;
-            engine.register_test_action(Box::new(SlowAction));
+            engine.register_test_action(Box::new(SlowAction {
+                ready_file: std::env::var_os(READY_FILE).unwrap().into(),
+            }));
             engine.run_id = Some("01ABORTED".into());
             let verification = def(r#"
 verification: signal
@@ -1222,10 +1228,6 @@ criteria:
           - uses: test/slow
         assertions: ["true"]
 "#);
-            let raiser = std::thread::spawn(|| {
-                std::thread::sleep(Duration::from_millis(250));
-                signal_hook::low_level::raise(signal_hook::consts::signal::SIGTERM).unwrap();
-            });
             let result = engine.run(&verification, BTreeMap::new()).await;
             assert!(
                 matches!(
@@ -1236,8 +1238,6 @@ criteria:
                 ),
                 "run result: {result:?}"
             );
-            raiser.join().unwrap();
-
             let store = SqliteStore::open(tmp.path().join("duhem.db"))
                 .await
                 .unwrap();
@@ -1257,20 +1257,75 @@ criteria:
             return;
         }
 
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
+        let ready_dir = tempfile::tempdir().unwrap();
+        let ready_file = ready_dir.path().join("ready");
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
                 "engine::runner::tests::sigterm_records_an_aborted_terminal",
                 "--nocapture",
             ])
             .env(CHILD, "1")
-            .output()
+            .env(READY_FILE, &ready_file)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
             .expect("spawn isolated signal test");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !ready_file.exists() {
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "signal-test child exited before becoming ready"
+            );
+            assert!(
+                std::time::Instant::now() < deadline,
+                "signal-test child did not become ready within 10s"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        let signal_status = std::process::Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status()
+            .expect("send SIGTERM to signal-test child");
+        assert!(
+            signal_status.success(),
+            "kill command failed: {signal_status}"
+        );
+        let output = child.wait_with_output().unwrap();
         assert!(
             output.status.success(),
-            "child stderr: {}",
-            String::from_utf8_lossy(&output.stderr)
+            "{}",
+            child_failure_message(&output)
         );
+    }
+
+    #[cfg(unix)]
+    fn child_failure_message(output: &std::process::Output) -> String {
+        format!(
+            "child status: {}\nchild stdout:\n{}\nchild stderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signal_child_failure_message_includes_status_and_output() {
+        let output = std::process::Command::new("sh")
+            .args([
+                "-c",
+                "printf 'abort path output'; printf 'abort path error' >&2; exit 7",
+            ])
+            .output()
+            .unwrap();
+
+        let message = child_failure_message(&output);
+        assert!(message.contains("status: exit status: 7"), "{message}");
+        assert!(message.contains("stdout:\nabort path output"), "{message}");
+        assert!(message.contains("stderr:\nabort path error"), "{message}");
     }
 
     /// In-memory stub that ignores `page` and returns a configurable

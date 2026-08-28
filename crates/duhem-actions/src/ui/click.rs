@@ -15,7 +15,7 @@ use crate::with::TimeoutSpec;
 // name: Create, timeout: 3s }`), not under a `locator:` key — kept that way
 // for backward compatibility. `WithWire` collects the inline fields
 // (rejecting unknowns), then folds them into a validated `Locator` so click
-// gains label/testid/css/placeholder and the exactly-one-primary check.
+// gains label/testid/css/xpath/placeholder and the exactly-one-primary check.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WithWire {
@@ -31,6 +31,8 @@ struct WithWire {
     placeholder: Option<String>,
     #[serde(default)]
     css: Option<String>,
+    #[serde(default)]
+    xpath: Option<String>,
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -58,6 +60,7 @@ impl TryFrom<WithWire> for With {
             testid: w.testid,
             placeholder: w.placeholder,
             css: w.css,
+            xpath: w.xpath,
             name: w.name,
             text: w.text,
             scope: w.scope,
@@ -67,6 +70,7 @@ impl TryFrom<WithWire> for With {
             || inline.testid.is_some()
             || inline.placeholder.is_some()
             || inline.css.is_some()
+            || inline.xpath.is_some()
             || inline.name.is_some()
             || inline.text.is_some()
             || inline.scope.is_some();
@@ -114,6 +118,7 @@ impl Action for Click {
                 FieldSpec::optional("testid"),
                 FieldSpec::optional("placeholder"),
                 FieldSpec::optional("css"),
+                FieldSpec::optional("xpath"),
                 FieldSpec::optional("name"),
                 FieldSpec::optional("text"),
                 FieldSpec::optional("scope"),
@@ -173,6 +178,13 @@ timeout: 3s
         let (l, t) = v.into_locator();
         assert_eq!(l.scope.as_ref().unwrap().role.as_deref(), Some("list"));
         assert_eq!(t, Duration::from_secs(3));
+    }
+
+    #[test]
+    fn parses_inline_xpath_click() {
+        let v: With = serde_yml::from_str(r#"{ xpath: "//button[@id='save']" }"#).unwrap();
+        let (locator, _) = v.into_locator();
+        assert_eq!(locator.xpath.as_deref(), Some("//button[@id='save']"));
     }
 
     #[test]

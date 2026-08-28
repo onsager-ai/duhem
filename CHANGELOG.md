@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] UI locators accept a raw `xpath` primary strategy, including inline `ui/click` locators. (#462)
 - [clarifying] A semantic validation error on a step that follows a multi-step `flows:` invocation now reports its authored `file:line:col` instead of falling back to the filename alone. (#408)
 - [clarifying] `duhem-schema`'s validation error vocabulary and lifecycle-surface validators move into `validate_error.rs` and `validate_lifecycle.rs`; `validate.rs` now meets the per-file token budget without an exemption. Public paths are unchanged. (#411)
 - [additive] `duhem run` discovers `.env` values for declared `env:` inputs without overriding exported variables, adds `--env-file` / `--no-env-file`, and supports the operational `DUHEM_SLOW_MO` browser delay. (#442)

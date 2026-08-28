@@ -1532,7 +1532,7 @@ criteria:
     }
 
     #[tokio::test]
-    async fn fixture_up_failure_is_inconclusive_and_still_drains_down() {
+    async fn fixture_up_action_error_is_missing_observation_and_still_drains_down() {
         let (mut engine, _tmp) = engine_for_test().await;
         let up = StubAction::new("fake/up", Outcome::Error);
         let check = StubAction::new("fake/check", Outcome::Ok)
@@ -1558,7 +1558,7 @@ criteria:
         let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
         assert_eq!(
             outcome.verdict.state,
-            VerdictState::Inconclusive(InconclusiveCause::EnvironmentError)
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation)
         );
         assert_eq!(check_calls.load(Ordering::SeqCst), 0);
         assert_eq!(down_calls.load(Ordering::SeqCst), 1);
@@ -1568,6 +1568,28 @@ criteria:
                 .as_deref()
                 .unwrap()
                 .contains("resource")
+        );
+    }
+
+    #[tokio::test]
+    async fn fixture_up_timeout_remains_inconclusive_timeout() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/up", Outcome::Timeout)));
+        let v = def(r#"
+verification: fixtures
+fixtures:
+  resource:
+    up: [{ uses: fake/up }]
+    down: []
+criteria:
+  - id: AC-1
+    description: fixture timeout
+    checks: [{ id: AC-1.1, needs: [resource], assertions: ["true"] }]
+"#);
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            outcome.verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::Timeout)
         );
     }
 
@@ -2610,7 +2632,7 @@ criteria:
     }
 
     #[tokio::test]
-    async fn setup_error_aborts_run_with_inconclusive() {
+    async fn setup_action_error_aborts_run_with_missing_observation() {
         // Spec on #20: a setup step returning Outcome::Error aborts
         // setup, no criterion executes, the run verdict is
         // Inconclusive, and `SetupFinished { aborted: true }` is on
@@ -2642,8 +2664,9 @@ criteria:
           - "true"
 "#);
         let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
-        assert!(
-            matches!(verdict.state, VerdictState::Inconclusive(_)),
+        assert_eq!(
+            verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
             "got {verdict:?}"
         );
         assert!(verdict.criteria.is_empty(), "no criterion should execute");
@@ -2665,7 +2688,7 @@ criteria:
 
     #[tokio::test]
     async fn setup_timeout_aborts_run_with_inconclusive_timeout() {
-        // Companion to `setup_error_aborts_run_with_inconclusive`:
+        // Companion to `setup_action_error_aborts_run_with_missing_observation`:
         // the abort policy applies to `Outcome::Timeout` too, and the
         // verdict's `InconclusiveCause` distinguishes it from an
         // environmental setup failure.

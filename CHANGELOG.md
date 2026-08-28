@@ -31,6 +31,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 - [clarifying] `just preflight` gates the branch merged with freshly fetched `origin/main`, refusing fetch failures and merge conflicts instead of reporting a branch-only green. (#474)
 - [clarifying] The runtime SIGTERM test waits for an explicit abort-ready handshake and reports child status and output on failure. (#469)
+- [clarifying] Lifecycle actions that run and return an error report missing observation, while genuine environmental precondition failures remain environment errors. (#452)
 - [clarifying] `duhem-schema`'s manifest load-error vocabulary moves into `manifest_error.rs`; `manifest.rs` returns under the per-file token budget without an exemption. Public paths are unchanged. (#472)
 - [additive] UI locators accept a raw `xpath` primary strategy, including inline `ui/click` locators. (#462)
 - [breaking] `$`-leading `with:` values must parse as expressions before validation or execution, and expression string literals accept single or double quotes. (#461)

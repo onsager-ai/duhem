@@ -4,7 +4,7 @@
 // panel (screenshots inline, network HAR as a request table).
 
 import { ChevronDown, ChevronRight, Maximize2, Minimize2, X } from "lucide-react";
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -375,9 +375,11 @@ function ApiExchange({ node }: { node: Extract<TimelineNode, { kind: "step" }> }
 function StepCaptures({
   node,
   artifacts,
+  expandedScreenshot = false,
 }: {
   node: Extract<TimelineNode, { kind: "step" }>;
   artifacts: ArtifactRef[];
+  expandedScreenshot?: boolean;
 }) {
   const caps = node.events
     .filter(
@@ -418,7 +420,7 @@ function StepCaptures({
               </p>
             ))}
           {isImageArtifact(c.art.kind, c.art.url) && (
-            <ScreenshotArtifact artifact={c.art} rectsUrl={rectsUrl} />
+            <ScreenshotArtifact artifact={c.art} rectsUrl={rectsUrl} initiallyExpanded={expandedScreenshot} />
           )}
           {c.kind === "capture/network" && <HarTable url={c.art.url} />}
           {c.kind === "capture/dom" && <DomViewer url={c.art.url} />}
@@ -442,11 +444,15 @@ function StepGroup({
   prevOf,
   artifacts,
   selected,
+  rawExpanded,
+  onRawExpandedChange,
 }: {
   node: Extract<TimelineNode, { kind: "step" }>;
   prevOf: (evt: TraceEvent) => TraceEvent | undefined;
   artifacts: ArtifactRef[];
   selected?: boolean;
+  rawExpanded: boolean;
+  onRawExpandedChange: (expanded: boolean) => void;
 }) {
   const started = node.events[0];
   // Scalar (non-blob) observations — the outputs the action pulled from
@@ -511,6 +517,7 @@ function StepGroup({
       id={`step-${node.stepIndex}`}
       className={`ev step-group tone-${status.tone}${selected ? " step-selected" : ""}`}
       data-testid="step-group"
+      data-step-index={node.stepIndex}
       data-flow-invocation={flow?.invocation}
       data-flow-name={flow?.name}
     >
@@ -589,6 +596,18 @@ function StepGroup({
           )}
         </summary>
         <div className="step-body">
+          {status.tone === "fail" && (
+            <StepCaptures node={node} artifacts={artifacts} expandedScreenshot />
+          )}
+          {status.tone === "inconclusive" && (
+            <section className="step-inconclusive-lead" data-testid="step-inconclusive-lead">
+              <strong>{status.reason || status.label}</strong>
+              {typeof started.with === "object" && started.with !== null &&
+                typeof (started.with as Record<string, unknown>).timeout === "string" && (
+                  <span>Deadline: {(started.with as Record<string, unknown>).timeout as string}</span>
+                )}
+            </section>
+          )}
           {/* For an api/db step, a legible request/response inspector —
               method · url · status + pretty-printed bodies — nested under
               the step (the api analogue of a screenshot attachment). */}
@@ -596,7 +615,7 @@ function StepGroup({
           <StructuredOutputs outputs={structuredObs} />
           {/* ui evidence (screenshot / DOM / network / video) nested under
               the step that captured it, not a side panel. */}
-          <StepCaptures node={node} artifacts={artifacts} />
+          {status.tone !== "fail" && <StepCaptures node={node} artifacts={artifacts} />}
           {blobObs.length > 0 && (
             <ol className="step-blob-events" data-testid="step-blob-events">
               {blobObs.map((event) => (
@@ -611,12 +630,17 @@ function StepGroup({
           )}
           {/* Lifecycle events are one diagnostic subtree, not a repeated
               started/observed/finished mini-timeline. */}
-          <section className="step-raw" data-testid="step-raw">
-            <div className="step-raw-title">
+          <details
+            className="step-raw"
+            data-testid="step-raw"
+            open={rawExpanded}
+            onToggle={(event) => onRawExpandedChange(event.currentTarget.open)}
+          >
+            <summary className="step-raw-title">
               Raw step data · {node.events.length} events
-            </div>
+            </summary>
             <pre>{JSON.stringify(node.events, null, 2)}</pre>
-          </section>
+          </details>
         </div>
       </details>
     </li>
@@ -667,11 +691,15 @@ function FlowGroup({
   prevOf,
   artifacts,
   selectedStep,
+  rawExpanded,
+  onRawExpandedChange,
 }: {
   group: FlowGroupNode;
   prevOf: (evt: TraceEvent) => TraceEvent | undefined;
   artifacts: ArtifactRef[];
   selectedStep?: number;
+  rawExpanded: boolean;
+  onRawExpandedChange: (expanded: boolean) => void;
 }) {
   const vd = useVd();
   const started = group.steps[0].events[0];
@@ -698,6 +726,8 @@ function FlowGroup({
             prevOf={prevOf}
             artifacts={artifacts}
             selected={selectedStep === node.stepIndex}
+            rawExpanded={rawExpanded}
+            onRawExpandedChange={onRawExpandedChange}
           />
         ))}
       </ol>
@@ -709,10 +739,14 @@ export function Timeline({
   events,
   artifacts = [],
   selectedStep,
+  rawExpanded = false,
+  onRawExpandedChange = () => {},
 }: {
   events: TraceEvent[];
   artifacts?: ArtifactRef[];
   selectedStep?: number;
+  rawExpanded?: boolean;
+  onRawExpandedChange?: (expanded: boolean) => void;
 }) {
   const nodes = groupFlowSteps(groupTimeline(events));
   const idx = new Map(events.map((e, i) => [e.seq, i]));
@@ -727,6 +761,8 @@ export function Timeline({
             prevOf={prevOf}
             artifacts={artifacts}
             selectedStep={selectedStep}
+            rawExpanded={rawExpanded}
+            onRawExpandedChange={onRawExpandedChange}
           />
         ) : n.kind === "step" ? (
           <StepGroup
@@ -735,6 +771,8 @@ export function Timeline({
             prevOf={prevOf}
             artifacts={artifacts}
             selected={selectedStep === n.stepIndex}
+            rawExpanded={rawExpanded}
+            onRawExpandedChange={onRawExpandedChange}
           />
         ) : (
           <TimelineRow key={n.key} evt={n.event} prev={prevOf(n.event)} artifacts={artifacts} />
@@ -1035,11 +1073,13 @@ interface TargetRect {
 export function ScreenshotArtifact({
   artifact,
   rectsUrl,
+  initiallyExpanded = false,
 }: {
   artifact: ArtifactRef;
   rectsUrl?: string;
+  initiallyExpanded?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(initiallyExpanded);
   const [rects, setRects] = useState<TargetRect[]>([]);
   const [nat, setNat] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => {
@@ -1468,11 +1508,78 @@ export default function CheckPage() {
   );
 }
 
+function StepSelectionSync({
+  surfaceRef,
+  params,
+  selectedStep,
+  stepNavigation,
+  view,
+}: {
+  surfaceRef: RefObject<HTMLDivElement | null>;
+  params: URLSearchParams;
+  selectedStep?: number;
+  stepNavigation: ReadonlyMap<number, { key: string; label: string }>;
+  view: "steps" | "replay";
+}) {
+  const navigate = useNavigate();
+  const syncing = useRef(false);
+  const stepParam = params.get("step") ?? undefined;
+
+  useLayoutEffect(() => {
+    if (view !== "steps" || selectedStep === undefined) return;
+    const surface = surfaceRef.current;
+    const scroller = surface?.closest(".run-results-detail") as HTMLElement | null;
+    const target = surface?.querySelector<HTMLElement>(`[data-step-index="${selectedStep}"]`);
+    if (!surface || !scroller || !target) return;
+    const stickyOffset = Number.parseFloat(
+      getComputedStyle(surface).getPropertyValue("--check-context-height"),
+    ) || 0;
+    syncing.current = true;
+    if (typeof scroller.scrollTo !== "function") {
+      syncing.current = false;
+      return;
+    }
+    scroller.scrollTo({
+      top: scroller.scrollTop + target.getBoundingClientRect().top -
+        scroller.getBoundingClientRect().top - stickyOffset,
+      behavior: "auto",
+    });
+    requestAnimationFrame(() => { syncing.current = false; });
+  }, [selectedStep, surfaceRef, view]);
+
+  useEffect(() => {
+    if (view !== "steps") return;
+    const surface = surfaceRef.current;
+    const scroller = surface?.closest(".run-results-detail") as HTMLElement | null;
+    if (!surface || !scroller) return;
+    const onScroll = () => {
+      if (syncing.current) return;
+      const stickyOffset = Number.parseFloat(
+        getComputedStyle(surface).getPropertyValue("--check-context-height"),
+      ) || 0;
+      const threshold = scroller.getBoundingClientRect().top + stickyOffset + 1;
+      const groups = [...surface.querySelectorAll<HTMLElement>("[data-step-index]")];
+      const visible = [...groups].reverse().find(
+        (group) => group.getBoundingClientRect().top <= threshold,
+      ) ?? groups[0];
+      const key = stepNavigation.get(Number(visible?.dataset.stepIndex))?.key;
+      if (key && key !== stepParam) {
+        navigate({ search: queryWith(params, { step: key }) }, { replace: true });
+      }
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => scroller.removeEventListener("scroll", onScroll);
+  }, [navigate, params, stepNavigation, stepParam, surfaceRef, view]);
+
+  return null;
+}
+
 function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
   const [check, setCheck] = useState<CheckDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const contextRef = useRef<HTMLDivElement>(null);
+  const [rawExpanded, setRawExpanded] = useState(false);
 
   useEffect(() => {
     const [criterionId, checkId] = pair.split("::", 2);
@@ -1484,6 +1591,8 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
     setError(null);
     fetchCheck(runId, criterionId, checkId).then(setCheck, (e) => setError(String(e)));
   }, [runId, pair]);
+
+  useEffect(() => setRawExpanded(false), [runId]);
 
   useLayoutEffect(() => {
     const surface = surfaceRef.current;
@@ -1545,6 +1654,13 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
   return (
     <>
       <div ref={surfaceRef} className="run-detail-surface">
+        <StepSelectionSync
+          surfaceRef={surfaceRef}
+          params={params}
+          selectedStep={selectedStep}
+          stepNavigation={stepNavigation}
+          view={view}
+        />
         <div ref={contextRef} className="check-context mb-3 border-b bg-background/95 pb-3 backdrop-blur md:sticky md:top-0 md:z-20 md:-ml-4 md:pl-4">
           <h2 className="flex flex-wrap items-center gap-2 text-base font-semibold">
             <span>{check.criterion_id}</span>
@@ -1584,6 +1700,8 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
               events={check.timeline}
               artifacts={check.artifacts}
               selectedStep={selectedStep}
+              rawExpanded={rawExpanded}
+              onRawExpandedChange={setRawExpanded}
             />
           </>
         ) : (

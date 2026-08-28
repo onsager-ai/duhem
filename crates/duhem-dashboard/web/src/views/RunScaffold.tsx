@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronRight, FileText, ListChecks, LayoutList } from "lucide-react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import {
   fetchCheck,
@@ -136,6 +136,7 @@ function TreeGroup({
   const [open, setOpen] = useState(hasChecks);
   const vd = useVd();
   const [search] = useSearchParams();
+  const navigate = useNavigate();
   const critDesc = vd?.criterion(criterion.id)?.description;
   const active = activeCriterion === criterion.id;
   const [activeCheck, setActiveCheck] = useState<CheckDetail | null>(null);
@@ -276,6 +277,27 @@ function TreeGroup({
                           : status.tone === "inconclusive"
                             ? "inconclusive:step"
                             : null;
+                    const moveByKeyboard = (direction: number) => {
+                      const current = steps.findIndex(
+                        (candidate) => candidate.kind === "step" && candidate.stepIndex === node.stepIndex,
+                      );
+                      const target = steps[current + direction];
+                      if (target?.kind !== "step") return;
+                      const targetStarted = target.events[0];
+                      const targetFlow = flowOrigin(targetStarted.flow);
+                      const targetKey = vd?.stepId(
+                        criterion.id,
+                        chk.id,
+                        target.stepIndex,
+                        targetFlow,
+                      ) ?? String(target.stepIndex);
+                      const targetSearch = new URLSearchParams(search);
+                      targetSearch.set("step", targetKey);
+                      navigate({
+                        pathname: checkHref(runId, criterion.id, chk.id),
+                        search: `?${targetSearch.toString()}`,
+                      });
+                    };
                     return (
                       <Link
                         key={node.stepIndex}
@@ -287,6 +309,11 @@ function TreeGroup({
                         }}
                         aria-label={label}
                         aria-current={activeStep === key ? "step" : undefined}
+                        onKeyDown={(event) => {
+                          if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+                          event.preventDefault();
+                          moveByKeyboard(event.key === "ArrowDown" ? 1 : -1);
+                        }}
                         className={cn(
                           "flex min-w-0 items-center gap-2 rounded px-2 py-1 text-xs",
                           activeStep === key

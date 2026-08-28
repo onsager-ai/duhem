@@ -596,6 +596,7 @@ ol.timeline li.ev.step-group {
   display: block;
   overflow: visible;
   padding: 0;
+  scroll-margin-top: var(--check-context-height, 0px);
 }
 ol.timeline > li.flow-group {
   list-style: none;
@@ -753,6 +754,7 @@ li.ev.step-group.tone-skipped > details > summary .ev-label { color: var(--lg-mu
 .step-raw-title {
   color: var(--lg-muted);
   font-size: 0.76rem;
+  cursor: pointer;
 }
 .step-raw pre {
   max-height: 24rem;
@@ -766,6 +768,15 @@ li.ev.step-group.tone-skipped > details > summary .ev-label { color: var(--lg-mu
   font-size: 0.76rem;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.step-inconclusive-lead {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border-left: 3px solid var(--inconclusive);
+  background: color-mix(in oklab, var(--inconclusive) 7%, var(--panel));
 }
 
 /* Structured action outputs (notably db/query rows) read like evidence,

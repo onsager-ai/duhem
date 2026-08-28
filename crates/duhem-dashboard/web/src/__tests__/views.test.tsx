@@ -715,6 +715,39 @@ describe("in-page inspection (#210)", () => {
     expect(btn.querySelector("img")?.getAttribute("src")).toBe("run/r/artifact/shot");
   });
 
+  it("leads each expanded step with evidence appropriate to its outcome", () => {
+    const failShot = "f".repeat(64);
+    const passShot = "p".repeat(64);
+    const events: TraceEvent[] = [
+      { seq: 1, ts: "t1", kind: "step_started", step_index: 0, uses: "ui/click" },
+      { seq: 2, ts: "t2", kind: "step_observation", step_index: 0, output_name: "capture/screenshot", blob_sha256: failShot },
+      { seq: 3, ts: "t3", kind: "step_finished", step_index: 0, outcome: "error" },
+      { seq: 4, ts: "t4", kind: "step_started", step_index: 1, uses: "ui/wait", with: { timeout: "8s" } },
+      { seq: 5, ts: "t5", kind: "step_finished", step_index: 1, outcome: "timeout" },
+      { seq: 6, ts: "t6", kind: "step_started", step_index: 2, uses: "ui/navigate" },
+      { seq: 7, ts: "t7", kind: "step_observation", step_index: 2, output_name: "capture/screenshot", blob_sha256: passShot },
+      { seq: 8, ts: "t8", kind: "step_finished", step_index: 2, outcome: "ok" },
+    ];
+    const artifacts = [
+      { id: failShot, kind: "capture/screenshot", url: "fail.png" },
+      { id: passShot, kind: "capture/screenshot", url: "pass.png" },
+    ];
+    const { container } = render(<Timeline events={events} artifacts={artifacts} />);
+    const groups = container.querySelectorAll<HTMLElement>('[data-testid="step-group"]');
+
+    const failedShot = groups[0].querySelector('[data-testid="shot-toggle"]');
+    expect(failedShot?.getAttribute("aria-expanded")).toBe("true");
+    expect(groups[0].querySelector(".step-body")?.firstElementChild).toBe(
+      groups[0].querySelector('[data-testid="step-captures"]'),
+    );
+    const inconclusiveLead = groups[1].querySelector('[data-testid="step-inconclusive-lead"]');
+    expect(inconclusiveLead?.textContent).toContain("step timed out");
+    expect(inconclusiveLead?.textContent).toContain("Deadline: 8s");
+    expect(groups[1].querySelector('[data-testid="step-captures"]')).toBeNull();
+    expect(groups[2].querySelector('[data-testid="shot-toggle"]')?.getAttribute("aria-expanded"))
+      .toBe("false");
+  });
+
   it("groups a step's events into a node and keeps the verdict standalone", () => {
     const events: TraceEvent[] = [
       { seq: 1, ts: "t1", kind: "step_started", step_index: 0, uses: "ui/navigate", with: { url: "http://x/" } },
@@ -734,10 +767,11 @@ describe("in-page inspection (#210)", () => {
     // of repeating started / observed / finished rows.
     const raw = groups[0].querySelector(".step-raw pre");
     expect(raw?.textContent).toContain("ui/navigate");
-    // One step disclosure owns the whole diagnostic body; raw data is not
-    // hidden behind a second nested click.
-    expect(groups[0].querySelectorAll("details")).toHaveLength(1);
-    expect(groups[0].querySelector('[data-testid="step-raw"]')).not.toBeNull();
+    // Raw execution payload is a second, collapsed disclosure beneath the
+    // product evidence.
+    expect(groups[0].querySelectorAll("details")).toHaveLength(2);
+    expect(groups[0].querySelector<HTMLDetailsElement>('[data-testid="step-raw"]')?.open)
+      .toBe(false);
     expect(groups[0].querySelector("summary")?.className).toContain("md:sticky");
     // The verdict is a standalone row, never folded into a step group.
     const labels = [...container.querySelectorAll(".ev-label")]

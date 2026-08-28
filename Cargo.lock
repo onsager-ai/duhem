@@ -789,7 +789,7 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "duhem-actions"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -814,7 +814,7 @@ dependencies = [
 
 [[package]]
 name = "duhem-cli"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -840,7 +840,7 @@ dependencies = [
 
 [[package]]
 name = "duhem-dashboard"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -862,7 +862,7 @@ dependencies = [
 
 [[package]]
 name = "duhem-evidence"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "aho-corasick",
  "async-trait",
@@ -885,7 +885,7 @@ dependencies = [
 
 [[package]]
 name = "duhem-judge"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -893,7 +893,7 @@ dependencies = [
 
 [[package]]
 name = "duhem-reporter-junit"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "duhem-judge",
  "duhem-summary",
@@ -902,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "duhem-reporter-pretty"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "duhem-judge",
  "duhem-summary",
@@ -911,7 +911,7 @@ dependencies = [
 
 [[package]]
 name = "duhem-runtime"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -940,7 +940,7 @@ dependencies = [
 
 [[package]]
 name = "duhem-schema"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "chumsky",
@@ -956,7 +956,7 @@ dependencies = [
 
 [[package]]
 name = "duhem-summary"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "duhem-judge",
  "serde",
@@ -4617,7 +4617,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64",

@@ -13,10 +13,10 @@
 //! "we couldn't observe the workload in the state the Verification
 //! Definition claims to verify". The specific
 //! `InconclusiveCause` preserves the abort trigger: a setup-step
-//! `Timeout` surfaces as `Inconclusive(Timeout)`, while an `Error`,
-//! an unknown-action step, or a missing browser surfaces as
-//! `Inconclusive(EnvironmentError)` — the same cause family the
-//! per-check path uses for analogous infrastructure failures.
+//! `Timeout` surfaces as `Inconclusive(Timeout)`, a step that ran and
+//! returned `Error` as `Inconclusive(MissingObservation)`, and an
+//! unknown-action step or missing browser as
+//! `Inconclusive(EnvironmentError)`.
 
 use std::collections::BTreeMap;
 
@@ -47,9 +47,11 @@ pub(crate) enum AbortReason {
     /// A setup step returned `Outcome::Timeout` — the action ran but
     /// didn't reach its requested state within `timeout:`.
     Timeout,
-    /// A setup step returned `Outcome::Error`, used an unknown
-    /// `Step.uses`, or the runtime couldn't provision a setup browser
-    /// when one was required.
+    /// A lifecycle action ran but returned `Outcome::Error`, so the
+    /// product behavior the step was meant to expose was not observed.
+    ActionError,
+    /// A step used an unknown `Step.uses`, or the runtime couldn't
+    /// provision a lifecycle browser when one was required.
     Environment,
 }
 
@@ -59,6 +61,7 @@ impl AbortReason {
     pub fn cause(self) -> InconclusiveCause {
         match self {
             AbortReason::Timeout => InconclusiveCause::Timeout,
+            AbortReason::ActionError => InconclusiveCause::MissingObservation,
             AbortReason::Environment => InconclusiveCause::EnvironmentError,
         }
     }
@@ -419,7 +422,7 @@ async fn run_lifecycle_steps(
         if aborted.is_none() {
             aborted = match outcome {
                 Outcome::Timeout => Some(AbortReason::Timeout),
-                Outcome::Error => Some(AbortReason::Environment),
+                Outcome::Error => Some(AbortReason::ActionError),
                 Outcome::Ok if failed => Some(AbortReason::Environment),
                 Outcome::Ok | Outcome::Skipped { .. } => None,
             };
@@ -631,6 +634,27 @@ mod tests {
         outcome: Outcome,
         outputs: Vec<(&'static str, serde_json::Value)>,
         invocations: Arc<AtomicUsize>,
+    }
+
+    struct PageAction;
+
+    #[async_trait]
+    impl Dispatch for PageAction {
+        fn uses(&self) -> &'static str {
+            "fake/page"
+        }
+        fn requires_page(&self) -> bool {
+            true
+        }
+        async fn invoke(
+            &self,
+            _page: Option<&Page>,
+            _step_index: usize,
+            _with: &serde_yml::Value,
+            _child_env: &BTreeMap<String, String>,
+        ) -> Result<ActionResult, ActionError> {
+            Ok(ActionResult::ok())
+        }
     }
 
     #[async_trait]
@@ -853,7 +877,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn setup_aborts_on_first_error() {
+    async fn setup_action_error_aborts_with_missing_observation() {
         let (mut w, _tmp) = make_writer().await;
         let mut registry: ActionRegistry = BTreeMap::new();
         registry.insert(
@@ -882,13 +906,39 @@ mod tests {
             .unwrap();
         assert_eq!(
             r.aborted,
-            Some(AbortReason::Environment),
-            "Outcome::Error should pin the cause to Environment"
+            Some(AbortReason::ActionError),
+            "Outcome::Error should pin the cause to ActionError"
+        );
+        assert_eq!(
+            r.aborted.map(AbortReason::cause),
+            Some(InconclusiveCause::MissingObservation)
         );
         assert_eq!(
             after.load(Ordering::SeqCst),
             0,
             "step after Error must not invoke"
+        );
+    }
+
+    #[tokio::test]
+    async fn setup_missing_browser_remains_environment_error() {
+        let (mut w, _tmp) = make_writer().await;
+        let registry: ActionRegistry =
+            BTreeMap::from([("fake/page", Box::new(PageAction) as Box<dyn Dispatch>)]);
+        let mut run = RunState::new(BTreeMap::new());
+        let result = run_setup(
+            &mut w,
+            &registry,
+            None,
+            &mut run,
+            &[step(None, "fake/page")],
+            &BTreeMap::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            result.aborted.map(AbortReason::cause),
+            Some(InconclusiveCause::EnvironmentError)
         );
     }
 
@@ -983,7 +1033,7 @@ mod tests {
         assert_eq!(failure_calls.load(Ordering::SeqCst), 1);
         assert_eq!(
             result.aborted,
-            Some(AbortReason::Environment),
+            Some(AbortReason::ActionError),
             "opt-in cleanup does not soften setup's abort-the-run policy"
         );
     }

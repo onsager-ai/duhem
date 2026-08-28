@@ -134,6 +134,7 @@ test target="workspace":
     set -euo pipefail
     case "$1" in
         workspace)
+            tests/preflight_merge_preview.sh
             exec cargo test --workspace
             ;;
         browser-actions)
@@ -196,8 +197,8 @@ self-verify:
         --db "$db" \
         --inputs duhem_bin="$PWD/target/release/duhem"
 
-# Full CI-equivalent gate. Slower than `check` on purpose; run before pushing.
-preflight: _committed lint test self-verify
+# The stages run by `preflight`, from its merge-preview worktree.
+_preflight_stages: lint test self-verify
     # The strict form of the changelog check, as CI runs it.
     cargo run -p xtask --quiet -- schema-changelog-check
     # docs §10 yaml blocks parse and validate against the live schema.
@@ -207,3 +208,7 @@ preflight: _committed lint test self-verify
     cargo run -p xtask --quiet -- schema-drift
     # The generated action reference matches the action contracts.
     cargo run -p xtask --quiet -- action-reference --check
+
+# Full CI-equivalent gate. Green is against `main` as fetched and can expire before merge.
+preflight: _committed
+    ./scripts/preflight-merge-preview.sh just _preflight_stages

@@ -276,6 +276,11 @@ enum Cmd {
         /// ui check is recorded but only failing checks keep the file.
         #[arg(long = "capture-video", default_value_t = false)]
         capture_video: bool,
+        /// Override the manifest's headless browser viewport for this
+        /// run, in CSS pixels (for example `1440x900`). Headed runs
+        /// always follow the real window.
+        #[arg(long = "viewport", value_name = "WIDTHxHEIGHT")]
+        viewport: Option<duhem_schema::Viewport>,
     },
     /// Browse run evidence in a read-only web dashboard.
     ///
@@ -412,6 +417,7 @@ fn main() -> ExitCode {
             watch,
             capture,
             capture_video,
+            viewport,
         }) => {
             if let Err(e) = env_file::source_for_run(
                 path.as_deref(),
@@ -476,6 +482,7 @@ fn main() -> ExitCode {
                 watch,
                 capture,
                 capture_video,
+                viewport,
             }))
         }
     }
@@ -558,6 +565,34 @@ mod tests {
         assert_eq!(crate::run_cmd::parse_slow_mo(" 250 ").unwrap(), 250);
         assert!(crate::run_cmd::parse_slow_mo("2s").is_err());
         assert!(crate::run_cmd::parse_slow_mo("-1").is_err());
+    }
+
+    #[test]
+    fn viewport_flag_parses_and_beats_manifest_default() {
+        let cli =
+            Cli::try_parse_from(["duhem", "run", "v.yml", "--viewport", "1600x1000"]).unwrap();
+        let Some(Cmd::Run { viewport, .. }) = cli.cmd else {
+            panic!("expected run command");
+        };
+        let manifest: duhem_schema::RootManifest = serde_yml::from_str(
+            "manifest_version: 1\ndefaults:\n  viewport: { width: 1024, height: 768 }\nverifications:\n  - path: v.yml\n",
+        )
+        .unwrap();
+        assert_eq!(
+            crate::run_cmd::resolve_viewport(viewport, manifest.defaults.as_ref()),
+            duhem_schema::Viewport {
+                width: 1600,
+                height: 1000
+            }
+        );
+    }
+
+    #[test]
+    fn viewport_defaults_to_historical_1280_by_720() {
+        assert_eq!(
+            crate::run_cmd::resolve_viewport(None, None),
+            duhem_schema::Viewport::default()
+        );
     }
 
     #[test]

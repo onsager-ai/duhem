@@ -62,6 +62,13 @@ impl Engine {
         self
     }
 
+    /// Record the effective viewport alongside the run evidence header.
+    /// JSON null is the deliberate headed/window-tracked mode.
+    pub fn with_viewport(mut self, viewport: serde_json::Value) -> Self {
+        self.viewport = Some(viewport);
+        self
+    }
+
     /// Set the failure-evidence capture posture (spec #202). Default
     /// is [`CapturePolicy::OnFailure`].
     pub fn with_capture(mut self, capture: CapturePolicy) -> Self {

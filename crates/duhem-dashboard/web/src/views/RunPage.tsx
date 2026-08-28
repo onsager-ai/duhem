@@ -218,6 +218,16 @@ function RunSummary({ run }: { run: RunDetail }) {
           <dt className="mb-0.5 text-xs text-muted-foreground">Started</dt>
           <dd className="font-medium">{formatStartedAt(run.started_at)}</dd>
         </div>
+        {run.viewport !== undefined && (
+          <div>
+            <dt className="mb-0.5 text-xs text-muted-foreground">Viewport</dt>
+            <dd className="font-medium" data-testid="run-viewport">
+              {run.viewport === null
+                ? "Follows headed window"
+                : `${run.viewport.width}×${run.viewport.height}`}
+            </dd>
+          </div>
+        )}
         <div>
           <dt className="mb-0.5 text-xs text-muted-foreground">Evidence</dt>
           <dd className="flex flex-wrap gap-x-4 gap-y-1">

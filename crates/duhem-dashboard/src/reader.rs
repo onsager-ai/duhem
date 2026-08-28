@@ -24,8 +24,10 @@ use thiserror::Error;
 use crate::model::{
     ArtifactRef, AssertionDiff, CheckDetail, CheckDiff, CheckRef, CriterionDetail, CriterionDiff,
     CriterionHistory, EntryKind, FailingAssertion, FailingCheck, FailingRequest, FailureEnvelope,
-    HistoryRun, RunDetail, RunDiff, RunSide, RunsListEntry, SpanModel, VerificationHistory,
+    HistoryRun, RunDetail, RunDiff, RunsListEntry, SpanModel, VerificationHistory,
 };
+
+mod run_detail;
 
 mod mime;
 mod replay;
@@ -240,8 +242,8 @@ impl EvidenceReader {
         let criteria = diff_criteria(&cur_proj, base_proj.as_ref());
 
         Ok(Some(RunDiff {
-            current: run_side(&current.record),
-            baseline: baseline.as_ref().map(|b| run_side(&b.record)),
+            current: run_detail::run_side(&current.record),
+            baseline: baseline.as_ref().map(|b| run_detail::run_side(&b.record)),
             criteria,
         }))
     }
@@ -518,6 +520,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
     // criteria.
     let mut criterion_of_check: Vec<(String, String)> = Vec::new();
     let mut run_verdict = None;
+    let mut viewport = None;
 
     fn note_check(
         criterion_order: &mut Vec<String>,
@@ -550,10 +553,12 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
             EventPayload::RunStarted {
                 inputs: i,
                 definition,
+                viewport: recorded_viewport,
                 ..
             } => {
                 inputs = i.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
                 has_definition = definition.is_some();
+                viewport = recorded_viewport.clone();
             }
             EventPayload::SetupFinished {
                 phase,
@@ -675,20 +680,13 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         status: run.record.status,
         setup_aborted,
         has_definition,
+        viewport,
         cleanup,
         criteria,
     }
 }
 
 // ---- #211: run-to-run diff -----------------------------------------
-
-fn run_side(r: &RunRecord) -> RunSide {
-    RunSide {
-        run_id: r.run_id.clone(),
-        started_at: Some(r.started_at),
-        verdict: r.verdict,
-    }
-}
 
 /// A run folded into the projection the diff compares over: ordered
 /// criteria + checks with verdicts, each check's assertions and blob

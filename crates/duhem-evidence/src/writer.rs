@@ -475,6 +475,19 @@ pub fn run_started_with_definition_and_lineage(
     definition: Option<String>,
     lineage: RunLineage,
 ) -> EventPayload {
+    run_started_with_viewport(verification_path, inputs, definition, lineage, None)
+}
+
+/// Build a self-describing run header with the effective browser
+/// viewport. `Some(null)` means a headed run tracks its real window;
+/// `None` is reserved for page-free and legacy runs.
+pub fn run_started_with_viewport(
+    verification_path: impl Into<String>,
+    inputs: BTreeMap<String, serde_json::Value>,
+    definition: Option<String>,
+    lineage: RunLineage,
+    viewport: Option<serde_json::Value>,
+) -> EventPayload {
     EventPayload::RunStarted {
         verification_path: verification_path.into(),
         inputs,
@@ -482,6 +495,7 @@ pub fn run_started_with_definition_and_lineage(
         parent_run_id: lineage.parent_run_id,
         origin: lineage.origin,
         definition,
+        viewport,
     }
 }
 

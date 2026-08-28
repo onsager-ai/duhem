@@ -63,6 +63,7 @@ pub struct RunArgs {
     pub watch: bool,
     pub capture: duhem_runtime::CapturePolicy,
     pub capture_video: bool,
+    pub viewport: Option<duhem_schema::Viewport>,
 }
 
 pub async fn run_command(args: RunArgs) -> ExitCode {
@@ -82,6 +83,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         watch,
         capture,
         capture_video,
+        viewport: viewport_override,
     } = args;
 
     // Live progress posture (#299), resolved once: forced by
@@ -273,6 +275,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         Scope::Manifest { defaults, .. } => defaults.clone(),
         Scope::SingleLeaf => None,
     };
+    // CLI precedence is explicit: invocation override > suite default
+    // > the historical Playwright 1280x720 size.
+    let viewport = resolve_viewport(viewport_override, manifest_defaults.as_ref());
     // Suite-wide declared target (#191); leaf `project:` wins below.
     let manifest_project: Option<duhem_schema::ProjectDecl> = match &scope {
         Scope::Manifest { project, .. } => project.clone(),
@@ -624,7 +629,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // (#49) and `RunBrowser` is non-`Clone`, so a fresh launch per
         // leaf is the cleanest model.
         let browser = if needs_browser {
-            match RunBrowser::launch_with_slow_mo(headed, slow_mo_ms).await {
+            match RunBrowser::launch_with_viewport(headed, slow_mo_ms, viewport).await {
                 Ok(b) => Some(b.with_video(record_video)),
                 Err(e) => {
                     eprintln!("browser: {e}");
@@ -667,6 +672,14 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         }
         if let Some(d) = manifest_defaults.as_ref() {
             engine = engine.with_defaults(d);
+        }
+        if needs_browser {
+            let recorded_viewport = if headed {
+                serde_json::Value::Null
+            } else {
+                serde_json::json!({ "width": viewport.width, "height": viewport.height })
+            };
+            engine = engine.with_viewport(recorded_viewport);
         }
         if let Some(b) = browser {
             engine = engine.with_browser(b);
@@ -892,6 +905,14 @@ pub(crate) fn parse_slow_mo(raw: &str) -> Result<u64, String> {
 /// is unit-testable without mutating process-global state.
 pub(crate) fn parse_truthy(value: &str) -> bool {
     matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true")
+}
+
+pub(crate) fn resolve_viewport(
+    cli: Option<duhem_schema::Viewport>,
+    defaults: Option<&duhem_schema::ManifestDefaults>,
+) -> duhem_schema::Viewport {
+    cli.or_else(|| defaults.and_then(|d| d.viewport))
+        .unwrap_or_default()
 }
 
 /// Derive the canonical "verification name" of a leaf for evidence

@@ -418,6 +418,8 @@ pub struct RunBrowser {
     /// run, up front; whether the video is *kept* is the runtime's
     /// capture-policy call after the check.
     record_video: bool,
+    /// `None` means Playwright `viewport: null` (headed/window-tracked).
+    viewport: Option<duhem_schema::Viewport>,
 }
 
 impl RunBrowser {
@@ -440,12 +442,22 @@ impl RunBrowser {
         headed: bool,
         slow_mo_ms: Option<u64>,
     ) -> Result<Self, ActionError> {
-        match Self::launch_once(headed, slow_mo_ms).await {
+        Self::launch_with_viewport(headed, slow_mo_ms, duhem_schema::Viewport::default()).await
+    }
+
+    /// Launch with the declared headless viewport. Headed runs ignore
+    /// the dimensions and track the real maximized window.
+    pub async fn launch_with_viewport(
+        headed: bool,
+        slow_mo_ms: Option<u64>,
+        viewport: duhem_schema::Viewport,
+    ) -> Result<Self, ActionError> {
+        match Self::launch_once(headed, slow_mo_ms, viewport).await {
             Ok(browser) => Ok(browser),
             Err(ActionError::Playwright(raw)) => {
                 if is_missing_browser_error(&raw) && !auto_install_disabled() {
                     match provision_browser().await {
-                        Ok(()) => Self::launch_once(headed, slow_mo_ms)
+                        Ok(()) => Self::launch_once(headed, slow_mo_ms, viewport)
                             .await
                             .map_err(humanize_action_error),
                         Err(why) => Err(ActionError::Playwright(format!(
@@ -463,7 +475,11 @@ impl RunBrowser {
 
     /// One spawn+launch attempt. Returns the *raw* launch error so the
     /// caller can humanize it or decide to auto-provision (#295).
-    async fn launch_once(headed: bool, slow_mo_ms: Option<u64>) -> Result<Self, ActionError> {
+    async fn launch_once(
+        headed: bool,
+        slow_mo_ms: Option<u64>,
+        viewport: duhem_schema::Viewport,
+    ) -> Result<Self, ActionError> {
         let node = node_command();
         check_node_version(&node).await?;
 
@@ -514,6 +530,7 @@ impl RunBrowser {
             child,
             conn,
             record_video: false,
+            viewport: (!headed).then_some(viewport),
         })
     }
 
@@ -547,11 +564,15 @@ impl RunBrowser {
         &self,
         storage_state: Option<&serde_json::Value>,
     ) -> Result<CheckBrowser, ActionError> {
+        let viewport = self.viewport.map_or(
+            serde_json::Value::Null,
+            |v| json!({ "width": v.width, "height": v.height }),
+        );
         let params = match storage_state {
             Some(state) => {
-                json!({ "recordVideo": self.record_video, "storageState": state })
+                json!({ "recordVideo": self.record_video, "storageState": state, "viewport": viewport })
             }
-            None => json!({ "recordVideo": self.record_video }),
+            None => json!({ "recordVideo": self.record_video, "viewport": viewport }),
         };
         let ctx = self
             .conn

@@ -17,8 +17,8 @@ use duhem_evidence::{RunLineage, RunOrigin, RunScope};
 use duhem_judge::{RunVerdict, VerdictState, aggregate_run_set};
 use duhem_runtime::{Engine, RunOutcome, SuiteEnvironment, SuiteRunConfig};
 use duhem_schema::{
-    Loaded, LoadedLeaf, VerificationDefinition, load_for_run as load_definition,
-    validate_with_action_catalog,
+    Loaded, LoadedLeaf, VerificationDefinition, filter_loaded_to_directory,
+    load_for_run as load_definition, validate_with_action_catalog,
 };
 
 use crate::filter::CliCheckFilter;
@@ -114,9 +114,18 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // Resolve which manifest/leaf to load (issue #69). `-f`/`--file` is
     // the explicit override — used as-is, no discovery. Otherwise
     // `discover` resolves the positional `path` (a file verbatim, a
-    // directory probed for a manifest) or, when no path is given, walks
-    // the cwd and its ancestors so `cd anywhere-in-the-repo && duhem
-    // run` finds the repo-root manifest (capped at a `.git` boundary).
+    // directory walking from itself through its ancestors) or, when no
+    // path is given, walks the cwd and its ancestors so `cd
+    // anywhere-in-the-repo && duhem run` finds the repo-root manifest
+    // (capped at a `.git` boundary). An explicit directory is applied as
+    // an entry-set filter immediately after the manifest loads below.
+    let directory_filter = if file.is_none() {
+        path.as_deref()
+            .filter(|candidate| candidate.is_dir())
+            .map(Path::to_path_buf)
+    } else {
+        None
+    };
     let target = match file {
         Some(f) => f,
         None => {
@@ -147,7 +156,12 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // failures with the offending path; we prefix the schema version
     // so authors see at a glance which schema the loader parsed
     // against (spec on #51).
-    let loaded = match load_definition(&target) {
+    let loaded = match load_definition(&target).and_then(|loaded| {
+        if let Some(directory) = &directory_filter {
+            return filter_loaded_to_directory(loaded, directory);
+        }
+        Ok(loaded)
+    }) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("[schema v{}] {e}", duhem_schema::SCHEMA_VERSION);

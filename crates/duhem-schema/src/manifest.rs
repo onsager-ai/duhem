@@ -363,12 +363,19 @@ pub enum LoadError {
     },
     #[error("directory `{path}` has no `duhem.yml`")]
     DirectoryMissingManifest { path: PathBuf },
-    /// Discovery (issue #69) walked the current directory and its
+    #[error("directory `{directory}` matches no verifications resolved by manifest `{manifest}`")]
+    DirectoryMatchesNoVerifications {
+        directory: PathBuf,
+        manifest: PathBuf,
+    },
+    /// Discovery walked the requested directory (or cwd) and its
     /// ancestors (capped at a `.git` repository boundary) without
     /// finding any of the manifest candidate filenames. The `searched`
     /// list names every path probed so the author can see where Duhem
     /// looked.
-    #[error("no manifest found in the current directory or its ancestors; searched {searched:?}")]
+    #[error(
+        "no manifest found in the directory or its ancestors; searched {searched:?}; run `duhem init` to create one"
+    )]
     ManifestNotFound { searched: Vec<PathBuf> },
     /// A `profiles:` key is not a well-formed profile name
     /// (lowercase letters, digits, dashes; alphanumeric at both ends).
@@ -450,10 +457,9 @@ pub(crate) fn manifest_in_dir(dir: &Path) -> Option<PathBuf> {
 ///
 /// 1. An explicit *file* is used verbatim — Pattern A (a single leaf
 ///    passed directly) is preserved byte-for-byte.
-/// 2. An explicit *directory* is probed for a manifest candidate; a
-///    directory with none keeps today's `DirectoryMissingManifest`
-///    error. Explicit args behave identically to before this spec —
-///    the ancestor walk only activates when no path is given.
+/// 2. An explicit *directory* starts the same ancestor walk as an
+///    omitted path. A manifest in the directory wins; otherwise the
+///    nearest ancestor manifest is selected.
 /// 3. An explicit path that is neither file nor directory (e.g. a
 ///    path that does not exist) is handed back verbatim so [`load`]
 ///    surfaces the same I/O error against the offending path.
@@ -469,9 +475,7 @@ pub fn discover(explicit: Option<&Path>, cwd: &Path) -> Result<PathBuf, LoadErro
             return Ok(path.to_path_buf());
         }
         if path.is_dir() {
-            return manifest_in_dir(path).ok_or_else(|| LoadError::DirectoryMissingManifest {
-                path: path.to_path_buf(),
-            });
+            return crate::manifest_compose::walk_ancestors_for_manifest(path);
         }
         // Neither file nor directory: defer to `load` for the I/O
         // error, preserving today's diagnostic on a bad explicit path.
@@ -759,6 +763,7 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::manifest_filter::filter_loaded_to_directory;
 
     fn write(dir: &Path, name: &str, contents: &str) -> PathBuf {
         let path = dir.join(name);
@@ -1404,15 +1409,79 @@ verifications:
     }
 
     #[test]
-    fn discover_explicit_dir_without_manifest_keeps_directory_missing() {
+    fn discover_explicit_dir_walks_to_ancestor_manifest() {
         let tmp = tempfile::tempdir().unwrap();
-        // Explicit directory with no manifest → today's error, not the
-        // ancestor walk (explicit args behave identically to before).
-        let err = discover(Some(tmp.path()), tmp.path()).unwrap_err();
-        assert!(
-            matches!(err, LoadError::DirectoryMissingManifest { .. }),
-            "got {err:?}"
+        let manifest = write(
+            tmp.path(),
+            "duhem.yml",
+            "manifest_version: 1\nverifications: []\n",
         );
+        let nested = tmp.path().join("verifications/admin");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(discover(Some(&nested), tmp.path()).unwrap(), manifest);
+    }
+
+    #[test]
+    fn directory_filter_preserves_ancestor_manifest_context() {
+        let tmp = tempfile::tempdir().unwrap();
+        let selected = tmp.path().join("verifications/admin");
+        std::fs::create_dir_all(&selected).unwrap();
+        let leaf = write(
+            tmp.path(),
+            "verifications/admin/a.yml",
+            r#"
+verification: contextual
+inputs:
+  base_url: { inherit: true }
+criteria:
+  - id: AC-1
+    description: shared context is composed
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/assert-element
+            with: { locator: $pages.login.heading, expected: visible }
+        assertions: ["true"]
+"#,
+        );
+        let manifest = write(
+            tmp.path(),
+            "duhem.yml",
+            r#"
+manifest_version: 1
+defaults: { timeout: 17s }
+inputs:
+  base_url: { type: string, default: "https://example.com" }
+pages:
+  login:
+    heading: { text: Sign in }
+verifications:
+  - glob: verifications/**/*.yml
+"#,
+        );
+
+        let unfiltered = load_for_run(&manifest).unwrap();
+        let filtered = filter_loaded_to_directory(load_for_run(&manifest).unwrap(), &selected)
+            .expect("selected entry");
+        let context = |loaded: Loaded| match loaded {
+            Loaded::Manifest {
+                manifest, leaves, ..
+            } => (
+                manifest.defaults,
+                manifest.inputs,
+                manifest.pages,
+                leaves
+                    .into_iter()
+                    .map(|entry| entry.definition)
+                    .collect::<Vec<_>>(),
+            ),
+            Loaded::Leaf { .. } => panic!("expected manifest"),
+        };
+        assert_eq!(context(filtered), context(unfiltered));
+        match load_for_run(&manifest).unwrap() {
+            Loaded::Manifest { leaves, .. } => assert_eq!(leaves[0].path, leaf),
+            Loaded::Leaf { .. } => panic!("expected manifest"),
+        }
     }
 
     #[test]

@@ -15,6 +15,7 @@ pub mod jsonschema;
 mod leaf_context;
 pub mod manifest;
 mod manifest_compose;
+mod manifest_filter;
 mod manifest_inputs;
 mod manifest_path;
 pub mod project;
@@ -41,6 +42,7 @@ pub use manifest::{
     InconclusivePolicy, LoadError, Loaded, LoadedLeaf, ManifestDefaults, ManifestEntry,
     RetryBackoff, RetryPolicy, RootManifest, discover, load, load_for_run,
 };
+pub use manifest_filter::filter_loaded_to_directory;
 pub use project::{ProjectDecl, ProjectKind};
 pub use provision::{DurationSpec, HttpReadyProbe, Provision, ReadyProbe};
 pub use source::{SourceLocation, SourceMap};

@@ -1026,22 +1026,137 @@ fn dry_run_two_part_filter_applies_to_every_leaf() {
 }
 
 #[test]
-fn directory_without_manifest_errors_before_browser_launch() {
-    // Spec on #49 § "CLI surface": directory with no `duhem.yml` is a
-    // load-time error.
+fn explicit_directory_walks_to_ancestor_manifest_and_filters_entries() {
+    // Spec on #464 revises #49's hard-error decision: an explicit
+    // manifest-less directory uses the shared ancestor walk, then filters
+    // the manifest-resolved entry set. Recursive glob expansion is retained.
     let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(tmp.path().join(".git")).unwrap();
+    let admin = tmp.path().join("verifications/admin");
+    std::fs::create_dir_all(admin.join("nested")).unwrap();
+    std::fs::create_dir_all(tmp.path().join("verifications/public")).unwrap();
+    std::fs::write(
+        tmp.path().join("duhem.yml"),
+        "manifest_version: 1\nverifications:\n  - glob: verifications/**/*.yml\n",
+    )
+    .unwrap();
+    for (path, name) in [
+        (admin.join("a.yml"), "admin-a"),
+        (admin.join("nested/b.yml"), "admin-b"),
+        (tmp.path().join("verifications/public/c.yml"), "public-c"),
+    ] {
+        std::fs::write(&path, ONE_CRITERION.replace("smoke", name)).unwrap();
+    }
 
     let out = Command::new(bin())
         .arg("run")
-        .arg(tmp.path())
+        .arg(&admin)
         .arg("--dry-run")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("a::AC-1::AC-1.1"), "{stdout}");
+    assert!(stdout.contains("b::AC-1::AC-1.1"), "{stdout}");
+    assert!(
+        !stdout.contains("c::AC-1::AC-1.1"),
+        "entry outside the requested directory ran: {stdout}"
+    );
+}
+
+#[test]
+fn explicit_directory_local_manifest_wins_over_ancestor() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(tmp.path().join(".git")).unwrap();
+    let suite = tmp.path().join("suite");
+    std::fs::create_dir(&suite).unwrap();
+    std::fs::write(
+        tmp.path().join("duhem.yml"),
+        "manifest_version: 1\nverifications:\n  - path: root.yml\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("root.yml"),
+        ONE_CRITERION.replace("smoke", "ancestor"),
+    )
+    .unwrap();
+    std::fs::write(
+        suite.join("duhem.yml"),
+        "manifest_version: 1\nverifications:\n  - path: local.yml\n",
+    )
+    .unwrap();
+    std::fs::write(
+        suite.join("local.yml"),
+        ONE_CRITERION.replace("smoke", "local"),
+    )
+    .unwrap();
+
+    let out = Command::new(bin())
+        .args(["run", "--dry-run"])
+        .arg(&suite)
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("local::AC-1::AC-1.1"), "{stdout}");
+    assert!(!stdout.contains("ancestor::"), "{stdout}");
+}
+
+#[test]
+fn explicit_directory_with_no_resolved_entries_errors() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(tmp.path().join(".git")).unwrap();
+    let empty = tmp.path().join("verifications/empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    std::fs::write(
+        tmp.path().join("duhem.yml"),
+        "manifest_version: 1\nverifications:\n  - path: elsewhere.yml\n",
+    )
+    .unwrap();
+    std::fs::write(tmp.path().join("elsewhere.yml"), ONE_CRITERION).unwrap();
+
+    let out = Command::new(bin())
+        .args(["run", "--dry-run"])
+        .arg(&empty)
         .output()
         .expect("spawn duhem");
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains(&empty.display().to_string()), "{stderr}");
+    assert!(stderr.contains("duhem.yml"), "{stderr}");
+    assert!(stderr.contains("matches no verifications"), "{stderr}");
+}
+
+#[test]
+fn explicit_directory_without_any_manifest_lists_probes_and_suggests_init() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(tmp.path().join(".git")).unwrap();
+    let nested = tmp.path().join("nested");
+    std::fs::create_dir(&nested).unwrap();
+
+    let out = Command::new(bin())
+        .args(["run", "--dry-run"])
+        .arg(&nested)
+        .output()
+        .expect("spawn duhem");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("duhem init"), "{stderr}");
     assert!(
-        stderr.contains("no `duhem.yml`") || stderr.contains("missing manifest"),
-        "stderr should name the failure: {stderr}"
+        stderr.contains(&nested.join("duhem.yml").display().to_string()),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains(&tmp.path().join(".duhem.yaml").display().to_string()),
+        "{stderr}"
     );
 }
 

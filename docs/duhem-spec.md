@@ -988,7 +988,7 @@ when present, groups those steps under the invocation, and retains its index
 join for older/non-flow traces. `duhem resolve --provenance` prints the flat
 expansion and its origins for offline debugging.
 
-The root manifest is canonical: Duhem auto-discovers `duhem.yml` (or `.duhem.yml`) at the project root or its ancestors. Users can override with `duhem run -f path/to/manifest.yml`.
+The root manifest is canonical: Duhem auto-discovers `duhem.yml` (or `.duhem.yml`) at the project root or its ancestors. A bare `duhem run` starts that walk at the current directory and runs the whole resolved manifest. An explicit directory, such as `duhem run verifications/admin/`, starts the same walk at that directory and runs only the manifest-resolved entries beneath it (including entries reached recursively by a glob); a nearer manifest inside the directory wins. The directory is a filter over the resolved entry set, not a manifest-less collection, so manifest `defaults:`, `inputs:`, `profiles:`, `pages:`, and `flows:` retain exactly the same meaning. A directory matching no resolved entries is an error, as is reaching the `.git` boundary without a manifest. Users can override discovery with `duhem run -f path/to/manifest.yml`.
 
 If no root manifest is present, Duhem still works on individual Verification Definition files passed directly.
 

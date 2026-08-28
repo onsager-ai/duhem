@@ -152,10 +152,11 @@ enum Cmd {
     /// flags (specs #23 / #189); none change the verdict on a
     /// non-filtered run.
     Run {
-        /// Path to a `.yml` Verification Definition, or a directory
-        /// containing a manifest. Omit entirely to auto-discover a
-        /// manifest from the current directory and its ancestors —
-        /// `cd anywhere-in-the-repo && duhem run` (issue #69).
+        /// Path to a `.yml` Verification Definition, or a directory.
+        /// A directory discovers the nearest manifest at or above it
+        /// and runs only that manifest's entries beneath the directory.
+        /// Omit entirely to discover from the current directory and run
+        /// the whole manifest (issues #69 and #464).
         path: Option<PathBuf>,
         /// Explicit manifest path. Bypasses discovery (no directory
         /// probe, no ancestor walk) and uses the path as-is — the

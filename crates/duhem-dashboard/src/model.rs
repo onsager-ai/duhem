@@ -58,6 +58,10 @@ pub struct RunDetail {
     /// `GET /api/runs/:id/definition`. `false` for runs predating the
     /// snapshot field.
     pub has_definition: bool,
+    /// Fixed `{width,height}` for headless runs; JSON null when a
+    /// headed run follows its real window; omitted for legacy/page-free.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<serde_json::Value>,
     /// Teardown failures are shown as evidence and never folded into
     /// the judge-owned verdict.
     pub cleanup: Vec<CleanupStepDetail>,

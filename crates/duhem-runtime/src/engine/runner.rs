@@ -20,7 +20,7 @@ use duhem_actions::Page;
 use duhem_actions::{Outcome, RunBrowser};
 use duhem_evidence::{
     EventPayload, EvidenceWriter, RunLineage, RunScope, SecretRegistry, SqliteStore, Store,
-    StoreError, VerdictState, new_run_id, project_db_path, run_started_with_definition_and_lineage,
+    StoreError, VerdictState, new_run_id, project_db_path, run_started_with_viewport,
 };
 use duhem_judge::{
     AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusivePolicy, RunVerdict,
@@ -65,6 +65,9 @@ pub struct Engine {
     /// `Engine::with_browser` so unit tests can construct an Engine
     /// without paying the Playwright launch cost.
     browser: Option<RunBrowser>,
+    /// Effective browser viewport recorded in `run_started`. `Some(null)`
+    /// denotes a headed run that follows the real window.
+    viewport: Option<serde_json::Value>,
     /// Caller-supplied path / identifier for the Verification
     /// Definition that's being run. Recorded as
     /// `manifest.definition_path` and the `run_started.verification_path`
@@ -164,6 +167,7 @@ impl Engine {
             registry: default_registry(),
             store: None,
             browser: None,
+            viewport: None,
             definition_path: None,
             definition_source: None,
             filter: None,
@@ -308,11 +312,12 @@ impl Engine {
         writer.start_heartbeats();
 
         writer
-            .append(run_started_with_definition_and_lineage(
+            .append(run_started_with_viewport(
                 evidence_path.clone(),
                 inputs.clone(),
                 self.definition_source.clone(),
                 self.lineage.clone(),
+                self.viewport.clone(),
             ))
             .await?;
 
@@ -1573,6 +1578,7 @@ criteria:
             registry: BTreeMap::new(),
             store: Some(Arc::new(store)),
             browser: None,
+            viewport: None,
             definition_path: None,
             definition_source: None,
             filter: None,

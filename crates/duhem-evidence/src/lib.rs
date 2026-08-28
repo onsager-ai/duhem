@@ -48,7 +48,7 @@ pub use store::{
 };
 pub use writer::{
     EvidenceWriter, Sha256Hex, WriterError, run_started, run_started_with_definition,
-    run_started_with_definition_and_lineage,
+    run_started_with_definition_and_lineage, run_started_with_viewport,
 };
 
 /// Generate a new run id — a ULID (sortable, opaque, time-prefixed).

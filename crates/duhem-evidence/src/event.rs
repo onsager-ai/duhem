@@ -182,6 +182,11 @@ pub enum EventPayload {
         /// `None`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         definition: Option<String>,
+        /// Effective browser viewport for this run. Fixed headless runs
+        /// record `{width,height}`; headed/window-tracked runs record an
+        /// explicit JSON `null`. Absent only on older/page-free records.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        viewport: Option<serde_json::Value>,
     },
     /// Periodic proof that the runtime still owns this unterminated run.
     RunHeartbeat,
@@ -439,12 +444,50 @@ mod tests {
                 parent_run_id: None,
                 origin: None,
                 definition: None,
+                viewport: None,
             },
         };
         let line = serde_json::to_string(&evt).unwrap();
         assert!(line.contains(r#""kind":"run_started""#));
         let back: Event = serde_json::from_str(&line).unwrap();
         assert_eq!(evt, back);
+    }
+
+    #[test]
+    fn run_started_distinguishes_fixed_window_and_legacy_viewports() {
+        let fixed = crate::writer::run_started_with_viewport(
+            "v.yml",
+            BTreeMap::new(),
+            None,
+            crate::RunLineage::default(),
+            Some(serde_json::json!({ "width": 1440, "height": 900 })),
+        );
+        let window = crate::writer::run_started_with_viewport(
+            "v.yml",
+            BTreeMap::new(),
+            None,
+            crate::RunLineage::default(),
+            Some(serde_json::Value::Null),
+        );
+        let fixed_json = serde_json::to_value(fixed).unwrap();
+        let window_json = serde_json::to_value(window).unwrap();
+        assert_eq!(
+            fixed_json["viewport"],
+            serde_json::json!({ "width": 1440, "height": 900 })
+        );
+        assert!(window_json.get("viewport").is_some());
+        assert!(window_json["viewport"].is_null());
+
+        let legacy: EventPayload = serde_json::from_value(serde_json::json!({
+            "kind": "run_started",
+            "verification_path": "v.yml",
+            "schema_version": "v1"
+        }))
+        .unwrap();
+        assert!(matches!(
+            legacy,
+            EventPayload::RunStarted { viewport: None, .. }
+        ));
     }
 
     #[test]

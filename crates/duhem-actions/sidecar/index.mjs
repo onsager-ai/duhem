@@ -256,6 +256,9 @@ async function dispatch(req) {
       const extraArgs = (process.env.DUHEM_BROWSER_ARGS || '')
         .split(/\s+/)
         .filter(Boolean)
+      if (req.headless === false && !extraArgs.includes('--start-maximized')) {
+        extraArgs.push('--start-maximized')
+      }
       const baseOpts = {
         headless: req.headless !== false,
         slowMo: Number.isFinite(req.slowMo) ? req.slowMo : undefined,
@@ -305,6 +308,11 @@ async function dispatch(req) {
       // every request still creates a new BrowserContext (#347).
       if (req.storageState !== undefined) {
         opts.storageState = req.storageState
+      }
+      // Preserve explicit null: it disables Playwright's fixed viewport
+      // so headed pages follow and reflow with the real OS window.
+      if (req.viewport !== undefined) {
+        opts.viewport = req.viewport
       }
       let ctx
       try {

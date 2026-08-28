@@ -22,6 +22,7 @@ use crate::provision::{DurationSpec, Provision};
 use crate::verification::{
     FlowCatalog, InputDecl, PageCatalog, SchemaError, VerificationDefinition,
 };
+use crate::viewport::Viewport;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -170,6 +171,9 @@ pub struct ManifestDefaults {
     /// like `30s` / `2m`). Absent → the built-in 60s ceiling applies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_wait: Option<DurationSpec>,
+    /// Headless size; defaults to 1280x720.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<Viewport>,
     /// How a criterion-level `inconclusive` verdict is treated at run
     /// aggregation. Absent → `block` (today's behavior).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -764,6 +768,34 @@ fn load_manifest(manifest_path: &Path, src: &str) -> Result<Loaded, LoadError> {
 mod tests {
     use super::*;
     use crate::manifest_filter::filter_loaded_to_directory;
+
+    #[test]
+    fn viewport_is_optional_and_round_trips_when_declared() {
+        let absent: RootManifest =
+            serde_yml::from_str("manifest_version: 1\nverifications:\n  - path: v.yml\n").unwrap();
+        assert!(absent.defaults.is_none());
+
+        let declared: RootManifest = serde_yml::from_str(
+            "manifest_version: 1\ndefaults:\n  viewport: { width: 1440, height: 900 }\nverifications:\n  - path: v.yml\n",
+        )
+        .unwrap();
+        assert_eq!(
+            declared.defaults.unwrap().viewport,
+            Some(Viewport {
+                width: 1440,
+                height: 900
+            })
+        );
+    }
+
+    #[test]
+    fn viewport_rejects_zero_dimensions() {
+        let err = serde_yml::from_str::<RootManifest>(
+            "manifest_version: 1\ndefaults:\n  viewport: { width: 0, height: 720 }\nverifications:\n  - path: v.yml\n",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("greater than zero"));
+    }
 
     fn write(dir: &Path, name: &str, contents: &str) -> PathBuf {
         let path = dir.join(name);

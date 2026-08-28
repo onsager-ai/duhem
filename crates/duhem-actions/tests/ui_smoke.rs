@@ -114,6 +114,80 @@ async fn fresh_browser() -> Arc<RunBrowser> {
     )
 }
 
+fn png_dimensions(bytes: &[u8]) -> (u32, u32) {
+    assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
+    (
+        u32::from_be_bytes(bytes[16..20].try_into().unwrap()),
+        u32::from_be_bytes(bytes[20..24].try_into().unwrap()),
+    )
+}
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
+async fn headless_default_and_declared_viewports_size_screenshots() {
+    for (viewport, expected) in [
+        (duhem_schema::Viewport::default(), (1280, 720)),
+        (
+            duhem_schema::Viewport {
+                width: 960,
+                height: 540,
+            },
+            (960, 540),
+        ),
+    ] {
+        let run = RunBrowser::launch_with_viewport(false, None, viewport)
+            .await
+            .unwrap();
+        let check = run.open_check().await.unwrap();
+        let shot = check.page.screenshot(5_000.0).await.unwrap();
+        assert_eq!(png_dimensions(&shot), expected);
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires a headed display and installed Chromium"]
+async fn headed_viewport_follows_window_resize() {
+    // CI runs this file with `--ignored`, and a headed Chromium needs a
+    // display CI does not have. Skip loudly rather than fail — and
+    // loudly rather than silently, so a green here is never mistaken
+    // for evidence that window-tracking was exercised.
+    if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        eprintln!(
+            "SKIPPED headed_viewport_follows_window_resize: no DISPLAY/WAYLAND_DISPLAY. \
+             Headed window-tracking is NOT verified by this run."
+        );
+        return;
+    }
+    let run = RunBrowser::launch_with_viewport(true, None, duhem_schema::Viewport::default())
+        .await
+        .unwrap();
+    let check = run.open_check().await.unwrap();
+    let before: (u32, u32) = check
+        .page
+        .eval("[window.innerWidth, window.innerHeight]")
+        .await
+        .unwrap();
+    check
+        .page
+        .eval::<serde_json::Value>("window.resizeTo(900, 700); null")
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let after: (u32, u32) = check
+        .page
+        .eval("[window.innerWidth, window.innerHeight]")
+        .await
+        .unwrap();
+    assert_ne!(
+        after, before,
+        "the page viewport must reflow with the window"
+    );
+    assert!(
+        after.0 <= 900 && after.1 <= 700,
+        "reported viewport: {after:?}"
+    );
+}
+
 fn yaml(s: &str) -> Value {
     serde_yml::from_str(s).unwrap()
 }

@@ -45,6 +45,8 @@ export interface RunDetail {
   /** `true` when the run recorded its VD source snapshot (#302); the
    *  client then fetches it from `definitionUrl`. */
   has_definition: boolean;
+  /** Fixed dimensions in headless mode; null means the headed window. */
+  viewport?: { width: number; height: number } | null;
   cleanup?: CleanupStepDetail[];
   criteria: CriterionDetail[];
 }

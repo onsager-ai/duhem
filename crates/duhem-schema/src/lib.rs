@@ -29,6 +29,7 @@ mod validate_lifecycle;
 mod validate_pages;
 mod validate_runtime;
 pub mod verification;
+mod viewport;
 
 pub use assertion::{Assertion, TypeCheckKind};
 pub use criterion::{Check, Criterion, StepCountError};
@@ -54,6 +55,7 @@ pub use verification::{
     Fixture, FixtureCatalog, Flow, FlowCatalog, InputDecl, InputType, PageCatalog, SchemaError,
     VerificationDefinition,
 };
+pub use viewport::Viewport;
 
 /// Current Verification Definition schema version. Pre-1.0 per
 /// `docs/duhem-spec.md` §11.3 — breaking changes bump the minor under

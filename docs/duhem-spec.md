@@ -875,6 +875,9 @@ defaults:
   profile: staging            # default profile for runs
   timeout: 30s                # default per-step timeout
   max_wait: 60s               # ui/wait duration ceiling (default: 60s)
+  viewport:                   # headless browser CSS pixels (default: 1280x720)
+    width: 1440
+    height: 900
   inconclusive_policy: block  # block | warn | pass
   retry:
     max: 1
@@ -938,6 +941,17 @@ profiles:                       # named configuration profiles
     base_url: https://example.com
     db_password: prod-secret
 ```
+
+Browser viewport semantics deliberately differ by execution mode. Headless
+runs use `defaults.viewport`, overridden for one invocation by `duhem run
+--viewport WIDTHxHEIGHT`, and fall back to the declared 1280×720 compatibility
+default. This keeps CI screenshots reproducible. Headed runs ignore the fixed
+dimensions, start maximized, and use Playwright's `viewport: null` so page
+layout follows and reflows with the real window. Their screenshots therefore
+depend on the operator's monitor, which is appropriate for interactive
+debugging but not reproducible evidence. Every browser-backed run records the
+effective fixed dimensions or the headed window-tracking mode in its
+`run_started` evidence header; page-free and legacy runs omit it.
 
 Leaves consume suite inputs by declaring `inputs: { base_url: { inherit: true }, db_password: { inherit: true, secret: true } }`. Values resolve from `--inputs` → selected `profiles:` entry → the manifest declaration's process `env:` → its `default:`, and the manifest declaration's `type` is enforced. `inherit: true` rejects a leaf-local `type:` or `default:`. A manifest input not inherited by any leaf produces an authoring warning, not an error. `secret: true` still cannot be combined with `default:`.
 

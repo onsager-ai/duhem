@@ -12,7 +12,7 @@ use duhem_dashboard::{EvidenceReader, events_to_jsonl, router};
 use duhem_evidence::{
     EventPayload, EvidenceWriter, ObservationValue, RunLineage, RunOrigin, RunScope,
     SecretRegistry, Store, Trace, VerdictState, replay, run_started_with_definition,
-    run_started_with_definition_and_lineage,
+    run_started_with_definition_and_lineage, run_started_with_viewport,
 };
 use http_body_util::BodyExt;
 use serde_json::Value;
@@ -540,6 +540,36 @@ async fn run_definition_is_served_verbatim_and_flagged_on_run_detail() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, yaml.as_bytes());
     assert_eq!(content_type, "application/x-yaml; charset=utf-8");
+}
+
+#[tokio::test]
+async fn run_detail_surfaces_recorded_viewport_metadata() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let run_id = "01J0000000000000000000000V";
+    let mut w = EvidenceWriter::begin(rw, run_id, "v.yml", BTreeMap::new())
+        .await
+        .unwrap();
+    w.append(run_started_with_viewport(
+        "v.yml",
+        BTreeMap::new(),
+        None,
+        RunLineage::default(),
+        Some(serde_json::json!({ "width": 1024, "height": 768 })),
+    ))
+    .await
+    .unwrap();
+    w.append(EventPayload::RunFinished {
+        verdict: Some(VerdictState::Pass),
+    })
+    .await
+    .unwrap();
+    w.finish().await.unwrap();
+
+    let (_, json) = get_json(EvidenceReader::new(ro), &format!("/api/runs/{run_id}")).await;
+    assert_eq!(
+        json["viewport"],
+        serde_json::json!({ "width": 1024, "height": 768 })
+    );
 }
 
 #[tokio::test]

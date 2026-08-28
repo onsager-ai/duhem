@@ -29,6 +29,9 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+
+## v0.3.0 — 2026-08-28
+
 - [clarifying] `just preflight` gates the branch merged with freshly fetched `origin/main`, refusing fetch failures and merge conflicts instead of reporting a branch-only green. (#474)
 - [clarifying] The runtime SIGTERM test waits for an explicit abort-ready handshake and reports child status and output on failure. (#469)
 - [clarifying] Lifecycle actions that run and return an error report missing observation, while genuine environmental precondition failures remain environment errors. (#452)

@@ -418,7 +418,7 @@ This content-based identification lets Duhem coexist with other YAML in the repo
 
 ### 10.3 Verification Definition structure
 
-Values like `$inputs.workspace_name` below are **runtime expressions** (§10.7). Substitution is whole-string only: a `with:` value that is *exactly* a bare `$…` reference (or a `$runtime.<fn>(…)` call) is resolved to its evaluated value; everything else passes through literally. `$pages.<page>.<element>` is the deliberate map-valued case: the locator node is spliced first, then any `$inputs.*` inside that node resolves in the leaf's context. There is no embedded `{{…}}` interpolation — to compose a scalar, use `$runtime.format(…)` / `$runtime.concat(…)` (§10.7), not string templating. Input `default:` values are taken literally and are never evaluated as expressions.
+Values like `$inputs.workspace_name` below are **runtime expressions** (§10.7). Substitution is whole-string only: a `$`-leading `with:` value must be a bare `$…` reference or a `$runtime.<fn>(…)` call and is resolved to its evaluated value; strings not beginning with `$` pass through literally. `$pages.<page>.<element>` is the deliberate map-valued case: the locator node is spliced first, then any `$inputs.*` inside that node resolves in the leaf's context. There is no embedded `{{…}}` interpolation — to compose a scalar, use `$runtime.format(…)` / `$runtime.concat(…)` (§10.7), not string templating. Input `default:` values are taken literally and are never evaluated as expressions.
 
 #### Inputs, acquired values, and secret masking
 
@@ -1049,6 +1049,14 @@ Assertions evaluate to `true`, `false`, or `inconclusive` (e.g., when timeouts h
 An `inconclusive` result always carries a cause, distinguishing "the check could not be evaluated" from a genuine `false`. The verdict-level catalog is closed at v1 and surfaces as `inconclusive:<cause>` (snake-case wire tokens): `timeout`, `missing_observation`, `environment_error`, `empty_aggregation`. The runtime evaluator tracks finer internal causes (missing input, missing env, type mismatch, invalid pattern, unknown runtime helper) that collapse into these when the judge aggregates the verdict (§7.6).
 
 ### 10.7 Runtime expressions
+
+A `with:` string whose first non-whitespace character is `$` is always
+treated as an expression. It must parse and evaluate successfully; Duhem
+never passes a malformed or unresolved `$`-leading value to an action as a
+literal string. Literal strings beginning with `$` are unsupported in v1.
+String literals inside expressions may use either single (`'…'`) or double
+(`"…"`) quotes. Neither form supports escape sequences; use the other quote
+form when the string must contain a quote character.
 
 Borrowed from Arazzo. References available in expressions:
 

@@ -87,6 +87,15 @@ pub fn validate_with_contract_outputs(
             SourcePathSegment::index(idx),
             SourcePathSegment::key("with"),
         ];
+        check_with_expression_syntax(
+            &step.with,
+            &mut source_path,
+            RefSite::StepWith {
+                step: step_name.clone(),
+            },
+            &v.source_map,
+            &mut errs,
+        );
         crate::source::walk_with_refs(&step.with, &mut source_path, &mut |expr, raw, path| {
             let location = v.source_map.scalar_location(path, raw);
             walk_checkable_paths(expr, &mut |path, arity| {
@@ -144,6 +153,15 @@ pub fn validate_with_contract_outputs(
             SourcePathSegment::index(idx),
             SourcePathSegment::key("with"),
         ];
+        check_with_expression_syntax(
+            &step.with,
+            &mut source_path,
+            RefSite::StepWith {
+                step: step_name.clone(),
+            },
+            &v.source_map,
+            &mut errs,
+        );
         crate::source::walk_with_refs(&step.with, &mut source_path, &mut |expr, raw, path| {
             let location = v.source_map.scalar_location(path, raw);
             walk_checkable_paths(expr, &mut |path, arity| {
@@ -214,6 +232,27 @@ pub fn validate_with_contract_outputs(
     }
 
     if errs.is_empty() { Ok(()) } else { Err(errs) }
+}
+
+pub(crate) fn check_with_expression_syntax(
+    with: &serde_yml::Value,
+    source_path: &mut Vec<SourcePathSegment>,
+    site: RefSite,
+    source_map: &crate::SourceMap,
+    errs: &mut Vec<ValidationError>,
+) {
+    crate::source::walk_with_strings(with, source_path, &mut |raw, path| {
+        if raw.trim_start().starts_with('$')
+            && let Err(error) = crate::expr::parse(raw)
+        {
+            errs.push(ValidationError::InvalidWithExpression {
+                raw: raw.to_string(),
+                context: error.to_string(),
+                site: site.clone(),
+                location: source_map.scalar_location(path, raw),
+            });
+        }
+    });
 }
 
 /// Like [`validate_with_contract_outputs`], but also rejects action names
@@ -637,6 +676,30 @@ fn validate_check(
         let mut source_path = crate::source::check_path(criterion_index, check_index, "steps");
         source_path.push(SourcePathSegment::index(idx));
         source_path.push(SourcePathSegment::key("with"));
+        crate::source::walk_with_strings(&s.with, &mut source_path, &mut |raw, path| {
+            if raw.trim_start().starts_with('$')
+                && let Err(error) = crate::expr::parse(raw)
+            {
+                let location = source_context_matches
+                    .then(|| {
+                        source_map.step_with_location(
+                            s,
+                            criterion_index,
+                            check_index,
+                            idx,
+                            path,
+                            raw,
+                        )
+                    })
+                    .flatten();
+                errs.push(ValidationError::InvalidWithExpression {
+                    raw: raw.to_string(),
+                    context: error.to_string(),
+                    site: site.clone(),
+                    location,
+                });
+            }
+        });
         crate::source::walk_with_refs(&s.with, &mut source_path, &mut |expr, raw, path| {
             let location = source_context_matches
                 .then(|| {
@@ -2375,6 +2438,33 @@ criteria:
             .map(|e| e.to_string())
             .unwrap();
         assert!(msg.contains("step `login` with:"), "got: {msg}");
+    }
+
+    #[test]
+    fn malformed_dollar_leading_with_value_fails_with_location() {
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: invoke
+            uses: cli/invoke
+            with:
+              command: $inputs.foo bar
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        let error = errs
+            .iter()
+            .find(|error| matches!(error, ValidationError::InvalidWithExpression { .. }))
+            .expect("malformed expression error");
+        assert!(error.to_string().contains("$inputs.foo bar"));
+        let location = error.location().expect("source location");
+        assert_eq!((location.line, location.column), (12, 24));
     }
 
     #[test]

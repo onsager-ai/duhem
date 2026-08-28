@@ -64,10 +64,15 @@ fn expr_parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
                     .map_err(|e| Rich::custom(span, format!("bad int `{s}`: {e}")))
             });
 
-        let string_lit = just('"')
+        let double_quoted = just('"')
             .ignore_then(none_of('"').repeated().to_slice())
             .then_ignore(just('"'))
             .map(|s: &str| Literal::Str(s.to_string()));
+        let single_quoted = just('\'')
+            .ignore_then(none_of('\'').repeated().to_slice())
+            .then_ignore(just('\''))
+            .map(|s: &str| Literal::Str(s.to_string()));
+        let string_lit = choice((double_quoted, single_quoted));
 
         let literal = choice((bool_lit, float_lit, int_lit, string_lit)).map(Expr::Lit);
 
@@ -353,6 +358,44 @@ mod tests {
                 args: vec![
                     Expr::Lit(Literal::Str("x".into())),
                     Expr::Lit(Literal::Int(1)),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn parses_both_string_quote_forms() {
+        assert_eq!(
+            p(r#"$runtime.format("{}", "value")"#),
+            p("$runtime.format('{}', 'value')")
+        );
+    }
+
+    #[test]
+    fn each_string_quote_form_may_contain_the_other_quote() {
+        assert_eq!(
+            p(r#"$runtime.format("{}", "it's")"#),
+            Expr::Call {
+                path: Path {
+                    root: PathRoot::Runtime,
+                    segments: vec!["format".into()],
+                },
+                args: vec![
+                    Expr::Lit(Literal::Str("{}".into())),
+                    Expr::Lit(Literal::Str("it's".into())),
+                ],
+            }
+        );
+        assert_eq!(
+            p(r#"$runtime.format('{}', 'say "hello"')"#),
+            Expr::Call {
+                path: Path {
+                    root: PathRoot::Runtime,
+                    segments: vec!["format".into()],
+                },
+                args: vec![
+                    Expr::Lit(Literal::Str("{}".into())),
+                    Expr::Lit(Literal::Str("say \"hello\"".into())),
                 ],
             }
         );

@@ -5,9 +5,9 @@
 //! `with: { url: $inputs.fixture_url }` actually executable, we
 //! resolve any string value that parses as an `Expr::Path` against
 //! the current `EvalContext` and substitute the evaluated scalar in
-//! place. Strings that don't start with `$`, or that don't parse as
-//! a path/runtime call, pass through unchanged — the substitution
-//! is conservative.
+//! place. Strings that don't start with `$` pass through unchanged;
+//! `$`-leading strings are expression-shaped author intent, so a parse
+//! failure is a hard error and never reaches the action as a literal.
 //!
 //! This is intentionally narrower than full string interpolation
 //! (e.g. `"prefix-{{ $inputs.x }}-suffix"`). The spec on issue #15
@@ -34,6 +34,21 @@ use crate::eval::{EvalContext, eval_to_value};
 pub struct UnresolvedWith {
     pub reference: String,
     pub context: Option<String>,
+}
+
+impl UnresolvedWith {
+    pub(crate) fn rendered_context(&self) -> String {
+        self.context
+            .as_deref()
+            .map(|context| {
+                if context.starts_with("expression parse error:") {
+                    format!(" ({context})")
+                } else {
+                    format!(" (evaluating `{context}`)")
+                }
+            })
+            .unwrap_or_default()
+    }
 }
 
 /// First whole-string `$pages.<page>.<element>` reference in an
@@ -132,8 +147,14 @@ fn try_resolve(s: &str, ctx: &dyn EvalContext) -> Resolution {
     if !s.trim_start().starts_with('$') {
         return Resolution::Passthrough;
     }
-    let Ok(expr) = duhem_schema::expr::parse(s) else {
-        return Resolution::Passthrough;
+    let expr = match duhem_schema::expr::parse(s) {
+        Ok(expr) => expr,
+        Err(error) => {
+            return Resolution::Unresolved(UnresolvedWith {
+                reference: s.trim().to_string(),
+                context: Some(error.to_string()),
+            });
+        }
     };
     // Allow only path / runtime-call expressions — anything else
     // (boolean ops, comparisons) was clearly authored as an
@@ -320,6 +341,34 @@ mod tests {
         // A bare ref is its own culprit — no enclosing context.
         assert_eq!(err.reference, "$inputs.unset");
         assert_eq!(err.context, None);
+    }
+
+    #[test]
+    fn malformed_dollar_leading_value_is_an_error() {
+        let run = run_with(&[]);
+        let ctx = RunContext::new(&run);
+        let mut with: serde_yml::Value =
+            serde_yml::from_str("{ command: '$inputs.foo bar' }").unwrap();
+        let err = substitute_with(&mut with, &ctx).unwrap_err();
+        assert_eq!(err.reference, "$inputs.foo bar");
+        assert!(
+            err.context
+                .as_deref()
+                .is_some_and(|context| context.starts_with("expression parse error:")),
+            "got: {:?}",
+            err.context
+        );
+    }
+
+    #[test]
+    fn non_leading_dollar_and_punctuation_pass_through_byte_for_byte() {
+        let run = run_with(&[]);
+        let ctx = RunContext::new(&run);
+        let mut with: serde_yml::Value =
+            serde_yml::from_str(r#"{ command: 'echo $inputs.foo {"quoted"}' }"#).unwrap();
+        let before = with.clone();
+        substitute_with(&mut with, &ctx).expect("plain strings pass through");
+        assert_eq!(with, before);
     }
 
     #[test]

@@ -25,6 +25,31 @@ fn typed_inputs_fixture_parses_and_validates() {
 }
 
 #[test]
+fn with_expressions_using_both_quote_forms_round_trip() {
+    let source = r#"
+verification: quote-forms
+criteria:
+  - id: AC-1
+    description: both expression string quote forms survive serialization
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: cli/invoke
+            with:
+              command:
+                - $runtime.format("{}", "it's")
+                - $runtime.format('{}', 'say "hello"')
+        assertions: ["true"]
+"#;
+    let definition = VerificationDefinition::from_yaml_str(source).expect("parse");
+    validate(&definition).expect("validate both quote forms");
+    let serialized = definition.to_yaml_string().expect("serialize");
+    let reparsed = VerificationDefinition::from_yaml_str(&serialized).expect("reparse");
+    validate(&reparsed).expect("revalidate both quote forms");
+    assert_eq!(definition, reparsed);
+}
+
+#[test]
 fn worked_example_round_trips_byte_equivalent() {
     let v = VerificationDefinition::from_yaml_str(POSITIVE).expect("parse");
     let out = v.to_yaml_string().expect("serialize");

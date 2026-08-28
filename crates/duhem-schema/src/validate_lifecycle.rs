@@ -62,6 +62,15 @@ pub(crate) fn validate_fixtures(
                 SourcePathSegment::index(index),
                 SourcePathSegment::key("with"),
             ];
+            crate::validate::check_with_expression_syntax(
+                &step.with,
+                &mut path,
+                crate::validate::RefSite::StepWith {
+                    step: step_label(step, index),
+                },
+                &v.source_map,
+                errs,
+            );
             crate::source::walk_with_refs(&step.with, &mut path, &mut |expr, raw, source_path| {
                 expr.walk_paths(|reference| {
                     if reference.root == PathRoot::Fixture {
@@ -100,6 +109,15 @@ pub(crate) fn validate_fixtures(
                 SourcePathSegment::index(index),
                 SourcePathSegment::key("with"),
             ];
+            crate::validate::check_with_expression_syntax(
+                &step.with,
+                &mut path,
+                crate::validate::RefSite::StepWith {
+                    step: step_label(step, index),
+                },
+                &v.source_map,
+                errs,
+            );
             crate::source::walk_with_refs(&step.with, &mut path, &mut |expr, raw, source_path| {
                 let location = v.source_map.scalar_location(source_path, raw);
                 expr.walk_paths(|reference| {

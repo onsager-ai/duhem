@@ -323,11 +323,8 @@ async fn run_lifecycle_steps(
         } else if gate_reason.is_none() {
             substitute_with(&mut resolved_with, &ctx).err().map(|u| {
                 EngineError::UnresolvedReference {
+                    context: u.rendered_context(),
                     reference: u.reference,
-                    context: u
-                        .context
-                        .map(|c| format!(" (evaluating `{c}`)"))
-                        .unwrap_or_default(),
                     step: step_label(step, idx),
                 }
             })

@@ -15,6 +15,7 @@ pub mod jsonschema;
 mod leaf_context;
 pub mod manifest;
 mod manifest_compose;
+mod manifest_error;
 mod manifest_filter;
 mod manifest_inputs;
 mod manifest_path;

@@ -163,6 +163,24 @@ lint:
 # Fast inner-loop gate: lint + test. Green here does NOT imply green CI.
 check: lint test
 
+# Refuse to gate a dirty tree.
+#
+# `schema-changelog-check` and `schema-drift` both compare *committed*
+# state against origin/main, so on uncommitted work they see no change
+# and pass vacuously. A green `preflight` would then mean nothing —
+# which is exactly how #455 reached CI with a missing CHANGELOG entry
+# after passing locally.
+_committed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -n "$(git status --porcelain)" ]]; then
+        printf 'preflight: working tree is dirty — commit first.\n' >&2
+        printf '  The changelog and schema-drift checks compare committed state,\n' >&2
+        printf '  so a green result on uncommitted work is meaningless.\n\n' >&2
+        git status --short >&2
+        exit 1
+    fi
+
 # Run Duhem's own self-verification suite against a freshly built CLI.
 self-verify:
     #!/usr/bin/env bash
@@ -179,7 +197,7 @@ self-verify:
         --inputs duhem_bin="$PWD/target/release/duhem"
 
 # Full CI-equivalent gate. Slower than `check` on purpose; run before pushing.
-preflight: lint test self-verify
+preflight: _committed lint test self-verify
     # The strict form of the changelog check, as CI runs it.
     cargo run -p xtask --quiet -- schema-changelog-check
     # docs §10 yaml blocks parse and validate against the live schema.

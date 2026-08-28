@@ -116,7 +116,12 @@ fn render() -> String {
 
 /// Workspace root = the parent of `xtask/` (this crate's manifest dir).
 fn workspace_root() -> Result<PathBuf> {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    // Runtime lookup, not `env!`: a build-time constant bakes in whichever
+    // tree compiled the binary, which is wrong the moment a target dir is
+    // shared between trees — as `preflight`'s merge preview does (#476).
+    let manifest = std::env::var("CARGO_MANIFEST_DIR")
+        .context("CARGO_MANIFEST_DIR not set; run via `cargo run -p xtask`")?;
+    PathBuf::from(manifest)
         .parent()
         .map(Path::to_path_buf)
         .context("could not resolve the workspace root from xtask/")

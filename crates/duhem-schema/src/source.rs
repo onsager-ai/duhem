@@ -72,6 +72,26 @@ impl PartialEq for SourceMap {
 }
 
 impl SourceMap {
+    /// Location of a check step's authored `with:` mapping.
+    #[doc(hidden)]
+    pub fn check_step_with_location(
+        &self,
+        criterion_index: usize,
+        check_index: usize,
+        step_index: usize,
+    ) -> Option<SourceLocation> {
+        let path = vec![
+            SourcePathSegment::key("criteria"),
+            SourcePathSegment::index(criterion_index),
+            SourcePathSegment::key("checks"),
+            SourcePathSegment::index(check_index),
+            SourcePathSegment::key("steps"),
+            SourcePathSegment::index(step_index),
+            SourcePathSegment::key("with"),
+        ];
+        self.nodes.get(&path).map(|node| node.location)
+    }
+
     pub(crate) fn from_yaml(source: &str) -> Self {
         let mut map = Self::default();
         let mut parser = Parser::new(Cow::Borrowed(source.as_bytes()));

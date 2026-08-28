@@ -398,6 +398,17 @@ async function dispatch(req) {
     case 'count':
       return await page(req).locator(req.selector).count()
 
+    case 'extract':
+      return await page(req).locator(req.selector).evaluateAll((elements, spec) =>
+        elements.map(element => {
+          if (spec.source === 'attribute') return element.getAttribute(spec.name)
+          if (spec.source === 'property') {
+            const value = element[spec.name]
+            return value === undefined ? null : value
+          }
+          return element.innerText
+        }), { source: req.source, name: req.name })
+
     case 'url':
       return page(req).url()
 

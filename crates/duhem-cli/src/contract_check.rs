@@ -26,23 +26,43 @@ pub(crate) fn field_errors(def: &VerificationDefinition) -> Vec<String> {
     let mut errs = Vec::new();
     for (i, s) in def.setup.iter().enumerate() {
         check_step(s, &format!("setup step {i}"), &mut errs);
+        check_field_source(s, &format!("setup step {i}"), "", &mut errs);
     }
     for (i, s) in def.teardown.iter().enumerate() {
         check_step(s, &format!("teardown step {i}"), &mut errs);
+        check_field_source(s, &format!("teardown step {i}"), "", &mut errs);
     }
     for (name, fixture) in &def.fixtures {
         for (i, step) in fixture.up.iter().enumerate() {
             check_step(step, &format!("fixture `{name}` up step {i}"), &mut errs);
+            check_field_source(
+                step,
+                &format!("fixture `{name}` up step {i}"),
+                "",
+                &mut errs,
+            );
         }
         for (i, step) in fixture.down.iter().enumerate() {
             check_step(step, &format!("fixture `{name}` down step {i}"), &mut errs);
+            check_field_source(
+                step,
+                &format!("fixture `{name}` down step {i}"),
+                "",
+                &mut errs,
+            );
         }
     }
-    for c in &def.criteria {
-        for ch in &c.checks {
+    for (criterion_index, c) in def.criteria.iter().enumerate() {
+        for (check_index, ch) in c.checks.iter().enumerate() {
             for (i, s) in ch.steps.iter().enumerate() {
                 let site = format!("criterion `{}` / check `{}` / step {i}", c.id, ch.id);
                 check_step(s, &site, &mut errs);
+                let location = def
+                    .source_map
+                    .check_step_with_location(criterion_index, check_index, i)
+                    .map(|at| format!(" at {}:{}", at.line, at.column))
+                    .unwrap_or_default();
+                check_field_source(s, &site, &location, &mut errs);
             }
             check_judgment(c, ch, &mut errs);
         }
@@ -119,6 +139,14 @@ fn check_step(s: &Step, site: &str, errs: &mut Vec<String>) {
                 ));
             }
         }
+    }
+}
+
+fn check_field_source(s: &Step, site: &str, location: &str, errs: &mut Vec<String>) {
+    if matches!(s.uses.as_deref(), Some("ui/extract" | "ui/assert-element"))
+        && let Err(error) = duhem_actions::validate_field_source(s.uses_name(), &s.with)
+    {
+        errs.push(format!("{site}{location}: `{}` {error}", s.uses_name()));
     }
 }
 
@@ -318,6 +346,23 @@ mod tests {
                 .any(|m| m.contains("`expected` = `shown`")),
             "{:?}",
             field_errors(&d)
+        );
+    }
+
+    #[test]
+    fn extract_source_rule_and_closed_field_table_are_validated() {
+        let missing = vd("          - { uses: ui/extract, with: { locator: { css: h1 } } }");
+        assert!(
+            field_errors(&missing)
+                .iter()
+                .any(|e| e.contains("exactly one") && e.contains(" at "))
+        );
+        let unknown =
+            vd("          - { uses: ui/extract, with: { locator: { css: h1 }, field: mystery } }");
+        assert!(
+            field_errors(&unknown)
+                .iter()
+                .any(|e| e.contains("attribute:"))
         );
     }
 

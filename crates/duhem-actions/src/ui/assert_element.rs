@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 
+use super::field::FieldSource;
 use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT};
 use crate::browser::ElementState;
 use crate::error::ActionError;
@@ -26,13 +27,66 @@ use crate::locator::{ExistenceState, Locator};
 use crate::playwright::to_selector;
 use crate::with::TimeoutSpec;
 
+#[derive(Debug)]
+enum Predicate {
+    State(ExistenceState),
+    Field {
+        source: FieldSource,
+        equals: serde_json::Value,
+    },
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct With {
+struct Expect {
+    #[serde(flatten)]
+    source: FieldSource,
+    equals: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WithWire {
     locator: Locator,
-    expected: ExistenceState,
+    #[serde(default)]
+    expected: Option<ExistenceState>,
+    #[serde(default)]
+    expect: Option<Expect>,
     #[serde(default)]
     timeout: Option<TimeoutSpec>,
+}
+
+#[derive(Debug)]
+struct With {
+    locator: Locator,
+    predicate: Predicate,
+    timeout: Option<TimeoutSpec>,
+}
+
+impl<'de> Deserialize<'de> for With {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = WithWire::deserialize(deserializer)?;
+        let predicate = match (wire.expected, wire.expect) {
+            (Some(state), None) => Predicate::State(state),
+            (None, Some(expect)) => Predicate::Field {
+                source: expect.source,
+                equals: expect.equals,
+            },
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "ui/assert-element requires exactly one of `expected` or `expect`",
+                ));
+            }
+        };
+        Ok(Self {
+            locator: wire.locator,
+            predicate,
+            timeout: wire.timeout,
+        })
+    }
 }
 
 pub struct AssertElement;
@@ -52,14 +106,15 @@ impl Action for AssertElement {
                 FieldSpec::required("locator"),
                 FieldSpec::enum_of(
                     "expected",
-                    true,
+                    false,
                     &["exists", "not_exists", "visible", "hidden"],
                 ),
+                FieldSpec::optional("expect"),
                 FieldSpec::optional("timeout"),
             ],
             outputs: vec!["satisfied", "count"],
             secret_outputs: vec![],
-            example: "- uses: ui/assert-element\n  with: { locator: { role: heading, name: \"Welcome\" }, expected: visible }",
+            example: "- uses: ui/assert-element\n  with: { locator: { role: checkbox, name: \"Receive updates\" }, expect: { field: checked, equals: true } }",
         }
     }
 
@@ -77,17 +132,29 @@ impl Action for AssertElement {
         let timeout: Duration = with.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
         let selector = to_selector(&with.locator);
 
-        let satisfied = match page
-            .wait_for_selector(
-                &selector,
-                map_state(with.expected),
-                timeout.as_millis() as f64,
-            )
-            .await
-        {
-            Ok(()) => true,
-            Err(e) if super::is_timeout_message(&e.to_string()) => false,
-            Err(e) => return Err(ActionError::Playwright(format!("ui/assert-element: {e}"))),
+        let satisfied = match &with.predicate {
+            Predicate::State(expected) => match page
+                .wait_for_selector(&selector, map_state(*expected), timeout.as_millis() as f64)
+                .await
+            {
+                Ok(()) => true,
+                Err(e) if super::is_timeout_message(&e.to_string()) => false,
+                Err(e) => return Err(ActionError::Playwright(format!("ui/assert-element: {e}"))),
+            },
+            Predicate::Field { source, equals } => {
+                let values = page
+                    .extract(&selector, source.kind(), source.name())
+                    .await
+                    .map_err(|e| ActionError::Playwright(format!("ui/assert-element: {e}")))?;
+                if values.len() > 1 {
+                    return Err(ActionError::Playwright(format!(
+                        "ui/assert-element: locator {} matched {} elements; expected exactly one",
+                        with.locator.describe(),
+                        values.len()
+                    )));
+                }
+                values.first().is_some_and(|actual| actual == equals)
+            }
         };
 
         // `count` reflects matches at observation time. Even when the
@@ -128,7 +195,10 @@ expected: visible
 timeout: 2s
 "#;
         let v: With = serde_yml::from_str(yaml).unwrap();
-        assert_eq!(v.expected, ExistenceState::Visible);
+        assert!(matches!(
+            v.predicate,
+            Predicate::State(ExistenceState::Visible)
+        ));
         let d: Duration = v.timeout.unwrap().into();
         assert_eq!(d, Duration::from_secs(2));
         assert_eq!(v.locator.text.as_deref(), Some("Created"));

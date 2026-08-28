@@ -31,9 +31,10 @@ use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::routing::get;
+use base64::Engine as _;
 use duhem_actions::{
-    Action, ActionCtx, AssertElement, AssertState, AssertUrl, Click, Navigate, Outcome, RunBrowser,
-    Select, Type,
+    Action, ActionCtx, AssertElement, AssertState, AssertUrl, Click, Extract, Navigate, Outcome,
+    RunBrowser, Select, Type,
 };
 use serde_yml::Value;
 use tokio::net::TcpListener;
@@ -51,6 +52,7 @@ const STATIC_HTML: &str = r#"<!doctype html>
     ">Create</button>
 
     <form action="/thanks" method="get">
+      <label><input id="updates" type="checkbox">Receive updates</label>
       <label for="name">Name</label>
       <input id="name" name="name" type="text" aria-label="Name">
 
@@ -69,6 +71,8 @@ const STATIC_HTML: &str = r#"<!doctype html>
       <input id="search" name="search" type="text" placeholder="Search projects">
 
       <button id="save" data-testid="save-btn" type="button">Save</button>
+      <a class="item" href="/first">First</a>
+      <a class="item" href="/second">Second</a>
 
       <button type="submit">Submit</button>
     </form>
@@ -104,6 +108,13 @@ async fn start_fixture() -> Fixture {
 
 fn url(fx: &Fixture) -> String {
     format!("http://{}/", fx.addr)
+}
+
+fn static_data_url() -> String {
+    format!(
+        "data:text/html;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(STATIC_HTML)
+    )
 }
 
 async fn fresh_browser() -> Arc<RunBrowser> {
@@ -508,6 +519,102 @@ text: "crawlab"
         .await
         .unwrap();
     assert_eq!(search, "crawlab");
+}
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
+async fn extract_distinguishes_attribute_property_counts_and_direct_assertion() {
+    let run = fresh_browser().await;
+    let check = run.open_check().await.unwrap();
+    let ctx = ActionCtx {
+        page: Some(&check.page),
+        step_index: 0,
+    };
+    Navigate
+        .invoke(&ctx, &yaml(&format!("url: {}", static_data_url())))
+        .await
+        .unwrap();
+    Click
+        .invoke(
+            &ctx,
+            &yaml(r#"{ role: checkbox, name: "Receive updates" }"#),
+        )
+        .await
+        .unwrap();
+
+    let property = Extract
+        .invoke(
+            &ctx,
+            &yaml("locator: { css: '#updates' }\nproperty: checked"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        property.outputs.get("value"),
+        Some(&serde_json::json!(true))
+    );
+    let attribute = Extract
+        .invoke(
+            &ctx,
+            &yaml("locator: { css: '#updates' }\nattribute: checked"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        attribute.outputs.get("value"),
+        Some(&serde_json::Value::Null)
+    );
+    assert_eq!(
+        attribute.outputs.get("found"),
+        Some(&serde_json::json!(true))
+    );
+
+    let missing = Extract
+        .invoke(&ctx, &yaml("locator: { css: '.missing' }\nfield: text"))
+        .await
+        .unwrap();
+    assert_eq!(
+        missing.outputs.get("found"),
+        Some(&serde_json::json!(false))
+    );
+    assert_eq!(missing.outputs.get("value"), Some(&serde_json::Value::Null));
+
+    let all = Extract
+        .invoke(
+            &ctx,
+            &yaml("locator: { css: '.item' }\nfield: href\nall: true"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        all.outputs.get("values"),
+        Some(&serde_json::json!(["/first", "/second"]))
+    );
+    assert_eq!(all.outputs.get("count"), Some(&serde_json::json!(2)));
+    let empty_all = Extract
+        .invoke(
+            &ctx,
+            &yaml("locator: { css: '.missing' }\nfield: text\nall: true"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        empty_all.outputs.get("values"),
+        Some(&serde_json::json!([]))
+    );
+    assert_eq!(empty_all.outputs.get("count"), Some(&serde_json::json!(0)));
+    let ambiguous = Extract
+        .invoke(&ctx, &yaml("locator: { css: '.item' }\nfield: text"))
+        .await
+        .unwrap_err();
+    assert!(ambiguous.to_string().contains("matched 2 elements"));
+    assert!(ambiguous.to_string().contains("css .item"));
+
+    let direct = AssertElement.invoke(&ctx, &yaml("locator: { role: checkbox, name: 'Receive updates' }\nexpect: { field: checked, equals: true }")).await.unwrap();
+    assert_eq!(
+        direct.outputs.get("satisfied"),
+        Some(&serde_json::json!(true))
+    );
 }
 
 #[tokio::test]

@@ -2132,6 +2132,33 @@ criteria:
     }
 
     #[tokio::test]
+    async fn ui_extract_authored_value_secret_is_masked_in_evidence() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        let secret = "sensitive-dom-extraction";
+        engine.register_test_action(Box::new(
+            StubAction::new("ui/extract", Outcome::Ok)
+                .with_output("value", serde_json::json!(secret)),
+        ));
+        let v = def(r#"
+verification: extracted secret
+criteria:
+  - id: AC-1
+    description: An extracted DOM value can be protected from evidence.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: extracted
+            uses: ui/extract
+            secret_outputs: [value]
+        assertions: ["true"]
+"#);
+        engine.run(&v, BTreeMap::new()).await.unwrap();
+        let wire = serde_json::to_string(&read_only_run_events(&engine).await).unwrap();
+        assert!(!wire.contains(secret));
+        assert!(wire.contains("[redacted:extracted.value]"));
+    }
+
+    #[tokio::test]
     async fn deep_array_secret_path_registers_its_scalar_leaf() {
         let (mut engine, _tmp) = engine_for_test().await;
         let token = "deep-array-secret-value";

@@ -755,6 +755,20 @@ impl Page {
         Ok(v.as_u64().unwrap_or(0) as u32)
     }
 
+    pub async fn extract(
+        &self,
+        selector: &str,
+        source: &str,
+        name: Option<&str>,
+    ) -> Result<Vec<Value>, PwError> {
+        let mut req = self.p();
+        req["selector"] = json!(selector);
+        req["source"] = json!(source);
+        req["name"] = json!(name);
+        let value = self.conn.request("extract", req).await?;
+        serde_json::from_value(value).map_err(|e| PwError(format!("extract result decode: {e}")))
+    }
+
     pub async fn url(&self) -> Result<String, PwError> {
         let v = self.conn.request("url", self.p()).await?;
         Ok(v.as_str().unwrap_or("").to_string())

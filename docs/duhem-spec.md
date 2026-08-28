@@ -1018,11 +1018,34 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 - `ui/click` — click an element (role-based locators preferred)
 - `ui/type` — type into an input
 - `ui/select` — select an option
-- `ui/assert-element` — observe whether an element exists/is visible/has text
+- `ui/assert-element` — judge existence/visibility with `expected:`, or directly judge an extracted field with `expect: { field: checked, equals: true }`
+- `ui/extract` — non-judging extraction of an attribute, live DOM property, or rendered `innerText`; exposes `value`, `found`, `count`, and (with `all: true`) DOM-ordered `values`
 - `ui/assert-url` — observe URL state
 - `ui/assert-state` — observe page-level state (authenticated, loaded, etc.)
 - `ui/capture-session` — capture cookies/local storage as a secret state value for later checks
 - `ui/wait` — wait for a fixed `duration` (`TimeoutSpec`, e.g. `500ms` or `2s`) without requiring a browser page. Prefer `ui/assert-element` with `timeout:`; fixed waits are a debugging and transitional-authoring escape hatch with a 60-second default ceiling that root-manifest `defaults.max_wait` may raise or lower.
+
+`ui/extract` selects exactly one source from `field:`, `attribute:`, `property:`, or
+`text: true`. Attributes describe markup and return `null` when absent; properties
+describe live state. Text uses `innerText`, so hidden content is omitted and rendered
+whitespace rules apply. `field:` is a closed lookup, never a heuristic:
+
+| `field:` | source |
+| --- | --- |
+| `checked`, `value`, `disabled` | DOM property |
+| `text` | `innerText` |
+| `href`, `class`, `id`, `title`, `alt` | HTML attribute |
+| `aria-*`, `data-*` | HTML attribute |
+
+Any other `field:` is invalid and must use explicit `attribute:` or `property:`
+intent. Single mode defaults to zero matches producing `found: false`, `value: null`,
+`count: 0`; one match produces its scalar; multiple matches are an ambiguity error.
+With `all: true`, `values` contains every scalar in DOM order and an empty match is
+`values: []`, `count: 0`. Property booleans remain booleans. The action emits no
+`satisfied`, so extraction errors are inconclusive. `secret_outputs: [value]` masks a
+sensitive observation. `ui/assert-element` accepts this same source vocabulary inside
+`expect:` with `equals:` for direct implicit judgment; extraction remains the path for
+later reuse and check-level assertions.
 
 **API actions**
 

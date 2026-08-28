@@ -1,0 +1,27 @@
+verification: UI extraction and direct field assertion
+spec_ref: https://github.com/onsager-ai/duhem/issues/445
+inputs:
+  base_url: { type: string, default: "http://127.0.0.1:8090" }
+criteria:
+  - id: AC-1
+    description: A verification can observe a concrete page value and judge it mechanically, either for later reuse or directly at the element.
+    checks:
+      - id: AC-1.1
+        description: Extract visible heading text from the real page and judge it at check level.
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.base_url }
+          - id: heading
+            uses: ui/extract
+            with: { locator: { css: h1 }, field: text }
+        assertions:
+          - matches: { value: $steps.heading.outputs.value, pattern: "^Welcome" }
+      - id: AC-1.2
+        description: Judge a checkbox's live checked state directly.
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.base_url }
+          - uses: ui/assert-element
+            with:
+              locator: { role: checkbox, name: "Receive updates" }
+              expect: { field: checked, equals: true }

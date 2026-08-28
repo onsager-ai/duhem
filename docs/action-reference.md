@@ -70,6 +70,27 @@ Click an element (locator shorthand fields, or a `locator` object).
   with: { locator: { role: button, name: "Save" } }
 ```
 
+### `ui/extract`
+
+Extract an attribute, DOM property, or rendered text from matching elements.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `locator` | yes | — |
+| `field` | no | — |
+| `attribute` | no | — |
+| `property` | no | — |
+| `text` | no | — |
+| `all` | no | — |
+
+**outputs:** `value`, `found`, `count`, `values`
+
+```yaml
+- id: heading
+  uses: ui/extract
+  with: { locator: { css: h1 }, field: text }
+```
+
 ### `ui/type`
 
 Type text into an element.
@@ -112,14 +133,15 @@ Assert an element reaches an existence/visibility state within a deadline.
 | `with:` field | required | values |
 |---|:---:|---|
 | `locator` | yes | — |
-| `expected` | yes | `exists` \| `not_exists` \| `visible` \| `hidden` |
+| `expected` | no | `exists` \| `not_exists` \| `visible` \| `hidden` |
+| `expect` | no | — |
 | `timeout` | no | — |
 
 **outputs:** `satisfied`, `count`
 
 ```yaml
 - uses: ui/assert-element
-  with: { locator: { role: heading, name: "Welcome" }, expected: visible }
+  with: { locator: { role: checkbox, name: "Receive updates" }, expect: { field: checked, equals: true } }
 ```
 
 ### `ui/assert-url`

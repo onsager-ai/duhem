@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] `duhem-schema`'s manifest load-error vocabulary moves into `manifest_error.rs`; `manifest.rs` returns under the per-file token budget without an exemption. Public paths are unchanged. (#472)
 - [additive] UI locators accept a raw `xpath` primary strategy, including inline `ui/click` locators. (#462)
 - [breaking] `$`-leading `with:` values must parse as expressions before validation or execution, and expression string literals accept single or double quotes. (#461)
 - [clarifying] `duhem run <directory>` discovers the nearest ancestor manifest and runs only its entries beneath that directory, preserving manifest context and rejecting an empty selection. (#464)

@@ -30,6 +30,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 
 - [clarifying] A semantic validation error on a step that follows a multi-step `flows:` invocation now reports its authored `file:line:col` instead of falling back to the filename alone. (#408)
+- [clarifying] `duhem-schema`'s validation error vocabulary and lifecycle-surface validators move into `validate_error.rs` and `validate_lifecycle.rs`; `validate.rs` now meets the per-file token budget without an exemption. Public paths are unchanged. (#411)
 - [additive] `duhem run` discovers `.env` values for declared `env:` inputs without overriding exported variables, adds `--env-file` / `--no-env-file`, and supports the operational `DUHEM_SLOW_MO` browser delay. (#442)
 - [additive] Verification Definitions support per-check `fixtures:` requested through `needs:`, with isolated output-backed cleanup and attributed lifecycle evidence. (#449)
 - [additive] `setup:` and `teardown:` steps accept value-based `if:` expressions with static reference validation and fail-closed evaluation; check-step expressions remain rejected. (#440)

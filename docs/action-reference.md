@@ -56,6 +56,7 @@ Click an element (locator shorthand fields, or a `locator` object).
 | `testid` | no | — |
 | `placeholder` | no | — |
 | `css` | no | — |
+| `xpath` | no | — |
 | `name` | no | — |
 | `text` | no | — |
 | `scope` | no | — |

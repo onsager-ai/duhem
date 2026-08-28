@@ -27,8 +27,8 @@ fn fixture_parses_at_schema_layer() {
     let def = VerificationDefinition::from_yaml_str(FIXTURE).expect("parse");
     assert_eq!(def.verification, "Static page smoke");
     // AC-1 shipped with #12; AC-2 was added in #37 to exercise the
-    // rest-of-slice ui/* actions on the same fixture.
-    assert_eq!(def.criteria.len(), 2);
+    // rest-of-slice ui/* actions; AC-3 exercises XPath upward traversal.
+    assert_eq!(def.criteria.len(), 3);
     assert_eq!(def.criteria[0].id, "AC-1");
     assert_eq!(def.criteria[0].checks.len(), 1);
     assert_eq!(def.criteria[0].checks[0].steps.len(), 3);
@@ -57,6 +57,23 @@ fn fixture_parses_at_schema_layer() {
             "ui/assert-state",
         ]
     );
+
+    let ac3_steps = &def.criteria[2].checks[0].steps;
+    assert_eq!(def.criteria[2].id, "AC-3");
+    let xpath_with: AssertWithShape =
+        serde_yml::from_value(ac3_steps[1].with.clone()).expect("XPath assert-element");
+    assert_eq!(
+        xpath_with.locator.xpath.as_deref(),
+        Some("//button[@id='save']/ancestor::form")
+    );
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AssertWithShape {
+    locator: Locator,
+    expected: ExistenceState,
+    timeout: Option<String>,
 }
 
 #[test]
@@ -74,14 +91,6 @@ fn each_step_with_deserializes_into_action_with() {
         role: String,
         name: Option<String>,
     }
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct AssertWith {
-        locator: Locator,
-        expected: ExistenceState,
-        timeout: Option<String>,
-    }
-
     let def = VerificationDefinition::from_yaml_str(FIXTURE).unwrap();
     let steps = &def.criteria[0].checks[0].steps;
 
@@ -92,7 +101,7 @@ fn each_step_with_deserializes_into_action_with() {
     assert_eq!(click.role, "button");
     assert_eq!(click.name.as_deref(), Some("Create"));
 
-    let assertion: AssertWith =
+    let assertion: AssertWithShape =
         serde_yml::from_value(steps[2].with.clone()).expect("assert-element");
     assert_eq!(assertion.expected, ExistenceState::Visible);
     assert_eq!(assertion.locator.role.as_deref(), Some("alert"));

@@ -1,7 +1,7 @@
 //! `Locator` — how UI actions point at an element on the page.
 //!
 //! Exactly one *primary strategy* selects the element —
-//! `role` | `label` | `testid` | `placeholder` | `css` | standalone
+//! `role` | `label` | `testid` | `placeholder` | `css` | `xpath` | standalone
 //! `text` — mirroring the Playwright `getBy*` family. `name` refines
 //! `role` (accessible-name match); `text` refines a non-text primary
 //! (`:has-text`) or, alone, is itself the primary (`getByText`);
@@ -48,6 +48,10 @@ pub struct Locator {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub css: Option<String>,
 
+    /// Raw XPath selector escape hatch. Primary strategy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub xpath: Option<String>,
+
     /// Accessible name. Refines `role` (exact match); requires `role`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -82,6 +86,8 @@ struct LocatorWire {
     #[serde(default)]
     css: Option<String>,
     #[serde(default)]
+    xpath: Option<String>,
+    #[serde(default)]
     name: Option<String>,
     #[serde(default)]
     text: Option<String>,
@@ -101,6 +107,7 @@ impl Locator {
             ("testid", self.testid.is_some()),
             ("placeholder", self.placeholder.is_some()),
             ("css", self.css.is_some()),
+            ("xpath", self.xpath.is_some()),
         ]
         .into_iter()
         .filter(|(_, present)| *present)
@@ -108,7 +115,7 @@ impl Locator {
         .collect();
         if set.len() > 1 {
             return Err(format!(
-                "locator has multiple primary strategies ({}); use exactly one of role/label/testid/placeholder/css",
+                "locator has multiple primary strategies ({}); use exactly one of role/label/testid/placeholder/css/xpath",
                 set.join(", ")
             ));
         }
@@ -116,7 +123,7 @@ impl Locator {
         // the primary (getByText).
         if set.is_empty() && self.text.is_none() {
             return Err(
-                "locator needs a primary strategy: one of role/label/testid/placeholder/css, or a standalone text"
+                "locator needs a primary strategy: one of role/label/testid/placeholder/css/xpath, or a standalone text"
                     .to_string(),
             );
         }
@@ -154,6 +161,9 @@ impl Locator {
         if let Some(css) = &self.css {
             parts.push(format!("css {css}"));
         }
+        if let Some(xpath) = &self.xpath {
+            parts.push(format!("xpath {xpath}"));
+        }
         if let Some(text) = &self.text {
             parts.push(format!("text \"{text}\""));
         }
@@ -178,6 +188,7 @@ impl TryFrom<LocatorWire> for Locator {
             testid: w.testid,
             placeholder: w.placeholder,
             css: w.css,
+            xpath: w.xpath,
             name: w.name,
             text: w.text,
             scope: w.scope,
@@ -243,6 +254,23 @@ mod tests {
         assert_eq!(c.css.as_deref(), Some("div.card > button"));
         let p: Locator = serde_yml::from_str(r#"placeholder: Search"#).unwrap();
         assert_eq!(p.placeholder.as_deref(), Some("Search"));
+    }
+
+    #[test]
+    fn parses_xpath_primary_and_rejects_a_second_primary() {
+        let xpath: Locator =
+            serde_yml::from_str(r#"{ xpath: "//button[@data-kind='primary']" }"#).unwrap();
+        assert_eq!(
+            xpath.xpath.as_deref(),
+            Some("//button[@data-kind='primary']")
+        );
+
+        let err =
+            serde_yml::from_str::<Locator>(r#"{ xpath: "//button", css: "button" }"#).unwrap_err();
+        assert!(
+            format!("{err}").contains("multiple primary strategies"),
+            "got: {err}"
+        );
     }
 
     #[test]
@@ -329,6 +357,8 @@ scope:
         assert_eq!(label.describe(), "label \"Password\"");
         let ph: Locator = serde_yml::from_str(r#"{ placeholder: "Enter email" }"#).unwrap();
         assert_eq!(ph.describe(), "placeholder \"Enter email\"");
+        let xpath: Locator = serde_yml::from_str(r#"{ xpath: "//main/form" }"#).unwrap();
+        assert_eq!(xpath.describe(), "xpath //main/form");
         // A scoped role composes: primary then `in {scope}`.
         let scoped: Locator =
             serde_yml::from_str(r#"{ role: button, name: Save, scope: { role: dialog } }"#)

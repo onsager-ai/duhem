@@ -18,6 +18,7 @@
 //! - `placeholder` → `internal:attr=[placeholder="<placeholder>"i]`
 //!   (`getByPlaceholder`).
 //! - `css` → `css=<css>` (raw CSS escape hatch, passed through verbatim).
+//! - `xpath` → `xpath=<xpath>` (raw XPath escape hatch, passed through verbatim).
 //! - `text` alone → `internal:text="<text>"i` (`getByText`).
 //! - `text` with a non-text primary → a chained `internal:has-text="..."i`
 //!   filter step (case-insensitive substring). It is a separate `>>`
@@ -47,8 +48,8 @@
 //! The selector string is handed to the sidecar's `page.locator(...)`,
 //! so Playwright's own engines resolve it — no behavior is reimplemented
 //! Rust-side. `name`/`text`/`label`/`placeholder`/`testid` strings have
-//! `\`, `"` escaped before interpolation; `css` is passed through raw
-//! (it *is* a selector). Exotic forms (regex name, exact-vs-substring
+//! `\`, `"` escaped before interpolation; `css` and `xpath` are passed
+//! through raw (they are selectors). Exotic forms (regex name, exact-vs-substring
 //! toggles) remain a follow-up — the strategy set is enforced
 //! exactly-one at deserialize in [`crate::locator`].
 
@@ -73,7 +74,8 @@ fn collect(loc: &Locator, chain: &mut Vec<String>) {
         || loc.label.is_some()
         || loc.testid.is_some()
         || loc.placeholder.is_some()
-        || loc.css.is_some();
+        || loc.css.is_some()
+        || loc.xpath.is_some();
 
     if let Some(role) = &loc.role {
         let mut s = format!("role={role}");
@@ -93,6 +95,9 @@ fn collect(loc: &Locator, chain: &mut Vec<String>) {
     } else if let Some(css) = &loc.css {
         // Raw CSS escape hatch — passed through verbatim.
         chain.push(format!("css={css}"));
+    } else if let Some(xpath) = &loc.xpath {
+        // Raw XPath escape hatch — passed through verbatim.
+        chain.push(format!("xpath={xpath}"));
     }
 
     // `text` is a chained filter on the primary — Playwright's role
@@ -205,6 +210,41 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(to_selector(&l), "css=div.card > button.primary");
+    }
+
+    #[test]
+    fn selector_xpath_primary_passthrough_including_quotes_and_predicates() {
+        let l = Locator {
+            xpath: Some(r#".//button[@aria-label="Save"]"#.into()),
+            ..Default::default()
+        };
+        assert_eq!(to_selector(&l), r#"xpath=.//button[@aria-label="Save"]"#);
+    }
+
+    #[test]
+    fn selector_xpath_scope_is_outer_first() {
+        let l = Locator {
+            xpath: Some(".//button".into()),
+            scope: Some(Box::new(Locator {
+                xpath: Some("//main".into()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        assert_eq!(to_selector(&l), "xpath=//main >> xpath=.//button");
+    }
+
+    #[test]
+    fn selector_xpath_with_text_filter() {
+        let l = Locator {
+            xpath: Some("//button".into()),
+            text: Some("Save".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            to_selector(&l),
+            r#"xpath=//button >> internal:has-text="Save"i"#
+        );
     }
 
     #[test]

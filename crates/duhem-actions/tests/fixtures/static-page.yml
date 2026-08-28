@@ -84,3 +84,18 @@ criteria:
         assertions:
           - $steps.landed.outputs.satisfied == true
           - $steps.loaded.outputs.satisfied == true
+
+  - id: AC-3
+    description: |
+      A locator can reach a visible containing region when the page exposes
+      only a stable descendant and no stable name for the ancestor.
+    checks:
+      - id: AC-3.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.fixture_url }
+          - uses: ui/assert-element
+            with:
+              locator: { xpath: "//button[@id='save']/ancestor::form" }
+              expected: visible
+              timeout: 2s

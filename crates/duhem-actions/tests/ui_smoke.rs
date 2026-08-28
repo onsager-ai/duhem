@@ -313,13 +313,13 @@ text: "Alice"
     assert_eq!(value, "Alice");
 }
 
-/// The locator strategy union (#240): `label` / `testid` / `css` /
-/// `placeholder` each resolve a real element in Chromium. `label` is the
+/// The locator strategy union (#240, #462): `label` / `testid` / `css` /
+/// `xpath` / `placeholder` each resolve a real element in Chromium. `label` is the
 /// one `role`-only addressing can't do — it reaches a `type=password` input
 /// (no `textbox` role), the crawlab-pro #256 unblock.
 #[tokio::test]
 #[ignore = "requires `npx playwright install chromium`"]
-async fn locator_strategies_label_testid_css_placeholder_resolve() {
+async fn locator_strategies_label_testid_css_xpath_placeholder_resolve() {
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
@@ -380,6 +380,27 @@ timeout: 3s
             &yaml(
                 r#"
 locator: { css: "button#save" }
+expected: visible
+timeout: 3s
+"#,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.outcome, Outcome::Ok);
+    assert_eq!(
+        r.outputs.get("satisfied").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+
+    // xpath → traverse upward from the stable button to its form ancestor,
+    // the relationship CSS cannot express.
+    let r = AssertElement
+        .invoke(
+            &ctx,
+            &yaml(
+                r#"
+locator: { xpath: "//button[@id='save']/ancestor::form" }
 expected: visible
 timeout: 3s
 "#,

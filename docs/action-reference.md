@@ -17,6 +17,11 @@ assertion as `$steps.<id>.outputs.<name>`. Assert over **scalar** outputs
 whole-string only; compose values with `$runtime.format(...)` or
 `$runtime.concat(...)` instead of embedding a reference in a larger string.
 
+A named locator is spliced as a map with `$pages.<page>.<element>`. For a
+selector template, `$pages.<page>.<element>(args…)` fills `{}` placeholders
+across the entry's string values before splicing it. Arity is validated
+offline; `{{` and `}}` escape literal braces.
+
 `uses:` always names one of the closed-catalog actions below. Reusable
 `flows:` use the distinct `call:` key and expand into these actions before
 runtime dispatch; a flow can never shadow an action name.

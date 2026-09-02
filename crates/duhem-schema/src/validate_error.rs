@@ -133,6 +133,23 @@ pub enum ValidationError {
         location: Option<SourceLocation>,
     },
 
+    #[error("page locator `{entry}` has invalid placeholder escaping: {detail}")]
+    InvalidPageTemplate { entry: String, detail: String },
+
+    #[error(
+        "{site} `{raw}` supplies {given} {argument_word} to page locator `{entry}`, but the entry contains {placeholders} `{{}}` {placeholder_word}"
+    )]
+    PageRefArityMismatch {
+        site: String,
+        raw: String,
+        entry: String,
+        given: usize,
+        argument_word: &'static str,
+        placeholders: usize,
+        placeholder_word: &'static str,
+        location: Option<SourceLocation>,
+    },
+
     #[error("{site} `{raw}` references unknown `$runtime` helper `{helper}`{help}")]
     UnknownRuntimeHelper {
         site: String,
@@ -371,6 +388,7 @@ impl ValidationError {
             | Self::UnresolvedStepOutput { location, .. }
             | Self::UnresolvedInputRef { location, .. }
             | Self::UnresolvedPageRef { location, .. }
+            | Self::PageRefArityMismatch { location, .. }
             | Self::MalformedPageRef { location, .. }
             | Self::MalformedStepRef { location, .. }
             | Self::MalformedInputRef { location, .. }

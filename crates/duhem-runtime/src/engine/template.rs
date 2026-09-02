@@ -61,6 +61,14 @@ pub(crate) fn page_reference(with: &serde_yml::Value) -> Option<String> {
                 root: duhem_schema::PathRoot::Pages,
                 segments,
             }) if segments.len() == 2 => Some(raw.trim().to_string()),
+            Expr::Call {
+                path:
+                    Path {
+                        root: duhem_schema::PathRoot::Pages,
+                        segments,
+                    },
+                ..
+            } if segments.len() == 2 => Some(raw.trim().to_string()),
             _ => None,
         },
         serde_yml::Value::Sequence(values) => values.iter().find_map(page_reference),
@@ -75,9 +83,7 @@ enum Resolution {
     /// to a scalar — splice it in.
     Replace {
         value: serde_yml::Value,
-        /// Catalog entries may themselves contain `$inputs.*`; walk
-        /// the newly spliced node before returning to the action.
-        resolve_nested: bool,
+        nested: NestedResolution,
     },
     /// The string was not a substitutable reference (no leading `$`,
     /// or parses as an assertion-shaped expr) — pass through unchanged.
@@ -89,6 +95,13 @@ enum Resolution {
     /// `default(...)` call evaluates successfully (yields its fallback)
     /// and so never reaches here.
     Unresolved(UnresolvedWith),
+}
+
+enum NestedResolution {
+    None,
+    /// Catalog entries may themselves contain `$inputs.*`. Retain the
+    /// authored entry so filled arguments are not re-scanned as expressions.
+    PageEntry(serde_yml::Value),
 }
 
 /// Recursively walk `with`, substituting any string value that parses
@@ -105,18 +118,14 @@ pub fn substitute_with(
         serde_yml::Value::String(s) => match try_resolve(s, ctx) {
             Resolution::Replace {
                 value: replacement,
-                resolve_nested,
+                nested,
             } => {
                 *with = replacement;
-                if resolve_nested
-                    && matches!(
-                        with,
-                        serde_yml::Value::Mapping(_) | serde_yml::Value::Sequence(_)
-                    )
-                {
-                    substitute_with(with, ctx)
-                } else {
-                    Ok(())
+                match nested {
+                    NestedResolution::None => Ok(()),
+                    NestedResolution::PageEntry(authored) => {
+                        resolve_page_entry_nested(&authored, with, ctx)
+                    }
                 }
             }
             Resolution::Passthrough => Ok(()),
@@ -163,6 +172,15 @@ fn try_resolve(s: &str, ctx: &dyn EvalContext) -> Resolution {
     if !is_substitutable_expr(&expr) {
         return Resolution::Passthrough;
     }
+    if let Some((path, args)) = page_call(&expr) {
+        return match resolve_page_call(path, args, ctx) {
+            Ok((value, authored)) => Resolution::Replace {
+                value,
+                nested: NestedResolution::PageEntry(authored),
+            },
+            Err(()) => Resolution::Unresolved(pinpoint(&expr, s, ctx)),
+        };
+    }
     // A bare `$...` reference that fails to evaluate is a hard error,
     // never a pass-through (#134): no action may receive a literal
     // `$...` string. `$runtime.default(value, fallback)` evaluates
@@ -172,15 +190,80 @@ fn try_resolve(s: &str, ctx: &dyn EvalContext) -> Resolution {
     match eval_to_value(&expr, ctx) {
         Ok(value) => Resolution::Replace {
             value: value_to_yml(&value),
-            resolve_nested: matches!(
-                expr,
-                Expr::Path(Path {
-                    root: duhem_schema::PathRoot::Pages,
-                    ..
-                })
-            ),
+            nested: NestedResolution::None,
         },
         Err(_) => Resolution::Unresolved(pinpoint(&expr, s, ctx)),
+    }
+}
+
+fn page_call(expr: &Expr) -> Option<(&Path, &[Expr])> {
+    match expr {
+        Expr::Path(path) if path.root == duhem_schema::PathRoot::Pages => Some((path, &[])),
+        Expr::Call { path, args } if path.root == duhem_schema::PathRoot::Pages => {
+            Some((path, args))
+        }
+        _ => None,
+    }
+}
+
+/// Resolve and fill the whole catalog entry before its authored nested
+/// expressions are walked (spec #495). Validation normally guarantees
+/// the two-segment shape, escaping, and arity; errors remain hard here
+/// for callers that bypass validation.
+fn resolve_page_call(
+    path: &Path,
+    args: &[Expr],
+    ctx: &dyn EvalContext,
+) -> Result<(serde_yml::Value, serde_yml::Value), ()> {
+    let [page, element] = path.segments.as_slice() else {
+        return Err(());
+    };
+    let entry = ctx.page(page, element).cloned().ok_or(())?;
+    let authored = value_to_yml(&entry);
+    let mut filled = authored.clone();
+    let parts = args
+        .iter()
+        .map(|arg| {
+            eval_to_value(arg, ctx)
+                .and_then(crate::eval::scalar_to_string)
+                .map_err(|_| ())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    duhem_schema::page_template::fill_value_placeholders(&mut filled, &parts).map_err(|_| ())?;
+    Ok((filled, authored))
+}
+
+/// Resolve only expressions that were present in the catalog entry.
+/// Strings changed by placeholder filling stay literal, even when an
+/// argument value begins with `$` and looks like another expression.
+fn resolve_page_entry_nested(
+    authored: &serde_yml::Value,
+    filled: &mut serde_yml::Value,
+    ctx: &dyn EvalContext,
+) -> Result<(), UnresolvedWith> {
+    match (authored, filled) {
+        (serde_yml::Value::String(raw), filled) => {
+            if duhem_schema::page_template::has_template_syntax(raw) {
+                Ok(())
+            } else {
+                substitute_with(filled, ctx)
+            }
+        }
+        (serde_yml::Value::Sequence(authored), serde_yml::Value::Sequence(filled)) => {
+            for (authored, filled) in authored.iter().zip(filled) {
+                resolve_page_entry_nested(authored, filled, ctx)?;
+            }
+            Ok(())
+        }
+        (serde_yml::Value::Mapping(authored), serde_yml::Value::Mapping(filled)) => {
+            for (key, authored) in authored {
+                if let Some(filled) = filled.get_mut(key) {
+                    resolve_page_entry_nested(authored, filled, ctx)?;
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
     }
 }
 
@@ -306,6 +389,64 @@ mod tests {
         )
         .unwrap();
         assert_eq!(authored, inline);
+    }
+
+    #[test]
+    fn parameterized_page_calls_fill_distinct_selectors() {
+        // #495 / #485: one catalog template serves multiple call sites
+        // while each action still receives the ordinary locator map.
+        let pages: duhem_schema::PageCatalog =
+            serde_yml::from_str("chat:\n  history_item:\n    xpath: '(//article)[{}]'\n").unwrap();
+        let run = run_with(&[]).with_pages(&pages);
+        let ctx = RunContext::new(&run);
+        let mut first: serde_yml::Value =
+            serde_yml::from_str("locator: $pages.chat.history_item(1)").unwrap();
+        let mut second: serde_yml::Value =
+            serde_yml::from_str("locator: $pages.chat.history_item(2)").unwrap();
+        substitute_with(&mut first, &ctx).expect("first call resolves");
+        substitute_with(&mut second, &ctx).expect("second call resolves");
+
+        assert_eq!(first["locator"]["xpath"].as_str(), Some("(//article)[1]"));
+        assert_eq!(second["locator"]["xpath"].as_str(), Some("(//article)[2]"));
+    }
+
+    #[test]
+    fn page_call_resolves_expression_args_and_nested_inputs_without_re_evaluation() {
+        let pages: duhem_schema::PageCatalog = serde_yml::from_str(
+            "chat:\n  history_item:\n    xpath: '(//article)[{}]'\n    scope: { text: $inputs.scope }\n",
+        )
+        .unwrap();
+        let run = run_with(&[
+            ("index", Value::Str("$inputs.secret".into())),
+            ("scope", Value::Str("History".into())),
+            ("secret", Value::Str("must-not-be-injected".into())),
+        ])
+        .with_pages(&pages);
+        let ctx = RunContext::new(&run);
+        let mut authored: serde_yml::Value =
+            serde_yml::from_str("locator: $pages.chat.history_item($inputs.index)").unwrap();
+        substitute_with(&mut authored, &ctx).expect("page call resolves");
+
+        assert_eq!(
+            authored["locator"]["xpath"].as_str(),
+            Some("(//article)[$inputs.secret]")
+        );
+        assert_eq!(
+            authored["locator"]["scope"]["text"].as_str(),
+            Some("History")
+        );
+    }
+
+    #[test]
+    fn page_call_unescapes_literal_braces() {
+        let pages: duhem_schema::PageCatalog =
+            serde_yml::from_str("chat:\n  history_item: { css: '{{history}}[{}]' }\n").unwrap();
+        let run = run_with(&[]).with_pages(&pages);
+        let ctx = RunContext::new(&run);
+        let mut authored: serde_yml::Value =
+            serde_yml::from_str("locator: $pages.chat.history_item(2)").unwrap();
+        substitute_with(&mut authored, &ctx).expect("page call resolves");
+        assert_eq!(authored["locator"]["css"].as_str(), Some("{history}[2]"));
     }
 
     #[test]

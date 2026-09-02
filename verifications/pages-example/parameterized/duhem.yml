@@ -1,0 +1,20 @@
+# Worked example for parameterized page locators (spec #495).
+verification: Parameterized named locator catalog
+criteria:
+  - id: AC-1
+    description: An author can reuse one catalog entry to target different history items by position.
+    checks:
+      - id: AC-1.1
+        description: Two calls fill the same catalog selector with different indices.
+        steps:
+          - uses: ui/navigate
+            with:
+              url: "data:text/html,<ol><li>First history</li><li>Second history</li></ol>"
+          - uses: ui/assert-element
+            with:
+              locator: $pages.fixture.history_item(1)
+              expect: { field: text, equals: First history }
+          - uses: ui/assert-element
+            with:
+              locator: $pages.fixture.history_item(2)
+              expect: { field: text, equals: Second history }

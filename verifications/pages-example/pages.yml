@@ -1,3 +1,4 @@
 pages:
   fixture:
     heading: { role: heading, name: Catalog Fixture }
+    history_item: { xpath: '(//li)[{}]' }

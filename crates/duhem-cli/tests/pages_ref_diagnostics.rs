@@ -95,3 +95,48 @@ criteria:
     );
     assert!(!stderr.contains("malformed `$pages` reference"), "{stderr}");
 }
+
+#[test]
+fn validate_rejects_parameterized_page_arity_at_the_call_site() {
+    for (reference, supplied) in [
+        ("$pages.chat.history_item", "supplies 0 arguments"),
+        ("$pages.chat.history_item(1, 2)", "supplies 2 arguments"),
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("arity.yml");
+        std::fs::write(
+            &path,
+            format!(
+                r#"verification: page arity
+pages:
+  chat:
+    history_item: {{ xpath: '(//article)[{{}}]' }}
+criteria:
+  - id: AC-1
+    description: repro
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: select_history
+            uses: ui/assert-element
+            with:
+              locator: {reference}
+              expected: visible
+"#
+            ),
+        )
+        .unwrap();
+
+        let output = invoke("validate", &path);
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(":14:"),
+            "missing call-site location: {stderr}"
+        );
+        assert!(stderr.contains("step `select_history`"), "{stderr}");
+        assert!(stderr.contains("$pages.chat.history_item"), "{stderr}");
+        assert!(stderr.contains(supplied), "{stderr}");
+        assert!(stderr.contains("contains 1 `{}` placeholder"), "{stderr}");
+    }
+}

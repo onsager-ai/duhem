@@ -35,7 +35,7 @@ pub use crate::engine::outcome::{
 };
 pub(crate) use crate::engine::outcome::{
     StepEvidence, append_implicit_judgment, display_step_label, evaluate_explicit_assertions,
-    implicit_judgment_for_step, implicit_judgment_outcomes, step_label,
+    execution_deadline, implicit_judgment_for_step, implicit_judgment_outcomes, step_label,
 };
 
 use crate::engine::capture::{
@@ -599,7 +599,7 @@ impl Engine {
             Err(error) => vec![CleanupFailure {
                 step: "teardown evidence".to_string(),
                 outcome: duhem_evidence::StepOutcome::Error,
-                detail: Some(error.to_string()),
+                detail: Some(writer.mask_text(&error.to_string())),
             }],
         }
     }
@@ -934,6 +934,7 @@ impl Engine {
                         outcome: duhem_evidence::StepOutcome::Skipped {
                             reason: reason.clone(),
                         },
+                        detail: None,
                     })
                     .await?;
                 step_evidence[idx] = StepEvidence::skipped(reason);
@@ -941,10 +942,16 @@ impl Engine {
             }
 
             if let Some(error) = step_error {
+                // The process-level engine error already has the pinpointed
+                // `with:` reference and enclosing expression. Preserve that
+                // exact diagnostic in evidence, through the same secret
+                // boundary as every recorded string (#494).
+                let detail = writer.mask_text(&error.to_string());
                 writer
                     .append(EventPayload::StepFinished {
                         step_index: idx as u32,
                         outcome: duhem_evidence::StepOutcome::Error,
+                        detail: Some(detail),
                     })
                     .await?;
                 if !cleanup_step && stored_error.is_none() {
@@ -1025,6 +1032,7 @@ impl Engine {
                         skip_reason: None,
                         catalog_reference: catalog_reference.clone(),
                         outcome: Some(r.outcome.clone()),
+                        detail: None,
                     };
                     if let Outcome::Skipped { reason } = &r.outcome {
                         step_evidence[idx].skip_reason = Some(reason.clone());
@@ -1046,10 +1054,35 @@ impl Engine {
                 step_evidence[idx].outcome = Some(outcome.clone());
             }
 
+            let raw_detail = match (&execution, &outcome) {
+                (Some(Err(error)), _) => {
+                    Some(format!("action `{}` failed: {error}", step.uses_name()))
+                }
+                (_, Outcome::Timeout) => Some(format!(
+                    "action `{}` timed out{}",
+                    step.uses_name(),
+                    execution_deadline(&step_evidence[idx])
+                )),
+                (_, Outcome::Error) if !known => {
+                    Some(format!("action `{}` is not registered", step.uses_name()))
+                }
+                (_, Outcome::Error) if environment_failed => Some(format!(
+                    "action `{}` could not start because the check environment failed",
+                    step.uses_name()
+                )),
+                (_, Outcome::Error) => {
+                    Some(format!("action `{}` returned an error", step.uses_name()))
+                }
+                (_, Outcome::Ok | Outcome::Skipped { .. }) => None,
+            };
+            let detail = raw_detail.map(|detail| writer.mask_text(&detail));
+            step_evidence[idx].detail = detail.clone();
+
             writer
                 .append(EventPayload::StepFinished {
                     step_index: idx as u32,
                     outcome: outcome_to_evidence(&outcome),
+                    detail,
                 })
                 .await?;
 
@@ -1404,6 +1437,39 @@ criteria:
         }
     }
 
+    /// Dispatcher failure whose message includes one resolved `with:`
+    /// value, exercising both cause preservation and sink masking (#494).
+    struct FailingAction {
+        uses: &'static str,
+        field: &'static str,
+        message: &'static str,
+    }
+
+    #[async_trait]
+    impl Dispatch for FailingAction {
+        fn uses(&self) -> &'static str {
+            self.uses
+        }
+
+        fn requires_page(&self) -> bool {
+            false
+        }
+
+        async fn invoke(
+            &self,
+            _page: Option<&Page>,
+            _step_index: usize,
+            with: &serde_yml::Value,
+            _child_env: &BTreeMap<String, String>,
+        ) -> Result<ActionResult, ActionError> {
+            let value = with[self.field].as_str().expect("string test input");
+            Err(ActionError::Playwright(format!(
+                "{} `{value}`",
+                self.message
+            )))
+        }
+    }
+
     struct ContractSecretAction {
         token: &'static str,
     }
@@ -1732,7 +1798,7 @@ criteria:
         steps:
           - id: inspect
             uses: fake/read
-            with: { locator: $pages.login.missing }
+            with: { locator: '$runtime.format("{}", $pages.login.missing)' }
         assertions: ["true"]
 "#);
         let error = engine.run(&v, BTreeMap::new()).await.unwrap_err();
@@ -1747,6 +1813,152 @@ criteria:
             ),
             "got: {error}"
         );
+        let detail = read_only_run_events(&engine)
+            .await
+            .into_iter()
+            .find_map(|event| match event.payload {
+                EventPayload::StepFinished { detail, .. } => detail,
+                _ => None,
+            })
+            .expect("recorded #485 cause");
+        assert!(detail.contains("$pages.login.missing"), "{detail}");
+        assert!(detail.contains("$runtime.format"), "{detail}");
+    }
+
+    #[tokio::test]
+    async fn unresolved_with_records_reference_and_enclosing_expression() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/read", Outcome::Ok)));
+        let v = def(r#"
+verification: unresolved expression
+inputs:
+  base: { type: string, default: https://example.com }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: inspect
+            uses: fake/read
+            with:
+              url: $runtime.format("{}/{}", $inputs.base, $steps.gone.outputs.id)
+        assertions: ["true"]
+"#);
+        engine
+            .run(
+                &v,
+                BTreeMap::from([("base".into(), serde_json::json!("https://example.com"))]),
+            )
+            .await
+            .unwrap_err();
+
+        let detail = read_only_run_events(&engine)
+            .await
+            .into_iter()
+            .find_map(|event| match event.payload {
+                EventPayload::StepFinished {
+                    outcome: duhem_evidence::StepOutcome::Error,
+                    detail,
+                    ..
+                } => detail,
+                _ => None,
+            })
+            .expect("failed step detail");
+        assert!(detail.contains("$steps.gone.outputs.id"), "{detail}");
+        assert!(
+            detail.contains(
+                r#"evaluating `$runtime.format("{}/{}", $inputs.base, $steps.gone.outputs.id)`"#
+            ),
+            "{detail}"
+        );
+        assert!(detail.contains("in `with:`"), "{detail}");
+    }
+
+    #[tokio::test]
+    async fn action_error_detail_reaches_trace_and_run_failure() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(FailingAction {
+            uses: "ui/click",
+            field: "locator",
+            message: "locator never resolved",
+        }));
+        let v = def(r#"
+verification: action error detail
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: click
+            uses: ui/click
+            with: { locator: '#missing' }
+"#);
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        let detail = read_only_run_events(&engine)
+            .await
+            .into_iter()
+            .find_map(|event| match event.payload {
+                EventPayload::StepFinished {
+                    outcome: duhem_evidence::StepOutcome::Error,
+                    detail,
+                    ..
+                } => detail,
+                _ => None,
+            })
+            .expect("action error detail");
+        assert!(detail.contains("action `ui/click` failed"), "{detail}");
+        assert!(
+            detail.contains("locator never resolved `#missing`"),
+            "{detail}"
+        );
+        assert_eq!(
+            outcome.failures[0].assertions[0].detail.as_deref(),
+            Some(detail.as_str()),
+            "RunSummary input must carry the recorded cause"
+        );
+    }
+
+    #[tokio::test]
+    async fn action_error_detail_is_masked_before_trace_and_summary() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(FailingAction {
+            uses: "fake/auth",
+            field: "token",
+            message: "credential rejected",
+        }));
+        let v = def(r#"
+verification: masked action error
+inputs:
+  api_token: { type: string, secret: true }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: fake/auth
+            with: { token: $inputs.api_token }
+"#);
+        let secret = "correct-horse-battery-staple";
+        let outcome = engine
+            .run_with_metadata(
+                &v,
+                BTreeMap::from([("api_token".into(), serde_json::json!(secret))]),
+            )
+            .await
+            .unwrap();
+        let events = read_only_run_events(&engine).await;
+        let trace = serde_json::to_string(&events).unwrap();
+        assert!(!trace.contains(secret), "raw secret leaked: {trace}");
+        assert!(trace.contains("[redacted:api_token]"), "{trace}");
+        let summary_detail = outcome.failures[0].assertions[0]
+            .detail
+            .as_deref()
+            .expect("summary cause");
+        assert!(!summary_detail.contains(secret), "{summary_detail}");
+        assert!(summary_detail.contains("[redacted:api_token]"));
     }
 
     #[tokio::test]
@@ -1810,6 +2022,7 @@ criteria:
                 EventPayload::StepFinished {
                     step_index,
                     outcome: duhem_evidence::StepOutcome::Ok,
+                    ..
                 } if *step_index == index
             )));
         }
@@ -4027,6 +4240,7 @@ criteria:
                 EventPayload::StepFinished {
                     step_index: 1,
                     outcome: duhem_evidence::StepOutcome::Skipped { reason },
+                    ..
                 } => Some(reason),
                 _ => None,
             })
@@ -4059,15 +4273,30 @@ criteria:
 "#);
         engine.run(&v, BTreeMap::new()).await.unwrap();
         assert_eq!(tracker_calls.load(Ordering::SeqCst), 0);
-        assert!(read_only_run_events(&engine).await.iter().any(|event| {
+        let events = read_only_run_events(&engine).await;
+        assert!(events.iter().any(|event| {
             matches!(
                 event.payload,
                 EventPayload::StepFinished {
                     step_index: 1,
                     outcome: duhem_evidence::StepOutcome::Skipped { .. },
+                    ..
                 }
             )
         }));
+        let timeout_detail = events
+            .iter()
+            .find_map(|event| match &event.payload {
+                EventPayload::StepFinished {
+                    step_index: 0,
+                    outcome: duhem_evidence::StepOutcome::Timeout,
+                    detail,
+                } => detail.as_deref(),
+                _ => None,
+            })
+            .expect("timeout cause");
+        assert_eq!(timeout_detail, "action `fake/timeout` timed out");
+        assert!(!timeout_detail.contains("returned an error"));
     }
 
     #[tokio::test]
@@ -4376,6 +4605,7 @@ criteria:
                 EventPayload::StepFinished {
                     step_index,
                     outcome: duhem_evidence::StepOutcome::Skipped { .. },
+                    ..
                 } => Some(*step_index),
                 _ => None,
             })

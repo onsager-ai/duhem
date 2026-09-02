@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] `step_finished`/`setup_step_finished` carry a masked `detail` naming the cause of an `error`/`timeout` outcome. (#494)
 
 ## v0.3.0 — 2026-08-28
 

@@ -99,7 +99,11 @@ impl TtyBoard {
             .get_or_insert(now);
     }
 
-    pub(super) fn finish_step(&mut self, outcome: &duhem_evidence::StepOutcome) {
+    pub(super) fn finish_step(
+        &mut self,
+        outcome: &duhem_evidence::StepOutcome,
+        detail: Option<&str>,
+    ) {
         let (Some(criterion_id), Some(check_id), Some(step)) = (
             self.active_criterion.as_deref(),
             self.active_check.as_deref(),
@@ -119,10 +123,10 @@ impl TtyBoard {
                 uses: step.uses,
                 outcome: outcome.clone(),
                 judgment: None,
-                detail: match outcome {
+                detail: detail.map(str::to_string).or_else(|| match outcome {
                     duhem_evidence::StepOutcome::Skipped { reason } => Some(reason.clone()),
                     _ => None,
-                },
+                }),
                 duration: step.since.elapsed(),
             });
     }

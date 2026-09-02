@@ -519,6 +519,30 @@ mod tests {
     }
 
     #[test]
+    fn default_and_json_reporters_render_step_error_cause() {
+        let mut o = outcome(VerdictState::Inconclusive(
+            InconclusiveCause::MissingObservation,
+        ));
+        let cause = "action `ui/click` failed: locator `#missing` never resolved";
+        o.failures.push(duhem_runtime::CheckFailure {
+            criterion_id: "AC-1".into(),
+            check_id: "AC-1.1".into(),
+            assertions: vec![duhem_runtime::FailedAssertion {
+                expr: "step `click` satisfied == true".into(),
+                state: VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+                detail: Some(cause.into()),
+            }],
+            captures: Vec::new(),
+        });
+
+        let default = capture(&Reporter::Default, &o);
+        assert!(default.contains(cause), "{default}");
+        let json: serde_json::Value =
+            serde_json::from_str(capture(&Reporter::Json, &o).trim()).unwrap();
+        assert_eq!(json["failures"][0]["assertions"][0]["detail"], cause);
+    }
+
+    #[test]
     fn quiet_reporter_writes_nothing() {
         let s = capture(&Reporter::Quiet, &outcome(VerdictState::Fail));
         assert_eq!(s, "");

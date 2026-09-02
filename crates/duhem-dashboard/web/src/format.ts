@@ -252,7 +252,7 @@ export function formatEvent(
         skipped: { icon: "skipped", label: "step skipped", tone: "skipped" },
       };
       const m = map[outcome.kind] ?? { icon: "unknown" as IconName, label: `step ${outcome.kind}`, tone: "muted" as Tone };
-      return { ...base, ...m, detail: outcome.reason };
+      return { ...base, ...m, detail: str(evt.detail) ?? outcome.reason };
     }
     case "assertion_evaluated": {
       const state = str(evt.state) ?? "";
@@ -505,7 +505,7 @@ export function stepStatus(node: StepNode): {
   const m = map[outcome.kind] ?? { icon: "unknown" as IconName, label: `step ${outcome.kind}`, tone: "muted" as Tone };
   return {
     ...m,
-    reason: outcome.reason,
+    reason: str(finished?.detail) ?? outcome.reason,
     failed: m.tone === "fail" || m.tone === "inconclusive",
   };
 }

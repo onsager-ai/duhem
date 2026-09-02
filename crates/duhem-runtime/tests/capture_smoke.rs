@@ -464,6 +464,7 @@ async fn timed_out_ui_step_still_retains_its_post_step_frame() {
             EventPayload::StepFinished {
                 step_index: 1,
                 outcome: duhem_evidence::StepOutcome::Timeout,
+                ..
             }
         )),
         "fixture must exercise the timeout path"

@@ -112,6 +112,11 @@ pub(crate) struct StepEvidence {
     pub catalog_reference: Option<String>,
     /// Terminal execution outcome when the step was attempted.
     pub outcome: Option<Outcome>,
+    /// Masked engine/action cause for an error or timeout (#494). This
+    /// is the same string persisted on `step_finished`, retained here so
+    /// the implicit assertion and `RunSummary` do not regress to a bare
+    /// outcome token.
+    pub detail: Option<String>,
 }
 
 impl StepEvidence {
@@ -124,6 +129,7 @@ impl StepEvidence {
             skip_reason: None,
             catalog_reference: None,
             outcome: None,
+            detail: None,
         }
     }
 
@@ -134,6 +140,7 @@ impl StepEvidence {
             skip_reason: Some(reason),
             catalog_reference: None,
             outcome: None,
+            detail: None,
         }
     }
 
@@ -178,11 +185,16 @@ pub(crate) fn implicit_judgment_for_step(
     let execution_failure = match evidence.outcome.as_ref() {
         Some(Outcome::Timeout) => Some((
             VerdictState::Inconclusive(InconclusiveCause::Timeout),
-            format!("step `{label}` timed out{}", execution_deadline(evidence)),
+            evidence.detail.clone().unwrap_or_else(|| {
+                format!("step `{label}` timed out{}", execution_deadline(evidence))
+            }),
         )),
         Some(Outcome::Error) => Some((
             VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
-            format!("step `{label}` did not complete"),
+            evidence
+                .detail
+                .clone()
+                .unwrap_or_else(|| format!("step `{label}` did not complete")),
         )),
         _ => None,
     };
@@ -266,7 +278,7 @@ pub(crate) fn implicit_judgment_outcomes(
         .collect()
 }
 
-fn execution_deadline(ev: &StepEvidence) -> String {
+pub(crate) fn execution_deadline(ev: &StepEvidence) -> String {
     for key in ["timeout", "duration"] {
         if let Some(value) = ev.with.get(key) {
             if let Some(value) = value.as_str() {
@@ -731,6 +743,7 @@ mod fail_detail_tests {
             skip_reason: None,
             catalog_reference: None,
             outcome: Some(Outcome::Ok),
+            detail: None,
         }
     }
 
@@ -937,6 +950,7 @@ mod step_label_tests {
             skip_reason: None,
             catalog_reference: None,
             outcome: Some(Outcome::Ok),
+            detail: None,
         }];
         let outcomes = implicit_judgment_outcomes(
             &check,

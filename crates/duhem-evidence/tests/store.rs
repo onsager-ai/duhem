@@ -54,6 +54,7 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
     w.append(EventPayload::StepFinished {
         step_index: 0,
         outcome: StepOutcome::Ok,
+        detail: None,
     })
     .await
     .unwrap();
@@ -1010,6 +1011,7 @@ async fn step_pair(
     w.append(EventPayload::StepFinished {
         step_index,
         outcome,
+        detail: None,
     })
     .await
     .unwrap();
@@ -1148,6 +1150,7 @@ async fn setup_phase_spans_carry_no_check_id() {
         phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         outcome: StepOutcome::Ok,
+        detail: None,
         fixture_name: None,
         check_id: None,
     })

@@ -302,6 +302,7 @@ async fn run_detail_surfaces_teardown_evidence_without_changing_verdict() {
             phase: duhem_evidence::StepPhase::Teardown,
             step_index: 0,
             outcome: duhem_evidence::StepOutcome::Error,
+            detail: None,
             fixture_name: None,
             check_id: None,
         })
@@ -772,6 +773,7 @@ async fn colliding_check_ids_attribute_to_the_first_owner() {
         w.append(EventPayload::StepFinished {
             step_index: 0,
             outcome: StepOutcome::Ok,
+            detail: None,
         })
         .await
         .unwrap();

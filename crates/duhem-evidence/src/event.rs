@@ -272,6 +272,11 @@ pub enum EventPayload {
         phase: StepPhase,
         step_index: u32,
         outcome: StepOutcome,
+        /// Human-readable cause for an error or timeout, masked at the
+        /// evidence boundary (#494). Absent for successful/skipped steps
+        /// and traces recorded before this field existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fixture_name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -311,6 +316,11 @@ pub enum EventPayload {
     StepFinished {
         step_index: u32,
         outcome: StepOutcome,
+        /// Human-readable cause for an error or timeout, masked at the
+        /// evidence boundary (#494). Absent for successful/skipped steps
+        /// and traces recorded before this field existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
     },
     AssertionEvaluated {
         check_id: String,
@@ -535,11 +545,32 @@ mod tests {
                 outcome: StepOutcome::Skipped {
                     reason: "blocked by failed step `login`".into(),
                 },
+                detail: None,
             },
         };
         let line = serde_json::to_string(&evt).unwrap();
         assert!(line.contains(r#""skipped":{"reason":"blocked by failed step `login`"}"#));
         assert_eq!(serde_json::from_str::<Event>(&line).unwrap(), evt);
+    }
+
+    #[test]
+    fn pre_detail_step_finishes_keep_their_wire_shape() {
+        // Additive detail must not make a legacy error look newly
+        // explained, nor change its bytes when read and re-emitted (#494).
+        for old in [
+            r#"{"seq":2,"ts":"2026-05-08T12:00:00.000Z","kind":"step_finished","step_index":1,"outcome":"error"}"#,
+            r#"{"seq":2,"ts":"2026-05-08T12:00:00.000Z","kind":"setup_step_finished","step_index":1,"outcome":"timeout"}"#,
+        ] {
+            let event: Event = serde_json::from_str(old).unwrap();
+            match &event.payload {
+                EventPayload::StepFinished { detail, .. }
+                | EventPayload::SetupStepFinished { detail, .. } => {
+                    assert_eq!(detail, &None);
+                }
+                other => panic!("unexpected payload: {other:?}"),
+            }
+            assert_eq!(serde_json::to_string(&event).unwrap(), old);
+        }
     }
 
     #[test]
@@ -617,6 +648,7 @@ mod tests {
                 phase: StepPhase::Setup,
                 step_index: 0,
                 outcome: StepOutcome::Ok,
+                detail: None,
                 fixture_name: None,
                 check_id: None,
             },
@@ -649,6 +681,7 @@ mod tests {
                 phase: StepPhase::Teardown,
                 step_index: 0,
                 outcome: StepOutcome::Error,
+                detail: None,
                 fixture_name: None,
                 check_id: None,
             },
@@ -686,6 +719,7 @@ mod tests {
                 phase: StepPhase::Setup,
                 step_index: 0,
                 outcome: StepOutcome::Ok,
+                detail: None,
                 fixture_name: None,
                 check_id: None,
             }

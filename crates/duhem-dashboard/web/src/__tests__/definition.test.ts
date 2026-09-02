@@ -33,6 +33,29 @@ criteria:
     expect(vd.stepLabel("AC-1", "AC-1.1", 2)).toBeUndefined();
   });
 
+  it("parses authored parameters and tolerates absent or malformed maps", () => {
+    const vd = parseDefinition(`
+criteria:
+  - id: AC-1
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/click
+            with:
+              locator: $pages.login.submit
+          - uses: ui/wait
+          - uses: ui/navigate
+            with: malformed
+`);
+
+    expect(vd.stepWith("AC-1", "AC-1.1", 0)).toEqual({
+      locator: "$pages.login.submit",
+    });
+    expect(vd.stepWith("AC-1", "AC-1.1", 1)).toBeUndefined();
+    expect(vd.stepWith("AC-1", "AC-1.1", 2)).toBeUndefined();
+    expect(vd.stepWith("missing", "missing", 0)).toBeUndefined();
+  });
+
   it("joins expanded steps through flow provenance and keeps index fallback", () => {
     const vd = parseDefinition(`
 flows:
@@ -42,6 +65,8 @@ flows:
       - id: user
         description: Enter the username
         uses: ui/type
+        with:
+          locator: $pages.login.user
       - uses: ui/click
   undescribed:
     steps:
@@ -69,6 +94,9 @@ criteria:
       .toBe("Sign in as the fixture user › Enter the username");
     expect(vd.flowStepLabel(flow)).toBe("Enter the username");
     expect(vd.stepId("AC-1", "AC-1.1", 0, flow)).toBe("login__user");
+    expect(vd.stepWith("AC-1", "AC-1.1", 0, flow)).toEqual({
+      locator: "$pages.login.user",
+    });
     expect(vd.stepLabel("AC-1", "AC-1.1", 1)).toBe("legacy");
 
     const describedCall = {

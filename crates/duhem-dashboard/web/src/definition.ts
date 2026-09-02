@@ -12,6 +12,7 @@ export interface VdStep {
   description?: string;
   uses?: string;
   call?: string;
+  with?: Record<string, unknown>;
 }
 export interface VdCheck {
   id: string;
@@ -47,6 +48,14 @@ export interface VdLookup {
     index: number,
     flow?: FlowOrigin,
   ): string | undefined;
+  /** The author's `with:` map for the traced step, before runtime
+   *  reference resolution. */
+  stepWith(
+    criterionId: string,
+    checkId: string,
+    index: number,
+    flow?: FlowOrigin,
+  ): Record<string, unknown> | undefined;
   /** Human-facing label for the authored inner step of a flow. */
   flowStepLabel(flow: FlowOrigin): string | undefined;
   /** Label for the authored invocation that owns an expanded step. */
@@ -63,6 +72,12 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+function record(v: unknown): Record<string, unknown> | undefined {
+  return v !== null && typeof v === "object" && !Array.isArray(v)
+    ? v as Record<string, unknown>
+    : undefined;
+}
+
 function normStep(raw: unknown): VdStep {
   const r = (raw ?? {}) as Record<string, unknown>;
   return {
@@ -70,6 +85,7 @@ function normStep(raw: unknown): VdStep {
     description: str(r.description),
     uses: str(r.uses),
     call: str(r.call),
+    with: record(r.with),
   };
 }
 
@@ -169,6 +185,8 @@ export function parseDefinition(yamlText: string): VdLookup {
       const step = find(cid, chid)?.steps[i];
       return stepLabel(step, i);
     },
+    stepWith: (cid, chid, i, flow) =>
+      (flow ? innerStep(flow) : find(cid, chid)?.steps[i])?.with,
     flowStepLabel: (flow) => stepLabel(innerStep(flow), flow.inner_index),
     flowLabel,
   };

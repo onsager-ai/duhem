@@ -2,8 +2,8 @@
 // and preserve trace order — it presents, it never judges.
 
 import { describe, expect, it } from "vitest";
-import { foldRun } from "../fold";
-import type { TraceEvent } from "../api";
+import { carryFetched, foldRun } from "../fold";
+import type { RunDetail, TraceEvent } from "../api";
 
 const trace: TraceEvent[] = [
   {
@@ -71,5 +71,55 @@ describe("foldRun", () => {
       { step_index: 0, uses: "api/call", outcome: "error" },
     ]);
     expect(done.verdict).toBe("pass");
+  });
+});
+
+describe("carryFetched", () => {
+  // `has_definition` gates the whole description overlay. A live fold
+  // cannot derive it, so resetting it to the fold default on every SSE
+  // event is what made a running run show bare ids until it finished
+  // (#491).
+  const fetched: RunDetail = {
+    run_id: "r1",
+    verification: "verifications/login.yml",
+    started_at: "2026-06-10T10:00:00.000Z",
+    inputs: { user: "u1" },
+    verdict: null,
+    status: "running",
+    setup_aborted: false,
+    has_definition: true,
+    viewport: { width: 1280, height: 720 },
+    cleanup: [],
+    criteria: [],
+  };
+
+  it("keeps the fetched definition flag across a live fold", () => {
+    const live = foldRun("r1", trace.slice(0, 2));
+    expect(live.has_definition).toBe(false);
+    expect(carryFetched(live, fetched).has_definition).toBe(true);
+  });
+
+  it("keeps the fetched identity rather than the run-id fallback", () => {
+    const merged = carryFetched(foldRun("r1", []), fetched);
+    expect(merged.verification).toBe("verifications/login.yml");
+    expect(merged.started_at).toBe("2026-06-10T10:00:00.000Z");
+    expect(merged.inputs).toEqual({ user: "u1" });
+    expect(merged.viewport).toEqual({ width: 1280, height: 720 });
+  });
+
+  it("leaves execution progress to the fold", () => {
+    const merged = carryFetched(foldRun("r1", trace), fetched);
+    // The fold owns these even though `fetched` still says "running".
+    expect(merged.status).toBe("finished");
+    expect(merged.verdict).toBe("pass");
+    expect(merged.criteria[0].checks[0].verdict).toBe("pass");
+  });
+
+  it("never enables the overlay for a run without a snapshot", () => {
+    const merged = carryFetched(foldRun("r1", trace.slice(0, 2)), {
+      ...fetched,
+      has_definition: false,
+    });
+    expect(merged.has_definition).toBe(false);
   });
 });

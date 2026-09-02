@@ -15,7 +15,7 @@ import {
   type RunDetail,
   type TraceEvent,
 } from "../api";
-import { foldRun } from "../fold";
+import { carryFetched, foldRun } from "../fold";
 import { deliveryLayerLabel, groupTimeline, stepStatus } from "../format";
 import { flowOrigin } from "../definition";
 import { cn } from "@/lib/utils";
@@ -57,6 +57,10 @@ export function useRun(runId: string): {
     fetchRun(runId).then((detail) => {
       if (cancelled) return;
       setRun(detail);
+      // The fetched detail stays authoritative for everything the fold
+      // cannot see — notably `has_definition`, which gates the whole
+      // description overlay (#491).
+      const fetched = detail;
       if (detail.status !== "running") return;
       // Replay-then-follow: the SSE stream re-sends the whole trace,
       // so folding from scratch is gap- and dupe-free by contract.
@@ -66,7 +70,7 @@ export function useRun(runId: string): {
       source.addEventListener("trace", (msg) => {
         const evt = JSON.parse((msg as MessageEvent).data) as TraceEvent;
         events.push(evt);
-        setRun(foldRun(runId, events));
+        setRun(carryFetched(foldRun(runId, events), fetched));
         if (evt.kind === "run_finished" || evt.kind === "run_aborted") {
           source?.close();
           setConnection("disconnected");

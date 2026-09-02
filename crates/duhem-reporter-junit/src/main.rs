@@ -5,7 +5,12 @@
 //! accept, so we stick to the subset every consumer parses):
 //!
 //! - One `<testsuite>` per run.
-//! - One `<testcase>` per criterion.
+//! - One `<testcase>` per criterion, and suite `tests` / `failures` /
+//!   `skipped` attributes that count those same elements. JUnit
+//!   consumers cross-check the attributes against the `<testcase>`
+//!   children, so the two must describe the same population — this is
+//!   deliberately *not* `RunSummary.totals`, which counts checks (#493).
+//!   The check-level aggregate is available on the JSON reporter.
 //! - `pass` → empty testcase.
 //! - `fail` → `<testcase><failure type="fail"/></testcase>`.
 //! - `inconclusive:<cause>` → `<testcase><skipped type="<cause>"/></testcase>`.
@@ -56,6 +61,10 @@ fn main() {
 /// `String` so the test below can assert on the exact wire shape
 /// without going through stdout.
 fn render(s: &RunSummary) -> String {
+    // Counts describe the `<testcase>` elements emitted below, which are
+    // criteria. Substituting `RunSummary.totals` here would claim N
+    // checks while emitting one element per criterion, which parsers
+    // read as a malformed suite (#493).
     let total = s.criteria.len();
     let failures = s
         .criteria
@@ -137,7 +146,16 @@ mod tests {
     use std::path::PathBuf;
 
     use duhem_judge::InconclusiveCause;
-    use duhem_summary::{CleanupFailureSummary, CriterionSummary};
+    use duhem_summary::{CheckTotals, CleanupFailureSummary, CriterionSummary};
+
+    fn totals(total: u32, passed: u32, failed: u32, inconclusive: u32) -> CheckTotals {
+        CheckTotals {
+            total,
+            passed,
+            failed,
+            inconclusive,
+        }
+    }
 
     #[test]
     fn pass_run_produces_empty_testcase_per_criterion() {
@@ -155,7 +173,8 @@ mod tests {
                 },
             ],
             PathBuf::from("."),
-        );
+        )
+        .with_totals(totals(2, 2, 0, 0));
         let xml = render(&s);
         assert!(xml.contains("tests=\"2\""), "{xml}");
         assert!(xml.contains("failures=\"0\""), "{xml}");
@@ -173,7 +192,8 @@ mod tests {
                 verdict: VerdictState::Fail,
             }],
             PathBuf::from("."),
-        );
+        )
+        .with_totals(totals(1, 0, 1, 0));
         let xml = render(&s);
         assert!(xml.contains("<failure type=\"fail\"/>"), "{xml}");
     }
@@ -188,7 +208,8 @@ mod tests {
                 verdict: VerdictState::Inconclusive(InconclusiveCause::Timeout),
             }],
             PathBuf::from("."),
-        );
+        )
+        .with_totals(totals(1, 0, 0, 1));
         let xml = render(&s);
         assert!(xml.contains("<skipped type=\"timeout\"/>"), "{xml}");
     }
@@ -203,7 +224,8 @@ mod tests {
                 verdict: VerdictState::Pass,
             }],
             PathBuf::from("."),
-        );
+        )
+        .with_totals(totals(1, 1, 0, 0));
         let xml = render(&s);
         assert!(xml.contains("&lt;AC&amp;1&gt;"), "{xml}");
         assert!(!xml.contains("<AC&1>"), "raw should not appear: {xml}");
@@ -222,5 +244,26 @@ mod tests {
         assert!(xml.contains("failures=\"0\""), "{xml}");
         assert!(xml.contains("<system-err>"), "{xml}");
         assert!(xml.contains("delete-record"), "{xml}");
+    }
+
+    #[test]
+    fn suite_attributes_count_testcase_elements_not_checks() {
+        // Three checks rolled up into one criterion. JUnit's `tests`
+        // attribute must describe the emitted `<testcase>` elements, or a
+        // consumer sees a suite promising three tests and finding one.
+        let s = RunSummary::new(
+            "r",
+            VerdictState::Fail,
+            vec![CriterionSummary {
+                id: "AC-1".into(),
+                verdict: VerdictState::Fail,
+            }],
+            PathBuf::from("."),
+        )
+        .with_totals(totals(3, 1, 1, 1));
+
+        let xml = render(&s);
+        assert!(xml.contains("tests=\"1\""), "{xml}");
+        assert_eq!(xml.matches("<testcase").count(), 1, "{xml}");
     }
 }

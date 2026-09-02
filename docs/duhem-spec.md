@@ -1247,7 +1247,7 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 
 **Run Summary & Reporters** (`duhem-summary`, `duhem-reporter-pretty`, `duhem-reporter-junit`)
 
-- `duhem-summary` defines the run-summary types the CLI emits
+- `duhem-summary` defines the run-summary types the CLI emits. `RunSummary.totals` carries `total`, `passed`, `failed`, and `inconclusive` check counts; `RunSetSummary.totals` aggregates them across leaves. `total` means checks that executed and emitted a verdict, not checks authored in the Verification Definition, so `--filter` exclusions are absent. Both fields default to all-zero counts when an older summary is deserialized.
 - The reporters render those summaries for humans (pretty) and CI (JUnit XML); they consume judge output and never produce a verdict, so they sit on the delivery side of the trust boundary (§11.2)
 
 **Delivery Layer**

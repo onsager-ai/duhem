@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] `RunSummary`/`RunSetSummary` carry check-level `totals`; the default reporter prints a final summary line. (#493)
 
 ## v0.3.0 — 2026-08-28
 

@@ -23,6 +23,17 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
   const criteria = new Map<string, CriterionDetail>();
   const criterionOf = new Map<string, string>();
 
+  // Index the first step owner before folding. It is stronger than the
+  // additive check_finished fallback even in a malformed stream (#490).
+  for (const evt of events) {
+    if (evt.kind === "step_started") {
+      const checkId = String(evt.check_id);
+      if (!criterionOf.has(checkId)) {
+        criterionOf.set(checkId, String(evt.criterion_id));
+      }
+    }
+  }
+
   const noteCheck = (criterionId: string, checkId: string) => {
     let crit = criteria.get(criterionId);
     if (!crit) {
@@ -33,7 +44,6 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
     if (!crit.checks.some((c) => c.id === checkId)) {
       crit.checks.push({ id: checkId, verdict: null });
     }
-    criterionOf.set(checkId, criterionId);
   };
 
   for (const evt of events) {
@@ -70,12 +80,23 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
         }
         break;
       case "step_started":
-        noteCheck(String(evt.criterion_id), String(evt.check_id));
+        if (criterionOf.get(String(evt.check_id)) === String(evt.criterion_id)) {
+          noteCheck(String(evt.criterion_id), String(evt.check_id));
+        }
         break;
       case "check_finished": {
-        const critId = criterionOf.get(String(evt.check_id));
+        const checkId = String(evt.check_id);
+        const recordedCriterion =
+          typeof evt.criterion_id === "string" ? evt.criterion_id : undefined;
+        const critId = criterionOf.get(checkId) ?? recordedCriterion;
+        if (critId) {
+          if (!criterionOf.has(checkId)) {
+            criterionOf.set(checkId, critId);
+          }
+          noteCheck(critId, checkId);
+        }
         const crit = critId ? criteria.get(critId) : undefined;
-        const check = crit?.checks.find((c) => c.id === evt.check_id);
+        const check = crit?.checks.find((c) => c.id === checkId);
         if (check) {
           check.verdict = String(evt.verdict);
         }

@@ -646,6 +646,7 @@ impl Engine {
             writer
                 .append(EventPayload::CheckFinished {
                     check_id: check.id.clone(),
+                    criterion_id: Some(criterion.id.clone()),
                     verdict: cv.state,
                     session_source: session.source.clone(),
                     session_digest: session.digest(),
@@ -2795,6 +2796,19 @@ criteria:
             )
         });
         assert!(!has_setup, "no Setup* events for empty setup block");
+        let owner = events.iter().find_map(|event| match &event.payload {
+            duhem_evidence::EventPayload::CheckFinished {
+                criterion_id,
+                check_id,
+                ..
+            } if check_id == "AC-1.1" => criterion_id.as_deref(),
+            _ => None,
+        });
+        assert_eq!(
+            owner,
+            Some("AC-1"),
+            "step-less checks carry ownership (#490)"
+        );
     }
 
     #[tokio::test]

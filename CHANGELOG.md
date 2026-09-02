@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] `check_finished` carries `criterion_id` so a check with no steps is attributable in the report. (#490)
 
 ## v0.3.0 — 2026-08-28
 

@@ -514,11 +514,21 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
     let mut cleanup = Vec::new();
     let mut criterion_order: Vec<String> = Vec::new();
     let mut checks_by_criterion: Vec<(String, Vec<CheckRef>)> = Vec::new();
-    // A check belongs to exactly one criterion (replay rejects
-    // conflicting mappings outright); first `step_started` wins here
-    // so a malformed stream can't smear one check's verdict across
-    // criteria.
+    // A check belongs to exactly one criterion. Seed ownership from the
+    // first `step_started` across the whole trace so its stronger evidence
+    // wins even if a malformed stream disagrees in `check_finished` (#490).
     let mut criterion_of_check: Vec<(String, String)> = Vec::new();
+    for evt in &run.events {
+        if let EventPayload::StepStarted {
+            criterion_id,
+            check_id,
+            ..
+        } = &evt.payload
+            && !criterion_of_check.iter().any(|(k, _)| k == check_id)
+        {
+            criterion_of_check.push((check_id.clone(), criterion_id.clone()));
+        }
+    }
     let mut run_verdict = None;
     let mut viewport = None;
 
@@ -602,14 +612,15 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 check_id,
                 ..
             } => {
+                // The pre-pass indexed every `step_started`, so a lookup
+                // miss is unreachable — but the reader stays tolerant of
+                // whatever the store hands it rather than panicking, so
+                // fall back to this event's own criterion.
                 let owner = criterion_of_check
                     .iter()
                     .find(|(k, _)| k == check_id)
                     .map(|(_, c)| c.clone())
-                    .unwrap_or_else(|| {
-                        criterion_of_check.push((check_id.clone(), criterion_id.clone()));
-                        criterion_id.clone()
-                    });
+                    .unwrap_or_else(|| criterion_id.clone());
                 // Only the owning criterion lists the check; a
                 // colliding `step_started` under another criterion is
                 // a malformed stream and must not duplicate the row.
@@ -623,18 +634,35 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 }
             }
             EventPayload::CheckFinished {
-                check_id, verdict, ..
+                check_id,
+                criterion_id,
+                verdict,
+                ..
             } => {
                 let owner = criterion_of_check
                     .iter()
                     .find(|(k, _)| k == check_id)
-                    .map(|(_, c)| c.clone());
-                if let Some(owner) = owner
-                    && let Some((_, checks)) =
+                    .map(|(_, c)| c.clone())
+                    .or_else(|| criterion_id.clone());
+                if let Some(owner) = owner {
+                    if !criterion_of_check.iter().any(|(k, _)| k == check_id) {
+                        criterion_of_check.push((check_id.clone(), owner.clone()));
+                    }
+                    // A step-less check enters the tree here rather than at
+                    // `step_started`; `note_check` de-duplicates, so a check
+                    // that already has steps is unaffected (#490).
+                    note_check(
+                        &mut criterion_order,
+                        &mut checks_by_criterion,
+                        &owner,
+                        check_id,
+                    );
+                    if let Some((_, checks)) =
                         checks_by_criterion.iter_mut().find(|(c, _)| *c == owner)
-                    && let Some(check) = checks.iter_mut().find(|c| c.id == *check_id)
-                {
-                    check.verdict = Some(*verdict);
+                        && let Some(check) = checks.iter_mut().find(|c| c.id == *check_id)
+                    {
+                        check.verdict = Some(*verdict);
+                    }
                 }
             }
             EventPayload::CriterionFinished { criterion_id, .. }
@@ -909,18 +937,27 @@ fn build_check_detail(
     check_id: &str,
     spans: Vec<SpanModel>,
 ) -> Option<CheckDetail> {
-    // A check belongs to exactly one criterion — replay hard-errors
-    // on conflicting mappings; the view applies the same first-wins
-    // ownership so `assertion_evaluated` / `check_finished` (which
-    // carry only `check_id`) can't be attributed to a colliding
-    // criterion. No ownership record → no such pair.
-    let owner = run.events.iter().find_map(|e| match &e.payload {
+    // `step_started` remains the strongest ownership evidence. A
+    // `check_finished.criterion_id` is the fallback that makes checks with
+    // no executable steps addressable while old traces still degrade to
+    // no detail (#490).
+    let owner_from_step = run.events.iter().find_map(|e| match &e.payload {
         EventPayload::StepStarted {
             criterion_id: c,
             check_id: k,
             ..
         } if k == check_id => Some(c.clone()),
         _ => None,
+    });
+    let owner = owner_from_step.or_else(|| {
+        run.events.iter().find_map(|e| match &e.payload {
+            EventPayload::CheckFinished {
+                criterion_id: Some(c),
+                check_id: k,
+                ..
+            } if k == check_id => Some(c.clone()),
+            _ => None,
+        })
     });
     if owner.as_deref() != Some(criterion_id) {
         return None;

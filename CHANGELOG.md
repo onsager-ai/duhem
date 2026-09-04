@@ -30,6 +30,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 
 - [breaking] `$pages.<page>.<element>(args…)` fills `{}` placeholders in a catalog entry; braces in a page locator now carry meaning, so an entry with an unescaped brace must write it `{{`/`}}` or it is rejected. (#495)
+- [additive] `check_finished` carries `criterion_id` so a check with no steps is attributable in the report. (#490)
 
 ## v0.3.0 — 2026-08-28
 

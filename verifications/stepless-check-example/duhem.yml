@@ -1,0 +1,23 @@
+# A check can judge runtime context without dispatching an action (#490).
+# Its `check_finished` evidence still names the owning criterion, so reports
+# can show both the check verdict and this assertion-only timeline.
+
+verification: step-less check example
+spec_ref: https://github.com/onsager-ai/duhem/issues/490
+
+inputs:
+  value:
+    type: string
+    default: a
+
+criteria:
+  - id: AC-1
+    description: |
+      A check can evaluate data already available at run time without
+      dispatching an action, and its result remains attributable.
+    checks:
+      - id: AC-1.1
+        description: Judge an input and a pure runtime expression with no steps.
+        steps: []
+        assertions:
+          - $runtime.format("{}1", $inputs.value) == "a1"

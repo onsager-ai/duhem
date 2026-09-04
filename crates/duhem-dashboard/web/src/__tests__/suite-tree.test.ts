@@ -88,6 +88,38 @@ describe("suite tree derivations", () => {
     });
   });
 
+  it("counts the #488 step-less repro from check_finished ownership", () => {
+    const events: TraceEvent[] = [
+      ...[
+        ["AC-1", "AC-1.1", "fail"],
+        ["AC-2", "AC-2.1", "pass"],
+        ["AC-3", "AC-3.1", "pass"],
+      ].flatMap(([criterionId, checkId, verdict], index) => [
+        {
+          seq: index * 2,
+          ts: `2026-07-24T00:00:0${index}.000Z`,
+          kind: "check_finished",
+          criterion_id: criterionId,
+          check_id: checkId,
+          verdict,
+        },
+        {
+          seq: index * 2 + 1,
+          ts: `2026-07-24T00:00:0${index}.010Z`,
+          kind: "criterion_finished",
+          criterion_id: criterionId,
+          verdict,
+        },
+      ]),
+    ];
+
+    expect(countSuiteStatuses(buildSuiteTree(foldRun("R1", events).criteria))).toEqual({
+      pass: 2,
+      fail: 1,
+      inconclusive: 0,
+    });
+  });
+
   it("filters by multiple statuses while retaining criterion context", () => {
     const filtered = filterSuiteTree(
       buildSuiteTree(CRITERIA),

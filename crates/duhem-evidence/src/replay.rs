@@ -83,6 +83,29 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     let mut recorded_run: Option<VerdictState> = None;
     let mut saw_run_started = false;
 
+    // A step owner is stronger than the additive check_finished fallback,
+    // regardless of event order. Preserve the existing hard error for two
+    // conflicting step owners (#490).
+    for evt in events {
+        if let EventPayload::StepStarted {
+            criterion_id,
+            check_id,
+            ..
+        } = &evt.payload
+        {
+            match check_to_criterion.get(check_id) {
+                Some(prev) if prev != criterion_id => {
+                    return Err(ReplayError::OutOfOrder(format!(
+                        "check {check_id} mapped to both criterion {prev} and {criterion_id}"
+                    )));
+                }
+                _ => {
+                    check_to_criterion.insert(check_id.clone(), criterion_id.clone());
+                }
+            }
+        }
+    }
+
     for evt in events {
         match &evt.payload {
             EventPayload::RunStarted { .. } => {
@@ -91,25 +114,7 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                 }
                 saw_run_started = true;
             }
-            EventPayload::StepStarted {
-                criterion_id,
-                check_id,
-                ..
-            } => {
-                // A check belongs to exactly one criterion. Reject
-                // conflicting mappings rather than silently letting
-                // last-write-wins mis-attribute recomputed verdicts.
-                match check_to_criterion.get(check_id) {
-                    Some(prev) if prev != criterion_id => {
-                        return Err(ReplayError::OutOfOrder(format!(
-                            "check {check_id} mapped to both criterion {prev} and {criterion_id}"
-                        )));
-                    }
-                    _ => {
-                        check_to_criterion.insert(check_id.clone(), criterion_id.clone());
-                    }
-                }
-            }
+            EventPayload::StepStarted { .. } => {}
             EventPayload::AssertionEvaluated {
                 check_id,
                 assertion_index,
@@ -127,8 +132,16 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                     });
             }
             EventPayload::CheckFinished {
-                check_id, verdict, ..
+                check_id,
+                criterion_id,
+                verdict,
+                ..
             } => {
+                if !check_to_criterion.contains_key(check_id)
+                    && let Some(criterion_id) = criterion_id
+                {
+                    check_to_criterion.insert(check_id.clone(), criterion_id.clone());
+                }
                 recorded_checks.insert(check_id.clone(), *verdict);
             }
             EventPayload::CriterionFinished {

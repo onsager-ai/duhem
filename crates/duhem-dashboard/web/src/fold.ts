@@ -5,6 +5,28 @@
 
 import type { CriterionDetail, RunDetail, TraceEvent } from "./api";
 
+/** Fields `foldRun` cannot derive from the event stream. `useRun` carries
+ *  them over from the authoritative `GET /api/runs/:id` so a live run shows
+ *  what a finished one shows (#491). Typed as a `RunDetail` subset, so a new
+ *  field added to `RunDetail` has to be classified rather than silently
+ *  reverting to the fold's default on every event. */
+export type FoldUnknowable = Pick<
+  RunDetail,
+  "verification" | "started_at" | "inputs" | "has_definition" | "viewport"
+>;
+
+/** Overlay the fetched detail's fold-unknowable fields onto a live fold. */
+export function carryFetched(folded: RunDetail, fetched: RunDetail): RunDetail {
+  const carried: FoldUnknowable = {
+    verification: fetched.verification,
+    started_at: fetched.started_at,
+    inputs: fetched.inputs,
+    has_definition: fetched.has_definition,
+    viewport: fetched.viewport,
+  };
+  return { ...folded, ...carried };
+}
+
 export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
   const detail: RunDetail = {
     run_id: runId,
@@ -14,8 +36,9 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
     verdict: null,
     status: "running",
     setup_aborted: false,
-    // A live fold doesn't surface the definition; the authoritative
-    // re-fetch on `run_finished` fills this in (#302).
+    // Not knowable from the event stream: `run_started` carries the
+    // snapshot, but the fold does not read it. The caller carries the
+    // fetched value forward instead — see `carryFetched` (#491).
     has_definition: false,
     cleanup: [],
     criteria: [],

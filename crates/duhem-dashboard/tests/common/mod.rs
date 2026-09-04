@@ -195,6 +195,7 @@ pub async fn write_passing_run(
     .unwrap();
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
+        criterion_id: Some("AC-1".into()),
         verdict: VerdictState::Pass,
         session_source: None,
         session_digest: None,
@@ -329,6 +330,7 @@ pub async fn write_replay_run(store: Arc<SqliteStore>, run_id: &str) -> (String,
     .unwrap();
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
+        criterion_id: Some("AC-1".into()),
         verdict: VerdictState::Pass,
         session_source: None,
         session_digest: None,
@@ -388,6 +390,7 @@ pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition
     .unwrap();
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
+        criterion_id: Some("AC-1".into()),
         verdict: VerdictState::Fail,
         session_source: None,
         session_digest: None,

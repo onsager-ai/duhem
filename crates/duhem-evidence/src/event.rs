@@ -344,6 +344,11 @@ pub enum EventPayload {
     },
     CheckFinished {
         check_id: String,
+        /// Owning criterion. Lets readers attribute checks that emitted no
+        /// `step_started`, including `steps: []` checks. Optional for traces
+        /// recorded before spec #490.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        criterion_id: Option<String>,
         verdict: VerdictState,
         /// Literal `session:` expression selected by the check. The
         /// credential value is never recorded; this source proves which
@@ -573,12 +578,14 @@ mod tests {
             ts: ts(),
             payload: EventPayload::CheckFinished {
                 check_id: "AC-2.1".into(),
+                criterion_id: Some("AC-2".into()),
                 verdict: VerdictState::Pass,
                 session_source: Some("$setup.session.outputs.state".into()),
                 session_digest: Some("a".repeat(64)),
             },
         };
         let line = serde_json::to_string(&seeded).unwrap();
+        assert!(line.contains(r#""criterion_id":"AC-2""#));
         assert!(line.contains(r#""session_source":"$setup.session.outputs.state""#));
         assert!(line.contains(&format!(r#""session_digest":"{}""#, "a".repeat(64))));
         assert!(!line.contains("cookies"));
@@ -776,6 +783,7 @@ mod tests {
         assert!(
             EventPayload::CheckFinished {
                 check_id: "x".into(),
+                criterion_id: None,
                 verdict: VerdictState::Pass,
                 session_source: None,
                 session_digest: None,

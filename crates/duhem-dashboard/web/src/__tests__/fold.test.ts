@@ -72,6 +72,30 @@ describe("foldRun", () => {
     ]);
     expect(done.verdict).toBe("pass");
   });
+
+  it("keeps the first step owner over a disagreeing finished-event owner (#490)", () => {
+    const done = foldRun("r1", [
+      {
+        seq: 0,
+        ts: "2026-06-10T10:00:00.000Z",
+        kind: "step_started",
+        criterion_id: "AC-1",
+        check_id: "AC-1.1",
+      },
+      {
+        seq: 1,
+        ts: "2026-06-10T10:00:01.000Z",
+        kind: "check_finished",
+        criterion_id: "AC-2",
+        check_id: "AC-1.1",
+        verdict: "fail",
+      },
+    ]);
+
+    expect(done.criteria).toEqual([
+      { id: "AC-1", verdict: null, checks: [{ id: "AC-1.1", verdict: "fail" }] },
+    ]);
+  });
 });
 
 describe("carryFetched", () => {

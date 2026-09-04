@@ -431,6 +431,32 @@ function StepCaptures({
   );
 }
 
+// Keep the compact resolved-only summary for old snapshots and ordinary
+// literal parameters. When the snapshot carries an authored reference,
+// show that reference next to the value the runtime persisted (#492).
+function describeStepWith(
+  resolved: unknown,
+  authored: Record<string, unknown> | undefined,
+): string {
+  if (!resolved || typeof resolved !== "object" || Array.isArray(resolved)) {
+    return describeWith(resolved);
+  }
+  const values = resolved as Record<string, unknown>;
+  const hasReference = Object.entries(values).some(([name, value]) => {
+    const source = authored?.[name];
+    return typeof source === "string" && source.startsWith("$") &&
+      source !== value;
+  });
+  if (!hasReference) return describeWith(resolved);
+  return Object.entries(values).map(([name, value]) => {
+    const source = authored?.[name];
+    return typeof source === "string" && source.startsWith("$") &&
+        source !== value
+      ? `${name}=${source} → ${compactValue(value)}`
+      : `${name}=${compactValue(value)}`;
+  }).join(" · ");
+}
+
 // A step's lifecycle collapsed into one row: the action + its
 // status-propagated outcome + observation count as the summary, its
 // observations one click away. A judging step's implicit verdict (#280)
@@ -444,6 +470,7 @@ function StepGroup({
   prevOf,
   artifacts,
   selected,
+  selectedFromScroll,
   rawExpanded,
   onRawExpandedChange,
 }: {
@@ -451,6 +478,7 @@ function StepGroup({
   prevOf: (evt: TraceEvent) => TraceEvent | undefined;
   artifacts: ArtifactRef[];
   selected?: boolean;
+  selectedFromScroll?: boolean;
   rawExpanded: boolean;
   onRawExpandedChange: (expanded: boolean) => void;
 }) {
@@ -490,6 +518,25 @@ function StepGroup({
   );
   const fe = formatEvent(started, prevOf(started));
   const status = stepStatus(node);
+  // Selection remains URL/highlight state, while disclosure is seeded once
+  // and then belongs to the reader; scroll-spy selections never seed it (#492).
+  const selectedOnMount = Boolean(selected && !selectedFromScroll);
+  const [open, setOpen] = useState(status.failed || selectedOnMount);
+  const disclosureSeeded = useRef(status.failed || selectedOnMount);
+  const wasSelected = useRef(Boolean(selected));
+  useEffect(() => {
+    if (!selected) {
+      wasSelected.current = false;
+      return;
+    }
+    if (!wasSelected.current) {
+      wasSelected.current = true;
+      if (!selectedFromScroll && !disclosureSeeded.current) {
+        disclosureSeeded.current = true;
+        setOpen(true);
+      }
+    }
+  }, [selected, selectedFromScroll]);
   // Overlay authored intent from the recorded VD snapshot (#302).
   // Description is prose for readers; id remains the stable reference.
   const vd = useVd();
@@ -503,7 +550,10 @@ function StepGroup({
       : vd?.stepLabel(cid, chid, node.stepIndex)
   ) ?? `${uses} #${node.stepIndex}`;
   const layer = deliveryLayerLabel(started.layer);
-  const detailText = [fe.label, describeWith(started.with)].filter(Boolean).join(" · ");
+  const authoredWith = vd?.stepWith(cid, chid, node.stepIndex, flow);
+  const detailText = [fe.label, describeStepWith(started.with, authoredWith)]
+    .filter(Boolean)
+    .join(" · ");
   const statusObs = scalarObs.find(
     (observation) => observation.name === "status" && typeof observation.value === "number",
   );
@@ -521,7 +571,10 @@ function StepGroup({
       data-flow-invocation={flow?.invocation}
       data-flow-name={flow?.name}
     >
-      <details open={status.failed || selected}>
+      <details
+        open={open}
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+      >
         <summary className="step-summary md:sticky md:top-[var(--check-context-height)] md:z-10 md:border-b md:bg-background/95 md:backdrop-blur">
           {/* Primary line: status icon + action. Successful steps rely on
               the green check alone; only exceptional outcomes need text. */}
@@ -691,15 +744,17 @@ function FlowGroup({
   prevOf,
   artifacts,
   selectedStep,
-  rawExpanded,
+  selectedFromScroll,
+  rawExpandedSteps,
   onRawExpandedChange,
 }: {
   group: FlowGroupNode;
   prevOf: (evt: TraceEvent) => TraceEvent | undefined;
   artifacts: ArtifactRef[];
   selectedStep?: number;
-  rawExpanded: boolean;
-  onRawExpandedChange: (expanded: boolean) => void;
+  selectedFromScroll?: boolean;
+  rawExpandedSteps: ReadonlySet<number>;
+  onRawExpandedChange: (stepIndex: number, expanded: boolean) => void;
 }) {
   const vd = useVd();
   const started = group.steps[0].events[0];
@@ -726,8 +781,10 @@ function FlowGroup({
             prevOf={prevOf}
             artifacts={artifacts}
             selected={selectedStep === node.stepIndex}
-            rawExpanded={rawExpanded}
-            onRawExpandedChange={onRawExpandedChange}
+            selectedFromScroll={selectedFromScroll && selectedStep === node.stepIndex}
+            rawExpanded={rawExpandedSteps.has(node.stepIndex)}
+            onRawExpandedChange={(expanded) =>
+              onRawExpandedChange(node.stepIndex, expanded)}
           />
         ))}
       </ol>
@@ -739,14 +796,16 @@ export function Timeline({
   events,
   artifacts = [],
   selectedStep,
-  rawExpanded = false,
+  selectedFromScroll = false,
+  rawExpandedSteps = new Set<number>(),
   onRawExpandedChange = () => {},
 }: {
   events: TraceEvent[];
   artifacts?: ArtifactRef[];
   selectedStep?: number;
-  rawExpanded?: boolean;
-  onRawExpandedChange?: (expanded: boolean) => void;
+  selectedFromScroll?: boolean;
+  rawExpandedSteps?: ReadonlySet<number>;
+  onRawExpandedChange?: (stepIndex: number, expanded: boolean) => void;
 }) {
   const nodes = groupFlowSteps(groupTimeline(events));
   const idx = new Map(events.map((e, i) => [e.seq, i]));
@@ -761,7 +820,8 @@ export function Timeline({
             prevOf={prevOf}
             artifacts={artifacts}
             selectedStep={selectedStep}
-            rawExpanded={rawExpanded}
+            selectedFromScroll={selectedFromScroll}
+            rawExpandedSteps={rawExpandedSteps}
             onRawExpandedChange={onRawExpandedChange}
           />
         ) : n.kind === "step" ? (
@@ -771,8 +831,10 @@ export function Timeline({
             prevOf={prevOf}
             artifacts={artifacts}
             selected={selectedStep === n.stepIndex}
-            rawExpanded={rawExpanded}
-            onRawExpandedChange={onRawExpandedChange}
+            selectedFromScroll={selectedFromScroll && selectedStep === n.stepIndex}
+            rawExpanded={rawExpandedSteps.has(n.stepIndex)}
+            onRawExpandedChange={(expanded) =>
+              onRawExpandedChange(n.stepIndex, expanded)}
           />
         ) : (
           <TimelineRow key={n.key} evt={n.event} prev={prevOf(n.event)} artifacts={artifacts} />
@@ -1514,12 +1576,14 @@ function StepSelectionSync({
   selectedStep,
   stepNavigation,
   view,
+  onScrollSelection,
 }: {
   surfaceRef: RefObject<HTMLDivElement | null>;
   params: URLSearchParams;
   selectedStep?: number;
   stepNavigation: ReadonlyMap<number, { key: string; label: string }>;
   view: "steps" | "replay";
+  onScrollSelection: (key: string) => void;
 }) {
   const navigate = useNavigate();
   const syncing = useRef(false);
@@ -1564,12 +1628,13 @@ function StepSelectionSync({
       ) ?? groups[0];
       const key = stepNavigation.get(Number(visible?.dataset.stepIndex))?.key;
       if (key && key !== stepParam) {
+        onScrollSelection(key);
         navigate({ search: queryWith(params, { step: key }) }, { replace: true });
       }
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
     return () => scroller.removeEventListener("scroll", onScroll);
-  }, [navigate, params, stepNavigation, stepParam, surfaceRef, view]);
+  }, [navigate, onScrollSelection, params, stepNavigation, stepParam, surfaceRef, view]);
 
   return null;
 }
@@ -1579,7 +1644,10 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
   const [error, setError] = useState<string | null>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const contextRef = useRef<HTMLDivElement>(null);
-  const [rawExpanded, setRawExpanded] = useState(false);
+  const [rawExpandedSteps, setRawExpandedSteps] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [scrollSelectedKey, setScrollSelectedKey] = useState<string>();
 
   useEffect(() => {
     const [criterionId, checkId] = pair.split("::", 2);
@@ -1592,7 +1660,7 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
     fetchCheck(runId, criterionId, checkId).then(setCheck, (e) => setError(String(e)));
   }, [runId, pair]);
 
-  useEffect(() => setRawExpanded(false), [runId]);
+  useEffect(() => setRawExpandedSteps(new Set()), [runId]);
 
   useLayoutEffect(() => {
     const surface = surfaceRef.current;
@@ -1610,6 +1678,12 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
 
   const vd = useVd();
   const [params] = useSearchParams();
+  const stepParam = params.get("step") ?? undefined;
+  const selectedFromScroll = stepParam !== undefined && stepParam === scrollSelectedKey;
+
+  useEffect(() => {
+    if (selectedFromScroll) setScrollSelectedKey(undefined);
+  }, [selectedFromScroll]);
 
   if (error) return <p className="error">{error}</p>;
   if (check === null) return <p className="muted">Loading…</p>;
@@ -1638,7 +1712,6 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
       ] as const];
     }),
   );
-  const stepParam = params.get("step") ?? undefined;
   const selectedNode = stepParam === undefined
     ? undefined
     : stepNodes.find((node) => {
@@ -1651,6 +1724,15 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
     : undefined;
   const view = params.get("view") === "replay" ? "replay" : "steps";
 
+  const setRawExpanded = (stepIndex: number, expanded: boolean) => {
+    setRawExpandedSteps((current) => {
+      const next = new Set(current);
+      if (expanded) next.add(stepIndex);
+      else next.delete(stepIndex);
+      return next;
+    });
+  };
+
   return (
     <>
       <div ref={surfaceRef} className="run-detail-surface">
@@ -1660,6 +1742,7 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
           selectedStep={selectedStep}
           stepNavigation={stepNavigation}
           view={view}
+          onScrollSelection={setScrollSelectedKey}
         />
         <div ref={contextRef} className="check-context mb-3 border-b bg-background/95 pb-3 backdrop-blur md:sticky md:top-0 md:z-20 md:-ml-4 md:pl-4">
           <h2 className="flex flex-wrap items-center gap-2 text-base font-semibold">
@@ -1700,7 +1783,8 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
               events={check.timeline}
               artifacts={check.artifacts}
               selectedStep={selectedStep}
-              rawExpanded={rawExpanded}
+              selectedFromScroll={selectedFromScroll}
+              rawExpandedSteps={rawExpandedSteps}
               onRawExpandedChange={setRawExpanded}
             />
           </>

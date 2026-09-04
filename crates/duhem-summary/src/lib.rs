@@ -50,6 +50,13 @@ pub struct RunSummary {
     /// **v2**: replaces v1's `evidence_dir` (per-run trace directories
     /// were retired for the store in #189).
     pub store: PathBuf,
+    /// Check-level aggregate for the run (spec #493). `total` counts
+    /// checks that executed, not checks authored in the Verification
+    /// Definition: a check excluded by `--filter` emits no verdict and
+    /// is not counted. Additive — old summaries deserialize to zeros
+    /// and older plugins ignore this field.
+    #[serde(default)]
+    pub totals: CheckTotals,
     /// Non-passing checks and the assertions that explain their verdict.
     /// Lets a reporter show *which* assertion failed (and the observed
     /// values) without the author querying the store. Empty on a
@@ -102,6 +109,7 @@ impl RunSummary {
             verdict,
             criteria,
             store,
+            totals: CheckTotals::default(),
             failures: Vec::new(),
             warnings: Vec::new(),
             cleanup: Vec::new(),
@@ -114,6 +122,12 @@ impl RunSummary {
         self
     }
 
+    /// Attach the check-level aggregate derived from recorded verdicts.
+    pub fn with_totals(mut self, totals: CheckTotals) -> Self {
+        self.totals = totals;
+        self
+    }
+
     /// Attach run warnings (builder style). Empty by default.
     pub fn with_warnings(mut self, warnings: Vec<String>) -> Self {
         self.warnings = warnings;
@@ -123,6 +137,47 @@ impl RunSummary {
     pub fn with_cleanup(mut self, cleanup: Vec<CleanupFailureSummary>) -> Self {
         self.cleanup = cleanup;
         self
+    }
+}
+
+/// Check-level aggregate over the verdicts recorded for executed checks.
+///
+/// `total` deliberately means executed checks, not authored checks. A
+/// check skipped by `--filter` has no `check_finished` verdict and is
+/// therefore absent from every count (spec #493).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CheckTotals {
+    /// Number of checks executed. This is not the authored check count:
+    /// checks excluded by `--filter` do not emit a verdict and are absent.
+    pub total: u32,
+    /// Executed checks whose recorded verdict is `pass`.
+    pub passed: u32,
+    /// Executed checks whose recorded verdict is `fail`.
+    pub failed: u32,
+    /// Executed checks whose recorded verdict is `inconclusive:*`.
+    pub inconclusive: u32,
+}
+
+impl CheckTotals {
+    /// Fold the recorded verdict of every executed check into one aggregate.
+    pub fn from_verdicts<'a>(verdicts: impl IntoIterator<Item = &'a VerdictState>) -> Self {
+        let mut totals = Self::default();
+        for verdict in verdicts {
+            totals.total += 1;
+            match verdict {
+                VerdictState::Pass => totals.passed += 1,
+                VerdictState::Fail => totals.failed += 1,
+                VerdictState::Inconclusive(_) => totals.inconclusive += 1,
+            }
+        }
+        totals
+    }
+
+    fn add(&mut self, other: Self) {
+        self.total += other.total;
+        self.passed += other.passed;
+        self.failed += other.failed;
+        self.inconclusive += other.inconclusive;
     }
 }
 
@@ -179,6 +234,12 @@ pub struct RunSetSummary {
     pub schema_version: String,
     /// Aggregated verdict per `aggregate_run_set`.
     pub verdict: VerdictState,
+    /// Check-level aggregate across all leaf runs (spec #493). Like
+    /// [`RunSummary::totals`], this counts executed, not authored,
+    /// checks and defaults to zeros for summaries written before the
+    /// field existed.
+    #[serde(default)]
+    pub totals: CheckTotals,
     /// Per-leaf summaries, in execution order.
     pub runs: Vec<RunSummary>,
 }
@@ -190,9 +251,14 @@ impl RunSetSummary {
     pub const SCHEMA_VERSION: &'static str = "1";
 
     pub fn new(verdict: VerdictState, runs: Vec<RunSummary>) -> Self {
+        let mut totals = CheckTotals::default();
+        for run in &runs {
+            totals.add(run.totals);
+        }
         Self {
             schema_version: Self::SCHEMA_VERSION.to_string(),
             verdict,
+            totals,
             runs,
         }
     }
@@ -255,6 +321,40 @@ mod tests {
     }
 
     #[test]
+    fn totals_round_trip_default_to_zero_and_always_serialize() {
+        // Additive contract (#493): a pre-field summary reads as zero,
+        // while a current zero-check run still states every count.
+        let bare =
+            r#"{"schema_version":"2","run_id":"r","verdict":"pass","criteria":[],"store":"."}"#;
+        let old: RunSummary = serde_json::from_str(bare).unwrap();
+        assert_eq!(old.totals, CheckTotals::default());
+
+        let line = serde_json::to_string(&old).unwrap();
+        assert!(line.contains(r#""totals":{"total":0,"passed":0,"failed":0,"inconclusive":0}"#));
+        let back: RunSummary = serde_json::from_str(&line).unwrap();
+        assert_eq!(back, old);
+    }
+
+    #[test]
+    fn mixed_verdict_totals_partition_every_executed_check() {
+        let verdicts = [
+            VerdictState::Pass,
+            VerdictState::Fail,
+            VerdictState::Inconclusive(duhem_judge::InconclusiveCause::Timeout),
+        ];
+        let totals = CheckTotals::from_verdicts(&verdicts);
+
+        assert_eq!(totals.total, 3);
+        assert_eq!(totals.passed, 1);
+        assert_eq!(totals.failed, 1);
+        assert_eq!(totals.inconclusive, 1);
+        assert_eq!(
+            totals.passed + totals.failed + totals.inconclusive,
+            totals.total,
+        );
+    }
+
+    #[test]
     fn warnings_round_trip_and_omit_when_empty() {
         // Empty warnings must not appear on the wire (additive
         // guarantee: a warning-free summary serializes as before).
@@ -305,12 +405,30 @@ mod tests {
                 verdict: VerdictState::Pass,
             }],
             PathBuf::from("state/duhem.db"),
-        );
+        )
+        .with_totals(CheckTotals {
+            total: 3,
+            passed: 1,
+            failed: 1,
+            inconclusive: 1,
+        });
         let set = RunSetSummary::new(VerdictState::Pass, vec![leaf]);
         let line = serde_json::to_string(&set).unwrap();
         let back: RunSetSummary = serde_json::from_str(&line).unwrap();
         assert_eq!(back, set);
         assert!(line.contains("\"schema_version\":\"1\""));
         assert!(line.contains("\"runs\""));
+        assert_eq!(back.totals.total, 3);
+        assert_eq!(
+            back.totals.passed + back.totals.failed + back.totals.inconclusive,
+            back.totals.total,
+        );
+    }
+
+    #[test]
+    fn run_set_totals_default_for_pre_field_summary() {
+        let bare = r#"{"schema_version":"1","verdict":"pass","runs":[]}"#;
+        let back: RunSetSummary = serde_json::from_str(bare).unwrap();
+        assert_eq!(back.totals, CheckTotals::default());
     }
 }

@@ -462,8 +462,10 @@ impl<B: Backend> TtyRenderer<B> {
                     .start_step(criterion_id, check_id, *step_index, uses, with);
                 (false, true)
             }
-            EventPayload::StepFinished { outcome, .. } => {
-                self.board.finish_step(outcome);
+            EventPayload::StepFinished {
+                outcome, detail, ..
+            } => {
+                self.board.finish_step(outcome, detail.as_deref());
                 (false, true)
             }
             EventPayload::AssertionEvaluated {
@@ -1135,6 +1137,7 @@ criteria:
                 EventPayload::StepFinished {
                     step_index: 0,
                     outcome: duhem_evidence::StepOutcome::Ok,
+                    detail: None,
                 },
             ),
             evt(
@@ -1210,17 +1213,37 @@ criteria:
         let with = std::collections::BTreeMap::new();
 
         board.start_step("AC-1", "AC-1.1", 0, "cli/invoke", &with);
-        board.finish_step(&duhem_evidence::StepOutcome::Error);
+        board.finish_step(&duhem_evidence::StepOutcome::Error, None);
         let error = board.lines(120, 12).join("\n");
         assert!(error.contains("✗ 1 completed step"), "{error}");
 
         board.start_step("AC-1", "AC-1.1", 1, "cli/invoke", &with);
-        board.finish_step(&duhem_evidence::StepOutcome::Timeout);
+        board.finish_step(&duhem_evidence::StepOutcome::Timeout, None);
         let mixed = board.lines(120, 12).join("\n");
         assert!(
             mixed.contains("✗ 2 completed steps"),
             "failure must take priority over timeout: {mixed}"
         );
+    }
+
+    #[test]
+    fn failed_step_row_renders_recorded_engine_detail() {
+        let mut board = TtyBoard::new("error detail".into(), plan().criteria);
+        board.start_step(
+            "AC-1",
+            "AC-1.1",
+            0,
+            "ui/click",
+            &std::collections::BTreeMap::new(),
+        );
+        let cause = "action `ui/click` failed: locator `#missing` never resolved";
+        board.finish_step(&duhem_evidence::StepOutcome::Error, Some(cause));
+        let state = VerdictState::Inconclusive(duhem_judge::InconclusiveCause::MissingObservation);
+        board.finish_check("AC-1.1", &state);
+        board.finish_criterion("AC-1", &state);
+
+        let lines = board.lines(160, 12).join("\n");
+        assert!(lines.contains(cause), "{lines}");
     }
 
     fn rolling_board() -> TtyBoard {
@@ -1241,13 +1264,13 @@ criteria:
             let criterion = format!("AC-{index}");
             let check = format!("{criterion}.1");
             board.start_step(&criterion, &check, 0, "cli/invoke", &with);
-            board.finish_step(&duhem_evidence::StepOutcome::Ok);
+            board.finish_step(&duhem_evidence::StepOutcome::Ok, None);
             board.assertion(&check, Some(0), &duhem_judge::VerdictState::Pass, None);
             board.finish_check(&check, &VerdictState::Pass);
             board.finish_criterion(&criterion, &VerdictState::Pass);
         }
         board.start_step("AC-6", "AC-6.1", 0, "api/call", &with);
-        board.finish_step(&duhem_evidence::StepOutcome::Error);
+        board.finish_step(&duhem_evidence::StepOutcome::Error, None);
         board.assertion(
             "AC-6.1",
             Some(0),

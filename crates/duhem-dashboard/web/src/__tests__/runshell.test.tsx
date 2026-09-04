@@ -88,19 +88,11 @@ const TRIAGE_CHECK = {
     { seq: 3, ts: "t3", kind: "step_started", criterion_id: "AC-5", check_id: "AC-5.1", step_index: 1, uses: "ui/click" },
     { seq: 4, ts: "t4", kind: "step_finished", step_index: 1, outcome: "error" },
     { seq: 5, ts: "t5", kind: "step_started", criterion_id: "AC-5", check_id: "AC-5.1", step_index: 2, uses: "ui/wait", with: { timeout: "5s" } },
-    { seq: 6, ts: "t6", kind: "step_finished", step_index: 2, outcome: "timeout" },
+    { seq: 6, ts: "t6", kind: "step_finished", step_index: 2, outcome: "ok" },
   ],
 };
 
-function stub(run = RUN, check: Record<string, unknown> = CHECK) {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (url: string) => {
-      if (String(url).includes("/checks/")) {
-        return new Response(JSON.stringify(check), { status: 200 });
-      }
-      if (String(url).endsWith("/definition")) {
-        return new Response(`
+const DEFINITION = `
 criteria:
   - id: AC-5
     checks:
@@ -110,7 +102,21 @@ criteria:
             uses: ui/navigate
           - id: submit-form
             uses: ui/click
-`);
+`;
+
+function stub(
+  run = RUN,
+  check: Record<string, unknown> = CHECK,
+  definition = DEFINITION,
+) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (String(url).includes("/checks/")) {
+        return new Response(JSON.stringify(check), { status: 200 });
+      }
+      if (String(url).endsWith("/definition")) {
+        return new Response(definition);
       }
       return new Response(JSON.stringify(run), { status: 200 });
     }),
@@ -452,36 +458,105 @@ describe("run report tree", () => {
     }
   });
 
-  it("updates the highlighted rail row from detail scrolling and arrow-key navigation", async () => {
+  it("updates scroll selection without changing step disclosure", async () => {
     stub(RUN, TRIAGE_CHECK);
     const { container } = renderAt("/run/R1/check/AC-5%3A%3AAC-5.1?step=open-page");
     const rail = await screen.findByTestId("run-tree");
     await waitFor(() => expect(container.querySelectorAll("[data-step-index]")).toHaveLength(3));
     const detail = container.querySelector(".run-results-detail") as HTMLElement;
     const groups = container.querySelectorAll<HTMLElement>("[data-step-index]");
+    const disclosures = [...groups].map((group) =>
+      group.querySelector<HTMLDetailsElement>(":scope > details")!);
+    expect(disclosures.map((item) => item.open)).toEqual([true, true, false]);
     vi.spyOn(detail, "getBoundingClientRect").mockReturnValue({ top: 0 } as DOMRect);
     vi.spyOn(groups[0], "getBoundingClientRect").mockReturnValue({ top: -100 } as DOMRect);
-    vi.spyOn(groups[1], "getBoundingClientRect").mockReturnValue({ top: -1 } as DOMRect);
-    vi.spyOn(groups[2], "getBoundingClientRect").mockReturnValue({ top: 300 } as DOMRect);
+    vi.spyOn(groups[1], "getBoundingClientRect").mockReturnValue({ top: -50 } as DOMRect);
+    vi.spyOn(groups[2], "getBoundingClientRect").mockReturnValue({ top: -1 } as DOMRect);
     fireEvent.scroll(detail);
-    await waitFor(() => expect(within(rail).getByRole("link", { name: "submit-form" }).getAttribute("aria-current")).toBe("step"));
-    fireEvent.keyDown(within(rail).getByRole("link", { name: "submit-form" }), { key: "ArrowDown" });
     await waitFor(() => expect(within(rail).getByRole("link", { name: "ui/wait #2" }).getAttribute("aria-current")).toBe("step"));
     expect(container.querySelector('[data-step-index="2"]')?.className).toContain("step-selected");
+    expect(screen.getByTestId("location-search").textContent).toContain("step=2");
+    expect(disclosures.map((item) => item.open)).toEqual([true, true, false]);
+
+    fireEvent.keyDown(within(rail).getByRole("link", { name: "ui/wait #2" }), {
+      key: "ArrowUp",
+    });
+    await waitFor(() => expect(
+      within(rail).getByRole("link", { name: "submit-form" }).getAttribute("aria-current"),
+    ).toBe("step"));
   });
 
-  it("keeps raw step data collapsed by default and expanded across steps only within a run", async () => {
+  it("keeps raw step data expansion local to one step and resets it on a new run", async () => {
     stub(RUN, TRIAGE_CHECK);
     const first = renderAt("/run/R1/check/AC-5%3A%3AAC-5.1?step=open-page");
     const raws = await screen.findAllByTestId("step-raw") as HTMLDetailsElement[];
     expect(raws.every((raw) => !raw.open)).toBe(true);
     fireEvent.click(within(raws[0]).getByText(/Raw step data/));
-    await waitFor(() => expect(raws.every((raw) => raw.open)).toBe(true));
+    await waitFor(() => expect(raws[0].open).toBe(true));
+    expect(raws.slice(1).every((raw) => !raw.open)).toBe(true);
     fireEvent.click((await screen.findByTestId("run-tree")).querySelector('[aria-label="submit-form"]')!);
-    await waitFor(() => expect(screen.getAllByTestId("step-raw").every((raw) => (raw as HTMLDetailsElement).open)).toBe(true));
+    await waitFor(() => expect(
+      (screen.getAllByTestId("step-raw")[0] as HTMLDetailsElement).open,
+    ).toBe(true));
+    expect(screen.getAllByTestId("step-raw").slice(1).every(
+      (raw) => !(raw as HTMLDetailsElement).open,
+    )).toBe(true);
     first.unmount();
     renderAt("/run/R2/check/AC-5%3A%3AAC-5.1?step=open-page");
     await waitFor(() => expect(screen.getAllByTestId("step-raw").every((raw) => !(raw as HTMLDetailsElement).open)).toBe(true));
+  });
+
+  it("shows authored references beside resolved parameters without duplicating literals", async () => {
+    const check = {
+      ...TRIAGE_CHECK,
+      verdict: "pass",
+      timeline: [
+        {
+          seq: 1,
+          ts: "t1",
+          kind: "step_started",
+          criterion_id: "AC-5",
+          check_id: "AC-5.1",
+          step_index: 0,
+          uses: "ui/click",
+          with: { locator: { role: "button", name: "Submit" } },
+        },
+        { seq: 2, ts: "t2", kind: "step_finished", step_index: 0, outcome: "ok" },
+        {
+          seq: 3,
+          ts: "t3",
+          kind: "step_started",
+          criterion_id: "AC-5",
+          check_id: "AC-5.1",
+          step_index: 1,
+          uses: "ui/navigate",
+          with: { url: "https://example.test/login" },
+        },
+        { seq: 4, ts: "t4", kind: "step_finished", step_index: 1, outcome: "ok" },
+      ],
+    };
+    stub(RUN, check, `
+criteria:
+  - id: AC-5
+    checks:
+      - id: AC-5.1
+        steps:
+          - id: submit
+            uses: ui/click
+            with:
+              locator: $pages.login.submit
+          - id: literal
+            uses: ui/navigate
+            with:
+              url: https://example.test/login
+`);
+    const { container } = renderAt("/run/R1/check/AC-5%3A%3AAC-5.1");
+    await waitFor(() => expect(container.querySelectorAll(".ev-detail-text")).toHaveLength(2));
+    const details = container.querySelectorAll<HTMLElement>(".ev-detail-text");
+
+    expect(details[0].textContent).toContain("locator=$pages.login.submit →");
+    expect(details[0].textContent).toContain('{"role":"button","name":"Submit"}');
+    expect(details[1].textContent?.match(/https:\/\/example\.test\/login/g)).toHaveLength(1);
   });
 
   it("renders a video-relative step timeline that seeks and selects markers", async () => {

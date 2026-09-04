@@ -94,6 +94,12 @@ describe("formatEvent", () => {
     expect(skipped.detail).toContain("login");
   });
 
+  it("renders a recorded error cause and leaves legacy errors bare", () => {
+    const cause = "action `ui/click` failed: locator `#missing` never resolved";
+    expect(formatEvent(ev("step_finished", { outcome: "error", detail: cause })).detail).toBe(cause);
+    expect(formatEvent(ev("step_finished", { outcome: "error" })).detail).toBe("");
+  });
+
   it("keeps unknown structured step outcomes neutral", () => {
     const future = formatEvent(
       ev("step_finished", { outcome: { future: { detail: "new wire shape" } } }),
@@ -239,13 +245,13 @@ describe("groupTimeline", () => {
 });
 
 describe("stepStatus (#280 status propagation)", () => {
-  const node = (judgment?: TraceEvent, outcome: unknown = "ok"): StepNode => ({
+  const node = (judgment?: TraceEvent, outcome: unknown = "ok", detail?: string): StepNode => ({
     kind: "step",
     key: "s1",
     stepIndex: 0,
     events: [
       ev("step_started", { step_index: 0, uses: "ui/assert-element" }, 1),
-      ev("step_finished", { step_index: 0, outcome }, 2),
+      ev("step_finished", { step_index: 0, outcome, ...(detail ? { detail } : {}) }, 2),
     ],
     judgment,
   });
@@ -287,6 +293,10 @@ describe("stepStatus (#280 status propagation)", () => {
     expect(stepStatus(node(undefined, "ok")).label).toBe("step ok");
     expect(stepStatus(node(undefined, "error")).label).toBe("step error");
     expect(stepStatus(node(undefined, "error")).tone).toBe("fail");
+    expect(stepStatus(node(undefined, "error", "locator never resolved")).reason).toBe(
+      "locator never resolved",
+    );
+    expect(stepStatus(node(undefined, "error")).reason).toBe("");
   });
 
   it("does not render an unknown structured outcome as successful", () => {

@@ -751,15 +751,15 @@ describe("in-page inspection (#210)", () => {
     expect(btn.querySelector("img")?.getAttribute("src")).toBe("run/r/artifact/shot");
   });
 
-  it("leads each expanded step with evidence appropriate to its outcome", () => {
+  it("expands only the failing step and its screenshot", () => {
     const failShot = "f".repeat(64);
     const passShot = "p".repeat(64);
     const events: TraceEvent[] = [
       { seq: 1, ts: "t1", kind: "step_started", step_index: 0, uses: "ui/click" },
       { seq: 2, ts: "t2", kind: "step_observation", step_index: 0, output_name: "capture/screenshot", blob_sha256: failShot },
-      { seq: 3, ts: "t3", kind: "step_finished", step_index: 0, outcome: "error" },
+      { seq: 3, ts: "t3", kind: "step_finished", step_index: 0, outcome: "error", detail: "locator `#missing` never resolved" },
       { seq: 4, ts: "t4", kind: "step_started", step_index: 1, uses: "ui/wait", with: { timeout: "8s" } },
-      { seq: 5, ts: "t5", kind: "step_finished", step_index: 1, outcome: "timeout" },
+      { seq: 5, ts: "t5", kind: "step_finished", step_index: 1, outcome: "timeout", detail: "action `ui/wait` timed out after 8s" },
       { seq: 6, ts: "t6", kind: "step_started", step_index: 2, uses: "ui/navigate" },
       { seq: 7, ts: "t7", kind: "step_observation", step_index: 2, output_name: "capture/screenshot", blob_sha256: passShot },
       { seq: 8, ts: "t8", kind: "step_finished", step_index: 2, outcome: "ok" },
@@ -771,17 +771,38 @@ describe("in-page inspection (#210)", () => {
     const { container } = render(<Timeline events={events} artifacts={artifacts} />);
     const groups = container.querySelectorAll<HTMLElement>('[data-testid="step-group"]');
 
+    expect(groups[0].querySelector<HTMLDetailsElement>(":scope > details")?.open).toBe(true);
     const failedShot = groups[0].querySelector('[data-testid="shot-toggle"]');
     expect(failedShot?.getAttribute("aria-expanded")).toBe("true");
+    expect(groups[0].querySelector('[data-testid="step-reason"]')?.textContent).toContain(
+      "locator `#missing` never resolved",
+    );
     expect(groups[0].querySelector(".step-body")?.firstElementChild).toBe(
       groups[0].querySelector('[data-testid="step-captures"]'),
     );
     const inconclusiveLead = groups[1].querySelector('[data-testid="step-inconclusive-lead"]');
-    expect(inconclusiveLead?.textContent).toContain("step timed out");
+    expect(inconclusiveLead?.textContent).toContain("action `ui/wait` timed out after 8s");
     expect(inconclusiveLead?.textContent).toContain("Deadline: 8s");
     expect(groups[1].querySelector('[data-testid="step-captures"]')).toBeNull();
     expect(groups[2].querySelector('[data-testid="shot-toggle"]')?.getAttribute("aria-expanded"))
       .toBe("false");
+  });
+
+  it("keeps a reader-opened step open across rerenders", async () => {
+    const events: TraceEvent[] = [
+      { seq: 1, ts: "t1", kind: "step_started", step_index: 0, uses: "ui/navigate" },
+      { seq: 2, ts: "t2", kind: "step_finished", step_index: 0, outcome: "ok" },
+    ];
+    const { container, rerender } = render(<Timeline events={events} />);
+    const disclosure = container.querySelector<HTMLDetailsElement>(
+      '[data-testid="step-group"] > details',
+    )!;
+
+    expect(disclosure.open).toBe(false);
+    fireEvent.click(disclosure.querySelector("summary")!);
+    await waitFor(() => expect(disclosure.open).toBe(true));
+    rerender(<Timeline events={[...events]} selectedStep={undefined} />);
+    expect(disclosure.open).toBe(true);
   });
 
   it("groups a step's events into a node and keeps the verdict standalone", () => {

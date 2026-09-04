@@ -37,6 +37,9 @@ criteria:
         assertions: ["true"]
 "#;
 
+const ONE_PASS_DEFAULT_REPORT: &[u8] =
+    b"pass\nTotal: 1 checks \xc2\xb7 1 passed \xc2\xb7 0 failed \xc2\xb7 0 inconclusive\n";
+
 const TWO_CRITERIA: &str = r#"
 verification: smoke
 criteria:
@@ -214,10 +217,9 @@ fn explicit_and_disabled_env_file_controls_work() {
 
 #[test]
 #[ignore = "requires `npx playwright install chromium`; `duhem run` launches a browser unconditionally"]
-fn default_reporter_matches_pre_spec_output_byte_for_byte() {
-    // Regression-safety: pre-issue-#23 `duhem run` printed exactly
-    // `<verdict>\n`. The `default` reporter must produce the same
-    // bytes so existing CI scripts grepping for `pass` keep working.
+fn default_reporter_prints_verdict_then_check_totals() {
+    // Spec #493 extends the default reporter while retaining the
+    // verdict as the first line for existing CI scripts.
     let tmp = tempfile::tempdir().unwrap();
     let path = fixture(&tmp, ONE_CRITERION);
     let db = tmp.path().join("duhem.db");
@@ -235,7 +237,7 @@ fn default_reporter_matches_pre_spec_output_byte_for_byte() {
         "stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(out.stdout, b"pass\n");
+    assert_eq!(out.stdout, ONE_PASS_DEFAULT_REPORT);
 }
 
 #[test]
@@ -294,6 +296,8 @@ fn json_reporter_emits_one_valid_json_line() {
     let v: serde_json::Value = serde_json::from_str(trimmed).expect("valid JSON");
     assert_eq!(v["verdict"], "pass");
     assert_eq!(v["criteria"][0]["id"], "AC-1");
+    assert_eq!(v["totals"]["total"], 1);
+    assert_eq!(v["totals"]["passed"], 1);
     assert_eq!(
         v["store"].as_str().unwrap(),
         db.to_str().unwrap(),
@@ -372,6 +376,10 @@ fn filter_selects_a_single_check_and_skips_the_failing_sibling() {
         .find(|c| c["id"] == "AC-2")
         .unwrap();
     assert_eq!(ac2["verdict"], "inconclusive:empty_aggregation");
+    // `total` means executed checks (#493): AC-1.2 and AC-2.1 were
+    // authored but filtered out, so only AC-1.1 contributes.
+    assert_eq!(v["totals"]["total"], 1);
+    assert_eq!(v["totals"]["passed"], 1);
 }
 
 #[test]
@@ -399,7 +407,10 @@ fn filter_with_or_includes_both_criteria_and_run_passes() {
         "stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(out.stdout, b"pass\n");
+    assert_eq!(
+        out.stdout,
+        b"pass\nTotal: 2 checks \xc2\xb7 2 passed \xc2\xb7 0 failed \xc2\xb7 0 inconclusive\n"
+    );
 }
 
 /// Spec on #33: `--dry-run` short-circuits before browser launch and
@@ -1184,7 +1195,7 @@ fn manifest_runs_every_leaf_and_aggregates_verdicts() {
     );
     // Both leaves passed → run-set verdict is `pass`. Default
     // reporter prints one `<name>: <verdict>` line per leaf, then the
-    // aggregated verdict on its own line.
+    // aggregated verdict and set-level check totals.
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(
         stdout.contains("leaf-a: pass"),
@@ -1194,9 +1205,12 @@ fn manifest_runs_every_leaf_and_aggregates_verdicts() {
         stdout.contains("leaf-b: pass"),
         "expected per-leaf line: {stdout:?}"
     );
-    assert!(
-        stdout.lines().last().unwrap_or("").trim() == "pass",
-        "expected aggregated verdict on last line: {stdout:?}"
+    let lines = stdout.lines().collect::<Vec<_>>();
+    assert_eq!(lines.get(lines.len().saturating_sub(2)), Some(&"pass"));
+    assert_eq!(
+        lines.last(),
+        Some(&"Total: 2 checks · 2 passed · 0 failed · 0 inconclusive"),
+        "expected set totals on last line: {stdout:?}"
     );
     // Both leaf runs landed in the one store.
     assert!(db.is_file(), "store DB missing: {db:?}");
@@ -1895,8 +1909,8 @@ criteria:
 }
 
 /// #298: with a dashboard base configured, `duhem run` prints the live
-/// deep link on STDERR before the run — and stdout stays byte-stable
-/// (the default reporter's `pass\n` contract above). Not `#[ignore]`d:
+/// deep link on STDERR before the run — and stdout keeps the default
+/// reporter contract. Not `#[ignore]`d:
 /// the fixture is page-free, and page-free runs skip the browser
 /// launch entirely (`needs_browser` in `run_cmd.rs`).
 #[test]
@@ -1915,7 +1929,7 @@ fn live_link_prints_on_stderr_when_dashboard_base_is_set() {
         .expect("spawn duhem");
 
     assert!(out.status.success());
-    assert_eq!(out.stdout, b"pass\n", "stdout stays machine-stable");
+    assert_eq!(out.stdout, ONE_PASS_DEFAULT_REPORT);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("live: http://127.0.0.1:7878/#/run/"),
@@ -1941,7 +1955,7 @@ fn no_dashboard_base_means_no_live_line() {
         .expect("spawn duhem");
 
     assert!(out.status.success());
-    assert_eq!(out.stdout, b"pass\n");
+    assert_eq!(out.stdout, ONE_PASS_DEFAULT_REPORT);
     assert!(
         !String::from_utf8_lossy(&out.stderr).contains("live:"),
         "no base → no live line"
@@ -1951,7 +1965,7 @@ fn no_dashboard_base_means_no_live_line() {
 /// #299: `--live` forces per-criterion progress onto stderr even
 /// without a TTY (the flag exists exactly for captured-stderr
 /// consumers like the self-verification VD), while stdout keeps the
-/// default reporter's byte-stable `pass\n`.
+/// default reporter's verdict-plus-totals contract.
 #[test]
 fn live_flag_renders_per_criterion_progress_on_stderr() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1968,7 +1982,7 @@ fn live_flag_renders_per_criterion_progress_on_stderr() {
         .expect("spawn duhem");
 
     assert!(out.status.success());
-    assert_eq!(out.stdout, b"pass\n", "stdout stays machine-stable");
+    assert_eq!(out.stdout, ONE_PASS_DEFAULT_REPORT);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("› AC-1 (1/1)…"),
@@ -2052,7 +2066,7 @@ fn watch_spawns_opener_with_the_live_url() {
         .expect("spawn duhem");
 
     assert!(out.status.success());
-    assert_eq!(out.stdout, b"pass\n", "stdout stays machine-stable");
+    assert_eq!(out.stdout, ONE_PASS_DEFAULT_REPORT);
     // The opener is spawned detached; wait for its write to land.
     let mut url = String::new();
     for _ in 0..50 {
@@ -2089,7 +2103,7 @@ fn watch_without_dashboard_base_warns_and_runs() {
         .expect("spawn duhem");
 
     assert!(out.status.success());
-    assert_eq!(out.stdout, b"pass\n");
+    assert_eq!(out.stdout, ONE_PASS_DEFAULT_REPORT);
     assert!(
         String::from_utf8_lossy(&out.stderr).contains("--watch: no dashboard"),
         "expected the no-base warning"

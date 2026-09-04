@@ -342,6 +342,7 @@ async fn run_lifecycle_steps(
                     phase,
                     step_index: idx as u32,
                     outcome: StepOutcome::Skipped { reason },
+                    detail: None,
                     fixture_name: fixture_scope.map(|scope| scope.0.to_string()),
                     check_id: fixture_scope.map(|scope| scope.1.to_string()),
                 })
@@ -351,10 +352,19 @@ async fn run_lifecycle_steps(
 
         let mut error_detail = step_error.as_ref().map(ToString::to_string);
         let (outcome, failed) = if step_error.is_some() || environment_failed {
+            if error_detail.is_none() {
+                error_detail = Some(format!(
+                    "action `{}` could not start because the setup environment failed",
+                    step.uses_name()
+                ));
+            }
             (Outcome::Error, true)
         } else {
             match registry.get(step.uses_name()) {
-                None => (Outcome::Error, true),
+                None => {
+                    error_detail = Some(format!("action `{}` is not registered", step.uses_name()));
+                    (Outcome::Error, true)
+                }
                 Some(dispatcher) => {
                     *dispatched = true;
                     let page_ref: Option<&Page> = setup_browser.as_ref().map(|cb| &cb.page);
@@ -374,7 +384,10 @@ async fn run_lifecycle_steps(
                     )
                     .await
                     {
-                        Ok(result) => result,
+                        Ok((outcome, failed, action_detail)) => {
+                            error_detail = action_detail;
+                            (outcome, failed)
+                        }
                         Err(error) => {
                             error_detail = Some(error.to_string());
                             if !cleanup_step && stored_error.is_none() {
@@ -395,22 +408,30 @@ async fn run_lifecycle_steps(
         }
 
         let evidence_outcome = outcome_to_evidence(&outcome);
+        let detail = match &outcome {
+            Outcome::Timeout => {
+                error_detail.or_else(|| Some(format!("action `{}` timed out", step.uses_name())))
+            }
+            Outcome::Error => error_detail
+                .or_else(|| Some(format!("action `{}` returned an error", step.uses_name()))),
+            Outcome::Ok | Outcome::Skipped { .. } => None,
+        }
+        .map(|detail| writer.mask_text(&detail));
         writer
             .append(EventPayload::SetupStepFinished {
                 phase,
                 step_index: idx as u32,
                 outcome: evidence_outcome.clone(),
+                detail: detail.clone(),
                 fixture_name: fixture_scope.map(|scope| scope.0.to_string()),
                 check_id: fixture_scope.map(|scope| scope.1.to_string()),
             })
             .await?;
 
         if phase == StepPhase::Teardown && failed {
-            let detail = error_detail.or_else(|| match &outcome {
-                Outcome::Timeout => Some("action timed out".to_string()),
-                Outcome::Error => Some("action returned an error".to_string()),
-                Outcome::Ok => Some("judging action reported failure".to_string()),
-                Outcome::Skipped { .. } => None,
+            let detail = detail.or_else(|| {
+                matches!(outcome, Outcome::Ok)
+                    .then(|| "judging action reported failure".to_string())
             });
             cleanup.push(CleanupFailure {
                 step: display_step_label(step, idx),
@@ -497,7 +518,7 @@ async fn invoke_and_record(
     idx: usize,
     resolved_with: &serde_yml::Value,
     invocation: SetupInvocation<'_>,
-) -> Result<(Outcome, bool), EngineError> {
+) -> Result<(Outcome, bool, Option<String>), EngineError> {
     let SetupInvocation {
         step,
         run,
@@ -512,6 +533,10 @@ async fn invoke_and_record(
         Ok(r) => r.outcome.clone(),
         Err(_) => Outcome::Error,
     };
+    let action_detail = result
+        .as_ref()
+        .err()
+        .map(|error| format!("action `{}` failed: {error}", step.uses_name()));
     if let Ok(r) = &result {
         crate::engine::secret_output::register(
             writer,
@@ -564,6 +589,9 @@ async fn invoke_and_record(
         },
         catalog_reference: None,
         outcome: Some(outcome.clone()),
+        detail: action_detail
+            .as_deref()
+            .map(|detail| writer.mask_text(detail)),
     };
     let judgment = fixture_scope
         .is_none()
@@ -581,7 +609,7 @@ async fn invoke_and_record(
         .flatten()
         .map(|outcome| outcome.state);
     let failed = step_failed(&outcome, judgment);
-    Ok((outcome, failed))
+    Ok((outcome, failed, action_detail))
 }
 
 /// Mirror of `EvidenceWriter::append_observation` for setup. The
@@ -918,6 +946,18 @@ mod tests {
             0,
             "step after Error must not invoke"
         );
+        let events = duhem_evidence::Trace::from_store(w.store().as_ref(), w.run_id())
+            .await
+            .unwrap()
+            .into_events();
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            EventPayload::SetupStepFinished {
+                outcome: StepOutcome::Error,
+                detail: Some(detail),
+                ..
+            } if detail == "action `fake/boom` returned an error"
+        )));
     }
 
     #[tokio::test]
@@ -985,6 +1025,18 @@ mod tests {
             0,
             "step after Timeout must not invoke"
         );
+        let events = duhem_evidence::Trace::from_store(w.store().as_ref(), w.run_id())
+            .await
+            .unwrap()
+            .into_events();
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            EventPayload::SetupStepFinished {
+                outcome: StepOutcome::Timeout,
+                detail: Some(detail),
+                ..
+            } if detail == "action `fake/slow` timed out"
+        )));
     }
 
     #[tokio::test]

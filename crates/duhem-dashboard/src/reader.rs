@@ -601,6 +601,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 outcome,
                 fixture_name,
                 check_id,
+                ..
             } => {
                 if let Some(step) = cleanup.iter_mut().rev().find(|step| {
                     step.step_index == *step_index

@@ -100,12 +100,28 @@ duhem run      ./verifications/hello       # execute end-to-end, print a verdict
 ```
 checks: pass
 pass
+Total: 1 checks · 1 passed · 0 failed · 0 inconclusive
 ```
 
 `pass` means every assertion held against the *real* system — no mocks.
 A `fail` names the assertion that broke; an `inconclusive` means Duhem
 couldn't observe cleanly (a timeout, an environment that wouldn't come
-up) and deliberately refuses to call that a pass.
+up) and deliberately refuses to call that a pass. The final line counts
+checks that actually executed. A check excluded by `--filter` is not
+included in `Total`; it emits no verdict for the run to count.
+
+When a step itself cannot complete, the failure includes the recorded
+engine/action cause rather than stopping at a bare `error`. For example:
+
+```text
+inconclusive:missing_observation
+  AC-1::AC-1.1:
+    inconclusive:missing_observation  implicit: step `click` satisfied == true
+        (action `ui/click` failed: locator `#submit` never resolved)
+```
+
+The same secret-masked cause appears under the `error` or `timeout` step
+in the dashboard trace.
 
 **Watch it in the terminal.** On a TTY, `duhem run` narrates progress
 on stderr while the run executes. A bounded rolling board uses

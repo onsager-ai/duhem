@@ -147,6 +147,7 @@ async fn export_refuses_traversal_shaped_ids() {
     w.append(EventPayload::StepFinished {
         step_index: 0,
         outcome: StepOutcome::Ok,
+        detail: None,
     })
     .await
     .unwrap();

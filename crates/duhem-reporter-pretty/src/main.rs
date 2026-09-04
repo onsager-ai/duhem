@@ -207,6 +207,33 @@ mod tests {
     }
 
     #[test]
+    fn renders_step_error_cause() {
+        let cause = "action `ui/click` failed: locator `#missing` never resolved";
+        let s = RunSummary::new(
+            "r",
+            VerdictState::Fail,
+            vec![CriterionSummary {
+                id: "AC-1".into(),
+                verdict: VerdictState::Fail,
+            }],
+            PathBuf::from("."),
+        )
+        .with_failures(vec![CheckFailureSummary {
+            criterion_id: "AC-1".into(),
+            check_id: "AC-1.1".into(),
+            assertions: vec![FailedAssertionSummary {
+                expr: "step `click` satisfied == true".into(),
+                verdict: VerdictState::Fail,
+                detail: Some(cause.into()),
+            }],
+        }]);
+        let mut buf = Vec::new();
+        render(&s, &mut buf).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains(cause), "got: {out}");
+    }
+
+    #[test]
     fn renders_cleanup_as_evidence_without_changing_verdict() {
         let s = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from(".")).with_cleanup(
             vec![CleanupFailureSummary {

@@ -113,6 +113,7 @@ pub async fn write_passing_run(
         phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         outcome: StepOutcome::Ok,
+        detail: None,
         fixture_name: None,
         check_id: None,
     })
@@ -150,6 +151,7 @@ pub async fn write_passing_run(
     w.append(EventPayload::StepFinished {
         step_index: 0,
         outcome: StepOutcome::Ok,
+        detail: None,
     })
     .await
     .unwrap();
@@ -179,6 +181,7 @@ pub async fn write_passing_run(
     w.append(EventPayload::StepFinished {
         step_index: 1,
         outcome: StepOutcome::Ok,
+        detail: None,
     })
     .await
     .unwrap();
@@ -245,6 +248,7 @@ pub async fn write_replay_run(store: Arc<SqliteStore>, run_id: &str) -> (String,
     w.append(EventPayload::StepFinished {
         step_index: 0,
         outcome: StepOutcome::Ok,
+        detail: None,
     })
     .await
     .unwrap();
@@ -375,6 +379,7 @@ pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition
     w.append(EventPayload::StepFinished {
         step_index: 0,
         outcome: StepOutcome::Ok,
+        detail: None,
     })
     .await
     .unwrap();
@@ -444,6 +449,7 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
         phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         outcome: StepOutcome::Error,
+        detail: None,
         fixture_name: None,
         check_id: None,
     })

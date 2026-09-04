@@ -320,6 +320,7 @@ impl Store for SqliteStore {
             EventPayload::StepFinished {
                 step_index,
                 outcome,
+                ..
             }
             | EventPayload::SetupStepFinished {
                 step_index,

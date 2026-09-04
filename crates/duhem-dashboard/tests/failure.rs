@@ -66,6 +66,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, network: Option
     w.append(EventPayload::StepFinished {
         step_index: 0,
         outcome: StepOutcome::Ok,
+        detail: None,
     })
     .await
     .unwrap();
@@ -75,6 +76,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, network: Option
     w.append(EventPayload::StepFinished {
         step_index: 1,
         outcome: StepOutcome::Ok,
+        detail: None,
     })
     .await
     .unwrap();

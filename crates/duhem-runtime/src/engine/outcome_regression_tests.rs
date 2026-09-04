@@ -16,6 +16,7 @@ fn evidence(outcome: Outcome, with: &str) -> StepEvidence {
         skip_reason: None,
         catalog_reference: None,
         outcome: Some(outcome),
+        detail: None,
     }
 }
 

@@ -250,6 +250,42 @@ describe("CheckSummary", () => {
 });
 
 describe("Timeline", () => {
+  it("renders a step-less check's assertion expression, state, and detail (#490)", () => {
+    const events: TraceEvent[] = [
+      {
+        seq: 1,
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "assertion_evaluated",
+        check_id: "AC-1.1",
+        assertion_index: 0,
+        state: "fail",
+        expr: '$runtime.format("{}", "a") == "a1"',
+        detail: 'actual "a", expected "a1"',
+      },
+      {
+        seq: 2,
+        ts: "2026-01-01T00:00:00.010Z",
+        kind: "check_finished",
+        criterion_id: "AC-1",
+        check_id: "AC-1.1",
+        verdict: "fail",
+      },
+    ];
+
+    const { container, getByTestId } = render(<Timeline events={events} />);
+    expect(container.querySelectorAll('[data-testid="step-group"]')).toHaveLength(0);
+    expect(container.querySelector(".ev-label")?.textContent).toBe("assertion failed");
+    expect(getByTestId("assert-expr").textContent).toContain(
+      '$runtime.format("{}", "a") == "a1"',
+    );
+    expect(getByTestId("assert-cmp").textContent).toContain('"a"');
+    expect(getByTestId("assert-cmp").textContent).toContain('"a1"');
+    expect([...container.querySelectorAll(".ev-label")].map((el) => el.textContent)).toEqual([
+      "assertion failed",
+      "verdict: fail",
+    ]);
+  });
+
   it("groups expanded steps under their recorded flow invocation", () => {
     const flow = { name: "sign_in", invocation: "login", inner_index: 0 };
     const events: TraceEvent[] = [

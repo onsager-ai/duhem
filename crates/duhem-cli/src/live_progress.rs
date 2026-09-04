@@ -1154,6 +1154,7 @@ criteria:
                 400,
                 EventPayload::CheckFinished {
                     check_id: "AC-1.1".into(),
+                    criterion_id: Some("AC-1".into()),
                     verdict: VerdictState::Pass,
                     session_source: None,
                     session_digest: None,
@@ -1172,6 +1173,7 @@ criteria:
                 1650,
                 EventPayload::CheckFinished {
                     check_id: "AC-2.1".into(),
+                    criterion_id: Some("AC-2".into()),
                     verdict: VerdictState::Fail,
                     session_source: None,
                     session_digest: None,

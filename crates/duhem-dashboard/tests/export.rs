@@ -152,6 +152,7 @@ async fn export_refuses_traversal_shaped_ids() {
     .unwrap();
     w.append(EventPayload::CheckFinished {
         check_id: "../pwn".into(),
+        criterion_id: Some("../../escape".into()),
         verdict: VerdictState::Pass,
         session_source: None,
         session_digest: None,

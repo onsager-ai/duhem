@@ -737,10 +737,107 @@ async fn spa_index_is_served_at_root_and_as_deep_link_fallback() {
     assert_eq!(fallback, body);
 }
 
+async fn write_stepless_run(
+    store: std::sync::Arc<duhem_evidence::SqliteStore>,
+    run_id: &str,
+    owner: Option<&str>,
+) {
+    let mut writer =
+        EvidenceWriter::begin(store, run_id, "verifications/stepless.yml", BTreeMap::new())
+            .await
+            .unwrap();
+    writer
+        .append(duhem_evidence::run_started(
+            "verifications/stepless.yml",
+            BTreeMap::new(),
+        ))
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::AssertionEvaluated {
+            check_id: "AC-1.1".into(),
+            assertion_index: 0,
+            state: VerdictState::Fail,
+            detail: Some(r#"actual "a", expected "a1""#.into()),
+            expr: Some(r#"$runtime.format("{}", "a") == "a1""#.into()),
+            step_index: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::CheckFinished {
+            check_id: "AC-1.1".into(),
+            criterion_id: owner.map(str::to_string),
+            verdict: VerdictState::Fail,
+            session_source: None,
+            session_digest: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::CriterionFinished {
+            criterion_id: "AC-1".into(),
+            verdict: VerdictState::Fail,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::RunFinished {
+            verdict: Some(VerdictState::Fail),
+        })
+        .await
+        .unwrap();
+    writer.finish().await.unwrap();
+}
+
+/// Spec #490: `check_finished` supplies ownership when a check has no
+/// `step_started`, making its verdict and assertion-only detail visible.
+#[tokio::test]
+async fn stepless_check_is_attributed_and_has_assertion_only_detail() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let run_id = "01J0000000000000000000000S";
+    write_stepless_run(rw, run_id, Some("AC-1")).await;
+    let reader = EvidenceReader::new(ro);
+
+    let (status, run) = get_json(reader.clone(), &format!("/api/runs/{run_id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(run["criteria"].as_array().unwrap().len(), 1);
+    assert_eq!(run["criteria"][0]["id"], "AC-1");
+    assert_eq!(run["criteria"][0]["checks"][0]["id"], "AC-1.1");
+    assert_eq!(run["criteria"][0]["checks"][0]["verdict"], "fail");
+
+    let (status, check) =
+        get_json(reader, &format!("/api/runs/{run_id}/checks/AC-1::AC-1.1")).await;
+    assert_eq!(status, StatusCode::OK);
+    let timeline = check["timeline"].as_array().unwrap();
+    assert_eq!(timeline.len(), 2);
+    assert_eq!(timeline[0]["kind"], "assertion_evaluated");
+    assert_eq!(timeline[0]["expr"], r#"$runtime.format("{}", "a") == "a1""#);
+    assert_eq!(timeline[0]["detail"], r#"actual "a", expected "a1""#);
+    assert_eq!(timeline[1]["kind"], "check_finished");
+}
+
+/// A trace recorded before #490 has no ownership source for a step-less
+/// check, so it retains the prior empty-criterion/404 degradation.
+#[tokio::test]
+async fn old_stepless_trace_without_owner_keeps_prior_degradation() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let run_id = "01J0000000000000000000000O";
+    write_stepless_run(rw, run_id, None).await;
+    let reader = EvidenceReader::new(ro);
+
+    let (status, run) = get_json(reader.clone(), &format!("/api/runs/{run_id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(run["criteria"][0]["id"], "AC-1");
+    assert!(run["criteria"][0]["checks"].as_array().unwrap().is_empty());
+    let (status, _) = get_json(reader, &format!("/api/runs/{run_id}/checks/AC-1::AC-1.1")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
 /// PR #88 review: when a malformed stream reuses one check id under
 /// two criteria, the first `step_started` owns it — the check is
-/// listed once, its verdict lands only there, and the colliding pair
-/// is not addressable.
+/// listed once, its verdict lands only there, and a disagreeing #490
+/// fallback cannot smear it across criteria.
 #[tokio::test]
 async fn colliding_check_ids_attribute_to_the_first_owner() {
     use duhem_evidence::{EventPayload, EvidenceWriter, StepOutcome, VerdictState, run_started};
@@ -780,6 +877,7 @@ async fn colliding_check_ids_attribute_to_the_first_owner() {
     }
     w.append(EventPayload::CheckFinished {
         check_id: "DUP".into(),
+        criterion_id: Some("AC-2".into()),
         verdict: VerdictState::Pass,
         session_source: None,
         session_digest: None,

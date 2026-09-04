@@ -274,11 +274,14 @@ impl Store for SqliteStore {
                 .await?;
             }
             EventPayload::CheckFinished {
-                check_id, verdict, ..
+                check_id,
+                criterion_id,
+                verdict,
+                ..
             } => {
-                // Resolve the owning criterion from the first
-                // step_started that named this check.
-                let criterion: Option<String> = sqlx::query_scalar(
+                // A first step owner wins; the finished event fills the
+                // projection for a check that emitted no step (#490).
+                let step_criterion: Option<String> = sqlx::query_scalar(
                     "SELECT json_extract(payload, '$.criterion_id') FROM events \
                      WHERE run_id = ? AND kind = 'step_started' \
                      AND json_extract(payload, '$.check_id') = ? \
@@ -289,6 +292,7 @@ impl Store for SqliteStore {
                 .fetch_optional(&mut *tx)
                 .await?
                 .flatten();
+                let criterion = step_criterion.or_else(|| criterion_id.clone());
                 sqlx::query(
                     "INSERT INTO checks (run_id, check_id, criterion_id, verdict) \
                      VALUES (?, ?, ?, ?)",

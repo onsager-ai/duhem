@@ -5,6 +5,28 @@
 
 import type { CriterionDetail, RunDetail, TraceEvent } from "./api";
 
+/** Fields `foldRun` cannot derive from the event stream. `useRun` carries
+ *  them over from the authoritative `GET /api/runs/:id` so a live run shows
+ *  what a finished one shows (#491). Typed as a `RunDetail` subset, so a new
+ *  field added to `RunDetail` has to be classified rather than silently
+ *  reverting to the fold's default on every event. */
+export type FoldUnknowable = Pick<
+  RunDetail,
+  "verification" | "started_at" | "inputs" | "has_definition" | "viewport"
+>;
+
+/** Overlay the fetched detail's fold-unknowable fields onto a live fold. */
+export function carryFetched(folded: RunDetail, fetched: RunDetail): RunDetail {
+  const carried: FoldUnknowable = {
+    verification: fetched.verification,
+    started_at: fetched.started_at,
+    inputs: fetched.inputs,
+    has_definition: fetched.has_definition,
+    viewport: fetched.viewport,
+  };
+  return { ...folded, ...carried };
+}
+
 export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
   const detail: RunDetail = {
     run_id: runId,
@@ -14,14 +36,26 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
     verdict: null,
     status: "running",
     setup_aborted: false,
-    // A live fold doesn't surface the definition; the authoritative
-    // re-fetch on `run_finished` fills this in (#302).
+    // Not knowable from the event stream: `run_started` carries the
+    // snapshot, but the fold does not read it. The caller carries the
+    // fetched value forward instead — see `carryFetched` (#491).
     has_definition: false,
     cleanup: [],
     criteria: [],
   };
   const criteria = new Map<string, CriterionDetail>();
   const criterionOf = new Map<string, string>();
+
+  // Index the first step owner before folding. It is stronger than the
+  // additive check_finished fallback even in a malformed stream (#490).
+  for (const evt of events) {
+    if (evt.kind === "step_started") {
+      const checkId = String(evt.check_id);
+      if (!criterionOf.has(checkId)) {
+        criterionOf.set(checkId, String(evt.criterion_id));
+      }
+    }
+  }
 
   const noteCheck = (criterionId: string, checkId: string) => {
     let crit = criteria.get(criterionId);
@@ -33,7 +67,6 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
     if (!crit.checks.some((c) => c.id === checkId)) {
       crit.checks.push({ id: checkId, verdict: null });
     }
-    criterionOf.set(checkId, criterionId);
   };
 
   for (const evt of events) {
@@ -70,12 +103,23 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
         }
         break;
       case "step_started":
-        noteCheck(String(evt.criterion_id), String(evt.check_id));
+        if (criterionOf.get(String(evt.check_id)) === String(evt.criterion_id)) {
+          noteCheck(String(evt.criterion_id), String(evt.check_id));
+        }
         break;
       case "check_finished": {
-        const critId = criterionOf.get(String(evt.check_id));
+        const checkId = String(evt.check_id);
+        const recordedCriterion =
+          typeof evt.criterion_id === "string" ? evt.criterion_id : undefined;
+        const critId = criterionOf.get(checkId) ?? recordedCriterion;
+        if (critId) {
+          if (!criterionOf.has(checkId)) {
+            criterionOf.set(checkId, critId);
+          }
+          noteCheck(critId, checkId);
+        }
         const crit = critId ? criteria.get(critId) : undefined;
-        const check = crit?.checks.find((c) => c.id === evt.check_id);
+        const check = crit?.checks.find((c) => c.id === checkId);
         if (check) {
           check.verdict = String(evt.verdict);
         }

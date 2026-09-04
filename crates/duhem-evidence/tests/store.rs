@@ -70,6 +70,7 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
     .unwrap();
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
+        criterion_id: Some("AC-1".into()),
         verdict: VerdictState::Pass,
         session_source: None,
         session_digest: None,
@@ -337,6 +338,66 @@ async fn replay_passes_on_recorded_run() {
     assert_eq!(criterion.criterion_id, "AC-1");
     assert_eq!(criterion.checks.len(), 1);
     assert_eq!(criterion.checks[0].check_id, "AC-1.1");
+}
+
+#[tokio::test]
+async fn stepless_check_owner_projects_and_replays() {
+    let (_tmp, store) = open_store().await;
+    let mut writer = EvidenceWriter::begin(store.clone(), RUN_ID, "stepless.yml", BTreeMap::new())
+        .await
+        .unwrap();
+    writer
+        .append(run_started("stepless.yml", BTreeMap::new()))
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::AssertionEvaluated {
+            check_id: "AC-1.1".into(),
+            assertion_index: 0,
+            state: VerdictState::Pass,
+            detail: None,
+            expr: Some("true".into()),
+            step_index: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::CheckFinished {
+            check_id: "AC-1.1".into(),
+            criterion_id: Some("AC-1".into()),
+            verdict: VerdictState::Pass,
+            session_source: None,
+            session_digest: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::CriterionFinished {
+            criterion_id: "AC-1".into(),
+            verdict: VerdictState::Pass,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::RunFinished {
+            verdict: Some(VerdictState::Pass),
+        })
+        .await
+        .unwrap();
+    writer.finish().await.unwrap();
+
+    let owner: Option<String> =
+        sqlx::query_scalar("SELECT criterion_id FROM checks WHERE run_id = ?")
+            .bind(RUN_ID)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(owner.as_deref(), Some("AC-1"));
+
+    let trace = Trace::from_store(store.as_ref(), RUN_ID).await.unwrap();
+    let replayed = replay(&trace).unwrap();
+    assert_eq!(replayed.run.criteria[0].criterion_id, "AC-1");
+    assert_eq!(replayed.run.criteria[0].checks[0].check_id, "AC-1.1");
 }
 
 #[tokio::test]
@@ -1041,6 +1102,7 @@ async fn spans_fold_a_checks_layer_chain_in_order() {
     .await;
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
+        criterion_id: Some("AC-1".into()),
         verdict: VerdictState::Pass,
         session_source: None,
         session_digest: None,
@@ -1190,6 +1252,7 @@ async fn writer_tee_mirrors_persisted_events_in_order() {
         .unwrap();
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.1".into(),
+        criterion_id: Some("AC-1".into()),
         verdict: VerdictState::Pass,
         session_source: None,
         session_digest: None,
@@ -1219,6 +1282,7 @@ async fn writer_tee_mirrors_persisted_events_in_order() {
     drop(rx);
     w.append(EventPayload::CheckFinished {
         check_id: "AC-1.2".into(),
+        criterion_id: Some("AC-1".into()),
         verdict: VerdictState::Pass,
         session_source: None,
         session_digest: None,

@@ -22,12 +22,15 @@ use duhem_evidence::{
 use thiserror::Error;
 
 use crate::model::{
-    ArtifactRef, AssertionDiff, CheckDetail, CheckDiff, CheckRef, CriterionDetail, CriterionDiff,
-    CriterionHistory, EntryKind, FailingAssertion, FailingCheck, FailingRequest, FailureEnvelope,
-    HistoryRun, RunDetail, RunDiff, RunsListEntry, SpanModel, VerificationHistory,
+    ArtifactRef, CheckDetail, CheckRef, CriterionDetail, CriterionHistory, EntryKind,
+    FailingAssertion, FailingCheck, FailingRequest, FailureEnvelope, HistoryRun, RunDetail,
+    RunDiff, RunsListEntry, SpanModel, VerificationHistory,
 };
 
+mod diff;
 mod run_detail;
+
+use diff::{CheckProjection, diff_criteria, project_run};
 
 mod mime;
 mod replay;
@@ -514,11 +517,21 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
     let mut cleanup = Vec::new();
     let mut criterion_order: Vec<String> = Vec::new();
     let mut checks_by_criterion: Vec<(String, Vec<CheckRef>)> = Vec::new();
-    // A check belongs to exactly one criterion (replay rejects
-    // conflicting mappings outright); first `step_started` wins here
-    // so a malformed stream can't smear one check's verdict across
-    // criteria.
+    // A check belongs to exactly one criterion. Seed ownership from the
+    // first `step_started` across the whole trace so its stronger evidence
+    // wins even if a malformed stream disagrees in `check_finished` (#490).
     let mut criterion_of_check: Vec<(String, String)> = Vec::new();
+    for evt in &run.events {
+        if let EventPayload::StepStarted {
+            criterion_id,
+            check_id,
+            ..
+        } = &evt.payload
+            && !criterion_of_check.iter().any(|(k, _)| k == check_id)
+        {
+            criterion_of_check.push((check_id.clone(), criterion_id.clone()));
+        }
+    }
     let mut run_verdict = None;
     let mut viewport = None;
 
@@ -603,14 +616,15 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 check_id,
                 ..
             } => {
+                // The pre-pass indexed every `step_started`, so a lookup
+                // miss is unreachable — but the reader stays tolerant of
+                // whatever the store hands it rather than panicking, so
+                // fall back to this event's own criterion.
                 let owner = criterion_of_check
                     .iter()
                     .find(|(k, _)| k == check_id)
                     .map(|(_, c)| c.clone())
-                    .unwrap_or_else(|| {
-                        criterion_of_check.push((check_id.clone(), criterion_id.clone()));
-                        criterion_id.clone()
-                    });
+                    .unwrap_or_else(|| criterion_id.clone());
                 // Only the owning criterion lists the check; a
                 // colliding `step_started` under another criterion is
                 // a malformed stream and must not duplicate the row.
@@ -624,18 +638,35 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 }
             }
             EventPayload::CheckFinished {
-                check_id, verdict, ..
+                check_id,
+                criterion_id,
+                verdict,
+                ..
             } => {
                 let owner = criterion_of_check
                     .iter()
                     .find(|(k, _)| k == check_id)
-                    .map(|(_, c)| c.clone());
-                if let Some(owner) = owner
-                    && let Some((_, checks)) =
+                    .map(|(_, c)| c.clone())
+                    .or_else(|| criterion_id.clone());
+                if let Some(owner) = owner {
+                    if !criterion_of_check.iter().any(|(k, _)| k == check_id) {
+                        criterion_of_check.push((check_id.clone(), owner.clone()));
+                    }
+                    // A step-less check enters the tree here rather than at
+                    // `step_started`; `note_check` de-duplicates, so a check
+                    // that already has steps is unaffected (#490).
+                    note_check(
+                        &mut criterion_order,
+                        &mut checks_by_criterion,
+                        &owner,
+                        check_id,
+                    );
+                    if let Some((_, checks)) =
                         checks_by_criterion.iter_mut().find(|(c, _)| *c == owner)
-                    && let Some(check) = checks.iter_mut().find(|c| c.id == *check_id)
-                {
-                    check.verdict = Some(*verdict);
+                        && let Some(check) = checks.iter_mut().find(|c| c.id == *check_id)
+                    {
+                        check.verdict = Some(*verdict);
+                    }
                 }
             }
             EventPayload::CriterionFinished { criterion_id, .. }
@@ -687,241 +718,33 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
     }
 }
 
-// ---- #211: run-to-run diff -----------------------------------------
-
-/// A run folded into the projection the diff compares over: ordered
-/// criteria + checks with verdicts, each check's assertions and blob
-/// artifacts. One pass over the event stream (same folds as
-/// `build_run_detail` / `build_check_detail`, collected together).
-struct RunProjection {
-    criteria: Vec<(String, Option<VerdictState>)>,
-    checks: Vec<CheckProjection>,
-}
-
-struct CheckProjection {
-    criterion_id: String,
-    check_id: String,
-    verdict: Option<VerdictState>,
-    /// `(assertion_index, state, detail)` in recorded order.
-    assertions: Vec<(u32, VerdictState, Option<String>)>,
-    artifacts: Vec<ArtifactRef>,
-}
-
-fn project_run(run: &RunEvidence) -> RunProjection {
-    let mut criteria: Vec<(String, Option<VerdictState>)> = Vec::new();
-    let mut checks: Vec<CheckProjection> = Vec::new();
-    // Positional attribution for blob observations: they belong to the
-    // check whose `step_started` most recently opened (same rule as
-    // `build_check_detail`), so trailing `capture/*` observations land
-    // on their check.
-    let mut current = None;
-
-    for evt in &run.events {
-        match &evt.payload {
-            EventPayload::StepStarted {
-                criterion_id,
-                check_id,
-                ..
-            } => {
-                if !criteria.iter().any(|(c, _)| c == criterion_id) {
-                    criteria.push((criterion_id.clone(), None));
-                }
-                let pos = match checks.iter().position(|c| &c.check_id == check_id) {
-                    Some(p) => p,
-                    None => {
-                        checks.push(CheckProjection {
-                            criterion_id: criterion_id.clone(),
-                            check_id: check_id.clone(),
-                            verdict: None,
-                            assertions: Vec::new(),
-                            artifacts: Vec::new(),
-                        });
-                        checks.len() - 1
-                    }
-                };
-                current = Some(pos);
-            }
-            EventPayload::StepObservation {
-                output_name,
-                value:
-                    ObservationValue::Blob {
-                        blob_sha256,
-                        mask_counts,
-                    },
-                ..
-            } => {
-                if let Some(pos) = current {
-                    checks[pos].artifacts.push(ArtifactRef {
-                        id: blob_sha256.clone(),
-                        kind: output_name.clone(),
-                        url: format!("/api/runs/{}/artifact/{}", run.record.run_id, blob_sha256),
-                        mask_counts: mask_counts.clone(),
-                    });
-                }
-            }
-            EventPayload::AssertionEvaluated {
-                check_id,
-                assertion_index,
-                state,
-                detail,
-                ..
-            } => {
-                if let Some(pos) = checks.iter().position(|c| &c.check_id == check_id) {
-                    checks[pos]
-                        .assertions
-                        .push((*assertion_index, *state, detail.clone()));
-                }
-            }
-            EventPayload::CheckFinished {
-                check_id, verdict, ..
-            } => {
-                if let Some(pos) = checks.iter().position(|c| &c.check_id == check_id) {
-                    checks[pos].verdict = Some(*verdict);
-                }
-            }
-            EventPayload::CriterionFinished {
-                criterion_id,
-                verdict,
-            } => {
-                if let Some(entry) = criteria.iter_mut().find(|(c, _)| c == criterion_id) {
-                    entry.1 = Some(*verdict);
-                }
-            }
-            _ => {}
-        }
-    }
-    RunProjection { criteria, checks }
-}
-
-/// Ordered union of criterion ids (current first, then baseline-only)
-/// with per-criterion / per-check / per-assertion transitions. When
-/// there is no baseline, `changed` is always `false` — the view shows
-/// the "no passing baseline" state rather than painting everything as
-/// changed.
-fn diff_criteria(cur: &RunProjection, base: Option<&RunProjection>) -> Vec<CriterionDiff> {
-    let has_base = base.is_some();
-    let mut ids: Vec<String> = cur.criteria.iter().map(|(c, _)| c.clone()).collect();
-    if let Some(b) = base {
-        for (c, _) in &b.criteria {
-            if !ids.contains(c) {
-                ids.push(c.clone());
-            }
-        }
-    }
-    ids.into_iter()
-        .map(|cid| {
-            let cur_v = cur
-                .criteria
-                .iter()
-                .find(|(c, _)| *c == cid)
-                .and_then(|(_, v)| *v);
-            let base_v = base
-                .and_then(|b| b.criteria.iter().find(|(c, _)| *c == cid))
-                .and_then(|(_, v)| *v);
-            CriterionDiff {
-                id: cid.clone(),
-                baseline_verdict: base_v,
-                current_verdict: cur_v,
-                changed: has_base && base_v != cur_v,
-                checks: diff_checks(&cid, cur, base),
-            }
-        })
-        .collect()
-}
-
-fn diff_checks(
-    criterion_id: &str,
-    cur: &RunProjection,
-    base: Option<&RunProjection>,
-) -> Vec<CheckDiff> {
-    let has_base = base.is_some();
-    let mut ids: Vec<String> = cur
-        .checks
-        .iter()
-        .filter(|c| c.criterion_id == criterion_id)
-        .map(|c| c.check_id.clone())
-        .collect();
-    if let Some(b) = base {
-        for c in b.checks.iter().filter(|c| c.criterion_id == criterion_id) {
-            if !ids.contains(&c.check_id) {
-                ids.push(c.check_id.clone());
-            }
-        }
-    }
-    ids.into_iter()
-        .map(|cid| {
-            let cur_c = cur.checks.iter().find(|c| c.check_id == cid);
-            let base_c = base.and_then(|b| b.checks.iter().find(|c| c.check_id == cid));
-            let cur_v = cur_c.and_then(|c| c.verdict);
-            let base_v = base_c.and_then(|c| c.verdict);
-            CheckDiff {
-                id: cid,
-                baseline_verdict: base_v,
-                current_verdict: cur_v,
-                changed: has_base && base_v != cur_v,
-                assertions: diff_assertions(cur_c, base_c, has_base),
-                baseline_artifacts: base_c.map(|c| c.artifacts.clone()).unwrap_or_default(),
-                current_artifacts: cur_c.map(|c| c.artifacts.clone()).unwrap_or_default(),
-            }
-        })
-        .collect()
-}
-
-fn diff_assertions(
-    cur: Option<&CheckProjection>,
-    base: Option<&CheckProjection>,
-    has_base: bool,
-) -> Vec<AssertionDiff> {
-    let mut idxs: Vec<u32> = cur
-        .map(|c| c.assertions.iter().map(|(i, _, _)| *i).collect())
-        .unwrap_or_default();
-    if let Some(b) = base {
-        for (i, _, _) in &b.assertions {
-            if !idxs.contains(i) {
-                idxs.push(*i);
-            }
-        }
-    }
-    idxs.sort_unstable();
-    idxs.into_iter()
-        .map(|i| {
-            let c = cur.and_then(|c| c.assertions.iter().find(|(j, _, _)| *j == i));
-            let b = base.and_then(|b| b.assertions.iter().find(|(j, _, _)| *j == i));
-            let cur_state = c.map(|(_, s, _)| *s);
-            let base_state = b.map(|(_, s, _)| *s);
-            let cur_detail = c.and_then(|(_, _, d)| d.clone());
-            let base_detail = b.and_then(|(_, _, d)| d.clone());
-            let changed = has_base && (base_state != cur_state || base_detail != cur_detail);
-            AssertionDiff {
-                assertion_index: i,
-                baseline_state: base_state,
-                current_state: cur_state,
-                baseline_detail: base_detail,
-                current_detail: cur_detail,
-                changed,
-            }
-        })
-        .collect()
-}
-
 fn build_check_detail(
     run: &RunEvidence,
     criterion_id: &str,
     check_id: &str,
     spans: Vec<SpanModel>,
 ) -> Option<CheckDetail> {
-    // A check belongs to exactly one criterion — replay hard-errors
-    // on conflicting mappings; the view applies the same first-wins
-    // ownership so `assertion_evaluated` / `check_finished` (which
-    // carry only `check_id`) can't be attributed to a colliding
-    // criterion. No ownership record → no such pair.
-    let owner = run.events.iter().find_map(|e| match &e.payload {
+    // `step_started` remains the strongest ownership evidence. A
+    // `check_finished.criterion_id` is the fallback that makes checks with
+    // no executable steps addressable while old traces still degrade to
+    // no detail (#490).
+    let owner_from_step = run.events.iter().find_map(|e| match &e.payload {
         EventPayload::StepStarted {
             criterion_id: c,
             check_id: k,
             ..
         } if k == check_id => Some(c.clone()),
         _ => None,
+    });
+    let owner = owner_from_step.or_else(|| {
+        run.events.iter().find_map(|e| match &e.payload {
+            EventPayload::CheckFinished {
+                criterion_id: Some(c),
+                check_id: k,
+                ..
+            } if k == check_id => Some(c.clone()),
+            _ => None,
+        })
     });
     if owner.as_deref() != Some(criterion_id) {
         return None;

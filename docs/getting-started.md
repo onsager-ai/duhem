@@ -100,12 +100,15 @@ duhem run      ./verifications/hello       # execute end-to-end, print a verdict
 ```
 checks: pass
 pass
+Total: 1 checks · 1 passed · 0 failed · 0 inconclusive
 ```
 
 `pass` means every assertion held against the *real* system — no mocks.
 A `fail` names the assertion that broke; an `inconclusive` means Duhem
 couldn't observe cleanly (a timeout, an environment that wouldn't come
-up) and deliberately refuses to call that a pass.
+up) and deliberately refuses to call that a pass. The final line counts
+checks that actually executed. A check excluded by `--filter` is not
+included in `Total`; it emits no verdict for the run to count.
 
 **Watch it in the terminal.** On a TTY, `duhem run` narrates progress
 on stderr while the run executes. A bounded rolling board uses

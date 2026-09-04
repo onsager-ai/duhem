@@ -230,10 +230,14 @@ pages:
   login:
     username: { role: textbox, name: Username }
     submit: { role: button, name: Sign In }
+  chat:
+    history_item: { xpath: '(//article)[{}]' }
 
 # a leaf step
 - uses: ui/type
   with: { locator: $pages.login.username, text: $inputs.user }
+- uses: ui/click
+  with: { locator: $pages.chat.history_item($inputs.index) }
 ```
 
 The catalog is flat below each group; do not add a `locators:` layer.
@@ -242,7 +246,13 @@ entries may use `$inputs.*` for dynamic scope text, but every leaf that
 receives that catalog must declare each referenced input. `duhem
 validate` catches dangling `$pages.*` names offline and suggests nearby
 entries; `duhem resolve --provenance` lists the effective catalog and
-the source file of each winning entry.
+the source file of each winning entry. For a selector template, call the
+two-segment reference as `$pages.<group>.<name>(args…)`: arguments are
+ordinary expressions and fill `{}` placeholders positionally across the
+entry's string values. The argument count must exactly match the entry's
+placeholder count or `duhem validate` rejects the call; use `{{` / `}}`
+for literal braces. A bare reference to an entry containing `{}` is an
+arity error.
 
 #### Share step flows instead of copying sequences
 

@@ -418,7 +418,7 @@ This content-based identification lets Duhem coexist with other YAML in the repo
 
 ### 10.3 Verification Definition structure
 
-Values like `$inputs.workspace_name` below are **runtime expressions** (§10.7). Substitution is whole-string only: a `$`-leading `with:` value must be a bare `$…` reference or a `$runtime.<fn>(…)` call and is resolved to its evaluated value; strings not beginning with `$` pass through literally. `$pages.<page>.<element>` is the deliberate map-valued case: the locator node is spliced first, then any `$inputs.*` inside that node resolves in the leaf's context. There is no embedded `{{…}}` interpolation — to compose a scalar, use `$runtime.format(…)` / `$runtime.concat(…)` (§10.7), not string templating. Input `default:` values are taken literally and are never evaluated as expressions.
+Values like `$inputs.workspace_name` below are **runtime expressions** (§10.7). Substitution is whole-string only: a `$`-leading `with:` value must be a bare `$…` reference, a `$runtime.<fn>(…)` call, or a parameterized `$pages.<page>.<element>(…)` reference and is resolved to its evaluated value; strings not beginning with `$` pass through literally. `$pages` is the deliberate map-valued case: the locator node is spliced first, then any authored `$inputs.*` inside that node resolves in the leaf's context. There is no embedded `{{…}}` expression interpolation — to compose a scalar, use `$runtime.format(…)` / `$runtime.concat(…)` (§10.7), not string templating. Input `default:` values are taken literally and are never evaluated as expressions.
 
 #### Inputs, acquired values, and secret masking
 
@@ -961,9 +961,19 @@ intervening `locators:` key. It may be declared by the root, an
 page and element, then the leaf-local entry wins. Locator bodies remain
 untyped at the schema layer because the consuming action owns their
 contract. A step uses one as `locator: $pages.login.submit`. Catalog
-entries may contain `$inputs.*` (for example a row-scoped locator);
-every leaf receiving that entry must declare those inputs. Validation
-checks both input closure and dangling catalog references offline.
+entries can be parameterized without exposing their strategy key:
+`$pages.chat.history_item($inputs.index)` fills unescaped `{}`
+placeholders positionally across the entry's string values, then splices
+the whole locator map. Arguments are ordinary call-site expressions and
+must match the entry's static placeholder count; `{{` / `}}` produce
+literal braces. Filling happens before authored `$inputs.*` references in
+the entry resolve, but inserted argument text is never re-scanned as an
+expression. A bare reference to an entry containing `{}` is therefore an
+arity error at validation, not a selector with a literal placeholder.
+Entries may otherwise contain `$inputs.*` (for example a row-scoped
+locator); every leaf receiving that entry must declare those inputs.
+Validation checks input closure, placeholder grammar and arity, and
+dangling catalog references offline.
 `duhem resolve --provenance` lists the composed entries and their
 winning source files.
 
@@ -1098,9 +1108,12 @@ form when the string must contain a quote character.
 Borrowed from Arazzo. References available in expressions:
 
 - `$inputs.<name>` — inputs to the verification run
-- `$pages.<page>.<element>` — a named locator from the effective
-  manifest/leaf catalog. Valid only as a whole `with:` value; its map is
-  spliced before nested `$inputs.*` substitution.
+- `$pages.<page>.<element>` / `$pages.<page>.<element>(args…)` — a named
+  locator from the effective manifest/leaf catalog. Valid only as a whole
+  `with:` value; the call form fills `{}` placeholders across its string
+  values before the map is spliced and authored nested `$inputs.*`
+  references resolve. Arity is validated statically; `{{` and `}}` escape
+  literal braces.
 - `$params.<name>` — a reusable-flow parameter, valid only inside the
   flow body that declares it. The loader substitutes it during static
   expansion; it never reaches runtime evaluation.
@@ -1116,7 +1129,11 @@ Borrowed from Arazzo. References available in expressions:
   $inputs.base, $steps.create.outputs.body.data._id)` — without
   scripting. The placeholder count must equal the substitution-argument
   count; a mismatch is an authoring error that surfaces as `inconclusive`
-  (`BadFormat`). `{}` is the only placeholder and has no escape in v1, so
+  (`BadFormat`). `{}` is the only placeholder and has no escape in v1 —
+  unlike a parameterized `pages:` entry (§10.6), where `{{` / `}}` do escape,
+  because braces there are validated statically rather than passed through. The
+  two grammars deliberately differ: giving `format` an escape would change what
+  an existing `{{` in a format string means. So
   a literal `{}` cannot be produced by the format string.
 - `$runtime.concat(args...)` — join the args' string forms (`format`
   without a template).

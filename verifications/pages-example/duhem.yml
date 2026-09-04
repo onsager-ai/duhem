@@ -3,4 +3,5 @@ includes:
   - pages.yml
 verifications:
   - path: first/duhem.yml
+  - path: parameterized/duhem.yml
   - path: second/duhem.yml

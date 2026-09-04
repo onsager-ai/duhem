@@ -128,15 +128,16 @@ pub enum PathRoot {
     /// `inputs:` block.
     Inputs,
     /// `$pages.<page>.<element>` — a named locator from the effective
-    /// Verification Definition catalog.
+    /// Verification Definition catalog. A call suffix supplies positional
+    /// arguments for the entry's `{}` placeholders (spec #495).
     Pages,
     /// `$env.<name>` — whitelisted environment variables. The schema
     /// crate treats the catalog as open; the runtime spec owns the
     /// whitelist.
     Env,
     /// `$runtime.<fn>(...)` — built-in helpers exposed by the runtime
-    /// (e.g. `uuid()`, `now()`). Calls (`(...)` suffix) are only legal
-    /// under this root; the closed catalog lives alongside this grammar.
+    /// (e.g. `uuid()`, `now()`). The closed catalog lives alongside this
+    /// grammar.
     Runtime,
 }
 

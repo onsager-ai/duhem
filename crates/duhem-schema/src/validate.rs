@@ -103,6 +103,7 @@ pub fn validate_with_contract_outputs(
                     crate::validate_pages::check_page_path(
                         &v.pages,
                         path,
+                        arity,
                         raw,
                         &format!("setup step `{step_name}` with:"),
                         location,
@@ -169,6 +170,7 @@ pub fn validate_with_contract_outputs(
                     crate::validate_pages::check_page_path(
                         &v.pages,
                         path,
+                        arity,
                         raw,
                         &format!("teardown step `{step_name}` with:"),
                         location,
@@ -911,6 +913,7 @@ fn check_path(
             crate::validate_pages::check_page_path(
                 pages,
                 path,
+                arity,
                 raw,
                 &format!("criterion `{}` / check `{}`: {site}", c.id, ch.id),
                 location,
@@ -974,7 +977,33 @@ criteria:
         steps:
           - id: target
             uses: ui/assert-element
-            with: {{ locator: {reference}, expected: visible }}
+            with:
+              locator: {reference}
+              expected: visible
+"#
+        ))
+    }
+
+    fn parameterized_catalog_vd(reference: &str, template: &str) -> VerificationDefinition {
+        parse(&format!(
+            r#"
+verification: parameterized catalog leaf
+inputs:
+  index: {{ type: integer, default: 1 }}
+pages:
+  chat:
+    history_item: {{ xpath: {template:?} }}
+criteria:
+  - id: AC-1
+    description: shared locator template
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: target
+            uses: ui/assert-element
+            with:
+              locator: {reference}
+              expected: visible
 "#
         ))
     }
@@ -982,6 +1011,55 @@ criteria:
     #[test]
     fn page_reference_resolves_offline() {
         validate(&catalog_vd("$pages.login.submit")).expect("known entry resolves");
+    }
+
+    #[test]
+    fn parameterized_page_reference_validates_expression_argument() {
+        validate(&parameterized_catalog_vd(
+            "$pages.chat.history_item($inputs.index)",
+            "(//article)[{}]",
+        ))
+        .expect("matching page call resolves offline");
+    }
+
+    #[test]
+    fn parameterized_page_reference_rejects_too_few_and_too_many_arguments() {
+        for (reference, given) in [
+            ("$pages.chat.history_item", 0),
+            ("$pages.chat.history_item(1, 2)", 2),
+        ] {
+            let errors =
+                validate(&parameterized_catalog_vd(reference, "(//article)[{}]")).unwrap_err();
+            let message = errors
+                .iter()
+                .find(|error| matches!(error, ValidationError::PageRefArityMismatch { .. }))
+                .unwrap_or_else(|| panic!("page arity error for {reference}: {errors:?}"))
+                .to_string();
+            assert!(message.contains("step `target`"), "{message}");
+            assert!(message.contains("$pages.chat.history_item"), "{message}");
+            assert!(message.contains(&format!("supplies {given}")), "{message}");
+            assert!(message.contains("contains 1 `{}` placeholder"), "{message}");
+        }
+    }
+
+    #[test]
+    fn page_template_escaping_is_validated() {
+        validate(&parameterized_catalog_vd(
+            "$pages.chat.history_item(2)",
+            "{{history}}[{}]",
+        ))
+        .expect("escaped braces do not change page arity");
+
+        let errors = validate(&parameterized_catalog_vd(
+            "$pages.chat.history_item(2)",
+            "{history}[{}]",
+        ))
+        .unwrap_err();
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ValidationError::InvalidPageTemplate { entry, .. }
+                if entry == "$pages.chat.history_item"
+        )));
     }
 
     #[test]

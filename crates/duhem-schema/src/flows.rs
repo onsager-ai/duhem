@@ -189,12 +189,12 @@ fn validate_flow(name: &str, flow: &Flow, catalog: &FlowCatalog, errors: &mut Ve
                     "flow `{name}` hygiene violation: `{raw}` may reference only `$params.*` and `$pages.*`"
                 ));
             }
-            if let Some(param) = raw.strip_prefix("$params.").and_then(reference_head)
-                && !flow.params.contains_key(param)
-            {
-                errors.push(format!(
-                    "flow `{name}` references unknown param `{param}` in `{raw}`"
-                ));
+            for param in param_reference_names(raw) {
+                if !flow.params.contains_key(param) {
+                    errors.push(format!(
+                        "flow `{name}` references unknown param `{param}` in `{raw}`"
+                    ));
+                }
             }
         });
         if let Some(called) = &step.call {
@@ -481,27 +481,30 @@ fn mapping_to_bindings(value: &serde_yml::Value) -> BTreeMap<String, serde_yml::
 fn substitute_params(value: &mut serde_yml::Value, bindings: &BTreeMap<String, serde_yml::Value>) {
     match value {
         serde_yml::Value::String(raw) => {
-            let Some(reference) = raw.strip_prefix("$params.") else {
-                return;
-            };
-            let mut segments = reference.split('.');
-            let Some(name) = segments.next() else {
-                return;
-            };
-            let Some(mut resolved) = bindings.get(name).cloned() else {
-                return;
-            };
-            for segment in segments {
-                let Some(next) = resolved
-                    .as_mapping()
-                    .and_then(|map| map.get(serde_yml::Value::String(segment.to_string())))
-                    .cloned()
-                else {
+            if let Some(reference) = raw.strip_prefix("$params.") {
+                let mut segments = reference.split('.');
+                let Some(name) = segments.next() else {
                     return;
                 };
-                resolved = next;
+                let Some(mut resolved) = bindings.get(name).cloned() else {
+                    return;
+                };
+                for segment in segments {
+                    let Some(next) = resolved
+                        .as_mapping()
+                        .and_then(|map| map.get(serde_yml::Value::String(segment.to_string())))
+                        .cloned()
+                    else {
+                        return;
+                    };
+                    resolved = next;
+                }
+                *value = resolved;
+            } else if raw.trim_start().starts_with("$pages.")
+                && let Some(rewritten) = rewrite_page_param_args(raw, bindings)
+            {
+                *raw = rewritten;
             }
-            *value = resolved;
         }
         serde_yml::Value::Sequence(values) => {
             for value in values {
@@ -514,6 +517,54 @@ fn substitute_params(value: &mut serde_yml::Value, bindings: &BTreeMap<String, s
             }
         }
         _ => {}
+    }
+}
+
+/// Substitute flow params embedded as page-call arguments before the
+/// expanded step reaches the ordinary expression parser (spec #495).
+fn rewrite_page_param_args(
+    raw: &str,
+    bindings: &BTreeMap<String, serde_yml::Value>,
+) -> Option<String> {
+    let marker = "$params.";
+    let mut rest = raw;
+    let mut out = String::with_capacity(raw.len());
+    let mut changed = false;
+    while let Some(offset) = rest.find(marker) {
+        out.push_str(&rest[..offset]);
+        let reference = &rest[offset + marker.len()..];
+        let name = reference_head(reference)?;
+        let replacement = bindings.get(name).and_then(render_expr_value)?;
+        out.push_str(&replacement);
+        rest = &reference[name.len()..];
+        changed = true;
+    }
+    out.push_str(rest);
+    changed.then_some(out)
+}
+
+fn render_expr_value(value: &serde_yml::Value) -> Option<String> {
+    match value {
+        serde_yml::Value::String(raw)
+            if raw.trim_start().starts_with('$') && crate::expr::parse(raw).is_ok() =>
+        {
+            Some(raw.clone())
+        }
+        serde_yml::Value::String(raw) if !raw.contains('\'') => Some(format!("'{raw}'")),
+        serde_yml::Value::String(raw) if !raw.contains('"') => Some(format!("\"{raw}\"")),
+        serde_yml::Value::String(raw) => {
+            let mut args = Vec::new();
+            for (index, part) in raw.split('\'').enumerate() {
+                if index > 0 {
+                    args.push("\"'\"".to_string());
+                }
+                args.push(format!("'{part}'"));
+            }
+            Some(format!("$runtime.concat({})", args.join(", ")))
+        }
+        serde_yml::Value::Bool(value) => Some(value.to_string()),
+        serde_yml::Value::Number(value) => Some(value.to_string()),
+        _ => None,
     }
 }
 
@@ -576,6 +627,20 @@ fn reference_head(reference: &str) -> Option<&str> {
         .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
         .next()
         .filter(|name| !name.is_empty())
+}
+
+fn param_reference_names(raw: &str) -> Vec<&str> {
+    let mut names = Vec::new();
+    let mut rest = raw;
+    while let Some(offset) = rest.find("$params.") {
+        rest = &rest[offset + "$params.".len()..];
+        let Some(name) = reference_head(rest) else {
+            continue;
+        };
+        names.push(name);
+        rest = &rest[name.len()..];
+    }
+    names
 }
 
 fn step_output_reference(raw: &str) -> Option<(&str, &str)> {
@@ -643,6 +708,43 @@ criteria:
             check.steps[0].flow.as_ref().map(|flow| flow.name.as_str()),
             Some("greet")
         );
+    }
+
+    #[test]
+    fn expands_flow_param_inside_parameterized_page_reference() {
+        let mut definition = authored(
+            r#"
+verification: flow page call
+inputs:
+  index: { type: integer, default: 2 }
+pages:
+  chat:
+    history_item: { xpath: '(//article)[{}]' }
+flows:
+  select_history:
+    params:
+      index: { type: integer }
+    steps:
+      - uses: ui/assert-element
+        with:
+          locator: $pages.chat.history_item($params.index)
+          expected: visible
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - call: select_history
+            with: { index: $inputs.index }
+"#,
+        );
+        validate_and_expand(&mut definition).expect("flow expands");
+        assert_eq!(
+            definition.criteria[0].checks[0].steps[0].with["locator"].as_str(),
+            Some("$pages.chat.history_item($inputs.index)")
+        );
+        crate::validate(&definition).expect("expanded page call validates");
     }
 
     #[test]

@@ -125,18 +125,19 @@ fn expr_parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
             .collect::<Vec<_>>()
             .delimited_by(just('('), just(')'));
 
-        // Function-call syntax (`(args)`) is only legal under
-        // `$runtime` per `docs/duhem-spec.md` §10.7. Reject it on
-        // other roots at parse time so structural validation isn't
-        // asked to enforce a grammar rule.
+        // Function-call syntax (`(args)`) is legal for runtime helpers and
+        // parameterized two-segment page references (spec #495). Page shape
+        // and placeholder arity remain structural-validation concerns.
         let path_or_call = path
             .then(call_args.or_not())
             .try_map(|(path, args), span| match (args, path.root) {
-                (Some(args), PathRoot::Runtime) => Ok(Expr::Call { path, args }),
+                (Some(args), PathRoot::Runtime | PathRoot::Pages) => {
+                    Ok(Expr::Call { path, args })
+                }
                 (Some(_), other) => Err(Rich::custom(
                     span,
                     format!(
-                        "function-call syntax `(...)` is only valid on `$runtime`, not `${}`",
+                        "function-call syntax `(...)` is only valid on `$runtime` or `$pages`, not `${}`",
                         other.as_str()
                     ),
                 )),
@@ -308,17 +309,17 @@ mod tests {
     }
 
     #[test]
-    fn rejects_call_on_non_runtime_root() {
+    fn rejects_call_on_non_callable_root() {
         let err = parse("$inputs.x()").unwrap_err();
         assert!(
-            err.message.contains("only valid on `$runtime`"),
+            err.message.contains("only valid on `$runtime` or `$pages`"),
             "got: {}",
             err.message
         );
         let err = parse("$steps.a.outputs.x()").unwrap_err();
-        assert!(err.message.contains("only valid on `$runtime`"));
+        assert!(err.message.contains("only valid on `$runtime` or `$pages`"));
         let err = parse("$env.X()").unwrap_err();
-        assert!(err.message.contains("only valid on `$runtime`"));
+        assert!(err.message.contains("only valid on `$runtime` or `$pages`"));
     }
 
     #[test]
@@ -343,6 +344,26 @@ mod tests {
                 root: PathRoot::Pages,
                 segments: vec!["login".into(), "submit".into()],
             })
+        );
+    }
+
+    #[test]
+    fn parses_parameterized_page_locator() {
+        assert_eq!(
+            p("$pages.chat.history_item($inputs.index, 2)"),
+            Expr::Call {
+                path: Path {
+                    root: PathRoot::Pages,
+                    segments: vec!["chat".into(), "history_item".into()],
+                },
+                args: vec![
+                    Expr::Path(Path {
+                        root: PathRoot::Inputs,
+                        segments: vec!["index".into()],
+                    }),
+                    Expr::Lit(Literal::Int(2)),
+                ],
+            }
         );
     }
 

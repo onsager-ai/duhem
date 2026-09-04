@@ -225,6 +225,7 @@ pub(crate) fn validate_lifecycle_condition(
                 crate::validate_pages::check_page_path(
                     &definition.pages,
                     path,
+                    arity,
                     &expr.raw,
                     &format!("{phase} step condition:"),
                     location,

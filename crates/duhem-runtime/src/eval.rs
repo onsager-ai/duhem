@@ -606,7 +606,7 @@ fn eval_call(path: &Path, args: &[Expr], ctx: &dyn EvalContext) -> EvalRes {
 /// Coerce a scalar runtime value to its string form for `format`.
 /// Collections and `null` are not formattable (a null id in a URL is a
 /// bug, not an empty string) and surface as `TypeMismatch`.
-fn scalar_to_string(v: Value) -> Result<String, InconclusiveCause> {
+pub(crate) fn scalar_to_string(v: Value) -> Result<String, InconclusiveCause> {
     match v {
         Value::Str(s) => Ok(s),
         Value::Int(i) => Ok(i.to_string()),

@@ -10,6 +10,12 @@ pub(crate) fn validate_catalog_inputs(
 ) {
     for (page, elements) in &definition.pages {
         for (element, locator) in elements {
+            if let Err(error) = crate::page_template::value_placeholder_count(locator) {
+                errors.push(ValidationError::InvalidPageTemplate {
+                    entry: format!("$pages.{page}.{element}"),
+                    detail: error.to_string(),
+                });
+            }
             walk_strings(locator, &mut |raw| {
                 let Ok(expression) = crate::expr::parse(raw) else {
                     return;
@@ -35,6 +41,7 @@ pub(crate) fn validate_catalog_inputs(
 pub(crate) fn check_page_path(
     pages: &PageCatalog,
     path: &Path,
+    arity: Option<usize>,
     raw: &str,
     site: &str,
     location: Option<SourceLocation>,
@@ -51,10 +58,28 @@ pub(crate) fn check_page_path(
     }
     let page = &segments[0];
     let element = &segments[1];
-    if pages
-        .get(page)
-        .is_some_and(|entries| entries.contains_key(element))
-    {
+    if let Some(locator) = pages.get(page).and_then(|entries| entries.get(element)) {
+        let Ok(placeholders) = crate::page_template::value_placeholder_count(locator) else {
+            // The catalog-wide pass reports the escaping error once.
+            return;
+        };
+        let given = arity.unwrap_or(0);
+        if placeholders != given {
+            errors.push(ValidationError::PageRefArityMismatch {
+                site: site.to_string(),
+                raw: raw.to_string(),
+                entry: format!("$pages.{page}.{element}"),
+                given,
+                argument_word: if given == 1 { "argument" } else { "arguments" },
+                placeholders,
+                placeholder_word: if placeholders == 1 {
+                    "placeholder"
+                } else {
+                    "placeholders"
+                },
+                location,
+            });
+        }
         return;
     }
 

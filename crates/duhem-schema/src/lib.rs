@@ -19,6 +19,7 @@ mod manifest_error;
 mod manifest_filter;
 mod manifest_inputs;
 mod manifest_path;
+pub mod page_template;
 pub mod project;
 pub mod provision;
 mod source;

@@ -23,8 +23,8 @@ use duhem_judge::RunSetVerdict;
 use duhem_runtime::CheckFailure;
 use duhem_runtime::RunOutcome;
 use duhem_summary::{
-    CheckFailureSummary, CleanupFailureSummary, CriterionSummary, FailedAssertionSummary,
-    RunSetSummary, RunSummary,
+    CheckFailureSummary, CheckTotals, CleanupFailureSummary, CriterionSummary,
+    FailedAssertionSummary, RunSetSummary, RunSummary,
 };
 
 /// Selectable reporter. Built-ins are tagged variants; plugins carry
@@ -114,6 +114,7 @@ pub fn render(
             write_failures(out, &outcome.failures)?;
             write_warnings(out, &outcome.warnings)?;
             write_cleanup(out, &outcome.cleanup)?;
+            write_totals(out, check_totals(outcome))?;
             Ok(())
         }
         Reporter::Quiet => Ok(()),
@@ -134,7 +135,7 @@ pub fn render(
 /// run-set verdict (spec on issue #49). Per-built-in behavior:
 ///
 /// - `Default` — one `<name>: <verdict>` line per leaf, then the
-///   aggregated verdict on its own line.
+///   aggregated verdict and executed-check totals.
 /// - `Quiet` — nothing.
 /// - `Json` — a single `RunSetSummary` JSON object on one line.
 /// - `Plugin` — fan out: one plugin invocation per leaf (each with
@@ -155,6 +156,7 @@ pub fn render_set(
                 writeln!(out, "{name}: {}", outcome.verdict.state)?;
             }
             writeln!(out, "{}", set_verdict.state)?;
+            write_totals(out, check_totals_for_set(leaves))?;
             Ok(())
         }
         Reporter::Quiet => Ok(()),
@@ -286,6 +288,41 @@ fn write_cleanup(
     Ok(())
 }
 
+/// Print the executed-check denominator after every other default
+/// reporter detail, keeping the aggregate visible at the end (#493).
+fn write_totals(out: &mut dyn Write, totals: CheckTotals) -> Result<(), RenderError> {
+    if totals.total == 0 {
+        writeln!(out, "Total: 0 checks")?;
+    } else {
+        writeln!(
+            out,
+            "Total: {} checks · {} passed · {} failed · {} inconclusive",
+            totals.total, totals.passed, totals.failed, totals.inconclusive,
+        )?;
+    }
+    Ok(())
+}
+
+fn check_totals(outcome: &RunOutcome) -> CheckTotals {
+    CheckTotals::from_verdicts(
+        outcome
+            .verdict
+            .criteria
+            .iter()
+            .flat_map(|criterion| criterion.checks.iter().map(|check| &check.state)),
+    )
+}
+
+fn check_totals_for_set(leaves: &[(String, RunOutcome)]) -> CheckTotals {
+    CheckTotals::from_verdicts(leaves.iter().flat_map(|(_, outcome)| {
+        outcome
+            .verdict
+            .criteria
+            .iter()
+            .flat_map(|criterion| criterion.checks.iter().map(|check| &check.state))
+    }))
+}
+
 fn cleanup_outcome(outcome: &duhem_evidence::StepOutcome) -> &'static str {
     match outcome {
         duhem_evidence::StepOutcome::Ok => "ok",
@@ -326,6 +363,7 @@ fn build_summary(o: &RunOutcome, store_db: &std::path::Path) -> RunSummary {
             .collect(),
         store_db.to_path_buf(),
     )
+    .with_totals(check_totals(o))
     .with_failures(failures)
     .with_warnings(o.warnings.clone())
     .with_cleanup(
@@ -504,9 +542,12 @@ mod tests {
     }
 
     #[test]
-    fn default_reporter_writes_single_verdict_line() {
+    fn default_reporter_writes_verdict_and_check_totals() {
         let s = capture(&Reporter::Default, &outcome(VerdictState::Pass));
-        assert_eq!(s, "pass\n");
+        assert_eq!(
+            s,
+            "pass\nTotal: 1 checks · 1 passed · 0 failed · 0 inconclusive\n"
+        );
     }
 
     #[test]
@@ -515,7 +556,26 @@ mod tests {
             &Reporter::Default,
             &outcome(VerdictState::Inconclusive(InconclusiveCause::Timeout)),
         );
-        assert_eq!(s, "inconclusive:timeout\n");
+        assert_eq!(
+            s,
+            "inconclusive:timeout\nTotal: 1 checks · 0 passed · 0 failed · 1 inconclusive\n"
+        );
+    }
+
+    #[test]
+    fn default_reporter_states_zero_executed_checks() {
+        let o = RunOutcome {
+            verdict: RunVerdict {
+                state: VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+                criteria: Vec::new(),
+            },
+            run_id: "01J000000000000000000RUN".into(),
+            failures: Vec::new(),
+            warnings: Vec::new(),
+            cleanup: Vec::new(),
+        };
+        let s = capture(&Reporter::Default, &o);
+        assert_eq!(s, "inconclusive:environment_error\nTotal: 0 checks\n");
     }
 
     #[test]
@@ -559,6 +619,8 @@ mod tests {
         assert_eq!(v["criteria"][0]["id"], "AC-1");
         assert_eq!(v["criteria"][0]["verdict"], "pass");
         assert_eq!(v["store"], "state/duhem.db");
+        assert_eq!(v["totals"]["total"], 1);
+        assert_eq!(v["totals"]["passed"], 1);
         // Spec on #34: the contract surfaces schema_version on the wire.
         // v2 (#189): `evidence_dir` → `store`, a breaking rename — see
         // RunSummary::SCHEMA_VERSION.
@@ -589,12 +651,48 @@ mod tests {
         let default = capture(&Reporter::Default, &o);
         assert!(default.starts_with("pass\n"), "got: {default}");
         assert!(default.contains("cleanup: delete-record (error)"));
+        assert_eq!(
+            default.lines().last(),
+            Some("Total: 1 checks · 1 passed · 0 failed · 0 inconclusive")
+        );
 
         let json = capture(&Reporter::Json, &o);
         let value: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
         assert_eq!(value["verdict"], "pass");
         assert_eq!(value["cleanup"][0]["step"], "delete-record");
         assert_eq!(value["cleanup"][0]["outcome"], "error");
+    }
+
+    #[test]
+    fn default_reporter_writes_totals_last_after_all_detail() {
+        let mut o = outcome(VerdictState::Fail);
+        o.failures.push(duhem_runtime::CheckFailure {
+            criterion_id: "AC-1".into(),
+            check_id: "AC-1.1".into(),
+            assertions: vec![duhem_runtime::FailedAssertion {
+                expr: "false".into(),
+                state: VerdictState::Fail,
+                detail: Some("actual false, expected true".into()),
+            }],
+            captures: Vec::new(),
+        });
+        o.warnings.push("synthetic warning".into());
+        o.cleanup.push(duhem_runtime::CleanupFailure {
+            step: "release fixture".into(),
+            outcome: duhem_evidence::StepOutcome::Error,
+            detail: None,
+        });
+
+        let rendered = capture(&Reporter::Default, &o);
+        let failure = rendered.find("AC-1::AC-1.1").unwrap();
+        let warning = rendered.find("warning: synthetic warning").unwrap();
+        let cleanup = rendered.find("cleanup: release fixture").unwrap();
+        let totals = rendered.find("Total: 1 checks").unwrap();
+        assert!(failure < warning && warning < cleanup && cleanup < totals);
+        assert_eq!(
+            rendered.lines().last(),
+            Some("Total: 1 checks · 0 passed · 1 failed · 0 inconclusive")
+        );
     }
 
     #[test]
@@ -718,10 +816,13 @@ mod tests {
     fn render_set_default_prints_per_leaf_and_aggregate() {
         // Spec on #49: default reporter on a manifest prints one
         // `<name>: <verdict>` line per leaf, then the aggregated
-        // verdict on its own line as the final line of stdout.
+        // verdict. Spec #493 adds the set denominator as the final line.
         let (leaves, set) = leaves_pair();
         let s = capture_set(&Reporter::Default, &leaves, &set);
-        assert_eq!(s, "leaf-a: pass\nleaf-b: fail\nfail\n");
+        assert_eq!(
+            s,
+            "leaf-a: pass\nleaf-b: fail\nfail\nTotal: 2 checks · 1 passed · 1 failed · 0 inconclusive\n"
+        );
     }
 
     #[test]
@@ -743,10 +844,18 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(trimmed).expect("valid JSON");
         assert_eq!(v["schema_version"], "1");
         assert_eq!(v["verdict"], "fail");
+        assert_eq!(v["totals"]["total"], 2);
+        assert_eq!(v["totals"]["passed"], 1);
+        assert_eq!(v["totals"]["failed"], 1);
         let runs = v["runs"].as_array().expect("runs array");
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0]["verdict"], "pass");
         assert_eq!(runs[1]["verdict"], "fail");
+        let leaf_total: u64 = runs
+            .iter()
+            .map(|run| run["totals"]["total"].as_u64().unwrap())
+            .sum();
+        assert_eq!(v["totals"]["total"].as_u64(), Some(leaf_total));
     }
 
     #[test]

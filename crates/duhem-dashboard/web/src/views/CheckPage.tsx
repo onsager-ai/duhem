@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/card";
 import { fetchCheck, type ArtifactRef, type CheckDetail, type SpanModel, type TraceEvent } from "../api";
 import { VerdictBadge, formatDuration, isImageArtifact } from "../ui";
-import { compactValue, deliveryLayerLabel, describeWith, formatEvent, groupTimeline, parseComparison, stepStatus, summarizeCheck, type TimelineNode } from "../format";
+import { compactValue, deliveryLayerLabel, describeWith, formatEvent, groupTimeline, parseComparison, stepDuration, stepStatus, summarizeCheck, type TimelineNode } from "../format";
 import { EventIcon } from "../components/EventIcon";
 import { RunScaffold } from "./RunScaffold";
 import { useVd } from "./definition-context";
@@ -214,6 +214,14 @@ function TimelineRow({
                 </a>
               )}
             </span>
+            {/* This is a standalone point event (assertion, verdict,
+                trailing capture) rather than a step group, so "since the
+                previous event" is the correct and only meaningful
+                reading — there is no start/finish span to report a
+                duration over. The step row below uses `stepDuration`
+                instead (#433); the two `ev-time` columns look alike but
+                answer different questions — do not fold them back
+                together. */}
             <span className="ev-time" title={evt.ts}>
               {fe.delta ?? ""}
             </span>
@@ -518,10 +526,44 @@ function StepGroup({
   );
   const fe = formatEvent(started, prevOf(started));
   const status = stepStatus(node);
+  // The step's own duration (#433), not `fe.delta` (the gap since the
+  // *previous* event, which a wait/timeout step can dwarf). `null` while
+  // the step has no `step_finished` yet.
+  const duration = stepDuration(node);
+  const finished = node.events.find(
+    (e) => e.kind === "step_finished" || e.kind === "setup_step_finished",
+  );
   // Selection remains URL/highlight state, while disclosure is seeded once
   // and then belongs to the reader; scroll-spy selections never seed it (#492).
   const selectedOnMount = Boolean(selected && !selectedFromScroll);
   const [open, setOpen] = useState(status.failed || selectedOnMount);
+  // #503 / #435: the summary's own `md:sticky` pin is dropped while its
+  // step is open. Reproduced against a real run (`duhem-dashboard`
+  // served over the fixture): with a step expanded, at the scroller's
+  // (`.run-results-detail`) max scrollTop, the sticky summary still
+  // overlapped the top of its own now-fully-scrolled `.step-body` — the
+  // container had run out of room to scroll the body's tail clear of
+  // it. `scroll-padding-top` (already on `.run-results-detail` via
+  // `scroll-margin-top`, `styles.css`) only helps a *programmatic*
+  // landing scroll (selecting a step from the rail); it does nothing
+  // for a reader manually scrolling through an open body, which is
+  // what #435 reports. A bottom-runway fix alone
+  // (`.run-detail-surface`'s `padding-bottom`, `styles.css`) would
+  // still have to *guess* this summary's own height to size the
+  // runway — it wraps to more than one line whenever the detail text
+  // or an HTTP-status chip pushes it, so there is no fixed constant to
+  // reuse, and `--check-context-height` alone isn't a bound on it.
+  // Dropping the pin while open removes that unknown-height
+  // contributor outright: a step's identity while reading its body is
+  // still carried by the rail and by `check-context` (#420), so losing
+  // the per-step pin only while expanded costs a reader nothing. (Kept
+  // as a JS class swap, not a stylesheet override, because
+  // `styles.css` is deliberately kept inside Tailwind's `components`
+  // layer — see its file banner — so every Tailwind utility class,
+  // `md:sticky` included, always wins the cascade over it.)
+  const stickyClass = open
+    ? ""
+    : "md:sticky md:top-[var(--check-context-height)] md:z-10";
   const disclosureSeeded = useRef(status.failed || selectedOnMount);
   const wasSelected = useRef(Boolean(selected));
   useEffect(() => {
@@ -575,14 +617,22 @@ function StepGroup({
         open={open}
         onToggle={(event) => setOpen(event.currentTarget.open)}
       >
-        <summary className="step-summary md:sticky md:top-[var(--check-context-height)] md:z-10 md:border-b md:bg-background/95 md:backdrop-blur">
+        <summary
+          className={[
+            "step-summary",
+            stickyClass,
+            "md:border-b md:bg-background/95 md:backdrop-blur",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
           {/* Primary line: status icon + action. Successful steps rely on
               the green check alone; only exceptional outcomes need text. */}
           <span className="ev-row">
             <span className="ev-icon">
               <EventIcon name={status.icon} />
             </span>
-            <span className="ev-label">{label}</span>
+            <span className="ev-label" title={label}>{label}</span>
             {layer && (
               <Badge
                 variant="outline"
@@ -612,8 +662,12 @@ function StepGroup({
                 </span>
               )}
             </span>
-            <span className="ev-time min-w-max" title={started.ts}>
-              {fe.delta ?? ""}
+            <span
+              className="ev-time min-w-max"
+              data-testid="step-time"
+              title={finished ? `${started.ts} → ${finished.ts}` : started.ts}
+            >
+              {duration ?? ""}
             </span>
             <ChevronRight className="ev-caret" aria-hidden="true" />
           </span>

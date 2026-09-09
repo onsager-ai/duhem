@@ -311,6 +311,35 @@ criteria:
               locator: {role: link, name: AC-1.1}
               expected: visible
               timeout: 15s
+          # #503 / #433 regression: the fixture's `wait-slow` step (7th
+          # step of AC-1.1, `data-step-index`/DOM id `step-6`) has a
+          # start gap of milliseconds but a real duration of ~3s — the
+          # one combination that discriminates "since the previous
+          # event" from "how long the step took". Read its rendered
+          # time span (added `data-testid="step-time"` as a stable hook
+          # for the time column itself — there is no other way to reach
+          # it) while still on the Steps view, before switching to
+          # Replay below.
+          #
+          # The `#step-6` half of the locator DOES depend on step
+          # order — it is the DOM id CheckPage.tsx renders from
+          # `stepIndex`, pinned to `wait-slow` being AC-1.1's 7th step
+          # (index 6) in `fixture/dashboard-fixture.yml`. Inserting a
+          # step before it there shifts the index and breaks this
+          # locator (see the matching note on `wait-slow` there). It
+          # fails closed, not silently: an earlier step is sub-second,
+          # so `matches` below would not match it either.
+          - id: slow_step_time_visible
+            uses: ui/assert-element
+            with:
+              locator: {css: "#step-6 [data-testid='step-time']"}
+              expected: visible
+              timeout: 15s
+          - id: extract_slow_step_time
+            uses: ui/extract
+            with:
+              locator: {css: "#step-6 [data-testid='step-time']"}
+              field: text
           - id: select-step
             uses: ui/click
             with: {role: link, name: show-evidence}
@@ -350,6 +379,17 @@ criteria:
               role: button
               name: "Seek to step show-evidence"
               timeout: 15s
+        assertions:
+          # The regression contract for #433, made mechanical: a
+          # seconds-scale step duration renders as `N.Ns` — decimal
+          # point required — never as the millisecond-scale `Nms` its
+          # start gap would have produced. Before the R1 fix this
+          # extracted value was the ~92ms gap since the previous event
+          # (no decimal point, `ms` suffix) and the pattern below could
+          # not match it; only a real duration passes.
+          - matches:
+              value: $steps.extract_slow_step_time.outputs.value
+              pattern: '^\d+\.\d+s$'
 
   # ==========================================================================
   # #349 — runtime lifecycle is independent from judgment. The real slow

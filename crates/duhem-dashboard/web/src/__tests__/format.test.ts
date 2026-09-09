@@ -6,6 +6,7 @@ import {
   describeWith,
   formatEvent,
   groupTimeline,
+  stepDuration,
   stepStatus,
   summarizeCheck,
 } from "../format";
@@ -314,6 +315,66 @@ describe("stepStatus (#280 status propagation)", () => {
     expect(s.tone).toBe("skipped");
     expect(s.failed).toBe(false);
     expect(s.reason).toContain("login");
+  });
+});
+
+describe("stepDuration (#433 / #503)", () => {
+  const node = (startedTs: string, finishedTs?: string): StepNode => ({
+    kind: "step",
+    key: "s1",
+    stepIndex: 0,
+    events: [
+      { ...ev("step_started", { step_index: 0, uses: "ui/assert-element" }, 1), ts: startedTs },
+      ...(finishedTs
+        ? [{ ...ev("step_finished", { step_index: 0, outcome: "ok" }, 2), ts: finishedTs }]
+        : []),
+    ],
+  });
+
+  it("computes the finished-minus-started span, not the gap since the previous event", () => {
+    // The exact #433 reproduction: `step_started` fires 92ms after the
+    // event before it, then the step doesn't finish for another 90s.
+    // The old rendering (`fe.delta`, relative to the *previous* event)
+    // showed `+92ms` here; the regression is fixed only if `stepDuration`
+    // reports the step's own 90s span instead.
+    const previousEvent = ev("step_finished", { step_index: 1, outcome: "ok" }, 0);
+    const started: TraceEvent = {
+      ...ev("step_started", { step_index: 2, uses: "ui/assert-element" }, 1),
+      ts: "2026-01-01T00:00:00.092Z",
+    };
+    const finished: TraceEvent = {
+      ...ev("step_finished", { step_index: 2, outcome: "timeout" }, 2),
+      ts: "2026-01-01T00:01:30.092Z",
+    };
+    const s: StepNode = { kind: "step", key: "s2", stepIndex: 2, events: [started, finished] };
+
+    // Sanity check: the *previous-event* delta really is the misleading
+    // +92ms this bug report is about.
+    expect(formatEvent(started, previousEvent).delta).toBe("+92ms");
+
+    // The fix: the step's own duration is the 90s wait, not the 92ms gap.
+    expect(stepDuration(s)).toBe("90.0s");
+    expect(stepDuration(s)).not.toBe("+92ms");
+    expect(stepDuration(s)).not.toContain("+");
+  });
+
+  it("formats sub-second durations as Nms, never with a + prefix", () => {
+    expect(
+      stepDuration(node("2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.250Z")),
+    ).toBe("250ms");
+  });
+
+  it("formats durations at or above one second as N.Ns", () => {
+    expect(
+      stepDuration(node("2026-01-01T00:00:00.000Z", "2026-01-01T00:00:01.000Z")),
+    ).toBe("1.0s");
+    expect(
+      stepDuration(node("2026-01-01T00:00:00.000Z", "2026-01-01T00:00:04.500Z")),
+    ).toBe("4.5s");
+  });
+
+  it("returns null with no step_finished (still running, or aborted)", () => {
+    expect(stepDuration(node("2026-01-01T00:00:00.000Z"))).toBeNull();
   });
 });
 

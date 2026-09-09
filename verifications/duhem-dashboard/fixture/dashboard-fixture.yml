@@ -75,3 +75,20 @@ criteria:
               locator: {role: heading, name: Replay evidence ready}
               expected: visible
               timeout: 15s
+          # Deliberately slow, page-free step (#503 / #433 reproduction):
+          # its `step_started` fires milliseconds after the previous
+          # event, but it does not finish for ~3s. That combination is
+          # exactly what discriminates the bug the dashboard VD's AC-5
+          # extends to check — a report reading "since the previous
+          # event" shows a millisecond gap here; one reading "how long
+          # did the step take" shows a seconds-scale duration.
+          #
+          # It must stay AC-1.1's 7th step (index 6, 0-based): the VD's
+          # `duhem.yml` locates its rendered time by DOM id `#step-6`
+          # (CheckPage.tsx renders that id from the step's index — there
+          # is no stabler per-step hook in that pane). Inserting a step
+          # before this one shifts the index and breaks that locator.
+          - id: wait-slow
+            uses: ui/wait
+            with:
+              duration: 3s

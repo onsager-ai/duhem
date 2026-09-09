@@ -182,6 +182,14 @@ describe("run report tree", () => {
     expect(within(tree).getByRole("link", { name: "AC-5.2" })).toBeTruthy();
     expect(within(tree).getByRole("link", { name: "AC-7.1" })).toBeTruthy();
     expect(within(tree).getByRole("link", { name: "AC-6.1" })).toBeTruthy();
+    // #503/#436 guard: R3 must not have touched the check link's
+    // `aria-label` — the self-verification VD locates `role: link, name:
+    // <check id>`, and `title` on an element that already carries
+    // `aria-label` does not change the accessible name, but altering
+    // `aria-label` itself would break that VD.
+    expect(
+      within(tree).getByRole("link", { name: "AC-5.1" }).getAttribute("aria-label"),
+    ).toBe("AC-5.1");
     expect(screen.getByRole("tab", { name: "Results" }).getAttribute("aria-selected")).toBe(
       "true",
     );
@@ -402,6 +410,16 @@ describe("run report tree", () => {
     const surface = container.querySelector(".run-detail-surface") as HTMLElement;
     const context = container.querySelector(".check-context") as HTMLElement;
     const summary = container.querySelector(".step-summary") as HTMLElement;
+    // CHECK's one step carries a failing judgment, so it auto-expands
+    // (Allure-style) — and #503/#435 drops the summary's own sticky pin
+    // while a step is OPEN (it must never permanently cover the tail of
+    // its own body). Close it first: this test is about the pinned
+    // (closed) styling, which still applies to every step by default.
+    expect((container.querySelector('[data-testid="step-group"] > details') as HTMLDetailsElement).open).toBe(true);
+    fireEvent.click(summary);
+    await waitFor(() =>
+      expect((container.querySelector('[data-testid="step-group"] > details') as HTMLDetailsElement).open).toBe(false),
+    );
     Object.defineProperty(context, "offsetHeight", { configurable: true, value: 218 });
     resize?.([], {} as ResizeObserver);
 
@@ -425,6 +443,12 @@ describe("run report tree", () => {
     expect(
       screen.getAllByTestId("step-layer").some((badge) => badge.textContent === "ui"),
     ).toBe(true);
+    // #436: the rail step link truncates and had no hover fallback at
+    // all — `title` now mirrors its (unchanged) `aria-label`, so a
+    // truncated label is still readable on hover, without touching the
+    // accessible name itself.
+    expect(step.getAttribute("title")).toBe("open-page");
+    expect(step.getAttribute("title")).toBe(step.getAttribute("aria-label"));
   });
 
   it("scrolls rail selections below small and large measured sticky contexts", async () => {

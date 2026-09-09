@@ -509,3 +509,32 @@ export function stepStatus(node: StepNode): {
     failed: m.tone === "fail" || m.tone === "inconclusive",
   };
 }
+
+/**
+ * How long the step itself took — `step_finished.ts − step_started.ts`
+ * (#433) — as distinct from `relTime`'s "since the previous event" gap.
+ * A step that waits the full length of a timeout before failing must
+ * report that wait, not the millisecond gap before it began; rendering
+ * `fe.delta` against a step row conflates the two and reports the wrong
+ * number next to a verdict that was otherwise correct.
+ *
+ * Formatted on the same scale as `relTime` (`Nms` below 1s, `N.Ns` at or
+ * above) but with **no `+` prefix** — a duration is not an offset to
+ * something else, and the prefix is exactly what made the old value
+ * misread as one. Returns `null` when the step has no `step_finished`
+ * yet (still running, or aborted) so an unfinished step stays visibly
+ * unfinished rather than showing a bogus zero.
+ */
+export function stepDuration(node: StepNode): string | null {
+  const started = node.events[0];
+  const finished = node.events.find(
+    (e) => e.kind === "step_finished" || e.kind === "setup_step_finished",
+  );
+  if (!started || !finished) return null;
+  const a = Date.parse(started.ts);
+  const b = Date.parse(finished.ts);
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  const d = b - a;
+  if (d < 1000) return `${d}ms`;
+  return `${(d / 1000).toFixed(1)}s`;
+}

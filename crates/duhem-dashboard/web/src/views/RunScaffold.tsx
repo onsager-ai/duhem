@@ -312,6 +312,7 @@ function TreeGroup({
                           search: `?${stepSearch.toString()}`,
                         }}
                         aria-label={label}
+                        title={label}
                         aria-current={activeStep === key ? "step" : undefined}
                         onKeyDown={(event) => {
                           if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;

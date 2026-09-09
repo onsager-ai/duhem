@@ -598,6 +598,14 @@ ol.timeline li.ev.step-group {
   padding: 0;
   scroll-margin-top: var(--check-context-height, 0px);
 }
+/* #503 / #435 — the per-step `md:sticky` pin (JSX, `StepGroup` in
+ * `views/CheckPage.tsx`) is dropped from an OPEN step's summary in
+ * JS/JSX, not here: this stylesheet is deliberately kept inside
+ * Tailwind's `components` layer (see the file banner above) so every
+ * Tailwind utility class always wins the cascade over it — a plain CSS
+ * override of `md:sticky` from in here would need `!important` and
+ * would fight that convention. See `StepGroup`'s `stickyClass` for the
+ * mechanism and the full reproduction/rationale. */
 ol.timeline > li.flow-group {
   list-style: none;
   border-bottom: 1px solid var(--lg-border);
@@ -875,6 +883,62 @@ li.ev.step-group.tone-skipped > details > summary .ev-label { color: var(--lg-mu
 .run-detail-surface {
   min-width: 0;
   color: var(--text);
+}
+/* #503 / #435 — runway. `.run-results-detail` (the actual scroll
+ * container, `md:overflow-y-auto`, RunScaffold.tsx) has no bottom
+ * padding of its own; this pads `.run-detail-surface`, the plain
+ * content div it scrolls (CheckPage.tsx's `surfaceRef`). Padding an
+ * inner element still grows the outer scroller's `scrollHeight` — that
+ * IS the runway — so once the LAST rendered node's tail has scrolled
+ * up to just past the sticky `check-context` header, the scroller is
+ * not yet at its max scrollTop and there is still room to clear it,
+ * rather than that tail staying pinned behind `check-context` for good.
+ *
+ * `md:`-only: every rule this compensates for — the step summary's own
+ * `md:sticky` pin (dropped in JS while open, `StepGroup` in
+ * CheckPage.tsx), `check-context`'s `md:sticky md:top-0`, and
+ * `.run-results-detail` itself becoming a scroll container at all
+ * (`md:max-h-[...] md:overflow-y-auto`, RunScaffold.tsx) — is `md:`
+ * only. Below that breakpoint nothing is sticky and the *page* scrolls
+ * instead, so there is no occlusion to fix and this must not run: an
+ * unguarded rule added a full blank viewport under every self-opened
+ * failed step on a phone, for a bug that does not exist there.
+ *
+ * Sizing, now that the step summary's own (unbounded, wrapping) height
+ * is out of the picture: the ONLY sticky element left inside the
+ * scroller is `check-context`, whose height IS measured
+ * (`--check-context-height`) — but padding by that alone is still not
+ * enough, because it does not change how much of `check-context`'s
+ * OWN sticky-active window is left to run out at the very end of the
+ * list. Measured against the real fixture (a headless run, the
+ * fixture's actual last step, `Raw step data` opened, with the
+ * step-summary pin already dropped): at the scroller's natural max
+ * scrollTop, `padding-bottom: var(--check-context-height)` alone
+ * (174px here) still left the top ~149px of the `<pre>` block behind
+ * `check-context` (`check-context`'s bottom at 307.3px, the `<pre>`'s
+ * top at 158.5px) — not a rounding error, a third of the sticky
+ * header's own height. The bound that actually clears it is the
+ * SCROLLER's own visible height, independent of how tall
+ * `check-context` happens to be (verified: `check-context`'s sticky
+ * range itself ends exactly when the trailing content clears it, so a
+ * taller `check-context` does not change how much runway is needed).
+ * `.run-results-detail`'s visible height is `calc(100vh - 10.5rem)`
+ * (RunScaffold.tsx, duplicated here for lack of a shared token) with
+ * a 1rem margin for subpixel/scrollbar rounding — confirmed against
+ * both that same worst case and a realistic mid-list step (a
+ * screenshot capture) that continuous forward scrolling now always
+ * passes through a moment where the body is fully clear of
+ * `check-context`, before this padding, at either scenario's natural
+ * end of scroll.
+ *
+ * Gated behind `:has(details[open])` so a check with every step
+ * collapsed (the common case — only a failed/selected step opens on
+ * its own) never grows a scrollbar it doesn't need; the runway only
+ * exists while there is a step body it could actually apply to. */
+@media (min-width: 768px) {
+  .run-detail-surface:has(ol.timeline li.ev.step-group > details[open]) {
+    padding-bottom: calc(100vh - 9.5rem);
+  }
 }
 /* The two Results panes scroll independently of the page. `contain`
    stops a pane that has hit its end from handing the wheel back to the

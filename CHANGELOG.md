@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] The dashboard's step row now reports the step's own duration instead of the gap since the previous event, and no longer occludes an expanded step's body or leaves a truncated step label with no tooltip. (#503)
+
 ## v0.4.0 — 2026-09-04
 
 - [breaking] `$pages.<page>.<element>(args…)` fills `{}` placeholders in a catalog entry; braces in a page locator now carry meaning, so an entry with an unescaped brace must write it `{{`/`}}` or it is rejected. (#495)

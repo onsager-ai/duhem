@@ -437,6 +437,70 @@ describe("Timeline", () => {
     expect(raws.some((p) => p.textContent?.includes("actual false"))).toBe(true);
   });
 
+  it("shows a step's own duration, not the gap since the previous event (#433 / #503)", () => {
+    const events: TraceEvent[] = [
+      {
+        seq: 1,
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "step_started",
+        step_index: 0,
+        uses: "ui/navigate",
+      },
+      { seq: 2, ts: "2026-01-01T00:00:00.010Z", kind: "step_finished", step_index: 0, outcome: "ok" },
+      // The step this bug is about: it starts a mere 92ms after the
+      // previous event, then doesn't finish for 90s.
+      {
+        seq: 3,
+        ts: "2026-01-01T00:00:00.102Z",
+        kind: "step_started",
+        step_index: 1,
+        uses: "ui/assert-element",
+        with: { timeout: "90s" },
+      },
+      {
+        seq: 4,
+        ts: "2026-01-01T00:01:30.102Z",
+        kind: "step_finished",
+        step_index: 1,
+        outcome: "timeout",
+      },
+      // A standalone (non-step) event, 1s after the timed-out step —
+      // its column keeps meaning "since the previous event".
+      { seq: 5, ts: "2026-01-01T00:01:31.102Z", kind: "check_finished", verdict: "fail" },
+    ];
+    const { container } = render(<Timeline events={events} />);
+    const stepTimes = [...container.querySelectorAll('[data-testid="step-time"]')].map(
+      (el) => el.textContent,
+    );
+    // The regression: this must read the step's own 90s span, never the
+    // 92ms gap before it started.
+    expect(stepTimes).toEqual(["10ms", "90.0s"]);
+    expect(stepTimes).not.toContain("+92ms");
+    expect(stepTimes.every((t) => !t?.startsWith("+"))).toBe(true);
+    // The step row's title carries the two instants it spans.
+    const secondStepTime = container.querySelectorAll('[data-testid="step-time"]')[1];
+    expect(secondStepTime.getAttribute("title")).toBe(
+      "2026-01-01T00:00:00.102Z → 2026-01-01T00:01:30.102Z",
+    );
+    // The standalone verdict row is not a step group, and keeps the
+    // previous-event delta — a different column, a different question.
+    const verdictRow = [...container.querySelectorAll(".ev-label")]
+      .find((el) => el.textContent === "verdict: fail")
+      ?.closest("li");
+    expect(verdictRow?.querySelector(".ev-time")?.textContent).toBe("+1.0s");
+  });
+
+  it("carries a title on the step label so a truncated one still has a tooltip (#436)", () => {
+    const events: TraceEvent[] = [
+      { seq: 1, ts: "2026-01-01T00:00:00.000Z", kind: "step_started", step_index: 0, uses: "ui/navigate" },
+      { seq: 2, ts: "2026-01-01T00:00:00.010Z", kind: "step_finished", step_index: 0, outcome: "ok" },
+    ];
+    const { getByTestId } = render(<Timeline events={events} />);
+    const group = getByTestId("step-group");
+    const label = group.querySelector(".ev-label");
+    expect(label?.getAttribute("title")).toBe(label?.textContent);
+  });
+
   it("propagates a failed implicit judgment onto its step — red, reason inline, auto-expanded (#280)", () => {
     const events: TraceEvent[] = [
       {
@@ -799,10 +863,22 @@ describe("in-page inspection (#210)", () => {
     )!;
 
     expect(disclosure.open).toBe(false);
+    // #503/#435: a CLOSED step keeps its `md:sticky` pin (there's no body
+    // scrolled beneath it yet to occlude) — the DOM/class contract the R2
+    // fix relies on. jsdom does not compute layout/occlusion, so this
+    // cannot prove the sticky header stops covering the body; it only
+    // proves the class swap this mechanism depends on actually fires. The
+    // occlusion fix itself was verified against the real served SPA (see
+    // the spec/PR), not by this test.
+    expect(disclosure.querySelector("summary")?.className).toContain("md:sticky");
     fireEvent.click(disclosure.querySelector("summary")!);
     await waitFor(() => expect(disclosure.open).toBe(true));
+    // Once OPEN, the summary's own `md:sticky` pin is dropped so it can
+    // never permanently cover the tail of its own body.
+    expect(disclosure.querySelector("summary")?.className).not.toContain("md:sticky");
     rerender(<Timeline events={[...events]} selectedStep={undefined} />);
     expect(disclosure.open).toBe(true);
+    expect(disclosure.querySelector("summary")?.className).not.toContain("md:sticky");
   });
 
   it("groups a step's events into a node and keeps the verdict standalone", () => {

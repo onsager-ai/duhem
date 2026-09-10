@@ -69,6 +69,7 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
     .await
     .unwrap();
     w.append(EventPayload::CheckFinished {
+        gated_judging_steps: 0,
         check_id: "AC-1.1".into(),
         criterion_id: Some("AC-1".into()),
         verdict: VerdictState::Pass,
@@ -363,6 +364,7 @@ async fn stepless_check_owner_projects_and_replays() {
         .unwrap();
     writer
         .append(EventPayload::CheckFinished {
+            gated_judging_steps: 0,
             check_id: "AC-1.1".into(),
             criterion_id: Some("AC-1".into()),
             verdict: VerdictState::Pass,
@@ -1103,6 +1105,7 @@ async fn spans_fold_a_checks_layer_chain_in_order() {
     )
     .await;
     w.append(EventPayload::CheckFinished {
+        gated_judging_steps: 0,
         check_id: "AC-1.1".into(),
         criterion_id: Some("AC-1".into()),
         verdict: VerdictState::Pass,
@@ -1255,6 +1258,7 @@ async fn writer_tee_mirrors_persisted_events_in_order() {
         .await
         .unwrap();
     w.append(EventPayload::CheckFinished {
+        gated_judging_steps: 0,
         check_id: "AC-1.1".into(),
         criterion_id: Some("AC-1".into()),
         verdict: VerdictState::Pass,
@@ -1285,6 +1289,7 @@ async fn writer_tee_mirrors_persisted_events_in_order() {
     // Receiver gone → appends keep succeeding (send failure ignored).
     drop(rx);
     w.append(EventPayload::CheckFinished {
+        gated_judging_steps: 0,
         check_id: "AC-1.2".into(),
         criterion_id: Some("AC-1".into()),
         verdict: VerdictState::Pass,

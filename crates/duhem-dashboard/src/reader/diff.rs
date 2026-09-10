@@ -17,6 +17,7 @@ pub(super) struct RunProjection {
 }
 
 pub(super) struct CheckProjection {
+    pub(super) gated_judging_steps: u32,
     pub(super) criterion_id: String,
     pub(super) check_id: String,
     pub(super) verdict: Option<VerdictState>,
@@ -48,6 +49,7 @@ pub(super) fn project_run(run: &RunEvidence) -> RunProjection {
                     Some(p) => p,
                     None => {
                         checks.push(CheckProjection {
+                            gated_judging_steps: 0,
                             criterion_id: criterion_id.clone(),
                             check_id: check_id.clone(),
                             verdict: None,
@@ -91,10 +93,14 @@ pub(super) fn project_run(run: &RunEvidence) -> RunProjection {
                 }
             }
             EventPayload::CheckFinished {
-                check_id, verdict, ..
+                check_id,
+                verdict,
+                gated_judging_steps,
+                ..
             } => {
                 if let Some(pos) = checks.iter().position(|c| &c.check_id == check_id) {
                     checks[pos].verdict = Some(*verdict);
+                    checks[pos].gated_judging_steps = *gated_judging_steps;
                 }
             }
             EventPayload::CriterionFinished {

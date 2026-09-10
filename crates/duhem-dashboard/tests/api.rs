@@ -769,6 +769,7 @@ async fn write_stepless_run(
         .unwrap();
     writer
         .append(EventPayload::CheckFinished {
+            gated_judging_steps: 0,
             check_id: "AC-1.1".into(),
             criterion_id: owner.map(str::to_string),
             verdict: VerdictState::Fail,
@@ -879,6 +880,7 @@ async fn colliding_check_ids_attribute_to_the_first_owner() {
         .unwrap();
     }
     w.append(EventPayload::CheckFinished {
+        gated_judging_steps: 0,
         check_id: "DUP".into(),
         criterion_id: Some("AC-2".into()),
         verdict: VerdictState::Pass,

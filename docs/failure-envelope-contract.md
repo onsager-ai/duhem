@@ -53,6 +53,14 @@ A passing run is `200` with `failing: []` — not an error.
 
 ### Semantics
 
+- **`gated_checks`** (#509, optional) — entries with `criterion_id`,
+  `check_id`, and non-zero `gated_judging_steps`, including passing
+  checks. Omitted entirely when no judging steps were value-gated; static
+  gates, upstream blocking, and lifecycle steps do not count. The scoped
+  check response and each failing entry also carry `gated_judging_steps`
+  when non-zero. The check timeline
+  preserves the skipped step's condition and evaluated operands.
+  None of these fields changes the recorded verdict.
 - **`failing`** — every check whose recorded verdict is not `pass`
   (`fail` or `inconclusive:<cause>`). The scoped endpoint returns a
   single such object (not wrapped in `failing`).

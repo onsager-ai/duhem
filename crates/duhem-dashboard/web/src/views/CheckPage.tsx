@@ -1,3 +1,4 @@
+import { GatedJudgingNotice } from "../components/GatedJudgingNotice";
 // Per-check evidence (#86, #206): a plain-language summary, then the
 // check's slice of the trace rendered as legible rows (icon · label ·
 // detail · Δ) with the raw JSON one click away, and a rich artifacts
@@ -138,6 +139,7 @@ export function CheckSummary({ detail }: { detail: CheckDetail }) {
   return (
     <div className={`check-summary tone-${tone}`} data-testid="check-summary">
       <p className="summary-headline">{s.headline}</p>
+      <GatedJudgingNotice count={detail.gated_judging_steps} />
       {s.failing.length > 0 && (
         <ol className="summary-failing">
           {s.failing.map((failure, i) => (

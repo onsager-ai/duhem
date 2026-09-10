@@ -121,6 +121,7 @@ pub fn render(
         Reporter::Default => {
             writeln!(out, "{}", outcome.verdict.state)?;
             write_failures(out, &outcome.failures, def)?;
+            write_gated_checks(out, outcome)?;
             write_warnings(out, &outcome.warnings)?;
             write_cleanup(out, &outcome.cleanup)?;
             write_totals(out, check_totals(outcome))?;
@@ -163,6 +164,7 @@ pub fn render_set(
         Reporter::Default => {
             for (name, outcome) in leaves {
                 writeln!(out, "{name}: {}", outcome.verdict.state)?;
+                write_gated_checks(out, outcome)?;
             }
             writeln!(out, "{}", set_verdict.state)?;
             write_totals(out, check_totals_for_set(leaves))?;
@@ -317,6 +319,28 @@ fn write_cleanup(
 
 /// Print the executed-check denominator after every other default
 /// reporter detail, keeping the aggregate visible at the end (#493).
+fn gated_checks(outcome: &RunOutcome) -> Vec<duhem_summary::CheckGatingSummary> {
+    outcome
+        .gated_checks
+        .iter()
+        .filter(|(_, count)| **count > 0)
+        .map(
+            |((criterion_id, check_id), count)| duhem_summary::CheckGatingSummary {
+                criterion_id: criterion_id.clone(),
+                check_id: check_id.clone(),
+                gated_judging_steps: *count,
+            },
+        )
+        .collect()
+}
+
+fn write_gated_checks(out: &mut dyn Write, outcome: &RunOutcome) -> Result<(), RenderError> {
+    for check in gated_checks(outcome) {
+        writeln!(out, "  {check}")?;
+    }
+    Ok(())
+}
+
 fn write_totals(out: &mut dyn Write, totals: CheckTotals) -> Result<(), RenderError> {
     if totals.total == 0 {
         writeln!(out, "Total: 0 checks")?;
@@ -391,6 +415,7 @@ fn build_summary(o: &RunOutcome, store_db: &std::path::Path) -> RunSummary {
         store_db.to_path_buf(),
     )
     .with_totals(check_totals(o))
+    .with_gated_checks(gated_checks(o))
     .with_failures(failures)
     .with_warnings(o.warnings.clone())
     .with_cleanup(
@@ -538,6 +563,7 @@ mod tests {
 
     fn outcome(state: VerdictState) -> RunOutcome {
         RunOutcome {
+            gated_checks: Default::default(),
             verdict: RunVerdict {
                 state,
                 criteria: vec![CriterionVerdict {
@@ -559,6 +585,79 @@ mod tests {
     /// Matches `outcome()`'s ids (`AC-1` / `AC-1.1`) with no lifecycle
     /// hooks at any level, so `capture()` exercises the common
     /// hook-free path by default.
+    #[tokio::test]
+    async fn actual_gating_reaches_the_default_reporter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            duhem_evidence::SqliteStore::open(tmp.path().join("evidence.db"))
+                .await
+                .unwrap(),
+        );
+        let mut rendered = Vec::new();
+        for condition in ["always", "$runtime.len('') > 0"] {
+            let def = VerificationDefinition::from_yaml_str(&format!(
+                r#"
+verification: gating
+criteria:
+  - id: AC-1
+    description: Gated claims remain legible
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: db/observe
+            if: {condition}
+            with: {{ connection: 'sqlite::memory:', sql: 'select 1', until: {{ row_count: 1 }} }}
+        assertions: ["true"]
+"#
+            ))
+            .unwrap();
+            let result = duhem_runtime::Engine::new()
+                .with_store(store.clone())
+                .run_with_metadata(&def, Default::default())
+                .await
+                .unwrap();
+            assert_eq!(result.verdict.state, VerdictState::Pass);
+            rendered.push(capture_with_def(&Reporter::Default, &result, &def));
+        }
+        assert_eq!(
+            rendered[0],
+            "pass\nTotal: 1 checks · 1 passed · 0 failed · 0 inconclusive\n"
+        );
+        assert_ne!(rendered[0], rendered[1]);
+        assert!(rendered[1].contains("AC-1::AC-1.1: 1 judging step gated"));
+    }
+
+    #[test]
+    fn gated_check_renders_differently_without_changing_pass() {
+        let whole = outcome(VerdictState::Pass);
+        let mut gated = whole.clone();
+        gated
+            .gated_checks
+            .insert(("AC-1".into(), "AC-1.1".into()), 1);
+        for reporter in [Reporter::Default, Reporter::Json] {
+            let all_ran = capture(&reporter, &whole);
+            let shrunken = capture(&reporter, &gated);
+            assert_ne!(all_ran, shrunken, "the rendered claim sets must differ");
+        }
+        assert!(capture(&Reporter::Default, &gated).contains("AC-1::AC-1.1: 1 judging step gated"));
+        assert_eq!(
+            serde_json::to_vec(&whole.verdict).unwrap(),
+            serde_json::to_vec(&gated.verdict).unwrap()
+        );
+    }
+
+    #[test]
+    fn no_gated_checks_add_no_reporter_noise() {
+        let whole = outcome(VerdictState::Pass);
+        assert_eq!(
+            capture(&Reporter::Default, &whole),
+            "pass\nTotal: 1 checks · 1 passed · 0 failed · 0 inconclusive\n"
+        );
+        let json: serde_json::Value =
+            serde_json::from_str(&capture(&Reporter::Json, &whole)).unwrap();
+        assert!(json.get("gated_checks").is_none());
+    }
+
     fn minimal_def() -> VerificationDefinition {
         VerificationDefinition::from_yaml_str(
             r#"
@@ -619,6 +718,7 @@ criteria:
     #[test]
     fn default_reporter_states_zero_executed_checks() {
         let o = RunOutcome {
+            gated_checks: Default::default(),
             verdict: RunVerdict {
                 state: VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
                 criteria: Vec::new(),

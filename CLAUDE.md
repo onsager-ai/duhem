@@ -15,7 +15,7 @@ runtime), and gates merge/deploy on the verdict.
 > `dashboard` (serve + static export; live SSE) / `export` / `ship` /
 > `mcp` / `--version`; the `ui/*`, `api/*`, `db/*`, and `cli/*` action
 > families are implemented (`ui/navigate` / `click` / `type` /
-> `select` / `wait` / `extract` / `assert-*`,
+> `select` / `wait` / `extract` / `capture-session` / `assert-*`,
 > `api/call` / `observe` / `poll` / `stream`,
 > `db/query` / `observe` / `seed`, `cli/invoke`); environment
 > provisioning (`up:` / `down:` hooks) is wired into the runtime;

@@ -1,0 +1,92 @@
+# Run app.py (see README.md), then duhem run this file.
+verification: Independent identities observe permission changes
+spec_ref: https://github.com/onsager-ai/duhem/issues/508
+inputs:
+  base_url:
+    type: string
+    default: http://127.0.0.1:3000
+setup:
+  - uses: ui/navigate
+    with: { url: '$runtime.format("{}/login", $inputs.base_url)' }
+  - uses: ui/type
+    with: { locator: { label: Username }, text: admin }
+  - uses: ui/type
+    with: { locator: { label: Password }, text: admin-password }
+  - uses: ui/click
+    with: { role: button, name: Sign in }
+  - id: admin_login
+    uses: ui/capture-session
+criteria:
+  - id: AC-1
+    description: An administrator can grant a user access, which the user observes through an independent login.
+    checks:
+      - id: AC-1.1
+        sessions:
+          admin: ~
+          user1: ~
+        steps:
+          - session: admin
+            uses: ui/navigate
+            with: { url: '$runtime.format("{}/login", $inputs.base_url)' }
+          - session: admin
+            uses: ui/type
+            with: { locator: { label: Username }, text: admin }
+          - session: admin
+            uses: ui/type
+            with: { locator: { label: Password }, text: admin-password }
+          - session: admin
+            uses: ui/click
+            with: { role: button, name: Sign in }
+          - session: admin
+            uses: ui/assert-url
+            with: { matches: /admin }
+          # Load-bearing isolation assertion: a shared cookie jar would
+          # let user1 through to /reports using the admin's login.
+          - session: user1
+            uses: ui/navigate
+            with: { url: '$runtime.format("{}/reports", $inputs.base_url)' }
+          - id: user1_is_signed_out
+            session: user1
+            uses: ui/assert-element
+            with: { locator: { role: heading, name: Login }, expected: visible }
+          - session: user1
+            uses: ui/assert-url
+            with: { matches: /login }
+          - session: admin
+            uses: ui/click
+            with: { role: button, name: Grant access }
+          - session: admin
+            uses: ui/assert-element
+            with: { locator: { role: heading, name: Access granted }, expected: visible }
+          - session: user1
+            uses: ui/type
+            with: { locator: { label: Username }, text: user1 }
+          - session: user1
+            uses: ui/type
+            with: { locator: { label: Password }, text: user1-password }
+          - session: user1
+            uses: ui/click
+            with: { role: button, name: Sign in }
+          - session: user1
+            uses: ui/assert-element
+            with: { locator: { role: heading, name: Reports }, expected: visible }
+  - id: AC-2
+    description: A signed-out visitor cannot inherit an authenticated sibling's access.
+    checks:
+      - id: AC-2.1
+        sessions:
+          admin: $setup.admin_login.outputs.state
+          visitor: ~
+        steps:
+          - session: admin
+            uses: ui/navigate
+            with: { url: '$runtime.format("{}/reports", $inputs.base_url)' }
+          - session: admin
+            uses: ui/assert-element
+            with: { locator: { role: heading, name: Reports }, expected: visible }
+          - session: visitor
+            uses: ui/navigate
+            with: { url: '$runtime.format("{}/reports", $inputs.base_url)' }
+          - session: visitor
+            uses: ui/assert-url
+            with: { matches: /login }

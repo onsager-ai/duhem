@@ -549,6 +549,52 @@ literal expression) and `session_digest` (lowercase SHA-256 of the resolved
 JSON). The digest proves that checks or runs used the same baseline without
 putting the credential into the trace, export bundle, or dashboard.
 
+**Named browser sessions** (#508). A check can instead declare `sessions:`,
+a map of bare name to an acquired-state expression or `~` for a deliberately
+signed-out context. `session:` and `sessions:` on a check are mutually exclusive.
+Every browser-driving step in a named-session check must select a declared name;
+including its check-level `setup:` and `teardown:`; there is no implicit default.
+Leaf/criterion hooks and fixtures keep their existing independent contexts. A step-level `$` expression is invalid: put the
+expression in the check's `sessions:` map. `api/*`, `db/*`, and `cli/*` steps
+reject `session:` with a source location.
+
+```yaml
+verification: Independent permission change
+inputs:
+  base_url: { type: string, default: "http://localhost:3000" }
+  admin_state: { type: object }
+criteria:
+  - id: AC-1
+    description: A permission grant is visible through the user's independent login.
+    checks:
+      - id: AC-1.1
+        sessions:
+          admin: $inputs.admin_state
+          user1: ~
+        steps:
+          - session: admin
+            uses: ui/navigate
+            with: { url: '$runtime.format("{}/admin", $inputs.base_url)' }
+          - session: admin
+            uses: ui/click
+            with: { role: button, name: Grant access }
+          - session: user1
+            uses: ui/navigate
+            with: { url: '$runtime.format("{}/reports", $inputs.base_url)' }
+          - session: user1
+            uses: ui/assert-url
+            with: { matches: /login }
+```
+
+The complete login/grant/independent-user flow, including a runnable application,
+is in `verifications/named-sessions-example/`. Root-manifest
+`defaults.max_sessions` is an optional integer ceiling, default **4**. Declaring
+more contexts is a validation error at the check's `sessions:` source location.
+A single-entry map is allowed, with an authoring nudge toward the scalar form.
+Step events and screenshots, DOM, network and replay captures carry the selected
+session name. The dashboard labels steps and offers a separate replay per context.
+Definitions using neither session field retain their existing wire shape.
+
 **Locators.** UI actions (`ui/click`, `ui/type`, `ui/assert-element`, `ui/select`) address an element by exactly one *primary strategy*: `role` (paired with an optional `name`), `label` (associated label text — how to reach an input with no ARIA role, e.g. `type=password`), `testid` (the `data-testid` attribute), `placeholder`, `css` (a raw CSS selector escape hatch), `xpath` (a raw XPath selector escape hatch), or a standalone `text`. A `text` substring may additionally *filter* a non-text primary, and a recursive `scope:` narrows the search to inside a container. Prefer `role`, `testid`, or `scope:` + `text:`; use `css:` or `xpath:` only when those cannot reach the element, because markup-coupled selectors—especially absolute XPath paths—break readily as markup changes. `ui/click` takes these fields inline in its `with:`; the other actions nest them under `locator:`. Two primaries at once, or none, is rejected. Each named strategy maps to the corresponding Playwright selector engine.
 
 ```yaml
@@ -1329,6 +1375,12 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 **Runtime** (`duhem-runtime`)
 
 - Executes checks against an environment
+- Named browser contexts are distinct Playwright `BrowserContext` instances,
+  with independent cookies, storage and cache. All declared contexts open before
+  the check's first step and close on check exit, including failure; retries
+  allocate fresh contexts from the same acquired baselines. Steps remain
+  sequential in authored order. This adds no parallel execution or leases
+  (epic #410).
 - **Provisions the environment**: owns the `provision.up:`/`down:` lifecycle, the `ready:` readiness probe, and the sanitized subprocess env under which operator-supplied scripts run (§9 Stage 3, §10.3.1)
 - Produces evidence
 - Stateless except for run records

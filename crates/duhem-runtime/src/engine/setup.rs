@@ -171,6 +171,7 @@ pub(crate) async fn run_setup_tracking(
         StepPhase::Setup,
         dispatched,
         HookScope::Leaf,
+        None,
     )
     .await?;
     Ok(SetupResult {
@@ -200,6 +201,7 @@ pub(crate) async fn run_teardown(
         StepPhase::Teardown,
         &mut dispatched,
         HookScope::Leaf,
+        None,
     )
     .await?
     .cleanup)
@@ -230,6 +232,7 @@ pub(crate) async fn run_criterion_setup(
         StepPhase::Setup,
         dispatched,
         HookScope::Criterion(criterion_id),
+        None,
     )
     .await?;
     Ok(SetupResult {
@@ -261,6 +264,7 @@ pub(crate) async fn run_criterion_teardown(
         StepPhase::Teardown,
         &mut dispatched,
         HookScope::Criterion(criterion_id),
+        None,
     )
     .await?
     .cleanup)
@@ -280,6 +284,7 @@ pub(crate) async fn run_check_setup(
     setup: &[Step],
     child_env: &BTreeMap<String, String>,
     dispatched: &mut bool,
+    contexts: Option<&super::session::CheckContexts>,
 ) -> Result<SetupResult, EngineError> {
     let result = run_lifecycle_steps(
         writer,
@@ -291,6 +296,7 @@ pub(crate) async fn run_check_setup(
         StepPhase::Setup,
         dispatched,
         HookScope::Check(criterion_id, check_id),
+        contexts,
     )
     .await?;
     Ok(SetupResult {
@@ -311,6 +317,7 @@ pub(crate) async fn run_check_teardown(
     check_id: &str,
     teardown: &[Step],
     child_env: &BTreeMap<String, String>,
+    contexts: Option<&super::session::CheckContexts>,
 ) -> Result<Vec<CleanupFailure>, EngineError> {
     let mut dispatched = false;
     Ok(run_lifecycle_steps(
@@ -323,6 +330,7 @@ pub(crate) async fn run_check_teardown(
         StepPhase::Teardown,
         &mut dispatched,
         HookScope::Check(criterion_id, check_id),
+        contexts,
     )
     .await?
     .cleanup)
@@ -350,6 +358,7 @@ pub(crate) async fn run_fixture_up(
         StepPhase::Setup,
         &mut dispatched,
         HookScope::Fixture(fixture, check_id),
+        None,
     )
     .await?;
     Ok(SetupResult {
@@ -380,6 +389,7 @@ pub(crate) async fn run_fixture_down(
         StepPhase::Teardown,
         &mut dispatched,
         HookScope::Fixture(fixture, check_id),
+        None,
     )
     .await?
     .cleanup)
@@ -396,6 +406,7 @@ async fn run_lifecycle_steps(
     phase: StepPhase,
     dispatched: &mut bool,
     scope: HookScope<'_>,
+    contexts: Option<&super::session::CheckContexts>,
 ) -> Result<LifecycleResult, EngineError> {
     let (fixture_name, check_id, criterion_id) = scope.evidence_fields();
     writer
@@ -419,11 +430,13 @@ async fn run_lifecycle_steps(
     });
     let any_unknown = steps.iter().any(|s| !registry.contains_key(s.uses_name()));
     let browser_missing = needs_browser && browser.is_none();
-    let mut environment_failed = browser_missing || any_unknown;
+    let mut environment_failed =
+        browser_missing || any_unknown || contexts.is_some_and(|c| c.failed);
 
     // Setup gets its own browser context, never shared with checks.
     let mut setup_browser = None;
-    if !environment_failed
+    if contexts.is_none()
+        && !environment_failed
         && !steps.is_empty()
         && let Some(b) = browser
     {
@@ -449,6 +462,7 @@ async fn run_lifecycle_steps(
     let mut stored_error = None;
     let mut cleanup = Vec::new();
     for (idx, step) in steps.iter().enumerate() {
+        writer.set_session(step.session.as_deref());
         // The outcome gate runs first — including for value expressions,
         // which carry `success` semantics (see `gating::skip_reason`).
         // Only once it passes is the expression itself evaluated, so a
@@ -522,7 +536,10 @@ async fn run_lifecycle_steps(
                 }
                 Some(dispatcher) => {
                     *dispatched = true;
-                    let page_ref: Option<&Page> = setup_browser.as_ref().map(|cb| &cb.page);
+                    let page_ref: Option<&Page> = match contexts {
+                        Some(contexts) => contexts.browsers.get(&step.session).map(|cb| &cb.page),
+                        None => setup_browser.as_ref().map(|cb| &cb.page),
+                    };
                     match invoke_and_record(
                         dispatcher.as_ref(),
                         page_ref,
@@ -609,6 +626,7 @@ async fn run_lifecycle_steps(
         }
     }
 
+    writer.set_session(None);
     if let Some(cb) = setup_browser {
         // Setup never keeps a video; skip the read + transfer entirely.
         let _ = cb.close(false, 0).await;
@@ -903,6 +921,7 @@ mod tests {
 
     fn step(id: Option<&str>, uses: &str) -> Step {
         Step {
+            session: None,
             needs: vec![],
             id: id.map(String::from),
             description: None,

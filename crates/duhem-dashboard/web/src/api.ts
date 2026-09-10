@@ -68,6 +68,7 @@ export interface TraceEvent {
 }
 
 export interface ArtifactRef {
+  session?: string;
   id: string;
   kind: string;
   url: string;
@@ -90,6 +91,7 @@ export interface CheckDetail {
   timeline: TraceEvent[];
   artifacts: ArtifactRef[];
   replay?: ReplayModel;
+  sessions?: ReplayModel[];
 }
 
 export interface ReplayStep {
@@ -121,6 +123,7 @@ export interface ReplayPerformanceObservation {
 }
 
 export interface ReplayModel {
+  session?: string;
   version: number;
   clock: string;
   duration_ms: number;

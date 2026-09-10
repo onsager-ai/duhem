@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Schema 0.4.3: checks can declare isolated named browser sessions, route UI steps explicitly, and inspect session-attributed evidence; root defaults.max_sessions caps contexts per check (default 4). (#508)
 - [additive] Skipped-step evidence carries optional condition and evaluated operands; check summaries, reporters, dashboard and failure envelopes expose non-zero gated judging-step counts without changing verdicts. (#509)
 
 - [additive] `Criterion` and `Check` accept `setup:`/`teardown:` lifecycle blocks, symmetric with leaf-level `setup:`/`teardown:`; `setup_started`/`setup_step_started`/`setup_step_observation`/`setup_step_finished`/`setup_finished` carry an optional `criterion_id`. (#441)

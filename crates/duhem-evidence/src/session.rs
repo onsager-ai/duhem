@@ -13,6 +13,8 @@ pub const STEP_SCREENSHOT_OBSERVATION: &str = "capture/step-screenshot";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionEvidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
     pub version: u32,
     /// Always `monotonic` in v1. All values are milliseconds from the
     /// check browser context's origin.
@@ -30,6 +32,7 @@ pub struct SessionEvidence {
 impl SessionEvidence {
     pub fn v1(duration_ms: f64) -> Self {
         Self {
+            session: None,
             version: SESSION_EVIDENCE_VERSION,
             clock: "monotonic".to_string(),
             duration_ms,

@@ -46,6 +46,23 @@
             "null"
           ]
         },
+        "sessions": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ExprStr"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": "Named independent browser contexts, seeded from acquired state. A null value declares a signed-out context. Exclusive with `session:`.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "setup": {
           "description": "Optional setup steps run once before this check's own `steps:`, after criterion `setup:` and before this check's `needs:` fixtures (#441 Part B). Re-run on every retry attempt, like fixtures. A `setup:` step that aborts makes only this check `Inconclusive` with the triggering cause; its fixtures and `steps:` do not run.",
           "items": {
@@ -122,6 +139,9 @@
           "type": "integer"
         }
       ]
+    },
+    "ExprStr": {
+      "type": "string"
     },
     "Fixture": {
       "additionalProperties": false,
@@ -296,6 +316,15 @@
             }
           ],
           "description": "How a criterion-level `inconclusive` verdict is treated at run aggregation. Absent → `block` (today's behavior)."
+        },
+        "max_sessions": {
+          "description": "Maximum browser contexts declared per check. Absent → 4. Enforced during validation, before any browser allocation.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "max_wait": {
           "anyOf": [
@@ -636,6 +665,13 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "session": {
+          "description": "Bare name of a browser context declared by the enclosing check.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "uses": {
           "description": "Action type identifier (e.g. `ui/click`). Exactly one of this field and [`Step::call`] is required; the structural validator owns the friendly exactly-one diagnostic.",

@@ -247,6 +247,7 @@ async fn stale_unterminated_trace_is_orphaned() {
         .append_event(
             RUN_ID,
             &Event {
+                session: None,
                 seq: 0,
                 ts: started_at,
                 payload: run_started("legacy.yml", BTreeMap::new()),

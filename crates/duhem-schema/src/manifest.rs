@@ -172,6 +172,10 @@ pub struct ManifestDefaults {
     /// like `30s` / `2m`). Absent → the built-in 60s ceiling applies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_wait: Option<DurationSpec>,
+    /// Maximum browser contexts declared per check. Absent → 4.
+    /// Enforced during validation, before any browser allocation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_sessions: Option<usize>,
     /// Headless size; defaults to 1280x720.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub viewport: Option<Viewport>,
@@ -485,6 +489,17 @@ fn load_leaf_authored(path: &Path, src: &str) -> Result<VerificationDefinition, 
 
 fn load_leaf(path: &Path, src: &str) -> Result<VerificationDefinition, LoadError> {
     let mut definition = load_leaf_authored(path, src)?;
+    // Named contexts need the root's validation ceiling even when validating
+    // a leaf directly. Preserve the historical loader/diagnostics otherwise.
+    if definition
+        .criteria
+        .iter()
+        .flat_map(|c| &c.checks)
+        .any(|check| check.sessions.is_some())
+    {
+        crate::leaf_context::resolve_leaf_through_root_manifest(path, &mut definition)?;
+        return Ok(definition);
+    }
     crate::flows::validate_and_expand(&mut definition).map_err(|message| {
         LoadError::InvalidFlows {
             path: path.to_path_buf(),

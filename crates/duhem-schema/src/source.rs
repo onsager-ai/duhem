@@ -123,6 +123,10 @@ impl SourceMap {
             .and_then(|node| (node.scalar.as_deref() == Some(expected)).then_some(node.location))
     }
 
+    pub(crate) fn node_location(&self, path: &[SourcePathSegment]) -> Option<SourceLocation> {
+        self.nodes.get(path).map(|node| node.location)
+    }
+
     pub(crate) fn check_context_matches(
         &self,
         criterion_index: usize,
@@ -140,16 +144,6 @@ impl SourceMap {
             && self.scalar_location(&check, check_id).is_some()
     }
 
-    pub(crate) fn check_scalar_location(
-        &self,
-        criterion_index: usize,
-        check_index: usize,
-        field: &str,
-        expected: &str,
-    ) -> Option<SourceLocation> {
-        self.scalar_location(&check_path(criterion_index, check_index, field), expected)
-    }
-
     pub(crate) fn record_expanded_step_origins(
         &mut self,
         criterion_index: usize,
@@ -162,6 +156,8 @@ impl SourceMap {
         }
     }
 
+    /// Resolve an authored step value after expansion, including `with:`,
+    /// `session:`, and the `uses:` mark for a missing session selector.
     pub(crate) fn step_with_location(
         &self,
         step: &Step,
@@ -175,8 +171,7 @@ impl SourceMap {
             .iter()
             .position(|segment| matches!(segment, SourcePathSegment::Key(key) if key == "steps"))?;
         let with_index = steps_index + 2;
-        if !matches!(value_path.get(with_index), Some(SourcePathSegment::Key(key)) if key == "with")
-        {
+        if !matches!(value_path.get(with_index), Some(SourcePathSegment::Key(_))) {
             return None;
         }
         let mut identity_path = value_path[..with_index].to_vec();

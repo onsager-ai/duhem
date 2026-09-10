@@ -835,6 +835,7 @@ criteria:
 
     fn evt(seq: u64, offset_ms: i64, payload: EventPayload) -> Event {
         Event {
+            session: None,
             seq,
             ts: chrono::DateTime::parse_from_rfc3339("2026-07-23T00:00:00Z")
                 .unwrap()

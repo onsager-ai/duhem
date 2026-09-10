@@ -65,6 +65,12 @@ pub struct VerificationDefinition {
     #[schemars(skip)]
     pub source_map: SourceMap,
 
+    /// Effective root-manifest ceiling; loader metadata, never authored on a leaf.
+    #[doc(hidden)]
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub max_sessions: Option<usize>,
+
     /// Human-readable name of the verification.
     pub verification: String,
 
@@ -313,6 +319,7 @@ criteria:
             },
         );
         let v = VerificationDefinition {
+            max_sessions: None,
             source_map: SourceMap::default(),
             verification: "x".into(),
             spec_ref: None,

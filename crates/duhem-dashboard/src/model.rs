@@ -121,10 +121,15 @@ pub struct CheckDetail {
     /// session document. `None` is the explicit old-run degradation path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replay: Option<ReplayModel>,
+    /// Independent clocks and captures for named browser contexts.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sessions: Vec<ReplayModel>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ReplayModel {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
     pub version: u32,
     pub clock: String,
     pub duration_ms: f64,
@@ -313,6 +318,8 @@ pub struct FailingRequest {
 /// A content-addressed blob referenced from the check's timeline.
 #[derive(Debug, Clone, Serialize)]
 pub struct ArtifactRef {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
     /// The blob's sha-256 (the artifact id in `/artifact/:id` URLs).
     pub id: String,
     /// The observation's `output_name` (e.g. `body`, `stdout`) — what

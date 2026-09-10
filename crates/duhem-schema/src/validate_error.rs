@@ -299,6 +299,12 @@ pub enum ValidationError {
         location: Option<SourceLocation>,
     },
 
+    #[error("{message}")]
+    InvalidNamedSession {
+        message: String,
+        location: Option<SourceLocation>,
+    },
+
     #[error(
         "input `{input}`: default value type `{actual}` does not match declared type `{declared}`"
     )]
@@ -427,6 +433,7 @@ impl ValidationError {
             | Self::SetupStepOutOfScope { location, .. }
             | Self::MalformedSetupRef { location, .. }
             | Self::InvalidSessionReference { location, .. }
+            | Self::InvalidNamedSession { location, .. }
             | Self::UnknownAction { location, .. }
             | Self::InvalidStepCondition { location, .. }
             | Self::CheckStepConditionUnavailable { location, .. } => *location,

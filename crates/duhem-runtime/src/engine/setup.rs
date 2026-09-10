@@ -24,11 +24,11 @@ use duhem_actions::Page;
 use duhem_actions::{Outcome, RunBrowser};
 use duhem_evidence::{EventPayload, EvidenceWriter, StepOutcome, StepPhase};
 use duhem_judge::InconclusiveCause;
-use duhem_schema::{Step, StepCondition};
+use duhem_schema::Step;
 use tracing::debug;
 
 use crate::engine::context::RunState;
-use crate::engine::gating::{skip_reason as gate_skip_reason, step_failed};
+use crate::engine::gating::{evaluate as evaluate_gate, step_failed};
 use crate::engine::registry::{ActionRegistry, Dispatch};
 use crate::engine::runner::{
     CleanupFailure, EngineError, StepEvidence, display_step_label, implicit_judgment_for_step,
@@ -454,42 +454,21 @@ async fn run_lifecycle_steps(
         // Only once it passes is the expression itself evaluated, so a
         // step blocked by an earlier failure is gated cleanly rather
         // than failing on operands that failure left unresolvable.
-        let mut condition_error = None;
-        let gate_reason = match gate_skip_reason(&step.condition, failed_by.as_deref()) {
-            Some(blocked) => Some(blocked),
-            None => match &step.condition {
-                StepCondition::Expr(expr) => {
-                    let ctx = crate::engine::context::RunContext::new(run);
-                    match crate::eval(&expr.parsed, &ctx) {
-                        crate::EvalResult::True => None,
-                        crate::EvalResult::False => {
-                            Some(format!("condition `{}` evaluated false", expr.raw))
-                        }
-                        crate::EvalResult::Inconclusive(cause) => {
-                            condition_error = Some(EngineError::UnresolvedReference {
-                                reference: expr.raw.clone(),
-                                context: format!(" (condition could not be evaluated: {cause:?})"),
-                                step: step_label(step, idx),
-                            });
-                            None
-                        }
-                    }
-                }
-                _ => None,
-            },
+        let ctx = crate::engine::context::RunContext::new(run);
+        let (gate, condition_error) = match evaluate_gate(step, idx, failed_by.as_deref(), &ctx) {
+            Ok(gate) => (gate, None),
+            Err(error) => (None, Some(error)),
         };
-        let cleanup_step =
-            phase == StepPhase::Teardown || (failed_by.is_some() && gate_reason.is_none());
+        let cleanup_step = phase == StepPhase::Teardown || (failed_by.is_some() && gate.is_none());
         // Setup steps see the run state (inputs, env, uuid, plus any
         // outputs already published by earlier setup steps in this
         // same block). The view is read-only against the run state —
         // we feed it through a `RunContext` to reuse the existing
         // template substitution.
-        let ctx = crate::engine::context::RunContext::new(run);
         let mut resolved_with = step.with.clone();
         let step_error = if condition_error.is_some() {
             condition_error
-        } else if gate_reason.is_none() {
+        } else if gate.is_none() {
             substitute_with(&mut resolved_with, &ctx).err().map(|u| {
                 EngineError::UnresolvedReference {
                     context: u.rendered_context(),
@@ -502,12 +481,21 @@ async fn run_lifecycle_steps(
         };
 
         append_setup_started(writer, phase, step, idx, &resolved_with, scope).await?;
-        if let Some(reason) = gate_reason {
+        if let Some(StepOutcome::Skipped {
+            reason,
+            condition,
+            operands,
+        }) = gate
+        {
             writer
                 .append(EventPayload::SetupStepFinished {
                     phase,
                     step_index: idx as u32,
-                    outcome: StepOutcome::Skipped { reason },
+                    outcome: StepOutcome::Skipped {
+                        reason,
+                        condition,
+                        operands,
+                    },
                     detail: None,
                     fixture_name: fixture_name.clone(),
                     check_id: check_id.clone(),

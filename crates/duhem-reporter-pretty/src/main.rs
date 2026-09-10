@@ -98,6 +98,11 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
             }
         }
     }
+    for check in &s.gated_checks {
+        if check.gated_judging_steps > 0 {
+            writeln!(out, "  {check}")?;
+        }
+    }
     if !s.cleanup.is_empty() {
         writeln!(out)?;
         writeln!(out, "CLEANUP (evidence only)")?;
@@ -128,6 +133,47 @@ mod tests {
     use duhem_summary::{
         CheckFailureSummary, CleanupFailureSummary, CriterionSummary, FailedAssertionSummary,
     };
+
+    #[test]
+    fn shrunken_and_whole_checks_render_differently() {
+        let whole = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from("."));
+        let gated = whole
+            .clone()
+            .with_gated_checks(vec![duhem_summary::CheckGatingSummary {
+                criterion_id: "AC-1".into(),
+                check_id: "AC-1.1".into(),
+                gated_judging_steps: 1,
+            }]);
+        let mut a = Vec::new();
+        let mut b = Vec::new();
+        render(&whole, &mut a).unwrap();
+        render(&gated, &mut b).unwrap();
+        assert_ne!(a, b, "pretty rendering must reveal conditional absence");
+        assert!(
+            String::from_utf8(b)
+                .unwrap()
+                .contains("AC-1::AC-1.1: 1 judging step gated")
+        );
+    }
+
+    #[test]
+    fn whole_and_old_summaries_gain_no_noise() {
+        let old =
+            r#"{"schema_version":"2","run_id":"r","verdict":"pass","criteria":[],"store":"."}"#;
+        let summary: RunSummary = serde_json::from_str(old).unwrap();
+        let mut out = Vec::new();
+        render(&summary, &mut out).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "run r — pass\nCRITERION  VERDICT\n------------------\nstore: . (run r)\n"
+        );
+        assert!(
+            serde_json::to_value(summary)
+                .unwrap()
+                .get("gated_checks")
+                .is_none()
+        );
+    }
 
     #[test]
     fn renders_pass_run_to_a_2_column_table() {

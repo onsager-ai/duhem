@@ -1156,6 +1156,7 @@ criteria:
                 4,
                 400,
                 EventPayload::CheckFinished {
+                    gated_judging_steps: 0,
                     check_id: "AC-1.1".into(),
                     criterion_id: Some("AC-1".into()),
                     verdict: VerdictState::Pass,
@@ -1175,6 +1176,7 @@ criteria:
                 6,
                 1650,
                 EventPayload::CheckFinished {
+                    gated_judging_steps: 0,
                     check_id: "AC-2.1".into(),
                     criterion_id: Some("AC-2".into()),
                     verdict: VerdictState::Fail,

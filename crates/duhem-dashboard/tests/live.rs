@@ -63,6 +63,7 @@ async fn connect_mid_flight_streams_incrementally_and_ends_on_run_finished() {
     // Follow: append while the stream is live; the new events arrive
     // without reconnecting, and run_finished terminates the stream.
     w.append(EventPayload::CheckFinished {
+        gated_judging_steps: 0,
         check_id: "AC-1.1".into(),
         criterion_id: Some("AC-1".into()),
         verdict: VerdictState::Pass,

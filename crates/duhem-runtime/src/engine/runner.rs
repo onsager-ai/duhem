@@ -42,7 +42,7 @@ use crate::engine::capture::{
     CapturePolicy, Storyboard, TargetLocator, finalize_capture, target_from_step,
 };
 use crate::engine::context::{RunContext, RunState, json_to_value};
-use crate::engine::gating::{skip_reason as gate_skip_reason, step_failed};
+use crate::engine::gating::{evaluate as evaluate_gate, step_failed};
 use crate::engine::registry::{ActionRegistry, default_registry, enforce_wait_ceiling};
 use crate::engine::session::SessionResolution;
 use crate::engine::template::{page_reference, substitute_with};
@@ -371,6 +371,7 @@ impl Engine {
                         })
                         .await?;
                     return Ok(RunOutcome {
+                        gated_checks: Default::default(),
                         verdict,
                         run_id,
                         // The run aborted before any criterion executed, so
@@ -462,6 +463,7 @@ impl Engine {
                         })
                         .await?;
                     return Ok(RunOutcome {
+                        gated_checks: Default::default(),
                         verdict,
                         run_id,
                         // The run aborted before any criterion executed, so
@@ -474,6 +476,7 @@ impl Engine {
                 }
             }
 
+            let mut gated_checks = BTreeMap::new();
             let mut criterion_verdicts: Vec<CriterionVerdict> = Vec::new();
             let mut failures: Vec<CheckFailure> = Vec::new();
             let mut warnings: Vec<String> = Vec::new();
@@ -489,6 +492,7 @@ impl Engine {
                             &mut failures,
                             &mut warnings,
                             &mut fixture_cleanup,
+                            &mut gated_checks,
                         )
                         .await?;
                     writer
@@ -532,6 +536,7 @@ impl Engine {
                 .await?;
 
             Ok(RunOutcome {
+                gated_checks,
                 verdict: run_verdict,
                 run_id,
                 failures,
@@ -614,6 +619,7 @@ impl Engine {
         failures: &mut Vec<CheckFailure>,
         warnings: &mut Vec<String>,
         cleanup: &mut Vec<CleanupFailure>,
+        gated_checks: &mut BTreeMap<(String, String), u32>,
     ) -> Result<CriterionVerdict, EngineError> {
         // Criterion-level `setup:` (#441 Part B) runs once before any
         // of this criterion's checks — after leaf `setup:`, before any
@@ -671,6 +677,7 @@ impl Engine {
                 };
                 writer
                     .append(EventPayload::CheckFinished {
+                        gated_judging_steps: 0,
                         check_id: check.id.clone(),
                         criterion_id: Some(criterion.id.clone()),
                         verdict: cv.state,
@@ -696,7 +703,7 @@ impl Engine {
                 // reuses the same immutable baseline but still opens a new
                 // context for every attempt.
                 let session = crate::engine::session::resolve(check, run);
-                let cv = self
+                let (cv, gated_judging_steps) = self
                     .run_check_with_retry(
                         writer,
                         run,
@@ -710,6 +717,7 @@ impl Engine {
                     .await?;
                 writer
                     .append(EventPayload::CheckFinished {
+                        gated_judging_steps,
                         check_id: check.id.clone(),
                         criterion_id: Some(criterion.id.clone()),
                         verdict: cv.state,
@@ -717,6 +725,12 @@ impl Engine {
                         session_digest: session.digest(),
                     })
                     .await?;
+                if gated_judging_steps > 0 {
+                    gated_checks.insert(
+                        (criterion.id.clone(), check.id.clone()),
+                        gated_judging_steps,
+                    );
+                }
                 check_verdicts.push(cv);
             }
         }
@@ -778,7 +792,7 @@ impl Engine {
         session: &SessionResolution,
         failures: &mut Vec<CheckFailure>,
         cleanup: &mut Vec<CleanupFailure>,
-    ) -> Result<CheckVerdict, EngineError> {
+    ) -> Result<(CheckVerdict, u32), EngineError> {
         let max = self.retry.map(|r| r.max).unwrap_or(0);
         let backoff = self
             .retry
@@ -848,7 +862,7 @@ impl Engine {
                     }
                 }
             }
-            let cv = if let Some((reason, step)) = &check_setup_abort {
+            let (cv, gated_judging_steps) = if let Some((reason, step)) = &check_setup_abort {
                 failures.push(CheckFailure {
                     criterion_id: criterion_id.to_string(),
                     check_id: check.id.clone(),
@@ -859,10 +873,13 @@ impl Engine {
                     }],
                     captures: Vec::new(),
                 });
-                CheckVerdict {
-                    check_id: check.id.clone(),
-                    state: VerdictState::Inconclusive(reason.cause()),
-                }
+                (
+                    CheckVerdict {
+                        check_id: check.id.clone(),
+                        state: VerdictState::Inconclusive(reason.cause()),
+                    },
+                    0,
+                )
             } else if let Some((name, reason, step)) = fixture_abort {
                 failures.push(CheckFailure {
                     criterion_id: criterion_id.to_string(),
@@ -874,10 +891,13 @@ impl Engine {
                     }],
                     captures: Vec::new(),
                 });
-                CheckVerdict {
-                    check_id: check.id.clone(),
-                    state: VerdictState::Inconclusive(reason.cause()),
-                }
+                (
+                    CheckVerdict {
+                        check_id: check.id.clone(),
+                        state: VerdictState::Inconclusive(reason.cause()),
+                    },
+                    0,
+                )
             } else {
                 self.run_check(writer, run, criterion_id, check, session, failures)
                     .await?
@@ -932,7 +952,7 @@ impl Engine {
                 }
                 continue;
             }
-            return Ok(cv);
+            return Ok((cv, gated_judging_steps));
         }
     }
 
@@ -944,7 +964,7 @@ impl Engine {
         check: &Check,
         session: &SessionResolution,
         failures: &mut Vec<CheckFailure>,
-    ) -> Result<CheckVerdict, EngineError> {
+    ) -> Result<(CheckVerdict, u32), EngineError> {
         let mut ctx = RunContext::new(run);
 
         // A `Step.uses` not in the registry means the step can't run
@@ -1001,9 +1021,14 @@ impl Engine {
         // Per-step evidence (resolved `with:` + outputs) for implicit
         // judgment (#280). Empty = the step didn't run.
         let mut step_evidence = vec![StepEvidence::empty(); check.steps.len()];
+        let mut gated_judging_steps = 0;
         for (idx, step) in check.steps.iter().enumerate() {
-            let gate_reason = gate_skip_reason(&step.condition, failed_by.as_deref());
-            let cleanup_step = failed_by.is_some() && gate_reason.is_none();
+            let (gate, condition_error) = match evaluate_gate(step, idx, failed_by.as_deref(), &ctx)
+            {
+                Ok(gate) => (gate, None),
+                Err(error) => (None, Some(error)),
+            };
+            let cleanup_step = failed_by.is_some() && gate.is_none();
             if cleanup_step {
                 cleanup_steps.insert(idx);
             }
@@ -1011,7 +1036,9 @@ impl Engine {
             // context available without bifurcating evidence.
             let mut resolved_with = step.with.clone();
             let catalog_reference = page_reference(&step.with);
-            let step_error = if gate_reason.is_none() {
+            let step_error = if condition_error.is_some() {
+                condition_error
+            } else if gate.is_none() {
                 substitute_with(&mut resolved_with, &ctx).err().map(|u| {
                     EngineError::UnresolvedReference {
                         context: u.rendered_context(),
@@ -1027,7 +1054,7 @@ impl Engine {
             // `timeout:` already in the payload wins; this only fills the
             // gap. With no manifest default, the action's built-in
             // `DEFAULT_TIMEOUT` (5s) remains the last resort.
-            if gate_reason.is_none()
+            if gate.is_none()
                 && let Some(default) = self.default_timeout
             {
                 apply_default_timeout(&mut resolved_with, default);
@@ -1038,7 +1065,7 @@ impl Engine {
             // A gated or otherwise unexecuted step never "looked" for
             // anything, so recording its
             // locator would be misleading evidence.
-            let will_run = gate_reason.is_none()
+            let will_run = gate.is_none()
                 && step_error.is_none()
                 && !environment_failed
                 && self.registry.contains_key(step.uses_name());
@@ -1061,7 +1088,7 @@ impl Engine {
             // invocation itself stays *after* `StepStarted` — see the
             // registration comment below.
             let dispatcher =
-                if gate_reason.is_some() || step_error.is_some() || !known || environment_failed {
+                if gate.is_some() || step_error.is_some() || !known || environment_failed {
                     None
                 } else {
                     Some(
@@ -1086,11 +1113,26 @@ impl Engine {
                 })
                 .await?;
 
-            if let Some(reason) = gate_reason {
+            if let Some(duhem_evidence::StepOutcome::Skipped {
+                reason,
+                condition,
+                operands,
+            }) = gate
+            {
+                if condition.is_some()
+                    && self
+                        .registry
+                        .get(step.uses_name())
+                        .is_some_and(|action| action.judges())
+                {
+                    gated_judging_steps += 1;
+                }
                 writer
                     .append(EventPayload::StepFinished {
                         step_index: idx as u32,
                         outcome: duhem_evidence::StepOutcome::Skipped {
+                            condition,
+                            operands,
                             reason: reason.clone(),
                         },
                         detail: None,
@@ -1356,7 +1398,7 @@ impl Engine {
                 captures,
             });
         }
-        Ok(verdict)
+        Ok((verdict, gated_judging_steps))
     }
 }
 
@@ -4688,7 +4730,7 @@ criteria:
             .find_map(|event| match event.payload {
                 EventPayload::StepFinished {
                     step_index: 1,
-                    outcome: duhem_evidence::StepOutcome::Skipped { reason },
+                    outcome: duhem_evidence::StepOutcome::Skipped { reason, .. },
                     ..
                 } => Some(reason),
                 _ => None,

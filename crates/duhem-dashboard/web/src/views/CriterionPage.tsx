@@ -1,3 +1,4 @@
+import { GatedJudgingNotice } from "../components/GatedJudgingNotice";
 import { ArrowRight } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 
@@ -55,6 +56,7 @@ function CriterionEvidence({
               <span>{check.id}</span>
               <span className="criterion-check-end">
                 <VerdictBadge verdict={check.verdict} compact />
+                <GatedJudgingNotice count={check.gated_judging_steps} />
                 <ArrowRight className="size-4" aria-hidden="true" />
               </span>
             </Link>

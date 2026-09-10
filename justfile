@@ -10,6 +10,7 @@ default:
     @printf '  just test [browser-actions]  Run tests\n'
     @printf '  just check                   Run lint + test (fast inner loop)\n'
     @printf '  just self-verify             Run Duhem against its own VDs\n'
+    @printf '  just validate-suites         Validate every verifications/ suite\n'
     @printf '  just preflight               Full CI-equivalent gate before pushing\n\n'
     @printf '  just dashboard [dev|build|test]  Develop, build, or test the dashboard\n'
     @printf '  just worktree [add|list]     Manage task worktrees\n'
@@ -197,8 +198,18 @@ self-verify:
         --db "$db" \
         --inputs duhem_bin="$PWD/target/release/duhem"
 
+# Validate every top-level suite under verifications/ — structural +
+# catalog-aware schema checks only (no provisioning, no network/browser/DB).
+# Before this recipe, 18 of 21 suites were run by no gate at all, free to
+# rot silently while doubling as authoring documentation (#505 §2.9).
+validate-suites:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release -p duhem-cli
+    exec ./scripts/validate-suites.sh
+
 # The stages run by `preflight`, from its merge-preview worktree.
-_preflight_stages: lint test self-verify
+_preflight_stages: lint test self-verify validate-suites
     # The strict form of the changelog check, as CI runs it.
     cargo run -p xtask --quiet -- schema-changelog-check
     # docs §10 yaml blocks parse and validate against the live schema.

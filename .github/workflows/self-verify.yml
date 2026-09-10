@@ -4,8 +4,13 @@
 # Definitions and gates on the verdict. Two independent lanes:
 #
 #   - cli-regression: the `verifications/duhem-cli` VD (`cli/invoke`) —
-#     the CLI contract (`--version` / `validate` / `init` / `run`).
-#     Fully offline + page-free, so no Node / Playwright.
+#     the CLI contract (`--version` / `validate` / `init` / `run`) — plus
+#     a `duhem validate` pass over EVERY top-level directory under
+#     `verifications/` (`just validate-suites`; onsager-ai/duhem#505
+#     §2.9). Before that gate, 18 of 21 in-tree suites were run by no
+#     gate at all — free to rot silently while doubling as authoring
+#     documentation. Both are fully offline + page-free, so no Node /
+#     Playwright, and both reuse the one release build below.
 #   - dashboard-regression: the `verifications/duhem-dashboard` VD
 #     (`api/call` + `ui/*`) — the served dashboard's JSON API, SPA
 #     render, and SSE stream. Needs the SPA bundle embedded in the
@@ -29,7 +34,11 @@
 #     names is exactly the kind of thing that silently goes stale as the
 #     dependency graph evolves (onsager-ai/duhem#400). The lane is fully
 #     offline + page-free (no Node / Playwright), so watching more paths
-#     is cheap.
+#     is cheap. It also watches the whole `verifications/**` tree (not
+#     just its own VD's directory) because its `validate-suites` step
+#     validates every suite in that tree, and a crates-only PR must run
+#     it too — the failure mode being guarded is a Duhem change that
+#     invalidates a consumer's VD.
 #   - dashboard-regression stays narrow (`crates/duhem-dashboard/**`
 #     only): its SPA-build + Chromium-install cost is real, so it only
 #     runs when the dashboard crate itself changes.
@@ -44,9 +53,7 @@ on:
       - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - 'verifications/duhem-cli/**'
-      - 'verifications/duhem-dashboard/**'
-      - 'verifications/defaults-example/**'
+      - 'verifications/**'
       - '.github/workflows/self-verify.yml'
   push:
     branches: [main]
@@ -54,9 +61,7 @@ on:
       - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - 'verifications/duhem-cli/**'
-      - 'verifications/duhem-dashboard/**'
-      - 'verifications/defaults-example/**'
+      - 'verifications/**'
       - '.github/workflows/self-verify.yml'
 
 concurrency:
@@ -86,8 +91,7 @@ jobs:
               - 'crates/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
-              - 'verifications/duhem-cli/**'
-              - 'verifications/defaults-example/**'
+              - 'verifications/**'
               - '.github/workflows/self-verify.yml'
             dashboard:
               - 'crates/duhem-dashboard/**'
@@ -112,6 +116,14 @@ jobs:
 
       - name: Build duhem CLI
         run: cargo build --release -p duhem-cli
+
+      # Structural + catalog-aware `duhem validate` over every top-level
+      # directory under `verifications/` — no provisioning, no
+      # network/browser/DB, so it belongs in this offline lane. Reuses
+      # the binary built above; collects every failing suite instead of
+      # stopping at the first. (onsager-ai/duhem#505 §2.9)
+      - name: Validate every verifications/ suite
+        run: ./scripts/validate-suites.sh "$PWD/target/release/duhem"
 
       # The VD runs the binary under test, so point `duhem_bin` at the
       # freshly built artifact rather than whatever is on PATH. A

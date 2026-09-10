@@ -390,6 +390,7 @@ async fn retain_storyboard(
         .map(|s| s.elapsed_ms)
         .unwrap_or(storyboard.last_ms);
     let mut document = SessionEvidence::v1(duration_ms);
+    document.session = writer.session().map(str::to_string);
     for frame in storyboard.frames {
         let mut frame_error = frame.frame_error;
         let screenshot_sha256 = match frame.png {

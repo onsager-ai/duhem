@@ -57,6 +57,10 @@ pub struct RunSummary {
     /// and older plugins ignore this field.
     #[serde(default)]
     pub totals: CheckTotals,
+    /// Checks with a smaller judged claim set, including passing checks.
+    /// Omitted when every judging step ran; additive to contract v2.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gated_checks: Vec<CheckGatingSummary>,
     /// Non-passing checks and the assertions that explain their verdict.
     /// Lets a reporter show *which* assertion failed (and the observed
     /// values) without the author querying the store. Empty on a
@@ -110,10 +114,19 @@ impl RunSummary {
             criteria,
             store,
             totals: CheckTotals::default(),
+            gated_checks: Vec::new(),
             failures: Vec::new(),
             warnings: Vec::new(),
             cleanup: Vec::new(),
         }
+    }
+
+    pub fn with_gated_checks(mut self, gated_checks: Vec<CheckGatingSummary>) -> Self {
+        self.gated_checks = gated_checks
+            .into_iter()
+            .filter(|c| c.gated_judging_steps > 0)
+            .collect();
+        self
     }
 
     /// Attach the non-passing-check failure detail (builder style).
@@ -178,6 +191,32 @@ impl CheckTotals {
         self.passed += other.passed;
         self.failed += other.failed;
         self.inconclusive += other.inconclusive;
+    }
+}
+
+/// Evidence-only per-check count alongside [`CheckTotals`]. A passing
+/// check can appear here: conditional absence never becomes a verdict.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CheckGatingSummary {
+    pub criterion_id: String,
+    pub check_id: String,
+    pub gated_judging_steps: u32,
+}
+
+impl std::fmt::Display for CheckGatingSummary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}::{}: {} judging step{} gated",
+            self.criterion_id,
+            self.check_id,
+            self.gated_judging_steps,
+            if self.gated_judging_steps == 1 {
+                ""
+            } else {
+                "s"
+            }
+        )
     }
 }
 

@@ -165,7 +165,19 @@ impl EvidenceReader {
         let Some(mut detail) = build_check_detail(&run, criterion_id, check_id, spans) else {
             return Ok(None);
         };
-        detail.replay = replay::model(&self.store, run_id, &detail.artifacts).await?;
+        detail.replay = replay::model(&self.store, run_id, &detail.artifacts, None).await?;
+        let names: std::collections::BTreeSet<_> = detail
+            .artifacts
+            .iter()
+            .filter_map(|a| a.session.clone())
+            .collect();
+        for name in names {
+            if let Some(model) =
+                replay::model(&self.store, run_id, &detail.artifacts, Some(&name)).await?
+            {
+                detail.sessions.push(model);
+            }
+        }
         Ok(Some(detail))
     }
 
@@ -298,7 +310,18 @@ impl EvidenceReader {
             }
             failing.push(self.build_failing_check(run_id, c).await?);
         }
+        let gated_checks = proj
+            .checks
+            .iter()
+            .filter(|c| c.gated_judging_steps > 0)
+            .map(|c| duhem_summary::CheckGatingSummary {
+                criterion_id: c.criterion_id.clone(),
+                check_id: c.check_id.clone(),
+                gated_judging_steps: c.gated_judging_steps,
+            })
+            .collect();
         Ok(Some(FailureEnvelope {
+            gated_checks,
             run_id: run.record.run_id.clone(),
             verification: verification_name(&run.record.verification),
             verdict: run.record.verdict,
@@ -353,6 +376,7 @@ impl EvidenceReader {
             .collect();
         let first_failing_request = self.first_failing_request(&c.artifacts).await?;
         Ok(FailingCheck {
+            gated_judging_steps: c.gated_judging_steps,
             criterion_id: c.criterion_id.clone(),
             check_id: c.check_id.clone(),
             verdict: c.verdict,
@@ -555,6 +579,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         let slot = &mut checks_by_criterion[idx].1;
         if !slot.iter().any(|c| c.id == check_id) {
             slot.push(CheckRef {
+                gated_judging_steps: 0,
                 id: check_id.to_string(),
                 verdict: None,
             });
@@ -641,6 +666,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 check_id,
                 criterion_id,
                 verdict,
+                gated_judging_steps,
                 ..
             } => {
                 let owner = criterion_of_check
@@ -666,6 +692,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                         && let Some(check) = checks.iter_mut().find(|c| c.id == *check_id)
                     {
                         check.verdict = Some(*verdict);
+                        check.gated_judging_steps = *gated_judging_steps;
                     }
                 }
             }
@@ -750,6 +777,7 @@ fn build_check_detail(
         return None;
     }
 
+    let mut gated_judging_steps = 0;
     let mut timeline = Vec::new();
     let mut verdict = None;
     // `step_observation` / `step_finished` carry only `step_index`;
@@ -778,9 +806,11 @@ fn build_check_detail(
             EventPayload::CheckFinished {
                 check_id: k,
                 verdict: v,
+                gated_judging_steps: gated,
                 ..
             } if k == check_id => {
                 verdict = Some(*v);
+                gated_judging_steps = *gated;
                 timeline.push(evt.clone());
             }
             _ => {}
@@ -799,6 +829,7 @@ fn build_check_detail(
                     },
                 ..
             } => Some(ArtifactRef {
+                session: evt.session.clone(),
                 id: blob_sha256.clone(),
                 kind: output_name.clone(),
                 url: format!("/api/runs/{}/artifact/{}", run.record.run_id, blob_sha256),
@@ -809,6 +840,7 @@ fn build_check_detail(
         .collect();
 
     Some(CheckDetail {
+        gated_judging_steps,
         criterion_id: criterion_id.to_string(),
         check_id: check_id.to_string(),
         verdict,
@@ -816,6 +848,7 @@ fn build_check_detail(
         timeline,
         artifacts,
         replay: None,
+        sessions: Vec::new(),
     })
 }
 

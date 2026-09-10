@@ -193,6 +193,7 @@ pub(crate) fn merge_manifest_catalogs_into_leaf(
     manifest: &RootManifest,
     def: &mut VerificationDefinition,
 ) {
+    def.max_sessions = manifest.defaults.as_ref().and_then(|d| d.max_sessions);
     for (page, elements) in &manifest.pages {
         let target = def.pages.entry(page.clone()).or_default();
         for (element, locator) in elements {

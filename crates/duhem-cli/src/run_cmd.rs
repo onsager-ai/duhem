@@ -612,23 +612,30 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             .inputs
             .iter()
             .any(|(name, decl)| !decl.inherit && !inputs.contains_key(name));
+        let declares_contexts = def.criteria.iter().flat_map(|c| &c.checks).any(|check| {
+            check
+                .sessions
+                .as_ref()
+                .is_some_and(|sessions| !sessions.is_empty())
+        });
         let needs_browser = !has_missing_input
-            && def
-                .setup
-                .iter()
-                .chain(
-                    def.criteria
-                        .iter()
-                        .flat_map(|c| &c.checks)
-                        .flat_map(|ch| &ch.steps),
-                )
-                .chain(&def.teardown)
-                .chain(
-                    def.fixtures
-                        .values()
-                        .flat_map(|fixture| fixture.up.iter().chain(&fixture.down)),
-                )
-                .any(|s| duhem_actions::uses_requires_page(s.uses_name()));
+            && (declares_contexts
+                || def
+                    .setup
+                    .iter()
+                    .chain(
+                        def.criteria
+                            .iter()
+                            .flat_map(|c| &c.checks)
+                            .flat_map(|ch| &ch.steps),
+                    )
+                    .chain(&def.teardown)
+                    .chain(
+                        def.fixtures
+                            .values()
+                            .flat_map(|fixture| fixture.up.iter().chain(&fixture.down)),
+                    )
+                    .any(|s| duhem_actions::uses_requires_page(s.uses_name())));
 
         // One browser per leaf when needed. Phase-0 leaves run serially
         // (#49) and `RunBrowser` is non-`Clone`, so a fresh launch per

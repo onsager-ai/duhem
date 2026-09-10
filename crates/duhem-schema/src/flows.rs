@@ -105,6 +105,7 @@ fn blank_step() -> Step {
     Step {
         needs: Vec::new(),
         id: None,
+        session: None,
         description: None,
         condition: StepCondition::Success,
         uses: None,
@@ -343,6 +344,11 @@ fn validate_lifecycle_dispatch(
 }
 
 fn validate_dispatch(step: &Step, site: &str, errors: &mut Vec<String>) {
+    if step.call.is_some() && step.session.is_some() {
+        errors.push(format!(
+            "{site}: `session:` belongs on browser-driving steps inside the flow, not on `call:`"
+        ));
+    }
     // `for_each:` (#443 Tier 1) extends the exactly-one rule from two
     // body forms to three — `uses:`, `call:`, or an inline `steps:`
     // list — rather than introducing a separate concept. `steps:` and
@@ -1005,10 +1011,7 @@ criteria:
 "#,
         );
         let errors = validate_authored(&bad_param).join("\n");
-        assert!(
-            errors.contains("missing parameter `name`"),
-            "{errors}"
-        );
+        assert!(errors.contains("missing parameter `name`"), "{errors}");
     }
 
     #[test]

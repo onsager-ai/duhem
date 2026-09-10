@@ -20,6 +20,7 @@ pub(super) async fn finish(
         })
         .await?;
     Ok(RunOutcome {
+        gated_checks: Default::default(),
         verdict,
         run_id: run_id.to_string(),
         failures: Vec::new(),

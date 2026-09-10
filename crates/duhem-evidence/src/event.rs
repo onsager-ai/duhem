@@ -98,7 +98,17 @@ pub enum StepOutcome {
     Ok,
     Error,
     Timeout,
-    Skipped { reason: String },
+    Skipped {
+        reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        condition: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operands: Option<BTreeMap<String, serde_json::Value>>,
+    },
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 /// Assertion and finished-verdict fields share the same three-state
@@ -133,6 +143,9 @@ pub enum ObservationValue {
 /// millisecond precision.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Event {
+    /// Named browser context for this step or capture; absent on legacy runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
     /// Monotonic per run, starting at 0. A backwards-or-flat seq on
     /// read is a hard error.
     pub seq: u64,
@@ -385,6 +398,10 @@ pub enum EventPayload {
     },
     CheckFinished {
         check_id: String,
+        /// Judging steps gated in the final attempt, never lifecycle steps.
+        /// Evidence only: does not contribute to the recorded verdict.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        gated_judging_steps: u32,
         /// Owning criterion. Lets readers attribute checks that emitted no
         /// `step_started`, including `steps: []` checks. Optional for traces
         /// recorded before spec #490.
@@ -481,6 +498,7 @@ mod tests {
         let mut inputs = BTreeMap::new();
         inputs.insert("workspace_name".into(), serde_json::json!("test-ws-018f"));
         let evt = Event {
+            session: None,
             seq: 0,
             ts: ts(),
             payload: EventPayload::RunStarted {
@@ -539,6 +557,7 @@ mod tests {
     #[test]
     fn step_observation_inline_vs_blob() {
         let inline = Event {
+            session: None,
             seq: 1,
             ts: ts(),
             payload: EventPayload::StepObservation {
@@ -554,6 +573,7 @@ mod tests {
         assert!(!line.contains("blob_sha256"));
 
         let blob = Event {
+            session: None,
             seq: 2,
             ts: ts(),
             payload: EventPayload::StepObservation {
@@ -574,11 +594,14 @@ mod tests {
     #[test]
     fn skipped_step_outcome_round_trips_with_reason() {
         let evt = Event {
+            session: None,
             seq: 2,
             ts: ts(),
             payload: EventPayload::StepFinished {
                 step_index: 1,
                 outcome: StepOutcome::Skipped {
+                    condition: None,
+                    operands: None,
                     reason: "blocked by failed step `login`".into(),
                 },
                 detail: None,
@@ -636,9 +659,11 @@ mod tests {
         assert_eq!(serde_json::to_string(&event).unwrap(), old);
 
         let seeded = Event {
+            session: None,
             seq: 8,
             ts: ts(),
             payload: EventPayload::CheckFinished {
+                gated_judging_steps: 0,
                 check_id: "AC-2.1".into(),
                 criterion_id: Some("AC-2".into()),
                 verdict: VerdictState::Pass,
@@ -705,6 +730,7 @@ mod tests {
         ];
         for payload in cases {
             let evt = Event {
+                session: None,
                 seq: 1,
                 ts: ts(),
                 payload,
@@ -719,6 +745,7 @@ mod tests {
     #[test]
     fn teardown_reuses_setup_step_events_with_a_phase_discriminator() {
         let event = Event {
+            session: None,
             seq: 1,
             ts: ts(),
             payload: EventPayload::SetupStepFinished {
@@ -830,6 +857,7 @@ mod tests {
         ];
         for payload in cases {
             let evt = Event {
+                session: None,
                 seq: 1,
                 ts: ts(),
                 payload: payload.clone(),
@@ -859,6 +887,7 @@ mod tests {
         );
         assert!(
             EventPayload::CheckFinished {
+                gated_judging_steps: 0,
                 check_id: "x".into(),
                 criterion_id: None,
                 verdict: VerdictState::Pass,
@@ -907,5 +936,20 @@ mod tests {
             serde_json::from_str::<EventPayload>(&json).expect("round trip"),
             payload
         );
+    }
+}
+
+#[cfg(test)]
+mod skipped_compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn old_skipped_payload_round_trips_without_null_fields() {
+        let old = r#"{"skipped":{"reason":"blocked by failed step `login`"}}"#;
+        let outcome: StepOutcome = serde_json::from_str(old).unwrap();
+        assert_eq!(serde_json::to_string(&outcome).unwrap(), old);
+        let old_check = r#"{"kind":"check_finished","check_id":"C","verdict":"pass"}"#;
+        let event: EventPayload = serde_json::from_str(old_check).unwrap();
+        assert_eq!(serde_json::to_string(&event).unwrap(), old_check);
     }
 }

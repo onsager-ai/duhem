@@ -14,10 +14,10 @@ use std::collections::BTreeMap;
 use duhem_actions::Page;
 use duhem_actions::{CheckBrowser, Outcome};
 use duhem_evidence::{EventPayload, EvidenceWriter, StepOutcome, StepPhase};
-use duhem_schema::{Step, StepCondition};
+use duhem_schema::Step;
 
 use crate::engine::context::RunState;
-use crate::engine::gating::{skip_reason as gate_skip_reason, step_failed};
+use crate::engine::gating::{evaluate as evaluate_gate, step_failed};
 use crate::engine::registry::{ActionRegistry, Dispatch};
 use crate::engine::runner::{
     CleanupFailure, EngineError, StepEvidence, display_step_label, implicit_judgment_for_step,
@@ -70,6 +70,7 @@ pub(crate) async fn process_lifecycle_step(
     step: &Step,
     idx: usize,
     loop_ctx: Option<&LoopIterationCtx<'_>>,
+    contexts: Option<&super::session::CheckContexts>,
     dispatched: &mut bool,
     aborted: &mut Option<AbortReason>,
     failed_by: &mut Option<String>,
@@ -77,49 +78,33 @@ pub(crate) async fn process_lifecycle_step(
     cleanup: &mut Vec<CleanupFailure>,
 ) -> Result<(), EngineError> {
     let (fixture_name, check_id, criterion_id) = scope.evidence_fields();
+    writer.set_session(step.session.as_deref());
 
     // The outcome gate runs first — including for value expressions,
     // which carry `success` semantics (see `gating::skip_reason`).
     // Only once it passes is the expression itself evaluated, so a
     // step blocked by an earlier failure is gated cleanly rather
     // than failing on operands that failure left unresolvable.
-    let mut condition_error = None;
-    let gate_reason = match gate_skip_reason(&step.condition, failed_by.as_deref()) {
-        Some(blocked) => Some(blocked),
-        None => match &step.condition {
-            StepCondition::Expr(expr) => {
-                let ctx = loop_run_context(run, loop_ctx);
-                match crate::eval(&expr.parsed, &ctx) {
-                    crate::EvalResult::True => None,
-                    crate::EvalResult::False => {
-                        Some(format!("condition `{}` evaluated false", expr.raw))
-                    }
-                    crate::EvalResult::Inconclusive(cause) => {
-                        condition_error = Some(EngineError::UnresolvedReference {
-                            reference: expr.raw.clone(),
-                            context: format!(" (condition could not be evaluated: {cause:?})"),
-                            step: step_label(step, idx),
-                        });
-                        None
-                    }
-                }
-            }
-            _ => None,
-        },
+    // `gating::evaluate` — not a second, hand-rolled evaluation — is
+    // what lets a loop-body step gated by a value condition record
+    // `condition`/`operands` the same way any other gated step does
+    // (#511's shrunken-claim-set reporting depends on this).
+    let ctx = loop_run_context(run, loop_ctx);
+    let (gate, condition_error) = match evaluate_gate(step, idx, failed_by.as_deref(), &ctx) {
+        Ok(gate) => (gate, None),
+        Err(error) => (None, Some(error)),
     };
-    let cleanup_step =
-        phase == StepPhase::Teardown || (failed_by.is_some() && gate_reason.is_none());
+    let cleanup_step = phase == StepPhase::Teardown || (failed_by.is_some() && gate.is_none());
     // Setup steps see the run state (inputs, env, uuid, plus any
     // outputs already published by earlier setup steps in this
     // same block, and — inside a `for_each:` body — the current
     // iteration's `as:` binding). The view is read-only against the
     // run state — we feed it through a `RunContext` to reuse the
     // existing template substitution.
-    let ctx = loop_run_context(run, loop_ctx);
     let mut resolved_with = step.with.clone();
     let step_error = if condition_error.is_some() {
         condition_error
-    } else if gate_reason.is_none() {
+    } else if gate.is_none() {
         substitute_with(&mut resolved_with, &ctx)
             .err()
             .map(|u| EngineError::UnresolvedReference {
@@ -133,12 +118,21 @@ pub(crate) async fn process_lifecycle_step(
 
     let iteration = loop_ctx.map(|l| l.iteration);
     append_setup_started(writer, phase, step, idx, &resolved_with, scope, iteration).await?;
-    if let Some(reason) = gate_reason {
+    if let Some(StepOutcome::Skipped {
+        reason,
+        condition,
+        operands,
+    }) = gate
+    {
         writer
             .append(EventPayload::SetupStepFinished {
                 phase,
                 step_index: idx as u32,
-                outcome: StepOutcome::Skipped { reason },
+                outcome: StepOutcome::Skipped {
+                    reason,
+                    condition,
+                    operands,
+                },
                 detail: None,
                 fixture_name: fixture_name.clone(),
                 check_id: check_id.clone(),
@@ -165,7 +159,10 @@ pub(crate) async fn process_lifecycle_step(
             }
             Some(dispatcher) => {
                 *dispatched = true;
-                let page_ref: Option<&Page> = setup_browser.map(|cb| &cb.page);
+                let page_ref: Option<&Page> = match contexts {
+                    Some(contexts) => contexts.browsers.get(&step.session).map(|cb| &cb.page),
+                    None => setup_browser.map(|cb| &cb.page),
+                };
                 match invoke_and_record(
                     dispatcher.as_ref(),
                     page_ref,
@@ -273,6 +270,7 @@ pub(crate) async fn run_for_each_step(
     environment_failed: bool,
     step: &Step,
     idx: usize,
+    contexts: Option<&super::session::CheckContexts>,
     dispatched: &mut bool,
     aborted: &mut Option<AbortReason>,
     failed_by: &mut Option<String>,
@@ -296,30 +294,13 @@ pub(crate) async fn run_for_each_step(
 
     // The loop's own outcome gate (its `if:`) is resolved once, in the
     // outer scope — never against a loop-bound element, since the
-    // array hasn't been read yet at this point.
-    let mut condition_error = None;
-    let gate_reason = match gate_skip_reason(&step.condition, failed_by.as_deref()) {
-        Some(blocked) => Some(blocked),
-        None => match &step.condition {
-            StepCondition::Expr(cond) => {
-                let ctx = crate::engine::context::RunContext::new(run);
-                match crate::eval(&cond.parsed, &ctx) {
-                    crate::EvalResult::True => None,
-                    crate::EvalResult::False => {
-                        Some(format!("condition `{}` evaluated false", cond.raw))
-                    }
-                    crate::EvalResult::Inconclusive(cause) => {
-                        condition_error = Some(EngineError::UnresolvedReference {
-                            reference: cond.raw.clone(),
-                            context: format!(" (condition could not be evaluated: {cause:?})"),
-                            step: step_label(step, idx),
-                        });
-                        None
-                    }
-                }
-            }
-            _ => None,
-        },
+    // array hasn't been read yet at this point. Same `gating::evaluate`
+    // every other step gate goes through (see `process_lifecycle_step`),
+    // not a second hand-rolled evaluation.
+    let gate_ctx = crate::engine::context::RunContext::new(run);
+    let (gate, condition_error) = match evaluate_gate(step, idx, failed_by.as_deref(), &gate_ctx) {
+        Ok(gate) => (gate, None),
+        Err(error) => (None, Some(error)),
     };
     let cleanup_step = phase == StepPhase::Teardown || failed_by.is_some();
 
@@ -337,12 +318,12 @@ pub(crate) async fn run_for_each_step(
         })
         .await?;
 
-    if let Some(reason) = gate_reason {
+    if let Some(outcome) = gate {
         writer
             .append(EventPayload::SetupStepFinished {
                 phase,
                 step_index: idx as u32,
-                outcome: StepOutcome::Skipped { reason },
+                outcome,
                 detail: None,
                 fixture_name: fixture_name.clone(),
                 check_id: check_id.clone(),
@@ -497,6 +478,7 @@ pub(crate) async fn run_for_each_step(
                 body_step,
                 idx,
                 Some(&loop_ctx),
+                contexts,
                 dispatched,
                 aborted,
                 failed_by,

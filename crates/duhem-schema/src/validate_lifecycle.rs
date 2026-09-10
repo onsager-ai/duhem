@@ -92,7 +92,11 @@ pub(crate) fn validate_fixtures(
                         // already present for every other lifecycle
                         // `with:` — is what catches an ordinary typo
                         // here too.
-                        let bound = reference.segments().first().map(String::as_str).unwrap_or("");
+                        let bound = reference
+                            .segments()
+                            .first()
+                            .map(String::as_str)
+                            .unwrap_or("");
                         if step.as_binding.as_deref() != Some(bound) {
                             errs.push(ValidationError::LoopVariableOutOfScope {
                                 site: format!(
@@ -145,7 +149,11 @@ pub(crate) fn validate_fixtures(
                 expr.walk_paths(|reference| {
                     if reference.root == PathRoot::Loop {
                         // See the matching `up:` check above.
-                        let bound = reference.segments().first().map(String::as_str).unwrap_or("");
+                        let bound = reference
+                            .segments()
+                            .first()
+                            .map(String::as_str)
+                            .unwrap_or("");
                         if step.as_binding.as_deref() != Some(bound) {
                             errs.push(ValidationError::LoopVariableOutOfScope {
                                 site: format!(

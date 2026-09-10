@@ -327,6 +327,11 @@ function TreeGroup({
                         )}
                       >
                         <span className="min-w-0 flex-1 truncate">{label}</span>
+                        {typeof started.session === "string" && (
+                          <Badge variant="outline" data-testid="step-session">
+                            {started.session}
+                          </Badge>
+                        )}
                         {layer && (
                           <Badge
                             variant="outline"

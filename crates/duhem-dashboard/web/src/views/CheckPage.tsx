@@ -1,3 +1,4 @@
+import { GatedJudgingNotice } from "../components/GatedJudgingNotice";
 // Per-check evidence (#86, #206): a plain-language summary, then the
 // check's slice of the trace rendered as legible rows (icon · label ·
 // detail · Δ) with the raw JSON one click away, and a rich artifacts
@@ -138,6 +139,7 @@ export function CheckSummary({ detail }: { detail: CheckDetail }) {
   return (
     <div className={`check-summary tone-${tone}`} data-testid="check-summary">
       <p className="summary-headline">{s.headline}</p>
+      <GatedJudgingNotice count={detail.gated_judging_steps} />
       {s.failing.length > 0 && (
         <ol className="summary-failing">
           {s.failing.map((failure, i) => (
@@ -633,6 +635,9 @@ function StepGroup({
               <EventIcon name={status.icon} />
             </span>
             <span className="ev-label" title={label}>{label}</span>
+            {typeof started.session === "string" && (
+              <Badge variant="outline" data-testid="step-session">{started.session}</Badge>
+            )}
             {layer && (
               <Badge
                 variant="outline"
@@ -1303,9 +1308,9 @@ export function Artifacts({ artifacts }: { artifacts: CheckDetail["artifacts"] }
     <div className="panel">
       <h2>Artifacts</h2>
       {shown.map((artifact) => (
-        <div className="artifact" key={artifact.id}>
+        <div className="artifact" key={`${artifact.session ?? ""}:${artifact.kind}:${artifact.id}`}>
           <p className="kv">
-            <strong>{artifactLabel(artifact.kind)}</strong> ·{" "}
+            <strong>{artifactLabel(artifact.kind)}</strong>{artifact.session && ` · ${artifact.session}`} ·{" "}
             <a href={artifact.url} target="_blank" rel="noreferrer">
               open<span className="muted"> ({artifact.id.slice(0, 12)}…)</span>
             </a>
@@ -1317,7 +1322,7 @@ export function Artifacts({ artifacts }: { artifacts: CheckDetail["artifacts"] }
               </p>
             ))}
           {isImageArtifact(artifact.kind, artifact.url) && (
-            <ScreenshotArtifact artifact={artifact} rectsUrl={rectsUrl} />
+            <ScreenshotArtifact artifact={artifact} rectsUrl={artifact.session ? artifacts.find((a) => a.kind === "capture/target-rect" && a.session === artifact.session)?.url : rectsUrl} />
           )}
           {artifact.kind === "capture/network" && <HarTable url={artifact.url} />}
           {artifact.kind === "capture/dom" && <DomViewer url={artifact.url} />}
@@ -1354,7 +1359,10 @@ function ReplayView({
   stepNavigation: ReadonlyMap<number, { key: string; label: string }>;
   params: URLSearchParams;
 }) {
-  const replay = check.replay;
+  const sessions = check.sessions ?? [];
+  const replay = sessions.find((item) => item.steps.some((step) => step.step_index === selectedStep))
+    ?? sessions.find((item) => item.session === params.get("session"))
+    ?? sessions[0] ?? check.replay;
   const inspector = params.get("inspector") === "performance" ? "performance" : "network";
   const selected = selectedStep === undefined
     ? undefined
@@ -1446,6 +1454,14 @@ function ReplayView({
 
   return (
     <div className="replay" data-testid="replay">
+      {sessions.length > 0 && (
+        <label>Session{" "}
+          <select aria-label="Browser session" value={replay.session} onChange={(event) =>
+            navigate({ search: queryWith(params, { session: event.target.value, step: undefined }) })}>
+            {sessions.map((item) => <option key={item.session} value={item.session}>{item.session}</option>)}
+          </select>
+        </label>
+      )}
       <section
         className={`replay-media${media === "video" ? " video-mode" : ""}`}
         aria-label="Replay media"

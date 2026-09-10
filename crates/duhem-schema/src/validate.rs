@@ -51,6 +51,7 @@ pub fn validate_with_contract_outputs(
     outputs_for: &dyn Fn(&str) -> Vec<String>,
 ) -> Result<(), Vec<ValidationError>> {
     let mut errs = Vec::new();
+    crate::validate_sessions::validate(v, &mut errs);
 
     errs.extend(
         crate::flows::validate_authored(v)
@@ -724,9 +725,28 @@ fn validate_check(
     // calls could fabricate auth state at the authoring boundary. Once
     // parsed, the ordinary reference checker supplies the same
     // undeclared input/setup diagnostics as `with:` (#134).
-    if let Some(raw) = &ch.session {
+    for (name, raw) in ch.session.iter().map(|raw| (None, raw.as_str())).chain(
+        ch.sessions
+            .iter()
+            .flat_map(|sessions| sessions.iter())
+            .filter_map(|(name, value)| value.as_ref().map(|expr| (Some(name), expr.raw.as_str()))),
+    ) {
         let location = source_context_matches
-            .then(|| source_map.check_scalar_location(criterion_index, check_index, "session", raw))
+            .then(|| {
+                let mut path = crate::source::check_path(
+                    criterion_index,
+                    check_index,
+                    if name.is_some() {
+                        "sessions"
+                    } else {
+                        "session"
+                    },
+                );
+                if let Some(name) = name {
+                    path.push(SourcePathSegment::key(name));
+                }
+                source_map.scalar_location(&path, raw)
+            })
             .flatten();
         match crate::expr::parse(raw) {
             Ok(Expr::Path(path)) => {
@@ -735,7 +755,7 @@ fn validate_check(
             _ => errs.push(ValidationError::InvalidSessionReference {
                 criterion: c.id.clone(),
                 check: ch.id.clone(),
-                value: raw.clone(),
+                value: raw.to_string(),
                 location,
             }),
         }

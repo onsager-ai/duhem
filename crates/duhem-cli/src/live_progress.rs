@@ -835,6 +835,7 @@ criteria:
 
     fn evt(seq: u64, offset_ms: i64, payload: EventPayload) -> Event {
         Event {
+            session: None,
             seq,
             ts: chrono::DateTime::parse_from_rfc3339("2026-07-23T00:00:00Z")
                 .unwrap()
@@ -1156,6 +1157,7 @@ criteria:
                 4,
                 400,
                 EventPayload::CheckFinished {
+                    gated_judging_steps: 0,
                     check_id: "AC-1.1".into(),
                     criterion_id: Some("AC-1".into()),
                     verdict: VerdictState::Pass,
@@ -1175,6 +1177,7 @@ criteria:
                 6,
                 1650,
                 EventPayload::CheckFinished {
+                    gated_judging_steps: 0,
                     check_id: "AC-2.1".into(),
                     criterion_id: Some("AC-2".into()),
                     verdict: VerdictState::Fail,

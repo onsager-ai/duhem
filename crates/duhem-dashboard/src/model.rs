@@ -11,6 +11,10 @@ use chrono::{DateTime, Utc};
 use duhem_evidence::{Event, RunOrigin, RunStatus, StepOutcome, VerdictState};
 use serde::Serialize;
 
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
 /// Discriminates runs with recorded children from terminal leaves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -88,6 +92,8 @@ pub struct CriterionDetail {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckRef {
+    #[serde(skip_serializing_if = "is_zero")]
+    pub gated_judging_steps: u32,
     pub id: String,
     pub verdict: Option<VerdictState>,
 }
@@ -95,6 +101,8 @@ pub struct CheckRef {
 /// `GET /api/runs/:run_id/checks/:crit::check`.
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckDetail {
+    #[serde(skip_serializing_if = "is_zero")]
+    pub gated_judging_steps: u32,
     pub criterion_id: String,
     pub check_id: String,
     pub verdict: Option<VerdictState>,
@@ -113,10 +121,15 @@ pub struct CheckDetail {
     /// session document. `None` is the explicit old-run degradation path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replay: Option<ReplayModel>,
+    /// Independent clocks and captures for named browser contexts.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sessions: Vec<ReplayModel>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ReplayModel {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
     pub version: u32,
     pub clock: String,
     pub duration_ms: f64,
@@ -256,6 +269,9 @@ pub struct AssertionDiff {
 /// contract (`docs/failure-envelope-contract.md`).
 #[derive(Debug, Clone, Serialize)]
 pub struct FailureEnvelope {
+    /// Includes passing checks whose judging steps were gated.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub gated_checks: Vec<duhem_summary::CheckGatingSummary>,
     pub run_id: String,
     pub verification: String,
     pub verdict: Option<VerdictState>,
@@ -265,6 +281,8 @@ pub struct FailureEnvelope {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FailingCheck {
+    #[serde(skip_serializing_if = "is_zero")]
+    pub gated_judging_steps: u32,
     pub criterion_id: String,
     pub check_id: String,
     pub verdict: Option<VerdictState>,
@@ -300,6 +318,8 @@ pub struct FailingRequest {
 /// A content-addressed blob referenced from the check's timeline.
 #[derive(Debug, Clone, Serialize)]
 pub struct ArtifactRef {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
     /// The blob's sha-256 (the artifact id in `/artifact/:id` URLs).
     pub id: String,
     /// The observation's `output_name` (e.g. `body`, `stdout`) — what

@@ -156,6 +156,8 @@ pub(crate) fn outcome_to_evidence(o: &Outcome) -> StepOutcome {
         Outcome::Error => StepOutcome::Error,
         Outcome::Timeout => StepOutcome::Timeout,
         Outcome::Skipped { reason } => StepOutcome::Skipped {
+            condition: None,
+            operands: None,
             reason: reason.clone(),
         },
     }
@@ -170,7 +172,7 @@ mod outcome_vocabulary_tests {
             StepOutcome::Ok => Outcome::Ok,
             StepOutcome::Error => Outcome::Error,
             StepOutcome::Timeout => Outcome::Timeout,
-            StepOutcome::Skipped { reason } => Outcome::Skipped { reason },
+            StepOutcome::Skipped { reason, .. } => Outcome::Skipped { reason },
         }
     }
 

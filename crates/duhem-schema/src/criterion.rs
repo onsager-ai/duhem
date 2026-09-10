@@ -10,6 +10,8 @@
 //! regenerated as the implementation evolves; round-tripping authored
 //! YAML order keeps regeneration diffs reviewable.
 
+use std::collections::BTreeMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -76,6 +78,11 @@ pub struct Check {
     /// it is a reference and the runtime resolves its value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
+
+    /// Named independent browser contexts, seeded from acquired state.
+    /// A null value declares a signed-out context. Exclusive with `session:`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sessions: Option<BTreeMap<String, Option<crate::ExprStr>>>,
 
     /// Fixtures instantiated for this check, in bring-up order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

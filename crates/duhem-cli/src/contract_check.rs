@@ -205,6 +205,13 @@ pub(crate) fn lint_warnings(def: &VerificationDefinition) -> Vec<String> {
     }
     for c in &def.criteria {
         for ch in &c.checks {
+            if ch
+                .sessions
+                .as_ref()
+                .is_some_and(|sessions| sessions.len() == 1)
+            {
+                warns.push(format!("criterion `{}` / check `{}`: `sessions:` has one entry; consider scalar `session:` (or omit it for signed-out checks)", c.id, ch.id));
+            }
             // `session:` configures the per-check UI context. Keeping it
             // on a page-free check is valid (the seed is ignored), but
             // almost always signals an authoring copy/paste mistake.

@@ -18,11 +18,11 @@ pub(super) async fn model(
     store: &Arc<dyn Store>,
     run_id: &str,
     artifacts: &[ArtifactRef],
+    name: Option<&str>,
 ) -> Result<Option<ReplayModel>, ReaderError> {
-    let Some(session_ref) = artifacts
-        .iter()
-        .find(|artifact| artifact.kind == SESSION_EVIDENCE_OBSERVATION)
-    else {
+    let Some(session_ref) = artifacts.iter().find(|artifact| {
+        artifact.kind == SESSION_EVIDENCE_OBSERVATION && artifact.session.as_deref() == name
+    }) else {
         return Ok(None);
     };
     let Some(bytes) = store.get_blob(&session_ref.id).await? else {
@@ -38,9 +38,10 @@ pub(super) async fn model(
     let artifact_for = |sha: &str, kind: &str| {
         artifacts
             .iter()
-            .find(|artifact| artifact.id == sha)
+            .find(|artifact| artifact.id == sha && artifact.session.as_deref() == name)
             .cloned()
             .unwrap_or_else(|| ArtifactRef {
+                session: name.map(str::to_string),
                 id: sha.to_string(),
                 kind: kind.to_string(),
                 url: format!("/api/runs/{run_id}/artifact/{sha}"),
@@ -69,6 +70,7 @@ pub(super) async fn model(
     });
 
     Ok(Some(ReplayModel {
+        session: session.session,
         version: session.version,
         clock: session.clock,
         duration_ms: session.duration_ms,

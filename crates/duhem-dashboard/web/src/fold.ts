@@ -122,6 +122,11 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
         const check = crit?.checks.find((c) => c.id === checkId);
         if (check) {
           check.verdict = String(evt.verdict);
+          if (typeof evt.gated_judging_steps === "number" && evt.gated_judging_steps > 0) {
+            check.gated_judging_steps = evt.gated_judging_steps;
+          } else {
+            delete check.gated_judging_steps;
+          }
         }
         break;
       }

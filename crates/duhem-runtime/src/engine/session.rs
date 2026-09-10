@@ -6,6 +6,8 @@
 //! is deliberately data-plane failure (`Inconclusive(EnvironmentError)`)
 //! rather than an engine error, matching browser context allocation.
 
+use std::collections::BTreeMap;
+
 use duhem_schema::{Check, Expr};
 use sha2::{Digest, Sha256};
 
@@ -22,6 +24,7 @@ pub(crate) struct SessionResolution {
     pub seed: Option<SessionSeed>,
     /// Parse, lookup, conversion, or browser-seed preparation failed.
     pub failed: bool,
+    pub named: BTreeMap<String, SessionResolution>,
 }
 
 pub(crate) struct SessionSeed {
@@ -52,15 +55,37 @@ impl SessionResolution {
 /// an API/DB/CLI-only check is an authoring warning and an operational
 /// no-op, so it cannot make an otherwise valid run fail.
 pub(crate) fn resolve(check: &Check, run: &RunState) -> SessionResolution {
+    if let Some(sessions) = &check.sessions {
+        let named: BTreeMap<_, _> = sessions
+            .iter()
+            .map(|(name, state)| {
+                (
+                    name.clone(),
+                    resolve_source(state.as_ref().map(|expr| expr.raw.as_str()), run),
+                )
+            })
+            .collect();
+        return SessionResolution {
+            source: None,
+            seed: None,
+            failed: named.values().any(|s| s.failed),
+            named,
+        };
+    }
     let consumes_session = check
         .steps
         .iter()
         .any(|step| step.uses_name().starts_with("ui/"));
-    let Some(source) = check.session.as_ref().filter(|_| consumes_session) else {
+    resolve_source(check.session.as_deref().filter(|_| consumes_session), run)
+}
+
+fn resolve_source(source: Option<&str>, run: &RunState) -> SessionResolution {
+    let Some(source) = source else {
         return SessionResolution {
             source: None,
             seed: None,
             failed: false,
+            named: BTreeMap::new(),
         };
     };
 
@@ -77,15 +102,17 @@ pub(crate) fn resolve(check: &Check, run: &RunState) -> SessionResolution {
             let bytes = serde_json::to_vec(&state).expect("runtime value serializes to JSON");
             let digest = hex::encode(Sha256::digest(bytes));
             SessionResolution {
-                source: Some(source.clone()),
+                source: Some(source.to_string()),
                 seed: Some(SessionSeed { state, digest }),
                 failed: false,
+                named: BTreeMap::new(),
             }
         }
         None => SessionResolution {
-            source: Some(source.clone()),
+            source: Some(source.to_string()),
             seed: None,
             failed: true,
+            named: BTreeMap::new(),
         },
     }
 }
@@ -159,5 +186,73 @@ criteria:
         assert!(!resolved.failed);
         assert!(resolved.source.is_none());
         assert!(resolved.seed.is_none());
+    }
+}
+
+/// Contexts and investigation evidence owned by one check attempt.
+#[derive(Default)]
+pub(crate) struct CheckContexts {
+    pub browsers: BTreeMap<Option<String>, duhem_actions::CheckBrowser>,
+    pub targets: BTreeMap<Option<String>, Vec<super::capture::TargetLocator>>,
+    pub storyboards: BTreeMap<Option<String>, super::capture::Storyboard>,
+    pub failed: bool,
+}
+
+impl CheckContexts {
+    pub async fn open_named(
+        session: &SessionResolution,
+        browser: Option<&duhem_actions::RunBrowser>,
+    ) -> Self {
+        let mut contexts = Self {
+            failed: session.failed || (browser.is_none() && !session.named.is_empty()),
+            ..Self::default()
+        };
+        if !contexts.failed
+            && let Some(browser) = browser
+        {
+            for (name, state) in &session.named {
+                match state.open_check(browser).await {
+                    Ok(context) => {
+                        contexts.browsers.insert(Some(name.clone()), context);
+                    }
+                    Err(error) => {
+                        tracing::debug!(%error, session = name, "named context allocation failed");
+                        contexts.failed = true;
+                        break;
+                    }
+                }
+            }
+        }
+        contexts
+    }
+
+    pub async fn finish(
+        &mut self,
+        writer: &mut duhem_evidence::EvidenceWriter,
+        capture: bool,
+        check: &Check,
+    ) -> Vec<super::outcome::CapturedArtifact> {
+        let mut artifacts = Vec::new();
+        for (name, browser) in std::mem::take(&mut self.browsers) {
+            writer.set_session(name.as_deref());
+            let last = check
+                .steps
+                .iter()
+                .rposition(|step| step.session == name)
+                .unwrap_or(0) as u32;
+            artifacts.extend(
+                super::capture::finalize_capture(
+                    writer,
+                    browser,
+                    capture,
+                    last,
+                    &self.targets.remove(&name).unwrap_or_default(),
+                    self.storyboards.remove(&name).unwrap_or_default(),
+                )
+                .await,
+            );
+        }
+        writer.set_session(None);
+        artifacts
     }
 }

@@ -60,10 +60,16 @@ function stepOutcome(v: unknown): { kind: string; reason: string } {
   if (v && typeof v === "object") {
     const skipped = (v as Record<string, unknown>).skipped;
     if (skipped && typeof skipped === "object") {
-      return {
-        kind: "skipped",
-        reason: str((skipped as Record<string, unknown>).reason) ?? "",
-      };
+      const evidence = skipped as Record<string, unknown>;
+      const reason = str(evidence.reason) ?? "";
+      const details = [reason];
+      if (typeof evidence.condition === "string") details.push(`condition: ${evidence.condition}`);
+      if (evidence.operands && typeof evidence.operands === "object") {
+        for (const [path, value] of Object.entries(evidence.operands)) {
+          details.push(`${path} = ${JSON.stringify(value)}`);
+        }
+      }
+      return { kind: "skipped", reason: details.join("; ") };
     }
   }
   return { kind: "unknown", reason: "" };

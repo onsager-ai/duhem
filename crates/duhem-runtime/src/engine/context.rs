@@ -127,6 +127,10 @@ impl RunState {
 pub struct RunContext<'r> {
     run: &'r RunState,
     outputs: BTreeMap<(String, String), Value>,
+    /// The active `for_each:` iteration's `as:` binding (#443 Tier 1),
+    /// when this context is resolving a loop body step. At most one is
+    /// ever active — nesting is capped at depth 1.
+    loop_binding: Option<(String, Value)>,
 }
 
 impl<'r> RunContext<'r> {
@@ -134,7 +138,15 @@ impl<'r> RunContext<'r> {
         Self {
             run,
             outputs: BTreeMap::new(),
+            loop_binding: None,
         }
+    }
+
+    /// Bind `name` to the current `for_each:` iteration's element so
+    /// `$<name>` resolves inside this context (spec #443 Tier 1).
+    pub fn with_loop_binding(mut self, name: impl Into<String>, value: Value) -> Self {
+        self.loop_binding = Some((name.into(), value));
+        self
     }
 
     /// Record an observed `$steps.<step_id>.outputs.<name>` value.
@@ -169,6 +181,13 @@ impl<'r> EvalContext for RunContext<'r> {
             step_id.to_string(),
             output.to_string(),
         ))
+    }
+
+    fn loop_binding(&self, name: &str) -> Option<&Value> {
+        self.loop_binding
+            .as_ref()
+            .filter(|(bound, _)| bound == name)
+            .map(|(_, value)| value)
     }
 
     fn env(&self, name: &str) -> Option<&str> {

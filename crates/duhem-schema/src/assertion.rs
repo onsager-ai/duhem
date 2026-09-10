@@ -320,9 +320,17 @@ mod tests {
 
     #[test]
     fn rejects_bad_expression_in_value() {
-        let y = "type_check: { value: $nope.x, is: uuid }\n";
+        // An unrecognized root (`$nope.x`) is no longer a parse error
+        // (#443 Tier 1): it's provisionally a `for_each` loop-variable
+        // reference, and legitimacy is a validator question. A
+        // genuinely malformed expression — an operator with no right
+        // operand — still fails to parse.
+        let y = "type_check: { value: $inputs.x ==, is: uuid }\n";
         let err = serde_yml::from_str::<Assertion>(y).unwrap_err();
-        assert!(format!("{err}").contains("unknown scope"), "got: {err}");
+        assert!(
+            format!("{err}").contains("expression parse error"),
+            "got: {err}"
+        );
     }
 
     #[test]

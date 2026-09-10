@@ -3,7 +3,7 @@
 use std::{cell::RefCell, collections::BTreeMap};
 
 use chrono::{DateTime, Utc};
-use duhem_schema::{BinOp, Expr, ExprStr, Literal};
+use duhem_schema::{BinOp, Expr, ExprStr, Literal, Path, PathRoot};
 
 use super::{EvalContext, EvalResult, Value};
 use crate::engine::context::value_to_json;
@@ -41,6 +41,15 @@ impl EvalContext for RecordingContext<'_> {
     fn fixture_output(&self, fixture: &str, step: &str, output: &str) -> Option<&Value> {
         self.inner.fixture_output(fixture, step, output)
     }
+    fn loop_binding(&self, name: &str) -> Option<&Value> {
+        // Without this forward, `EvalContext::loop_binding`'s default
+        // no-op impl wins and a `for_each:` (#443) body step's `if:`
+        // condition can never resolve `$<as>` once gated through
+        // `gating::evaluate` (which always evaluates via this
+        // recording wrapper) — every loop-bound value condition would
+        // report `MissingLoopBinding` instead of actually gating.
+        self.inner.loop_binding(name)
+    }
     fn env(&self, name: &str) -> Option<&str> {
         self.inner.env(name)
     }
@@ -67,13 +76,25 @@ impl EvalContext for RecordingContext<'_> {
     }
 }
 
+/// Render a path's `<root>.<segments...>` half, without the leading
+/// `$` (callers add that). A `for_each:` loop binding (spec #443)
+/// isn't a fixed keyword — `PathRoot::Loop` carries the author's `as:`
+/// name as `segments[0]` rather than in the root itself (see
+/// `PathRoot::Loop`'s doc comment) — so it renders as `$row.field`,
+/// the surface an author actually wrote, not `$loop.row.field`.
+fn path_label(path: &Path) -> String {
+    match path.root {
+        PathRoot::Loop => path.segments.join("."),
+        root => format!("{}.{}", root.as_str(), path.segments.join(".")),
+    }
+}
+
 fn label(expr: &Expr) -> String {
     match expr {
-        Expr::Path(path) => format!("${}.{}", path.root.as_str(), path.segments.join(".")),
+        Expr::Path(path) => format!("${}", path_label(path)),
         Expr::Call { path, args } => format!(
-            "${}.{}({})",
-            path.root.as_str(),
-            path.segments.join("."),
+            "${}({})",
+            path_label(path),
             args.iter().map(label).collect::<Vec<_>>().join(", ")
         ),
         Expr::Lit(lit) => match lit {

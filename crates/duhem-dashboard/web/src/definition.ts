@@ -66,6 +66,14 @@ export interface FlowOrigin {
   name: string;
   invocation: string;
   inner_index: number;
+  /** `for_each:` (#443) iteration this step belongs to, 0-based.
+   * Absent for an ordinary flow invocation with no enclosing loop.
+   * Not yet consumed by the labeling helpers below — those resolve
+   * only check-level `call:` invocations against `criteria[].checks`,
+   * and a `for_each:` step's flow origin can point at `setup:`/
+   * `teardown:`/fixture bodies instead, which this module doesn't
+   * look up. Grouping the report by iteration is tracked separately. */
+  iteration?: number;
 }
 
 function str(v: unknown): string | undefined {

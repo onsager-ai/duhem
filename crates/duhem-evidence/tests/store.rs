@@ -1212,6 +1212,7 @@ async fn setup_phase_spans_carry_no_check_id() {
         fixture_name: None,
         check_id: None,
         criterion_id: None,
+        flow: None,
     })
     .await
     .unwrap();

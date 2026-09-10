@@ -96,6 +96,7 @@ pub async fn write_passing_run(
         fixture_name: None,
         check_id: None,
         criterion_id: None,
+        flow: None,
     })
     .await
     .unwrap();
@@ -452,6 +453,7 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
         fixture_name: None,
         check_id: None,
         criterion_id: None,
+        flow: None,
     })
     .await
     .unwrap();

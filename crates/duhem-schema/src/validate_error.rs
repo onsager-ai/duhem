@@ -368,6 +368,50 @@ pub enum ValidationError {
     },
 
     #[error(
+        "{site} references `${name}`, but `${name}` is not a `for_each` binding in scope here (expected `$steps`, `$setup`, `$fixture`, `$inputs`, `$pages`, `$env`, `$runtime`, or the `as:` name of an enclosing `for_each`)"
+    )]
+    LoopVariableOutOfScope {
+        site: String,
+        name: String,
+        location: Option<SourceLocation>,
+    },
+
+    #[error(
+        "criterion `{criterion}` / check `{check}`: `for_each:` is not yet available on check steps (Tier 2, gated behind #509 — a shrunken claim set must be visible in the verdict before a loop can wrap judging steps); it is available today in `setup:`, `teardown:`, fixture `up:`/`down:`, and criterion-/check-level `setup:`/`teardown:` (Tier 1)"
+    )]
+    ForEachUnavailableInCheck {
+        criterion: String,
+        check: String,
+        location: Option<SourceLocation>,
+    },
+
+    #[error(
+        "{site}: `for_each:` requires `max:` — the iteration ceiling #444 needs to compute a worst-case step count"
+    )]
+    ForEachMaxRequired {
+        site: String,
+        location: Option<SourceLocation>,
+    },
+
+    #[error(
+        "{site}: a `for_each:` body step may not itself declare `{field}:` — nesting is capped at depth 1"
+    )]
+    ForEachDepthExceeded {
+        site: String,
+        field: &'static str,
+        location: Option<SourceLocation>,
+    },
+
+    #[error(
+        "{site}: `{field}:` is not allowed on a `for_each:` step — it produces no output of its own; give the *body* step an `id:` instead"
+    )]
+    ForEachWrapperFieldNotAllowed {
+        site: String,
+        field: &'static str,
+        location: Option<SourceLocation>,
+    },
+
+    #[error(
         "criterion `{criterion}` / check `{check}`: value-based conditions are not yet available on check steps"
     )]
     CheckStepConditionUnavailable {
@@ -436,7 +480,12 @@ impl ValidationError {
             | Self::InvalidNamedSession { location, .. }
             | Self::UnknownAction { location, .. }
             | Self::InvalidStepCondition { location, .. }
-            | Self::CheckStepConditionUnavailable { location, .. } => *location,
+            | Self::CheckStepConditionUnavailable { location, .. }
+            | Self::LoopVariableOutOfScope { location, .. }
+            | Self::ForEachUnavailableInCheck { location, .. }
+            | Self::ForEachMaxRequired { location, .. }
+            | Self::ForEachDepthExceeded { location, .. }
+            | Self::ForEachWrapperFieldNotAllowed { location, .. } => *location,
             Self::UndeclaredFixture { location, .. }
             | Self::FixtureRefOutsideDown { location, .. }
             | Self::FixtureStepNeeds { location, .. }

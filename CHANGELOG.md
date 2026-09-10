@@ -29,9 +29,9 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] `Step` accepts bounded `for_each:` (mandatory `max:`, `as:` binding, `uses:`/`call:`/`steps:` body) in non-judging lifecycle contexts; rejected with a location inside a check's `steps:` (Tier 2, gated behind #509). `flow` origins gain an optional `iteration`. (#443)
 - [additive] Schema 0.4.3: checks can declare isolated named browser sessions, route UI steps explicitly, and inspect session-attributed evidence; root defaults.max_sessions caps contexts per check (default 4). (#508)
 - [additive] Skipped-step evidence carries optional condition and evaluated operands; check summaries, reporters, dashboard and failure envelopes expose non-zero gated judging-step counts without changing verdicts. (#509)
-
 - [additive] `Criterion` and `Check` accept `setup:`/`teardown:` lifecycle blocks, symmetric with leaf-level `setup:`/`teardown:`; `setup_started`/`setup_step_started`/`setup_step_observation`/`setup_step_finished`/`setup_finished` carry an optional `criterion_id`. (#441)
 - [clarifying] The dashboard's step row now reports the step's own duration instead of the gap since the previous event, and no longer occludes an expanded step's body or leaves a truncated step label with no tooltip. (#503)
 - [clarifying] `duhem browser install` now shares `duhem run`'s auto-provision mechanics: it retries the Chromium install only on an actual distro refusal (not any failure), probes Node via `DUHEM_NODE` like the runtime does, and takes the same cross-process install lock. (#505)

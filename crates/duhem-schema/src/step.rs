@@ -24,6 +24,13 @@ pub struct ExpandedFlowOrigin {
     pub name: String,
     pub invocation: String,
     pub inner_index: u32,
+    /// Which `for_each` (#443 Tier 1) iteration this expanded step
+    /// belongs to, `0`-based. `None` for a step expanded from an
+    /// ordinary `flows:` invocation with no enclosing loop — kept
+    /// separate from `inner_index` (this step's position within one
+    /// iteration's body) so a report can group by iteration without
+    /// conflating the two axes.
+    pub iteration: Option<u32>,
 }
 
 /// Dispatch condition for a step. The three outcome gates retain their
@@ -169,6 +176,54 @@ pub struct Step {
     /// give a false impression that the subtree was protected.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secret_outputs: Vec<String>,
+
+    /// Bounded iteration over a runtime-produced array (spec #443
+    /// Tier 1). Permitted only in non-judging contexts — `setup:`,
+    /// `teardown:`, fixture `up:`/`down:`, and the criterion-/
+    /// check-level equivalents — never inside a check's `steps:`
+    /// (Tier 2, gated behind #509). The array is read once, when this
+    /// step is reached; `max:` is a mandatory ceiling, and exceeding it
+    /// aborts the block rather than silently iterating fewer times
+    /// than authored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub for_each: Option<ExprStr>,
+
+    /// Mandatory iteration ceiling for `for_each:`. Required by #444's
+    /// totality commitment: the worst-case step count must be
+    /// computable from the Verification Definition alone, and
+    /// `max × len(body)` is what makes that possible. Meaningless
+    /// (and rejected by the validator) without `for_each:`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<u32>,
+
+    /// Iteration-scoped binding name for `for_each:` — `as: row` makes
+    /// `$row` resolve to the current element inside this step's body
+    /// and a validation error everywhere else. Meaningless (and
+    /// rejected) without `for_each:`.
+    #[serde(rename = "as", default, skip_serializing_if = "Option::is_none")]
+    pub as_binding: Option<String>,
+
+    /// Inline multi-step loop body — one of the three `for_each:` body
+    /// forms alongside `uses:` and `call:` (exactly one required).
+    /// Recursive in the type so `secret_outputs:`/`outputs:`/`if:`
+    /// etc. are never duplicated onto a separate loop-body type, but
+    /// capped at depth 1 by validation: a step inside this list may
+    /// not itself carry `for_each:` or `steps:`. Also rejected without
+    /// an enclosing `for_each:`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steps: Option<Vec<Step>>,
+
+    /// The `for_each:` body, normalized to a flat, iteration-ready
+    /// step template by the loader: whichever of `uses:`/`call:`/
+    /// `steps:` was authored, with any `call:` invocation already
+    /// flow-expanded (namespaced ids, substituted params, projected
+    /// outputs) exactly as a check's own `call:` steps are. Empty for
+    /// a step with no `for_each:`. Not part of the authored VD schema;
+    /// the runtime clones this once per iteration and binds `as:` to
+    /// the current element before dispatching each clone.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub for_each_body: Vec<Step>,
 
     /// Origin of an expanded action step. Not part of the authored VD
     /// schema; the runtime copies it into `StepStarted.flow`.
@@ -325,5 +380,48 @@ secret: [body]
         let step = serde_yml::from_str::<Step>(yaml).expect("parse");
         assert!(step.uses.is_none());
         assert!(step.call.is_none());
+    }
+
+    #[test]
+    fn for_each_fields_absent_round_trip_the_old_wire_shape_byte_identically() {
+        // Spec #443: `for_each`/`max`/`as`/`steps` are additive — a
+        // definition using none of them must serialize exactly as it
+        // did before this feature existed.
+        let old_shape = "uses: ui/click\n";
+        let step: Step = serde_yml::from_str(old_shape).expect("parse");
+        assert!(step.for_each.is_none());
+        assert!(step.max.is_none());
+        assert!(step.as_binding.is_none());
+        assert!(step.steps.is_none());
+        assert_eq!(serde_yml::to_string(&step).expect("serialize"), old_shape);
+    }
+
+    #[test]
+    fn for_each_fields_parse_and_round_trip() {
+        let yaml =
+            "uses: ui/click\nwith:\n  locator: $row\nfor_each: $inputs.rows\nmax: 5\nas: row\n";
+        let step: Step = serde_yml::from_str(yaml).expect("parse for_each step");
+        assert_eq!(
+            step.for_each.as_ref().map(|e| e.raw.as_str()),
+            Some("$inputs.rows")
+        );
+        assert_eq!(step.max, Some(5));
+        assert_eq!(step.as_binding.as_deref(), Some("row"));
+        assert!(step.steps.is_none());
+        assert_eq!(serde_yml::to_string(&step).expect("serialize"), yaml);
+    }
+
+    #[test]
+    fn for_each_steps_body_form_parses_and_round_trips() {
+        let yaml =
+            "for_each: $inputs.rows\nmax: 5\nas: row\nsteps:\n- uses: ui/click\n- uses: ui/click\n";
+        let step: Step = serde_yml::from_str(yaml).expect("parse for_each steps: body");
+        let body = step.steps.as_ref().expect("steps: body present");
+        assert_eq!(body.len(), 2);
+        assert!(step.uses.is_none());
+        assert!(step.call.is_none());
+        let expected =
+            "for_each: $inputs.rows\nmax: 5\nas: row\nsteps:\n- uses: ui/click\n- uses: ui/click\n";
+        assert_eq!(serde_yml::to_string(&step).expect("serialize"), expected);
     }
 }

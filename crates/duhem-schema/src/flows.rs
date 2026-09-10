@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::assertion::Assertion;
 use crate::includes::MAX_INCLUDE_DEPTH;
 use crate::source::StepSourceOrigin;
-use crate::step::{ExpandedFlowOrigin, Step};
+use crate::step::{ExpandedFlowOrigin, Step, StepCondition};
 use crate::verification::{Flow, FlowCatalog, InputDecl, InputType, VerificationDefinition};
 
 pub(crate) const MAX_FLOW_DEPTH: usize = MAX_INCLUDE_DEPTH;
@@ -43,7 +43,120 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
             );
         }
     }
+
+    // `for_each:` bodies (#443 Tier 1) get the same static flow
+    // expansion as a check's own `call:` steps — a `call:` body is
+    // namespaced and param-substituted once here, up front, so the
+    // runtime never needs the flow catalog: it clones the resulting
+    // flat template once per iteration and only substitutes the
+    // `as:` binding at dispatch time. Best-effort: a malformed
+    // `for_each` (wrong body-form count, depth > 1) is left
+    // unexpanded here and reported by `crate::validate` before any
+    // run reaches it.
+    let mut for_each_counter = 0usize;
+    expand_for_each_in_list(&mut definition.setup, &catalog, &mut for_each_counter);
+    expand_for_each_in_list(&mut definition.teardown, &catalog, &mut for_each_counter);
+    for lifecycle in definition.fixtures.values_mut() {
+        expand_for_each_in_list(&mut lifecycle.up, &catalog, &mut for_each_counter);
+        expand_for_each_in_list(&mut lifecycle.down, &catalog, &mut for_each_counter);
+    }
+    for criterion in &mut definition.criteria {
+        expand_for_each_in_list(&mut criterion.setup, &catalog, &mut for_each_counter);
+        expand_for_each_in_list(&mut criterion.teardown, &catalog, &mut for_each_counter);
+        for check in &mut criterion.checks {
+            expand_for_each_in_list(&mut check.setup, &catalog, &mut for_each_counter);
+            expand_for_each_in_list(&mut check.teardown, &catalog, &mut for_each_counter);
+        }
+    }
     Ok(())
+}
+
+/// Resolve a `for_each:` step's authored body (exactly one of `uses:`,
+/// `call:`, `steps:`) into the `Vec<Step>` `expand_sequence` expects.
+/// `None` when the body shape is invalid — the caller leaves
+/// `for_each_body` empty and `validate_for_each` reports the real
+/// error with a source location.
+fn for_each_body_steps(step: &Step) -> Option<Vec<Step>> {
+    let forms = (
+        step.uses.as_deref().filter(|u| !u.trim().is_empty()),
+        step.call.as_deref().filter(|c| !c.trim().is_empty()),
+        step.steps.as_ref(),
+    );
+    match forms {
+        (Some(uses), None, None) => Some(vec![Step {
+            uses: Some(uses.to_string()),
+            with: step.with.clone(),
+            ..blank_step()
+        }]),
+        (None, Some(call), None) => Some(vec![Step {
+            call: Some(call.to_string()),
+            with: step.with.clone(),
+            ..blank_step()
+        }]),
+        (None, None, Some(body)) => Some(body.clone()),
+        _ => None,
+    }
+}
+
+/// A `Step` with every field at its wire-absent default. Used to
+/// build the synthetic single-step body for the `uses:`/`call:`
+/// for_each body forms without hand-listing every field.
+fn blank_step() -> Step {
+    Step {
+        needs: Vec::new(),
+        id: None,
+        session: None,
+        description: None,
+        condition: StepCondition::Success,
+        uses: None,
+        call: None,
+        with: serde_yml::Value::Null,
+        outputs: BTreeMap::new(),
+        secret_outputs: Vec::new(),
+        for_each: None,
+        max: None,
+        as_binding: None,
+        steps: None,
+        for_each_body: Vec::new(),
+        flow: None,
+        flow_secrets: Vec::new(),
+    }
+}
+
+/// Expand every `for_each:` step's body in one lifecycle step list
+/// (leaf `setup:`/`teardown:`, fixture `up:`/`down:`, or a
+/// criterion-/check-level `setup:`/`teardown:`). Non-`for_each` steps
+/// are untouched. `counter` is threaded across every call so
+/// invocation ordinals stay unique across the whole definition, same
+/// as check-step flow expansion.
+fn expand_for_each_in_list(steps: &mut [Step], catalog: &FlowCatalog, counter: &mut usize) {
+    for step in steps.iter_mut() {
+        if step.for_each.is_none() {
+            continue;
+        }
+        let Some(body_steps) = for_each_body_steps(step) else {
+            continue;
+        };
+        let ordinal = *counter;
+        *counter += 1;
+        let construct = step.call.clone().unwrap_or_else(|| "for_each".to_string());
+        let invocation = step
+            .id
+            .clone()
+            .unwrap_or_else(|| format!("for_each#{ordinal}"));
+        let expanded = expand_sequence(
+            body_steps,
+            catalog,
+            &invocation,
+            Some(&construct),
+            Some(&invocation),
+            &[],
+            counter,
+        );
+        let mut body = expanded.steps;
+        rewrite_steps(&mut body, &expanded.projections);
+        step.for_each_body = body;
+    }
 }
 
 /// Validate the authored surface without mutating it. Messages are
@@ -52,35 +165,59 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
 pub(crate) fn validate_authored(definition: &VerificationDefinition) -> Vec<String> {
     let mut errors = Vec::new();
 
-    for (index, step) in definition.setup.iter().enumerate() {
-        validate_dispatch(step, &format!("setup step {index}"), &mut errors);
-        if let Some(name) = &step.call {
-            errors.push(format!(
-                "flow `{name}` is invoked from setup step {index}; `call:` is only valid in a check"
-            ));
-        }
-    }
-
-    for (index, step) in definition.teardown.iter().enumerate() {
-        validate_dispatch(step, &format!("teardown step {index}"), &mut errors);
-        if let Some(name) = &step.call {
-            errors.push(format!(
-                "flow `{name}` is invoked from teardown step {index}; `call:` is only valid in a check"
-            ));
-        }
-    }
+    validate_lifecycle_dispatch(&definition.setup, "setup step", definition, &mut errors);
+    validate_lifecycle_dispatch(
+        &definition.teardown,
+        "teardown step",
+        definition,
+        &mut errors,
+    );
     for (fixture, lifecycle) in &definition.fixtures {
-        for (phase, steps) in [("up", &lifecycle.up), ("down", &lifecycle.down)] {
-            for (index, step) in steps.iter().enumerate() {
-                validate_dispatch(
-                    step,
-                    &format!("fixture `{fixture}` {phase} step {index}"),
-                    &mut errors,
-                );
-                if step.call.is_some() {
-                    errors.push(format!("flow invocation from fixture `{fixture}` {phase} step {index} is not allowed"));
-                }
-            }
+        validate_lifecycle_dispatch(
+            &lifecycle.up,
+            &format!("fixture `{fixture}` up step"),
+            definition,
+            &mut errors,
+        );
+        validate_lifecycle_dispatch(
+            &lifecycle.down,
+            &format!("fixture `{fixture}` down step"),
+            definition,
+            &mut errors,
+        );
+    }
+    for criterion in &definition.criteria {
+        validate_lifecycle_dispatch(
+            &criterion.setup,
+            &format!("criterion `{}` setup step", criterion.id),
+            definition,
+            &mut errors,
+        );
+        validate_lifecycle_dispatch(
+            &criterion.teardown,
+            &format!("criterion `{}` teardown step", criterion.id),
+            definition,
+            &mut errors,
+        );
+        for check in &criterion.checks {
+            validate_lifecycle_dispatch(
+                &check.setup,
+                &format!(
+                    "criterion `{}` / check `{}` setup step",
+                    criterion.id, check.id
+                ),
+                definition,
+                &mut errors,
+            );
+            validate_lifecycle_dispatch(
+                &check.teardown,
+                &format!(
+                    "criterion `{}` / check `{}` teardown step",
+                    criterion.id, check.id
+                ),
+                definition,
+                &mut errors,
+            );
         }
     }
 
@@ -146,11 +283,111 @@ pub(crate) fn validate_authored(definition: &VerificationDefinition) -> Vec<Stri
     errors
 }
 
+/// Validate one lifecycle step list — `setup:`, `teardown:`, fixture
+/// `up:`/`down:`, or a criterion-/check-level `setup:`/`teardown:`
+/// (§10.3.6). `call:` is ordinarily rejected outside a check (a
+/// lifecycle step's own action is dispatched directly), but a
+/// `for_each:` step's `call:` body form is legitimate here — that's
+/// exactly Tier 1's `for_each` (#443) — so it gets the same flow-param
+/// validation a check's `call:` step already gets.
+fn validate_lifecycle_dispatch(
+    steps: &[Step],
+    label: &str,
+    definition: &VerificationDefinition,
+    errors: &mut Vec<String>,
+) {
+    for (index, step) in steps.iter().enumerate() {
+        let site = format!("{label} {index}");
+        validate_dispatch(step, &site, errors);
+        if let Some(name) = &step.call {
+            if step.for_each.is_some() {
+                validate_call(
+                    name,
+                    step,
+                    &definition.flows,
+                    &definition.inputs,
+                    None,
+                    &site,
+                    errors,
+                );
+            } else {
+                errors.push(format!(
+                    "flow `{name}` is invoked from {site}; `call:` is only valid in a check, or as a `for_each:` step's body"
+                ));
+            }
+        }
+        if step.for_each.is_some()
+            && let Some(body) = &step.steps
+        {
+            // The `steps:` body form (depth capped at 1 by
+            // `validate_for_each` — not re-checked here): each body
+            // step still needs the ordinary exactly-one-of-`uses:`/
+            // `call:` dispatch check, and a `call:` body step gets the
+            // same flow-param validation any other `call:` gets.
+            for (inner_index, inner) in body.iter().enumerate() {
+                let inner_site = format!("{site} body step {inner_index}");
+                validate_dispatch(inner, &inner_site, errors);
+                if let Some(name) = &inner.call {
+                    validate_call(
+                        name,
+                        inner,
+                        &definition.flows,
+                        &definition.inputs,
+                        None,
+                        &inner_site,
+                        errors,
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn validate_dispatch(step: &Step, site: &str, errors: &mut Vec<String>) {
     if step.call.is_some() && step.session.is_some() {
         errors.push(format!(
             "{site}: `session:` belongs on browser-driving steps inside the flow, not on `call:`"
         ));
+    }
+    // `for_each:` (#443 Tier 1) extends the exactly-one rule from two
+    // body forms to three — `uses:`, `call:`, or an inline `steps:`
+    // list — rather than introducing a separate concept. `steps:` and
+    // `max:`/`as:` are meaningless without an enclosing `for_each:`,
+    // so they're rejected there instead of silently ignored.
+    if step.for_each.is_some() {
+        let forms = [
+            step.uses.as_deref().is_some_and(|u| !u.trim().is_empty()),
+            step.call.as_deref().is_some_and(|c| !c.trim().is_empty()),
+            step.steps.is_some(),
+        ];
+        match forms.iter().filter(|present| **present).count() {
+            1 => {}
+            0 => errors.push(format!(
+                "{site}: a `for_each:` step must declare exactly one of `uses:`, `call:`, or `steps:` as its body"
+            )),
+            _ => errors.push(format!(
+                "{site}: a `for_each:` step must declare exactly one of `uses:`, `call:`, or `steps:` as its body, not more than one"
+            )),
+        }
+        return;
+    }
+    if step.steps.is_some() {
+        errors.push(format!(
+            "{site}: `steps:` is only valid on a step that also declares `for_each:`"
+        ));
+        return;
+    }
+    if step.max.is_some() {
+        errors.push(format!(
+            "{site}: `max:` is only valid on a step that also declares `for_each:`"
+        ));
+        return;
+    }
+    if step.as_binding.is_some() {
+        errors.push(format!(
+            "{site}: `as:` is only valid on a step that also declares `for_each:`"
+        ));
+        return;
     }
     match (step.uses.as_deref(), step.call.as_deref()) {
         (Some(uses), None) if !uses.trim().is_empty() => {}
@@ -183,6 +420,18 @@ fn validate_flow(name: &str, flow: &Flow, catalog: &FlowCatalog, errors: &mut Ve
     for (index, step) in flow.steps.iter().enumerate() {
         let site = format!("flow `{name}` step {index}");
         validate_dispatch(step, &site, errors);
+        if step.for_each.is_some() {
+            // A flow is callable from anywhere a `call:` is legal,
+            // including a check body. Allowing `for_each:` on a flow's
+            // own step would let Tier 2 (for_each around judging
+            // steps, still gated behind #509) in through that door
+            // uncontrolled. `for_each:` stays a property of the *call
+            // site* (a check's `setup:`/`teardown:` or a for_each
+            // step's own body), never of the reusable template.
+            errors.push(format!(
+                "{site}: `for_each:` is not allowed inside a `flows:` catalog entry — a flow may be called from a check, where `for_each` is Tier 2 (not yet built, see #509); use `for_each:` at the call site instead"
+            ));
+        }
         if let Some(id) = &step.id
             && !ids.insert(id.as_str())
         {
@@ -392,6 +641,10 @@ fn expand_sequence(
                     name: name.to_string(),
                     invocation: invocation.to_string(),
                     inner_index: inner_index as u32,
+                    // Patched in per-clone by the `for_each` runtime
+                    // expansion (#443 Tier 1); this static template has
+                    // no iteration yet.
+                    iteration: None,
                 });
             }
             step.flow_secrets = inherited_secrets.to_vec();
@@ -660,6 +913,105 @@ mod tests {
 
     fn authored(yaml: &str) -> VerificationDefinition {
         VerificationDefinition::from_yaml_str(yaml).expect("parse")
+    }
+
+    /// #443: criterion-/check-level `setup:`/`teardown:` dispatch was
+    /// never validated before this work — a `call:` there reached
+    /// `Step::uses_name()` at runtime (which `.expect()`s `uses` is
+    /// `Some`) and panicked instead of failing `duhem validate`. Pin
+    /// both halves: a bare `call:` (no `for_each:`) is rejected with
+    /// the "only valid in a check" message, and the identical `call:`
+    /// *with* `for_each:` — where it's legitimate — validates clean,
+    /// including the flow's own param-type checking.
+    #[test]
+    fn criterion_and_check_level_call_dispatch_is_validated_not_left_to_panic() {
+        let bare_call = authored(
+            r#"
+verification: x
+flows:
+  greet:
+    steps:
+      - uses: cli/invoke
+criteria:
+  - id: AC-1
+    description: x
+    setup:
+      - call: greet
+    checks:
+      - id: AC-1.1
+        steps: []
+        assertions: ["true"]
+"#,
+        );
+        let errors = validate_authored(&bare_call).join("\n");
+        assert!(
+            errors.contains("call:` is only valid in a check, or as a `for_each:` step's body"),
+            "{errors}"
+        );
+
+        let for_each_call = authored(
+            r#"
+verification: x
+inputs:
+  rows: { type: array, default: [] }
+flows:
+  greet:
+    params:
+      name: { type: string }
+    steps:
+      - uses: cli/invoke
+        with: { command: [echo, $params.name] }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        setup:
+          - for_each: $inputs.rows
+            max: 5
+            as: row
+            call: greet
+            with: { name: $row }
+        steps: []
+        assertions: ["true"]
+"#,
+        );
+        assert!(
+            validate_authored(&for_each_call).is_empty(),
+            "{:?}",
+            validate_authored(&for_each_call)
+        );
+
+        // A mistyped flow param is still caught (proves real
+        // flow-param validation runs here, not just a shape check).
+        let bad_param = authored(
+            r#"
+verification: x
+inputs:
+  rows: { type: array, default: [] }
+flows:
+  greet:
+    params:
+      name: { type: string }
+    steps:
+      - uses: cli/invoke
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        setup:
+          - for_each: $inputs.rows
+            max: 5
+            as: row
+            call: greet
+            with: { nam: $row }
+        steps: []
+        assertions: ["true"]
+"#,
+        );
+        let errors = validate_authored(&bad_param).join("\n");
+        assert!(errors.contains("missing parameter `name`"), "{errors}");
     }
 
     #[test]
@@ -992,6 +1344,100 @@ criteria:
                 flow.inner_index
             )),
             Some(("child", "outer__nested", 0))
+        );
+    }
+
+    #[test]
+    fn for_each_uses_body_expands_to_a_single_templated_step_with_provenance() {
+        let mut definition = authored(
+            r#"
+verification: for_each uses body
+setup:
+  - id: loop
+    for_each: $inputs.rows
+    max: 5
+    as: row
+    uses: cli/invoke
+    with: { command: [echo, $row] }
+criteria: []
+"#,
+        );
+        validate_and_expand(&mut definition).expect("expand");
+        let step = &definition.setup[0];
+        assert_eq!(step.for_each_body.len(), 1);
+        let body = &step.for_each_body[0];
+        assert_eq!(body.uses.as_deref(), Some("cli/invoke"));
+        assert_eq!(
+            body.flow.as_ref().map(|f| (f.name.as_str(), f.iteration)),
+            Some(("for_each", None)),
+            "iteration is patched in per-clone at runtime, not at schema-expansion time"
+        );
+    }
+
+    #[test]
+    fn for_each_call_body_expands_the_flow_exactly_like_a_check_call_step() {
+        let mut definition = authored(
+            r#"
+verification: for_each call body
+flows:
+  delete_row:
+    params:
+      row: { type: string }
+    steps:
+      - id: click
+        uses: cli/invoke
+        with: { command: [rm, $params.row] }
+setup:
+  - id: loop
+    for_each: $inputs.rows
+    max: 5
+    as: row
+    call: delete_row
+    with: { row: $row }
+criteria: []
+"#,
+        );
+        validate_and_expand(&mut definition).expect("expand");
+        let step = &definition.setup[0];
+        assert_eq!(step.for_each_body.len(), 1);
+        let body = &step.for_each_body[0];
+        assert!(
+            body.id.as_deref().is_some_and(|id| id.starts_with("loop__")
+                && id.contains("delete_row")
+                && id.ends_with("__click")),
+            "expected a namespaced id under the `loop` invocation, got {:?}",
+            body.id
+        );
+        assert_eq!(body.with["command"][1].as_str(), Some("$row"));
+        assert_eq!(
+            body.flow.as_ref().map(|f| f.name.as_str()),
+            Some("delete_row")
+        );
+    }
+
+    #[test]
+    fn for_each_steps_body_expands_every_inner_step() {
+        let mut definition = authored(
+            r#"
+verification: for_each steps body
+setup:
+  - for_each: $inputs.rows
+    max: 5
+    as: row
+    steps:
+      - uses: cli/invoke
+        with: { command: [echo, first, $row] }
+      - uses: cli/invoke
+        with: { command: [echo, second] }
+criteria: []
+"#,
+        );
+        validate_and_expand(&mut definition).expect("expand");
+        let step = &definition.setup[0];
+        assert_eq!(step.for_each_body.len(), 2);
+        assert_eq!(
+            step.for_each_body[0].with["command"][2].as_str(),
+            Some("$row")
         );
     }
 }

@@ -97,8 +97,15 @@ pub enum Literal {
     Str(String),
 }
 
-/// `$<root>.<segments...>` — the only path form at v0.1. Roots are a
-/// closed enum so a stray `$foo.bar` fails parse, not validation.
+/// `$<root>.<segments...>` — the only path form at v0.1. Six of the
+/// seven `PathRoot` variants are a closed, fixed-keyword set; the
+/// seventh (`Loop`, spec #443) accepts any identifier that isn't one
+/// of those six. So a stray `$foo.bar` no longer fails at *parse*
+/// time — it's provisionally a `for_each` loop reference, and
+/// legitimacy (is `foo` actually the active `as:` binding, in scope
+/// here?) is a validation-time question, the same deferral an
+/// undeclared `$steps.<id>` already gets. See `PathRoot::Loop`'s doc
+/// comment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Path {
     pub root: PathRoot,
@@ -139,6 +146,17 @@ pub enum PathRoot {
     /// (e.g. `uuid()`, `now()`). The closed catalog lives alongside this
     /// grammar.
     Runtime,
+    /// A `for_each` iteration binding (spec #443 Tier 1) — `as: row`
+    /// makes `$row` (and `$row.<field>` into a structured element)
+    /// resolve to the current element. Not a fixed keyword: the parser
+    /// accepts any identifier that isn't one of the six roots above and
+    /// carries it as `segments[0]` rather than adding a variant per
+    /// author-chosen name (which would break `PathRoot`'s `Copy`
+    /// derive). Legitimacy — is this identifier actually the active
+    /// `as:` binding, and is this reference inside that loop's body? —
+    /// is a validation-time question, not a parse-time one, exactly
+    /// like an undeclared `$steps.<id>` today.
+    Loop,
 }
 
 impl PathRoot {
@@ -151,6 +169,12 @@ impl PathRoot {
             Self::Pages => "pages",
             Self::Env => "env",
             Self::Runtime => "runtime",
+            // Never actually rendered as `$loop.<segments[0]>...` — the
+            // authored surface is bare `$<name>`, so every caller that
+            // renders a `Loop` path special-cases `segments[0]` as the
+            // root instead of calling `as_str()`. This arm exists only
+            // so the match stays exhaustive.
+            Self::Loop => "loop",
         }
     }
 }

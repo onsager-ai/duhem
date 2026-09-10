@@ -29,5 +29,6 @@ pub(crate) fn origin(step: &Step) -> Option<FlowOrigin> {
         name: flow.name.clone(),
         invocation: flow.invocation.clone(),
         inner_index: flow.inner_index,
+        iteration: flow.iteration,
     })
 }

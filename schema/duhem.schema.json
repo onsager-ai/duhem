@@ -620,6 +620,13 @@
     "Step": {
       "additionalProperties": false,
       "properties": {
+        "as": {
+          "description": "Iteration-scoped binding name for `for_each:` — `as: row` makes `$row` resolve to the current element inside this step's body and a validation error everywhere else. Meaningless (and rejected) without `for_each:`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "call": {
           "description": "Reusable flow name. The loader expands this invocation into ordinary action steps before the runtime sees the definition.",
           "type": [
@@ -634,6 +641,17 @@
             "null"
           ]
         },
+        "for_each": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ExprStr"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Bounded iteration over a runtime-produced array (spec #443 Tier 1). Permitted only in non-judging contexts — `setup:`, `teardown:`, fixture `up:`/`down:`, and the criterion-/ check-level equivalents — never inside a check's `steps:` (Tier 2, gated behind #509). The array is read once, when this step is reached; `max:` is a mandatory ceiling, and exceeding it aborts the block rather than silently iterating fewer times than authored."
+        },
         "id": {
           "description": "Optional — required only when another assertion or step references this step via `$steps.<id>.outputs.*`. The validator enforces that an unreferenced step may omit `id`, while a referenced step must declare one and that the id is unique within its check.",
           "type": [
@@ -644,6 +662,15 @@
         "if": {
           "$ref": "#/definitions/StepCondition",
           "description": "Dispatch condition, serialized as `if:`. Omission is byte-identical to `if: success`."
+        },
+        "max": {
+          "description": "Mandatory iteration ceiling for `for_each:`. Required by #444's totality commitment: the worst-case step count must be computable from the Verification Definition alone, and `max × len(body)` is what makes that possible. Meaningless (and rejected by the validator) without `for_each:`.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "needs": {
           "description": "Reserved for a friendly validation error: fixtures may only be requested by checks, never by lifecycle steps.",
@@ -670,6 +697,16 @@
           "description": "Bare name of a browser context declared by the enclosing check.",
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "steps": {
+          "description": "Inline multi-step loop body — one of the three `for_each:` body forms alongside `uses:` and `call:` (exactly one required). Recursive in the type so `secret_outputs:`/`outputs:`/`if:` etc. are never duplicated onto a separate loop-body type, but capped at depth 1 by validation: a step inside this list may not itself carry `for_each:` or `steps:`. Also rejected without an enclosing `for_each:`.",
+          "items": {
+            "$ref": "#/definitions/Step"
+          },
+          "type": [
+            "array",
             "null"
           ]
         },

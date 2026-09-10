@@ -1,4 +1,12 @@
 //! Three-state, mechanically judged expression evaluation.
+//
+// budget-allow: #443's `for_each` added one `PathRoot::Loop` arm
+// (`$<as>` resolution), an `InconclusiveCause` variant, and an
+// `EvalContext::loop_binding` default method, pushing this file ~1%
+// over the 8000-token budget. Track a follow-up to split the
+// evaluator (literal/path/call/binop dispatch vs. `navigate`'s
+// structured-value walk) rather than raising the budget or exempting
+// it long-term.
 
 use chrono::{DateTime, Utc};
 use duhem_schema::{BinOp, Expr, Literal, Path, PathRoot, RuntimeHelper, UnaryOp};
@@ -30,6 +38,9 @@ pub enum InconclusiveCause {
     MissingInput(String),
     /// `$env.X` not in the whitelisted env at run time.
     MissingEnv(String),
+    /// `$<name>` (#443) doesn't match any active `for_each:` binding.
+    /// Defense-in-depth — validation should catch this at authoring time.
+    MissingLoopBinding(String),
     /// `$runtime.fn(...)` for a `fn` outside the closed v1 helper set.
     UnknownRuntimeHelper(String),
     /// Comparison applied to non-comparable shapes, e.g. `"a" < 5`.
@@ -123,6 +134,12 @@ pub trait EvalContext {
         None
     }
     fn fixture_output(&self, _fixture: &str, _step_id: &str, _output: &str) -> Option<&Value> {
+        None
+    }
+    /// The current `for_each:` element, when `name` matches the
+    /// enclosing loop's `as:` binding (#443). Nesting is capped at
+    /// depth 1, so at most one binding is ever active.
+    fn loop_binding(&self, _name: &str) -> Option<&Value> {
         None
     }
     fn env(&self, name: &str) -> Option<&str>;
@@ -315,6 +332,15 @@ fn eval_path(p: &Path, ctx: &dyn EvalContext) -> EvalRes {
             // Bare `$runtime.<name>` (no call): helpers must be called.
             let name = p.segments.join(".");
             Err(InconclusiveCause::UnknownRuntimeHelper(name))
+        }
+        PathRoot::Loop => {
+            // `$<as-name>` (#443) — `segments[0]` is the bound name.
+            let name = p.segments.first().map(String::as_str).unwrap_or("");
+            let base = ctx
+                .loop_binding(name)
+                .cloned()
+                .ok_or_else(|| InconclusiveCause::MissingLoopBinding(name.to_string()))?;
+            navigate(base, name, &p.segments[1.min(p.segments.len())..])
         }
     }
 }

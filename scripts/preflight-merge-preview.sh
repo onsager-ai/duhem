@@ -36,9 +36,7 @@ if ! git -C "$scratch_tree" merge --no-commit --no-ff "$main_commit" >"$merge_ou
     exit 1
 fi
 
-# Reuse build artifacts without making the preview depend on the branch tree.
-mkdir -p "$repo_root/target"
-ln -s "$repo_root/target" "$scratch_tree/target"
-
 printf 'preflight: running merged-tree gate against origin/main at %s\n' "$(git -C "$repo_root" rev-parse --short "$main_commit")"
-(cd "$scratch_tree" && "$@")
+# Keep artifacts with baked-in scratch paths out of the repository's cache.
+# A fresh build costs time, but these paths disappear when cleanup runs.
+(cd "$scratch_tree" && CARGO_TARGET_DIR="$scratch_tree/target" "$@")

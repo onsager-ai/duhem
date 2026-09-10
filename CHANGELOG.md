@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] Fixture `up:`/`down:` conditions and `for_each:` sources now reject undeclared steps and outputs at their source location, using the same validation as `setup:`/`teardown:` while preserving fixture scope diagnostics. (#515)
+
 - [additive] `Step` accepts bounded `for_each:` (mandatory `max:`, `as:` binding, `uses:`/`call:`/`steps:` body) in non-judging lifecycle contexts; rejected with a location inside a check's `steps:` (Tier 2, gated behind #509). `flow` origins gain an optional `iteration`. (#443)
 - [additive] Schema 0.4.3: checks can declare isolated named browser sessions, route UI steps explicitly, and inspect session-attributed evidence; root defaults.max_sessions caps contexts per check (default 4). (#508)
 - [additive] Skipped-step evidence carries optional condition and evaluated operands; check summaries, reporters, dashboard and failure envelopes expose non-zero gated judging-step counts without changing verdicts. (#509)

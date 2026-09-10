@@ -343,6 +343,15 @@ pub fn materialize_sidecar() -> std::io::Result<PathBuf> {
     Ok(dir)
 }
 
+/// Fail fast if Node (resolved the same way [`RunBrowser::launch`] does —
+/// via [`node_command`], honouring `DUHEM_NODE`) is absent or older than
+/// the supported floor. Shared by the runtime launch path and `duhem
+/// browser install`, so an operator who points `duhem run` at a
+/// non-PATH Node gets the same probe from both (#505).
+pub async fn check_node() -> Result<(), ActionError> {
+    check_node_version(&node_command()).await
+}
+
 /// Fail fast if Node is absent or older than the supported floor
 /// (Node 20 LTS; 18 is EOL). Returns the install hint as an
 /// `ActionError` rather than letting a cryptic spawn failure surface.

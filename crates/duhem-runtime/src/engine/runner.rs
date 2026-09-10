@@ -34,7 +34,7 @@ pub(crate) use crate::engine::outcome::{
 
 use crate::engine::capture::{CapturePolicy, target_from_step};
 use crate::engine::context::{RunContext, RunState, json_to_value};
-use crate::engine::gating::{skip_reason as gate_skip_reason, step_failed};
+use crate::engine::gating::{evaluate as evaluate_gate, step_failed};
 use crate::engine::registry::{ActionRegistry, default_registry, enforce_wait_ceiling};
 use crate::engine::session::{CheckContexts, SessionResolution};
 
@@ -365,6 +365,7 @@ impl Engine {
                         })
                         .await?;
                     return Ok(RunOutcome {
+                        gated_checks: Default::default(),
                         verdict,
                         run_id,
                         // The run aborted before any criterion executed, so
@@ -456,6 +457,7 @@ impl Engine {
                         })
                         .await?;
                     return Ok(RunOutcome {
+                        gated_checks: Default::default(),
                         verdict,
                         run_id,
                         // The run aborted before any criterion executed, so
@@ -468,6 +470,7 @@ impl Engine {
                 }
             }
 
+            let mut gated_checks = BTreeMap::new();
             let mut criterion_verdicts: Vec<CriterionVerdict> = Vec::new();
             let mut failures: Vec<CheckFailure> = Vec::new();
             let mut warnings: Vec<String> = Vec::new();
@@ -483,6 +486,7 @@ impl Engine {
                             &mut failures,
                             &mut warnings,
                             &mut fixture_cleanup,
+                            &mut gated_checks,
                         )
                         .await?;
                     writer
@@ -526,6 +530,7 @@ impl Engine {
                 .await?;
 
             Ok(RunOutcome {
+                gated_checks,
                 verdict: run_verdict,
                 run_id,
                 failures,
@@ -608,6 +613,7 @@ impl Engine {
         failures: &mut Vec<CheckFailure>,
         warnings: &mut Vec<String>,
         cleanup: &mut Vec<CleanupFailure>,
+        gated_checks: &mut BTreeMap<(String, String), u32>,
     ) -> Result<CriterionVerdict, EngineError> {
         // Criterion-level `setup:` (#441 Part B) runs once before any
         // of this criterion's checks — after leaf `setup:`, before any
@@ -665,6 +671,7 @@ impl Engine {
                 };
                 writer
                     .append(EventPayload::CheckFinished {
+                        gated_judging_steps: 0,
                         check_id: check.id.clone(),
                         criterion_id: Some(criterion.id.clone()),
                         verdict: cv.state,
@@ -690,7 +697,7 @@ impl Engine {
                 // reuses the same immutable baseline but still opens a new
                 // context for every attempt.
                 let session = crate::engine::session::resolve(check, run);
-                let cv = self
+                let (cv, gated_judging_steps) = self
                     .run_check_with_retry(
                         writer,
                         run,
@@ -704,6 +711,7 @@ impl Engine {
                     .await?;
                 writer
                     .append(EventPayload::CheckFinished {
+                        gated_judging_steps,
                         check_id: check.id.clone(),
                         criterion_id: Some(criterion.id.clone()),
                         verdict: cv.state,
@@ -711,6 +719,12 @@ impl Engine {
                         session_digest: session.digest(),
                     })
                     .await?;
+                if gated_judging_steps > 0 {
+                    gated_checks.insert(
+                        (criterion.id.clone(), check.id.clone()),
+                        gated_judging_steps,
+                    );
+                }
                 check_verdicts.push(cv);
             }
         }
@@ -754,217 +768,6 @@ impl Engine {
             state,
             checks: check_verdicts,
         })
-    }
-
-    /// Run one check, re-running it from step 0 when `defaults.retry`
-    /// is set and the verdict is retry-eligible (spec #66; see
-    /// [`check_is_retryable`]). Each attempt re-emits the check's
-    /// step / assertion events; only the final attempt's failing
-    /// assertions stay in `failures`.
-    #[allow(clippy::too_many_arguments)]
-    async fn run_check_with_retry(
-        &mut self,
-        writer: &mut EvidenceWriter,
-        run: &mut RunState,
-        fixtures: &duhem_schema::FixtureCatalog,
-        criterion_id: &str,
-        check: &Check,
-        session: &SessionResolution,
-        failures: &mut Vec<CheckFailure>,
-        cleanup: &mut Vec<CleanupFailure>,
-    ) -> Result<CheckVerdict, EngineError> {
-        let max = self.retry.map(|r| r.max).unwrap_or(0);
-        let backoff = self
-            .retry
-            .map(|r| r.backoff)
-            .unwrap_or(RetryBackoff::Exponential);
-        let mut attempt = 0;
-        loop {
-            // Discard any failures a prior (retried) attempt left behind
-            // so only the final attempt's detail reaches the reporter.
-            let failures_mark = failures.len();
-            let mut contexts = if check.sessions.is_some() {
-                Some(CheckContexts::open_named(session, self.browser.as_ref()).await)
-            } else {
-                None
-            };
-            let attempt_result: Result<CheckVerdict, EngineError> = async {
-                run.clear_fixture_outputs();
-
-                // Check-level `setup:` (#441 Part B) runs before this
-                // check's `needs:` fixtures, after criterion `setup:`.
-                // Re-run every retry attempt, like fixtures.
-                let mut check_setup_dispatched = false;
-                let mut check_setup_abort: Option<(crate::engine::setup::AbortReason, String)> =
-                    None;
-                if !check.setup.is_empty() {
-                    let result = crate::engine::setup::run_check_setup(
-                        writer,
-                        &self.registry,
-                        self.browser.as_ref(),
-                        run,
-                        criterion_id,
-                        &check.id,
-                        &check.setup,
-                        &self.child_process_env(writer.run_id()),
-                        &mut check_setup_dispatched,
-                        contexts.as_ref(),
-                    )
-                    .await?;
-                    if let Some(reason) = result.aborted {
-                        check_setup_abort = Some((
-                            reason,
-                            result
-                                .failed_step
-                                .unwrap_or_else(|| "check setup environment".to_string()),
-                        ));
-                    }
-                }
-
-                let mut active = Vec::new();
-                let mut fixture_abort = None;
-                if check_setup_abort.is_none() {
-                    for name in &check.needs {
-                        let fixture = &fixtures[name];
-                        active.push(name.as_str());
-                        let result = crate::engine::setup::run_fixture_up(
-                            writer,
-                            &self.registry,
-                            self.browser.as_ref(),
-                            run,
-                            name,
-                            &check.id,
-                            &fixture.up,
-                            &self.child_process_env(writer.run_id()),
-                        )
-                        .await?;
-                        if let Some(reason) = result.aborted {
-                            fixture_abort = Some((
-                                name.clone(),
-                                reason,
-                                result
-                                    .failed_step
-                                    .unwrap_or_else(|| "fixture environment".to_string()),
-                            ));
-                            break;
-                        }
-                    }
-                }
-                let cv = if let Some((reason, step)) = &check_setup_abort {
-                    failures.push(CheckFailure {
-                        criterion_id: criterion_id.to_string(),
-                        check_id: check.id.clone(),
-                        assertions: vec![FailedAssertion {
-                            expr: "check `setup:` completed".to_string(),
-                            state: VerdictState::Inconclusive(reason.cause()),
-                            detail: Some(format!("check `setup:` failed at step `{step}`")),
-                        }],
-                        captures: Vec::new(),
-                    });
-                    CheckVerdict {
-                        check_id: check.id.clone(),
-                        state: VerdictState::Inconclusive(reason.cause()),
-                    }
-                } else if let Some((name, reason, step)) = fixture_abort {
-                    failures.push(CheckFailure {
-                        criterion_id: criterion_id.to_string(),
-                        check_id: check.id.clone(),
-                        assertions: vec![FailedAssertion {
-                            expr: format!("fixture `{name}` up completed"),
-                            state: VerdictState::Inconclusive(reason.cause()),
-                            detail: Some(format!("fixture `{name}` up failed at step `{step}`")),
-                        }],
-                        captures: Vec::new(),
-                    });
-                    CheckVerdict {
-                        check_id: check.id.clone(),
-                        state: VerdictState::Inconclusive(reason.cause()),
-                    }
-                } else {
-                    self.run_check(
-                        writer,
-                        run,
-                        (criterion_id, check),
-                        session,
-                        failures,
-                        contexts.as_mut(),
-                    )
-                    .await?
-                };
-                for name in active.into_iter().rev() {
-                    let fixture = &fixtures[name];
-                    let mut failures = crate::engine::setup::run_fixture_down(
-                        writer,
-                        &self.registry,
-                        self.browser.as_ref(),
-                        run,
-                        name,
-                        &check.id,
-                        &fixture.down,
-                        &self.child_process_env(writer.run_id()),
-                    )
-                    .await?;
-                    for failure in &mut failures {
-                        failure.step = format!("fixture `{name}`: {}", failure.step);
-                    }
-                    cleanup.append(&mut failures);
-                }
-
-                // Check-level `teardown:` runs after this check's fixtures
-                // are torn down — including after a check `setup:` abort
-                // that dispatched at least one action. Evidence-only: never
-                // replaces the check's verdict. Re-run every retry attempt.
-                if !check.teardown.is_empty() && check_setup_dispatched {
-                    let mut teardown_failures = crate::engine::setup::run_check_teardown(
-                        writer,
-                        &self.registry,
-                        self.browser.as_ref(),
-                        run,
-                        criterion_id,
-                        &check.id,
-                        &check.teardown,
-                        &self.child_process_env(writer.run_id()),
-                        contexts.as_ref(),
-                    )
-                    .await?;
-                    for failure in &mut teardown_failures {
-                        failure.step = format!("check `{}` teardown: {}", check.id, failure.step);
-                    }
-                    cleanup.append(&mut teardown_failures);
-                }
-
-                Ok(cv)
-            }
-            .await;
-            writer.set_session(None);
-            if let Some(contexts) = contexts.as_mut() {
-                let capture = match self.capture {
-                    CapturePolicy::Off => false,
-                    CapturePolicy::Always => true,
-                    CapturePolicy::OnFailure => attempt_result
-                        .as_ref()
-                        .map_or(true, |cv| cv.state != VerdictState::Pass),
-                };
-                let captures = contexts.finish(writer, capture, check).await;
-                if let Some(failure) = failures[failures_mark..]
-                    .iter_mut()
-                    .find(|f| f.check_id == check.id)
-                {
-                    failure.captures.extend(captures);
-                }
-            }
-            let cv = attempt_result?;
-            if attempt < max && check_is_retryable(cv.state) {
-                failures.truncate(failures_mark);
-                attempt += 1;
-                let delay = retry_delay(self.retry_backoff_base, backoff, attempt);
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
-                continue;
-            }
-            return Ok(cv);
-        }
     }
 }
 
@@ -4296,7 +4099,7 @@ criteria:
             .find_map(|event| match event.payload {
                 EventPayload::StepFinished {
                     step_index: 1,
-                    outcome: duhem_evidence::StepOutcome::Skipped { reason },
+                    outcome: duhem_evidence::StepOutcome::Skipped { reason, .. },
                     ..
                 } => Some(reason),
                 _ => None,

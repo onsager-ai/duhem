@@ -1,3 +1,4 @@
+import { GatedJudgingNotice } from "../components/GatedJudgingNotice";
 // Run report (#86): the run summary panel — a check-verdict roll-up,
 // run metadata, and inputs — rendered inside the shared RunScaffold
 // tree (criteria → checks in the rail, this summary in the panel).
@@ -178,7 +179,7 @@ function StatusBreakdown({
   );
 }
 
-function RunSummary({ run }: { run: RunDetail }) {
+export function RunSummary({ run }: { run: RunDetail }) {
   const checks = tallyChecks(run.criteria);
   const criteria = tallyCriteria(run.criteria);
   const inputs = Object.entries(run.inputs);
@@ -196,6 +197,17 @@ function RunSummary({ run }: { run: RunDetail }) {
           not change this run&apos;s verdict.
         </div>
       )}
+
+      {run.criteria.flatMap((criterion) => criterion.checks
+        .filter((check) => (check.gated_judging_steps ?? 0) > 0)
+        .map((check) => (
+          <p key={`${criterion.id}::${check.id}`}>
+            <Link to={`/run/${encodeURIComponent(run.run_id)}/check/${encodeURIComponent(`${criterion.id}::${check.id}`)}`}>
+              {criterion.id}::{check.id}
+            </Link>{": "}
+            <GatedJudgingNotice count={check.gated_judging_steps} />
+          </p>
+        )))}
 
       {/* Checks and criteria use different denominators. Keep both explicit:
           criteria without checks must remain visible instead of disappearing

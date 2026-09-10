@@ -124,7 +124,7 @@ impl TtyBoard {
                 outcome: outcome.clone(),
                 judgment: None,
                 detail: detail.map(str::to_string).or_else(|| match outcome {
-                    duhem_evidence::StepOutcome::Skipped { reason } => Some(reason.clone()),
+                    duhem_evidence::StepOutcome::Skipped { reason, .. } => Some(reason.clone()),
                     _ => None,
                 }),
                 duration: step.since.elapsed(),

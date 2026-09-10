@@ -108,7 +108,12 @@ impl Value {
     }
 }
 
+pub(crate) mod operands;
+
 pub trait EvalContext {
+    /// Optional observation of values already evaluated; never a judge input.
+    fn record_operand(&self, _expr: &Expr, _value: &Value) {}
+
     fn input(&self, name: &str) -> Option<&Value>;
     fn page(&self, _page: &str, _element: &str) -> Option<&Value> {
         None
@@ -202,7 +207,7 @@ pub(crate) fn eval_to_value(
 type EvalRes = Result<Value, InconclusiveCause>;
 
 fn eval_value(expr: &Expr, ctx: &dyn EvalContext) -> EvalRes {
-    match expr {
+    let result = match expr {
         Expr::Lit(l) => Ok(literal_to_value(l)),
         Expr::Path(p) => eval_path(p, ctx),
         Expr::Call { path, args } => eval_call(path, args, ctx),
@@ -219,7 +224,11 @@ fn eval_value(expr: &Expr, ctx: &dyn EvalContext) -> EvalRes {
                 }),
             },
         },
+    };
+    if let Ok(value) = &result {
+        ctx.record_operand(expr, value);
     }
+    result
 }
 
 fn literal_to_value(l: &Literal) -> Value {

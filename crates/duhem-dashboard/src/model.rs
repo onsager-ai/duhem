@@ -11,6 +11,10 @@ use chrono::{DateTime, Utc};
 use duhem_evidence::{Event, RunOrigin, RunStatus, StepOutcome, VerdictState};
 use serde::Serialize;
 
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
 /// Discriminates runs with recorded children from terminal leaves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -88,6 +92,8 @@ pub struct CriterionDetail {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckRef {
+    #[serde(skip_serializing_if = "is_zero")]
+    pub gated_judging_steps: u32,
     pub id: String,
     pub verdict: Option<VerdictState>,
 }
@@ -95,6 +101,8 @@ pub struct CheckRef {
 /// `GET /api/runs/:run_id/checks/:crit::check`.
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckDetail {
+    #[serde(skip_serializing_if = "is_zero")]
+    pub gated_judging_steps: u32,
     pub criterion_id: String,
     pub check_id: String,
     pub verdict: Option<VerdictState>,
@@ -261,6 +269,9 @@ pub struct AssertionDiff {
 /// contract (`docs/failure-envelope-contract.md`).
 #[derive(Debug, Clone, Serialize)]
 pub struct FailureEnvelope {
+    /// Includes passing checks whose judging steps were gated.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub gated_checks: Vec<duhem_summary::CheckGatingSummary>,
     pub run_id: String,
     pub verification: String,
     pub verdict: Option<VerdictState>,
@@ -270,6 +281,8 @@ pub struct FailureEnvelope {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FailingCheck {
+    #[serde(skip_serializing_if = "is_zero")]
+    pub gated_judging_steps: u32,
     pub criterion_id: String,
     pub check_id: String,
     pub verdict: Option<VerdictState>,

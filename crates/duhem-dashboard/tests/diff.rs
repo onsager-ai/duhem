@@ -105,6 +105,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, screenshot: boo
         VerdictState::Fail
     };
     w.append(EventPayload::CheckFinished {
+        gated_judging_steps: 0,
         check_id: "AC-1.1".into(),
         criterion_id: Some("AC-1".into()),
         verdict,

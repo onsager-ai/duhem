@@ -2,6 +2,223 @@
 use super::*;
 
 impl Engine {
+    /// Run one check, re-running it from step 0 when `defaults.retry`
+    /// is set and the verdict is retry-eligible (spec #66; see
+    /// [`check_is_retryable`]). Each attempt re-emits the check's
+    /// step / assertion events; only the final attempt's failing
+    /// assertions stay in `failures`.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn run_check_with_retry(
+        &mut self,
+        writer: &mut EvidenceWriter,
+        run: &mut RunState,
+        fixtures: &duhem_schema::FixtureCatalog,
+        criterion_id: &str,
+        check: &Check,
+        session: &SessionResolution,
+        failures: &mut Vec<CheckFailure>,
+        cleanup: &mut Vec<CleanupFailure>,
+    ) -> Result<(CheckVerdict, u32), EngineError> {
+        let max = self.retry.map(|r| r.max).unwrap_or(0);
+        let backoff = self
+            .retry
+            .map(|r| r.backoff)
+            .unwrap_or(RetryBackoff::Exponential);
+        let mut attempt = 0;
+        loop {
+            // Discard any failures a prior (retried) attempt left behind
+            // so only the final attempt's detail reaches the reporter.
+            let failures_mark = failures.len();
+            let mut contexts = if check.sessions.is_some() {
+                Some(CheckContexts::open_named(session, self.browser.as_ref()).await)
+            } else {
+                None
+            };
+            let attempt_result: Result<(CheckVerdict, u32), EngineError> = async {
+                run.clear_fixture_outputs();
+
+                // Check-level `setup:` (#441 Part B) runs before this
+                // check's `needs:` fixtures, after criterion `setup:`.
+                // Re-run every retry attempt, like fixtures.
+                let mut check_setup_dispatched = false;
+                let mut check_setup_abort: Option<(crate::engine::setup::AbortReason, String)> =
+                    None;
+                if !check.setup.is_empty() {
+                    let result = crate::engine::setup::run_check_setup(
+                        writer,
+                        &self.registry,
+                        self.browser.as_ref(),
+                        run,
+                        criterion_id,
+                        &check.id,
+                        &check.setup,
+                        &self.child_process_env(writer.run_id()),
+                        &mut check_setup_dispatched,
+                        contexts.as_ref(),
+                    )
+                    .await?;
+                    if let Some(reason) = result.aborted {
+                        check_setup_abort = Some((
+                            reason,
+                            result
+                                .failed_step
+                                .unwrap_or_else(|| "check setup environment".to_string()),
+                        ));
+                    }
+                }
+
+                let mut active = Vec::new();
+                let mut fixture_abort = None;
+                if check_setup_abort.is_none() {
+                    for name in &check.needs {
+                        let fixture = &fixtures[name];
+                        active.push(name.as_str());
+                        let result = crate::engine::setup::run_fixture_up(
+                            writer,
+                            &self.registry,
+                            self.browser.as_ref(),
+                            run,
+                            name,
+                            &check.id,
+                            &fixture.up,
+                            &self.child_process_env(writer.run_id()),
+                        )
+                        .await?;
+                        if let Some(reason) = result.aborted {
+                            fixture_abort = Some((
+                                name.clone(),
+                                reason,
+                                result
+                                    .failed_step
+                                    .unwrap_or_else(|| "fixture environment".to_string()),
+                            ));
+                            break;
+                        }
+                    }
+                }
+                let (cv, gated_judging_steps) = if let Some((reason, step)) = &check_setup_abort {
+                    failures.push(CheckFailure {
+                        criterion_id: criterion_id.to_string(),
+                        check_id: check.id.clone(),
+                        assertions: vec![FailedAssertion {
+                            expr: "check `setup:` completed".to_string(),
+                            state: VerdictState::Inconclusive(reason.cause()),
+                            detail: Some(format!("check `setup:` failed at step `{step}`")),
+                        }],
+                        captures: Vec::new(),
+                    });
+                    (
+                        CheckVerdict {
+                            check_id: check.id.clone(),
+                            state: VerdictState::Inconclusive(reason.cause()),
+                        },
+                        0,
+                    )
+                } else if let Some((name, reason, step)) = fixture_abort {
+                    failures.push(CheckFailure {
+                        criterion_id: criterion_id.to_string(),
+                        check_id: check.id.clone(),
+                        assertions: vec![FailedAssertion {
+                            expr: format!("fixture `{name}` up completed"),
+                            state: VerdictState::Inconclusive(reason.cause()),
+                            detail: Some(format!("fixture `{name}` up failed at step `{step}`")),
+                        }],
+                        captures: Vec::new(),
+                    });
+                    (
+                        CheckVerdict {
+                            check_id: check.id.clone(),
+                            state: VerdictState::Inconclusive(reason.cause()),
+                        },
+                        0,
+                    )
+                } else {
+                    self.run_check(
+                        writer,
+                        run,
+                        (criterion_id, check),
+                        session,
+                        failures,
+                        contexts.as_mut(),
+                    )
+                    .await?
+                };
+                for name in active.into_iter().rev() {
+                    let fixture = &fixtures[name];
+                    let mut failures = crate::engine::setup::run_fixture_down(
+                        writer,
+                        &self.registry,
+                        self.browser.as_ref(),
+                        run,
+                        name,
+                        &check.id,
+                        &fixture.down,
+                        &self.child_process_env(writer.run_id()),
+                    )
+                    .await?;
+                    for failure in &mut failures {
+                        failure.step = format!("fixture `{name}`: {}", failure.step);
+                    }
+                    cleanup.append(&mut failures);
+                }
+
+                // Check-level `teardown:` runs after this check's fixtures
+                // are torn down — including after a check `setup:` abort
+                // that dispatched at least one action. Evidence-only: never
+                // replaces the check's verdict. Re-run every retry attempt.
+                if !check.teardown.is_empty() && check_setup_dispatched {
+                    let mut teardown_failures = crate::engine::setup::run_check_teardown(
+                        writer,
+                        &self.registry,
+                        self.browser.as_ref(),
+                        run,
+                        criterion_id,
+                        &check.id,
+                        &check.teardown,
+                        &self.child_process_env(writer.run_id()),
+                        contexts.as_ref(),
+                    )
+                    .await?;
+                    for failure in &mut teardown_failures {
+                        failure.step = format!("check `{}` teardown: {}", check.id, failure.step);
+                    }
+                    cleanup.append(&mut teardown_failures);
+                }
+
+                Ok((cv, gated_judging_steps))
+            }
+            .await;
+            writer.set_session(None);
+            if let Some(contexts) = contexts.as_mut() {
+                let capture = match self.capture {
+                    CapturePolicy::Off => false,
+                    CapturePolicy::Always => true,
+                    CapturePolicy::OnFailure => attempt_result
+                        .as_ref()
+                        .map_or(true, |(cv, _)| cv.state != VerdictState::Pass),
+                };
+                let captures = contexts.finish(writer, capture, check).await;
+                if let Some(failure) = failures[failures_mark..]
+                    .iter_mut()
+                    .find(|f| f.check_id == check.id)
+                {
+                    failure.captures.extend(captures);
+                }
+            }
+            let (cv, gated_judging_steps) = attempt_result?;
+            if attempt < max && check_is_retryable(cv.state) {
+                failures.truncate(failures_mark);
+                attempt += 1;
+                let delay = retry_delay(self.retry_backoff_base, backoff, attempt);
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
+                continue;
+            }
+            return Ok((cv, gated_judging_steps));
+        }
+    }
+
     pub(super) async fn run_check(
         &mut self,
         writer: &mut EvidenceWriter,
@@ -10,7 +227,7 @@ impl Engine {
         session: &SessionResolution,
         failures: &mut Vec<CheckFailure>,
         named: Option<&mut CheckContexts>,
-    ) -> Result<CheckVerdict, EngineError> {
+    ) -> Result<(CheckVerdict, u32), EngineError> {
         let (criterion_id, check) = target;
         let mut ctx = RunContext::new(run);
 
@@ -78,6 +295,7 @@ impl Engine {
             // Per-step evidence (resolved `with:` + outputs) for implicit
             // judgment (#280). Empty = the step didn't run.
             let mut step_evidence = vec![StepEvidence::empty(); check.steps.len()];
+            let mut gated_judging_steps = 0;
             for (idx, step) in check.steps.iter().enumerate() {
                 writer.set_session(step.session.as_deref());
                 let check_browser = contexts.browsers.get(&step.session);
@@ -85,8 +303,12 @@ impl Engine {
                     .storyboards
                     .entry(step.session.clone())
                     .or_default();
-                let gate_reason = gate_skip_reason(&step.condition, failed_by.as_deref());
-                let cleanup_step = failed_by.is_some() && gate_reason.is_none();
+                let (gate, condition_error) =
+                    match evaluate_gate(step, idx, failed_by.as_deref(), &ctx) {
+                        Ok(gate) => (gate, None),
+                        Err(error) => (None, Some(error)),
+                    };
+                let cleanup_step = failed_by.is_some() && gate.is_none();
                 if cleanup_step {
                     cleanup_steps.insert(idx);
                 }
@@ -94,7 +316,9 @@ impl Engine {
                 // context available without bifurcating evidence.
                 let mut resolved_with = step.with.clone();
                 let catalog_reference = page_reference(&step.with);
-                let step_error = if gate_reason.is_none() {
+                let step_error = if condition_error.is_some() {
+                    condition_error
+                } else if gate.is_none() {
                     substitute_with(&mut resolved_with, &ctx).err().map(|u| {
                         EngineError::UnresolvedReference {
                             context: u.rendered_context(),
@@ -110,7 +334,7 @@ impl Engine {
                 // `timeout:` already in the payload wins; this only fills the
                 // gap. With no manifest default, the action's built-in
                 // `DEFAULT_TIMEOUT` (5s) remains the last resort.
-                if gate_reason.is_none()
+                if gate.is_none()
                     && let Some(default) = self.default_timeout
                 {
                     apply_default_timeout(&mut resolved_with, default);
@@ -121,7 +345,7 @@ impl Engine {
                 // A gated or otherwise unexecuted step never "looked" for
                 // anything, so recording its
                 // locator would be misleading evidence.
-                let will_run = gate_reason.is_none()
+                let will_run = gate.is_none()
                     && step_error.is_none()
                     && !environment_failed
                     && self.registry.contains_key(step.uses_name());
@@ -147,19 +371,16 @@ impl Engine {
                 // action's contract without a second registry lookup. The
                 // invocation itself stays *after* `StepStarted` — see the
                 // registration comment below.
-                let dispatcher = if gate_reason.is_some()
-                    || step_error.is_some()
-                    || !known
-                    || environment_failed
-                {
-                    None
-                } else {
-                    Some(
-                        self.registry
-                            .get(step.uses_name())
-                            .expect("known checked above"),
-                    )
-                };
+                let dispatcher =
+                    if gate.is_some() || step_error.is_some() || !known || environment_failed {
+                        None
+                    } else {
+                        Some(
+                            self.registry
+                                .get(step.uses_name())
+                                .expect("known checked above"),
+                        )
+                    };
 
                 crate::engine::flow::register_secrets(writer, step, &ctx);
 
@@ -176,11 +397,26 @@ impl Engine {
                     })
                     .await?;
 
-                if let Some(reason) = gate_reason {
+                if let Some(duhem_evidence::StepOutcome::Skipped {
+                    reason,
+                    condition,
+                    operands,
+                }) = gate
+                {
+                    if condition.is_some()
+                        && self
+                            .registry
+                            .get(step.uses_name())
+                            .is_some_and(|action| action.judges())
+                    {
+                        gated_judging_steps += 1;
+                    }
                     writer
                         .append(EventPayload::StepFinished {
                             step_index: idx as u32,
                             outcome: duhem_evidence::StepOutcome::Skipped {
+                                condition,
+                                operands,
                                 reason: reason.clone(),
                             },
                             detail: None,
@@ -446,7 +682,7 @@ impl Engine {
                     captures,
                 });
             }
-            Ok(verdict)
+            Ok((verdict, gated_judging_steps))
         }
         .await;
         writer.set_session(None);

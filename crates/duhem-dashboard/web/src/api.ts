@@ -24,6 +24,7 @@ export interface RunsListEntry {
 }
 
 export interface CheckRef {
+  gated_judging_steps?: number;
   id: string;
   verdict: Verdict | null;
 }
@@ -54,7 +55,7 @@ export interface RunDetail {
 export interface CleanupStepDetail {
   step_index: number;
   uses: string;
-  outcome: "ok" | "error" | "timeout" | { skipped: { reason: string } };
+  outcome: "ok" | "error" | "timeout" | { skipped: { reason: string; condition?: string; operands?: Record<string, unknown> } };
   fixture_name?: string;
   check_id?: string;
 }
@@ -82,6 +83,7 @@ export interface SpanModel {
 }
 
 export interface CheckDetail {
+  gated_judging_steps?: number;
   criterion_id: string;
   check_id: string;
   verdict: Verdict | null;

@@ -98,7 +98,17 @@ pub enum StepOutcome {
     Ok,
     Error,
     Timeout,
-    Skipped { reason: String },
+    Skipped {
+        reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        condition: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operands: Option<BTreeMap<String, serde_json::Value>>,
+    },
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 /// Assertion and finished-verdict fields share the same three-state
@@ -376,6 +386,10 @@ pub enum EventPayload {
     },
     CheckFinished {
         check_id: String,
+        /// Judging steps gated in the final attempt, never lifecycle steps.
+        /// Evidence only: does not contribute to the recorded verdict.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        gated_judging_steps: u32,
         /// Owning criterion. Lets readers attribute checks that emitted no
         /// `step_started`, including `steps: []` checks. Optional for traces
         /// recorded before spec #490.
@@ -574,6 +588,8 @@ mod tests {
             payload: EventPayload::StepFinished {
                 step_index: 1,
                 outcome: StepOutcome::Skipped {
+                    condition: None,
+                    operands: None,
                     reason: "blocked by failed step `login`".into(),
                 },
                 detail: None,
@@ -635,6 +651,7 @@ mod tests {
             seq: 8,
             ts: ts(),
             payload: EventPayload::CheckFinished {
+                gated_judging_steps: 0,
                 check_id: "AC-2.1".into(),
                 criterion_id: Some("AC-2".into()),
                 verdict: VerdictState::Pass,
@@ -857,6 +874,7 @@ mod tests {
         );
         assert!(
             EventPayload::CheckFinished {
+                gated_judging_steps: 0,
                 check_id: "x".into(),
                 criterion_id: None,
                 verdict: VerdictState::Pass,
@@ -904,5 +922,20 @@ mod tests {
             serde_json::from_str::<EventPayload>(&json).expect("round trip"),
             payload
         );
+    }
+}
+
+#[cfg(test)]
+mod skipped_compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn old_skipped_payload_round_trips_without_null_fields() {
+        let old = r#"{"skipped":{"reason":"blocked by failed step `login`"}}"#;
+        let outcome: StepOutcome = serde_json::from_str(old).unwrap();
+        assert_eq!(serde_json::to_string(&outcome).unwrap(), old);
+        let old_check = r#"{"kind":"check_finished","check_id":"C","verdict":"pass"}"#;
+        let event: EventPayload = serde_json::from_str(old_check).unwrap();
+        assert_eq!(serde_json::to_string(&event).unwrap(), old_check);
     }
 }

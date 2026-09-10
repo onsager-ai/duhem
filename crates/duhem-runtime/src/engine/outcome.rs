@@ -662,6 +662,9 @@ pub trait CheckFilter: Send + Sync {
 /// store by `run_id`.
 #[derive(Debug, Clone)]
 pub struct RunOutcome {
+    /// Non-zero gated judging-step counts, keyed by criterion and check.
+    /// Kept separate from the judge's verdict and lifecycle outcomes.
+    pub gated_checks: std::collections::BTreeMap<(String, String), u32>,
     pub verdict: RunVerdict,
     pub run_id: String,
     /// Checks that did not pass, each with its failing assertions.

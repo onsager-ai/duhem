@@ -165,7 +165,19 @@ impl EvidenceReader {
         let Some(mut detail) = build_check_detail(&run, criterion_id, check_id, spans) else {
             return Ok(None);
         };
-        detail.replay = replay::model(&self.store, run_id, &detail.artifacts).await?;
+        detail.replay = replay::model(&self.store, run_id, &detail.artifacts, None).await?;
+        let names: std::collections::BTreeSet<_> = detail
+            .artifacts
+            .iter()
+            .filter_map(|a| a.session.clone())
+            .collect();
+        for name in names {
+            if let Some(model) =
+                replay::model(&self.store, run_id, &detail.artifacts, Some(&name)).await?
+            {
+                detail.sessions.push(model);
+            }
+        }
         Ok(Some(detail))
     }
 
@@ -799,6 +811,7 @@ fn build_check_detail(
                     },
                 ..
             } => Some(ArtifactRef {
+                session: evt.session.clone(),
                 id: blob_sha256.clone(),
                 kind: output_name.clone(),
                 url: format!("/api/runs/{}/artifact/{}", run.record.run_id, blob_sha256),
@@ -816,6 +829,7 @@ fn build_check_detail(
         timeline,
         artifacts,
         replay: None,
+        sessions: Vec::new(),
     })
 }
 

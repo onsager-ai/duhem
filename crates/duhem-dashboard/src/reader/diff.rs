@@ -70,6 +70,7 @@ pub(super) fn project_run(run: &RunEvidence) -> RunProjection {
             } => {
                 if let Some(pos) = current {
                     checks[pos].artifacts.push(ArtifactRef {
+                        session: evt.session.clone(),
                         id: blob_sha256.clone(),
                         kind: output_name.clone(),
                         url: format!("/api/runs/{}/artifact/{}", run.record.run_id, blob_sha256),

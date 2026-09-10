@@ -54,6 +54,7 @@ impl Sha256Hex {
 
 /// Append-only writer for a single run.
 pub struct EvidenceWriter {
+    session: Option<String>,
     shared: Arc<SharedWriter>,
     heartbeat_stop: Option<tokio::sync::oneshot::Sender<()>>,
     heartbeat_task: Option<tokio::task::JoinHandle<()>>,
@@ -84,6 +85,15 @@ struct SharedWriter {
 }
 
 impl EvidenceWriter {
+    /// Select context attribution for subsequent foreground step/capture events.
+    pub fn set_session(&mut self, session: Option<&str>) {
+        self.session = session.map(str::to_string);
+    }
+
+    pub fn session(&self) -> Option<&str> {
+        self.session.as_deref()
+    }
+
     /// Register the run with the store and open a writer for it.
     ///
     /// `definition_path` + `inputs` land in the run header row (the
@@ -187,6 +197,7 @@ impl EvidenceWriter {
             })
             .await?;
         Ok(Self {
+            session: None,
             shared: Arc::new(SharedWriter {
                 store,
                 run_id,
@@ -232,7 +243,7 @@ impl EvidenceWriter {
                 tokio::select! {
                     _ = &mut stop_rx => break,
                     _ = ticker.tick() => {
-                        if append_shared(&shared, EventPayload::RunHeartbeat).await.is_err() {
+                        if append_shared(&shared, EventPayload::RunHeartbeat, None).await.is_err() {
                             break;
                         }
                     }
@@ -281,7 +292,7 @@ impl EvidenceWriter {
     /// Append one event. The caller supplies the `payload`; `seq` and
     /// `ts` are stamped here.
     pub async fn append(&mut self, payload: EventPayload) -> Result<u64, WriterError> {
-        append_shared(&self.shared, payload).await
+        append_shared(&self.shared, payload, self.session.as_deref()).await
     }
 
     /// Convenience: emit a `step_observation`, choosing inline vs
@@ -380,6 +391,7 @@ impl Drop for EvidenceWriter {
 async fn append_shared(
     shared: &SharedWriter,
     mut payload: EventPayload,
+    session: Option<&str>,
 ) -> Result<u64, WriterError> {
     let mut next_seq = shared.next_seq.lock().await;
     attach_artifact_counts(shared, &mut payload);
@@ -399,6 +411,15 @@ async fn append_shared(
     }
     let seq = *next_seq;
     let evt = Event {
+        // Deliberately keep session labels in the cheap, uniform masking chokepoint.
+        session: session.map(|name| {
+            shared
+                .secrets
+                .read()
+                .expect("secret registry lock poisoned")
+                .mask(name)
+                .text
+        }),
         seq,
         ts: now_ms(),
         payload,

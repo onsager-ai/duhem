@@ -715,4 +715,24 @@ criteria:
     expect(within(network).getByText("/inside")).toBeTruthy();
     expect(within(network).queryByText("/outside")).toBeNull();
   });
+  it("labels named steps and switches independent browser replays", async () => {
+    const sessions = ["admin", "user1"].map((session, step_index) => ({
+      session, version: 1, clock: "monotonic", duration_ms: 100,
+      steps: [{ step_index, started_ms: 0, finished_ms: 100,
+        screenshot: { id: session, kind: "capture/step-screenshot", url: `${session}.png`, session } }],
+      network: [{ method: "GET", url: `http://app/${session}`, status: 200,
+        started_ms: 1, duration_ms: 2, wait_ms: 1, receive_ms: 1 }],
+      performance: [],
+    }));
+    stub(RUN, { ...CHECK, sessions, timeline: CHECK.timeline.map((event) => ({ ...event, session: "admin" })) });
+    renderAt("/run/R1/check/AC-5%3A%3AAC-5.1?view=replay&session=user1&step=open-page");
+    const selector = await screen.findByRole("combobox", { name: "Browser session" });
+    expect(screen.getAllByTestId("step-session").some((badge) => badge.textContent === "admin")).toBe(true);
+    expect(within(screen.getByTestId("replay-network")).getByText("http://app/admin")).toBeTruthy();
+    fireEvent.change(selector, { target: { value: "user1" } });
+    await waitFor(() => expect(within(screen.getByTestId("replay-network")).getByText("http://app/user1")).toBeTruthy());
+    expect(within(screen.getByTestId("replay-network")).queryByText("http://app/admin")).toBeNull();
+    expect(screen.getByTestId("replay").querySelector("img")?.getAttribute("src")).toBe("user1.png");
+  });
+
 });

@@ -112,6 +112,10 @@ pub struct Step {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
 
+    /// Bare name of a browser context declared by the enclosing check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+
     /// Optional prose explaining what this action is for. Unlike
     /// [`Step::id`], this is a human-facing display label and is never
     /// used as a reference symbol.

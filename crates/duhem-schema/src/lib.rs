@@ -30,6 +30,7 @@ pub mod validate_error;
 mod validate_lifecycle;
 mod validate_pages;
 mod validate_runtime;
+mod validate_sessions;
 pub mod verification;
 mod viewport;
 
@@ -74,7 +75,7 @@ pub const SCHEMA_VERSION: &str = schema_version!();
 #[macro_export]
 macro_rules! schema_version {
     () => {
-        "0.4.1"
+        "0.4.2"
     };
 }
 

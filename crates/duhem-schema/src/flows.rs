@@ -147,6 +147,11 @@ pub(crate) fn validate_authored(definition: &VerificationDefinition) -> Vec<Stri
 }
 
 fn validate_dispatch(step: &Step, site: &str, errors: &mut Vec<String>) {
+    if step.call.is_some() && step.session.is_some() {
+        errors.push(format!(
+            "{site}: `session:` belongs on browser-driving steps inside the flow, not on `call:`"
+        ));
+    }
     match (step.uses.as_deref(), step.call.as_deref()) {
         (Some(uses), None) if !uses.trim().is_empty() => {}
         (None, Some(call)) if !call.trim().is_empty() => {}

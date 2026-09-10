@@ -133,6 +133,9 @@ pub enum ObservationValue {
 /// millisecond precision.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Event {
+    /// Named browser context for this step or capture; absent on legacy runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
     /// Monotonic per run, starting at 0. A backwards-or-flat seq on
     /// read is a hard error.
     pub seq: u64,
@@ -469,6 +472,7 @@ mod tests {
         let mut inputs = BTreeMap::new();
         inputs.insert("workspace_name".into(), serde_json::json!("test-ws-018f"));
         let evt = Event {
+            session: None,
             seq: 0,
             ts: ts(),
             payload: EventPayload::RunStarted {
@@ -527,6 +531,7 @@ mod tests {
     #[test]
     fn step_observation_inline_vs_blob() {
         let inline = Event {
+            session: None,
             seq: 1,
             ts: ts(),
             payload: EventPayload::StepObservation {
@@ -542,6 +547,7 @@ mod tests {
         assert!(!line.contains("blob_sha256"));
 
         let blob = Event {
+            session: None,
             seq: 2,
             ts: ts(),
             payload: EventPayload::StepObservation {
@@ -562,6 +568,7 @@ mod tests {
     #[test]
     fn skipped_step_outcome_round_trips_with_reason() {
         let evt = Event {
+            session: None,
             seq: 2,
             ts: ts(),
             payload: EventPayload::StepFinished {
@@ -624,6 +631,7 @@ mod tests {
         assert_eq!(serde_json::to_string(&event).unwrap(), old);
 
         let seeded = Event {
+            session: None,
             seq: 8,
             ts: ts(),
             payload: EventPayload::CheckFinished {
@@ -692,6 +700,7 @@ mod tests {
         ];
         for payload in cases {
             let evt = Event {
+                session: None,
                 seq: 1,
                 ts: ts(),
                 payload,
@@ -706,6 +715,7 @@ mod tests {
     #[test]
     fn teardown_reuses_setup_step_events_with_a_phase_discriminator() {
         let event = Event {
+            session: None,
             seq: 1,
             ts: ts(),
             payload: EventPayload::SetupStepFinished {
@@ -817,6 +827,7 @@ mod tests {
         ];
         for payload in cases {
             let evt = Event {
+                session: None,
                 seq: 1,
                 ts: ts(),
                 payload: payload.clone(),

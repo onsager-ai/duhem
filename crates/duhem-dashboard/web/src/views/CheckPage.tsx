@@ -1806,7 +1806,7 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
   const checkDesc = vd?.check(check.criterion_id, check.check_id)?.description;
   const critDesc = vd?.criterion(check.criterion_id)?.description;
   const stepNodes = groupTimeline(check.timeline).filter((node) => node.kind === "step");
-  const stepNavigation = new Map(stepNodes.map((node) => [node.key, { ...navigationForStep(node, vd), stepIndex: node.stepIndex }]));
+  const stepNavigation = new Map(stepNodes.map((node) => [node.key, { ...navigationForStep(node, vd, check.criterion_id, check.check_id), stepIndex: node.stepIndex }]));
   const selectedNode = stepNodes.find((node) => stepParam !== undefined &&
     stepNavigation.get(node.key)?.key === stepParam);
   const selectedStep = selectedNode?.stepIndex;
@@ -1816,7 +1816,7 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
   const indexCounts = new Map<number, number>();
   for (const node of stepNodes) indexCounts.set(node.stepIndex, (indexCounts.get(node.stepIndex) ?? 0) + 1);
   const replayNavigation = new Map(stepNodes.filter((node) => indexCounts.get(node.stepIndex) === 1)
-    .map((node) => [node.stepIndex, navigationForStep(node, vd)]));
+    .map((node) => [node.stepIndex, navigationForStep(node, vd, check.criterion_id, check.check_id)]));
   const view = params.get("view") === "replay" ? "replay" : "steps";
 
   const setRawExpanded = (stepIndex: number | string, expanded: boolean) => {

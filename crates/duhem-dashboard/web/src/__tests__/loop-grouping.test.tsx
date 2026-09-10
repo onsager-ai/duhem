@@ -34,10 +34,14 @@ function events(count?: number): TraceEvent[] {
   return [step(0), ...(count === undefined ? [step(1)] : Array.from({ length: count }, (_, i) => step(1, i))), step(2)].flat();
 }
 
-function report(count?: number, step?: string, hasDefinition = true) {
+function report(count?: number, step?: string, hasDefinition = true, omitOwners = false) {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     if (String(url).includes("/checks/")) return new Response(JSON.stringify({
-      criterion_id: "AC-1", check_id: "C", verdict: "fail", spans: [], timeline: events(count), artifacts: [],
+      criterion_id: "AC-1", check_id: "C", verdict: "fail", spans: [], timeline: events(count).map((event) => {
+        if (!omitOwners) return event;
+        const { criterion_id: _criterion, check_id: _check, ...legacy } = event;
+        return legacy;
+      }), artifacts: [],
     }));
     if (String(url).endsWith("/definition")) return new Response(definition);
     return new Response(JSON.stringify({
@@ -166,4 +170,13 @@ it("scroll selection ignores collapsed iterations sharing the same index", async
   await waitFor(() => expect(view.container.querySelector('[aria-current="step"]')?.getAttribute("aria-label"))
     .toBe("loop › Iteration 37"));
   expect(view.container.querySelectorAll(".step-selected")).toHaveLength(1);
+});
+
+it("preserves authored no-loop links when legacy step records omit owner IDs", async () => {
+  const view = report(undefined, "after", true, true);
+  await screen.findByRole("link", { name: "after" });
+  expect(screen.getByRole("link", { name: "before" }).getAttribute("href")).toContain("step=before");
+  expect(screen.getByRole("link", { name: "loop" }).getAttribute("href")).toContain("step=loop");
+  expect(view.container.querySelectorAll(".step-selected")).toHaveLength(1);
+  expect(view.container.querySelector(".step-selected")?.getAttribute("data-step-index")).toBe("2");
 });

@@ -233,7 +233,7 @@ function TreeGroup({
               if (node.kind !== "step") return null;
               const started = node.events[0];
               const flow = flowOrigin(started.flow);
-              const { key, label } = stepNavigation(node, vd);
+              const { key, label } = stepNavigation(node, vd, criterion.id, chk.id);
               const stepSearch = new URLSearchParams(search);
               stepSearch.set("step", key);
               const status = stepStatus(node);
@@ -252,7 +252,7 @@ function TreeGroup({
                 );
                 const target = steps[current + direction];
                 if (target?.kind !== "step") return;
-                const targetKey = stepNavigation(target, vd).key;
+                const targetKey = stepNavigation(target, vd, criterion.id, chk.id).key;
                 const targetSearch = new URLSearchParams(search);
                 targetSearch.set("step", targetKey);
                 navigate({
@@ -337,7 +337,7 @@ function TreeGroup({
                 <div className="ml-3 border-l pl-2" data-testid="step-children">
                   {groupLoops(steps).map((node) => node.kind === "loop"
                     ? <LoopGroup key={node.key} group={node} rail
-                        selectedKey={steps.find((step) => stepNavigation(step, vd).key === activeStep)?.key}
+                        selectedKey={steps.find((step) => stepNavigation(step, vd, criterion.id, chk.id).key === activeStep)?.key}
                         renderStep={renderStep} />
                     : node.kind === "step" ? renderStep(node) : null)}
                 </div>

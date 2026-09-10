@@ -1,10 +1,15 @@
 import { flowOrigin, iterationStepKey, type FlowOrigin, type VdLookup } from "./definition";
 import type { StepNode, TimelineNode } from "./format";
 
-export function stepNavigation(node: StepNode, vd?: VdLookup | null) {
+export function stepNavigation(
+  node: StepNode,
+  vd?: VdLookup | null,
+  criterionId?: string,
+  checkId?: string,
+) {
   const started = node.events[0];
-  const cid = typeof started.criterion_id === "string" ? started.criterion_id : "";
-  const chid = typeof started.check_id === "string" ? started.check_id : "";
+  const cid = criterionId ?? (typeof started.criterion_id === "string" ? started.criterion_id : "");
+  const chid = checkId ?? (typeof started.check_id === "string" ? started.check_id : "");
   const flow = flowOrigin(started.flow);
   const uses = typeof started.uses === "string" ? started.uses : "step";
   return {

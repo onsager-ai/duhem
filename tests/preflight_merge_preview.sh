@@ -105,6 +105,36 @@ green_repo="$(make_fixture green)"
 green_output="$(cd "$green_repo" && "$helper" ./stage.sh 2>&1)"
 [[ "$green_output" == *'merged-tree stage green'* ]]
 
+# Build output must stay disposable, even when the caller exports a shared
+# Cargo target directory and even when a stage fails after writing artifacts.
+isolation_repo="$(make_fixture target-isolation)"
+for stage_status in 0 23; do
+    (
+        cd "$isolation_repo"
+        mkdir -p target
+        printf 'repository artifact\n' > target/existing
+        set +e
+        CARGO_TARGET_DIR="$isolation_repo/target" "$helper" bash -c '
+            set -euo pipefail
+            printf "%s\n" "$PWD" > "$1"
+            mkdir -p target "${CARGO_TARGET_DIR:-target}"
+            printf "preview artifact\n" > target/existing
+            touch target/preview-only
+            touch "${CARGO_TARGET_DIR:-target}/cargo-preview-only"
+            exit "$2"
+        ' _ "$test_root/preview-path" "$stage_status"
+        status=$?
+        set -e
+        [[ "$status" == "$stage_status" ]]
+        if [[ "$(cat target/existing)" != 'repository artifact' ]] ||
+            [[ -e target/preview-only || -e target/cargo-preview-only ]]; then
+            printf 'preview wrote into the repository target directory\n' >&2
+            exit 1
+        fi
+        [[ ! -e "$(cat "$test_root/preview-path")" ]]
+    )
+done
+
 conflict_repo="$(make_fixture conflict)"
 (
     cd "$conflict_repo"

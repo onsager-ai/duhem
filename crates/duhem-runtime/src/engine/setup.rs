@@ -67,6 +67,47 @@ impl AbortReason {
     }
 }
 
+/// Where a lifecycle block (`setup:` / `teardown:` / fixture `up:` /
+/// `down:`) was declared (#441 Part B). Drives both the evidence
+/// scope fields (`fixture_name` / `check_id` / `criterion_id`) and
+/// whether the block's judging actions gate its own abort — fixtures
+/// keep their established Part-A behavior (no implicit-judgment
+/// gating); every other level behaves like leaf `setup:`/`teardown:`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum HookScope<'a> {
+    /// Leaf-level `setup:` / `teardown:` (#20 / #409). No scope
+    /// fields — byte-identical to the pre-#441 wire shape.
+    Leaf,
+    /// Criterion-level `setup:` / `teardown:` (#441 Part B).
+    Criterion(&'a str),
+    /// Check-level `setup:` / `teardown:` (#441 Part B) — the check's
+    /// *own* lifecycle block, not a fixture.
+    Check(&'a str, &'a str),
+    /// Fixture `up:` / `down:` for a consuming check (#449 Part A).
+    Fixture(&'a str, &'a str),
+}
+
+impl<'a> HookScope<'a> {
+    /// Evidence scope fields, in `(fixture_name, check_id,
+    /// criterion_id)` order.
+    fn evidence_fields(self) -> (Option<String>, Option<String>, Option<String>) {
+        match self {
+            HookScope::Leaf => (None, None, None),
+            HookScope::Criterion(criterion) => (None, None, Some(criterion.to_string())),
+            HookScope::Check(criterion, check) => {
+                (None, Some(check.to_string()), Some(criterion.to_string()))
+            }
+            HookScope::Fixture(fixture, check) => {
+                (Some(fixture.to_string()), Some(check.to_string()), None)
+            }
+        }
+    }
+
+    fn is_fixture(self) -> bool {
+        matches!(self, HookScope::Fixture(..))
+    }
+}
+
 /// Outcome of walking the run-level `setup:` block.
 #[derive(Debug)]
 pub(crate) struct SetupResult {
@@ -129,7 +170,7 @@ pub(crate) async fn run_setup_tracking(
         child_env,
         StepPhase::Setup,
         dispatched,
-        None,
+        HookScope::Leaf,
     )
     .await?;
     Ok(SetupResult {
@@ -158,7 +199,130 @@ pub(crate) async fn run_teardown(
         child_env,
         StepPhase::Teardown,
         &mut dispatched,
-        None,
+        HookScope::Leaf,
+    )
+    .await?
+    .cleanup)
+}
+
+/// Criterion-level `setup:` (#441 Part B). `dispatched` mirrors the
+/// leaf contract: `true` once any action was actually invoked, so the
+/// caller knows whether to drain the paired `teardown:` even when
+/// setup aborted partway through.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_criterion_setup(
+    writer: &mut EvidenceWriter,
+    registry: &ActionRegistry,
+    browser: Option<&RunBrowser>,
+    run: &mut RunState,
+    criterion_id: &str,
+    setup: &[Step],
+    child_env: &BTreeMap<String, String>,
+    dispatched: &mut bool,
+) -> Result<SetupResult, EngineError> {
+    let result = run_lifecycle_steps(
+        writer,
+        registry,
+        browser,
+        run,
+        setup,
+        child_env,
+        StepPhase::Setup,
+        dispatched,
+        HookScope::Criterion(criterion_id),
+    )
+    .await?;
+    Ok(SetupResult {
+        aborted: result.aborted,
+        failed_step: result.failed_step,
+    })
+}
+
+/// Criterion-level `teardown:` (#441 Part B). Same drain contract as
+/// [`run_teardown`]: evidence-only, never replaces the criterion's
+/// verdict.
+pub(crate) async fn run_criterion_teardown(
+    writer: &mut EvidenceWriter,
+    registry: &ActionRegistry,
+    browser: Option<&RunBrowser>,
+    run: &mut RunState,
+    criterion_id: &str,
+    teardown: &[Step],
+    child_env: &BTreeMap<String, String>,
+) -> Result<Vec<CleanupFailure>, EngineError> {
+    let mut dispatched = false;
+    Ok(run_lifecycle_steps(
+        writer,
+        registry,
+        browser,
+        run,
+        teardown,
+        child_env,
+        StepPhase::Teardown,
+        &mut dispatched,
+        HookScope::Criterion(criterion_id),
+    )
+    .await?
+    .cleanup)
+}
+
+/// Check-level `setup:` (#441 Part B) — the check's *own* lifecycle
+/// block, run before its `needs:` fixtures. Re-run on every retry
+/// attempt, like fixtures.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_check_setup(
+    writer: &mut EvidenceWriter,
+    registry: &ActionRegistry,
+    browser: Option<&RunBrowser>,
+    run: &mut RunState,
+    criterion_id: &str,
+    check_id: &str,
+    setup: &[Step],
+    child_env: &BTreeMap<String, String>,
+    dispatched: &mut bool,
+) -> Result<SetupResult, EngineError> {
+    let result = run_lifecycle_steps(
+        writer,
+        registry,
+        browser,
+        run,
+        setup,
+        child_env,
+        StepPhase::Setup,
+        dispatched,
+        HookScope::Check(criterion_id, check_id),
+    )
+    .await?;
+    Ok(SetupResult {
+        aborted: result.aborted,
+        failed_step: result.failed_step,
+    })
+}
+
+/// Check-level `teardown:` (#441 Part B), run after the check's
+/// fixtures are torn down.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_check_teardown(
+    writer: &mut EvidenceWriter,
+    registry: &ActionRegistry,
+    browser: Option<&RunBrowser>,
+    run: &mut RunState,
+    criterion_id: &str,
+    check_id: &str,
+    teardown: &[Step],
+    child_env: &BTreeMap<String, String>,
+) -> Result<Vec<CleanupFailure>, EngineError> {
+    let mut dispatched = false;
+    Ok(run_lifecycle_steps(
+        writer,
+        registry,
+        browser,
+        run,
+        teardown,
+        child_env,
+        StepPhase::Teardown,
+        &mut dispatched,
+        HookScope::Check(criterion_id, check_id),
     )
     .await?
     .cleanup)
@@ -185,7 +349,7 @@ pub(crate) async fn run_fixture_up(
         child_env,
         StepPhase::Setup,
         &mut dispatched,
-        Some((fixture, check_id)),
+        HookScope::Fixture(fixture, check_id),
     )
     .await?;
     Ok(SetupResult {
@@ -215,7 +379,7 @@ pub(crate) async fn run_fixture_down(
         child_env,
         StepPhase::Teardown,
         &mut dispatched,
-        Some((fixture, check_id)),
+        HookScope::Fixture(fixture, check_id),
     )
     .await?
     .cleanup)
@@ -231,14 +395,16 @@ async fn run_lifecycle_steps(
     child_env: &BTreeMap<String, String>,
     phase: StepPhase,
     dispatched: &mut bool,
-    fixture_scope: Option<(&str, &str)>,
+    scope: HookScope<'_>,
 ) -> Result<LifecycleResult, EngineError> {
+    let (fixture_name, check_id, criterion_id) = scope.evidence_fields();
     writer
         .append(EventPayload::SetupStarted {
             phase,
             step_count: steps.len() as u32,
-            fixture_name: fixture_scope.map(|scope| scope.0.to_string()),
-            check_id: fixture_scope.map(|scope| scope.1.to_string()),
+            fixture_name: fixture_name.clone(),
+            check_id: check_id.clone(),
+            criterion_id: criterion_id.clone(),
         })
         .await?;
 
@@ -335,7 +501,7 @@ async fn run_lifecycle_steps(
             None
         };
 
-        append_setup_started(writer, phase, step, idx, &resolved_with, fixture_scope).await?;
+        append_setup_started(writer, phase, step, idx, &resolved_with, scope).await?;
         if let Some(reason) = gate_reason {
             writer
                 .append(EventPayload::SetupStepFinished {
@@ -343,8 +509,9 @@ async fn run_lifecycle_steps(
                     step_index: idx as u32,
                     outcome: StepOutcome::Skipped { reason },
                     detail: None,
-                    fixture_name: fixture_scope.map(|scope| scope.0.to_string()),
-                    check_id: fixture_scope.map(|scope| scope.1.to_string()),
+                    fixture_name: fixture_name.clone(),
+                    check_id: check_id.clone(),
+                    criterion_id: criterion_id.clone(),
                 })
                 .await?;
             continue;
@@ -379,7 +546,7 @@ async fn run_lifecycle_steps(
                             run,
                             writer,
                             child_env,
-                            fixture_scope,
+                            scope,
                         },
                     )
                     .await
@@ -423,8 +590,9 @@ async fn run_lifecycle_steps(
                 step_index: idx as u32,
                 outcome: evidence_outcome.clone(),
                 detail: detail.clone(),
-                fixture_name: fixture_scope.map(|scope| scope.0.to_string()),
-                check_id: fixture_scope.map(|scope| scope.1.to_string()),
+                fixture_name: fixture_name.clone(),
+                check_id: check_id.clone(),
+                criterion_id: criterion_id.clone(),
             })
             .await?;
 
@@ -462,8 +630,9 @@ async fn run_lifecycle_steps(
         .append(EventPayload::SetupFinished {
             phase,
             aborted: aborted.is_some(),
-            fixture_name: fixture_scope.map(|scope| scope.0.to_string()),
-            check_id: fixture_scope.map(|scope| scope.1.to_string()),
+            fixture_name,
+            check_id,
+            criterion_id,
         })
         .await?;
     if let Some(error) = stored_error {
@@ -482,8 +651,9 @@ async fn append_setup_started(
     step: &Step,
     idx: usize,
     resolved_with: &serde_yml::Value,
-    fixture_scope: Option<(&str, &str)>,
+    scope: HookScope<'_>,
 ) -> Result<(), EngineError> {
+    let (fixture_name, check_id, criterion_id) = scope.evidence_fields();
     writer
         .append(EventPayload::SetupStepStarted {
             phase,
@@ -492,8 +662,9 @@ async fn append_setup_started(
             // Same honesty contract as the per-check tag (#192).
             layer: duhem_actions::layer_for_uses(step.uses_name()).map(str::to_string),
             with: with_to_evidence_map(resolved_with),
-            fixture_name: fixture_scope.map(|scope| scope.0.to_string()),
-            check_id: fixture_scope.map(|scope| scope.1.to_string()),
+            fixture_name,
+            check_id,
+            criterion_id,
         })
         .await?;
     Ok(())
@@ -508,7 +679,7 @@ struct SetupInvocation<'a> {
     run: &'a mut RunState,
     writer: &'a mut EvidenceWriter,
     child_env: &'a BTreeMap<String, String>,
-    fixture_scope: Option<(&'a str, &'a str)>,
+    scope: HookScope<'a>,
 }
 
 async fn invoke_and_record(
@@ -524,7 +695,7 @@ async fn invoke_and_record(
         run,
         writer,
         child_env,
-        fixture_scope,
+        scope,
     } = invocation;
     // The caller persisted `SetupStepStarted` before dispatch so slow
     // actions and gated skips share one honest lifecycle shape.
@@ -552,9 +723,17 @@ async fn invoke_and_record(
         // per-check path in `runner.rs`; see `engine::extract`.
         if let Some(id) = step.id.as_deref() {
             crate::engine::extract::record_step_outputs(&step.outputs, &r.outputs, |local, v| {
-                if let Some((fixture, _)) = fixture_scope {
+                if let HookScope::Fixture(fixture, _) = scope {
                     run.record_fixture_output(fixture, id, local, v);
                 } else {
+                    // Leaf, criterion, and check `setup:`/`teardown:`
+                    // steps all publish into the same `$setup.<id>`
+                    // namespace (#441 Part B): execution is strictly
+                    // sequential and validation forbids an inner
+                    // scope's step id from shadowing an outer scope's
+                    // still-open id, so a flat map is safe and lets
+                    // an outer teardown read its own outer setup's
+                    // outputs with no new reference syntax.
                     run.record_setup_output(id, local, v);
                 }
             });
@@ -569,7 +748,7 @@ async fn invoke_and_record(
                 idx as u32,
                 name.clone(),
                 value.clone(),
-                fixture_scope,
+                scope,
             )
             .await?;
         }
@@ -593,8 +772,7 @@ async fn invoke_and_record(
             .as_deref()
             .map(|detail| writer.mask_text(detail)),
     };
-    let judgment = fixture_scope
-        .is_none()
+    let judgment = (!scope.is_fixture())
         .then(|| {
             implicit_judgment_for_step(
                 step,
@@ -621,9 +799,10 @@ async fn append_setup_observation(
     step_index: u32,
     output_name: String,
     value: serde_json::Value,
-    fixture_scope: Option<(&str, &str)>,
+    scope: HookScope<'_>,
 ) -> Result<(), EngineError> {
     use duhem_evidence::{BLOB_INLINE_THRESHOLD_BYTES, ObservationValue};
+    let (fixture_name, check_id, criterion_id) = scope.evidence_fields();
     let inline_bytes = serde_json::to_vec(&value).map_err(duhem_evidence::WriterError::from)?;
     let obs = if inline_bytes.len() > BLOB_INLINE_THRESHOLD_BYTES {
         let sha = writer.write_blob(&inline_bytes).await?;
@@ -640,8 +819,9 @@ async fn append_setup_observation(
             step_index,
             output_name,
             value: obs,
-            fixture_name: fixture_scope.map(|scope| scope.0.to_string()),
-            check_id: fixture_scope.map(|scope| scope.1.to_string()),
+            fixture_name,
+            check_id,
+            criterion_id,
         })
         .await?;
     Ok(())

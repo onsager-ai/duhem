@@ -32,6 +32,13 @@
           "description": "Authored stable identifier (e.g. `AC-1.1`).",
           "type": "string"
         },
+        "needs": {
+          "description": "Fixtures instantiated for this check, in bring-up order.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "session": {
           "description": "Whole-string runtime reference to Playwright storage state used to seed this check's fresh browser context (spec #347). The schema keeps the authored expression opaque; validation proves it is a reference and the runtime resolves its value.",
           "type": [
@@ -39,8 +46,22 @@
             "null"
           ]
         },
+        "setup": {
+          "description": "Optional setup steps run once before this check's own `steps:`, after criterion `setup:` and before this check's `needs:` fixtures (#441 Part B). Re-run on every retry attempt, like fixtures. A `setup:` step that aborts makes only this check `Inconclusive` with the triggering cause; its fixtures and `steps:` do not run.",
+          "items": {
+            "$ref": "#/definitions/Step"
+          },
+          "type": "array"
+        },
         "steps": {
           "description": "Ordered sequence of action invocations.",
+          "items": {
+            "$ref": "#/definitions/Step"
+          },
+          "type": "array"
+        },
+        "teardown": {
+          "description": "Optional cleanup steps run once after this check's fixtures are torn down (including after a `setup:` abort that dispatched at least one action), before the criterion moves on. Re-run on every retry attempt. Failure is evidence-only.",
           "items": {
             "$ref": "#/definitions/Step"
           },
@@ -69,6 +90,20 @@
         "id": {
           "description": "Authored stable identifier (e.g. `AC-1`). Required and authored — auto-generation hides intent and breaks evidence-trace stability across runs.",
           "type": "string"
+        },
+        "setup": {
+          "description": "Optional setup steps run once before this criterion's checks — after leaf `setup:` and before any check's own `setup:` (#441 Part B). Symmetric with leaf `setup:` (#20): non-judging and three-state-faithful. An aborted step makes every one of this criterion's checks `Inconclusive` with the triggering cause; none of them run.",
+          "items": {
+            "$ref": "#/definitions/Step"
+          },
+          "type": "array"
+        },
+        "teardown": {
+          "description": "Optional cleanup steps run once after every check in this criterion — including after a criterion `setup:` abort that dispatched at least one action — and before leaf `teardown:`. Failure is evidence-only, mirroring leaf `teardown:` (#409).",
+          "items": {
+            "$ref": "#/definitions/Step"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -87,6 +122,30 @@
           "type": "integer"
         }
       ]
+    },
+    "Fixture": {
+      "additionalProperties": false,
+      "properties": {
+        "down": {
+          "description": "Best-effort cleanup actions for that instance.",
+          "items": {
+            "$ref": "#/definitions/Step"
+          },
+          "type": "array"
+        },
+        "up": {
+          "description": "Actions that establish one fresh instance for a check.",
+          "items": {
+            "$ref": "#/definitions/Step"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "down",
+        "up"
+      ],
+      "type": "object"
     },
     "Flow": {
       "additionalProperties": false,
@@ -225,7 +284,7 @@
     },
     "ManifestDefaults": {
       "additionalProperties": false,
-      "description": "Suite-wide defaults declared once on the root manifest (spec #66). Every sub-key is optional; an absent sub-key falls back to today's behavior (`timeout` → the engine's 5s default, `inconclusive_policy` → `block`, `retry.max` → `0`).",
+      "description": "Suite-wide defaults declared once on the root manifest (spec #66). Every sub-key is optional; an absent sub-key falls back to today's behavior (`timeout` → the engine's 5s default, `max_wait` → the engine's 60s ceiling, `inconclusive_policy` → `block`, `retry.max` → `0`).",
       "properties": {
         "inconclusive_policy": {
           "anyOf": [
@@ -237,6 +296,17 @@
             }
           ],
           "description": "How a criterion-level `inconclusive` verdict is treated at run aggregation. Absent → `block` (today's behavior)."
+        },
+        "max_wait": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DurationSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Ceiling for `ui/wait`'s `duration:`. A fixed wait longer than this is rejected at dispatch rather than slept through. Same duration wire shape as `timeout:` (integer milliseconds or a suffixed string like `30s` / `2m`). Absent → the built-in 60s ceiling applies."
         },
         "profile": {
           "description": "Name of a profile under the sibling `profiles:` block to use for the suite. Accepted as any string here; the lookup against `profiles:` happens at engine-time (spec #66 Out-of-scope), so an unknown name is not a parse error.",
@@ -266,6 +336,17 @@
             }
           ],
           "description": "Per-step `timeout:` fallback for every leaf. A step's own `timeout:` always wins; this only fills in when a step omits it. Same duration wire shape as `provision.ready.http.timeout` (integer milliseconds or a suffixed string like `30s` / `2m`). Absent → the engine's built-in 5s default still applies."
+        },
+        "viewport": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Viewport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Headless size; defaults to 1280x720."
         }
       },
       "type": "object"
@@ -535,6 +616,13 @@
           "$ref": "#/definitions/StepCondition",
           "description": "Dispatch condition, serialized as `if:`. Omission is byte-identical to `if: success`."
         },
+        "needs": {
+          "description": "Reserved for a friendly validation error: fixtures may only be requested by checks, never by lifecycle steps.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "outputs": {
           "additionalProperties": {
             "type": "string"
@@ -563,30 +651,7 @@
       "type": "object"
     },
     "StepCondition": {
-      "description": "Closed dispatch condition for a step. This is deliberately not an expression language: the runtime decides it from recorded outcomes.",
-      "oneOf": [
-        {
-          "description": "Run only while no earlier step in this sequence has failed.",
-          "enum": [
-            "success"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Run regardless of an earlier step failure.",
-          "enum": [
-            "always"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Run only after an earlier step failure.",
-          "enum": [
-            "failure"
-          ],
-          "type": "string"
-        }
-      ]
+      "type": "string"
     },
     "VerificationDefinition": {
       "additionalProperties": false,
@@ -597,6 +662,13 @@
             "$ref": "#/definitions/Criterion"
           },
           "type": "array"
+        },
+        "fixtures": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Fixture"
+          },
+          "description": "Named, per-check lifecycle resources. Each check gets a fresh instance of every fixture named by its `needs:` list.",
+          "type": "object"
         },
         "flows": {
           "additionalProperties": {
@@ -676,6 +748,27 @@
       "required": [
         "criteria",
         "verification"
+      ],
+      "type": "object"
+    },
+    "Viewport": {
+      "additionalProperties": false,
+      "description": "CSS-pixel dimensions used by browser-backed checks in headless runs.",
+      "properties": {
+        "height": {
+          "format": "uint32",
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 1.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "height",
+        "width"
       ],
       "type": "object"
     }

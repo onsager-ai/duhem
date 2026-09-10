@@ -74,10 +74,15 @@ pub fn validate_with_contract_outputs(
     let mut preceding_lifecycle_outputs: HashMap<&str, HashSet<String>> = HashMap::new();
     for (idx, step) in v.setup.iter().enumerate() {
         let step_name = step_label(step, idx);
+        let condition_path = [
+            SourcePathSegment::key("setup"),
+            SourcePathSegment::index(idx),
+            SourcePathSegment::key("if"),
+        ];
         validate_lifecycle_condition(
             v,
             "setup",
-            idx,
+            &condition_path,
             step,
             &preceding_lifecycle_outputs,
             &mut errs,
@@ -134,10 +139,15 @@ pub fn validate_with_contract_outputs(
     let mut preceding_teardown_outputs = setup_outputs.clone();
     for (idx, step) in v.teardown.iter().enumerate() {
         let step_name = step_label(step, idx);
+        let condition_path = [
+            SourcePathSegment::key("teardown"),
+            SourcePathSegment::index(idx),
+            SourcePathSegment::key("if"),
+        ];
         validate_lifecycle_condition(
             v,
             "teardown",
-            idx,
+            &condition_path,
             step,
             &preceding_teardown_outputs,
             &mut errs,
@@ -205,11 +215,29 @@ pub fn validate_with_contract_outputs(
         setup_outputs: &setup_outputs,
         outputs_for,
     };
+    // Owned mirror of the leaf `setup:` ids, seeding every nested
+    // lifecycle block's `outer_ids` (#441 Part B). Owned because
+    // criterion/check step ids are locally scoped and can't share the
+    // `setup_outputs` borrow's lifetime.
+    let leaf_ids: HashMap<String, HashSet<String>> = setup_outputs
+        .iter()
+        .map(|(id, outputs)| (id.to_string(), outputs.clone()))
+        .collect();
     let mut seen_criteria: HashSet<&str> = HashSet::new();
     for (criterion_index, c) in v.criteria.iter().enumerate() {
         if !seen_criteria.insert(c.id.as_str()) {
             errs.push(ValidationError::DuplicateCriterionId { id: c.id.clone() });
         }
+
+        crate::validate_lifecycle::validate_criterion_and_check_lifecycle_hooks(
+            v,
+            outputs_for,
+            criterion_index,
+            c,
+            &leaf_ids,
+            &mut errs,
+        );
+
         for (check_index, check) in c.checks.iter().enumerate() {
             for (need_index, fixture) in check.needs.iter().enumerate() {
                 if !v.fixtures.contains_key(fixture) {
@@ -504,6 +532,10 @@ struct PathScope<'a> {
     ch: &'a Check,
     step_outputs: &'a HashMap<&'a str, HashSet<String>>,
     setup_outputs: &'a HashMap<&'a str, HashSet<String>>,
+    /// This check's own criterion-/check-level `setup:` ids (#441 Part
+    /// B) — declared but not check-body-addressable; drives
+    /// `SetupStepOutOfScope` vs. `UnresolvedSetupStepRef`.
+    out_of_scope_setup_ids: &'a HashSet<&'a str>,
     inputs: &'a BTreeMap<String, InputDecl>,
     pages: &'a PageCatalog,
 }
@@ -614,11 +646,21 @@ fn validate_check(
         }
     }
 
+    // Declared but not check-body-addressable (#441 Part B) — see
+    // `PathScope::out_of_scope_setup_ids`.
+    let out_of_scope_setup_ids: HashSet<&str> = c
+        .setup
+        .iter()
+        .chain(ch.setup.iter())
+        .filter_map(|s| s.id.as_deref())
+        .collect();
+
     let scope = PathScope {
         c,
         ch,
         step_outputs: &step_outputs,
         setup_outputs,
+        out_of_scope_setup_ids: &out_of_scope_setup_ids,
         inputs,
         pages,
     };
@@ -767,6 +809,7 @@ fn check_path(
         ch,
         step_outputs,
         setup_outputs,
+        out_of_scope_setup_ids,
         inputs,
         pages,
     } = *scope;
@@ -813,46 +856,17 @@ fn check_path(
                 }
             }
         }
-        PathRoot::Setup => {
-            let segs = path.segments();
-            // Leading `$setup.<step_id>.outputs.<output>` — same shape as
-            // `$steps`; deeper segments navigate the value at runtime.
-            if segs.len() < 3 || segs[1] != "outputs" {
-                errs.push(ValidationError::MalformedSetupRef {
-                    criterion: c.id.clone(),
-                    check: ch.id.clone(),
-                    raw: raw.to_string(),
-                    site: site.clone(),
-                    location,
-                });
-                return;
-            }
-            let step_id = segs[0].as_str();
-            let output_name = segs[2].as_str();
-            match setup_outputs.get(step_id) {
-                None => errs.push(ValidationError::UnresolvedSetupStepRef {
-                    criterion: c.id.clone(),
-                    check: ch.id.clone(),
-                    step: step_id.to_string(),
-                    raw: raw.to_string(),
-                    site: site.clone(),
-                    location,
-                }),
-                Some(outputs) => {
-                    if !outputs.contains(output_name) {
-                        errs.push(ValidationError::UnresolvedSetupStepOutput {
-                            criterion: c.id.clone(),
-                            check: ch.id.clone(),
-                            step: step_id.to_string(),
-                            output: output_name.to_string(),
-                            raw: raw.to_string(),
-                            site: site.clone(),
-                            location,
-                        });
-                    }
-                }
-            }
-        }
+        PathRoot::Setup => crate::validate_lifecycle::resolve_setup_reference(
+            &c.id,
+            &ch.id,
+            path.segments(),
+            raw,
+            site,
+            location,
+            setup_outputs,
+            out_of_scope_setup_ids,
+            errs,
+        ),
         PathRoot::Fixture => errs.push(ValidationError::FixtureRefOutsideDown {
             site: format!("criterion `{}` / check `{}`: {site}", c.id, ch.id),
             location,
@@ -2061,6 +2075,75 @@ criteria:
             errs.iter().any(|e| matches!(
                 e,
                 ValidationError::UnresolvedSetupStepRef { step, .. } if step == "nope"
+            )),
+            "got: {errs:?}"
+        );
+    }
+
+    /// A `$setup.<id>` reference naming a criterion- or check-level
+    /// `setup:` step (#441 Part B) is declared, just out of scope from
+    /// the check body — it must get its own diagnosis, distinct from
+    /// `UnresolvedSetupStepRef`'s "undeclared" message, so an author
+    /// isn't sent looking for a typo in a declaration staring back at
+    /// them. Reused for both the check-level and criterion-level case.
+    #[test]
+    fn setup_step_out_of_scope_is_distinguished_from_undeclared() {
+        let check_level = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        setup:
+          - id: mk
+            uses: cli/invoke
+        steps:
+          - id: use
+            uses: cli/invoke
+            with: { value: $setup.mk.outputs.stdout }
+        assertions:
+          - $steps.use.outputs.exit_code == 0
+"#;
+        let v = parse(check_level);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::SetupStepOutOfScope { step, .. } if step == "mk"
+            )),
+            "got: {errs:?}"
+        );
+        assert!(
+            !errs
+                .iter()
+                .any(|e| matches!(e, ValidationError::UnresolvedSetupStepRef { .. })),
+            "a declared-but-out-of-scope id must not also report as undeclared: {errs:?}"
+        );
+
+        let criterion_level = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    setup:
+      - id: mk
+        uses: cli/invoke
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: use
+            uses: cli/invoke
+            with: { value: $setup.mk.outputs.stdout }
+        assertions:
+          - $steps.use.outputs.exit_code == 0
+"#;
+        let v = parse(criterion_level);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::SetupStepOutOfScope { step, .. } if step == "mk"
             )),
             "got: {errs:?}"
         );

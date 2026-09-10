@@ -564,6 +564,11 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     );
 
     let mut leaf_outcomes: Vec<(String, RunOutcome)> = Vec::with_capacity(resolved.len());
+    // Only the single-leaf render path below needs the parsed
+    // definition back (for the resolved-hook-chain detail, #441 Part
+    // B); cloning it once per leaf here is cheap next to actually
+    // running it.
+    let mut leaf_defs: Vec<VerificationDefinition> = Vec::with_capacity(resolved.len());
     let total = resolved.len();
     let mut watch_opened = false;
     for (idx, (name, leaf_path, def, inputs, secrets)) in resolved.into_iter().enumerate() {
@@ -779,6 +784,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             // interleaves with a late progress line.
             let _ = r.await;
         }
+        leaf_defs.push(def.clone());
         leaf_outcomes.push((name, outcome));
     }
 
@@ -803,7 +809,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     let mut stdout = std::io::stdout().lock();
     if !is_manifest {
         let (_, outcome) = &leaf_outcomes[0];
-        if let Err(e) = reporter::render(&reporter, &mut stdout, outcome, &db_path) {
+        if let Err(e) = reporter::render(&reporter, &mut stdout, outcome, &db_path, &leaf_defs[0]) {
             eprintln!("reporter: {e}");
             return ExitCode::FAILURE;
         }

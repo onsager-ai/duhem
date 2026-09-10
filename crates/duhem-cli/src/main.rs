@@ -17,6 +17,7 @@ mod describe_cmd;
 mod env_file;
 mod export_cmd;
 mod filter;
+mod hook_chain;
 mod init;
 mod inputs;
 mod live_link;

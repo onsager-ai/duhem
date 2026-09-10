@@ -234,6 +234,13 @@ pub enum EventPayload {
         fixture_name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         check_id: Option<String>,
+        /// Owning criterion for a criterion- or check-level lifecycle
+        /// block (#441 Part B). Absent for leaf-level `setup:`/
+        /// `teardown:` and for fixture `up:`/`down:` (which already
+        /// disambiguate via `fixture_name`/`check_id`), so old traces
+        /// and fixture events round-trip byte-identically.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        criterion_id: Option<String>,
     },
     SetupStepStarted {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
@@ -254,6 +261,9 @@ pub enum EventPayload {
         fixture_name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         check_id: Option<String>,
+        /// Same contract as `SetupStarted.criterion_id`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        criterion_id: Option<String>,
     },
     SetupStepObservation {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
@@ -266,6 +276,9 @@ pub enum EventPayload {
         fixture_name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         check_id: Option<String>,
+        /// Same contract as `SetupStarted.criterion_id`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        criterion_id: Option<String>,
     },
     SetupStepFinished {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
@@ -281,6 +294,9 @@ pub enum EventPayload {
         fixture_name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         check_id: Option<String>,
+        /// Same contract as `SetupStarted.criterion_id`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        criterion_id: Option<String>,
     },
     SetupFinished {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
@@ -290,6 +306,9 @@ pub enum EventPayload {
         fixture_name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         check_id: Option<String>,
+        /// Same contract as `SetupStarted.criterion_id`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        criterion_id: Option<String>,
     },
     StepStarted {
         criterion_id: String,
@@ -631,6 +650,7 @@ mod tests {
                 step_count: 2,
                 fixture_name: None,
                 check_id: None,
+                criterion_id: None,
             },
             EventPayload::SetupStepStarted {
                 phase: StepPhase::Setup,
@@ -640,6 +660,7 @@ mod tests {
                 with: BTreeMap::new(),
                 fixture_name: None,
                 check_id: None,
+                criterion_id: None,
             },
             EventPayload::SetupStepObservation {
                 phase: StepPhase::Setup,
@@ -650,6 +671,7 @@ mod tests {
                 },
                 fixture_name: None,
                 check_id: None,
+                criterion_id: None,
             },
             EventPayload::SetupStepFinished {
                 phase: StepPhase::Setup,
@@ -658,12 +680,14 @@ mod tests {
                 detail: None,
                 fixture_name: None,
                 check_id: None,
+                criterion_id: None,
             },
             EventPayload::SetupFinished {
                 phase: StepPhase::Setup,
                 aborted: false,
                 fixture_name: None,
                 check_id: None,
+                criterion_id: None,
             },
         ];
         for payload in cases {
@@ -691,6 +715,7 @@ mod tests {
                 detail: None,
                 fixture_name: None,
                 check_id: None,
+                criterion_id: None,
             },
         };
         let line = serde_json::to_string(&event).unwrap();
@@ -708,7 +733,8 @@ mod tests {
                 phase: StepPhase::Setup,
                 aborted: false,
                 fixture_name: None,
-                check_id: None
+                check_id: None,
+                criterion_id: None,
             }
             .is_finished()
         );
@@ -717,7 +743,8 @@ mod tests {
                 phase: StepPhase::Setup,
                 aborted: true,
                 fixture_name: None,
-                check_id: None
+                check_id: None,
+                criterion_id: None,
             }
             .is_finished()
         );
@@ -729,6 +756,7 @@ mod tests {
                 detail: None,
                 fixture_name: None,
                 check_id: None,
+                criterion_id: None,
             }
             .is_finished()
         );
@@ -739,7 +767,8 @@ mod tests {
                 phase: StepPhase::Setup,
                 step_count: 1,
                 fixture_name: None,
-                check_id: None
+                check_id: None,
+                criterion_id: None,
             }
             .is_finished()
         );
@@ -753,6 +782,7 @@ mod tests {
                 },
                 fixture_name: None,
                 check_id: None,
+                criterion_id: None,
             }
             .is_finished()
         );

@@ -223,10 +223,40 @@ pub enum ValidationError {
     #[error("teardown: duplicate step id `{id}`")]
     DuplicateTeardownStepId { id: String },
 
+    #[error("{label} {phase}: duplicate step id `{id}`")]
+    DuplicateLifecycleStepId {
+        label: String,
+        phase: &'static str,
+        id: String,
+        location: Option<SourceLocation>,
+    },
+
+    #[error(
+        "{label} {phase} step id `{id}` collides with an outer lifecycle step id already in scope — step ids must be unique across nested `setup:`/`teardown:` scopes (#441)"
+    )]
+    LifecycleStepIdCollision {
+        label: String,
+        phase: &'static str,
+        id: String,
+        location: Option<SourceLocation>,
+    },
+
     #[error(
         "criterion `{criterion}` / check `{check}`: {site} `{raw}` references undeclared setup step `{step}`"
     )]
     UnresolvedSetupStepRef {
+        criterion: String,
+        check: String,
+        step: String,
+        raw: String,
+        site: RefSite,
+        location: Option<SourceLocation>,
+    },
+
+    #[error(
+        "criterion `{criterion}` / check `{check}`: {site} `{raw}` references setup step `{step}`, which is declared but out of scope: a criterion- or check-level `setup:` step's outputs are not addressable from the check body (only leaf-level `setup:` is). If `{step}` should produce a value this check reads, move it to the leaf-level `setup:` block instead; `fixtures:` + `needs:` (#449) is a different tool — guaranteed per-check cleanup that can address what it created, but only from that fixture's own `down:`, never from a check body either"
+    )]
+    SetupStepOutOfScope {
         criterion: String,
         check: String,
         step: String,
@@ -394,6 +424,7 @@ impl ValidationError {
             | Self::MalformedInputRef { location, .. }
             | Self::UnresolvedSetupStepRef { location, .. }
             | Self::UnresolvedSetupStepOutput { location, .. }
+            | Self::SetupStepOutOfScope { location, .. }
             | Self::MalformedSetupRef { location, .. }
             | Self::InvalidSessionReference { location, .. }
             | Self::UnknownAction { location, .. }
@@ -403,6 +434,8 @@ impl ValidationError {
             | Self::FixtureRefOutsideDown { location, .. }
             | Self::FixtureStepNeeds { location, .. }
             | Self::InvalidFixtureRef { location, .. } => *location,
+            Self::DuplicateLifecycleStepId { location, .. }
+            | Self::LifecycleStepIdCollision { location, .. } => *location,
             _ => None,
         }
     }

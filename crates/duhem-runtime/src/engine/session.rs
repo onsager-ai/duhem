@@ -75,6 +75,7 @@ pub(crate) fn resolve(check: &Check, run: &RunState) -> SessionResolution {
     let consumes_session = check
         .steps
         .iter()
+        .flat_map(duhem_schema::Step::actions)
         .any(|step| step.uses_name().starts_with("ui/"));
     resolve_source(check.session.as_deref().filter(|_| consumes_session), run)
 }

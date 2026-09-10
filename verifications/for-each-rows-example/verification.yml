@@ -1,0 +1,31 @@
+# Per-row validation (#427 / #521). Run this leaf with `duhem run`.
+# Each SQL row is observed through the real SQLite action. Change a
+# quantity to zero to see a failure attributed to that iteration;
+# later rows still produce their own assertion outcomes.
+verification: Every listed row has a positive quantity
+inputs:
+  rows:
+    type: array
+    default:
+      - {quantity: 1}
+      - {quantity: 2}
+      - {quantity: 3}
+criteria:
+  - id: AC-1
+    description: Every listed row has a positive quantity.
+    checks:
+      - id: AC-1.1
+        steps:
+          - for_each: $inputs.rows
+            max: 10
+            as: row
+            steps:
+              - id: inspect
+                uses: db/query
+                with:
+                  connection: 'sqlite::memory:'
+                  sql: 'select ? as quantity'
+                  params: [$row.quantity]
+        assertions:
+          - $steps.inspect.outputs.rows[0].quantity > 0
+          - $steps.inspect.outputs.row_count == 1

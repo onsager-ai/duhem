@@ -760,6 +760,7 @@ async fn write_stepless_run(
     writer
         .append(EventPayload::AssertionEvaluated {
             check_id: "AC-1.1".into(),
+            iteration: None,
             assertion_index: 0,
             state: VerdictState::Fail,
             detail: Some(r#"actual "a", expected "a1""#.into()),

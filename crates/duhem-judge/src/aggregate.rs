@@ -209,6 +209,7 @@ mod tests {
 
     fn ao(state: VerdictState) -> AssertionOutcome {
         AssertionOutcome {
+            iteration: None,
             assertion_index: 0,
             state,
             detail: None,

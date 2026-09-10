@@ -377,15 +377,6 @@ pub enum ValidationError {
     },
 
     #[error(
-        "criterion `{criterion}` / check `{check}`: `for_each:` is not yet available on check steps (Tier 2, gated behind #509 — a shrunken claim set must be visible in the verdict before a loop can wrap judging steps); it is available today in `setup:`, `teardown:`, fixture `up:`/`down:`, and criterion-/check-level `setup:`/`teardown:` (Tier 1)"
-    )]
-    ForEachUnavailableInCheck {
-        criterion: String,
-        check: String,
-        location: Option<SourceLocation>,
-    },
-
-    #[error(
         "{site}: `for_each:` requires `max:` — the iteration ceiling #444 needs to compute a worst-case step count"
     )]
     ForEachMaxRequired {
@@ -482,7 +473,6 @@ impl ValidationError {
             | Self::InvalidStepCondition { location, .. }
             | Self::CheckStepConditionUnavailable { location, .. }
             | Self::LoopVariableOutOfScope { location, .. }
-            | Self::ForEachUnavailableInCheck { location, .. }
             | Self::ForEachMaxRequired { location, .. }
             | Self::ForEachDepthExceeded { location, .. }
             | Self::ForEachWrapperFieldNotAllowed { location, .. } => *location,

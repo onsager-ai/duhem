@@ -27,7 +27,14 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
         for (check_index, check) in criterion.checks.iter_mut().enumerate() {
             let authored = std::mem::take(&mut check.steps);
             let mut counter = 0usize;
-            let expanded = expand_sequence(authored, &catalog, "", None, None, &[], &mut counter);
+            let mut expanded =
+                expand_sequence(authored, &catalog, "", None, None, &[], &mut counter);
+            expand_check_loops(
+                &mut expanded.steps,
+                &catalog,
+                &mut counter,
+                &mut expanded.projections,
+            );
             check.steps = expanded.steps;
             rewrite_steps(&mut check.steps, &expanded.projections);
             for assertion in &mut check.assertions {
@@ -231,6 +238,11 @@ pub(crate) fn validate_authored(definition: &VerificationDefinition) -> Vec<Stri
             let authored_ids: BTreeSet<&str> = check
                 .steps
                 .iter()
+                .flat_map(|step| {
+                    std::iter::once(step)
+                        .chain(step.steps.iter().flatten())
+                        .chain(step.for_each_body.iter())
+                })
                 .filter_map(|step| step.id.as_deref())
                 .collect();
             let mut check_reference = |raw: &str| {
@@ -259,7 +271,12 @@ pub(crate) fn validate_authored(definition: &VerificationDefinition) -> Vec<Stri
                     }
                 });
             }
-            for (index, step) in check.steps.iter().enumerate() {
+            for (index, step) in check
+                .steps
+                .iter()
+                .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+                .enumerate()
+            {
                 let site = format!(
                     "criterion `{}` / check `{}` / step {index}",
                     criterion.id, check.id
@@ -417,40 +434,60 @@ fn validate_flow(name: &str, flow: &Flow, catalog: &FlowCatalog, errors: &mut Ve
     }
 
     let mut ids = BTreeSet::new();
-    for (index, step) in flow.steps.iter().enumerate() {
+    for (index, step) in flow
+        .steps
+        .iter()
+        .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+        .enumerate()
+    {
         let site = format!("flow `{name}` step {index}");
         validate_dispatch(step, &site, errors);
         if step.for_each.is_some() {
-            // A flow is callable from anywhere a `call:` is legal,
-            // including a check body. Allowing `for_each:` on a flow's
-            // own step would let Tier 2 (for_each around judging
-            // steps, still gated behind #509) in through that door
-            // uncontrolled. `for_each:` stays a property of the *call
-            // site* (a check's `setup:`/`teardown:` or a for_each
-            // step's own body), never of the reusable template.
-            errors.push(format!(
-                "{site}: `for_each:` is not allowed inside a `flows:` catalog entry — a flow may be called from a check, where `for_each` is Tier 2 (not yet built, see #509); use `for_each:` at the call site instead"
-            ));
+            if step.max.is_none() {
+                errors.push(format!("{site}: `for_each:` requires `max:`"));
+            }
+            if step.id.is_some() || !step.outputs.is_empty() || !step.secret_outputs.is_empty() {
+                errors.push(format!(
+                    "{site}: a `for_each:` wrapper may not declare id, outputs, or secret_outputs"
+                ));
+            }
+            if step
+                .steps
+                .iter()
+                .flatten()
+                .any(|inner| inner.for_each.is_some() || inner.steps.is_some())
+            {
+                errors.push(format!("{site}: `for_each:` body exceeds depth 1"));
+            }
         }
+        // This formerly blocked loops entering judging checks through a flow.
+        // Tier 2 now evaluates each expanded iteration; boundedness and depth
+        // are still validated after expansion, including indirect flow bodies.
         if let Some(id) = &step.id
             && !ids.insert(id.as_str())
         {
             errors.push(format!("flow `{name}` has duplicate step id `{id}`"));
         }
-        walk_strings(&step.with, &mut |raw| {
-            if raw.contains("$inputs.") || raw.contains("$steps.") {
-                errors.push(format!(
+        let mut references = vec![step.with.clone()];
+        if let Some(expr) = &step.for_each {
+            references.push(serde_yml::Value::String(expr.raw.clone()));
+        }
+        for value in references {
+            walk_strings(&value, &mut |raw| {
+                if raw.contains("$inputs.") || raw.contains("$steps.") {
+                    errors.push(format!(
                     "flow `{name}` hygiene violation: `{raw}` may reference only `$params.*` and `$pages.*`"
                 ));
-            }
-            for param in param_reference_names(raw) {
-                if !flow.params.contains_key(param) {
-                    errors.push(format!(
-                        "flow `{name}` references unknown param `{param}` in `{raw}`"
-                    ));
                 }
-            }
-        });
+                for param in param_reference_names(raw) {
+                    if !flow.params.contains_key(param) {
+                        errors.push(format!(
+                            "flow `{name}` references unknown param `{param}` in `{raw}`"
+                        ));
+                    }
+                }
+            });
+        }
         if let Some(called) = &step.call {
             validate_call(
                 called,
@@ -600,7 +637,12 @@ fn validate_flow_graph(catalog: &FlowCatalog, errors: &mut Vec<String>) {
             return;
         };
         chain.push(name.to_string());
-        for called in flow.steps.iter().filter_map(|step| step.call.as_deref()) {
+        for called in flow
+            .steps
+            .iter()
+            .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+            .filter_map(|step| step.call.as_deref())
+        {
             visit(called, catalog, chain, depth + 1, errors);
         }
         chain.pop();
@@ -630,7 +672,7 @@ fn expand_sequence(
     let mut result = Expansion::default();
     for (inner_index, mut step) in steps.into_iter().enumerate() {
         rewrite_value(&mut step.with, &result.projections);
-        if step.call.is_none() {
+        if step.call.is_none() || step.for_each.is_some() {
             if !namespace.is_empty()
                 && let Some(id) = &mut step.id
             {
@@ -686,7 +728,7 @@ fn expand_sequence(
 
         let mut body = flow.steps.clone();
         for inner in &mut body {
-            substitute_params(&mut inner.with, &bindings);
+            substitute_step_params(inner, &bindings);
         }
         let mut expanded = expand_sequence(
             body,
@@ -702,7 +744,11 @@ fn expand_sequence(
         }
 
         let mut direct_ids = BTreeMap::new();
-        for inner in &flow.steps {
+        for inner in flow
+            .steps
+            .iter()
+            .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+        {
             if inner.call.is_none()
                 && let Some(id) = &inner.id
             {
@@ -725,6 +771,60 @@ fn expand_sequence(
         result.origins.append(&mut expanded.origins);
     }
     result
+}
+
+fn substitute_step_params(step: &mut Step, bindings: &BTreeMap<String, serde_yml::Value>) {
+    substitute_params(&mut step.with, bindings);
+    if let Some(expr) = &mut step.for_each {
+        let mut value = serde_yml::Value::String(expr.raw.clone());
+        substitute_params(&mut value, bindings);
+        if let Some(raw) = value.as_str() {
+            *expr = crate::ExprStr::from_source(raw).expect("validated flow source");
+        }
+    }
+    if let Some(body) = &mut step.steps {
+        for inner in body {
+            substitute_step_params(inner, bindings);
+        }
+    }
+}
+
+/// Keep inline body ids addressable by the check's assertions. Flow calls
+/// still namespace private ids and project their declared outputs normally.
+fn expand_check_loops(
+    steps: &mut [Step],
+    catalog: &FlowCatalog,
+    counter: &mut usize,
+    projections: &mut BTreeMap<String, String>,
+) {
+    for step in steps {
+        if step.for_each.is_none() {
+            continue;
+        }
+        let Some(body) = for_each_body_steps(step) else {
+            continue;
+        };
+        let ordinal = *counter;
+        *counter += 1;
+        let invocation = format!("for_each#{ordinal}");
+        let namespace = step
+            .flow
+            .as_ref()
+            .map(|f| f.invocation.as_str())
+            .unwrap_or("");
+        let mut expanded = expand_sequence(
+            body,
+            catalog,
+            namespace,
+            Some("for_each"),
+            Some(&invocation),
+            &step.flow_secrets,
+            counter,
+        );
+        rewrite_steps(&mut expanded.steps, &expanded.projections);
+        projections.extend(expanded.projections);
+        step.for_each_body = expanded.steps;
+    }
 }
 
 fn mapping_to_bindings(value: &serde_yml::Value) -> BTreeMap<String, serde_yml::Value> {
@@ -829,6 +929,11 @@ fn render_expr_value(value: &serde_yml::Value) -> Option<String> {
 fn rewrite_steps(steps: &mut [Step], projections: &BTreeMap<String, String>) {
     for step in steps {
         rewrite_value(&mut step.with, projections);
+        if let Some(source) = &mut step.for_each {
+            *source = crate::ExprStr::from_source(&rewrite_string(&source.raw, projections))
+                .expect("rewriting a valid step reference preserves expression syntax");
+        }
+        rewrite_steps(&mut step.for_each_body, projections);
     }
 }
 

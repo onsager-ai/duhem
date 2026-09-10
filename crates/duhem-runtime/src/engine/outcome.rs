@@ -422,6 +422,7 @@ pub(crate) async fn evaluate_explicit_assertions(
     check: &duhem_schema::Check,
     ctx: &RunContext<'_>,
     any_unknown: bool,
+    iteration: Option<u32>,
     environment_failed: bool,
     browser_missing: bool,
     step_evidence: &[StepEvidence],
@@ -471,6 +472,7 @@ pub(crate) async fn evaluate_explicit_assertions(
         writer
             .append(EventPayload::AssertionEvaluated {
                 check_id: check.id.clone(),
+                iteration,
                 assertion_index: i as u32,
                 state,
                 detail: detail.clone(),
@@ -492,6 +494,7 @@ pub(crate) async fn evaluate_explicit_assertions(
         }
         if !cleanup_assertion {
             assertion_outcomes.push(AssertionOutcome {
+                iteration,
                 assertion_index: i,
                 state,
                 detail,
@@ -591,14 +594,21 @@ pub(crate) async fn append_implicit_judgment(
     check_id: &str,
     outcomes: Vec<ImplicitOutcome>,
     start_index: usize,
+    iteration: Option<u32>,
     assertion_outcomes: &mut Vec<AssertionOutcome>,
     failed: &mut Vec<FailedAssertion>,
 ) -> Result<(), EngineError> {
     for (offset, imp) in outcomes.into_iter().enumerate() {
-        let index = start_index + offset;
+        let index = start_index
+            + if iteration.is_some() {
+                imp.step_index
+            } else {
+                offset
+            };
         writer
             .append(EventPayload::AssertionEvaluated {
                 check_id: check_id.to_string(),
+                iteration,
                 assertion_index: index as u32,
                 state: imp.state,
                 detail: imp.detail.clone(),
@@ -620,6 +630,7 @@ pub(crate) async fn append_implicit_judgment(
             });
         }
         assertion_outcomes.push(AssertionOutcome {
+            iteration,
             assertion_index: index,
             state: imp.state,
             detail: imp.detail,

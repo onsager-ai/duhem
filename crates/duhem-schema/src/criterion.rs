@@ -25,6 +25,8 @@ use crate::step::Step;
 /// bounded control-flow constructs are added later.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum StepCountError {
+    #[error("for_each requires max to compute a worst-case step count")]
+    MissingMax,
     #[error("worst-case step count exceeds the supported size")]
     Overflow,
 }
@@ -122,10 +124,21 @@ impl Check {
     /// Compute the maximum number of actions this check can dispatch.
     ///
     /// Loaders expand reusable flows before validation, so each current step
-    /// contributes exactly one action to the bound.
+    /// contributes one action, or max × expanded loop-body actions.
     pub fn worst_case_step_count(&self) -> Result<usize, StepCountError> {
-        self.steps.iter().try_fold(0usize, |bound, _| {
-            bound.checked_add(1).ok_or(StepCountError::Overflow)
+        self.steps.iter().try_fold(0usize, |bound, step| {
+            let count = if step.for_each.is_some() {
+                let max = step.max.ok_or(StepCountError::MissingMax)? as usize;
+                let body_len = if !step.for_each_body.is_empty() {
+                    step.for_each_body.len()
+                } else {
+                    step.steps.as_ref().map_or(1, Vec::len)
+                };
+                max.checked_mul(body_len).ok_or(StepCountError::Overflow)?
+            } else {
+                1
+            };
+            bound.checked_add(count).ok_or(StepCountError::Overflow)
         })
     }
 }

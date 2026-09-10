@@ -828,15 +828,33 @@ multi-step `steps:` list — never more than one, never nested (a body
 step may not itself carry `for_each:` or `steps:`, capping nesting at
 depth 1). `as: <name>` binds the current element for the body's
 duration; `$<name>` is a validation error anywhere outside that body,
-and a step `id:` declared inside the body is not addressable from
-outside it, for the same reason a `call:`-invoked flow's inner step
-ids aren't (§10.3 hygiene). Tier 1 mirrors `if:`'s split exactly:
-`for_each:` is available today on `setup:`, `teardown:`, fixture
-`up:`/`down:`, and the criterion-/check-level equivalents (§10.3.6) —
-contexts that produce no judgments, so a runtime-sized loop can never
-shrink what a check claims to verify. It remains unavailable on a
-check's own `steps:` (Tier 2) until a shrunken claim set is guaranteed
-visible in the run report.
+and lifecycle body ids remain local to that body. In a check (#521),
+`assertions:` can reference its loop body's `$steps.<id>.outputs.*`:
+the full assertion list is evaluated once per iteration against that
+iteration's observations. N rows and M assertions produce N × M
+outcomes with zero-based iteration ordinals; a failing row does not
+prevent later rows from recording outcomes. Ordinary flow calls retain
+their private ids and declared output projections (§10.3 hygiene).
+An empty judging loop produces `Inconclusive(EmptyAggregation)`.
+The judge's existing fail-wins, then inconclusive, then pass fold is
+unchanged. Loops may also be declared in reusable flows; expansion
+retains the same mandatory bounds and depth-one limit.
+
+### Schema impact — bounded judging iteration (#521)
+
+- **Category:** additive.
+- **Surfaces touched:** VD validation, runtime expressions, evidence schema.
+- **Fields added/renamed/removed:** optional `iteration: u32` on
+  `AssertionOutcome` and `AssertionEvaluated`, matching `FlowOrigin.iteration`.
+- **Migration:** none; absent iteration fields deserialize as `None` and
+  ordinary assertions omit the field when serialized.
+- **Version decision:** `duhem_schema::SCHEMA_VERSION` stays **0.4.4**.
+  This additive change is recorded under Unreleased; the repository's
+  dedicated release-cut process owns the eventual patch bump.
+- **CHANGELOG.md entry:** the additive #521 entry records judging loops
+  and assertion iteration identity.
+- **Worked example:** [per-row validation](../verifications/for-each-rows-example/verification.yml).
+
 
 The outcome gate vocabulary remains `success | always | failure`, and
 omission remains identical to `if: success`. A gated step emits a

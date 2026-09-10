@@ -21,6 +21,9 @@ Two kinds of directory live here, for two kinds of reader:
 > ladder below in order. From the repo root, `duhem run
 > verifications/<dir>` runs any of them.
 
+The [per-row validation example](for-each-rows-example/verification.yml) applies
+the same assertions to every row with bounded `for_each:` (#521).
+
 ## Feature examples — the learning ladder
 
 Read top to bottom: each leans on the mental model the previous one

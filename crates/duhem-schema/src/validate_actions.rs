@@ -67,6 +67,16 @@ fn check_steps(
     errors: &mut Vec<ValidationError>,
 ) {
     for (step_index, step) in steps.iter().enumerate() {
+        if step.for_each.is_some() {
+            check_steps(
+                definition,
+                &step.for_each_body,
+                collection,
+                scope,
+                action_for,
+                errors,
+            );
+        }
         let Some(uses) = step.uses.as_deref() else {
             continue;
         };

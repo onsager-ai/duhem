@@ -1,10 +1,4 @@
-//! Validation for `for_each:` (spec #443 Tier 1).
-//!
-//! Bounded iteration is permitted only in non-judging contexts —
-//! `setup:`, `teardown:`, fixture `up:`/`down:`, and the criterion-/
-//! check-level equivalents (§10.3.6) — never inside a check's
-//! `steps:` (Tier 2, gated behind #509: a shrunken claim set must be
-//! visible in the verdict before a loop can wrap judging steps).
+//! Bounded iteration validation (spec #443 / #521).
 //!
 //! Split out of `validate_lifecycle.rs` because `for_each` has its own
 //! rule set (mandatory `max:`, a depth-1 body cap, and the `as:`
@@ -21,31 +15,12 @@ use crate::validate_error::ValidationError;
 use crate::validate_lifecycle::validate_nested_lifecycle_block_in_loop;
 use crate::verification::VerificationDefinition;
 
-/// Validate every `for_each:` in the definition: Tier 2 rejection
-/// inside a check's `steps:`, and the full Tier 1 rule set (`max:`
-/// required, wrapper fields, depth cap, `as:` scope) everywhere else.
+/// Validate bounds, wrapper fields, depth, and binding scope.
 pub(crate) fn validate_for_each(
     v: &VerificationDefinition,
     outputs_for: &dyn Fn(&str) -> Vec<String>,
     errs: &mut Vec<ValidationError>,
 ) {
-    for criterion in &v.criteria {
-        for check in &criterion.checks {
-            for (idx, step) in check.steps.iter().enumerate() {
-                if step.for_each.is_none() {
-                    continue;
-                }
-                let expr = step.for_each.as_ref().expect("checked above");
-                let location = check_step_for_each_location(v, criterion, check, idx, &expr.raw);
-                errs.push(ValidationError::ForEachUnavailableInCheck {
-                    criterion: criterion.id.clone(),
-                    check: check.id.clone(),
-                    location,
-                });
-            }
-        }
-    }
-
     validate_for_each_list(
         v,
         outputs_for,
@@ -125,6 +100,22 @@ pub(crate) fn validate_for_each(
             validate_for_each_list(
                 v,
                 outputs_for,
+                &check.steps,
+                "steps",
+                &check_label,
+                &[
+                    SourcePathSegment::key("criteria"),
+                    SourcePathSegment::index(criterion_index),
+                    SourcePathSegment::key("checks"),
+                    SourcePathSegment::index(check_index),
+                    SourcePathSegment::key("steps"),
+                ],
+                errs,
+            );
+
+            validate_for_each_list(
+                v,
+                outputs_for,
                 &check.setup,
                 "setup",
                 &check_label,
@@ -154,34 +145,6 @@ pub(crate) fn validate_for_each(
             );
         }
     }
-}
-
-/// Location of a check step's `for_each:` scalar, for the Tier 2
-/// rejection. Mirrors `SourceMap::check_step_with_location`'s
-/// positional addressing (criteria/checks are indexed, not keyed).
-fn check_step_for_each_location(
-    v: &VerificationDefinition,
-    criterion: &crate::criterion::Criterion,
-    check: &crate::criterion::Check,
-    step_index: usize,
-    raw: &str,
-) -> Option<crate::SourceLocation> {
-    let criterion_index = v.criteria.iter().position(|c| c.id == criterion.id)?;
-    let check_index = criterion
-        .checks
-        .iter()
-        .position(|c| c.id == check.id)
-        .unwrap_or(0);
-    let path = [
-        SourcePathSegment::key("criteria"),
-        SourcePathSegment::index(criterion_index),
-        SourcePathSegment::key("checks"),
-        SourcePathSegment::index(check_index),
-        SourcePathSegment::key("steps"),
-        SourcePathSegment::index(step_index),
-        SourcePathSegment::key("for_each"),
-    ];
-    v.source_map.scalar_location(&path, raw)
 }
 
 /// Validate every `for_each:` step directly inside one lifecycle step
@@ -229,6 +192,17 @@ fn validate_for_each_list(
             }
         }
 
+        // Expanded flow bodies must obey the same depth cap as inline bodies;
+        // otherwise a loop could acquire a second loop through a call.
+        for inner in &step.for_each_body {
+            if inner.for_each.is_some() || inner.steps.is_some() {
+                errs.push(ValidationError::ForEachDepthExceeded {
+                    site: site.clone(),
+                    field: "for_each",
+                    location,
+                });
+            }
+        }
         let active_loop = step.as_binding.as_deref();
         let Some(body) = &step.steps else {
             // `uses:`/`call:` single-action body forms: nothing to
@@ -271,6 +245,9 @@ fn validate_for_each_list(
 
         let mut body_path_prefix = step_path.clone();
         body_path_prefix.push(SourcePathSegment::key("steps"));
+        if phase == "steps" {
+            continue;
+        }
         validate_nested_lifecycle_block_in_loop(
             v,
             outputs_for,
@@ -347,19 +324,9 @@ mod tests {
     }
 
     #[test]
-    fn for_each_inside_a_check_is_tier_2_and_names_509_with_a_location() {
-        let y = "verification: x\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        steps:\n          - for_each: $inputs.rows\n            max: 5\n            uses: cli/invoke\n        assertions: [\"true\"]\n";
-        let e = errs(y);
-        assert!(
-            e.iter().any(|e| matches!(
-                e,
-                ValidationError::ForEachUnavailableInCheck {
-                    location: Some(_),
-                    ..
-                }
-            ) && e.to_string().contains("#509")),
-            "{e:?}"
-        );
+    fn for_each_inside_a_check_validates() {
+        let y = "verification: x\ninputs: {rows: {type: array}}\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        steps:\n          - for_each: $inputs.rows\n            max: 5\n            uses: cli/invoke\n        assertions: [\"true\"]\n";
+        crate::validate(&parse(y)).expect("Tier 2 validates");
     }
 
     #[test]

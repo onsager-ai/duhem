@@ -39,6 +39,8 @@ use crate::engine::registry::{ActionRegistry, default_registry, enforce_wait_cei
 use crate::engine::session::{CheckContexts, SessionResolution};
 
 mod check;
+mod check_iterations;
+mod check_steps;
 use crate::engine::template::{page_reference, substitute_with};
 use crate::engine::translate::{
     RETRY_BACKOFF_BASE, apply_default_timeout, check_is_retryable, outcome_to_evidence,
@@ -4251,6 +4253,7 @@ criteria:
         assert!(matches!(
             assertions[0].payload,
             EventPayload::AssertionEvaluated {
+                iteration: None,
                 assertion_index: 1,
                 state: VerdictState::Fail,
                 ..

@@ -54,7 +54,7 @@ pub(crate) fn field_errors(def: &VerificationDefinition) -> Vec<String> {
     }
     for (criterion_index, c) in def.criteria.iter().enumerate() {
         for (check_index, ch) in c.checks.iter().enumerate() {
-            for (i, s) in ch.steps.iter().enumerate() {
+            for (i, s) in ch.steps.iter().flat_map(Step::actions).enumerate() {
                 let site = format!("criterion `{}` / check `{}` / step {i}", c.id, ch.id);
                 check_step(s, &site, &mut errs);
                 let location = def
@@ -82,12 +82,16 @@ fn check_judgment(c: &duhem_schema::Criterion, ch: &duhem_schema::Check, errs: &
     if !ch.assertions.is_empty() || ch.steps.is_empty() {
         return; // explicit assertions, or schema-level NothingToJudge.
     }
-    let any_judging = ch.steps.iter().any(|s| match contract_for(s.uses_name()) {
-        None => true, // unknown/custom action — assume it may judge.
-        // Binding an output named `satisfied` is the manual-control
-        // opt-out (mirrors the runtime in `implicit_judgment_outcomes`).
-        Some(contract) => contract.judges() && !s.outputs.contains_key("satisfied"),
-    });
+    let any_judging =
+        ch.steps
+            .iter()
+            .flat_map(Step::actions)
+            .any(|s| match contract_for(s.uses_name()) {
+                None => true, // unknown/custom action — assume it may judge.
+                // Binding an output named `satisfied` is the manual-control
+                // opt-out (mirrors the runtime in `implicit_judgment_outcomes`).
+                Some(contract) => contract.judges() && !s.outputs.contains_key("satisfied"),
+            });
     if !any_judging {
         errs.push(format!(
             "criterion `{}` / check `{}`: no `assertions:` and no judging step — add an assertion, or a step whose action emits `satisfied` (e.g. ui/assert-*, api/poll) without binding `satisfied` in `outputs:`",

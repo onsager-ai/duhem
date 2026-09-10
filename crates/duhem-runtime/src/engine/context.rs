@@ -124,6 +124,7 @@ impl RunState {
 /// `EvalContext` view for a single check. Borrows the run-level state
 /// (inputs, env, uuid cache) and owns its own per-check map of
 /// observed step outputs.
+#[derive(Clone)]
 pub struct RunContext<'r> {
     run: &'r RunState,
     outputs: BTreeMap<(String, String), Value>,

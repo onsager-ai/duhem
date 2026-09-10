@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import type { TraceEvent } from "../api";
@@ -157,7 +157,9 @@ it("preserves iteration selection across view switches without attributing ambig
 });
 
 it("scroll selection ignores collapsed iterations sharing the same index", async () => {
-  const view = report(50);
+  // Flush the fetch-driven render and its effects before the one-shot scroll.
+  // Finding timeline markup alone can precede the scroll listener's effect.
+  const view = await act(async () => report(50));
   await screen.findByTestId("loop-group");
   for (const step of screen.getAllByTestId("step-group")) {
     const index = step.getAttribute("data-step-index");

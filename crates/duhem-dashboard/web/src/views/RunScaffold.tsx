@@ -17,6 +17,8 @@ import {
 } from "../api";
 import { carryFetched, foldRun } from "../fold";
 import { deliveryLayerLabel, groupTimeline, stepStatus } from "../format";
+import { groupLoops, stepNavigation } from "../step-presentation";
+import { LoopGroup } from "../components/LoopGroup";
 import { flowOrigin } from "../definition";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -227,6 +229,80 @@ function TreeGroup({
             const steps = active && activeCheck
               ? groupTimeline(activeCheck.timeline).filter((node) => node.kind === "step")
               : [];
+            const renderStep = (node: (typeof steps)[number]) => {
+              if (node.kind !== "step") return null;
+              const started = node.events[0];
+              const flow = flowOrigin(started.flow);
+              const { key, label } = stepNavigation(node, vd);
+              const stepSearch = new URLSearchParams(search);
+              stepSearch.set("step", key);
+              const status = stepStatus(node);
+              const layer = deliveryLayerLabel(started.layer);
+              const verdict =
+                status.tone === "ok"
+                  ? "pass"
+                  : status.tone === "fail"
+                    ? "fail"
+                    : status.tone === "inconclusive"
+                      ? "inconclusive:step"
+                      : null;
+              const moveByKeyboard = (direction: number) => {
+                const current = steps.findIndex(
+                  (candidate) => candidate.key === node.key,
+                );
+                const target = steps[current + direction];
+                if (target?.kind !== "step") return;
+                const targetKey = stepNavigation(target, vd).key;
+                const targetSearch = new URLSearchParams(search);
+                targetSearch.set("step", targetKey);
+                navigate({
+                  pathname: checkHref(runId, criterion.id, chk.id),
+                  search: `?${targetSearch.toString()}`,
+                });
+              };
+              return (
+                <Link
+                  key={node.key}
+                  data-flow-invocation={flow?.invocation}
+                  data-flow-name={flow?.name}
+                  to={{
+                    pathname: checkHref(runId, criterion.id, chk.id),
+                    search: `?${stepSearch.toString()}`,
+                  }}
+                  aria-label={label}
+                  title={label}
+                  aria-current={activeStep === key ? "step" : undefined}
+                  onKeyDown={(event) => {
+                    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+                    event.preventDefault();
+                    moveByKeyboard(event.key === "ArrowDown" ? 1 : -1);
+                  }}
+                  className={cn(
+                    "flex min-w-0 items-center gap-2 rounded px-2 py-1 text-xs",
+                    activeStep === key
+                      ? "bg-accent font-medium text-accent-foreground"
+                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                  )}
+                >
+                  <span className="min-w-0 flex-1 truncate">{label}</span>
+                  {typeof started.session === "string" && (
+                    <Badge variant="outline" data-testid="step-session">
+                      {started.session}
+                    </Badge>
+                  )}
+                  {layer && (
+                    <Badge
+                      variant="outline"
+                      className="px-1.5 font-mono text-[0.65rem]"
+                      data-testid="step-layer"
+                    >
+                      {layer}
+                    </Badge>
+                  )}
+                  <VerdictBadge verdict={verdict} compact />
+                </Link>
+              );
+            };
             return (
               <div key={chk.id}>
               <Link
@@ -259,92 +335,11 @@ function TreeGroup({
               </Link>
               {active && steps.length > 0 && (
                 <div className="ml-3 border-l pl-2" data-testid="step-children">
-                  {steps.map((node) => {
-                    if (node.kind !== "step") return null;
-                    const started = node.events[0];
-                    const uses = typeof started.uses === "string" ? started.uses : "step";
-                    const flow = flowOrigin(started.flow);
-                    const authoredId = vd?.stepId(criterion.id, chk.id, node.stepIndex, flow);
-                    const label =
-                      vd?.stepLabel(criterion.id, chk.id, node.stepIndex, flow) ??
-                      `${uses} #${node.stepIndex}`;
-                    const key = authoredId ?? String(node.stepIndex);
-                    const stepSearch = new URLSearchParams(search);
-                    stepSearch.set("step", key);
-                    const status = stepStatus(node);
-                    const layer = deliveryLayerLabel(started.layer);
-                    const verdict =
-                      status.tone === "ok"
-                        ? "pass"
-                        : status.tone === "fail"
-                          ? "fail"
-                          : status.tone === "inconclusive"
-                            ? "inconclusive:step"
-                            : null;
-                    const moveByKeyboard = (direction: number) => {
-                      const current = steps.findIndex(
-                        (candidate) => candidate.kind === "step" && candidate.stepIndex === node.stepIndex,
-                      );
-                      const target = steps[current + direction];
-                      if (target?.kind !== "step") return;
-                      const targetStarted = target.events[0];
-                      const targetFlow = flowOrigin(targetStarted.flow);
-                      const targetKey = vd?.stepId(
-                        criterion.id,
-                        chk.id,
-                        target.stepIndex,
-                        targetFlow,
-                      ) ?? String(target.stepIndex);
-                      const targetSearch = new URLSearchParams(search);
-                      targetSearch.set("step", targetKey);
-                      navigate({
-                        pathname: checkHref(runId, criterion.id, chk.id),
-                        search: `?${targetSearch.toString()}`,
-                      });
-                    };
-                    return (
-                      <Link
-                        key={node.stepIndex}
-                        data-flow-invocation={flow?.invocation}
-                        data-flow-name={flow?.name}
-                        to={{
-                          pathname: checkHref(runId, criterion.id, chk.id),
-                          search: `?${stepSearch.toString()}`,
-                        }}
-                        aria-label={label}
-                        title={label}
-                        aria-current={activeStep === key ? "step" : undefined}
-                        onKeyDown={(event) => {
-                          if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-                          event.preventDefault();
-                          moveByKeyboard(event.key === "ArrowDown" ? 1 : -1);
-                        }}
-                        className={cn(
-                          "flex min-w-0 items-center gap-2 rounded px-2 py-1 text-xs",
-                          activeStep === key
-                            ? "bg-accent font-medium text-accent-foreground"
-                            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-                        )}
-                      >
-                        <span className="min-w-0 flex-1 truncate">{label}</span>
-                        {typeof started.session === "string" && (
-                          <Badge variant="outline" data-testid="step-session">
-                            {started.session}
-                          </Badge>
-                        )}
-                        {layer && (
-                          <Badge
-                            variant="outline"
-                            className="px-1.5 font-mono text-[0.65rem]"
-                            data-testid="step-layer"
-                          >
-                            {layer}
-                          </Badge>
-                        )}
-                        <VerdictBadge verdict={verdict} compact />
-                      </Link>
-                    );
-                  })}
+                  {groupLoops(steps).map((node) => node.kind === "loop"
+                    ? <LoopGroup key={node.key} group={node} rail
+                        selectedKey={steps.find((step) => stepNavigation(step, vd).key === activeStep)?.key}
+                        renderStep={renderStep} />
+                    : node.kind === "step" ? renderStep(node) : null)}
                 </div>
               )}
               </div>

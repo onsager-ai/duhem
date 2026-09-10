@@ -615,45 +615,134 @@ impl Engine {
         warnings: &mut Vec<String>,
         cleanup: &mut Vec<CleanupFailure>,
     ) -> Result<CriterionVerdict, EngineError> {
-        let mut check_verdicts = Vec::new();
-        for check in &criterion.checks {
-            // Filtered-out checks emit no events and don't contribute
-            // to verdict aggregation. A criterion with all checks
-            // filtered out aggregates as empty → Inconclusive
-            // (spec on issue #23).
-            if let Some(f) = &self.filter
-                && !f.matches(&criterion.id, &check.id)
-            {
-                continue;
+        // Criterion-level `setup:` (#441 Part B) runs once before any
+        // of this criterion's checks — after leaf `setup:`, before any
+        // check's own `setup:`. Skipped entirely when empty so the
+        // wire shape stays byte-identical for hook-free criteria.
+        let mut criterion_setup_dispatched = false;
+        let mut criterion_setup_abort: Option<(crate::engine::setup::AbortReason, String)> = None;
+        if !criterion.setup.is_empty() {
+            let result = crate::engine::setup::run_criterion_setup(
+                writer,
+                &self.registry,
+                self.browser.as_ref(),
+                run,
+                &criterion.id,
+                &criterion.setup,
+                &self.child_process_env(writer.run_id()),
+                &mut criterion_setup_dispatched,
+            )
+            .await?;
+            if let Some(reason) = result.aborted {
+                criterion_setup_abort = Some((
+                    reason,
+                    result
+                        .failed_step
+                        .unwrap_or_else(|| "criterion setup environment".to_string()),
+                ));
             }
-            // Session expressions resolve after setup has populated the
-            // run state and before any check context exists. A retry
-            // reuses the same immutable baseline but still opens a new
-            // context for every attempt.
-            let session = crate::engine::session::resolve(check, run);
-            let cv = self
-                .run_check_with_retry(
-                    writer,
-                    run,
-                    fixtures,
-                    &criterion.id,
-                    check,
-                    &session,
-                    failures,
-                    cleanup,
-                )
-                .await?;
-            writer
-                .append(EventPayload::CheckFinished {
-                    check_id: check.id.clone(),
-                    criterion_id: Some(criterion.id.clone()),
-                    verdict: cv.state,
-                    session_source: session.source.clone(),
-                    session_digest: session.digest(),
-                })
-                .await?;
-            check_verdicts.push(cv);
         }
+
+        let mut check_verdicts = Vec::new();
+        if let Some((reason, step)) = &criterion_setup_abort {
+            // The criterion never obtained its preconditions: every one
+            // of its checks is `Inconclusive` with the triggering
+            // cause, and none of them run — no step evidence, no
+            // fixtures, no check-level setup.
+            for check in &criterion.checks {
+                if let Some(f) = &self.filter
+                    && !f.matches(&criterion.id, &check.id)
+                {
+                    continue;
+                }
+                failures.push(CheckFailure {
+                    criterion_id: criterion.id.clone(),
+                    check_id: check.id.clone(),
+                    assertions: vec![FailedAssertion {
+                        expr: "criterion `setup:` completed".to_string(),
+                        state: VerdictState::Inconclusive(reason.cause()),
+                        detail: Some(format!("criterion `setup:` failed at step `{step}`")),
+                    }],
+                    captures: Vec::new(),
+                });
+                let cv = CheckVerdict {
+                    check_id: check.id.clone(),
+                    state: VerdictState::Inconclusive(reason.cause()),
+                };
+                writer
+                    .append(EventPayload::CheckFinished {
+                        check_id: check.id.clone(),
+                        criterion_id: Some(criterion.id.clone()),
+                        verdict: cv.state,
+                        session_source: None,
+                        session_digest: None,
+                    })
+                    .await?;
+                check_verdicts.push(cv);
+            }
+        } else {
+            for check in &criterion.checks {
+                // Filtered-out checks emit no events and don't contribute
+                // to verdict aggregation. A criterion with all checks
+                // filtered out aggregates as empty → Inconclusive
+                // (spec on issue #23).
+                if let Some(f) = &self.filter
+                    && !f.matches(&criterion.id, &check.id)
+                {
+                    continue;
+                }
+                // Session expressions resolve after setup has populated the
+                // run state and before any check context exists. A retry
+                // reuses the same immutable baseline but still opens a new
+                // context for every attempt.
+                let session = crate::engine::session::resolve(check, run);
+                let cv = self
+                    .run_check_with_retry(
+                        writer,
+                        run,
+                        fixtures,
+                        &criterion.id,
+                        check,
+                        &session,
+                        failures,
+                        cleanup,
+                    )
+                    .await?;
+                writer
+                    .append(EventPayload::CheckFinished {
+                        check_id: check.id.clone(),
+                        criterion_id: Some(criterion.id.clone()),
+                        verdict: cv.state,
+                        session_source: session.source.clone(),
+                        session_digest: session.digest(),
+                    })
+                    .await?;
+                check_verdicts.push(cv);
+            }
+        }
+
+        // Criterion-level `teardown:` runs once after every check in
+        // this criterion — including after a criterion `setup:` abort
+        // that dispatched at least one action — before leaf
+        // `teardown:`. Evidence-only: never replaces the criterion's
+        // verdict.
+        if !criterion.teardown.is_empty() && criterion_setup_dispatched {
+            let mut teardown_failures = crate::engine::setup::run_criterion_teardown(
+                writer,
+                &self.registry,
+                self.browser.as_ref(),
+                run,
+                &criterion.id,
+                &criterion.teardown,
+                &self.child_process_env(writer.run_id()),
+            )
+            .await?;
+            for failure in &mut teardown_failures {
+                failure.step = format!("criterion `{}` teardown: {}", criterion.id, failure.step);
+            }
+            cleanup.append(&mut teardown_failures);
+        }
+
         // Criterion-level aggregation, then the manifest's
         // `inconclusive_policy` lens (spec #66). `block` (the default)
         // leaves the verdict untouched; `warn`/`pass` soften a
@@ -701,34 +790,80 @@ impl Engine {
             // so only the final attempt's detail reaches the reporter.
             let failures_mark = failures.len();
             run.clear_fixture_outputs();
-            let mut active = Vec::new();
-            let mut fixture_abort = None;
-            for name in &check.needs {
-                let fixture = &fixtures[name];
-                active.push(name.as_str());
-                let result = crate::engine::setup::run_fixture_up(
+
+            // Check-level `setup:` (#441 Part B) runs before this
+            // check's `needs:` fixtures, after criterion `setup:`.
+            // Re-run every retry attempt, like fixtures.
+            let mut check_setup_dispatched = false;
+            let mut check_setup_abort: Option<(crate::engine::setup::AbortReason, String)> = None;
+            if !check.setup.is_empty() {
+                let result = crate::engine::setup::run_check_setup(
                     writer,
                     &self.registry,
                     self.browser.as_ref(),
                     run,
-                    name,
+                    criterion_id,
                     &check.id,
-                    &fixture.up,
+                    &check.setup,
                     &self.child_process_env(writer.run_id()),
+                    &mut check_setup_dispatched,
                 )
                 .await?;
                 if let Some(reason) = result.aborted {
-                    fixture_abort = Some((
-                        name.clone(),
+                    check_setup_abort = Some((
                         reason,
                         result
                             .failed_step
-                            .unwrap_or_else(|| "fixture environment".to_string()),
+                            .unwrap_or_else(|| "check setup environment".to_string()),
                     ));
-                    break;
                 }
             }
-            let cv = if let Some((name, reason, step)) = fixture_abort {
+
+            let mut active = Vec::new();
+            let mut fixture_abort = None;
+            if check_setup_abort.is_none() {
+                for name in &check.needs {
+                    let fixture = &fixtures[name];
+                    active.push(name.as_str());
+                    let result = crate::engine::setup::run_fixture_up(
+                        writer,
+                        &self.registry,
+                        self.browser.as_ref(),
+                        run,
+                        name,
+                        &check.id,
+                        &fixture.up,
+                        &self.child_process_env(writer.run_id()),
+                    )
+                    .await?;
+                    if let Some(reason) = result.aborted {
+                        fixture_abort = Some((
+                            name.clone(),
+                            reason,
+                            result
+                                .failed_step
+                                .unwrap_or_else(|| "fixture environment".to_string()),
+                        ));
+                        break;
+                    }
+                }
+            }
+            let cv = if let Some((reason, step)) = &check_setup_abort {
+                failures.push(CheckFailure {
+                    criterion_id: criterion_id.to_string(),
+                    check_id: check.id.clone(),
+                    assertions: vec![FailedAssertion {
+                        expr: "check `setup:` completed".to_string(),
+                        state: VerdictState::Inconclusive(reason.cause()),
+                        detail: Some(format!("check `setup:` failed at step `{step}`")),
+                    }],
+                    captures: Vec::new(),
+                });
+                CheckVerdict {
+                    check_id: check.id.clone(),
+                    state: VerdictState::Inconclusive(reason.cause()),
+                }
+            } else if let Some((name, reason, step)) = fixture_abort {
                 failures.push(CheckFailure {
                     criterion_id: criterion_id.to_string(),
                     check_id: check.id.clone(),
@@ -765,6 +900,29 @@ impl Engine {
                 }
                 cleanup.append(&mut failures);
             }
+
+            // Check-level `teardown:` runs after this check's fixtures
+            // are torn down — including after a check `setup:` abort
+            // that dispatched at least one action. Evidence-only: never
+            // replaces the check's verdict. Re-run every retry attempt.
+            if !check.teardown.is_empty() && check_setup_dispatched {
+                let mut teardown_failures = crate::engine::setup::run_check_teardown(
+                    writer,
+                    &self.registry,
+                    self.browser.as_ref(),
+                    run,
+                    criterion_id,
+                    &check.id,
+                    &check.teardown,
+                    &self.child_process_env(writer.run_id()),
+                )
+                .await?;
+                for failure in &mut teardown_failures {
+                    failure.step = format!("check `{}` teardown: {}", check.id, failure.step);
+                }
+                cleanup.append(&mut teardown_failures);
+            }
+
             if attempt < max && check_is_retryable(cv.state) {
                 failures.truncate(failures_mark);
                 attempt += 1;
@@ -1685,6 +1843,283 @@ criteria:
         assert_eq!(outcome.verdict.state, VerdictState::Fail);
         assert_eq!(outcome.cleanup.len(), 1);
         assert!(outcome.cleanup[0].step.contains("fixture `resource`"));
+    }
+
+    // --- #441 Part B: criterion- and check-level setup:/teardown: ---
+
+    /// The documented execution order, outermost first:
+    /// `provision.up → leaf setup → criterion setup → check setup →
+    /// [fixtures via needs] → check steps`, then teardown unwinds in
+    /// exact reverse. Asserts the *observed order*, not just that
+    /// every hook ran.
+    #[tokio::test]
+    async fn all_four_lifecycle_levels_execute_in_order_and_teardown_unwinds_in_reverse() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        for (uses, label) in [
+            ("fake/leaf_setup", "leaf_setup"),
+            ("fake/leaf_teardown", "leaf_teardown"),
+            ("fake/crit_setup", "crit_setup"),
+            ("fake/crit_teardown", "crit_teardown"),
+            ("fake/check_setup", "check_setup"),
+            ("fake/check_teardown", "check_teardown"),
+            ("fake/fixture_up", "fixture_up"),
+            ("fake/fixture_down", "fixture_down"),
+        ] {
+            engine.register_test_action(Box::new(RecordingAction {
+                uses,
+                label,
+                outcome: Outcome::Ok,
+                log: log.clone(),
+                judges: false,
+                outputs: vec![],
+            }));
+        }
+        engine.register_test_action(Box::new(RecordingAction {
+            uses: "fake/check_step",
+            label: "check_step",
+            outcome: Outcome::Ok,
+            log: log.clone(),
+            judges: true,
+            outputs: vec![("satisfied", serde_json::json!(true))],
+        }));
+        let v = def(r#"
+verification: full chain
+setup: [{ uses: fake/leaf_setup }]
+teardown: [{ uses: fake/leaf_teardown }]
+fixtures:
+  res:
+    up: [{ uses: fake/fixture_up }]
+    down: [{ uses: fake/fixture_down }]
+criteria:
+  - id: AC-1
+    description: full chain
+    setup: [{ uses: fake/crit_setup }]
+    teardown: [{ uses: fake/crit_teardown }]
+    checks:
+      - id: AC-1.1
+        needs: [res]
+        setup: [{ uses: fake/check_setup }]
+        teardown: [{ uses: fake/check_teardown }]
+        steps: [{ uses: fake/check_step }]
+"#);
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(outcome.verdict.state, VerdictState::Pass);
+        assert_eq!(
+            *log.lock().unwrap(),
+            vec![
+                "leaf_setup",
+                "crit_setup",
+                "check_setup",
+                "fixture_up",
+                "check_step",
+                "fixture_down",
+                "check_teardown",
+                "crit_teardown",
+                "leaf_teardown",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn criterion_setup_failure_makes_every_check_inconclusive_with_existing_cause() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/boom", Outcome::Error)));
+        let check = StubAction::new("fake/check", Outcome::Ok)
+            .judging()
+            .with_output("satisfied", serde_json::json!(true));
+        let check_calls = check.invocations.clone();
+        engine.register_test_action(Box::new(check));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: criterion setup fails
+    setup: [{ uses: fake/boom }]
+    checks:
+      - id: AC-1.1
+        steps: [{ uses: fake/check }]
+      - id: AC-1.2
+        steps: [{ uses: fake/check }]
+"#);
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            outcome.verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation)
+        );
+        let checks = &outcome.verdict.criteria[0].checks;
+        assert_eq!(checks.len(), 2);
+        for c in checks {
+            assert_eq!(
+                c.state,
+                VerdictState::Inconclusive(InconclusiveCause::MissingObservation)
+            );
+        }
+        assert_eq!(
+            check_calls.load(Ordering::SeqCst),
+            0,
+            "no check should have run once criterion setup aborted"
+        );
+    }
+
+    #[tokio::test]
+    async fn check_setup_failure_makes_only_that_check_inconclusive() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/boom", Outcome::Error)));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/check", Outcome::Ok)
+                .judging()
+                .with_output("satisfied", serde_json::json!(true)),
+        ));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: only one check's setup fails
+    checks:
+      - id: AC-1.1
+        setup: [{ uses: fake/boom }]
+        steps: [{ uses: fake/check }]
+      - id: AC-1.2
+        steps: [{ uses: fake/check }]
+"#);
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        let checks = &outcome.verdict.criteria[0].checks;
+        assert_eq!(
+            checks[0].state,
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation)
+        );
+        assert_eq!(checks[1].state, VerdictState::Pass);
+    }
+
+    #[tokio::test]
+    async fn criterion_and_check_teardown_failures_are_evidence_only() {
+        // Teardown drains what its matching setup created (mirrors
+        // leaf `teardown:` — #409), so each teardown here is paired
+        // with a (trivially succeeding) setup at the same level.
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/crit_setup", Outcome::Ok)));
+        engine.register_test_action(Box::new(StubAction::new("fake/check_setup", Outcome::Ok)));
+        engine.register_test_action(Box::new(StubAction::new("fake/crit_td", Outcome::Error)));
+        engine.register_test_action(Box::new(StubAction::new("fake/check_td", Outcome::Error)));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/check", Outcome::Ok)
+                .judging()
+                .with_output("satisfied", serde_json::json!(true)),
+        ));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: teardown failures never change the verdict
+    setup: [{ uses: fake/crit_setup }]
+    teardown: [{ uses: fake/crit_td }]
+    checks:
+      - id: AC-1.1
+        setup: [{ uses: fake/check_setup }]
+        teardown: [{ uses: fake/check_td }]
+        steps: [{ uses: fake/check }]
+"#);
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(outcome.verdict.state, VerdictState::Pass);
+        assert_eq!(outcome.cleanup.len(), 2);
+        assert!(
+            outcome
+                .cleanup
+                .iter()
+                .any(|c| c.step.contains("check `AC-1.1` teardown"))
+        );
+        assert!(
+            outcome
+                .cleanup
+                .iter()
+                .any(|c| c.step.contains("criterion `AC-1` teardown"))
+        );
+    }
+
+    #[tokio::test]
+    async fn check_teardown_runs_after_a_failing_check() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/check_setup", Outcome::Ok)));
+        let teardown = StubAction::new("fake/check_td", Outcome::Ok);
+        let teardown_calls = teardown.invocations.clone();
+        engine.register_test_action(Box::new(teardown));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/check_fail", Outcome::Ok)
+                .judging()
+                .with_output("satisfied", serde_json::json!(false)),
+        ));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: teardown still runs after a failing check
+    checks:
+      - id: AC-1.1
+        setup: [{ uses: fake/check_setup }]
+        teardown: [{ uses: fake/check_td }]
+        steps: [{ uses: fake/check_fail }]
+"#);
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(outcome.verdict.state, VerdictState::Fail);
+        assert_eq!(teardown_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn lifecycle_setup_steps_contribute_no_judgments() {
+        // A judging action reporting `satisfied: false` inside a
+        // criterion `setup:` must not turn into a `Fail` assertion —
+        // that would mean the lifecycle step "contributed a
+        // judgment," the exact thing #441/#440 Tier 1 forbids because
+        // it would let a lifecycle-only `if:` quietly shrink a
+        // check's claim set. Instead it gates setup itself: the
+        // action ran fine (`Outcome::Ok`) but reported failure, which
+        // the engine treats as an environment failure — surfacing as
+        // `Inconclusive(EnvironmentError)`, never `Fail`.
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/judging_setup", Outcome::Ok)
+                .judging()
+                .with_output("satisfied", serde_json::json!(false)),
+        ));
+        let check = StubAction::new("fake/check", Outcome::Ok)
+            .judging()
+            .with_output("satisfied", serde_json::json!(true));
+        let check_calls = check.invocations.clone();
+        engine.register_test_action(Box::new(check));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: setup judgment never becomes a verdict assertion
+    setup: [{ uses: fake/judging_setup }]
+    checks:
+      - id: AC-1.1
+        steps: [{ uses: fake/check }]
+"#);
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            outcome.verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
+            "a judging setup step's `satisfied: false` must gate setup, not fail an assertion"
+        );
+        assert_eq!(
+            check_calls.load(Ordering::SeqCst),
+            0,
+            "the check must never run once criterion setup aborted"
+        );
+        let store = SqliteStore::open(_tmp.path().join("duhem.db"))
+            .await
+            .unwrap();
+        let events = duhem_evidence::Store::run_events(&store, &outcome.run_id)
+            .await
+            .unwrap();
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(&e.payload, EventPayload::AssertionEvaluated { .. })),
+            "a lifecycle step must never produce an AssertionEvaluated event"
+        );
     }
 
     #[async_trait]

@@ -618,6 +618,7 @@ async fn a_finished_run_is_sealed_against_further_events() {
             step_count: 1,
             fixture_name: None,
             check_id: None,
+            criterion_id: None,
         })
         .await
         .expect_err("appending after run_finished must fail");
@@ -679,6 +680,7 @@ async fn events_after_supports_live_tailing() {
         step_count: 1,
         fixture_name: None,
         check_id: None,
+        criterion_id: None,
     })
     .await
     .unwrap();
@@ -1205,6 +1207,7 @@ async fn setup_phase_spans_carry_no_check_id() {
         with: BTreeMap::new(),
         fixture_name: None,
         check_id: None,
+        criterion_id: None,
     })
     .await
     .unwrap();
@@ -1215,6 +1218,7 @@ async fn setup_phase_spans_carry_no_check_id() {
         detail: None,
         fixture_name: None,
         check_id: None,
+        criterion_id: None,
     })
     .await
     .unwrap();

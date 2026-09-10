@@ -38,6 +38,22 @@ pub struct Criterion {
     /// Free-form prose. Opaque to the schema layer.
     pub description: String,
 
+    /// Optional setup steps run once before this criterion's checks —
+    /// after leaf `setup:` and before any check's own `setup:` (#441
+    /// Part B). Symmetric with leaf `setup:` (#20): non-judging and
+    /// three-state-faithful. An aborted step makes every one of this
+    /// criterion's checks `Inconclusive` with the triggering cause;
+    /// none of them run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub setup: Vec<Step>,
+
+    /// Optional cleanup steps run once after every check in this
+    /// criterion — including after a criterion `setup:` abort that
+    /// dispatched at least one action — and before leaf `teardown:`.
+    /// Failure is evidence-only, mirroring leaf `teardown:` (#409).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub teardown: Vec<Step>,
+
     /// One or more checks that, taken together, verify this criterion.
     /// The judge's per-criterion verdict is an aggregation of the
     /// per-check verdicts.
@@ -64,6 +80,22 @@ pub struct Check {
     /// Fixtures instantiated for this check, in bring-up order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
+
+    /// Optional setup steps run once before this check's own `steps:`,
+    /// after criterion `setup:` and before this check's `needs:`
+    /// fixtures (#441 Part B). Re-run on every retry attempt, like
+    /// fixtures. A `setup:` step that aborts makes only this check
+    /// `Inconclusive` with the triggering cause; its fixtures and
+    /// `steps:` do not run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub setup: Vec<Step>,
+
+    /// Optional cleanup steps run once after this check's fixtures are
+    /// torn down (including after a `setup:` abort that dispatched at
+    /// least one action), before the criterion moves on. Re-run on
+    /// every retry attempt. Failure is evidence-only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub teardown: Vec<Step>,
 
     /// Ordered sequence of action invocations.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -174,6 +206,57 @@ checks:
             criterion.checks[0].session.as_deref(),
             Some("$setup.login.outputs.state")
         );
+    }
+
+    #[test]
+    fn criterion_and_check_lifecycle_hooks_round_trip_and_absence_keeps_wire_shape() {
+        let source = r#"
+id: AC-1
+description: x
+checks:
+  - id: AC-1.1
+    assertions: ["true"]
+"#;
+        let absent: Criterion = serde_yml::from_str(source).expect("parse absent");
+        assert!(absent.setup.is_empty());
+        assert!(absent.teardown.is_empty());
+        assert!(absent.checks[0].setup.is_empty());
+        assert!(absent.checks[0].teardown.is_empty());
+        let round_trip = serde_yml::to_string(&absent).expect("serialize");
+        assert!(
+            !round_trip.contains("setup:") && !round_trip.contains("teardown:"),
+            "absent criterion/check hooks must not alter old VDs: {round_trip}"
+        );
+
+        let with = r#"
+id: AC-1
+description: x
+setup:
+  - id: crit_prep
+    uses: cli/invoke
+    with: { command: [sh, -c, "true"] }
+teardown:
+  - uses: cli/invoke
+    with: { command: [sh, -c, "true"] }
+checks:
+  - id: AC-1.1
+    setup:
+      - id: check_prep
+        uses: cli/invoke
+        with: { command: [sh, -c, "true"] }
+    teardown:
+      - uses: cli/invoke
+        with: { command: [sh, -c, "true"] }
+    assertions: ["true"]
+"#;
+        let parsed: Criterion = serde_yml::from_str(with).expect("parse hooks");
+        assert_eq!(parsed.setup.len(), 1);
+        assert_eq!(parsed.teardown.len(), 1);
+        assert_eq!(parsed.checks[0].setup.len(), 1);
+        assert_eq!(parsed.checks[0].teardown.len(), 1);
+        let round_trip: Criterion =
+            serde_yml::from_str(&serde_yml::to_string(&parsed).unwrap()).unwrap();
+        assert_eq!(round_trip, parsed);
     }
 
     #[test]

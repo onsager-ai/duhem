@@ -41,6 +41,7 @@ composition.
 | 10 | [`pages-example`](pages-example/) | Share a two-level `pages:` locator catalog through `includes:` and consume the same entry from sibling leaves | browser + inline fixture pages | #366 |
 | 11 | [`flows-example`](flows-example/) | Reuse a parameterized `flows:` sign-in sequence from sibling leaves while preserving expanded-step evidence | browser + inline fixture pages | #367 |
 | 12 | [`stepless-check-example`](stepless-check-example/) | Judge inputs and pure runtime expressions with `steps: []` while retaining check ownership in evidence | nothing — fully offline | #490 |
+| 13 | [`lifecycle-hooks-example`](lifecycle-hooks-example/) | Criterion- and check-level `setup:`/`teardown:`, symmetric with leaf `setup:`/`teardown:` and per-check fixtures — the run report's resolved hook chain names each level and where it was declared | local process (`cli/invoke`) | #441 |
 
 The CLI self-verification suite also carries the leaf-scoped cleanup
 worked example at

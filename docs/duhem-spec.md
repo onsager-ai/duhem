@@ -863,6 +863,113 @@ Only a fixture's own `down:` may read its `up:` outputs, through
 leaf lifecycle blocks, another fixture, or the fixture's own `up:` are
 validation errors. The action contract must declare the referenced output.
 
+### 10.3.6 Criterion and check lifecycle (`setup:`/`teardown:`)
+
+A `Criterion` and a `Check` may each carry their own `setup:`/`teardown:`
+pair — symmetric with leaf `setup:`/`teardown:` (§10.3, §10.3.4) and no new
+concept: the same `Vec<Step>` shape, the same non-judging semantics, the
+same value-based `if:` support (§10.3.3 Tier 1). Criterion `setup:` runs
+once before that criterion's checks; check `setup:` runs before that
+check's own `steps:` (and, like fixtures, on every retry attempt).
+
+```yaml
+verification: Criterion and check lifecycle hooks
+criteria:
+  - id: AC-1
+    description: Every check shares a scratch directory; each gets its own marker.
+    setup:                             # runs once before AC-1's checks
+      - uses: cli/invoke
+        with: { command: [mkdir, -p, /tmp/scratch] }
+    teardown:                          # runs once after AC-1's checks
+      - uses: cli/invoke
+        with: { command: [rmdir, /tmp/scratch] }
+    checks:
+      - id: AC-1.1
+        setup:                         # runs before AC-1.1's own steps
+          - uses: cli/invoke
+            with: { command: [touch, /tmp/scratch/marker] }
+        teardown:                      # runs after AC-1.1's own steps
+          - uses: cli/invoke
+            with: { command: [rm, -f, /tmp/scratch/marker] }
+        steps:
+          - id: inspect
+            uses: cli/invoke
+            with: { command: [test, -f, /tmp/scratch/marker] }
+        assertions:
+          - $steps.inspect.outputs.exit_code == 0
+```
+
+Full execution order, outermost first:
+
+```
+provision.up: → leaf setup: → criterion setup: → check setup: → [fixtures via needs:] → check steps
+                                                                                              ↓
+provision.down: ← leaf teardown: ← criterion teardown: ← check teardown: ← [fixture down:] ←
+```
+
+Teardown unwinds in the exact reverse of setup. A level's `teardown:` runs
+if — and only if — that same level's `setup:` actually dispatched an
+action, including when the check failed (the same "drain what setup
+created" rule §10.3.4 already states for leaf `teardown:`); a `teardown:`
+declared with no matching `setup:` at the same level never runs. A
+criterion `setup:` failure makes every one of that criterion's checks
+`inconclusive` with the triggering cause — none of them run, and no
+check-level hook fires for them. A check `setup:` failure makes only that
+check `inconclusive`; its fixtures and `steps:` do not run. A `teardown:`
+failure at either level is evidence-only and never changes a verdict.
+
+`if:` value expressions on a nested `setup:`/`teardown:` step resolve
+against declared inputs, `$runtime`, `$pages`, and every lifecycle step
+already in scope when that step runs: leaf `setup:`, then this
+criterion's own `setup:` (visible to the criterion's `teardown:` and to
+every check's `setup:`), then this check's own `setup:` (visible to the
+check's `teardown:`). Because every non-fixture lifecycle level publishes
+into the same run-scoped `$setup.<id>` namespace (§10.3), a nested
+lifecycle step's `id` may not collide with an id already open in an outer
+scope — validation rejects it. Fixtures keep their own `$fixture.*`
+namespace and rules (§10.3.5) unchanged.
+
+**Hooks are for side effects; leaf `setup:` is still the only lifecycle
+source of check-readable values.** A check's own `steps:`/`assertions:`/
+`session:` keep resolving `$setup.*` against leaf `setup:` only — a
+criterion- or check-level `setup:` step's outputs are *not* addressable
+from the check body, and this is deliberate, not an oversight to close
+later. Criterion- and check-level `setup:` exist to run side effects that
+put the system in the right state before a check (navigate, seed a
+record, sign in) and to guarantee their cleanup; they are not a second
+way to hand a value to the check that declared them. When a check
+genuinely needs to *read* a produced value, that has to be a leaf-level
+`setup:` step — unchanged from before this feature (§10.3): `$setup.<id>
+.outputs.<name>` is read-only from inside any check regardless of which
+criterion or check it belongs to. `fixtures:` + `needs:` (§10.3.5) is a
+third, different tool, easy to reach for here but the wrong one: it gives
+guaranteed per-check cleanup that can *address what it created* through
+`$fixture.<name>.<step_id>.outputs.<output>`, but only from that
+fixture's own `down:` — never from a check body either. Referencing a
+criterion- or check-level `setup:` step's output from a check body (in
+`with:`, `assertions:`, or `session:`) is therefore a validation error
+naming that step as declared-but-out-of-scope and pointing at leaf
+`setup:`, distinct from the ordinary undeclared-reference diagnostic —
+the id is real, so the message says so, rather than sending an author
+looking for a typo in a declaration that's staring back at them. The
+restriction is not a stopgap: exposing check-level `setup:` ids to check
+bodies would raise cross-check collision questions in the same flat
+`$setup` namespace that belong in their own proposal, not folded into
+this one.
+
+**Lookup surface.** With this, a check's effective setup can come from up
+to four declaration sites plus fixtures. `duhem run`'s default reporter
+mitigates that directly: for any **non-passing** check, it prints the
+resolved hook chain — in execution order, naming what ran and where each
+entry was declared (`leaf setup`, `` criterion `AC-1` setup ``, `` check
+`AC-1.1` setup ``, `` fixture `name` up ``, and their `teardown`/`down`
+counterparts) — right next to that check's failing assertions. This is
+gated on the check's own verdict, not printed unconditionally: the chain
+answers "why did this check just behave unexpectedly," a question a
+passing check hasn't raised, and printing it for every passing check in a
+large run would bury the signal it exists to surface. A check with no
+hooks at any level, passing or not, prints nothing extra.
+
 ### 10.4 Root manifest (`duhem.yml`)
 
 The root manifest is a single canonical file at the project root that aggregates Verification Definitions and provides shared configuration.

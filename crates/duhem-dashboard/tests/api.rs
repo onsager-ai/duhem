@@ -294,6 +294,7 @@ async fn run_detail_surfaces_teardown_evidence_without_changing_verdict() {
             with: BTreeMap::new(),
             fixture_name: None,
             check_id: None,
+            criterion_id: None,
         })
         .await
         .unwrap();
@@ -305,6 +306,7 @@ async fn run_detail_surfaces_teardown_evidence_without_changing_verdict() {
             detail: None,
             fixture_name: None,
             check_id: None,
+            criterion_id: None,
         })
         .await
         .unwrap();
@@ -314,6 +316,7 @@ async fn run_detail_surfaces_teardown_evidence_without_changing_verdict() {
             aborted: true,
             fixture_name: None,
             check_id: None,
+            criterion_id: None,
         })
         .await
         .unwrap();

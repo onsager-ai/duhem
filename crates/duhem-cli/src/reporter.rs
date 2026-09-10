@@ -19,9 +19,11 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+use crate::hook_chain;
 use duhem_judge::RunSetVerdict;
 use duhem_runtime::CheckFailure;
 use duhem_runtime::RunOutcome;
+use duhem_schema::VerificationDefinition;
 use duhem_summary::{
     CheckFailureSummary, CheckTotals, CleanupFailureSummary, CriterionSummary,
     FailedAssertionSummary, RunSetSummary, RunSummary,
@@ -102,16 +104,23 @@ impl From<std::io::Error> for RenderError {
 /// Render the post-run summary for `outcome` to `out`. Reporter
 /// selection is a stdout-only concern; the writer is parametric so
 /// tests can capture output without going through the real stdout.
+///
+/// `def` is the Verification Definition the run just executed —
+/// needed only by the `Default` reporter's resolved-hook-chain detail
+/// (#441 Part B; see [`hook_chain::resolve`]), which looks up each
+/// non-passing check's criterion/check-level `setup:`/`teardown:` and
+/// `needs:` declarations by id.
 pub fn render(
     reporter: &Reporter,
     out: &mut dyn Write,
     outcome: &RunOutcome,
     store_db: &std::path::Path,
+    def: &VerificationDefinition,
 ) -> Result<(), RenderError> {
     match reporter {
         Reporter::Default => {
             writeln!(out, "{}", outcome.verdict.state)?;
-            write_failures(out, &outcome.failures)?;
+            write_failures(out, &outcome.failures, def)?;
             write_warnings(out, &outcome.warnings)?;
             write_cleanup(out, &outcome.cleanup)?;
             write_totals(out, check_totals(outcome))?;
@@ -234,7 +243,11 @@ impl Write for NewlineTracker<'_> {
 /// failed (and any cause) without querying the store. Nothing is
 /// written for a passing run (`failures` is empty). ASCII-only and
 /// ANSI-free, matching the built-in reporters' plain posture.
-fn write_failures(out: &mut dyn Write, failures: &[CheckFailure]) -> Result<(), RenderError> {
+fn write_failures(
+    out: &mut dyn Write,
+    failures: &[CheckFailure],
+    def: &VerificationDefinition,
+) -> Result<(), RenderError> {
     for f in failures {
         writeln!(out, "  {}::{}:", f.criterion_id, f.check_id)?;
         for a in &f.assertions {
@@ -255,6 +268,20 @@ fn write_failures(out: &mut dyn Write, failures: &[CheckFailure]) -> Result<(), 
                 .collect::<Vec<_>>()
                 .join(", ");
             writeln!(out, "    evidence: {refs} (view: duhem dashboard)")?;
+        }
+        // Resolved hook chain (#441 Part B): setup/teardown can come
+        // from leaf, criterion, check, and fixtures — print the
+        // ordered, resolved list for *this* check, naming where each
+        // entry was declared, right where a non-passing check is
+        // already being explained. A hook-free check (the common
+        // case) prints nothing here.
+        if let Some(chain) = hook_chain::resolve(def, &f.criterion_id, &f.check_id) {
+            if !chain.before.is_empty() {
+                writeln!(out, "    hooks before: {}", chain.before.join(" -> "))?;
+            }
+            if !chain.after.is_empty() {
+                writeln!(out, "    hooks after:  {}", chain.after.join(" -> "))?;
+            }
         }
     }
     Ok(())
@@ -529,13 +556,40 @@ mod tests {
         }
     }
 
+    /// Matches `outcome()`'s ids (`AC-1` / `AC-1.1`) with no lifecycle
+    /// hooks at any level, so `capture()` exercises the common
+    /// hook-free path by default.
+    fn minimal_def() -> VerificationDefinition {
+        VerificationDefinition::from_yaml_str(
+            r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#,
+        )
+        .unwrap()
+    }
+
     fn capture(reporter: &Reporter, o: &RunOutcome) -> String {
+        capture_with_def(reporter, o, &minimal_def())
+    }
+
+    fn capture_with_def(
+        reporter: &Reporter,
+        o: &RunOutcome,
+        def: &VerificationDefinition,
+    ) -> String {
         let mut buf = Vec::new();
         render(
             reporter,
             &mut buf,
             o,
             std::path::Path::new("state/duhem.db"),
+            def,
         )
         .unwrap();
         String::from_utf8(buf).unwrap()
@@ -771,6 +825,7 @@ mod tests {
             &mut buf,
             &o,
             std::path::Path::new("state/duhem.db"),
+            &minimal_def(),
         )
         .unwrap_err();
         match err {
@@ -871,6 +926,7 @@ mod tests {
             &mut buf,
             &o,
             std::path::Path::new("state/duhem.db"),
+            &minimal_def(),
         )
         .unwrap_err();
         match err {

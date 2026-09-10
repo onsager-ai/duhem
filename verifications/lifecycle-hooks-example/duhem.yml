@@ -1,0 +1,139 @@
+# Criterion- and check-level setup:/teardown: — worked example (#441 Part B).
+#
+# Symmetric with leaf `setup:`/`teardown:` (#20/#409) and per-check
+# fixtures (#449): a criterion may declare its own `setup:`/`teardown:`,
+# run once before/after all of its checks, and a check may declare its
+# own `setup:`/`teardown:`, run before/after that check's `steps:`.
+#
+# The example deliberately makes the *unwind order* observable: the
+# criterion creates a shared scratch directory once; each check creates
+# its own marker file inside it and removes that file in its own
+# teardown; the criterion then removes the (now-empty) directory in its
+# teardown. If check-level teardown ran *after* criterion-level teardown
+# instead of before it, `rmdir` would fail on a non-empty directory —
+# so a correct run is itself proof that the documented order held.
+#
+# Hooks are for side effects, not values: AC-1.1/AC-1.2's `setup:` steps
+# below are deliberately never read by their own `steps:` — a criterion-
+# or check-level `setup:` step's outputs are not addressable from the
+# check body, and `duhem validate` rejects a `$setup.<id>` reference to
+# one with an error naming the step declared-but-out-of-scope (see
+# docs/duhem-spec.md §10.3.6). AC-1.3 contrasts the value case: when a
+# check genuinely needs to *read* a value a precondition produced, that
+# value has to come from *leaf*-level `setup:` instead —
+# `$setup.<id>.outputs.<name>` is addressable from any check body,
+# unchanged from before this feature (§10.3). `fixtures:` + `needs:`
+# (#449; see verifications/fixtures-needs-example/) is a third,
+# different tool: guaranteed per-check cleanup that can address what it
+# created, through `$fixture.<name>.<step_id>.outputs.<output>` — but
+# only from that fixture's own `down:`, never from a check body either.
+
+verification: Criterion and check lifecycle hooks
+spec_ref: https://github.com/onsager-ai/duhem/issues/441
+
+setup:
+  - id: run_started_at
+    uses: cli/invoke
+    with:
+      command: [date, +%s]
+
+criteria:
+  - id: AC-1
+    description: |
+      A criterion-level scratch directory is created once before this
+      criterion's checks and removed once after. Each check additionally
+      gets its own check-level marker file inside that directory, created
+      before that check's steps and removed right after — independent of
+      the other check's marker.
+    setup:
+      - uses: cli/invoke
+        with:
+          command:
+            - mkdir
+            - -p
+            - $runtime.format("/tmp/duhem-hooks-example-{}", $runtime.uuid())
+    teardown:
+      - uses: cli/invoke
+        with:
+          command:
+            - rmdir
+            - $runtime.format("/tmp/duhem-hooks-example-{}", $runtime.uuid())
+    checks:
+      - id: AC-1.1
+        description: The first check's own marker exists only for its own lifetime.
+        setup:
+          - uses: cli/invoke
+            with:
+              command:
+                - touch
+                - $runtime.format("/tmp/duhem-hooks-example-{}/one", $runtime.uuid())
+        teardown:
+          - uses: cli/invoke
+            with:
+              command:
+                - rm
+                - -f
+                - $runtime.format("/tmp/duhem-hooks-example-{}/one", $runtime.uuid())
+        steps:
+          - id: inspect
+            uses: cli/invoke
+            with:
+              command:
+                - test
+                - -f
+                - $runtime.format("/tmp/duhem-hooks-example-{}/one", $runtime.uuid())
+        assertions:
+          - $steps.inspect.outputs.exit_code == 0
+
+      - id: AC-1.2
+        description: The second check's own marker is separate from the first's.
+        setup:
+          - uses: cli/invoke
+            with:
+              command:
+                - touch
+                - $runtime.format("/tmp/duhem-hooks-example-{}/two", $runtime.uuid())
+        teardown:
+          - uses: cli/invoke
+            with:
+              command:
+                - rm
+                - -f
+                - $runtime.format("/tmp/duhem-hooks-example-{}/two", $runtime.uuid())
+        steps:
+          - id: inspect
+            uses: cli/invoke
+            with:
+              command:
+                - test
+                - -f
+                - $runtime.format("/tmp/duhem-hooks-example-{}/two", $runtime.uuid())
+          - id: sibling_marker_absent
+            uses: cli/invoke
+            with:
+              command:
+                - test
+                - "!"
+                - -f
+                - $runtime.format("/tmp/duhem-hooks-example-{}/one", $runtime.uuid())
+        assertions:
+          - $steps.inspect.outputs.exit_code == 0
+          - $steps.sibling_marker_absent.outputs.exit_code == 0
+
+      - id: AC-1.3
+        description: |
+          The value-case contrast with AC-1.1/AC-1.2: this check needs to
+          *read* the value leaf `setup:` produced (when the run started),
+          not just rely on a side effect. `$setup.run_started_at.outputs
+          .stdout` is addressable here because `run_started_at` is a
+          leaf-level `setup:` step; the equivalent output from a
+          criterion- or check-level `setup:` step would not be — that is
+          exactly the case `duhem validate` rejects as declared-but-out-
+          of-scope.
+        steps:
+          - id: inspect
+            uses: cli/invoke
+            with:
+              command: [test, -n, $setup.run_started_at.outputs.stdout]
+        assertions:
+          - $steps.inspect.outputs.exit_code == 0

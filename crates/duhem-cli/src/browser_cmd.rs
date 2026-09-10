@@ -7,14 +7,23 @@
 //! shipped. This materializes the embedded sidecar into the user cache dir
 //! (when running a distributed binary) and runs `npm ci` +
 //! `npx playwright install [--with-deps] chromium` in it. Idempotent.
+//!
+//! The install mechanics (the npm step, the distro-refusal retry, the
+//! cross-process lock) are shared with `duhem run`'s auto-provision via
+//! [`duhem_actions::browser_provision::install_browser`] (#505); this
+//! module is the clap surface, the human-friendly progress voice, and the
+//! `--with-deps` policy choice that only the explicit command may make.
 
-use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::path::PathBuf;
+use std::process::ExitCode;
 
 use clap::{Args, Subcommand};
 
-use duhem_actions::browser::{materialize_sidecar, sidecar_dir};
-use duhem_actions::browser_provision::{HOST_PLATFORM_OVERRIDE_ENV, HOST_PLATFORM_OVERRIDE_VALUE};
+use duhem_actions::browser::{check_node, materialize_sidecar, sidecar_dir};
+use duhem_actions::browser_provision::{
+    HOST_PLATFORM_OVERRIDE_ENV, HOST_PLATFORM_OVERRIDE_VALUE, InstallPolicy, InstallProgress,
+    install_browser,
+};
 
 /// `duhem browser …` clap surface.
 #[derive(Debug, Args)]
@@ -36,13 +45,13 @@ pub enum BrowserCmd {
     },
 }
 
-pub fn run(opts: &BrowserOpts) -> ExitCode {
+pub async fn run(opts: &BrowserOpts) -> ExitCode {
     match &opts.cmd {
-        BrowserCmd::Install { with_deps } => install(*with_deps),
+        BrowserCmd::Install { with_deps } => install(*with_deps).await,
     }
 }
 
-fn install(with_deps: bool) -> ExitCode {
+async fn install(with_deps: bool) -> ExitCode {
     let dir = match sidecar_dir_for_install() {
         Ok(d) => d,
         Err(e) => {
@@ -52,32 +61,64 @@ fn install(with_deps: bool) -> ExitCode {
     };
     println!("Sidecar: {}", dir.display());
 
-    if let Err(code) = check_node() {
-        return code;
+    if let Err(e) = check_node().await {
+        eprintln!("browser install: {e}");
+        return ExitCode::FAILURE;
     }
 
-    // 1. Sidecar node deps (playwright). `npm ci` is exact + reproducible
-    //    against the embedded lockfile; fall back to `npm install`.
-    println!("→ installing sidecar dependencies (npm ci)…");
-    if !run_in("npm", &["ci"], &dir) {
-        eprintln!("  npm ci failed; retrying with npm install…");
-        if !run_in("npm", &["install"], &dir) {
-            eprintln!("browser install: npm install failed in {}", dir.display());
-            return ExitCode::FAILURE;
+    let policy = InstallPolicy {
+        with_deps,
+        // Unlike auto-provision, always reinstall — this command is the
+        // "make it work" hammer and documents itself as "idempotent;
+        // safe to re-run".
+        skip_npm_when_usable: false,
+        // Unlike auto-provision, echo subprocess output live — a user
+        // who typed this command should watch the ~110 MiB Chromium
+        // download progress, not stare at silence for minutes.
+        stream_output: true,
+        progress: &CliProgress,
+    };
+    match install_browser(&dir, &policy).await {
+        Ok(()) => {
+            println!("✓ Browser ready — `ui/*` checks can now run.");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("browser install: {e}");
+            ExitCode::FAILURE
         }
     }
+}
 
-    // 2. The Chromium browser binary.
-    let mut pw_args = vec!["--yes", "playwright", "install"];
-    if with_deps {
-        pw_args.push("--with-deps");
+/// Friendly stdout progress for the explicit command — a user who typed
+/// `duhem browser install` wants to watch it work, unlike auto-provision's
+/// terse `[duhem]` stderr lines (`ProvisionProgress` in
+/// `duhem_actions::browser_provision`). These are just the framing lines
+/// around each step; the subprocess's own output is additionally
+/// streamed live (`InstallPolicy::stream_output: true`, set in
+/// `install` above) since the Chromium download is the longest step and
+/// silence there would read as a hang. On failure, `install_browser`'s
+/// returned error also folds in the captured text, so it reaches the
+/// user even if something scrolled past.
+struct CliProgress;
+
+impl InstallProgress for CliProgress {
+    fn npm_start(&self) {
+        println!("→ installing sidecar dependencies (npm ci)…");
     }
-    pw_args.push("chromium");
-    println!(
-        "→ installing Chromium (npx playwright install{})…",
-        if with_deps { " --with-deps" } else { "" }
-    );
-    if !run_in("npx", &pw_args, &dir) {
+
+    fn npm_retry(&self) {
+        eprintln!("  npm ci failed; retrying with npm install…");
+    }
+
+    fn chromium_start(&self, with_deps: bool) {
+        println!(
+            "→ installing Chromium (npx playwright install{})…",
+            if with_deps { " --with-deps" } else { "" }
+        );
+    }
+
+    fn distro_retry(&self) {
         // A pinned Playwright older than the host distro refuses with
         // `does not support chromium on <distro>`, though the prebuilt
         // ubuntu24.04 Chromium runs fine on newer releases. Retry once
@@ -85,19 +126,7 @@ fn install(with_deps: bool) -> ExitCode {
         eprintln!(
             "  Chromium install failed; retrying with a compatible-OS override ({HOST_PLATFORM_OVERRIDE_ENV}={HOST_PLATFORM_OVERRIDE_VALUE})…"
         );
-        if !run_in_env(
-            "npx",
-            &pw_args,
-            &dir,
-            &[(HOST_PLATFORM_OVERRIDE_ENV, HOST_PLATFORM_OVERRIDE_VALUE)],
-        ) {
-            eprintln!("browser install: npx playwright install chromium failed");
-            return ExitCode::FAILURE;
-        }
     }
-
-    println!("✓ Browser ready — `ui/*` checks can now run.");
-    ExitCode::SUCCESS
 }
 
 /// The directory the runtime resolves the sidecar to, materializing the
@@ -110,50 +139,4 @@ fn sidecar_dir_for_install() -> std::io::Result<PathBuf> {
     } else {
         materialize_sidecar()
     }
-}
-
-fn check_node() -> Result<(), ExitCode> {
-    match Command::new("node").arg("--version").output() {
-        Ok(out) => {
-            let v = String::from_utf8_lossy(&out.stdout);
-            let major = v
-                .trim()
-                .trim_start_matches('v')
-                .split('.')
-                .next()
-                .and_then(|s| s.parse::<u32>().ok());
-            match major {
-                Some(m) if m >= 20 => Ok(()),
-                Some(m) => {
-                    eprintln!(
-                        "browser install: Node {m} is too old; the Playwright sidecar needs Node >= 20."
-                    );
-                    Err(ExitCode::FAILURE)
-                }
-                None => {
-                    eprintln!("browser install: could not parse `node --version`.");
-                    Err(ExitCode::FAILURE)
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!(
-                "browser install: Node.js not found (`node --version`: {e}). Install Node >= 20."
-            );
-            Err(ExitCode::FAILURE)
-        }
-    }
-}
-
-fn run_in(program: &str, args: &[&str], dir: &Path) -> bool {
-    run_in_env(program, args, dir, &[])
-}
-
-fn run_in_env(program: &str, args: &[&str], dir: &Path, envs: &[(&str, &str)]) -> bool {
-    let mut cmd = Command::new(program);
-    cmd.args(args).current_dir(dir);
-    for (k, v) in envs {
-        cmd.env(k, v);
-    }
-    cmd.status().map(|s| s.success()).unwrap_or(false)
 }

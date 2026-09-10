@@ -30,6 +30,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 
 - [clarifying] The dashboard's step row now reports the step's own duration instead of the gap since the previous event, and no longer occludes an expanded step's body or leaves a truncated step label with no tooltip. (#503)
+- [clarifying] `duhem browser install` now shares `duhem run`'s auto-provision mechanics: it retries the Chromium install only on an actual distro refusal (not any failure), probes Node via `DUHEM_NODE` like the runtime does, and takes the same cross-process install lock. (#505)
 
 ## v0.4.0 — 2026-09-04
 

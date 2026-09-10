@@ -369,7 +369,13 @@ fn main() -> ExitCode {
             provenance,
         }),
         Some(Cmd::Dashboard(opts)) => dashboard::run(&opts.into()),
-        Some(Cmd::Browser(opts)) => browser_cmd::run(&opts),
+        Some(Cmd::Browser(opts)) => {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            rt.block_on(browser_cmd::run(&opts))
+        }
         Some(Cmd::Export { run_id, db, out }) => {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()

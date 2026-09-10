@@ -12,6 +12,7 @@ pub mod context;
 pub mod env;
 pub(crate) mod extract;
 pub(crate) mod flow;
+pub(crate) mod for_each;
 pub(crate) mod gating;
 pub mod har;
 pub mod identity;

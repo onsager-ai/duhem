@@ -295,6 +295,7 @@ async fn run_detail_surfaces_teardown_evidence_without_changing_verdict() {
             fixture_name: None,
             check_id: None,
             criterion_id: None,
+            flow: None,
         })
         .await
         .unwrap();

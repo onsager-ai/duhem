@@ -153,6 +153,12 @@ pub struct FlowOrigin {
     pub name: String,
     pub invocation: String,
     pub inner_index: u32,
+    /// Which `for_each:` (#443 Tier 1) iteration this step belongs
+    /// to, `0`-based. Absent for a step expanded from an ordinary
+    /// `flows:` invocation with no enclosing loop, and for traces
+    /// recorded before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iteration: Option<u32>,
 }
 
 /// The closed set of event payloads. `#[serde(tag = "kind")]` puts the
@@ -264,6 +270,12 @@ pub enum EventPayload {
         /// Same contract as `SetupStarted.criterion_id`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         criterion_id: Option<String>,
+        /// `for_each:` (#443 Tier 1) loop origin for a step expanded
+        /// from a loop body. Same contract as `StepStarted.flow`;
+        /// absent for an ordinary lifecycle step and for traces
+        /// recorded before `for_each` existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        flow: Option<FlowOrigin>,
     },
     SetupStepObservation {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
@@ -661,6 +673,7 @@ mod tests {
                 fixture_name: None,
                 check_id: None,
                 criterion_id: None,
+                flow: None,
             },
             EventPayload::SetupStepObservation {
                 phase: StepPhase::Setup,
@@ -886,6 +899,7 @@ mod tests {
                 name: "sign_in".into(),
                 invocation: "login".into(),
                 inner_index: 2,
+                iteration: None,
             }),
         };
         let json = serde_json::to_string(&payload).expect("serialize");

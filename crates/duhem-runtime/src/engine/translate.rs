@@ -96,6 +96,7 @@ fn map_eval_cause(c: &EvalCause) -> InconclusiveCause {
         | EvalCause::MissingSetupObservation { .. }
         | EvalCause::MissingInput(_)
         | EvalCause::MissingEnv(_)
+        | EvalCause::MissingLoopBinding(_)
         | EvalCause::MissingField(_) => InconclusiveCause::MissingObservation,
         EvalCause::UnknownRuntimeHelper(_)
         | EvalCause::TypeMismatch { .. }
@@ -122,6 +123,7 @@ pub(super) fn eval_cause_detail(c: &EvalCause) -> String {
         }
         EvalCause::MissingInput(n) => format!("missing_input({n})"),
         EvalCause::MissingEnv(n) => format!("missing_env({n})"),
+        EvalCause::MissingLoopBinding(n) => format!("missing_loop_binding({n})"),
         EvalCause::UnknownRuntimeHelper(n) => format!("unknown_runtime_helper({n})"),
         EvalCause::TypeMismatch { lhs, rhs } => {
             format!("type_mismatch({}, {})", shape_wire(*lhs), shape_wire(*rhs))

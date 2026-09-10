@@ -123,6 +123,16 @@ impl SourceMap {
             .and_then(|node| (node.scalar.as_deref() == Some(expected)).then_some(node.location))
     }
 
+    /// Location of whatever node sits at `path`, scalar or not (a
+    /// sequence or mapping's location is its opening mark). Unlike
+    /// [`SourceMap::scalar_location`], this has no authored value to
+    /// cross-check against a stale index, so callers should only use
+    /// it for structural nodes a loader doesn't rewrite in place —
+    /// e.g. a `steps:` sequence, never a `$...`-bearing scalar.
+    pub(crate) fn node_location(&self, path: &[SourcePathSegment]) -> Option<SourceLocation> {
+        self.nodes.get(path).map(|node| node.location)
+    }
+
     pub(crate) fn check_context_matches(
         &self,
         criterion_index: usize,

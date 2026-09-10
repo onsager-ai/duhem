@@ -6,6 +6,13 @@
 //! to something declared in the same definition. Operator/type
 //! checking is *not* done here — output value types aren't known
 //! statically; the runtime spec owns evaluation.
+//
+// budget-allow: #443's `for_each` wired a `PathRoot::Loop` rejection
+// into this file's existing setup/teardown/check-body reference walks
+// (a handful of lines each) and pushed it ~1.5% over the 8000-token
+// budget. Track a follow-up to extract those walks (already
+// near-duplicated three times) into a shared helper rather than
+// raising the budget or exempting it long-term.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -51,6 +58,8 @@ pub fn validate_with_contract_outputs(
             .map(|message| ValidationError::InvalidFlow { message }),
     );
 
+    crate::validate_for_each::validate_for_each(v, outputs_for, &mut errs);
+
     if v.criteria.is_empty() {
         errs.push(ValidationError::NoCriteria);
     }
@@ -83,6 +92,19 @@ pub fn validate_with_contract_outputs(
             v,
             "setup",
             &condition_path,
+            step,
+            &preceding_lifecycle_outputs,
+            &mut errs,
+        );
+        let for_each_path = [
+            SourcePathSegment::key("setup"),
+            SourcePathSegment::index(idx),
+            SourcePathSegment::key("for_each"),
+        ];
+        crate::validate_lifecycle::validate_for_each_source(
+            v,
+            "setup",
+            &for_each_path,
             step,
             &preceding_lifecycle_outputs,
             &mut errs,
@@ -127,6 +149,16 @@ pub fn validate_with_contract_outputs(
                         site: format!("setup step `{step_name}` with:"),
                         location,
                     });
+                } else if path.root == PathRoot::Loop {
+                    // #443: legitimate only for this step's own `for_each:`.
+                    let name = path.segments().first().map(String::as_str).unwrap_or("");
+                    if step.as_binding.as_deref() != Some(name) {
+                        errs.push(ValidationError::LoopVariableOutOfScope {
+                            site: format!("setup step `{step_name}` with:"),
+                            name: name.to_string(),
+                            location,
+                        });
+                    }
                 }
             });
         });
@@ -148,6 +180,19 @@ pub fn validate_with_contract_outputs(
             v,
             "teardown",
             &condition_path,
+            step,
+            &preceding_teardown_outputs,
+            &mut errs,
+        );
+        let for_each_path = [
+            SourcePathSegment::key("teardown"),
+            SourcePathSegment::index(idx),
+            SourcePathSegment::key("for_each"),
+        ];
+        crate::validate_lifecycle::validate_for_each_source(
+            v,
+            "teardown",
+            &for_each_path,
             step,
             &preceding_teardown_outputs,
             &mut errs,
@@ -199,6 +244,15 @@ pub fn validate_with_contract_outputs(
                         site: format!("teardown step `{step_name}` with:"),
                         location,
                     });
+                } else if path.root == PathRoot::Loop {
+                    let name = path.segments().first().map(String::as_str).unwrap_or("");
+                    if step.as_binding.as_deref() != Some(name) {
+                        errs.push(ValidationError::LoopVariableOutOfScope {
+                            site: format!("teardown step `{step_name}` with:"),
+                            name: name.to_string(),
+                            location,
+                        });
+                    }
                 }
             });
         });
@@ -946,6 +1000,15 @@ fn check_path(
                 &format!("criterion `{}` / check `{}`: {site}", c.id, ch.id),
                 errs,
             );
+        }
+        PathRoot::Loop => {
+            // #443: for_each is Tier 1 only, never inside a check body.
+            let name = path.segments().first().map(String::as_str).unwrap_or("");
+            errs.push(ValidationError::LoopVariableOutOfScope {
+                site: format!("criterion `{}` / check `{}`: {site}", c.id, ch.id),
+                name: name.to_string(),
+                location,
+            });
         }
     }
 }

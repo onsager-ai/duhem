@@ -74,6 +74,7 @@ pub(crate) fn validate_fixtures(
                 errs,
             );
             crate::source::walk_with_refs(&step.with, &mut path, &mut |expr, raw, source_path| {
+                let location = v.source_map.scalar_location(source_path, raw);
                 expr.walk_paths(|reference| {
                     if reference.root == PathRoot::Fixture {
                         errs.push(ValidationError::FixtureRefOutsideDown {
@@ -81,8 +82,27 @@ pub(crate) fn validate_fixtures(
                                 "fixture `{name}` up step `{}` with:",
                                 step_label(step, index)
                             ),
-                            location: v.source_map.scalar_location(source_path, raw),
+                            location,
                         });
+                    } else if reference.root == PathRoot::Loop {
+                        // #513 follow-up: the parser no longer rejects
+                        // an unknown `$name` outright (it's
+                        // provisionally a `for_each` loop reference,
+                        // see `PathRoot::Loop`), so this scope check —
+                        // already present for every other lifecycle
+                        // `with:` — is what catches an ordinary typo
+                        // here too.
+                        let bound = reference.segments().first().map(String::as_str).unwrap_or("");
+                        if step.as_binding.as_deref() != Some(bound) {
+                            errs.push(ValidationError::LoopVariableOutOfScope {
+                                site: format!(
+                                    "fixture `{name}` up step `{}` with:",
+                                    step_label(step, index)
+                                ),
+                                name: bound.to_string(),
+                                location,
+                            });
+                        }
                     }
                 });
             });
@@ -123,6 +143,21 @@ pub(crate) fn validate_fixtures(
             crate::source::walk_with_refs(&step.with, &mut path, &mut |expr, raw, source_path| {
                 let location = v.source_map.scalar_location(source_path, raw);
                 expr.walk_paths(|reference| {
+                    if reference.root == PathRoot::Loop {
+                        // See the matching `up:` check above.
+                        let bound = reference.segments().first().map(String::as_str).unwrap_or("");
+                        if step.as_binding.as_deref() != Some(bound) {
+                            errs.push(ValidationError::LoopVariableOutOfScope {
+                                site: format!(
+                                    "fixture `{name}` down step `{}` with:",
+                                    step_label(step, index)
+                                ),
+                                name: bound.to_string(),
+                                location,
+                            });
+                        }
+                        return;
+                    }
                     if reference.root != PathRoot::Fixture {
                         return;
                     }
@@ -155,13 +190,100 @@ pub(crate) fn validate_lifecycle_condition(
     preceding: &HashMap<&str, HashSet<String>>,
     errs: &mut Vec<ValidationError>,
 ) {
+    validate_lifecycle_condition_in_loop(
+        definition,
+        phase,
+        source_path,
+        step,
+        preceding,
+        None,
+        errs,
+    );
+}
+
+/// Like [`validate_lifecycle_condition`], but resolved inside a
+/// `for_each:` body (#443 Tier 1) where `active_loop` — the enclosing
+/// loop's `as:` name — makes `$<active_loop>` a legitimate reference
+/// instead of an out-of-scope one.
+pub(crate) fn validate_lifecycle_condition_in_loop(
+    definition: &VerificationDefinition,
+    phase: &str,
+    source_path: &[SourcePathSegment],
+    step: &Step,
+    preceding: &HashMap<&str, HashSet<String>>,
+    active_loop: Option<&str>,
+    errs: &mut Vec<ValidationError>,
+) {
     let StepCondition::Expr(expr) = &step.condition else {
         return;
     };
     let location = definition
         .source_map
         .scalar_location(source_path, &expr.raw);
-    walk_checkable_paths(&expr.parsed, &mut |path, arity| {
+    validate_lifecycle_value_expr(
+        definition,
+        &format!("{phase} step condition"),
+        &expr.raw,
+        &expr.parsed,
+        location,
+        preceding,
+        active_loop,
+        errs,
+    );
+}
+
+/// Validate a `for_each:` step's source expression with the exact
+/// same reference resolution `if:` gets (#440 R3: statically validated
+/// against declared steps, inputs, and contract outputs) — reusing
+/// [`validate_lifecycle_value_expr`] rather than a second resolver.
+/// Always resolved in the outer scope (`active_loop: None`): the
+/// array hasn't been read yet at the point `for_each:` itself is
+/// evaluated, so its own source expression can never legitimately
+/// reference the loop's own `as:` binding.
+pub(crate) fn validate_for_each_source(
+    definition: &VerificationDefinition,
+    phase: &str,
+    source_path: &[SourcePathSegment],
+    step: &Step,
+    preceding: &HashMap<&str, HashSet<String>>,
+    errs: &mut Vec<ValidationError>,
+) {
+    let Some(expr) = &step.for_each else {
+        return;
+    };
+    let location = definition
+        .source_map
+        .scalar_location(source_path, &expr.raw);
+    validate_lifecycle_value_expr(
+        definition,
+        &format!("{phase} step for_each source"),
+        &expr.raw,
+        &expr.parsed,
+        location,
+        preceding,
+        None,
+        errs,
+    );
+}
+
+/// Shared resolver for a lifecycle-scoped value expression — a
+/// step's `if:` condition (§10.3.3 Tier 1) or a `for_each:` source
+/// expression (#443 Tier 1). Both read the same `$setup`/`$inputs`/
+/// `$pages`/`$runtime`/loop-variable surface and reject the same
+/// `$steps`/`$fixture` references, so the walk lives once here rather
+/// than twice.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn validate_lifecycle_value_expr(
+    definition: &VerificationDefinition,
+    site: &str,
+    raw: &str,
+    parsed: &crate::expr::Expr,
+    location: Option<SourceLocation>,
+    preceding: &HashMap<&str, HashSet<String>>,
+    active_loop: Option<&str>,
+    errs: &mut Vec<ValidationError>,
+) {
+    walk_checkable_paths(parsed, &mut |path, arity| {
         let fail = |message: String, errs: &mut Vec<ValidationError>| {
             errs.push(ValidationError::InvalidStepCondition { message, location });
         };
@@ -171,8 +293,7 @@ pub(crate) fn validate_lifecycle_condition(
                 if segs.len() < 3 || segs[1] != "outputs" {
                     fail(
                         format!(
-                            "{phase} step condition `{}` has malformed `$setup` reference (expected `$setup.<step_id>.outputs.<output>`)",
-                            expr.raw
+                            "{site} `{raw}` has malformed `$setup` reference (expected `$setup.<step_id>.outputs.<output>`)"
                         ),
                         errs,
                     );
@@ -180,8 +301,8 @@ pub(crate) fn validate_lifecycle_condition(
                     if !outputs.contains(&segs[2]) {
                         fail(
                             format!(
-                                "{phase} step condition `{}` references undeclared output `{}` on step `{}`",
-                                expr.raw, segs[2], segs[0]
+                                "{site} `{raw}` references undeclared output `{}` on step `{}`",
+                                segs[2], segs[0]
                             ),
                             errs,
                         );
@@ -189,8 +310,8 @@ pub(crate) fn validate_lifecycle_condition(
                 } else {
                     fail(
                         format!(
-                            "{phase} step condition `{}` references undeclared or forward step `{}`",
-                            expr.raw, segs[0]
+                            "{site} `{raw}` references undeclared or forward step `{}`",
+                            segs[0]
                         ),
                         errs,
                     );
@@ -201,8 +322,7 @@ pub(crate) fn validate_lifecycle_condition(
                 if segs.is_empty() || !definition.inputs.contains_key(&segs[0]) {
                     fail(
                         format!(
-                            "{phase} step condition `{}` references undeclared input `{}`",
-                            expr.raw,
+                            "{site} `{raw}` references undeclared input `{}`",
                             segs.first().map(String::as_str).unwrap_or("")
                         ),
                         errs,
@@ -213,8 +333,8 @@ pub(crate) fn validate_lifecycle_condition(
                 crate::validate_runtime::check_runtime_path(
                     path,
                     arity,
-                    &expr.raw,
-                    &format!("{phase} step condition:"),
+                    raw,
+                    &format!("{site}:"),
                     errs,
                 );
             }
@@ -223,27 +343,31 @@ pub(crate) fn validate_lifecycle_condition(
                     &definition.pages,
                     path,
                     arity,
-                    &expr.raw,
-                    &format!("{phase} step condition:"),
+                    raw,
+                    &format!("{site}:"),
                     location,
                     errs,
                 );
             }
             PathRoot::Steps => fail(
-                format!(
-                    "{phase} step condition `{}` must use `$setup` for earlier lifecycle-step outputs",
-                    expr.raw
-                ),
+                format!("{site} `{raw}` must use `$setup` for earlier lifecycle-step outputs"),
                 errs,
             ),
             PathRoot::Fixture => fail(
-                format!(
-                    "{phase} step condition `{}` may not reference fixture outputs",
-                    expr.raw
-                ),
+                format!("{site} `{raw}` may not reference fixture outputs"),
                 errs,
             ),
             PathRoot::Env => {}
+            PathRoot::Loop => {
+                let name = path.segments().first().map(String::as_str).unwrap_or("");
+                if active_loop != Some(name) {
+                    errs.push(ValidationError::LoopVariableOutOfScope {
+                        site: site.to_string(),
+                        name: name.to_string(),
+                        location,
+                    });
+                }
+            }
         }
     });
 }
@@ -277,11 +401,51 @@ pub(crate) fn validate_nested_lifecycle_block(
     outer_ids: &HashMap<String, HashSet<String>>,
     errs: &mut Vec<ValidationError>,
 ) -> HashMap<String, HashSet<String>> {
+    validate_nested_lifecycle_block_in_loop(
+        v,
+        outputs_for,
+        steps,
+        phase,
+        source_path_prefix,
+        label,
+        outer_ids,
+        None,
+        errs,
+    )
+}
+
+/// Like [`validate_nested_lifecycle_block`], but for steps inside a
+/// `for_each:` body (#443 Tier 1) — `active_loop` is the enclosing
+/// loop's `as:` name, making `$<active_loop>` resolvable in both `if:`
+/// and `with:` here. Also used, with `active_loop: None`, by the
+/// ordinary criterion-/check-level walk above: same rules, no loop in
+/// scope.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn validate_nested_lifecycle_block_in_loop(
+    v: &VerificationDefinition,
+    outputs_for: &dyn Fn(&str) -> Vec<String>,
+    steps: &[Step],
+    phase: &'static str,
+    source_path_prefix: &[SourcePathSegment],
+    label: &str,
+    outer_ids: &HashMap<String, HashSet<String>>,
+    active_loop: Option<&str>,
+    errs: &mut Vec<ValidationError>,
+) -> HashMap<String, HashSet<String>> {
     let mut own: HashMap<String, HashSet<String>> = HashMap::new();
     for (idx, step) in steps.iter().enumerate() {
         let step_name = step_label(step, idx);
         let mut step_path = source_path_prefix.to_vec();
         step_path.push(SourcePathSegment::index(idx));
+
+        // A step's own `as:` binding (if it's itself a `for_each:`
+        // wrapper) always wins for resolving *its own* `if:`/`with:`;
+        // otherwise fall back to whatever loop this whole block is
+        // already nested inside (`active_loop`, `None` at the
+        // top level). This lets one call cover both "an ordinary
+        // lifecycle list that happens to contain a for_each step" and
+        // "the body of that for_each step" with the same function.
+        let step_active_loop = step.as_binding.as_deref().or(active_loop);
 
         // `if:` resolution sees every id already in scope: outer
         // lifecycle blocks that ran before this one, plus this
@@ -293,7 +457,18 @@ pub(crate) fn validate_nested_lifecycle_block(
             .collect();
         let mut condition_path = step_path.clone();
         condition_path.push(SourcePathSegment::key("if"));
-        validate_lifecycle_condition(v, phase, &condition_path, step, &preceding, errs);
+        validate_lifecycle_condition_in_loop(
+            v,
+            phase,
+            &condition_path,
+            step,
+            &preceding,
+            active_loop,
+            errs,
+        );
+        let mut for_each_path = step_path.clone();
+        for_each_path.push(SourcePathSegment::key("for_each"));
+        validate_for_each_source(v, phase, &for_each_path, step, &preceding, errs);
 
         let mut with_path = step_path.clone();
         with_path.push(SourcePathSegment::key("with"));
@@ -332,6 +507,20 @@ pub(crate) fn validate_nested_lifecycle_block(
                         site: format!("{label} {phase} step `{step_name}` with:"),
                         location,
                     });
+                } else if path.root == PathRoot::Loop {
+                    // A step's own `with:` is per-iteration content
+                    // when the step is itself a `for_each:` wrapper
+                    // (its `with:` feeds the body), so it resolves
+                    // against `step_active_loop`, not the outer
+                    // `active_loop` used for `if:` above.
+                    let name = path.segments().first().map(String::as_str).unwrap_or("");
+                    if step_active_loop != Some(name) {
+                        errs.push(ValidationError::LoopVariableOutOfScope {
+                            site: format!("{label} {phase} step `{step_name}` with:"),
+                            name: name.to_string(),
+                            location,
+                        });
+                    }
                 }
             });
         });
@@ -525,5 +714,50 @@ pub(crate) fn resolve_setup_reference(
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::verification::VerificationDefinition;
+
+    fn parse(y: &str) -> VerificationDefinition {
+        VerificationDefinition::from_yaml_str(y).expect("parse")
+    }
+
+    /// #513 blocker: the `PathRoot::Loop` grammar widening means an
+    /// unrecognized `$name` no longer fails to *parse* — every other
+    /// lifecycle `with:` got a scope check to compensate, but
+    /// `validate_fixtures`'s up:/down: walk only checked `$fixture`,
+    /// so an ordinary typo (`$input` for `$inputs`) escaped validation
+    /// entirely and only surfaced as a runtime `MissingLoopBinding`
+    /// with no location. Pin the fix: the typo is rejected with a
+    /// `file:line:col`, naming the closed root set and the `as:` rule.
+    #[test]
+    fn fixture_up_with_typo_scope_reference_is_rejected_with_a_location() {
+        let v = parse(
+            "verification: x\ninputs:\n  base_url: { type: string, default: x }\nfixtures:\n  thing:\n    up:\n      - id: mk\n        uses: cli/invoke\n        with: { command: [echo, $input.base_url] }\n    down:\n      - uses: cli/invoke\n        with: { command: [echo, done] }\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        needs: [thing]\n        steps: []\n        assertions: [\"true\"]\n",
+        );
+        let errs = crate::validate(&v).unwrap_err();
+        let found = errs.iter().find(|e| {
+            matches!(
+                e,
+                ValidationError::LoopVariableOutOfScope { name, .. } if name == "input"
+            )
+        });
+        let err = found.unwrap_or_else(|| panic!("expected LoopVariableOutOfScope: {errs:?}"));
+        assert!(
+            err.to_string().contains("$steps")
+                && err.to_string().contains("$setup")
+                && err.to_string().contains("$fixture")
+                && err.to_string().contains("$inputs")
+                && err.to_string().contains("as:"),
+            "message should name the valid roots and the as: rule: {err}"
+        );
+        assert!(
+            err.location().is_some(),
+            "expected a source location: {err:?}"
+        );
     }
 }

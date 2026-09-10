@@ -5071,6 +5071,208 @@ criteria:
         );
     }
 
+    /// Records the `target` field of every `with:` it's dispatched
+    /// with, in order. Used by the `for_each` (#443 Tier 1) runtime
+    /// tests to prove each iteration is a real, distinctly-dispatched
+    /// step — not just N copies of the same evidence.
+    struct RecordingTargetAction {
+        uses: &'static str,
+        log: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl Dispatch for RecordingTargetAction {
+        fn uses(&self) -> &'static str {
+            self.uses
+        }
+        fn requires_page(&self) -> bool {
+            false
+        }
+        async fn invoke(
+            &self,
+            _page: Option<&Page>,
+            _step_index: usize,
+            with: &serde_yml::Value,
+            _child_env: &BTreeMap<String, String>,
+        ) -> Result<ActionResult, ActionError> {
+            self.log
+                .lock()
+                .unwrap()
+                .push(with["target"].as_str().unwrap_or_default().to_string());
+            Ok(ActionResult::ok())
+        }
+    }
+
+    #[tokio::test]
+    async fn for_each_in_setup_dispatches_a_real_step_per_element_with_as_binding() {
+        // #443 Tier 1 (R2, R4, R7 non-empty case): each element of a
+        // runtime-produced array becomes a real, separately-dispatched
+        // step with `$<as>` bound to that element.
+        let (mut engine, tmp) = engine_for_test().await;
+        let rows = StubAction::new("fake/rows", Outcome::Ok)
+            .with_output("items", serde_json::json!(["a", "b", "c"]));
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        engine.register_test_action(Box::new(rows));
+        engine.register_test_action(Box::new(RecordingTargetAction {
+            uses: "fake/delete",
+            log: log.clone(),
+        }));
+        let path = tmp.path().join("for_each.yml");
+        std::fs::write(
+            &path,
+            r#"
+verification: for_each in setup
+setup:
+  - id: rows
+    uses: fake/rows
+  - for_each: $setup.rows.outputs.items
+    max: 5
+    as: row
+    uses: fake/delete
+    with: { target: $row }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps: []
+        assertions: ["true"]
+"#,
+        )
+        .unwrap();
+        let duhem_schema::Loaded::Leaf { definition, .. } =
+            duhem_schema::load(&path).expect("load and expand")
+        else {
+            panic!("expected leaf");
+        };
+        let verdict = engine.run(&definition, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Pass, "got {verdict:?}");
+        assert_eq!(*log.lock().unwrap(), vec!["a", "b", "c"]);
+
+        let events = read_only_run_events(&engine).await;
+        // The `for_each:` wrapper's own gating announcement also
+        // carries `uses: "fake/delete"` (its `uses:` label falls back
+        // to the body's, since this is the single-action body form) —
+        // filter to events that actually carry loop provenance, i.e.
+        // the per-iteration dispatches.
+        let iterations: Vec<u32> = events
+            .iter()
+            .filter_map(|e| match &e.payload {
+                EventPayload::SetupStepStarted {
+                    uses,
+                    flow: Some(flow),
+                    ..
+                } if uses == "fake/delete" => flow.iteration,
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            iterations,
+            vec![0, 1, 2],
+            "each dispatched step carries its own iteration ordinal (R3)"
+        );
+    }
+
+    #[tokio::test]
+    async fn for_each_empty_array_runs_zero_iterations_without_error() {
+        // R7: an empty array is zero iterations, not an error.
+        let (mut engine, tmp) = engine_for_test().await;
+        let rows =
+            StubAction::new("fake/rows", Outcome::Ok).with_output("items", serde_json::json!([]));
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        engine.register_test_action(Box::new(rows));
+        engine.register_test_action(Box::new(RecordingTargetAction {
+            uses: "fake/delete",
+            log: log.clone(),
+        }));
+        let path = tmp.path().join("for_each_empty.yml");
+        std::fs::write(
+            &path,
+            r#"
+verification: for_each empty array
+setup:
+  - id: rows
+    uses: fake/rows
+  - for_each: $setup.rows.outputs.items
+    max: 5
+    as: row
+    uses: fake/delete
+    with: { target: $row }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps: []
+        assertions: ["true"]
+"#,
+        )
+        .unwrap();
+        let duhem_schema::Loaded::Leaf { definition, .. } =
+            duhem_schema::load(&path).expect("load and expand")
+        else {
+            panic!("expected leaf");
+        };
+        let verdict = engine.run(&definition, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Pass, "got {verdict:?}");
+        assert!(
+            log.lock().unwrap().is_empty(),
+            "no iterations should dispatch"
+        );
+    }
+
+    #[tokio::test]
+    async fn for_each_exceeding_max_is_a_failure_naming_the_count_and_ceiling() {
+        // R1: exceeding `max:` aborts (mapped through the same
+        // `AbortReason::ActionError` → `Inconclusive(MissingObservation)`
+        // path an ordinary failed setup action gets — never a silent
+        // truncation to the first `max` elements.
+        let (mut engine, _tmp) = engine_for_test().await;
+        let rows = StubAction::new("fake/rows", Outcome::Ok)
+            .with_output("items", serde_json::json!(["a", "b", "c"]));
+        engine.register_test_action(Box::new(rows));
+        engine.register_test_action(Box::new(RecordingTargetAction {
+            uses: "fake/delete",
+            log: Arc::new(std::sync::Mutex::new(Vec::new())),
+        }));
+        let v = def(r#"
+verification: for_each exceeds max
+setup:
+  - id: rows
+    uses: fake/rows
+  - for_each: $setup.rows.outputs.items
+    max: 2
+    as: row
+    uses: fake/delete
+    with: { target: $row }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps: []
+        assertions: ["true"]
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(
+            verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+            "got {verdict:?}"
+        );
+        let events = read_only_run_events(&engine).await;
+        let detail = events.iter().find_map(|e| match &e.payload {
+            EventPayload::SetupStepFinished {
+                outcome: duhem_evidence::StepOutcome::Error,
+                detail: Some(detail),
+                ..
+            } if detail.contains("for_each") => Some(detail.clone()),
+            _ => None,
+        });
+        let detail = detail.expect("expected an error detail naming the for_each overflow");
+        assert!(detail.contains('3'), "names the actual count: {detail}");
+        assert!(detail.contains("max: 2"), "names the ceiling: {detail}");
+    }
+
     #[tokio::test]
     async fn missing_declared_input_records_environment_inconclusive() {
         let (mut engine, _tmp) = engine_for_test().await;

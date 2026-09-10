@@ -1,0 +1,95 @@
+# Bounded `for_each` in non-judging contexts — worked example (#443
+# Tier 1).
+#
+# This is the batch-cleanup case #427 asked for: "依次删除列表中的所有
+# 测试数据" (delete all the test data in a list) / "重复执行删除 N 次"
+# (repeat a deletion N times) — state normalization in `setup:`/
+# `teardown:`, which contribute no judgments, so a runtime-sized loop
+# here can never shrink what a check claims to verify. `setup:`'s
+# `for_each:` creates one marker file per element of `scratch_ids`
+# with a single authored step, instead of one hand-written step per
+# id; `teardown:`'s `for_each:` removes every one of them again. Widen
+# `scratch_ids` to ten ids and neither block grows by a line.
+#
+# `for_each:` inside a check's own `steps:` (Tier 2 — a loop wrapping
+# judging steps) is intentionally not used here: it remains gated
+# behind #509 until a shrunken claim set is guaranteed visible in the
+# verdict.
+
+verification: for_each batch cleanup (Tier 1)
+spec_ref: https://github.com/onsager-ai/duhem/issues/443
+
+inputs:
+  scratch_ids:
+    type: array
+    default: [alpha, bravo, charlie]
+
+setup:
+  - id: scratch_dir
+    uses: cli/invoke
+    with:
+      command:
+        - mkdir
+        - -p
+        - $runtime.format("/tmp/duhem-for-each-example-{}", $runtime.uuid())
+  - for_each: $inputs.scratch_ids
+    max: 10
+    as: id
+    uses: cli/invoke
+    with:
+      command:
+        - touch
+        - $runtime.format("/tmp/duhem-for-each-example-{}/{}", $runtime.uuid(), $id)
+
+teardown:
+  - for_each: $inputs.scratch_ids
+    max: 10
+    as: id
+    uses: cli/invoke
+    with:
+      command:
+        - rm
+        - -f
+        - $runtime.format("/tmp/duhem-for-each-example-{}/{}", $runtime.uuid(), $id)
+  - uses: cli/invoke
+    with:
+      command:
+        - rmdir
+        - $runtime.format("/tmp/duhem-for-each-example-{}", $runtime.uuid())
+
+criteria:
+  - id: AC-1
+    description: |
+      Every element of `scratch_ids` gets its own marker file, created
+      by one authored `for_each:` step in `setup:` rather than one
+      hand-written step per element — and removed again by
+      `teardown:`'s own `for_each:`, proving the batch cleanup #427
+      asked for. `max: 10` is the declared ceiling: `scratch_ids`
+      staying under it is exactly what keeps this Verification
+      Definition's worst-case step count computable (#444).
+    checks:
+      - id: AC-1.1
+        description: The first scratch id's marker file exists during the check.
+        steps:
+          - id: inspect
+            uses: cli/invoke
+            with:
+              command:
+                - test
+                - -f
+                - $runtime.format("/tmp/duhem-for-each-example-{}/{}", $runtime.uuid(), "alpha")
+        assertions:
+          - $steps.inspect.outputs.exit_code == 0
+
+      - id: AC-1.2
+        description: The last scratch id's marker file exists during the check too.
+        steps:
+          - id: inspect
+            uses: cli/invoke
+            with:
+              command:
+                - test
+                - -f
+                - $runtime.format("/tmp/duhem-for-each-example-{}/{}", $runtime.uuid(), "charlie")
+        assertions:
+          - $steps.inspect.outputs.exit_code == 0

@@ -79,24 +79,26 @@ fn expr_parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
         // ---- path / call ----
         let ident = text::ident().to_slice().map(|s: &str| s.to_string());
 
-        let root =
-            just('$')
-                .ignore_then(text::ident().to_slice())
-                .try_map(|s: &str, span| match s {
-                    "steps" => Ok(PathRoot::Steps),
-                    "setup" => Ok(PathRoot::Setup),
-                    "fixture" => Ok(PathRoot::Fixture),
-                    "inputs" => Ok(PathRoot::Inputs),
-                    "pages" => Ok(PathRoot::Pages),
-                    "env" => Ok(PathRoot::Env),
-                    "runtime" => Ok(PathRoot::Runtime),
-                    other => Err(Rich::custom(
-                        span,
-                        format!(
-                            "unknown scope `${other}` (expected `$steps`, `$setup`, `$inputs`, `$pages`, `$env`, or `$runtime`)"
-                        ),
-                    )),
-                });
+        // The six fixed roots are a closed keyword set. Any other
+        // identifier is not a parse error: it is provisionally a
+        // `for_each` loop-variable reference (`as: row` → `$row`),
+        // carried as the first path segment rather than the root
+        // itself (see `PathRoot::Loop`'s doc comment for why). Whether
+        // that identifier is actually a declared, in-scope binding is
+        // resolved by the validator, not here — same deferral the
+        // parser already gives an undeclared `$steps.<id>`.
+        let root = just('$')
+            .ignore_then(text::ident().to_slice())
+            .map(|s: &str| match s {
+                "steps" => (PathRoot::Steps, None),
+                "setup" => (PathRoot::Setup, None),
+                "fixture" => (PathRoot::Fixture, None),
+                "inputs" => (PathRoot::Inputs, None),
+                "pages" => (PathRoot::Pages, None),
+                "env" => (PathRoot::Env, None),
+                "runtime" => (PathRoot::Runtime, None),
+                other => (PathRoot::Loop, Some(other.to_string())),
+            });
 
         // A path segment is either a dotted key (`.name`) or a bracketed
         // array index (`[N]`). The index is lowered to its decimal-string
@@ -113,9 +115,13 @@ fn expr_parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
             .repeated()
             .collect::<Vec<_>>();
 
-        let path = root
-            .then(segments)
-            .map(|(root, segments)| Path { root, segments });
+        let path = root.then(segments).map(|((root, loop_name), segments)| {
+            let segments = match loop_name {
+                Some(name) => std::iter::once(name).chain(segments).collect(),
+                None => segments,
+            };
+            Path { root, segments }
+        });
 
         let call_args = expr
             .clone()
@@ -134,6 +140,13 @@ fn expr_parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
                 (Some(args), PathRoot::Runtime | PathRoot::Pages) => {
                     Ok(Expr::Call { path, args })
                 }
+                (Some(_), PathRoot::Loop) => Err(Rich::custom(
+                    span,
+                    format!(
+                        "function-call syntax `(...)` is only valid on `$runtime` or `$pages`, not `${}`",
+                        path.segments.first().map(String::as_str).unwrap_or("?")
+                    ),
+                )),
                 (Some(_), other) => Err(Rich::custom(
                     span,
                     format!(
@@ -288,13 +301,32 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_scope() {
-        let err = parse("$nope.x").unwrap_err();
-        assert!(
-            err.message.contains("unknown scope"),
-            "got: {}",
-            err.message
+    fn unrecognized_root_parses_as_a_loop_reference() {
+        // Not one of the six fixed keywords, so it's provisionally a
+        // `for_each` loop-variable reference (#443 Tier 1): `$nope`
+        // becomes `PathRoot::Loop` with `nope` as the first segment.
+        // Whether `nope` is an actual, in-scope `as:` binding is a
+        // validator question, not a parser one.
+        assert_eq!(
+            p("$nope.x"),
+            Expr::Path(Path {
+                root: PathRoot::Loop,
+                segments: vec!["nope".into(), "x".into()],
+            })
         );
+        assert_eq!(
+            p("$row"),
+            Expr::Path(Path {
+                root: PathRoot::Loop,
+                segments: vec!["row".into()],
+            })
+        );
+    }
+
+    #[test]
+    fn loop_reference_rejects_call_syntax() {
+        let err = parse("$row(1)").unwrap_err();
+        assert!(err.message.contains("$row"), "got: {}", err.message);
     }
 
     #[test]

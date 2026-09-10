@@ -20,22 +20,16 @@
 
 use std::collections::BTreeMap;
 
-use duhem_actions::Page;
-use duhem_actions::{Outcome, RunBrowser};
-use duhem_evidence::{EventPayload, EvidenceWriter, StepOutcome, StepPhase};
+use duhem_actions::RunBrowser;
+use duhem_evidence::{EventPayload, EvidenceWriter, StepPhase};
 use duhem_judge::InconclusiveCause;
-use duhem_schema::{Step, StepCondition};
+use duhem_schema::Step;
 use tracing::debug;
 
 use crate::engine::context::RunState;
-use crate::engine::gating::{skip_reason as gate_skip_reason, step_failed};
-use crate::engine::registry::{ActionRegistry, Dispatch};
-use crate::engine::runner::{
-    CleanupFailure, EngineError, StepEvidence, display_step_label, implicit_judgment_for_step,
-    step_label,
-};
-use crate::engine::template::substitute_with;
-use crate::engine::translate::{outcome_to_evidence, with_to_evidence_map};
+use crate::engine::for_each::{process_lifecycle_step, run_for_each_step};
+use crate::engine::registry::ActionRegistry;
+use crate::engine::runner::{CleanupFailure, EngineError};
 
 /// Why a setup block aborted. Distinct from a generic `aborted: bool`
 /// so the engine can map the trigger to the right
@@ -90,7 +84,7 @@ pub(crate) enum HookScope<'a> {
 impl<'a> HookScope<'a> {
     /// Evidence scope fields, in `(fixture_name, check_id,
     /// criterion_id)` order.
-    fn evidence_fields(self) -> (Option<String>, Option<String>, Option<String>) {
+    pub(crate) fn evidence_fields(self) -> (Option<String>, Option<String>, Option<String>) {
         match self {
             HookScope::Leaf => (None, None, None),
             HookScope::Criterion(criterion) => (None, None, Some(criterion.to_string())),
@@ -103,7 +97,7 @@ impl<'a> HookScope<'a> {
         }
     }
 
-    fn is_fixture(self) -> bool {
+    pub(crate) fn is_fixture(self) -> bool {
         matches!(self, HookScope::Fixture(..))
     }
 }
@@ -410,14 +404,29 @@ async fn run_lifecycle_steps(
 
     // Decide up front whether any step in this block needs a real
     // page. Mirrors the per-check logic in `Engine::run_check` so
-    // setup behaves the same way on an env-failure path.
-    let needs_browser = steps.iter().any(|s| {
+    // setup behaves the same way on an env-failure path. A `for_each:`
+    // step (#443 Tier 1) has no `uses:` of its own for the `call:`/
+    // `steps:` body forms, so the scan looks at its (already
+    // schema-expanded) body template instead — same iteration count
+    // regardless of the runtime array, since the template is built
+    // once per `for_each:`, not once per element.
+    fn dispatchable_uses(s: &Step) -> Vec<&str> {
+        if s.for_each.is_some() {
+            s.for_each_body.iter().map(Step::uses_name).collect()
+        } else {
+            vec![s.uses_name()]
+        }
+    }
+    let needs_browser = steps.iter().flat_map(dispatchable_uses).any(|uses| {
         registry
-            .get(s.uses_name())
+            .get(uses)
             .map(|d| d.requires_page())
             .unwrap_or(false)
     });
-    let any_unknown = steps.iter().any(|s| !registry.contains_key(s.uses_name()));
+    let any_unknown = steps
+        .iter()
+        .flat_map(dispatchable_uses)
+        .any(|uses| !registry.contains_key(uses));
     let browser_missing = needs_browser && browser.is_none();
     let mut environment_failed = browser_missing || any_unknown;
 
@@ -449,176 +458,46 @@ async fn run_lifecycle_steps(
     let mut stored_error = None;
     let mut cleanup = Vec::new();
     for (idx, step) in steps.iter().enumerate() {
-        // The outcome gate runs first — including for value expressions,
-        // which carry `success` semantics (see `gating::skip_reason`).
-        // Only once it passes is the expression itself evaluated, so a
-        // step blocked by an earlier failure is gated cleanly rather
-        // than failing on operands that failure left unresolvable.
-        let mut condition_error = None;
-        let gate_reason = match gate_skip_reason(&step.condition, failed_by.as_deref()) {
-            Some(blocked) => Some(blocked),
-            None => match &step.condition {
-                StepCondition::Expr(expr) => {
-                    let ctx = crate::engine::context::RunContext::new(run);
-                    match crate::eval(&expr.parsed, &ctx) {
-                        crate::EvalResult::True => None,
-                        crate::EvalResult::False => {
-                            Some(format!("condition `{}` evaluated false", expr.raw))
-                        }
-                        crate::EvalResult::Inconclusive(cause) => {
-                            condition_error = Some(EngineError::UnresolvedReference {
-                                reference: expr.raw.clone(),
-                                context: format!(" (condition could not be evaluated: {cause:?})"),
-                                step: step_label(step, idx),
-                            });
-                            None
-                        }
-                    }
-                }
-                _ => None,
-            },
-        };
-        let cleanup_step =
-            phase == StepPhase::Teardown || (failed_by.is_some() && gate_reason.is_none());
-        // Setup steps see the run state (inputs, env, uuid, plus any
-        // outputs already published by earlier setup steps in this
-        // same block). The view is read-only against the run state —
-        // we feed it through a `RunContext` to reuse the existing
-        // template substitution.
-        let ctx = crate::engine::context::RunContext::new(run);
-        let mut resolved_with = step.with.clone();
-        let step_error = if condition_error.is_some() {
-            condition_error
-        } else if gate_reason.is_none() {
-            substitute_with(&mut resolved_with, &ctx).err().map(|u| {
-                EngineError::UnresolvedReference {
-                    context: u.rendered_context(),
-                    reference: u.reference,
-                    step: step_label(step, idx),
-                }
-            })
-        } else {
-            None
-        };
-
-        append_setup_started(writer, phase, step, idx, &resolved_with, scope).await?;
-        if let Some(reason) = gate_reason {
-            writer
-                .append(EventPayload::SetupStepFinished {
-                    phase,
-                    step_index: idx as u32,
-                    outcome: StepOutcome::Skipped { reason },
-                    detail: None,
-                    fixture_name: fixture_name.clone(),
-                    check_id: check_id.clone(),
-                    criterion_id: criterion_id.clone(),
-                })
-                .await?;
+        if step.for_each.is_some() {
+            run_for_each_step(
+                writer,
+                registry,
+                setup_browser.as_ref(),
+                run,
+                child_env,
+                phase,
+                scope,
+                environment_failed,
+                step,
+                idx,
+                dispatched,
+                &mut aborted,
+                &mut failed_by,
+                &mut stored_error,
+                &mut cleanup,
+            )
+            .await?;
             continue;
         }
-
-        let mut error_detail = step_error.as_ref().map(ToString::to_string);
-        let (outcome, failed) = if step_error.is_some() || environment_failed {
-            if error_detail.is_none() {
-                error_detail = Some(format!(
-                    "action `{}` could not start because the setup environment failed",
-                    step.uses_name()
-                ));
-            }
-            (Outcome::Error, true)
-        } else {
-            match registry.get(step.uses_name()) {
-                None => {
-                    error_detail = Some(format!("action `{}` is not registered", step.uses_name()));
-                    (Outcome::Error, true)
-                }
-                Some(dispatcher) => {
-                    *dispatched = true;
-                    let page_ref: Option<&Page> = setup_browser.as_ref().map(|cb| &cb.page);
-                    match invoke_and_record(
-                        dispatcher.as_ref(),
-                        page_ref,
-                        phase,
-                        idx,
-                        &resolved_with,
-                        SetupInvocation {
-                            step,
-                            run,
-                            writer,
-                            child_env,
-                            scope,
-                        },
-                    )
-                    .await
-                    {
-                        Ok((outcome, failed, action_detail)) => {
-                            error_detail = action_detail;
-                            (outcome, failed)
-                        }
-                        Err(error) => {
-                            error_detail = Some(error.to_string());
-                            if !cleanup_step && stored_error.is_none() {
-                                stored_error = Some(error);
-                            }
-                            (Outcome::Error, true)
-                        }
-                    }
-                }
-            }
-        };
-
-        if let Some(error) = step_error
-            && !cleanup_step
-            && stored_error.is_none()
-        {
-            stored_error = Some(error);
-        }
-
-        let evidence_outcome = outcome_to_evidence(&outcome);
-        let detail = match &outcome {
-            Outcome::Timeout => {
-                error_detail.or_else(|| Some(format!("action `{}` timed out", step.uses_name())))
-            }
-            Outcome::Error => error_detail
-                .or_else(|| Some(format!("action `{}` returned an error", step.uses_name()))),
-            Outcome::Ok | Outcome::Skipped { .. } => None,
-        }
-        .map(|detail| writer.mask_text(&detail));
-        writer
-            .append(EventPayload::SetupStepFinished {
-                phase,
-                step_index: idx as u32,
-                outcome: evidence_outcome.clone(),
-                detail: detail.clone(),
-                fixture_name: fixture_name.clone(),
-                check_id: check_id.clone(),
-                criterion_id: criterion_id.clone(),
-            })
-            .await?;
-
-        if phase == StepPhase::Teardown && failed {
-            let detail = detail.or_else(|| {
-                matches!(outcome, Outcome::Ok)
-                    .then(|| "judging action reported failure".to_string())
-            });
-            cleanup.push(CleanupFailure {
-                step: display_step_label(step, idx),
-                outcome: evidence_outcome,
-                detail,
-            });
-        }
-
-        if aborted.is_none() {
-            aborted = match outcome {
-                Outcome::Timeout => Some(AbortReason::Timeout),
-                Outcome::Error => Some(AbortReason::ActionError),
-                Outcome::Ok if failed => Some(AbortReason::Environment),
-                Outcome::Ok | Outcome::Skipped { .. } => None,
-            };
-            if aborted.is_some() {
-                failed_by = Some(display_step_label(step, idx));
-            }
-        }
+        process_lifecycle_step(
+            writer,
+            registry,
+            setup_browser.as_ref(),
+            run,
+            child_env,
+            phase,
+            scope,
+            environment_failed,
+            step,
+            idx,
+            None,
+            dispatched,
+            &mut aborted,
+            &mut failed_by,
+            &mut stored_error,
+            &mut cleanup,
+        )
+        .await?;
     }
 
     if let Some(cb) = setup_browser {
@@ -645,194 +524,13 @@ async fn run_lifecycle_steps(
     })
 }
 
-async fn append_setup_started(
-    writer: &mut EvidenceWriter,
-    phase: StepPhase,
-    step: &Step,
-    idx: usize,
-    resolved_with: &serde_yml::Value,
-    scope: HookScope<'_>,
-) -> Result<(), EngineError> {
-    let (fixture_name, check_id, criterion_id) = scope.evidence_fields();
-    writer
-        .append(EventPayload::SetupStepStarted {
-            phase,
-            step_index: idx as u32,
-            uses: step.uses_name().to_string(),
-            // Same honesty contract as the per-check tag (#192).
-            layer: duhem_actions::layer_for_uses(step.uses_name()).map(str::to_string),
-            with: with_to_evidence_map(resolved_with),
-            fixture_name,
-            check_id,
-            criterion_id,
-        })
-        .await?;
-    Ok(())
-}
-
-/// Invoke one setup-step dispatcher, write a `SetupStepObservation`
-/// for every output, and publish scalar outputs onto
-/// `RunState.setup_outputs` so checks can reference them as
-/// `$setup.<id>.outputs.<name>`.
-struct SetupInvocation<'a> {
-    step: &'a Step,
-    run: &'a mut RunState,
-    writer: &'a mut EvidenceWriter,
-    child_env: &'a BTreeMap<String, String>,
-    scope: HookScope<'a>,
-}
-
-async fn invoke_and_record(
-    dispatcher: &dyn Dispatch,
-    page: Option<&Page>,
-    phase: StepPhase,
-    idx: usize,
-    resolved_with: &serde_yml::Value,
-    invocation: SetupInvocation<'_>,
-) -> Result<(Outcome, bool, Option<String>), EngineError> {
-    let SetupInvocation {
-        step,
-        run,
-        writer,
-        child_env,
-        scope,
-    } = invocation;
-    // The caller persisted `SetupStepStarted` before dispatch so slow
-    // actions and gated skips share one honest lifecycle shape.
-    let result = dispatcher.invoke(page, idx, resolved_with, child_env).await;
-    let outcome = match &result {
-        Ok(r) => r.outcome.clone(),
-        Err(_) => Outcome::Error,
-    };
-    let action_detail = result
-        .as_ref()
-        .err()
-        .map(|error| format!("action `{}` failed: {error}", step.uses_name()));
-    if let Ok(r) = &result {
-        crate::engine::secret_output::register(
-            writer,
-            step,
-            idx,
-            &dispatcher.secret_outputs(),
-            &r.outputs,
-        )?;
-    }
-    if let Ok(r) = &result {
-        // Bind raw fields (native names) + `outputs:` aliases (spec
-        // #273) as `$setup.<id>.outputs.<name>`. Symmetric with the
-        // per-check path in `runner.rs`; see `engine::extract`.
-        if let Some(id) = step.id.as_deref() {
-            crate::engine::extract::record_step_outputs(&step.outputs, &r.outputs, |local, v| {
-                if let HookScope::Fixture(fixture, _) = scope {
-                    run.record_fixture_output(fixture, id, local, v);
-                } else {
-                    // Leaf, criterion, and check `setup:`/`teardown:`
-                    // steps all publish into the same `$setup.<id>`
-                    // namespace (#441 Part B): execution is strictly
-                    // sequential and validation forbids an inner
-                    // scope's step id from shadowing an outer scope's
-                    // still-open id, so a flat map is safe and lets
-                    // an outer teardown read its own outer setup's
-                    // outputs with no new reference syntax.
-                    run.record_setup_output(id, local, v);
-                }
-            });
-        }
-        for (name, value) in &r.outputs {
-            // Setup observations get their own event variant so
-            // readers can attribute the observation to the
-            // run-level setup block, not a per-check step.
-            append_setup_observation(
-                writer,
-                phase,
-                idx as u32,
-                name.clone(),
-                value.clone(),
-                scope,
-            )
-            .await?;
-        }
-    }
-    let outputs = result
-        .as_ref()
-        .map(|action| &action.outputs)
-        .ok()
-        .cloned()
-        .unwrap_or_default();
-    let evidence = StepEvidence {
-        with: resolved_with.clone(),
-        outputs,
-        skip_reason: match &outcome {
-            Outcome::Skipped { reason } => Some(reason.clone()),
-            _ => None,
-        },
-        catalog_reference: None,
-        outcome: Some(outcome.clone()),
-        detail: action_detail
-            .as_deref()
-            .map(|detail| writer.mask_text(detail)),
-    };
-    let judgment = (!scope.is_fixture())
-        .then(|| {
-            implicit_judgment_for_step(
-                step,
-                idx,
-                dispatcher.judges(),
-                true,
-                &evidence,
-                false,
-                false,
-            )
-        })
-        .flatten()
-        .map(|outcome| outcome.state);
-    let failed = step_failed(&outcome, judgment);
-    Ok((outcome, failed, action_detail))
-}
-
-/// Mirror of `EvidenceWriter::append_observation` for setup. The
-/// inline-vs-blob policy (`BLOB_INLINE_THRESHOLD_BYTES`) is shared;
-/// only the event variant differs.
-async fn append_setup_observation(
-    writer: &mut EvidenceWriter,
-    phase: StepPhase,
-    step_index: u32,
-    output_name: String,
-    value: serde_json::Value,
-    scope: HookScope<'_>,
-) -> Result<(), EngineError> {
-    use duhem_evidence::{BLOB_INLINE_THRESHOLD_BYTES, ObservationValue};
-    let (fixture_name, check_id, criterion_id) = scope.evidence_fields();
-    let inline_bytes = serde_json::to_vec(&value).map_err(duhem_evidence::WriterError::from)?;
-    let obs = if inline_bytes.len() > BLOB_INLINE_THRESHOLD_BYTES {
-        let sha = writer.write_blob(&inline_bytes).await?;
-        ObservationValue::Blob {
-            blob_sha256: sha.0,
-            mask_counts: BTreeMap::new(),
-        }
-    } else {
-        ObservationValue::Inline { value }
-    };
-    writer
-        .append(EventPayload::SetupStepObservation {
-            phase,
-            step_index,
-            output_name,
-            value: obs,
-            fixture_name,
-            check_id,
-            criterion_id,
-        })
-        .await?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::engine::registry::Dispatch;
     use async_trait::async_trait;
-    use duhem_actions::{ActionError, ActionResult, Outcome};
+    use duhem_actions::{ActionError, ActionResult, Outcome, Page};
+    use duhem_evidence::StepOutcome;
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -924,6 +622,11 @@ mod tests {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
             secret_outputs: Vec::new(),
+            for_each: None,
+            max: None,
+            as_binding: None,
+            steps: None,
+            for_each_body: Vec::new(),
             flow: None,
             flow_secrets: Vec::new(),
         }

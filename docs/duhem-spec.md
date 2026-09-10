@@ -764,6 +764,33 @@ to decide is never silently treated as false. Condition references are
 validated against declared inputs and earlier lifecycle steps and their
 action-contract outputs; forward references are invalid.
 
+**Bounded iteration (`for_each:`)** is the other Tier 1 / Tier 2 split
+this totality boundary makes room for, alongside value-based `if:`
+(spec #443). A step carrying `for_each:` names a source expression
+that must evaluate to an array; the array is read exactly once, when
+that step is reached — no re-evaluation between iterations, no
+re-entry. `max:` is mandatory, not defaulted: it is what makes
+`max × len(body)` a computable worst-case step count for #444.
+Exceeding `max:` is a failure naming the actual count and the ceiling,
+never a silent truncation to the first `max` elements — that would
+report having verified less than the Verification Definition budgeted
+for, the false-green shape §7.6 exists to prevent. An empty array is
+zero iterations, not an error. The loop body is exactly one of a
+single `uses:` action, a `call:` to a named flow, or an inline
+multi-step `steps:` list — never more than one, never nested (a body
+step may not itself carry `for_each:` or `steps:`, capping nesting at
+depth 1). `as: <name>` binds the current element for the body's
+duration; `$<name>` is a validation error anywhere outside that body,
+and a step `id:` declared inside the body is not addressable from
+outside it, for the same reason a `call:`-invoked flow's inner step
+ids aren't (§10.3 hygiene). Tier 1 mirrors `if:`'s split exactly:
+`for_each:` is available today on `setup:`, `teardown:`, fixture
+`up:`/`down:`, and the criterion-/check-level equivalents (§10.3.6) —
+contexts that produce no judgments, so a runtime-sized loop can never
+shrink what a check claims to verify. It remains unavailable on a
+check's own `steps:` (Tier 2) until a shrunken claim set is guaranteed
+visible in the run report.
+
 The outcome gate vocabulary remains `success | always | failure`, and
 omission remains identical to `if: success`. A gated step emits a
 `StepOutcome::Skipped` evidence record with the causing step in its
@@ -906,6 +933,18 @@ provision.up: → leaf setup: → criterion setup: → check setup: → [fixture
                                                                                               ↓
 provision.down: ← leaf teardown: ← criterion teardown: ← check teardown: ← [fixture down:] ←
 ```
+
+**Retry timing differs by level, deliberately.** Check-level
+`setup:`/`teardown:` re-runs on every retry attempt of that check —
+same contract as fixtures (§10.3.5): a retry re-establishes the
+check's own preconditions, so its hooks must be idempotent, just like
+leaf-level cleanup (§10.3.4). Criterion-level `setup:`/`teardown:` runs
+once per criterion, outside any check's retry loop: re-running it per
+attempt would re-execute (or tear down) state every check in that
+criterion shares, disturbing siblings that aren't retrying. Both
+follow from the same rule — a level's hooks bracket exactly the scope
+that level owns, no more — rather than being two independent design
+choices.
 
 Teardown unwinds in the exact reverse of setup. A level's `teardown:` runs
 if — and only if — that same level's `setup:` actually dispatched an

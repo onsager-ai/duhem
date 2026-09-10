@@ -68,11 +68,7 @@ export interface FlowOrigin {
   inner_index: number;
   /** `for_each:` (#443) iteration this step belongs to, 0-based.
    * Absent for an ordinary flow invocation with no enclosing loop.
-   * Not yet consumed by the labeling helpers below — those resolve
-   * only check-level `call:` invocations against `criteria[].checks`,
-   * and a `for_each:` step's flow origin can point at `setup:`/
-   * `teardown:`/fixture bodies instead, which this module doesn't
-   * look up. Grouping the report by iteration is tracked separately. */
+   */
   iteration?: number;
 }
 
@@ -110,7 +106,10 @@ export function flowOrigin(raw: unknown): FlowOrigin | undefined {
   const invocation = str(value.invocation);
   const inner = value.inner_index;
   return name && invocation && typeof inner === "number"
-    ? { name, invocation, inner_index: inner }
+    ? { name, invocation, inner_index: inner,
+        ...(typeof value.iteration === "number" && Number.isInteger(value.iteration) && value.iteration >= 0
+          ? { iteration: value.iteration } : {}),
+      }
     : undefined;
 }
 
@@ -179,6 +178,7 @@ export function parseDefinition(yamlText: string): VdLookup {
     check: (cid, chid) => find(cid, chid),
     stepId: (cid, chid, i, flow) => {
       if (flow) {
+        if (flow.iteration !== undefined) return iterationStepKey(flow);
         const inner = innerStep(flow);
         return `${flow.invocation}__${inner?.id ?? flow.inner_index}`;
       }
@@ -187,7 +187,8 @@ export function parseDefinition(yamlText: string): VdLookup {
     stepLabel: (cid, chid, i, flow) => {
       if (flow) {
         const inner = stepLabel(innerStep(flow), flow.inner_index);
-        const invocation = invocationLabel(cid, chid, flow);
+        const invocation = invocationLabel(cid, chid, flow) +
+          (flow.iteration === undefined ? "" : ` › Iteration ${flow.iteration}`);
         return inner ? `${invocation} › ${inner}` : invocation;
       }
       const step = find(cid, chid)?.steps[i];
@@ -198,4 +199,10 @@ export function parseDefinition(yamlText: string): VdLookup {
     flowStepLabel: (flow) => stepLabel(innerStep(flow), flow.inner_index),
     flowLabel,
   };
+}
+
+/** Loop links depend only on recorded provenance, even without a VD snapshot.
+ * JSON tuples avoid delimiter collisions; ordinary flow links stay unchanged. */
+export function iterationStepKey(flow: FlowOrigin): string {
+  return `loop:${JSON.stringify([flow.name, flow.invocation, flow.iteration, flow.inner_index])}`;
 }

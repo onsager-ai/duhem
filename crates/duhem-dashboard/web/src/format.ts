@@ -431,9 +431,11 @@ export function groupTimeline(events: TraceEvent[]): TimelineNode[] {
  */
 function foldOntoSteps(nodes: TimelineNode[]): TimelineNode[] {
   const stepByIndex = new Map<number, StepNode>();
-  for (const n of nodes) if (n.kind === "step") stepByIndex.set(n.stepIndex, n);
   const out: TimelineNode[] = [];
   for (const n of nodes) {
+    // Reused lifecycle indices belong to the most recent preceding step,
+    // never a later iteration that happens to share the authored index.
+    if (n.kind === "step") stepByIndex.set(n.stepIndex, n);
     if (n.kind === "event") {
       const e = n.event;
       if (e.kind === "assertion_evaluated" && typeof e.step_index === "number") {

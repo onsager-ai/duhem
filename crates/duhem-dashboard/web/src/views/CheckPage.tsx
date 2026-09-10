@@ -20,6 +20,8 @@ import { compactValue, deliveryLayerLabel, describeWith, formatEvent, groupTimel
 import { EventIcon } from "../components/EventIcon";
 import { RunScaffold } from "./RunScaffold";
 import { useVd } from "./definition-context";
+import { type LoopNode, groupLoops, stepNavigation as navigationForStep } from "../step-presentation";
+import { LoopGroup } from "../components/LoopGroup";
 import { flowOrigin, type FlowOrigin } from "../definition";
 
 // The check's wall-clock span — first recorded event to last.
@@ -608,10 +610,12 @@ function StepGroup({
     typeof node.judgment?.detail === "string" ? node.judgment.detail : status.reason;
   return (
     <li
-      id={`step-${node.stepIndex}`}
+      id={`step-${flow?.iteration === undefined ? node.stepIndex : navigationForStep(node, vd).key}`}
       className={`ev step-group tone-${status.tone}${selected ? " step-selected" : ""}`}
       data-testid="step-group"
       data-step-index={node.stepIndex}
+      data-step-node={flow?.iteration === undefined ? undefined : node.key}
+      data-flow-iteration={flow?.iteration}
       data-flow-invocation={flow?.invocation}
       data-flow-name={flow?.name}
     >
@@ -767,15 +771,15 @@ type FlowGroupNode = {
   steps: StepNode[];
 };
 
-function groupFlowSteps(nodes: TimelineNode[]): (TimelineNode | FlowGroupNode)[] {
-  const grouped: (TimelineNode | FlowGroupNode)[] = [];
+function groupFlowSteps(nodes: (TimelineNode | LoopNode)[]): (TimelineNode | FlowGroupNode | LoopNode)[] {
+  const grouped: (TimelineNode | FlowGroupNode | LoopNode)[] = [];
   for (const node of nodes) {
     if (node.kind !== "step") {
       grouped.push(node);
       continue;
     }
     const origin = flowOrigin(node.events[0].flow);
-    if (!origin) {
+    if (!origin || origin.iteration !== undefined) {
       grouped.push(node);
       continue;
     }
@@ -803,6 +807,7 @@ function FlowGroup({
   prevOf,
   artifacts,
   selectedStep,
+  selectedNodeKey,
   selectedFromScroll,
   rawExpandedSteps,
   onRawExpandedChange,
@@ -811,9 +816,10 @@ function FlowGroup({
   prevOf: (evt: TraceEvent) => TraceEvent | undefined;
   artifacts: ArtifactRef[];
   selectedStep?: number;
+  selectedNodeKey?: string;
   selectedFromScroll?: boolean;
-  rawExpandedSteps: ReadonlySet<number>;
-  onRawExpandedChange: (stepIndex: number, expanded: boolean) => void;
+  rawExpandedSteps: ReadonlySet<number | string>;
+  onRawExpandedChange: (stepIndex: number | string, expanded: boolean) => void;
 }) {
   const vd = useVd();
   const started = group.steps[0].events[0];
@@ -839,8 +845,8 @@ function FlowGroup({
             node={node}
             prevOf={prevOf}
             artifacts={artifacts}
-            selected={selectedStep === node.stepIndex}
-            selectedFromScroll={selectedFromScroll && selectedStep === node.stepIndex}
+            selected={selectedNodeKey ? selectedNodeKey === node.key : selectedStep === node.stepIndex}
+            selectedFromScroll={selectedFromScroll && (selectedNodeKey ? selectedNodeKey === node.key : selectedStep === node.stepIndex)}
             rawExpanded={rawExpandedSteps.has(node.stepIndex)}
             onRawExpandedChange={(expanded) =>
               onRawExpandedChange(node.stepIndex, expanded)}
@@ -855,30 +861,43 @@ export function Timeline({
   events,
   artifacts = [],
   selectedStep,
+  selectedNodeKey,
   selectedFromScroll = false,
-  rawExpandedSteps = new Set<number>(),
+  rawExpandedSteps = new Set<number | string>(),
   onRawExpandedChange = () => {},
 }: {
   events: TraceEvent[];
   artifacts?: ArtifactRef[];
   selectedStep?: number;
+  selectedNodeKey?: string;
   selectedFromScroll?: boolean;
-  rawExpandedSteps?: ReadonlySet<number>;
-  onRawExpandedChange?: (stepIndex: number, expanded: boolean) => void;
+  rawExpandedSteps?: ReadonlySet<number | string>;
+  onRawExpandedChange?: (stepIndex: number | string, expanded: boolean) => void;
 }) {
-  const nodes = groupFlowSteps(groupTimeline(events));
+  const nodes = groupFlowSteps(groupLoops(groupTimeline(events)));
   const idx = new Map(events.map((e, i) => [e.seq, i]));
   const prevOf = (evt: TraceEvent) => events[(idx.get(evt.seq) ?? 0) - 1];
   return (
     <ol className="timeline">
       {nodes.map((n) =>
-        n.kind === "flow" ? (
+        n.kind === "loop" ? (
+          <li key={n.key} className="flow-group">
+            <LoopGroup group={n} selectedKey={selectedNodeKey} renderStep={(node) => (
+              <StepGroup key={node.key} node={node} prevOf={prevOf} artifacts={artifacts}
+                selected={selectedNodeKey === node.key}
+                selectedFromScroll={selectedFromScroll}
+                rawExpanded={rawExpandedSteps.has(node.key)}
+                onRawExpandedChange={(expanded) => onRawExpandedChange(node.key, expanded)} />
+            )} />
+          </li>
+        ) : n.kind === "flow" ? (
           <FlowGroup
             key={n.key}
             group={n}
             prevOf={prevOf}
             artifacts={artifacts}
             selectedStep={selectedStep}
+            selectedNodeKey={selectedNodeKey}
             selectedFromScroll={selectedFromScroll}
             rawExpandedSteps={rawExpandedSteps}
             onRawExpandedChange={onRawExpandedChange}
@@ -889,11 +908,11 @@ export function Timeline({
             node={n}
             prevOf={prevOf}
             artifacts={artifacts}
-            selected={selectedStep === n.stepIndex}
-            selectedFromScroll={selectedFromScroll && selectedStep === n.stepIndex}
-            rawExpanded={rawExpandedSteps.has(n.stepIndex)}
+            selected={selectedNodeKey ? selectedNodeKey === n.key : selectedStep === n.stepIndex}
+            selectedFromScroll={selectedFromScroll && (selectedNodeKey ? selectedNodeKey === n.key : selectedStep === n.stepIndex)}
+            rawExpanded={rawExpandedSteps.has(flowOrigin(n.events[0].flow)?.iteration === undefined ? n.stepIndex : n.key)}
             onRawExpandedChange={(expanded) =>
-              onRawExpandedChange(n.stepIndex, expanded)}
+              onRawExpandedChange(flowOrigin(n.events[0].flow)?.iteration === undefined ? n.stepIndex : n.key, expanded)}
           />
         ) : (
           <TimelineRow key={n.key} evt={n.event} prev={prevOf(n.event)} artifacts={artifacts} />
@@ -1350,12 +1369,14 @@ function ReplayView({
   check,
   selectedStep,
   selectedLabel,
+  ambiguousSelection = false,
   stepNavigation,
   params,
 }: {
   check: CheckDetail;
   selectedStep?: number;
   selectedLabel?: string;
+  ambiguousSelection?: boolean;
   stepNavigation: ReadonlyMap<number, { key: string; label: string }>;
   params: URLSearchParams;
 }) {
@@ -1415,6 +1436,15 @@ function ReplayView({
       setPlaybackStepIndex(selected.step_index);
     }
   }, [media, replay?.video, selected, videoStart]);
+
+  if (ambiguousSelection) {
+    return (
+      <div className="replay-empty" data-testid="replay-ambiguous">
+        <p>Replay cannot distinguish {selectedLabel} from the other iterations.</p>
+        <p className="muted">Open Steps to inspect this iteration’s recorded evidence.</p>
+      </div>
+    );
+  }
 
   if (!replay) {
     return (
@@ -1644,6 +1674,7 @@ function StepSelectionSync({
   surfaceRef,
   params,
   selectedStep,
+  selectedNodeKey,
   stepNavigation,
   view,
   onScrollSelection,
@@ -1651,7 +1682,8 @@ function StepSelectionSync({
   surfaceRef: RefObject<HTMLDivElement | null>;
   params: URLSearchParams;
   selectedStep?: number;
-  stepNavigation: ReadonlyMap<number, { key: string; label: string }>;
+  selectedNodeKey?: string;
+  stepNavigation: ReadonlyMap<string, { key: string; label: string; stepIndex: number }>;
   view: "steps" | "replay";
   onScrollSelection: (key: string) => void;
 }) {
@@ -1663,8 +1695,12 @@ function StepSelectionSync({
     if (view !== "steps" || selectedStep === undefined) return;
     const surface = surfaceRef.current;
     const scroller = surface?.closest(".run-results-detail") as HTMLElement | null;
-    const target = surface?.querySelector<HTMLElement>(`[data-step-index="${selectedStep}"]`);
+    const target = surface?.querySelector<HTMLElement>(`[data-step-node="${selectedNodeKey}"]`)
+      ?? surface?.querySelector<HTMLElement>(`[data-step-index="${selectedStep}"]`);
     if (!surface || !scroller || !target) return;
+    for (let parent = target.parentElement; parent && parent !== surface; parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement) parent.open = true;
+    }
     const stickyOffset = Number.parseFloat(
       getComputedStyle(surface).getPropertyValue("--check-context-height"),
     ) || 0;
@@ -1679,7 +1715,7 @@ function StepSelectionSync({
       behavior: "auto",
     });
     requestAnimationFrame(() => { syncing.current = false; });
-  }, [selectedStep, surfaceRef, view]);
+  }, [selectedStep, selectedNodeKey, surfaceRef, view]);
 
   useEffect(() => {
     if (view !== "steps") return;
@@ -1692,11 +1728,18 @@ function StepSelectionSync({
         getComputedStyle(surface).getPropertyValue("--check-context-height"),
       ) || 0;
       const threshold = scroller.getBoundingClientRect().top + stickyOffset + 1;
-      const groups = [...surface.querySelectorAll<HTMLElement>("[data-step-index]")];
+      const groups = [...surface.querySelectorAll<HTMLElement>("[data-step-index]")].filter((group) => {
+        for (let parent = group.parentElement; parent && parent !== surface; parent = parent.parentElement) {
+          if (parent instanceof HTMLDetailsElement && !parent.open) return false;
+        }
+        return true;
+      });
       const visible = [...groups].reverse().find(
         (group) => group.getBoundingClientRect().top <= threshold,
       ) ?? groups[0];
-      const key = stepNavigation.get(Number(visible?.dataset.stepIndex))?.key;
+      const key = visible?.dataset.stepNode
+        ? stepNavigation.get(visible.dataset.stepNode)?.key
+        : [...stepNavigation.values()].find((item) => item.stepIndex === Number(visible?.dataset.stepIndex))?.key;
       if (key && key !== stepParam) {
         onScrollSelection(key);
         navigate({ search: queryWith(params, { step: key }) }, { replace: true });
@@ -1714,7 +1757,7 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
   const [error, setError] = useState<string | null>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const contextRef = useRef<HTMLDivElement>(null);
-  const [rawExpandedSteps, setRawExpandedSteps] = useState<Set<number>>(
+  const [rawExpandedSteps, setRawExpandedSteps] = useState<Set<number | string>>(
     () => new Set(),
   );
   const [scrollSelectedKey, setScrollSelectedKey] = useState<string>();
@@ -1763,38 +1806,20 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
   const checkDesc = vd?.check(check.criterion_id, check.check_id)?.description;
   const critDesc = vd?.criterion(check.criterion_id)?.description;
   const stepNodes = groupTimeline(check.timeline).filter((node) => node.kind === "step");
-  const stepNavigation = new Map(
-    stepNodes.flatMap((node) => {
-      if (node.kind !== "step") return [];
-      const started = node.events[0];
-      const uses = typeof started.uses === "string" ? started.uses : "step";
-      const flow = flowOrigin(started.flow);
-      const authoredId = vd?.stepId(check.criterion_id, check.check_id, node.stepIndex, flow);
-      const label =
-        vd?.stepLabel(check.criterion_id, check.check_id, node.stepIndex, flow) ??
-        `${uses} #${node.stepIndex}`;
-      return [[
-        node.stepIndex,
-        {
-          key: authoredId ?? String(node.stepIndex),
-          label,
-        },
-      ] as const];
-    }),
-  );
-  const selectedNode = stepParam === undefined
-    ? undefined
-    : stepNodes.find((node) => {
-        if (node.kind !== "step") return false;
-        return stepParam === stepNavigation.get(node.stepIndex)?.key;
-      });
-  const selectedStep = selectedNode?.kind === "step" ? selectedNode.stepIndex : undefined;
-  const selectedLabel = selectedNode?.kind === "step"
-    ? stepNavigation.get(selectedNode.stepIndex)?.label
-    : undefined;
+  const stepNavigation = new Map(stepNodes.map((node) => [node.key, { ...navigationForStep(node, vd, check.criterion_id, check.check_id), stepIndex: node.stepIndex }]));
+  const selectedNode = stepNodes.find((node) => stepParam !== undefined &&
+    stepNavigation.get(node.key)?.key === stepParam);
+  const selectedStep = selectedNode?.stepIndex;
+  const selectedLabel = selectedNode ? stepNavigation.get(selectedNode.key)?.label : undefined;
+  // Replay's existing wire identifies frames by step_index alone. Do not assign
+  // one iteration's label to another iteration's frame when indices repeat.
+  const indexCounts = new Map<number, number>();
+  for (const node of stepNodes) indexCounts.set(node.stepIndex, (indexCounts.get(node.stepIndex) ?? 0) + 1);
+  const replayNavigation = new Map(stepNodes.filter((node) => indexCounts.get(node.stepIndex) === 1)
+    .map((node) => [node.stepIndex, navigationForStep(node, vd, check.criterion_id, check.check_id)]));
   const view = params.get("view") === "replay" ? "replay" : "steps";
 
-  const setRawExpanded = (stepIndex: number, expanded: boolean) => {
+  const setRawExpanded = (stepIndex: number | string, expanded: boolean) => {
     setRawExpandedSteps((current) => {
       const next = new Set(current);
       if (expanded) next.add(stepIndex);
@@ -1810,6 +1835,7 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
           surfaceRef={surfaceRef}
           params={params}
           selectedStep={selectedStep}
+          selectedNodeKey={selectedNode?.key}
           stepNavigation={stepNavigation}
           view={view}
           onScrollSelection={setScrollSelectedKey}
@@ -1853,6 +1879,7 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
               events={check.timeline}
               artifacts={check.artifacts}
               selectedStep={selectedStep}
+              selectedNodeKey={selectedNode?.key}
               selectedFromScroll={selectedFromScroll}
               rawExpandedSteps={rawExpandedSteps}
               onRawExpandedChange={setRawExpanded}
@@ -1863,7 +1890,8 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
             check={check}
             selectedStep={selectedStep}
             selectedLabel={selectedLabel}
-            stepNavigation={stepNavigation}
+            ambiguousSelection={selectedStep !== undefined && !replayNavigation.has(selectedStep)}
+            stepNavigation={replayNavigation}
             params={params}
           />
         )}

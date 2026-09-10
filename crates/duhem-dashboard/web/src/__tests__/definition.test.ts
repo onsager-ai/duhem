@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDefinition } from "../definition";
+import { flowOrigin, parseDefinition } from "../definition";
 
 describe("parseDefinition step labels", () => {
   it("exposes descriptions without changing id-based navigation keys", () => {
@@ -119,4 +119,26 @@ criteria:
     };
     expect(vd.flowLabel("AC-1", "AC-1.1", unmatchedCall)).toBe("raw_invocation");
   });
+});
+
+it("keeps iteration identity independent of labels, snapshots, and delimiter spelling", () => {
+  const vd = parseDefinition("");
+  const origin = { name: "for_each", invocation: "loop", inner_index: 0, iteration: 37 };
+  const key = vd.stepId("", "", 4, origin);
+  expect(key).toBe('loop:["for_each","loop",37,0]');
+  expect(vd.stepLabel("", "", 4, origin)).toBe("loop › Iteration 37");
+  expect(vd.stepId("", "", 4, { ...origin, iteration: 0 })).not.toBe(key);
+  expect(vd.stepId("", "", 4, { ...origin, inner_index: 1 })).not.toBe(key);
+  expect(vd.stepId("", "", 4, { ...origin, name: "different" })).not.toBe(key);
+  expect(vd.stepId("", "", 4, { ...origin, name: "a__b", invocation: "c" }))
+    .not.toBe(vd.stepId("", "", 4, { ...origin, name: "a", invocation: "b__c" }));
+});
+
+it("preserves zero-based iteration evidence and ignores malformed ordinals", () => {
+  const origin = { name: "for_each", invocation: "loop", inner_index: 0 };
+  expect(flowOrigin({ ...origin, iteration: 0 })).toEqual({ ...origin, iteration: 0 });
+  expect(flowOrigin({ ...origin, iteration: 37 })).toEqual({ ...origin, iteration: 37 });
+  for (const iteration of [undefined, null, -1, 1.5, "37"]) {
+    expect(flowOrigin({ ...origin, iteration })).toEqual(origin);
+  }
 });

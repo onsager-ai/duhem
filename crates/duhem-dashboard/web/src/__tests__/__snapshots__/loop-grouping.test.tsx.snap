@@ -1,0 +1,85 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`pins the no-loop sidebar links and selection 1`] = `"<a aria-label="before" title="before" class="flex min-w-0 items-center gap-2 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground" href="/run/r/check/AC-1%3A%3AC?step=before" data-discover="true"><span class="min-w-0 flex-1 truncate">before</span><span data-slot="badge" data-variant="pass" class="inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&amp;>svg]:pointer-events-none [&amp;>svg]:size-3 border-pass/25 bg-pass/10 text-pass [a&amp;]:hover:bg-pass/20" title="pass">pass</span></a><a aria-label="loop" title="loop" class="flex min-w-0 items-center gap-2 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground" href="/run/r/check/AC-1%3A%3AC?step=loop" data-discover="true"><span class="min-w-0 flex-1 truncate">loop</span><span data-slot="badge" data-variant="pass" class="inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&amp;>svg]:pointer-events-none [&amp;>svg]:size-3 border-pass/25 bg-pass/10 text-pass [a&amp;]:hover:bg-pass/20" title="pass">pass</span></a><a aria-label="after" title="after" aria-current="step" class="flex min-w-0 items-center gap-2 rounded px-2 py-1 text-xs bg-accent font-medium text-accent-foreground" href="/run/r/check/AC-1%3A%3AC?step=after" data-discover="true"><span class="min-w-0 flex-1 truncate">after</span><span data-slot="badge" data-variant="pass" class="inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&amp;>svg]:pointer-events-none [&amp;>svg]:size-3 border-pass/25 bg-pass/10 text-pass [a&amp;]:hover:bg-pass/20" title="pass">pass</span></a>"`;
+
+exports[`pins the no-loop timeline markup 1`] = `
+"<ol class="timeline"><li id="step-0" class="ev step-group tone-ok" data-testid="step-group" data-step-index="0"><details><summary class="step-summary md:sticky md:top-[var(--check-context-height)] md:z-10 md:border-b md:bg-background/95 md:backdrop-blur"><span class="ev-row"><span class="ev-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check ev-glyph ev-glyph-pass" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg></span><span class="ev-label" title="cli/invoke #0">cli/invoke #0</span><span class="ev-detail"><span class="ev-detail-text" title="invoke">invoke</span></span><span class="ev-time min-w-max" data-testid="step-time" title="2026-09-10T00:00:00Z → 2026-09-10T00:00:00Z">0ms</span><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right ev-caret" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></span><span class="step-detail"><span class="step-obs" data-testid="step-obs"><span class="obs-chip"><span class="obs-k">item</span><code class="obs-v">0</code></span></span></span></summary><div class="step-body"><details class="step-raw" data-testid="step-raw"><summary class="step-raw-title">Raw step data · 3 events</summary><pre>[
+  {
+    "ts": "2026-09-10T00:00:00Z",
+    "step_index": 0,
+    "seq": 0,
+    "kind": "setup_step_started",
+    "phase": "setup",
+    "criterion_id": "AC-1",
+    "check_id": "C",
+    "uses": "cli/invoke"
+  },
+  {
+    "ts": "2026-09-10T00:00:00Z",
+    "step_index": 0,
+    "seq": 1,
+    "kind": "setup_step_observation",
+    "output_name": "item",
+    "value": 0
+  },
+  {
+    "ts": "2026-09-10T00:00:00Z",
+    "step_index": 0,
+    "seq": 2,
+    "kind": "setup_step_finished",
+    "outcome": "ok"
+  }
+]</pre></details></div></details></li><li id="step-1" class="ev step-group tone-ok" data-testid="step-group" data-step-index="1"><details><summary class="step-summary md:sticky md:top-[var(--check-context-height)] md:z-10 md:border-b md:bg-background/95 md:backdrop-blur"><span class="ev-row"><span class="ev-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check ev-glyph ev-glyph-pass" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg></span><span class="ev-label" title="cli/invoke #1">cli/invoke #1</span><span class="ev-detail"><span class="ev-detail-text" title="invoke">invoke</span></span><span class="ev-time min-w-max" data-testid="step-time" title="2026-09-10T00:00:00Z → 2026-09-10T00:00:00Z">0ms</span><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right ev-caret" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></span><span class="step-detail"><span class="step-obs" data-testid="step-obs"><span class="obs-chip"><span class="obs-k">item</span><code class="obs-v">1</code></span></span></span></summary><div class="step-body"><details class="step-raw" data-testid="step-raw"><summary class="step-raw-title">Raw step data · 3 events</summary><pre>[
+  {
+    "ts": "2026-09-10T00:00:00Z",
+    "step_index": 1,
+    "seq": 3,
+    "kind": "setup_step_started",
+    "phase": "setup",
+    "criterion_id": "AC-1",
+    "check_id": "C",
+    "uses": "cli/invoke"
+  },
+  {
+    "ts": "2026-09-10T00:00:00Z",
+    "step_index": 1,
+    "seq": 4,
+    "kind": "setup_step_observation",
+    "output_name": "item",
+    "value": 1
+  },
+  {
+    "ts": "2026-09-10T00:00:00Z",
+    "step_index": 1,
+    "seq": 5,
+    "kind": "setup_step_finished",
+    "outcome": "ok"
+  }
+]</pre></details></div></details></li><li id="step-2" class="ev step-group tone-ok" data-testid="step-group" data-step-index="2"><details><summary class="step-summary md:sticky md:top-[var(--check-context-height)] md:z-10 md:border-b md:bg-background/95 md:backdrop-blur"><span class="ev-row"><span class="ev-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check ev-glyph ev-glyph-pass" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg></span><span class="ev-label" title="cli/invoke #2">cli/invoke #2</span><span class="ev-detail"><span class="ev-detail-text" title="invoke">invoke</span></span><span class="ev-time min-w-max" data-testid="step-time" title="2026-09-10T00:00:00Z → 2026-09-10T00:00:00Z">0ms</span><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right ev-caret" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></span><span class="step-detail"><span class="step-obs" data-testid="step-obs"><span class="obs-chip"><span class="obs-k">item</span><code class="obs-v">2</code></span></span></span></summary><div class="step-body"><details class="step-raw" data-testid="step-raw"><summary class="step-raw-title">Raw step data · 3 events</summary><pre>[
+  {
+    "ts": "2026-09-10T00:00:00Z",
+    "step_index": 2,
+    "seq": 6,
+    "kind": "setup_step_started",
+    "phase": "setup",
+    "criterion_id": "AC-1",
+    "check_id": "C",
+    "uses": "cli/invoke"
+  },
+  {
+    "ts": "2026-09-10T00:00:00Z",
+    "step_index": 2,
+    "seq": 7,
+    "kind": "setup_step_observation",
+    "output_name": "item",
+    "value": 2
+  },
+  {
+    "ts": "2026-09-10T00:00:00Z",
+    "step_index": 2,
+    "seq": 8,
+    "kind": "setup_step_finished",
+    "outcome": "ok"
+  }
+]</pre></details></div></details></li></ol>"
+`;

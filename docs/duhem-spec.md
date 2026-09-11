@@ -853,7 +853,7 @@ retains the same mandatory bounds and depth-one limit.
   dedicated release-cut process owns the eventual patch bump.
 - **CHANGELOG.md entry:** the additive #521 entry records judging loops
   and assertion iteration identity.
-- **Worked example:** [per-row validation](../verifications/for-each-rows-example/verification.yml).
+- **Worked example:** [per-row validation](../verifications/for-each-rows-example/duhem.yml).
 
 
 The outcome gate vocabulary remains `success | always | failure`, and

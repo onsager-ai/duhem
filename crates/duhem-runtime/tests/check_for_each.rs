@@ -5,7 +5,7 @@ use duhem_runtime::Engine;
 
 use std::sync::Arc;
 
-const EXAMPLE: &str = include_str!("../../../verifications/for-each-rows-example/verification.yml");
+const EXAMPLE: &str = include_str!("../../../verifications/for-each-rows-example/duhem.yml");
 
 async fn run(yaml: &str) -> (VerdictState, Trace) {
     let dir = tempfile::tempdir().unwrap();

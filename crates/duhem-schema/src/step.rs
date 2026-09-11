@@ -177,14 +177,11 @@ pub struct Step {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secret_outputs: Vec<String>,
 
-    /// Bounded iteration over a runtime-produced array (spec #443
-    /// Tier 1). Permitted only in non-judging contexts — `setup:`,
-    /// `teardown:`, fixture `up:`/`down:`, and the criterion-/
-    /// check-level equivalents — never inside a check's `steps:`
-    /// (Tier 2, gated behind #509). The array is read once, when this
-    /// step is reached; `max:` is a mandatory ceiling, and exceeding it
-    /// aborts the block rather than silently iterating fewer times
-    /// than authored.
+    /// Bounded iteration over a runtime-produced array (#443 / #521).
+    /// Available in lifecycle blocks and check steps. Check assertions
+    /// evaluate once per iteration against that iteration's outputs.
+    /// The source is read once; `max:` is mandatory and exceeding it
+    /// fails rather than silently truncating the source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub for_each: Option<ExprStr>,
 
@@ -241,6 +238,16 @@ pub struct Step {
 }
 
 impl Step {
+    /// Executable action templates, after loader expansion. A loop wrapper
+    /// has no action of its own; consumers inspect its bounded body instead.
+    pub fn actions(&self) -> std::slice::Iter<'_, Step> {
+        if self.for_each.is_some() {
+            self.for_each_body.iter()
+        } else {
+            std::slice::from_ref(self).iter()
+        }
+    }
+
     /// The catalog action on an executable (already-expanded) step.
     /// Loaders and validators guarantee this before runtime dispatch.
     pub fn uses_name(&self) -> &str {

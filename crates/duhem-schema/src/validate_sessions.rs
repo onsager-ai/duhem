@@ -112,6 +112,13 @@ fn validate_step(
     site: &str,
     errors: &mut Vec<ValidationError>,
 ) {
+    if step.for_each.is_some() {
+        for (index, inner) in step.for_each_body.iter().enumerate() {
+            let mut inner_path = path.clone();
+            inner_path.extend([S::key("steps"), S::index(index)]);
+            validate_step(v, inner, check, inner_path, site, errors);
+        }
+    }
     let ui = step
         .uses
         .as_deref()

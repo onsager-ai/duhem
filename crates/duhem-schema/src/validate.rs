@@ -583,6 +583,7 @@ fn validate_criterion(
 /// Per-check view of resolvable references — bundled to keep
 /// `check_path`'s arity within clippy's `too_many_arguments` lint.
 struct PathScope<'a> {
+    active_loop: Option<&'a str>,
     c: &'a Criterion,
     ch: &'a Check,
     step_outputs: &'a HashMap<&'a str, HashSet<String>>,
@@ -611,6 +612,21 @@ fn validate_check(
         setup_outputs,
         outputs_for,
     } = *definition;
+    let check_steps: Vec<(&Step, Option<&str>)> = ch
+        .steps
+        .iter()
+        .flat_map(|s| {
+            std::iter::once((s, None)).chain(
+                (if s.for_each_body.is_empty() {
+                    s.steps.as_deref().unwrap_or(&[])
+                } else {
+                    &s.for_each_body
+                })
+                .iter()
+                .map(move |body| (body, s.as_binding.as_deref())),
+            )
+        })
+        .collect();
     let source_context_matches =
         source_map.check_context_matches(criterion_index, &c.id, check_index, &ch.id);
     if let Err(error) = ch.worst_case_step_count() {
@@ -635,7 +651,7 @@ fn validate_check(
     let mut step_outputs: HashMap<&str, HashSet<String>> = HashMap::new();
     let mut seen_step_ids: HashSet<&str> = HashSet::new();
 
-    for (idx, s) in ch.steps.iter().enumerate() {
+    for (idx, &(s, _)) in check_steps.iter().enumerate() {
         if matches!(s.condition, StepCondition::Expr(_)) {
             let path = [
                 SourcePathSegment::key("criteria"),
@@ -711,6 +727,7 @@ fn validate_check(
         .collect();
 
     let scope = PathScope {
+        active_loop: None,
         c,
         ch,
         step_outputs: &step_outputs,
@@ -787,7 +804,26 @@ fn validate_check(
     // the action as a literal `$...` string (#134). Walk every string
     // scalar in the (untyped) `with:` tree and resolve its references
     // against the same scope.
-    for (idx, s) in ch.steps.iter().enumerate() {
+    for (idx, &(s, active_loop)) in check_steps.iter().enumerate() {
+        if let Some(expr) = &s.for_each {
+            walk_checkable_paths(&expr.parsed, &mut |p, arity| {
+                check_path(
+                    &scope,
+                    p,
+                    arity,
+                    &expr.raw,
+                    &RefSite::StepWith {
+                        step: step_label(s, idx),
+                    },
+                    None,
+                    errs,
+                );
+            });
+        }
+        let scope = PathScope {
+            active_loop: active_loop.or(s.as_binding.as_deref()),
+            ..scope
+        };
         let site = RefSite::StepWith {
             step: step_label(s, idx),
         };
@@ -879,6 +915,7 @@ fn check_path(
     errs: &mut Vec<ValidationError>,
 ) {
     let PathScope {
+        active_loop,
         c,
         ch,
         step_outputs,
@@ -1022,8 +1059,11 @@ fn check_path(
             );
         }
         PathRoot::Loop => {
-            // #443: for_each is Tier 1 only, never inside a check body.
+            // Only the enclosing loop body binds its `as:` variable.
             let name = path.segments().first().map(String::as_str).unwrap_or("");
+            if active_loop == Some(name) {
+                return;
+            }
             errs.push(ValidationError::LoopVariableOutOfScope {
                 site: format!("criterion `{}` / check `{}`: {site}", c.id, ch.id),
                 name: name.to_string(),

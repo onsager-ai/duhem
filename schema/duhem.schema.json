@@ -650,7 +650,7 @@
               "type": "null"
             }
           ],
-          "description": "Bounded iteration over a runtime-produced array (spec #443 Tier 1). Permitted only in non-judging contexts — `setup:`, `teardown:`, fixture `up:`/`down:`, and the criterion-/ check-level equivalents — never inside a check's `steps:` (Tier 2, gated behind #509). The array is read once, when this step is reached; `max:` is a mandatory ceiling, and exceeding it aborts the block rather than silently iterating fewer times than authored."
+          "description": "Bounded iteration over a runtime-produced array (#443 / #521). Available in lifecycle blocks and check steps. Check assertions evaluate once per iteration against that iteration's outputs. The source is read once; `max:` is mandatory and exceeding it fails rather than silently truncating the source."
         },
         "id": {
           "description": "Optional — required only when another assertion or step references this step via `$steps.<id>.outputs.*`. The validator enforces that an unreferenced step may omit `id`, while a referenced step must declare one and that the id is unique within its check.",

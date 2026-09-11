@@ -369,6 +369,9 @@ pub enum EventPayload {
     AssertionEvaluated {
         check_id: String,
         assertion_index: u32,
+        /// Zero-based loop ordinal; absent for ordinary assertions and older evidence.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        iteration: Option<u32>,
         state: VerdictState,
         #[serde(default)]
         detail: Option<String>,

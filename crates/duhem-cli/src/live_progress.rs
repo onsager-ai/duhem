@@ -953,6 +953,7 @@ criteria:
                     100,
                     EventPayload::AssertionEvaluated {
                         check_id: "AC-1.1".into(),
+                        iteration: None,
                         assertion_index: 0,
                         state: VerdictState::Pass,
                         detail: None,
@@ -973,6 +974,7 @@ criteria:
                     1700,
                     EventPayload::AssertionEvaluated {
                         check_id: "AC-2.1".into(),
+                        iteration: None,
                         assertion_index: 0,
                         state: VerdictState::Fail,
                         detail: None,
@@ -1146,6 +1148,7 @@ criteria:
                 300,
                 EventPayload::AssertionEvaluated {
                     check_id: "AC-1.1".into(),
+                    iteration: None,
                     assertion_index: 0,
                     state: VerdictState::Pass,
                     detail: None,

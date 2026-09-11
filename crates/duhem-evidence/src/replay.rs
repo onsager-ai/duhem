@@ -118,6 +118,7 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
             EventPayload::AssertionEvaluated {
                 check_id,
                 assertion_index,
+                iteration,
                 state,
                 detail,
                 ..
@@ -126,6 +127,7 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                     .entry(check_id.clone())
                     .or_default()
                     .push(AssertionOutcome {
+                        iteration: *iteration,
                         assertion_index: *assertion_index as usize,
                         state: *state,
                         detail: detail.clone(),

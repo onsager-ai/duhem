@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Bounded `for_each:` now supports check steps and reusable flows with per-iteration assertion evaluation; `AssertionOutcome` and `AssertionEvaluated` gain optional zero-based `iteration` identity. Empty judging loops are inconclusive. SCHEMA_VERSION stays 0.4.4 pending the dedicated release-cut patch bump. (#521)
+
 - [clarifying] Fixture `up:`/`down:` conditions and `for_each:` sources now reject undeclared steps and outputs at their source location, using the same validation as `setup:`/`teardown:` while preserving fixture scope diagnostics. (#515)
 
 - [additive] `Step` accepts bounded `for_each:` (mandatory `max:`, `as:` binding, `uses:`/`call:`/`steps:` body) in non-judging lifecycle contexts; rejected with a location inside a check's `steps:` (Tier 2, gated behind #509). `flow` origins gain an optional `iteration`. (#443)

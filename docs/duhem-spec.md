@@ -848,9 +848,9 @@ retains the same mandatory bounds and depth-one limit.
   `AssertionOutcome` and `AssertionEvaluated`, matching `FlowOrigin.iteration`.
 - **Migration:** none; absent iteration fields deserialize as `None` and
   ordinary assertions omit the field when serialized.
-- **Version decision:** `duhem_schema::SCHEMA_VERSION` stays **0.4.4**.
-  This additive change is recorded under Unreleased; the repository's
-  dedicated release-cut process owns the eventual patch bump.
+- **Version decision:** `duhem_schema::SCHEMA_VERSION` stayed **0.4.4**
+  at landing, per the dedicated release-cut process; the **v0.4.5** cut
+  carries this additive change.
 - **CHANGELOG.md entry:** the additive #521 entry records judging loops
   and assertion iteration identity.
 - **Worked example:** [per-row validation](../verifications/for-each-rows-example/duhem.yml).

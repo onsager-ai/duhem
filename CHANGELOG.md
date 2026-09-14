@@ -15,25 +15,14 @@ criteria) lives in the spec issue that introduced
   Does not bump.
 
 `SCHEMA_VERSION` advances in a dedicated bump commit that inserts
-`## v0.x.y — YYYY-MM-DD` below `## Unreleased`, leaving `## Unreleased`
-empty. The release commit is tagged `v0.x.y`.
+`## v0.x.y — YYYY-MM-DD` below `## Unreleased
 
-**Entry style.** One bullet per landing — the tag, the
-consumer-facing change, and (if `[breaking]`) the migration action,
-ending in the PR ref `(#N)`. Each entry must fit on one line of at
-most 400 characters. Design rationale, metrics, internal file paths,
-and "found via" belong in the linked PR, not here.
+## v0.4.5 — 2026-09-14
 
-The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
-[`docs/changelog-archive.md`](docs/changelog-archive.md).
-
-## Unreleased
-
-- [additive] Bounded `for_each:` now supports check steps and reusable flows with per-iteration assertion evaluation; `AssertionOutcome` and `AssertionEvaluated` gain optional zero-based `iteration` identity. Empty judging loops are inconclusive. SCHEMA_VERSION stays 0.4.4 pending the dedicated release-cut patch bump. (#521)
-
+- [additive] Bounded `for_each:` now supports check steps and reusable flows with per-iteration assertion evaluation; `AssertionOutcome` and `AssertionEvaluated` gain optional zero-based `iteration` identity. Empty judging loops are inconclusive. (#521)
 - [clarifying] Fixture `up:`/`down:` conditions and `for_each:` sources now reject undeclared steps and outputs at their source location, using the same validation as `setup:`/`teardown:` while preserving fixture scope diagnostics. (#515)
-
 - [additive] `Step` accepts bounded `for_each:` (mandatory `max:`, `as:` binding, `uses:`/`call:`/`steps:` body) in non-judging lifecycle contexts; rejected with a location inside a check's `steps:` (Tier 2, gated behind #509). `flow` origins gain an optional `iteration`. (#443)
+- [clarifying] The dashboard's run report groups a bounded loop's iterations into one construct with per-iteration disclosures, opening failing iterations while leaving every recorded step index unchanged; this is a read-side presentation change only. (#520)
 - [additive] Schema 0.4.3: checks can declare isolated named browser sessions, route UI steps explicitly, and inspect session-attributed evidence; root defaults.max_sessions caps contexts per check (default 4). (#508)
 - [additive] Skipped-step evidence carries optional condition and evaluated operands; check summaries, reporters, dashboard and failure envelopes expose non-zero gated judging-step counts without changing verdicts. (#509)
 - [additive] `Criterion` and `Check` accept `setup:`/`teardown:` lifecycle blocks, symmetric with leaf-level `setup:`/`teardown:`; `setup_started`/`setup_step_started`/`setup_step_observation`/`setup_step_finished`/`setup_finished` carry an optional `criterion_id`. (#441)

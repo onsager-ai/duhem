@@ -51,7 +51,11 @@ fn validate(dir: &Path, expected_field: &str, declare_input: bool) -> Output {
 fn literal_enum_value_is_accepted() {
     let tmp = tempfile::tempdir().unwrap();
     let out = validate(tmp.path(), "visible", false);
-    assert!(out.status.success(), "{:?}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{:?}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// Probe: a well-formed whole-string `$` expression on a closed-enum
@@ -60,7 +64,11 @@ fn literal_enum_value_is_accepted() {
 fn dollar_expression_on_enum_field_is_accepted() {
     let tmp = tempfile::tempdir().unwrap();
     let out = validate(tmp.path(), "$inputs.expected_state", true);
-    assert!(out.status.success(), "{:?}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{:?}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// A malformed expression is still rejected — proves the skip is

@@ -579,21 +579,41 @@ async fn invoke_and_record(
         // #273) as `$setup.<id>.outputs.<name>`. Symmetric with the
         // per-check path in `runner.rs`; see `engine::extract`.
         if let Some(id) = step.id.as_deref() {
-            crate::engine::extract::record_step_outputs(&step.outputs, &r.outputs, |local, v| {
-                if let HookScope::Fixture(fixture, _) = scope {
-                    run.record_fixture_output(fixture, id, local, v);
-                } else {
-                    // Leaf, criterion, and check `setup:`/`teardown:`
-                    // steps all publish into the same `$setup.<id>`
-                    // namespace (#441 Part B): execution is strictly
-                    // sequential and validation forbids an inner
-                    // scope's step id from shadowing an outer scope's
-                    // still-open id, so a flat map is safe and lets
-                    // an outer teardown read its own outer setup's
-                    // outputs with no new reference syntax.
-                    run.record_setup_output(id, local, v);
-                }
-            });
+            // An alias under the reserved `capture/` prefix is refused
+            // rather than bound — the runtime backstop for #532 — and
+            // recorded as evidence below rather than dropped silently.
+            let refused = crate::engine::extract::record_step_outputs(
+                &step.outputs,
+                &r.outputs,
+                |local, v| {
+                    if let HookScope::Fixture(fixture, _) = scope {
+                        run.record_fixture_output(fixture, id, local, v);
+                    } else {
+                        // Leaf, criterion, and check `setup:`/`teardown:`
+                        // steps all publish into the same `$setup.<id>`
+                        // namespace (#441 Part B): execution is strictly
+                        // sequential and validation forbids an inner
+                        // scope's step id from shadowing an outer scope's
+                        // still-open id, so a flat map is safe and lets
+                        // an outer teardown read its own outer setup's
+                        // outputs with no new reference syntax.
+                        run.record_setup_output(id, local, v);
+                    }
+                },
+            );
+            for name in refused {
+                append_setup_observation(
+                    writer,
+                    phase,
+                    idx as u32,
+                    format!("refused/{name}"),
+                    serde_json::json!({
+                        "reason": "authored output name uses the reserved `capture/` prefix (spec #202); refused at runtime (#532)",
+                    }),
+                    scope,
+                )
+                .await?;
+            }
         }
         for (name, value) in &r.outputs {
             // Setup observations get their own event variant so

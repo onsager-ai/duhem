@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] The reserved `capture/` output-name prefix is rejected in every lifecycle and fixture block, not only in a check's `steps:`, and refused at runtime as a backstop. (#532)
 - [clarifying] The changelog lint requires a `## Unreleased` heading, and the preamble deleted by the v0.4.5 cut is restored. (#529)
 
 ## v0.4.5 — 2026-09-14

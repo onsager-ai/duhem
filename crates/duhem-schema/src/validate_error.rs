@@ -67,11 +67,10 @@ pub enum ValidationError {
     },
 
     #[error(
-        "criterion `{criterion}` / check `{check}`: step `{step}` output `{name}` uses the reserved `capture/` prefix (runner-emitted failure evidence, spec #202)"
+        "{site}: step `{step}` output `{name}` uses the reserved `capture/` prefix (runner-emitted failure evidence, spec #202)"
     )]
     ReservedOutputPrefix {
-        criterion: String,
-        check: String,
+        site: String,
         step: String,
         name: String,
     },

@@ -61,6 +61,14 @@ pub fn validate_with_contract_outputs(
 
     crate::validate_for_each::validate_for_each(v, outputs_for, &mut errs);
 
+    // §7.7: the `capture/` output-name prefix is reserved for
+    // runner-emitted evidence; an authored output under it is rejected
+    // at validate time, in every step-bearing block, not only a
+    // check's own `steps:` (#532). One walker enumerates every such
+    // block so a block added later is covered without a new call site
+    // to remember.
+    validate_reserved_output_prefixes(v, &mut errs);
+
     if v.criteria.is_empty() {
         errs.push(ValidationError::NoCriteria);
     }
@@ -459,6 +467,61 @@ pub(crate) fn effective_outputs(
     set
 }
 
+/// Enumerate every step-bearing block in the definition and reject any
+/// authored `outputs:` alias under the reserved `capture/` prefix
+/// (§7.7, spec #202) — runner-emitted failure evidence, never
+/// producible by an action, so an authored binding under it can only
+/// be an attempt to forge a capture.
+///
+/// This is the *one* walker: rather than threading the check through
+/// every existing per-block validation function (which is exactly how
+/// #532 happened — eight sites, one of which remembered), it owns its
+/// own traversal of the whole definition, independent of every other
+/// rule. A step-bearing block added later is covered by extending the
+/// enumeration here, not by finding and patching N call sites.
+fn validate_reserved_output_prefixes(v: &VerificationDefinition, errs: &mut Vec<ValidationError>) {
+    reject_reserved_output_prefix(&v.setup, "setup", errs);
+    reject_reserved_output_prefix(&v.teardown, "teardown", errs);
+    for (name, fixture) in &v.fixtures {
+        reject_reserved_output_prefix(&fixture.up, &format!("fixture `{name}` up"), errs);
+        reject_reserved_output_prefix(&fixture.down, &format!("fixture `{name}` down"), errs);
+    }
+    for c in &v.criteria {
+        reject_reserved_output_prefix(&c.setup, &format!("criterion `{}` setup", c.id), errs);
+        reject_reserved_output_prefix(&c.teardown, &format!("criterion `{}` teardown", c.id), errs);
+        for ch in &c.checks {
+            let label = format!("criterion `{}` / check `{}`", c.id, ch.id);
+            reject_reserved_output_prefix(&ch.setup, &format!("{label} setup"), errs);
+            reject_reserved_output_prefix(&ch.teardown, &format!("{label} teardown"), errs);
+            reject_reserved_output_prefix(&ch.steps, &label, errs);
+        }
+    }
+}
+
+/// Reject a reserved-prefix `outputs:` alias anywhere in `steps`,
+/// including inside a `for_each:` body template — the loop body is
+/// itself a step list and authors the same `outputs:` surface as its
+/// enclosing block.
+fn reject_reserved_output_prefix(steps: &[Step], site: &str, errs: &mut Vec<ValidationError>) {
+    for (idx, step) in steps.iter().enumerate() {
+        for name in step.outputs.keys() {
+            if name.starts_with("capture/") {
+                errs.push(ValidationError::ReservedOutputPrefix {
+                    site: site.to_string(),
+                    step: step_label(step, idx),
+                    name: name.clone(),
+                });
+            }
+        }
+        let nested: &[Step] = if step.for_each_body.is_empty() {
+            step.steps.as_deref().unwrap_or(&[])
+        } else {
+            &step.for_each_body
+        };
+        reject_reserved_output_prefix(nested, site, errs);
+    }
+}
+
 /// Walk the run-level `setup:` block. Enforces id-uniqueness and
 /// returns the map of `step_id → referenceable outputs` (authored ∪
 /// contract, per [`effective_outputs`]) so per-check assertion
@@ -682,21 +745,6 @@ fn validate_check(
             &step_label(s, idx),
             errs,
         );
-        // The `capture/` output namespace is reserved for runner-emitted
-        // failure evidence (spec #202) so authored outputs can never
-        // masquerade as captures. Enforced here at the authoring
-        // boundary — no action produces `capture/*`, so the runtime is
-        // the only source.
-        for name in s.outputs.keys() {
-            if name.starts_with("capture/") {
-                errs.push(ValidationError::ReservedOutputPrefix {
-                    criterion: c.id.clone(),
-                    check: ch.id.clone(),
-                    step: step_label(s, idx),
-                    name: name.clone(),
-                });
-            }
-        }
         if let Some(id) = &s.id {
             if !seen_step_ids.insert(id.as_str()) {
                 errs.push(ValidationError::DuplicateStepId {
@@ -2578,8 +2626,259 @@ criteria:
         assert!(
             errs.iter().any(|e| matches!(
                 e,
-                ValidationError::ReservedOutputPrefix { criterion, check, name, .. }
-                    if criterion == "AC-1" && check == "AC-1.1" && name == "capture/screenshot"
+                ValidationError::ReservedOutputPrefix { site, name, .. }
+                    if site == "criterion `AC-1` / check `AC-1.1`" && name == "capture/screenshot"
+            )),
+            "expected ReservedOutputPrefix, got {errs:?}"
+        );
+    }
+
+    // #532: the `capture/` prefix check previously existed only for a
+    // check's own `steps:`. One test per other step-bearing block, so a
+    // regression names the block rather than a shared parameterised
+    // failure. Each probe was confirmed to PASS `validate()` on the
+    // pre-fix code (recorded as the control in the PR/issue) before
+    // this fix made it fail here.
+
+    #[test]
+    fn leaf_setup_output_under_capture_prefix_is_rejected() {
+        let y = r#"
+verification: x
+setup:
+  - id: s
+    uses: ui/navigate
+    with: { url: http://x }
+    outputs:
+      capture/x: satisfied
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::ReservedOutputPrefix { site, name, .. }
+                    if site == "setup" && name == "capture/x"
+            )),
+            "expected ReservedOutputPrefix, got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn leaf_teardown_output_under_capture_prefix_is_rejected() {
+        let y = r#"
+verification: x
+teardown:
+  - id: s
+    uses: ui/navigate
+    with: { url: http://x }
+    outputs:
+      capture/x: satisfied
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::ReservedOutputPrefix { site, name, .. }
+                    if site == "teardown" && name == "capture/x"
+            )),
+            "expected ReservedOutputPrefix, got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn fixture_up_output_under_capture_prefix_is_rejected() {
+        let y = r#"
+verification: x
+fixtures:
+  proj:
+    up:
+      - id: create
+        uses: api/call
+        with: { method: GET, url: http://x }
+        outputs:
+          capture/x: satisfied
+    down:
+      - uses: api/call
+        with: { method: GET, url: http://x }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        needs: [proj]
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate_with_contract_outputs(&v, &api_call_outputs).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::ReservedOutputPrefix { site, name, .. }
+                    if site == "fixture `proj` up" && name == "capture/x"
+            )),
+            "expected ReservedOutputPrefix, got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn fixture_down_output_under_capture_prefix_is_rejected() {
+        let y = r#"
+verification: x
+fixtures:
+  proj:
+    up:
+      - id: create
+        uses: api/call
+        with: { method: GET, url: http://x }
+    down:
+      - uses: api/call
+        with: { method: GET, url: http://x }
+        outputs:
+          capture/x: satisfied
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        needs: [proj]
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate_with_contract_outputs(&v, &api_call_outputs).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::ReservedOutputPrefix { site, name, .. }
+                    if site == "fixture `proj` down" && name == "capture/x"
+            )),
+            "expected ReservedOutputPrefix, got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn criterion_setup_output_under_capture_prefix_is_rejected() {
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: x
+    setup:
+      - id: s
+        uses: ui/navigate
+        with: { url: http://x }
+        outputs:
+          capture/x: satisfied
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::ReservedOutputPrefix { site, name, .. }
+                    if site == "criterion `AC-1` setup" && name == "capture/x"
+            )),
+            "expected ReservedOutputPrefix, got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn criterion_teardown_output_under_capture_prefix_is_rejected() {
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: x
+    teardown:
+      - id: s
+        uses: ui/navigate
+        with: { url: http://x }
+        outputs:
+          capture/x: satisfied
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::ReservedOutputPrefix { site, name, .. }
+                    if site == "criterion `AC-1` teardown" && name == "capture/x"
+            )),
+            "expected ReservedOutputPrefix, got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn check_setup_output_under_capture_prefix_is_rejected() {
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        setup:
+          - id: s
+            uses: ui/navigate
+            with: { url: http://x }
+            outputs:
+              capture/x: satisfied
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::ReservedOutputPrefix { site, name, .. }
+                    if site == "criterion `AC-1` / check `AC-1.1` setup" && name == "capture/x"
+            )),
+            "expected ReservedOutputPrefix, got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn check_teardown_output_under_capture_prefix_is_rejected() {
+        let y = r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        teardown:
+          - id: s
+            uses: ui/navigate
+            with: { url: http://x }
+            outputs:
+              capture/x: satisfied
+        assertions: ["true"]
+"#;
+        let v = parse(y);
+        let errs = validate(&v).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                ValidationError::ReservedOutputPrefix { site, name, .. }
+                    if site == "criterion `AC-1` / check `AC-1.1` teardown" && name == "capture/x"
             )),
             "expected ReservedOutputPrefix, got {errs:?}"
         );

@@ -226,13 +226,27 @@ impl Engine {
             let outcome = match &execution {
                 Some(Ok(r)) => {
                     // Bind raw fields + `outputs:` aliases (spec #273);
-                    // see `engine::extract`.
+                    // see `engine::extract`. An alias under the reserved
+                    // `capture/` prefix is refused rather than bound —
+                    // the runtime backstop for #532 — and recorded as
+                    // evidence below rather than dropped silently.
                     if let Some(id) = step.id.as_deref() {
-                        crate::engine::extract::record_step_outputs(
+                        let refused = crate::engine::extract::record_step_outputs(
                             &step.outputs,
                             &r.outputs,
                             |local, v| ctx.record_output(id, local, v),
                         );
+                        for name in refused {
+                            writer
+                                .append_observation(
+                                    idx as u32,
+                                    format!("refused/{name}"),
+                                    serde_json::json!({
+                                        "reason": "authored output name uses the reserved `capture/` prefix (spec #202); refused at runtime (#532)",
+                                    }),
+                                )
+                                .await?;
+                        }
                     }
                     for (name, value) in &r.outputs {
                         writer

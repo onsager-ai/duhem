@@ -121,7 +121,19 @@ fn check_step(s: &Step, site: &str, errs: &mut Vec<String>) {
                     ));
                 }
                 Some(f) if !f.enum_values.is_empty() => {
-                    if let Some(v) = val.as_str().filter(|v| !f.enum_values.contains(v)) {
+                    // A whole-string `$` expression defers to runtime (spec
+                    // §10.3) — it isn't a candidate for the literal enum set
+                    // at all, so it's excluded before the enum comparison
+                    // rather than merely tolerated by it. Same "leading `$`"
+                    // predicate as the rest of the with: pipeline (e.g.
+                    // `resolve_cmd::resolve_with`); malformed syntax is
+                    // still caught separately by expression-syntax
+                    // validation (`duhem_schema::validate`).
+                    if let Some(v) = val
+                        .as_str()
+                        .filter(|v| !v.trim_start().starts_with('$'))
+                        .filter(|v| !f.enum_values.contains(v))
+                    {
                         errs.push(format!(
                             "{site}: `{uses}` field `{k}` = `{v}` is not valid (one of: {})",
                             f.enum_values.join(", ")
@@ -358,6 +370,17 @@ mod tests {
             "{:?}",
             field_errors(&d)
         );
+    }
+
+    #[test]
+    fn dollar_expression_on_enum_field_is_accepted() {
+        // Spec #533: a whole-string `$` expression on a closed-enum
+        // `with:` field defers the value check to runtime instead of
+        // being compared against the literal enum set.
+        let d = vd(
+            "          - { uses: ui/assert-element, with: { locator: { css: h1 }, expected: $inputs.expected_state } }",
+        );
+        assert!(field_errors(&d).is_empty(), "{:?}", field_errors(&d));
     }
 
     #[test]

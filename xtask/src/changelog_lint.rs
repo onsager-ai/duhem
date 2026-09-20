@@ -142,6 +142,29 @@ fn lint_changelog(source: &str, release_tags: &[Version]) -> LintReport {
         sections.iter().map(|section| section.version).collect();
     let tag_check_skipped = release_tags.is_empty();
     if !tag_check_skipped {
+        // `## Unreleased` is where the diff-scoped touch gate appends,
+        // so its absence fails every schema-touching PR with an error
+        // naming this file rather than the change under review. The
+        // per-line loop above only inspects `- [` and `## v` lines, so
+        // nothing saw the heading vanish when the v0.4.5 cut removed
+        // it: the gate that requires it and the lint that reads the
+        // whole file were checking different things. Scoped by
+        // `tag_check_skipped` like the coverage check below, because a
+        // tagless source is a unit fixture, not the ledger. Accepts
+        // both spellings `unreleased_line_range` tolerates in
+        // `schema_changelog_check.rs`.
+        if !lines
+            .iter()
+            .any(|line| matches!(line.trim(), "## Unreleased" | "## [Unreleased]"))
+        {
+            violations.push(Violation {
+                line: 1,
+                message:
+                    "`## Unreleased` heading missing; the schema changelog gate appends entries to it"
+                        .to_string(),
+            });
+        }
+
         let mut sorted_tags = release_tags.to_vec();
         sorted_tags.sort_unstable();
         sorted_tags.dedup();
@@ -467,6 +490,35 @@ mod tests {
 ## v0.1.0 — 2026-01-01\n\
 - _No schema-impacting changes._\n";
         assert!(messages(source, &[]).is_empty());
+    }
+
+    #[test]
+    fn missing_unreleased_heading_is_a_violation() {
+        // The v0.4.5 cut (`72b941b`) deleted the heading and this lint
+        // passed anyway, so the strict gate failed on the next
+        // schema-touching PR instead. The companion false-positive
+        // guard is `empty_unreleased_section_never_requires_marker`:
+        // a bare heading must stay clean. A tag is required because
+        // the rule is scoped to a tagged ledger — with `&[]` this
+        // asserts on a violation the rule can no longer produce.
+        let source = "## v0.1.0 — 2026-01-01\n- _No schema-impacting changes._\n";
+        assert!(
+            messages(source, &[version(0, 1, 0)])
+                .iter()
+                .any(|message| message.contains("`## Unreleased` heading missing"))
+        );
+    }
+
+    #[test]
+    fn bracketed_unreleased_heading_satisfies_the_rule() {
+        // Same tag argument, for the opposite reason: without one the
+        // rule is skipped and this would pass whether or not the
+        // bracketed spelling is accepted.
+        let source = "## [Unreleased]\n\
+\n\
+## v0.1.0 — 2026-01-01\n\
+- _No schema-impacting changes._\n";
+        assert!(messages(source, &[version(0, 1, 0)]).is_empty());
     }
 
     #[test]

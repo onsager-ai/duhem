@@ -15,7 +15,21 @@ criteria) lives in the spec issue that introduced
   Does not bump.
 
 `SCHEMA_VERSION` advances in a dedicated bump commit that inserts
-`## v0.x.y — YYYY-MM-DD` below `## Unreleased
+`## v0.x.y — YYYY-MM-DD` below `## Unreleased`, leaving `## Unreleased`
+empty. The release commit is tagged `v0.x.y`.
+
+**Entry style.** One bullet per landing — the tag, the
+consumer-facing change, and (if `[breaking]`) the migration action,
+ending in the PR ref `(#N)`. Each entry must fit on one line of at
+most 400 characters. Design rationale, metrics, internal file paths,
+and "found via" belong in the linked PR, not here.
+
+The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
+[`docs/changelog-archive.md`](docs/changelog-archive.md).
+
+## Unreleased
+
+- [clarifying] The changelog lint requires a `## Unreleased` heading, and the preamble deleted by the v0.4.5 cut is restored. (#529)
 
 ## v0.4.5 — 2026-09-14
 

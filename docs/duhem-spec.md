@@ -1363,6 +1363,7 @@ Borrowed from Arazzo. References available in expressions:
   non-array first argument or a non-string `field` is a type mismatch
   (`inconclusive`); an element that is not an object, or an object
   missing `field`, is simply not a match (`false`), never an error.
+- `$runtime.matches(value, pattern)` — `true` when `pattern` finds a match **anywhere in** `value`. It is a search, not a full match, so anchor with `^` / `$` where you mean equality (`$runtime.matches($steps.api.outputs.body_text, "^ok$")`); an unanchored pattern standing in for an equality is the classic undiscriminating assertion. Both operands must be strings — anything else is a type mismatch (`inconclusive`), as with the comparison operators — and a `pattern` that fails to compile is `inconclusive` carrying the regex engine's message in evidence `detail`, never a silent `false`.
 - `$runtime.lower(s)` / `$runtime.upper(s)` / `$runtime.trim(s)` — case
   and whitespace normalization for robust string comparisons.
 - `$runtime.replace(s, from, to)` — literal substring replace.

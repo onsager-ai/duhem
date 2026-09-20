@@ -159,6 +159,17 @@ exercises it. A surface with no example is a surface we cannot
 dogfood, which means we cannot ship it on Onsager, which means we
 cannot validate it. See `verification-authoring`.
 
+## Session scope (Claude Code sessions on this repo)
+
+A session on this repo works the **duhem repo only**. It is consulted on duhem-the-tool; it is not a gatekeeper or reviewer for another repo's work unless that work bears directly on duhem. (Principal ruling, 2026-09-18.)
+
+- **In scope.** Anything answerable by reading duhem: does an action exist at version X, what changed between versions, is this expressible at a given pin, is this a duhem defect. A bug report against duhem raised from another repo's usage is still duhem's business.
+- **Out of scope.** Non-author review of another repo's PR; reviewing or authoring another repo's Verification Definitions; any gatekeeping role in another repo's merge path.
+
+The test that divides them is **whose knowledge the question requires**, not which artifact it touches. A Verification Definition is a duhem artifact, but "does this locator bind the right component" and "is this check reachable given fixture ordering" are answered by reading *that product*; "does `ui/extract` yield page text at 0.4.0" is answered by reading this repo. If answering requires opening their repo, it is theirs.
+
+Hand back anything already in flight rather than dropping it — a peer expecting a verdict is owed the news that it is not coming.
+
 ## Workspace isolation (all coding agents)
 
 Treat the repository's primary checkout as a `main`-only parking

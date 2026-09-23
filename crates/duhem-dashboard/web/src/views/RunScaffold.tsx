@@ -19,6 +19,8 @@ import { carryFetched, foldRun } from "../fold";
 import { deliveryLayerLabel, groupTimeline, stepStatus } from "../format";
 import { groupLoops, stepNavigation } from "../step-presentation";
 import { LoopGroup } from "../components/LoopGroup";
+import { RailSplitter } from "../components/RailSplitter";
+import { useRailWidth } from "../hooks/use-rail-width";
 import { flowOrigin } from "../definition";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -529,6 +531,7 @@ export function RunScaffold({
   children: (run: RunDetail) => ReactNode;
 }) {
   const { run, error, connection } = useRun(runId);
+  const railWidth = useRailWidth();
 
   if (error) return <p className="error">{error}</p>;
   if (run === null) return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -569,8 +572,11 @@ export function RunScaffold({
               No criteria recorded{run.status === "running" ? " yet" : ""}.
             </p>
           ) : (
-          <div className="run-results-grid grid min-w-0 max-w-full md:grid-cols-[17rem_minmax(0,1fr)]">
-            <aside className="min-w-0 max-w-full border-b md:grid md:max-h-[calc(100vh-10.5rem)] md:grid-rows-[auto_minmax(0,1fr)] md:border-b-0 md:border-r">
+          <div
+            className="run-results-grid grid min-w-0 max-w-full md:grid-cols-[var(--run-rail-width,17rem)_0.75rem_minmax(0,1fr)]"
+            style={{ "--run-rail-width": `${railWidth.width}px` } as React.CSSProperties}
+          >
+            <aside className="min-w-0 max-w-full border-b md:grid md:max-h-[calc(100vh-10.5rem)] md:grid-rows-[auto_minmax(0,1fr)] md:border-b-0">
               <RunTree
                 run={run}
                 activePair={activePair}
@@ -578,6 +584,13 @@ export function RunScaffold({
                 activeStep={activeStep}
               />
             </aside>
+            <RailSplitter
+              width={railWidth.width}
+              min={railWidth.min}
+              max={railWidth.max}
+              onChange={railWidth.setRailWidth}
+              onReset={railWidth.resetRailWidth}
+            />
             <section className="run-results-detail min-w-0 py-3 md:max-h-[calc(100vh-10.5rem)] md:overflow-y-auto md:py-0 md:pl-4">
               {children(run)}
             </section>

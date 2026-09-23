@@ -3,7 +3,7 @@
 // the summary roll-up tiles, and the active-check highlight when a check
 // is open. Replaces the former per-run tab-bar tests.
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RunPage from "../views/RunPage";
@@ -533,6 +533,44 @@ describe("run report tree", () => {
     ).toBe("step"));
     expect(screen.getByTestId("location-search").textContent).toContain("step=submit-form");
     expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("still scrolls the next navigation once a scroll-originated selection settles (#525)", async () => {
+    stub(RUN, TRIAGE_CHECK);
+    const { container } = renderAt("/run/R1/check/AC-5%3A%3AAC-5.1?step=2");
+    const rail = await screen.findByTestId("run-tree");
+    await waitFor(() => expect(container.querySelectorAll("[data-step-index]")).toHaveLength(3));
+    const detail = container.querySelector(".run-results-detail") as HTMLElement;
+    const scrollTo = vi.fn();
+    Object.assign(detail, { scrollTo, scrollTop: 20 });
+    vi.spyOn(detail, "getBoundingClientRect").mockReturnValue({ top: 0 } as DOMRect);
+    const groups = container.querySelectorAll<HTMLElement>("[data-step-index]");
+    vi.spyOn(groups[0], "getBoundingClientRect").mockReturnValue({ top: -100 } as DOMRect);
+    vi.spyOn(groups[1], "getBoundingClientRect").mockReturnValue({ top: -50 } as DOMRect);
+    vi.spyOn(groups[2], "getBoundingClientRect").mockReturnValue({ top: 60 } as DOMRect);
+    fireEvent.scroll(detail);
+    await waitFor(() => expect(
+      within(rail).getByRole("link", { name: "submit-form" }).getAttribute("aria-current"),
+    ).toBe("step"));
+    expect(scrollTo).not.toHaveBeenCalled();
+
+    // Let the scroll-key state settle: the caller clears it a render after
+    // the selection changes, so `selectedFromScroll` flips back to false
+    // with selectedStep/selectedNodeKey unchanged. A stale "consumed once"
+    // flag would leave the *next* selection change skipped; a value
+    // re-derived every render must not scroll on this settling render
+    // either, since nothing about the target actually moved.
+    await act(async () => {});
+    expect(scrollTo).not.toHaveBeenCalled();
+
+    // The next real navigation — a rail click to a different step — must
+    // still scroll into place.
+    vi.spyOn(groups[0], "getBoundingClientRect").mockReturnValue({ top: 210 } as DOMRect);
+    fireEvent.click(within(rail).getByRole("link", { name: "open-page" }));
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({
+      top: 20 + 210 - 0 - 0,
+      behavior: "auto",
+    }));
   });
 
   it("keeps raw step data expansion local to one step and resets it on a new run", async () => {

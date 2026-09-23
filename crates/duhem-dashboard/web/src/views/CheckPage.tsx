@@ -1675,6 +1675,7 @@ function StepSelectionSync({
   params,
   selectedStep,
   selectedNodeKey,
+  selectedFromScroll,
   stepNavigation,
   view,
   onScrollSelection,
@@ -1683,25 +1684,27 @@ function StepSelectionSync({
   params: URLSearchParams;
   selectedStep?: number;
   selectedNodeKey?: string;
+  // True when the *current* selection was produced by scroll-sync (below)
+  // rather than navigation (rail click / keyboard / deep link) — see #525.
+  selectedFromScroll: boolean;
   stepNavigation: ReadonlyMap<string, { key: string; label: string; stepIndex: number }>;
   view: "steps" | "replay";
   onScrollSelection: (key: string) => void;
 }) {
   const navigate = useNavigate();
   const syncing = useRef(false);
-  // Set by the scroll listener just before it moves the selection, so the
-  // layout effect below can tell a scroll-originated selection change from
-  // a navigation one (rail click / keyboard / deep link) and skip the
-  // programmatic scroll for the former — see #525.
-  const scrollOriginated = useRef(false);
   const stepParam = params.get("step") ?? undefined;
 
   useLayoutEffect(() => {
     if (view !== "steps" || selectedStep === undefined) return;
-    if (scrollOriginated.current) {
-      scrollOriginated.current = false;
-      return;
-    }
+    // Read, not depended on: a scroll-originated selection must not move
+    // the scroller (that's the #525 jump), but `selectedFromScroll` flips
+    // back to false a tick later — once the caller clears its scroll-key
+    // state — without selectedStep/selectedNodeKey changing. Putting it in
+    // the dependency array would re-run this effect on that later render
+    // and reproduce the jump it exists to prevent, so it's only read from
+    // the closure of the render that actually changed the selection.
+    if (selectedFromScroll) return;
     const surface = surfaceRef.current;
     const scroller = surface?.closest(".run-results-detail") as HTMLElement | null;
     const target = surface?.querySelector<HTMLElement>(`[data-step-node="${selectedNodeKey}"]`)
@@ -1750,7 +1753,6 @@ function StepSelectionSync({
         ? stepNavigation.get(visible.dataset.stepNode)?.key
         : [...stepNavigation.values()].find((item) => item.stepIndex === Number(visible?.dataset.stepIndex))?.key;
       if (key && key !== stepParam) {
-        scrollOriginated.current = true;
         onScrollSelection(key);
         navigate({ search: queryWith(params, { step: key }) }, { replace: true });
       }
@@ -1846,6 +1848,7 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
           params={params}
           selectedStep={selectedStep}
           selectedNodeKey={selectedNode?.key}
+          selectedFromScroll={selectedFromScroll}
           stepNavigation={stepNavigation}
           view={view}
           onScrollSelection={setScrollSelectedKey}

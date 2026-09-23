@@ -29,8 +29,9 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
-- [breaking] Browser sessions cascade: leaves and criteria accept `session:`, and every setup/teardown/fixture block opens a fresh context seeded from the nearest enclosing session (`session: ~` opts out); a `call:` step's `session:` fills its flow's undeclared steps. (#548)
+## v0.5.0 — 2026-09-23
 
+- [breaking] Browser sessions cascade: leaves and criteria accept `session:`, and every setup/teardown/fixture block opens a fresh context seeded from the nearest enclosing session (`session: ~` opts out); a `call:` step's `session:` fills its flow's undeclared steps. (#548)
 - [additive] `RunSummary` carries `lifecycle` — every setup/teardown/fixture block that ran, with its scope path, status, steps and failing step; reporters and the dashboard show them per scope. (#524)
 - [additive] `setup:`/`teardown:` at every level and fixture `up:`/`down:` accept a direct `call:` to a reusable flow, with flow-attributed evidence and masked secret params. (#526)
 - [breaking] A declared `teardown:` now always runs at leaf, criterion and check level, even with no same-level `setup:` or a setup that dispatched nothing; guard cleanup that assumes setup ran with `if:`. (#547)

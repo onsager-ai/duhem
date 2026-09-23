@@ -12,6 +12,7 @@ import {
   fetchRun,
   liveUrl,
   type CheckDetail,
+  type LifecycleBlock,
   type RunDetail,
   type TraceEvent,
 } from "../api";
@@ -20,6 +21,8 @@ import { deliveryLayerLabel, groupTimeline, stepStatus } from "../format";
 import { groupLoops, stepNavigation } from "../step-presentation";
 import { LoopGroup } from "../components/LoopGroup";
 import { RailSplitter } from "../components/RailSplitter";
+import { LifecycleRailRow } from "../components/LifecycleRailRow";
+import { lifecycleAtCheck, lifecycleAtCriterion, lifecycleHref, lifecycleKey } from "../lifecycle";
 import { useRailWidth } from "../hooks/use-rail-width";
 import { flowOrigin } from "../definition";
 import { cn } from "@/lib/utils";
@@ -103,7 +106,9 @@ function resultsHref(run: RunDetail): string {
   const criterion =
     run.criteria.find((item) => item.verdict !== "pass") ??
     run.criteria[0];
-  if (!criterion) return `/run/${encodeURIComponent(run.run_id)}/results`;
+  if (!criterion) return run.lifecycle?.[0]
+    ? lifecycleHref(run.run_id, run.lifecycle[0])
+    : `/run/${encodeURIComponent(run.run_id)}/results`;
   const check =
     criterion.checks.find((item) => item.verdict !== "pass") ??
     criterion.checks[0];
@@ -122,12 +127,16 @@ function criterionHref(runId: string, criterionId: string): string {
 function TreeGroup({
   runId,
   group,
+  lifecycle,
+  activeLifecycle,
   activePair,
   activeCriterion,
   activeStep,
 }: {
   runId: string;
   group: SuiteCriterionNode;
+  lifecycle: LifecycleBlock[];
+  activeLifecycle?: string;
   activePair?: string;
   activeCriterion?: string;
   activeStep?: string;
@@ -140,10 +149,11 @@ function TreeGroup({
     [group.checks, group.criterion],
   );
   const { contextOnly } = group;
-  const hasChecks = criterion.checks.length > 0;
-  const [open, setOpen] = useState(hasChecks);
+  const hasChildren = criterion.checks.length > 0 || lifecycle.some((block) => lifecycleAtCriterion(block, criterion.id));
+  const [open, setOpen] = useState(hasChildren);
   const vd = useVd();
   const [search] = useSearchParams();
+  const selectedLifecycle = activeLifecycle ?? search.get("lifecycle");
   const navigate = useNavigate();
   const critDesc = vd?.criterion(criterion.id)?.description;
   const active = activeCriterion === criterion.id;
@@ -188,7 +198,7 @@ function TreeGroup({
         className="criterion-tree-parent flex min-w-0 items-start gap-0.5 md:sticky md:top-0 md:z-10 md:bg-background/95 md:backdrop-blur"
         data-testid="criterion-parent"
       >
-        {hasChecks ? (
+        {hasChildren ? (
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
@@ -225,6 +235,9 @@ function TreeGroup({
           className="ml-8 space-y-0.5 border-l pl-3 pt-0.5"
           data-testid="check-children"
         >
+          {lifecycle.filter((block) => block.phase === "setup" && lifecycleAtCriterion(block, criterion.id)).map((block) => (
+            <LifecycleRailRow key={lifecycleKey(block)} runId={runId} block={block} active={selectedLifecycle === lifecycleKey(block)} />
+          ))}
           {criterion.checks.map((chk) => {
             const active = activePair === `${criterion.id}::${chk.id}`;
             const chkDesc = vd?.check(criterion.id, chk.id)?.description;
@@ -237,6 +250,7 @@ function TreeGroup({
               const flow = flowOrigin(started.flow);
               const { key, label } = stepNavigation(node, vd, criterion.id, chk.id);
               const stepSearch = new URLSearchParams(search);
+              stepSearch.delete("lifecycle");
               stepSearch.set("step", key);
               const status = stepStatus(node);
               const layer = deliveryLayerLabel(started.layer);
@@ -256,6 +270,7 @@ function TreeGroup({
                 if (target?.kind !== "step") return;
                 const targetKey = stepNavigation(target, vd, criterion.id, chk.id).key;
                 const targetSearch = new URLSearchParams(search);
+                targetSearch.delete("lifecycle");
                 targetSearch.set("step", targetKey);
                 navigate({
                   pathname: checkHref(runId, criterion.id, chk.id),
@@ -335,6 +350,15 @@ function TreeGroup({
                   className="max-w-24 truncate"
                 />
               </Link>
+              {lifecycle.some((block) => block.phase === "setup" && lifecycleAtCheck(block, criterion.id, chk.id)) && (
+                <div className="ml-3 border-l pl-2">
+                  {lifecycle.filter((block) => block.phase === "setup" && lifecycleAtCheck(block, criterion.id, chk.id)).map((block) => (
+                    <LifecycleRailRow key={lifecycleKey(block)} runId={runId} block={block}
+                      checkPath={checkHref(runId, criterion.id, chk.id)}
+                      active={active && selectedLifecycle === lifecycleKey(block)} />
+                  ))}
+                </div>
+              )}
               {active && steps.length > 0 && (
                 <div className="ml-3 border-l pl-2" data-testid="step-children">
                   {groupLoops(steps).map((node) => node.kind === "loop"
@@ -344,9 +368,21 @@ function TreeGroup({
                     : node.kind === "step" ? renderStep(node) : null)}
                 </div>
               )}
+              {lifecycle.some((block) => block.phase === "teardown" && lifecycleAtCheck(block, criterion.id, chk.id)) && (
+                <div className="ml-3 border-l pl-2">
+                  {lifecycle.filter((block) => block.phase === "teardown" && lifecycleAtCheck(block, criterion.id, chk.id)).map((block) => (
+                    <LifecycleRailRow key={lifecycleKey(block)} runId={runId} block={block}
+                      checkPath={checkHref(runId, criterion.id, chk.id)}
+                      active={active && selectedLifecycle === lifecycleKey(block)} />
+                  ))}
+                </div>
+              )}
               </div>
             );
           })}
+          {lifecycle.filter((block) => block.phase === "teardown" && lifecycleAtCriterion(block, criterion.id)).map((block) => (
+            <LifecycleRailRow key={lifecycleKey(block)} runId={runId} block={block} active={selectedLifecycle === lifecycleKey(block)} />
+          ))}
         </div>
       )}
       {/* Preserve the sticky runway the filter row supplied before it moved
@@ -358,13 +394,15 @@ function TreeGroup({
 
 // The Results-only tree rail. Top-level tabs own Summary and Definition,
 // so this nav can express one hierarchy clearly: criteria → checks.
-function RunTree({
+export function RunTree({
   run,
+  activeLifecycle,
   activePair,
   activeCriterion,
   activeStep,
 }: {
   run: RunDetail;
+  activeLifecycle?: string;
   activePair?: string;
   activeCriterion?: string;
   activeStep?: string;
@@ -421,15 +459,23 @@ function RunTree({
         data-testid="run-tree"
         className="run-results-rail run-results-nav min-w-0 max-w-full space-y-0.5 overflow-x-hidden pb-6 pr-3 supports-[overflow:clip]:overflow-x-clip md:min-h-0 md:overflow-y-auto"
       >
+        {(run.lifecycle ?? []).filter((block) => block.scope.length === 0 && block.phase === "setup").map((block) => (
+          <LifecycleRailRow key={lifecycleKey(block)} runId={run.run_id} block={block} active={activeLifecycle === lifecycleKey(block)} />
+        ))}
         {filtered.map((group) => (
           <TreeGroup
             key={group.criterion.id}
             runId={run.run_id}
             group={group}
+            lifecycle={run.lifecycle ?? []}
+            activeLifecycle={activeLifecycle}
             activePair={activePair}
             activeCriterion={activeCriterion}
             activeStep={activeStep}
           />
+        ))}
+        {(run.lifecycle ?? []).filter((block) => block.scope.length === 0 && block.phase === "teardown").map((block) => (
+          <LifecycleRailRow key={lifecycleKey(block)} runId={run.run_id} block={block} active={activeLifecycle === lifecycleKey(block)} />
         ))}
         {filtered.length === 0 && (
           <p className="px-2 py-3 text-xs text-muted-foreground">
@@ -457,7 +503,7 @@ function RunTabs({ run, active }: { run: RunDetail; active: RunTab }) {
       label: "Results",
       icon: ListChecks,
       to: resultsHref(run),
-      enabled: run.criteria.length > 0,
+      enabled: run.criteria.length > 0 || (run.lifecycle?.length ?? 0) > 0,
     },
     {
       id: "definition" as const,
@@ -515,6 +561,7 @@ function RunTabs({ run, active }: { run: RunDetail; active: RunTab }) {
 // resolved run so a page can derive from it (RunPage's donut, inputs).
 export function RunScaffold({
   runId,
+  activeLifecycle,
   activePair,
   activeCriterion,
   activeStep,
@@ -523,6 +570,7 @@ export function RunScaffold({
   children,
 }: {
   runId: string;
+  activeLifecycle?: string;
   activePair?: string;
   activeCriterion?: string;
   activeStep?: string;
@@ -567,7 +615,7 @@ export function RunScaffold({
         </header>
 
         {active === "results" ? (
-          run.criteria.length === 0 ? (
+          run.criteria.length === 0 && (run.lifecycle?.length ?? 0) === 0 ? (
             <p className="py-6 text-sm text-muted-foreground">
               No criteria recorded{run.status === "running" ? " yet" : ""}.
             </p>
@@ -579,6 +627,7 @@ export function RunScaffold({
             <aside className="min-w-0 max-w-full border-b md:grid md:max-h-[calc(100vh-10.5rem)] md:grid-rows-[auto_minmax(0,1fr)] md:border-b-0">
               <RunTree
                 run={run}
+                activeLifecycle={activeLifecycle}
                 activePair={activePair}
                 activeCriterion={activeCriterion}
                 activeStep={activeStep}

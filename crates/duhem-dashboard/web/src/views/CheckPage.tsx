@@ -23,7 +23,8 @@ import { useVd } from "./definition-context";
 import { type LoopNode, groupLoops, stepNavigation as navigationForStep } from "../step-presentation";
 import { LoopGroup } from "../components/LoopGroup";
 import { flowOrigin, type FlowOrigin } from "../definition";
-import { lifecycleScopePath } from "./RunPage";
+import { lifecycleKey, lifecycleFailure, lifecycleScopePath } from "../lifecycle";
+import { LifecycleStatusBadge } from "../components/LifecycleStatusBadge";
 
 // The check's wall-clock span — first recorded event to last.
 function checkDurationMs(timeline: TraceEvent[]): number | null {
@@ -480,6 +481,7 @@ function describeStepWith(
 // outside any group, so nothing load-bearing is hidden.
 function StepGroup({
   node,
+  lifecycle,
   prevOf,
   artifacts,
   selected,
@@ -488,6 +490,7 @@ function StepGroup({
   onRawExpandedChange,
 }: {
   node: Extract<TimelineNode, { kind: "step" }>;
+  lifecycle?: LifecycleBlock;
   prevOf: (evt: TraceEvent) => TraceEvent | undefined;
   artifacts: ArtifactRef[];
   selected?: boolean;
@@ -591,13 +594,14 @@ function StepGroup({
   const chid = typeof started.check_id === "string" ? started.check_id : "";
   const uses = typeof started.uses === "string" ? started.uses : "step";
   const flow = flowOrigin(started.flow);
-  const label = (
-    flow
-      ? vd?.flowStepLabel(flow)
-      : vd?.stepLabel(cid, chid, node.stepIndex)
+  const label = (lifecycle
+    ? vd?.lifecycleStepLabel(lifecycle.phase, lifecycle.scope, node.stepIndex, flow)
+    : flow ? vd?.flowStepLabel(flow) : vd?.stepLabel(cid, chid, node.stepIndex)
   ) ?? `${uses} #${node.stepIndex}`;
   const layer = deliveryLayerLabel(started.layer);
-  const authoredWith = vd?.stepWith(cid, chid, node.stepIndex, flow);
+  const authoredWith = lifecycle
+    ? vd?.lifecycleStepWith(lifecycle.phase, lifecycle.scope, node.stepIndex, flow)
+    : vd?.stepWith(cid, chid, node.stepIndex, flow);
   const detailText = [fe.label, describeStepWith(started.with, authoredWith)]
     .filter(Boolean)
     .join(" · ");
@@ -640,19 +644,20 @@ function StepGroup({
               <EventIcon name={status.icon} />
             </span>
             <span className="ev-label" title={label}>{label}</span>
-            {typeof started.session === "string" && (
-              <Badge variant="outline" data-testid="step-session">{started.session}</Badge>
-            )}
-            {layer && (
-              <Badge
-                variant="outline"
-                className="mx-1 px-1.5 font-mono text-[0.65rem]"
-                data-testid="step-layer"
-              >
-                {layer}
-              </Badge>
-            )}
-            <span className="ev-detail">
+            <span className={layer || typeof started.session === "string" || status.tone !== "ok"
+              ? "ev-detail step-summary-detail" : "ev-detail"}>
+              {typeof started.session === "string" && (
+                <Badge variant="outline" className="shrink-0" data-testid="step-session">{started.session}</Badge>
+              )}
+              {layer && (
+                <Badge
+                  variant="outline"
+                  className="shrink-0 px-1.5 font-mono text-[0.65rem]"
+                  data-testid="step-layer"
+                >
+                  {layer}
+                </Badge>
+              )}
               {detailText && (
                 <span className="ev-detail-text" title={detailText}>
                   {detailText}
@@ -805,6 +810,7 @@ function groupFlowSteps(nodes: (TimelineNode | LoopNode)[]): (TimelineNode | Flo
 
 function FlowGroup({
   group,
+  lifecycle,
   prevOf,
   artifacts,
   selectedStep,
@@ -814,6 +820,7 @@ function FlowGroup({
   onRawExpandedChange,
 }: {
   group: FlowGroupNode;
+  lifecycle?: LifecycleBlock;
   prevOf: (evt: TraceEvent) => TraceEvent | undefined;
   artifacts: ArtifactRef[];
   selectedStep?: number;
@@ -826,8 +833,9 @@ function FlowGroup({
   const started = group.steps[0].events[0];
   const criterionId = typeof started.criterion_id === "string" ? started.criterion_id : "";
   const checkId = typeof started.check_id === "string" ? started.check_id : "";
-  const label =
-    vd?.flowLabel(criterionId, checkId, group.origin) ?? group.origin.invocation;
+  const label = (lifecycle
+    ? vd?.lifecycleFlowLabel(lifecycle.phase, lifecycle.scope, group.origin)
+    : vd?.flowLabel(criterionId, checkId, group.origin)) ?? group.origin.invocation;
   return (
     <li
       className="flow-group"
@@ -844,6 +852,7 @@ function FlowGroup({
           <StepGroup
             key={node.key}
             node={node}
+            lifecycle={lifecycle}
             prevOf={prevOf}
             artifacts={artifacts}
             selected={selectedNodeKey ? selectedNodeKey === node.key : selectedStep === node.stepIndex}
@@ -860,6 +869,7 @@ function FlowGroup({
 
 export function Timeline({
   events,
+  lifecycle,
   artifacts = [],
   selectedStep,
   selectedNodeKey,
@@ -868,6 +878,7 @@ export function Timeline({
   onRawExpandedChange = () => {},
 }: {
   events: TraceEvent[];
+  lifecycle?: LifecycleBlock;
   artifacts?: ArtifactRef[];
   selectedStep?: number;
   selectedNodeKey?: string;
@@ -884,7 +895,7 @@ export function Timeline({
         n.kind === "loop" ? (
           <li key={n.key} className="flow-group">
             <LoopGroup group={n} selectedKey={selectedNodeKey} renderStep={(node) => (
-              <StepGroup key={node.key} node={node} prevOf={prevOf} artifacts={artifacts}
+              <StepGroup key={node.key} node={node} lifecycle={lifecycle} prevOf={prevOf} artifacts={artifacts}
                 selected={selectedNodeKey === node.key}
                 selectedFromScroll={selectedFromScroll}
                 rawExpanded={rawExpandedSteps.has(node.key)}
@@ -895,6 +906,7 @@ export function Timeline({
           <FlowGroup
             key={n.key}
             group={n}
+            lifecycle={lifecycle}
             prevOf={prevOf}
             artifacts={artifacts}
             selectedStep={selectedStep}
@@ -907,6 +919,7 @@ export function Timeline({
           <StepGroup
             key={n.key}
             node={n}
+            lifecycle={lifecycle}
             prevOf={prevOf}
             artifacts={artifacts}
             selected={selectedNodeKey ? selectedNodeKey === n.key : selectedStep === n.stepIndex}
@@ -928,12 +941,14 @@ export function LifecycleSections({ blocks }: { blocks: LifecycleBlock[] }) {
   return (
     <section className="mb-4 space-y-3" aria-label={`${blocks[0].phase} lifecycle`}>
       {blocks.map((block, index) => (
-        <div key={`${block.started_at}-${index}`} data-testid={`check-lifecycle-${block.phase}`}>
-          <h3 className="mb-2 text-sm font-semibold">
+        <div key={`${block.started_at}-${index}`} id={`lifecycle-${lifecycleKey(block)}`} data-testid={`check-lifecycle-${block.phase}`} className="scroll-mt-20 rounded-md border-l-2 border-muted px-3 py-2">
+          <h3 className="mb-2 flex flex-wrap items-center gap-2 text-sm font-semibold">
             <span className="font-mono">{lifecycleScopePath(block)}</span>{" "}
-            {block.phase} — {block.status}
+            <span className="text-muted-foreground">{block.phase}</span>
+            <LifecycleStatusBadge status={block.status} />
           </h3>
-          <Timeline events={block.timeline} />
+          {lifecycleFailure(block) && <p className="mb-2 whitespace-pre-wrap break-words text-sm text-fail">{lifecycleFailure(block)}</p>}
+          <Timeline events={block.timeline} lifecycle={block} />
         </div>
       ))}
     </section>
@@ -1694,6 +1709,7 @@ function StepSelectionSync({
   selectedStep,
   selectedNodeKey,
   selectedFromScroll,
+  lifecycleSelected,
   stepNavigation,
   view,
   onScrollSelection,
@@ -1705,6 +1721,7 @@ function StepSelectionSync({
   // True when the *current* selection was produced by scroll-sync (below)
   // rather than navigation (rail click / keyboard / deep link) — see #525.
   selectedFromScroll: boolean;
+  lifecycleSelected: boolean;
   stepNavigation: ReadonlyMap<string, { key: string; label: string; stepIndex: number }>;
   view: "steps" | "replay";
   onScrollSelection: (key: string) => void;
@@ -1748,7 +1765,7 @@ function StepSelectionSync({
   }, [selectedStep, selectedNodeKey, surfaceRef, view]);
 
   useEffect(() => {
-    if (view !== "steps") return;
+    if (view !== "steps" || lifecycleSelected) return;
     const surface = surfaceRef.current;
     const scroller = surface?.closest(".run-results-detail") as HTMLElement | null;
     if (!surface || !scroller) return;
@@ -1777,7 +1794,7 @@ function StepSelectionSync({
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
     return () => scroller.removeEventListener("scroll", onScroll);
-  }, [navigate, onScrollSelection, params, stepNavigation, stepParam, surfaceRef, view]);
+  }, [lifecycleSelected, navigate, onScrollSelection, params, stepNavigation, stepParam, surfaceRef, view]);
 
   return null;
 }
@@ -1822,6 +1839,12 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
   const vd = useVd();
   const [params] = useSearchParams();
   const stepParam = params.get("step") ?? undefined;
+  const lifecycleParam = params.get("lifecycle");
+  useEffect(() => {
+    if (!check || !lifecycleParam) return;
+    const target = document.getElementById(`lifecycle-${lifecycleParam}`);
+    target?.scrollIntoView?.({ block: "start" });
+  }, [check, lifecycleParam]);
   const selectedFromScroll = stepParam !== undefined && stepParam === scrollSelectedKey;
 
   useEffect(() => {
@@ -1868,6 +1891,7 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
           selectedStep={selectedStep}
           selectedNodeKey={selectedNode?.key}
           selectedFromScroll={selectedFromScroll}
+          lifecycleSelected={Boolean(lifecycleParam)}
           stepNavigation={stepNavigation}
           view={view}
           onScrollSelection={setScrollSelectedKey}

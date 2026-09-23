@@ -752,10 +752,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         has_definition,
         viewport,
         cleanup,
-        lifecycle: lifecycle
-            .into_iter()
-            .filter(|detail| detail.block.scope.len() <= 1)
-            .collect(),
+        lifecycle,
         criteria,
     }
 }
@@ -797,13 +794,7 @@ fn build_check_detail(
     let mut verdict = None;
     let lifecycle = lifecycle::fold(&run.events)
         .into_iter()
-        .filter(|detail| {
-            detail
-                .block
-                .scope
-                .iter()
-                .any(|segment| segment.id == check_id)
-        })
+        .filter(|detail| lifecycle::encloses_check(&detail.block.scope, criterion_id, check_id))
         .collect();
     // `step_observation` / `step_finished` carry only `step_index`;
     // attribution is positional — they belong to the pair iff the most

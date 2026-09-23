@@ -22,6 +22,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { RunsProvider } from "@/runs-context";
 import { ThemeProvider } from "@/theme";
 import CheckPage from "./views/CheckPage";
+import LifecyclePage from "./views/LifecyclePage";
 import CriterionPage from "./views/CriterionPage";
 import DefinitionPage from "./views/DefinitionPage";
 import DiffPage from "./views/DiffPage";
@@ -46,6 +47,7 @@ export default function App() {
               <Route path="/run/:runId/results" element={<ResultsPage />} />
               <Route path="/run/:runId/criterion/:criterionId" element={<CriterionPage />} />
               <Route path="/run/:runId/check/:pair" element={<CheckPage />} />
+              <Route path="/run/:runId/lifecycle/:blockKey" element={<LifecyclePage />} />
               <Route path="/run/:runId/definition" element={<DefinitionPage />} />
               <Route path="/run/:runId/diff" element={<DiffPage />} />
               <Route path="/verification/:name" element={<VerificationPage />} />

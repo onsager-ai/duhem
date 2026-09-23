@@ -291,6 +291,14 @@ li.ev.step-group > details[open] > summary .ev-caret {
   text-overflow: ellipsis;
 }
 .ev-detail { color: var(--lg-muted); min-width: 0; }
+.step-summary-detail {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.4rem;
+}
+.step-summary-detail .ev-detail-text { flex: 1 1 6rem; min-width: 0; }
 .ev-detail-text {
   display: inline-block;
   max-width: 100%;

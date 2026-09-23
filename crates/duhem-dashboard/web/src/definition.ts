@@ -6,6 +6,7 @@
 // ids), never a throw — a snapshot is evidence to read, not to trust.
 
 import { parse } from "yaml";
+import type { LifecycleBlock, LifecycleScopeSegment } from "./api";
 
 export interface VdStep {
   id?: string;
@@ -18,11 +19,15 @@ export interface VdCheck {
   id: string;
   description?: string;
   steps: VdStep[];
+  setup: VdStep[];
+  teardown: VdStep[];
 }
 export interface VdCriterion {
   id: string;
   description?: string;
   checks: VdCheck[];
+  setup: VdStep[];
+  teardown: VdStep[];
 }
 interface VdFlow {
   description?: string;
@@ -60,6 +65,10 @@ export interface VdLookup {
   flowStepLabel(flow: FlowOrigin): string | undefined;
   /** Label for the authored invocation that owns an expanded step. */
   flowLabel(criterionId: string, checkId: string, flow: FlowOrigin): string | undefined;
+  /** Lifecycle indices are local to the leaf, criterion, check, or fixture block. */
+  lifecycleStepLabel(phase: LifecycleBlock["phase"], scope: LifecycleScopeSegment[], index: number, flow?: FlowOrigin): string | undefined;
+  lifecycleStepWith(phase: LifecycleBlock["phase"], scope: LifecycleScopeSegment[], index: number, flow?: FlowOrigin): Record<string, unknown> | undefined;
+  lifecycleFlowLabel(phase: LifecycleBlock["phase"], scope: LifecycleScopeSegment[], flow: FlowOrigin): string | undefined;
 }
 
 export interface FlowOrigin {
@@ -93,6 +102,10 @@ function normStep(raw: unknown): VdStep {
   };
 }
 
+function normSteps(raw: unknown): VdStep[] {
+  return Array.isArray(raw) ? raw.map(normStep) : [];
+}
+
 function stepLabel(step: VdStep | undefined, index: number): string | undefined {
   return step?.description ??
     step?.id ??
@@ -121,7 +134,9 @@ function normCheck(raw: unknown): VdCheck | undefined {
   return {
     id,
     description: str(r.description),
-    steps: Array.isArray(r.steps) ? r.steps.map(normStep) : [],
+    steps: normSteps(r.steps),
+    setup: normSteps(r.setup),
+    teardown: normSteps(r.teardown),
   };
 }
 
@@ -133,6 +148,8 @@ function normCriterion(raw: unknown): VdCriterion | undefined {
   return {
     id,
     description: str(r.description),
+    setup: normSteps(r.setup),
+    teardown: normSteps(r.teardown),
     checks: Array.isArray(r.checks)
       ? r.checks.map(normCheck).filter((c): c is VdCheck => !!c)
       : [],
@@ -142,8 +159,11 @@ function normCriterion(raw: unknown): VdCriterion | undefined {
 export function parseDefinition(yamlText: string): VdLookup {
   let criteria: VdCriterion[] = [];
   let flows = new Map<string, VdFlow>();
+  let leaf: { setup: VdStep[]; teardown: VdStep[] } = { setup: [], teardown: [] };
+  let fixtures = new Map<string, { up: VdStep[]; down: VdStep[] }>();
   try {
-    const doc = parse(yamlText) as { criteria?: unknown; flows?: unknown } | null;
+    const doc = parse(yamlText) as { criteria?: unknown; flows?: unknown; setup?: unknown; teardown?: unknown; fixtures?: unknown } | null;
+    leaf = { setup: normSteps(doc?.setup), teardown: normSteps(doc?.teardown) };
     if (doc && Array.isArray(doc.criteria)) {
       criteria = doc.criteria.map(normCriterion).filter((c): c is VdCriterion => !!c);
     }
@@ -158,9 +178,18 @@ export function parseDefinition(yamlText: string): VdLookup {
         }),
       );
     }
+    const fixtureRecord = record(doc?.fixtures);
+    if (fixtureRecord) {
+      fixtures = new Map(Object.entries(fixtureRecord).map(([name, raw]) => {
+        const fixture = record(raw);
+        return [name, { up: normSteps(fixture?.up), down: normSteps(fixture?.down) }];
+      }));
+    }
   } catch {
     criteria = [];
     flows = new Map();
+    leaf = { setup: [], teardown: [] };
+    fixtures = new Map();
   }
   const byCrit = new Map(criteria.map((c) => [c.id, c]));
   const find = (cid: string, chid: string) =>
@@ -173,6 +202,27 @@ export function parseDefinition(yamlText: string): VdLookup {
     stepLabel(invocationStep(cid, chid, origin), origin.inner_index) ?? origin.invocation;
   const flowLabel = (cid: string, chid: string, origin: FlowOrigin) =>
     flows.get(origin.name)?.description ?? invocationLabel(cid, chid, origin);
+  const lifecycleSteps = (phase: LifecycleBlock["phase"], scope: LifecycleScopeSegment[]): VdStep[] | undefined => {
+    if (scope.length === 0) return leaf[phase];
+    const last = scope.at(-1);
+    if (last?.kind === "fixture" && scope.length >= 2 && scope.at(-2)?.kind === "check") {
+      return fixtures.get(last.id)?.[phase === "setup" ? "up" : "down"];
+    }
+    if (scope.length === 1 && last?.kind === "criterion") return byCrit.get(last.id)?.[phase];
+    if (last?.kind === "check") {
+      const parent = scope.at(-2);
+      if (parent?.kind === "criterion") return find(parent.id, last.id)?.[phase];
+      if (scope.length === 1) {
+        const matches = criteria.flatMap((criterion) => criterion.checks.filter((check) => check.id === last.id));
+        return matches.length === 1 ? matches[0][phase] : undefined;
+      }
+    }
+    return undefined;
+  };
+  const lifecycleInvocation = (phase: LifecycleBlock["phase"], scope: LifecycleScopeSegment[], origin: FlowOrigin) =>
+    lifecycleSteps(phase, scope)?.find((step) => step.id === origin.invocation);
+  const lifecycleInvocationLabel = (phase: LifecycleBlock["phase"], scope: LifecycleScopeSegment[], origin: FlowOrigin) =>
+    stepLabel(lifecycleInvocation(phase, scope, origin), origin.inner_index) ?? origin.invocation;
   return {
     criterion: (id) => byCrit.get(id),
     check: (cid, chid) => find(cid, chid),
@@ -198,6 +248,19 @@ export function parseDefinition(yamlText: string): VdLookup {
       (flow ? innerStep(flow) : find(cid, chid)?.steps[i])?.with,
     flowStepLabel: (flow) => stepLabel(innerStep(flow), flow.inner_index),
     flowLabel,
+    lifecycleStepLabel: (phase, scope, i, flow) => {
+      if (flow) {
+        const inner = stepLabel(innerStep(flow), flow.inner_index);
+        const invocation = lifecycleInvocationLabel(phase, scope, flow) +
+          (flow.iteration === undefined ? "" : ` › Iteration ${flow.iteration}`);
+        return inner ? `${invocation} › ${inner}` : invocation;
+      }
+      return stepLabel(lifecycleSteps(phase, scope)?.[i], i);
+    },
+    lifecycleStepWith: (phase, scope, i, flow) =>
+      (flow ? innerStep(flow) : lifecycleSteps(phase, scope)?.[i])?.with,
+    lifecycleFlowLabel: (phase, scope, flow) =>
+      flows.get(flow.name)?.description ?? lifecycleInvocationLabel(phase, scope, flow),
   };
 }
 

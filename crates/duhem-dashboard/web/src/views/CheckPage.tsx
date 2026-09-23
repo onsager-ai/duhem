@@ -1689,10 +1689,19 @@ function StepSelectionSync({
 }) {
   const navigate = useNavigate();
   const syncing = useRef(false);
+  // Set by the scroll listener just before it moves the selection, so the
+  // layout effect below can tell a scroll-originated selection change from
+  // a navigation one (rail click / keyboard / deep link) and skip the
+  // programmatic scroll for the former — see #525.
+  const scrollOriginated = useRef(false);
   const stepParam = params.get("step") ?? undefined;
 
   useLayoutEffect(() => {
     if (view !== "steps" || selectedStep === undefined) return;
+    if (scrollOriginated.current) {
+      scrollOriginated.current = false;
+      return;
+    }
     const surface = surfaceRef.current;
     const scroller = surface?.closest(".run-results-detail") as HTMLElement | null;
     const target = surface?.querySelector<HTMLElement>(`[data-step-node="${selectedNodeKey}"]`)
@@ -1741,6 +1750,7 @@ function StepSelectionSync({
         ? stepNavigation.get(visible.dataset.stepNode)?.key
         : [...stepNavigation.values()].find((item) => item.stepIndex === Number(visible?.dataset.stepIndex))?.key;
       if (key && key !== stepParam) {
+        scrollOriginated.current = true;
         onScrollSelection(key);
         navigate({ search: queryWith(params, { step: key }) }, { replace: true });
       }

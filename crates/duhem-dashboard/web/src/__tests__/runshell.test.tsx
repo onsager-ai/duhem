@@ -510,6 +510,31 @@ describe("run report tree", () => {
     ).toBe("step"));
   });
 
+  it("does not re-snap the scroller when scrolling up moves the selection back (#525)", async () => {
+    stub(RUN, TRIAGE_CHECK);
+    const { container } = renderAt("/run/R1/check/AC-5%3A%3AAC-5.1?step=2");
+    const rail = await screen.findByTestId("run-tree");
+    await waitFor(() => expect(container.querySelectorAll("[data-step-index]")).toHaveLength(3));
+    const detail = container.querySelector(".run-results-detail") as HTMLElement;
+    // Installed after the deep-link mount snap, so it only observes
+    // scroll-triggered calls.
+    const scrollTo = vi.fn();
+    Object.assign(detail, { scrollTo, scrollTop: 20 });
+    vi.spyOn(detail, "getBoundingClientRect").mockReturnValue({ top: 0 } as DOMRect);
+    const groups = container.querySelectorAll<HTMLElement>("[data-step-index]");
+    // Scrolling up: step 2 (currently selected) has scrolled past the
+    // sticky threshold and step 1 is now the one whose top sits at/above it.
+    vi.spyOn(groups[0], "getBoundingClientRect").mockReturnValue({ top: -100 } as DOMRect);
+    vi.spyOn(groups[1], "getBoundingClientRect").mockReturnValue({ top: -50 } as DOMRect);
+    vi.spyOn(groups[2], "getBoundingClientRect").mockReturnValue({ top: 60 } as DOMRect);
+    fireEvent.scroll(detail);
+    await waitFor(() => expect(
+      within(rail).getByRole("link", { name: "submit-form" }).getAttribute("aria-current"),
+    ).toBe("step"));
+    expect(screen.getByTestId("location-search").textContent).toContain("step=submit-form");
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
   it("keeps raw step data expansion local to one step and resets it on a new run", async () => {
     stub(RUN, TRIAGE_CHECK);
     const first = renderAt("/run/R1/check/AC-5%3A%3AAC-5.1?step=open-page");

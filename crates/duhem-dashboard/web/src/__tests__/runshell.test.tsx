@@ -383,7 +383,11 @@ describe("run report tree", () => {
     // Mobile-first: one-column source order. Desktop adds two columns and
     // independently scrollable panes without introducing fixed-width overflow.
     expect(grid.className).toContain("min-w-0");
-    expect(grid.className).toContain("md:grid-cols-[17rem_minmax(0,1fr)]");
+    // #436: the rail's column width now comes from the `--run-rail-width`
+    // custom property (default 17rem) so the splitter can drive it live.
+    expect(grid.className).toContain(
+      "md:grid-cols-[var(--run-rail-width,17rem)_0.75rem_minmax(0,1fr)]",
+    );
     expect(rail.className).toContain("md:overflow-y-auto");
     expect(detail.className).toContain("md:overflow-y-auto");
     const active = within(tree).getByRole("link", { name: "AC-5.1" });

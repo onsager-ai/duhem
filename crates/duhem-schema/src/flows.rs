@@ -4,6 +4,19 @@
 //! execute one flat sequence of ordinary catalog actions. The authored
 //! `flows:` catalog remains on the definition for round-tripping and
 //! dashboard snapshot lookup; only check `steps:` are expanded.
+//
+// budget-allow: #526 gave a direct `call:` in a lifecycle block
+// (setup:/teardown:/fixture up:/down:) the same load-time expansion a
+// check's own `steps:` already gets — `expand_lifecycle_calls_in_list`,
+// an `external_root` parameter threaded through `expand_sequence` so a
+// call's projected outputs land on the caller's own accessor
+// (`$setup.*`/`$fixture.<name>.*`, not check-only `$steps.*`), and the
+// now-legitimate direct-call arm in `validate_lifecycle_dispatch`. This
+// is the same `for_each`/flow-lifecycle family #443 already pushed
+// `validate.rs` and `eval.rs` over budget for. Track a follow-up to
+// split this file (expansion vs. validation are already two
+// recognizable halves) rather than raising the budget or exempting it
+// long-term.
 
 use std::collections::{BTreeMap, BTreeSet};
 

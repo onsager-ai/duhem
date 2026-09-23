@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] `setup:`/`teardown:` at every level and fixture `up:`/`down:` accept a direct `call:` to a reusable flow, with flow-attributed evidence and masked secret params. (#526)
 - [clarifying] The reserved `capture/` output-name prefix is rejected in every lifecycle and fixture block, not only in a check's `steps:`, and refused at runtime as a backstop. (#532)
 - [clarifying] The changelog lint requires a `## Unreleased` heading, and the preamble deleted by the v0.4.5 cut is restored. (#529)
 - [clarifying] A whole-string `$` expression is accepted on a closed-enum `with:` field, deferring the value check to runtime as §10.3 already specifies. (#533)

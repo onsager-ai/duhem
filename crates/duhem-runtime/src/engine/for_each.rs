@@ -116,6 +116,13 @@ pub(crate) async fn process_lifecycle_step(
         None
     };
 
+    // Mirrors the check-step path (`runner/check_steps.rs`): register
+    // this step's flow-secret bindings before the step-start event
+    // crosses the masking chokepoint, so a `secret: true` flow param
+    // is masked in lifecycle evidence too (#526) — not just when the
+    // same flow is called from a check.
+    crate::engine::flow::register_secrets(writer, step, &ctx);
+
     let iteration = loop_ctx.map(|l| l.iteration);
     append_setup_started(writer, phase, step, idx, &resolved_with, scope, iteration).await?;
     if let Some(StepOutcome::Skipped {

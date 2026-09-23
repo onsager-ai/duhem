@@ -123,3 +123,13 @@ discipline):
 
 What makes a `pass` meaningful is mechanical judgment (no LLM in the
 judge) plus a self-consistent Duhem contract — not where the VD lives.
+
+### Authenticated cleanup
+
+A leaf or criterion can declare `session: $inputs.operator_session`; checks
+inherit it unless they declare a nearer seed or `session: ~` for signed out.
+Setup, body, teardown, and fixture blocks each start from fresh contexts seeded
+from that declaration. Navigate again in cleanup and acquire any extra state
+it needs. Seeds can read inputs and enclosing setup outputs, never their own
+setup. In a named-sessions check, a `call:` can select `session: <name>` for
+its inner browser steps; an explicit inner selector wins.

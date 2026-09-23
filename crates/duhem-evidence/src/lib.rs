@@ -55,3 +55,5 @@ pub use writer::{
 pub fn new_run_id() -> String {
     ulid::Ulid::new().to_string()
 }
+
+mod event_session;

@@ -1,0 +1,50 @@
+verification: Signed-in cleanup
+spec_ref: https://github.com/onsager-ai/duhem/issues/548
+session: $inputs.operator_session
+inputs:
+  base_url: { type: string }
+  operator_session: { type: object, secret: true }
+flows:
+  verify_cleanup_identity:
+    params:
+      url: { type: string }
+    steps:
+      - uses: ui/navigate
+        with: { url: $params.url }
+      - uses: ui/assert-element
+        with: { locator: { role: heading, name: Admin }, expected: visible }
+criteria:
+  - id: AC-1
+    description: Authenticated work and cleanup retain the supplied identity, while signed-out checks remain isolated.
+    checks:
+      - id: AC-1.1
+        setup:
+          - uses: ui/navigate
+            with: { url: $inputs.base_url }
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.base_url }
+          - uses: ui/assert-element
+            with: { locator: { role: heading, name: Admin }, expected: visible }
+        teardown:
+          - call: verify_cleanup_identity
+            with: { url: $inputs.base_url }
+      - id: AC-1.2
+        session: ~
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.base_url }
+          - uses: ui/assert-element
+            with: { locator: { role: heading, name: Login }, expected: visible }
+      - id: AC-1.3
+        sessions:
+          operator: $inputs.operator_session
+          visitor: ~
+        steps:
+          - call: verify_cleanup_identity
+            session: operator
+            with: { url: $inputs.base_url }
+        teardown:
+          - call: verify_cleanup_identity
+            session: operator
+            with: { url: $inputs.base_url }

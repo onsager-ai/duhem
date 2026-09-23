@@ -34,6 +34,8 @@ use crate::eval::{EvalContext, Value};
 /// stays stable through every check.
 #[derive(Debug)]
 pub struct RunState {
+    pub(crate) session: Option<std::sync::Arc<super::session_scope::SessionScope>>,
+    pub(crate) context_budget: Option<std::sync::Arc<super::session_scope::ContextBudget>>,
     pub inputs: BTreeMap<String, Value>,
     pub pages: BTreeMap<(String, String), Value>,
     pub env: BTreeMap<String, String>,
@@ -65,6 +67,8 @@ impl RunState {
 
     fn new_inner(inputs: BTreeMap<String, Value>, uuid: String) -> Self {
         Self {
+            session: None,
+            context_budget: None,
             inputs,
             pages: BTreeMap::new(),
             env: BTreeMap::new(),

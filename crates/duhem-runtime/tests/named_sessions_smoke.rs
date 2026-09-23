@@ -44,8 +44,8 @@ async fn permissions_isolation_signed_out_seeded_sibling_and_evidence() {
         "../../../verifications/named-sessions-example/duhem.yml"
     ))
     .unwrap();
-    // Check hooks address the same contexts: setup reaches the login page;
-    // teardown observes admin's still-authenticated page after the body.
+    // Each hook opens fresh contexts from the named seeds. Teardown starts
+    // blank and signed out, despite the body authenticating admin.
     let check = &mut def.criteria[0].checks[0];
     check.setup = serde_yml::from_str(
         r#"
@@ -59,7 +59,13 @@ async fn permissions_isolation_signed_out_seeded_sibling_and_evidence() {
         r#"
 - session: admin
   uses: ui/assert-url
-  with: { matches: /grant }
+  with: { matches: 'about:blank' }
+- session: admin
+  uses: ui/navigate
+  with: { url: '$runtime.format("{}/admin", $inputs.base_url)' }
+- session: admin
+  uses: ui/assert-url
+  with: { matches: /login }
 "#,
     )
     .unwrap();
@@ -96,7 +102,7 @@ async fn permissions_isolation_signed_out_seeded_sibling_and_evidence() {
     assert_eq!(result.verdict.state, VerdictState::Pass);
     assert!(
         result.cleanup.is_empty(),
-        "named teardown must see admin's existing page: {:?}",
+        "named teardown must start fresh and signed out: {:?}",
         result.cleanup
     );
     let trace = Trace::from_store(store.as_ref(), &result.run_id)
@@ -215,7 +221,8 @@ async fn permissions_isolation_signed_out_seeded_sibling_and_evidence() {
         )),
         "the signed-out Login heading assertion, specifically, must go red"
     );
-    // Even an unused context must open before the first (page-free) step.
+    // A browser-driving block opens every named context before its first step,
+    // including an unused entry and a page-free prefix.
     // A malformed seed must prevent that step's filesystem side effect.
     let marker = tmp.path().join("must-not-run");
     let eager = VerificationDefinition::from_yaml_str(
@@ -226,7 +233,7 @@ inputs:
   marker: { type: string }
 criteria:
   - id: AC-1
-    description: Every context opens before actions run.
+    description: A browser block opens every context before actions run.
     checks:
       - id: AC-1.1
         sessions:
@@ -235,6 +242,9 @@ criteria:
         steps:
           - uses: cli/invoke
             with: { command: [touch, $inputs.marker] }
+          - uses: ui/navigate
+            session: a_signed_out
+            with: { url: 'about:blank' }
         assertions: ["true"]
 "#,
     )

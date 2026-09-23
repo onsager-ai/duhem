@@ -243,7 +243,7 @@ impl EvidenceWriter {
                 tokio::select! {
                     _ = &mut stop_rx => break,
                     _ = ticker.tick() => {
-                        if append_shared(&shared, EventPayload::RunHeartbeat, None).await.is_err() {
+                        if append_shared(&shared, EventPayload::RunHeartbeat, None, None).await.is_err() {
                             break;
                         }
                     }
@@ -292,7 +292,23 @@ impl EvidenceWriter {
     /// Append one event. The caller supplies the `payload`; `seq` and
     /// `ts` are stamped here.
     pub async fn append(&mut self, payload: EventPayload) -> Result<u64, WriterError> {
-        append_shared(&self.shared, payload, self.session.as_deref()).await
+        append_shared(&self.shared, payload, self.session.as_deref(), None).await
+    }
+
+    /// Append lifecycle seed metadata without changing the lifecycle payload.
+    pub async fn append_lifecycle(
+        &mut self,
+        payload: EventPayload,
+        sources: serde_json::Value,
+        digests: serde_json::Value,
+    ) -> Result<u64, WriterError> {
+        append_shared(
+            &self.shared,
+            payload,
+            self.session.as_deref(),
+            Some((sources, digests)),
+        )
+        .await
     }
 
     /// Convenience: emit a `step_observation`, choosing inline vs
@@ -392,6 +408,7 @@ async fn append_shared(
     shared: &SharedWriter,
     mut payload: EventPayload,
     session: Option<&str>,
+    seed: Option<(serde_json::Value, serde_json::Value)>,
 ) -> Result<u64, WriterError> {
     let mut next_seq = shared.next_seq.lock().await;
     attach_artifact_counts(shared, &mut payload);
@@ -410,7 +427,19 @@ async fn append_shared(
         }
     }
     let seq = *next_seq;
+    let seed = seed.map(|(mut source, digest)| {
+        shared
+            .secrets
+            .read()
+            .expect("secret registry lock poisoned")
+            .mask_json(&mut source);
+        (source, digest)
+    });
+    let (session_source, session_digest) =
+        seed.map(|(s, d)| (Some(s), Some(d))).unwrap_or_default();
     let evt = Event {
+        session_source,
+        session_digest,
         // Deliberately keep session labels in the cheap, uniform masking chokepoint.
         session: session.map(|name| {
             shared

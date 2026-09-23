@@ -530,7 +530,7 @@ criteria:
 cookies or local storage: acquire the state by exercising the real
 login surface. Each check still receives a fresh browser context
 seeded from that baseline, so mutations do not cross between checks.
-Omit `session:` for the signed-out path. `ui/capture-session` marks its
+Use `session: ~` for a signed-out scope beneath an authenticated parent. `ui/capture-session` marks its
 structured `state` output secret by contract; do not add an authored
 `secret_outputs:` entry for it.
 
@@ -617,3 +617,22 @@ criteria:
 - The Duhem documentation for the Holistic Verification Principle, the
   criteria-vs-checks separation, and the full Verification Definition
   schema.
+
+### Session inheritance and cleanup
+
+Declare scalar `session: $inputs.operator_session` on a leaf, criterion, or
+check. Omission inherits the nearest declaration; `session: ~` stops it.
+Every setup, body, teardown, and fixture up/down block opens fresh contexts
+from the seed. Cleanup must navigate again; body cookies and page state do
+not carry into cleanup. Browser-free blocks open no contexts.
+
+Seeds resolve at the first context opening and stay fixed across retries.
+Leaf seeds reference inputs only, criterion seeds may also reference leaf
+setup outputs, and check seeds may also reference criterion setup outputs.
+A scope cannot seed itself from its own setup outputs.
+
+With check `sessions:`, each block opens fresh contexts for the named entries.
+Select a name on each browser step, or put `session: <name>` on a `call:`:
+undeclared inner browser selectors inherit it; explicit inner selectors win.
+Call selectors require a named-sessions check. `defaults.max_sessions` caps
+simultaneously open contexts per check (default 4).

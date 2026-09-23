@@ -21,7 +21,6 @@ use duhem_judge::{
     aggregate_check, aggregate_criterion, aggregate_run, apply_inconclusive_policy,
 };
 use duhem_schema::{Check, Criterion, RetryBackoff, RetryPolicy, VerificationDefinition};
-use tracing::debug;
 
 pub use crate::engine::outcome::{
     CapturedArtifact, CheckFailure, CheckFilter, CleanupFailure, EngineError, FailedAssertion,
@@ -36,7 +35,7 @@ use crate::engine::capture::{CapturePolicy, target_from_step};
 use crate::engine::context::{RunContext, RunState, json_to_value};
 use crate::engine::gating::{evaluate as evaluate_gate, step_failed};
 use crate::engine::registry::{ActionRegistry, default_registry, enforce_wait_ceiling};
-use crate::engine::session::{CheckContexts, SessionResolution};
+use crate::engine::session::CheckContexts;
 
 mod check;
 mod check_iterations;
@@ -380,6 +379,8 @@ impl Engine {
                 }
             }
 
+            crate::engine::session_scope::SessionScope::enter(&mut run_state, &def.session, None);
+
             // Run-level `setup:` runs once before any criterion. Skipped
             // entirely when empty so the wire shape stays byte-identical
             // for setup-free Verification Definitions (issue #20).
@@ -465,18 +466,29 @@ impl Engine {
             let mut fixture_cleanup: Vec<CleanupFailure> = Vec::new();
             let criteria_result: Result<(), EngineError> = async {
                 for criterion in &def.criteria {
+                    let parent_session = run_state.session.clone();
+                    let parent_outputs = run_state.setup_outputs.clone();
+                    crate::engine::session_scope::SessionScope::enter(
+                        &mut run_state,
+                        &criterion.session,
+                        None,
+                    );
                     let cv = self
                         .run_criterion(
                             &mut writer,
                             &mut run_state,
                             &def.fixtures,
+                            def.max_sessions.unwrap_or(4),
                             criterion,
                             &mut failures,
                             &mut warnings,
                             &mut fixture_cleanup,
                             &mut gated_checks,
                         )
-                        .await?;
+                        .await;
+                    run_state.session = parent_session;
+                    run_state.setup_outputs = parent_outputs;
+                    let cv = cv?;
                     writer
                         .append(EventPayload::CriterionFinished {
                             criterion_id: criterion.id.clone(),
@@ -596,6 +608,7 @@ impl Engine {
         writer: &mut EvidenceWriter,
         run: &mut RunState,
         fixtures: &duhem_schema::FixtureCatalog,
+        max_sessions: usize,
         criterion: &Criterion,
         failures: &mut Vec<CheckFailure>,
         warnings: &mut Vec<String>,
@@ -681,19 +694,50 @@ impl Engine {
                 // run state and before any check context exists. A retry
                 // reuses the same immutable baseline but still opens a new
                 // context for every attempt.
-                let session = crate::engine::session::resolve(check, run);
-                let (cv, gated_judging_steps) = self
+                let parent_session = run.session.clone();
+                let parent_outputs = run.setup_outputs.clone();
+                crate::engine::session_scope::SessionScope::enter(
+                    run,
+                    &check.session,
+                    check.sessions.as_ref(),
+                );
+                run.context_budget = Some(crate::engine::session_scope::ContextBudget::new(
+                    &check.id,
+                    max_sessions,
+                ));
+                let consumes = check
+                    .steps
+                    .iter()
+                    .chain(&check.setup)
+                    .chain(&check.teardown)
+                    .chain(
+                        check
+                            .needs
+                            .iter()
+                            .flat_map(|name| fixtures[name].up.iter().chain(&fixtures[name].down)),
+                    )
+                    .flat_map(duhem_schema::Step::actions)
+                    .any(|step| step.uses_name().starts_with("ui/"));
+                let result = self
                     .run_check_with_retry(
                         writer,
                         run,
                         fixtures,
                         &criterion.id,
                         check,
-                        &session,
                         failures,
                         cleanup,
                     )
-                    .await?;
+                    .await;
+                let session = if consumes {
+                    crate::engine::session_scope::SessionScope::observed(run)
+                } else {
+                    crate::engine::session::resolve_source(None, run)
+                };
+                run.session = parent_session;
+                run.setup_outputs = parent_outputs;
+                run.context_budget = None;
+                let (cv, gated_judging_steps) = result?;
                 writer
                     .append(EventPayload::CheckFinished {
                         gated_judging_steps,

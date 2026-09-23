@@ -74,6 +74,14 @@ pub struct VerificationDefinition {
     /// Human-readable name of the verification.
     pub verification: String,
 
+    /// Browser seed inherited by criteria and checks. Null stops inheritance.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::session::deserialize"
+    )]
+    pub session: Option<Option<String>>,
+
     /// Optional reference to an upstream spec / issue / URL.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spec_ref: Option<String>,
@@ -319,6 +327,7 @@ criteria:
             },
         );
         let v = VerificationDefinition {
+            session: None,
             max_sessions: None,
             source_map: SourceMap::default(),
             verification: "x".into(),

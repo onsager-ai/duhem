@@ -119,7 +119,8 @@ pub struct Step {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
 
-    /// Bare name of a browser context declared by the enclosing check.
+    /// Bare name declared by the enclosing check. On a call, fills undeclared
+    /// browser selectors inside the expanded flow; explicit inner selectors win.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
 

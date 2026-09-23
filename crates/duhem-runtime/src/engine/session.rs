@@ -15,6 +15,7 @@ use crate::engine::context::{RunContext, RunState, value_to_json};
 use crate::eval::eval_to_value;
 
 /// The runtime result of interpreting one check's `session:` field.
+#[derive(Debug, Clone)]
 pub(crate) struct SessionResolution {
     /// Literal authored reference. Absent when no UI step consumes a
     /// session, even if a page-free check carries the advisory field.
@@ -27,6 +28,7 @@ pub(crate) struct SessionResolution {
     pub named: BTreeMap<String, SessionResolution>,
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct SessionSeed {
     pub state: serde_json::Value,
     pub digest: String,
@@ -51,36 +53,7 @@ impl SessionResolution {
     }
 }
 
-/// Resolve only for checks containing a `ui/*` step. A `session:` on
-/// an API/DB/CLI-only check is an authoring warning and an operational
-/// no-op, so it cannot make an otherwise valid run fail.
-pub(crate) fn resolve(check: &Check, run: &RunState) -> SessionResolution {
-    if let Some(sessions) = &check.sessions {
-        let named: BTreeMap<_, _> = sessions
-            .iter()
-            .map(|(name, state)| {
-                (
-                    name.clone(),
-                    resolve_source(state.as_ref().map(|expr| expr.raw.as_str()), run),
-                )
-            })
-            .collect();
-        return SessionResolution {
-            source: None,
-            seed: None,
-            failed: named.values().any(|s| s.failed),
-            named,
-        };
-    }
-    let consumes_session = check
-        .steps
-        .iter()
-        .flat_map(duhem_schema::Step::actions)
-        .any(|step| step.uses_name().starts_with("ui/"));
-    resolve_source(check.session.as_deref().filter(|_| consumes_session), run)
-}
-
-fn resolve_source(source: Option<&str>, run: &RunState) -> SessionResolution {
+pub(super) fn resolve_source(source: Option<&str>, run: &RunState) -> SessionResolution {
     let Some(source) = source else {
         return SessionResolution {
             source: None,
@@ -118,78 +91,6 @@ fn resolve_source(source: Option<&str>, run: &RunState) -> SessionResolution {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-
-    use duhem_schema::VerificationDefinition;
-
-    use super::*;
-    use crate::engine::context::{RunState, json_to_value};
-
-    fn check(yaml: &str) -> Check {
-        VerificationDefinition::from_yaml_str(yaml)
-            .unwrap()
-            .criteria[0]
-            .checks[0]
-            .clone()
-    }
-
-    #[test]
-    fn resolves_input_object_and_hashes_canonical_json() {
-        let state = serde_json::json!({"origins": [], "cookies": []});
-        let mut inputs = BTreeMap::new();
-        inputs.insert("state".into(), json_to_value(&state).unwrap());
-        let run = RunState::new(inputs);
-        let check = check(
-            r#"
-verification: x
-criteria:
-  - id: AC-1
-    description: x
-    checks:
-      - id: AC-1.1
-        session: $inputs.state
-        steps:
-          - uses: ui/navigate
-            with: { url: about:blank }
-        assertions: ["true"]
-"#,
-        );
-        let resolved = resolve(&check, &run);
-        assert!(!resolved.failed);
-        assert_eq!(resolved.seed.as_ref().unwrap().state, state);
-        assert_eq!(
-            resolved.seed.unwrap().digest,
-            "dcbfcdab9989eddcd68fdfe131c719283e1960b866b600a3d36d6daff254f32b"
-        );
-    }
-
-    #[test]
-    fn page_free_session_is_not_resolved() {
-        let run = RunState::new(BTreeMap::new());
-        let check = check(
-            r#"
-verification: x
-criteria:
-  - id: AC-1
-    description: x
-    checks:
-      - id: AC-1.1
-        session: $inputs.missing
-        steps:
-          - uses: cli/invoke
-            with: { command: [true] }
-        assertions: ["true"]
-"#,
-        );
-        let resolved = resolve(&check, &run);
-        assert!(!resolved.failed);
-        assert!(resolved.source.is_none());
-        assert!(resolved.seed.is_none());
-    }
-}
-
 /// Contexts and investigation evidence owned by one check attempt.
 #[derive(Default)]
 pub(crate) struct CheckContexts {
@@ -197,34 +98,60 @@ pub(crate) struct CheckContexts {
     pub targets: BTreeMap<Option<String>, Vec<super::capture::TargetLocator>>,
     pub storyboards: BTreeMap<Option<String>, super::capture::Storyboard>,
     pub failed: bool,
+    permits: Vec<super::session_scope::ContextPermit>,
 }
 
 impl CheckContexts {
-    pub async fn open_named(
+    pub async fn open(
         session: &SessionResolution,
         browser: Option<&duhem_actions::RunBrowser>,
-    ) -> Self {
+        budget: Option<&std::sync::Arc<super::session_scope::ContextBudget>>,
+    ) -> Result<Self, super::outcome::EngineError> {
         let mut contexts = Self {
-            failed: session.failed || (browser.is_none() && !session.named.is_empty()),
+            failed: session.failed || browser.is_none(),
             ..Self::default()
         };
         if !contexts.failed
             && let Some(browser) = browser
         {
-            for (name, state) in &session.named {
-                match state.open_check(browser).await {
+            let seeds: Vec<_> = if session.named.is_empty() {
+                vec![(None, session)]
+            } else {
+                session
+                    .named
+                    .iter()
+                    .map(|(name, seed)| (Some(name.clone()), seed))
+                    .collect()
+            };
+            for (name, seed) in seeds {
+                let permit = match budget.map(|budget| budget.reserve()).transpose() {
+                    Ok(permit) => permit,
+                    Err(error) => {
+                        contexts.close().await;
+                        return Err(error);
+                    }
+                };
+                match seed.open_check(browser).await {
                     Ok(context) => {
-                        contexts.browsers.insert(Some(name.clone()), context);
+                        contexts.browsers.insert(name, context);
+                        contexts.permits.extend(permit);
                     }
                     Err(error) => {
-                        tracing::debug!(%error, session = name, "named context allocation failed");
+                        tracing::debug!(%error, "context allocation failed");
                         contexts.failed = true;
                         break;
                     }
                 }
             }
         }
-        contexts
+        Ok(contexts)
+    }
+
+    pub async fn close(&mut self) {
+        for (_, browser) in std::mem::take(&mut self.browsers) {
+            let _ = browser.close(false, 0).await;
+        }
+        self.permits.clear();
     }
 
     pub async fn finish(
@@ -253,7 +180,111 @@ impl CheckContexts {
                 .await,
             );
         }
+        self.permits.clear();
         writer.set_session(None);
         artifacts
+    }
+}
+
+/// Emit only references and digests for contexts that actually opened.
+pub(super) fn lifecycle_evidence(
+    session: &SessionResolution,
+    contexts: &CheckContexts,
+) -> (serde_json::Value, serde_json::Value) {
+    if session.named.is_empty() {
+        return (
+            serde_json::json!(session.source),
+            serde_json::json!(session.digest()),
+        );
+    }
+    let mut sources = serde_json::Map::new();
+    let mut digests = serde_json::Map::new();
+    for name in contexts.browsers.keys().flatten() {
+        let seed = &session.named[name];
+        sources.insert(name.clone(), serde_json::json!(seed.source));
+        digests.insert(name.clone(), serde_json::json!(seed.digest()));
+    }
+    (sources.into(), digests.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use duhem_schema::VerificationDefinition;
+
+    use super::*;
+    use crate::engine::context::{RunState, json_to_value};
+
+    fn check(yaml: &str) -> Check {
+        VerificationDefinition::from_yaml_str(yaml)
+            .unwrap()
+            .criteria[0]
+            .checks[0]
+            .clone()
+    }
+
+    #[test]
+    fn resolves_input_object_and_hashes_canonical_json() {
+        let state = serde_json::json!({"origins": [], "cookies": []});
+        let mut inputs = BTreeMap::new();
+        inputs.insert("state".into(), json_to_value(&state).unwrap());
+        let mut run = RunState::new(inputs);
+        let check = check(
+            r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        session: $inputs.state
+        steps:
+          - uses: ui/navigate
+            with: { url: about:blank }
+        assertions: ["true"]
+"#,
+        );
+        super::super::session_scope::SessionScope::enter(
+            &mut run,
+            &check.session,
+            check.sessions.as_ref(),
+        );
+        let resolved = super::super::session_scope::SessionScope::resolve(&run);
+        assert!(!resolved.failed);
+        assert_eq!(resolved.seed.as_ref().unwrap().state, state);
+        assert_eq!(
+            resolved.seed.unwrap().digest,
+            "dcbfcdab9989eddcd68fdfe131c719283e1960b866b600a3d36d6daff254f32b"
+        );
+    }
+
+    #[test]
+    fn page_free_session_is_not_resolved() {
+        let mut run = RunState::new(BTreeMap::new());
+        let check = check(
+            r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        session: $inputs.missing
+        steps:
+          - uses: cli/invoke
+            with: { command: [true] }
+        assertions: ["true"]
+"#,
+        );
+        super::super::session_scope::SessionScope::enter(
+            &mut run,
+            &check.session,
+            check.sessions.as_ref(),
+        );
+        let resolved = super::super::session_scope::SessionScope::observed(&run);
+        assert!(!resolved.failed);
+        assert!(resolved.source.is_none());
+        assert!(resolved.seed.is_none());
     }
 }

@@ -67,6 +67,15 @@ fn print_contract(c: &ActionContract) {
         println!("secret outputs: {}", c.secret_outputs.join(", "));
     }
     println!();
+    if c.uses.starts_with("ui/") {
+        println!(
+            "session: inherits the nearest check, criterion, or leaf seed; session: ~ stops inheritance."
+        );
+        println!(
+            "  Each body/setup/teardown/fixture block opens fresh contexts. Named checks select a session on each UI step or enclosing call."
+        );
+        println!();
+    }
     println!("example:");
     for line in c.example.lines() {
         println!("  {line}");

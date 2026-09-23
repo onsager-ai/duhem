@@ -42,6 +42,14 @@ pub struct Criterion {
     /// Free-form prose. Opaque to the schema layer.
     pub description: String,
 
+    /// Browser seed inherited by this criterion's children. Null stops inheritance.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::session::deserialize"
+    )]
+    pub session: Option<Option<String>>,
+
     /// Optional setup steps run once before this criterion's checks —
     /// after leaf `setup:` and before any check's own `setup:` (#441
     /// Part B). Symmetric with leaf `setup:` (#20): non-judging and
@@ -78,8 +86,12 @@ pub struct Check {
     /// to seed this check's fresh browser context (spec #347). The
     /// schema keeps the authored expression opaque; validation proves
     /// it is a reference and the runtime resolves its value.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::session::deserialize"
+    )]
+    pub session: Option<Option<String>>,
 
     /// Named independent browser contexts, seeded from acquired state.
     /// A null value declares a signed-out context. Exclusive with `session:`.
@@ -223,7 +235,10 @@ checks:
         );
         let criterion: Criterion = serde_yml::from_str(&with).expect("parse session");
         assert_eq!(
-            criterion.checks[0].session.as_deref(),
+            criterion.checks[0]
+                .session
+                .as_ref()
+                .and_then(|s| s.as_deref()),
             Some("$setup.login.outputs.state")
         );
     }

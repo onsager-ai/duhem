@@ -15,24 +15,23 @@
 // evidence in the detail pane). RunPage, ResultsPage, and CheckPage
 // share the `RunScaffold` spine so the header persists while drilling.
 
-import { lazy, Suspense } from "react";
 import { HashRouter, Route, Routes } from "react-router-dom";
 
 import { AppShell } from "@/components/layout/AppShell";
 import { Toaster } from "@/components/ui/sonner";
 import { RunsProvider } from "@/runs-context";
 import { ThemeProvider } from "@/theme";
-const CheckPage = lazy(() => import("./views/CheckPage"));
-const LifecyclePage = lazy(() => import("./views/LifecyclePage"));
-const CriterionPage = lazy(() => import("./views/CriterionPage"));
-const DefinitionPage = lazy(() => import("./views/DefinitionPage"));
-const DiffPage = lazy(() => import("./views/DiffPage"));
-const Overview = lazy(() => import("./views/Overview"));
-const RunPage = lazy(() => import("./views/RunPage"));
-const ResultsPage = lazy(() => import("./views/ResultsPage"));
-const RunsList = lazy(() => import("./views/RunsList"));
-const VerificationPage = lazy(() => import("./views/VerificationPage"));
-const VerificationsList = lazy(() => import("./views/VerificationsList"));
+import CheckPage from "./views/CheckPage";
+import LifecyclePage from "./views/LifecyclePage";
+import CriterionPage from "./views/CriterionPage";
+import DefinitionPage from "./views/DefinitionPage";
+import DiffPage from "./views/DiffPage";
+import Overview from "./views/Overview";
+import RunPage from "./views/RunPage";
+import ResultsPage from "./views/ResultsPage";
+import RunsList from "./views/RunsList";
+import VerificationPage from "./views/VerificationPage";
+import VerificationsList from "./views/VerificationsList";
 
 export default function App() {
   return (
@@ -40,7 +39,6 @@ export default function App() {
       <HashRouter>
         <RunsProvider>
           <AppShell>
-            <Suspense fallback={<p className="p-4 text-sm text-muted-foreground">Loading…</p>}>
             <Routes>
               <Route path="/" element={<Overview />} />
               <Route path="/runs" element={<RunsList />} />
@@ -54,7 +52,6 @@ export default function App() {
               <Route path="/run/:runId/diff" element={<DiffPage />} />
               <Route path="/verification/:name" element={<VerificationPage />} />
             </Routes>
-            </Suspense>
           </AppShell>
           <Toaster />
         </RunsProvider>

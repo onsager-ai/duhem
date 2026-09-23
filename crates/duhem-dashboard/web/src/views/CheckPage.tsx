@@ -481,6 +481,7 @@ function describeStepWith(
 // outside any group, so nothing load-bearing is hidden.
 function StepGroup({
   node,
+  lifecycle,
   prevOf,
   artifacts,
   selected,
@@ -489,6 +490,7 @@ function StepGroup({
   onRawExpandedChange,
 }: {
   node: Extract<TimelineNode, { kind: "step" }>;
+  lifecycle?: LifecycleBlock;
   prevOf: (evt: TraceEvent) => TraceEvent | undefined;
   artifacts: ArtifactRef[];
   selected?: boolean;
@@ -592,13 +594,14 @@ function StepGroup({
   const chid = typeof started.check_id === "string" ? started.check_id : "";
   const uses = typeof started.uses === "string" ? started.uses : "step";
   const flow = flowOrigin(started.flow);
-  const label = (
-    flow
-      ? vd?.flowStepLabel(flow)
-      : vd?.stepLabel(cid, chid, node.stepIndex)
+  const label = (lifecycle
+    ? vd?.lifecycleStepLabel(lifecycle.phase, lifecycle.scope, node.stepIndex, flow)
+    : flow ? vd?.flowStepLabel(flow) : vd?.stepLabel(cid, chid, node.stepIndex)
   ) ?? `${uses} #${node.stepIndex}`;
   const layer = deliveryLayerLabel(started.layer);
-  const authoredWith = vd?.stepWith(cid, chid, node.stepIndex, flow);
+  const authoredWith = lifecycle
+    ? vd?.lifecycleStepWith(lifecycle.phase, lifecycle.scope, node.stepIndex, flow)
+    : vd?.stepWith(cid, chid, node.stepIndex, flow);
   const detailText = [fe.label, describeStepWith(started.with, authoredWith)]
     .filter(Boolean)
     .join(" · ");
@@ -641,19 +644,20 @@ function StepGroup({
               <EventIcon name={status.icon} />
             </span>
             <span className="ev-label" title={label}>{label}</span>
-            {typeof started.session === "string" && (
-              <Badge variant="outline" data-testid="step-session">{started.session}</Badge>
-            )}
-            {layer && (
-              <Badge
-                variant="outline"
-                className="mx-1 px-1.5 font-mono text-[0.65rem]"
-                data-testid="step-layer"
-              >
-                {layer}
-              </Badge>
-            )}
-            <span className="ev-detail">
+            <span className={layer || typeof started.session === "string" || status.tone !== "ok"
+              ? "ev-detail step-summary-detail" : "ev-detail"}>
+              {typeof started.session === "string" && (
+                <Badge variant="outline" className="shrink-0" data-testid="step-session">{started.session}</Badge>
+              )}
+              {layer && (
+                <Badge
+                  variant="outline"
+                  className="shrink-0 px-1.5 font-mono text-[0.65rem]"
+                  data-testid="step-layer"
+                >
+                  {layer}
+                </Badge>
+              )}
               {detailText && (
                 <span className="ev-detail-text" title={detailText}>
                   {detailText}
@@ -806,6 +810,7 @@ function groupFlowSteps(nodes: (TimelineNode | LoopNode)[]): (TimelineNode | Flo
 
 function FlowGroup({
   group,
+  lifecycle,
   prevOf,
   artifacts,
   selectedStep,
@@ -815,6 +820,7 @@ function FlowGroup({
   onRawExpandedChange,
 }: {
   group: FlowGroupNode;
+  lifecycle?: LifecycleBlock;
   prevOf: (evt: TraceEvent) => TraceEvent | undefined;
   artifacts: ArtifactRef[];
   selectedStep?: number;
@@ -827,8 +833,9 @@ function FlowGroup({
   const started = group.steps[0].events[0];
   const criterionId = typeof started.criterion_id === "string" ? started.criterion_id : "";
   const checkId = typeof started.check_id === "string" ? started.check_id : "";
-  const label =
-    vd?.flowLabel(criterionId, checkId, group.origin) ?? group.origin.invocation;
+  const label = (lifecycle
+    ? vd?.lifecycleFlowLabel(lifecycle.phase, lifecycle.scope, group.origin)
+    : vd?.flowLabel(criterionId, checkId, group.origin)) ?? group.origin.invocation;
   return (
     <li
       className="flow-group"
@@ -845,6 +852,7 @@ function FlowGroup({
           <StepGroup
             key={node.key}
             node={node}
+            lifecycle={lifecycle}
             prevOf={prevOf}
             artifacts={artifacts}
             selected={selectedNodeKey ? selectedNodeKey === node.key : selectedStep === node.stepIndex}
@@ -861,6 +869,7 @@ function FlowGroup({
 
 export function Timeline({
   events,
+  lifecycle,
   artifacts = [],
   selectedStep,
   selectedNodeKey,
@@ -869,6 +878,7 @@ export function Timeline({
   onRawExpandedChange = () => {},
 }: {
   events: TraceEvent[];
+  lifecycle?: LifecycleBlock;
   artifacts?: ArtifactRef[];
   selectedStep?: number;
   selectedNodeKey?: string;
@@ -885,7 +895,7 @@ export function Timeline({
         n.kind === "loop" ? (
           <li key={n.key} className="flow-group">
             <LoopGroup group={n} selectedKey={selectedNodeKey} renderStep={(node) => (
-              <StepGroup key={node.key} node={node} prevOf={prevOf} artifacts={artifacts}
+              <StepGroup key={node.key} node={node} lifecycle={lifecycle} prevOf={prevOf} artifacts={artifacts}
                 selected={selectedNodeKey === node.key}
                 selectedFromScroll={selectedFromScroll}
                 rawExpanded={rawExpandedSteps.has(node.key)}
@@ -896,6 +906,7 @@ export function Timeline({
           <FlowGroup
             key={n.key}
             group={n}
+            lifecycle={lifecycle}
             prevOf={prevOf}
             artifacts={artifacts}
             selectedStep={selectedStep}
@@ -908,6 +919,7 @@ export function Timeline({
           <StepGroup
             key={n.key}
             node={n}
+            lifecycle={lifecycle}
             prevOf={prevOf}
             artifacts={artifacts}
             selected={selectedNodeKey ? selectedNodeKey === n.key : selectedStep === n.stepIndex}
@@ -936,7 +948,7 @@ export function LifecycleSections({ blocks }: { blocks: LifecycleBlock[] }) {
             <LifecycleStatusBadge status={block.status} />
           </h3>
           {lifecycleFailure(block) && <p className="mb-2 whitespace-pre-wrap break-words text-sm text-fail">{lifecycleFailure(block)}</p>}
-          <Timeline events={block.timeline} />
+          <Timeline events={block.timeline} lifecycle={block} />
         </div>
       ))}
     </section>

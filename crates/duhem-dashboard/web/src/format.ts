@@ -225,6 +225,11 @@ export function formatEvent(
   const base = { delta, raw };
 
   switch (evt.kind) {
+    case "setup_started":
+    case "setup_finished": {
+      const phase = evt.phase === "teardown" ? "teardown" : "setup";
+      return { ...base, icon: "action", label: `${phase} ${evt.kind === "setup_started" ? "started" : "finished"}`, detail: "", tone: "muted" };
+    }
     case "step_started":
     case "setup_step_started": {
       const uses = str(evt.uses) ?? "step";

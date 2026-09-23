@@ -14,9 +14,7 @@ export function LifecycleRailRow({
   active?: boolean;
 }) {
   const scope = lifecycleScopePath(block);
-  const label = block.scope.at(-1)?.kind === "fixture"
-    ? `fixture ${block.scope.at(-1)?.id} ${block.phase}`
-    : block.phase;
+  const fixtureName = block.scope.at(-1)?.kind === "fixture" ? block.scope.at(-1)?.id : undefined;
   const to = checkPath
     ? `${checkPath}?lifecycle=${encodeURIComponent(lifecycleKey(block))}`
     : lifecycleHref(runId, block);
@@ -33,8 +31,12 @@ export function LifecycleRailRow({
       )}
     >
       <CircleDot className="size-3 shrink-0" aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate" title={scope}>{label}</span>
-      <LifecycleStatusBadge status={block.status} />
+      <span className="shrink-0">{block.phase}</span>
+      {fixtureName && <>
+        <span className="shrink-0" aria-hidden="true">·</span>
+        <span className="min-w-0 flex-1 truncate" title={scope}>fixture {fixtureName}</span>
+      </>}
+      <span className="ml-auto shrink-0"><LifecycleStatusBadge status={block.status} /></span>
     </Link>
   );
 }

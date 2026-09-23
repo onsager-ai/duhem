@@ -250,6 +250,7 @@ function TreeGroup({
               const flow = flowOrigin(started.flow);
               const { key, label } = stepNavigation(node, vd, criterion.id, chk.id);
               const stepSearch = new URLSearchParams(search);
+              stepSearch.delete("lifecycle");
               stepSearch.set("step", key);
               const status = stepStatus(node);
               const layer = deliveryLayerLabel(started.layer);
@@ -269,6 +270,7 @@ function TreeGroup({
                 if (target?.kind !== "step") return;
                 const targetKey = stepNavigation(target, vd, criterion.id, chk.id).key;
                 const targetSearch = new URLSearchParams(search);
+                targetSearch.delete("lifecycle");
                 targetSearch.set("step", targetKey);
                 navigate({
                   pathname: checkHref(runId, criterion.id, chk.id),

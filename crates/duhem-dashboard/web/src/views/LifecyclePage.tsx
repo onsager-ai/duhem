@@ -25,7 +25,7 @@ export function LifecycleEvidence({ block }: { block: LifecycleBlock }) {
           {failure && <p className="mt-1 whitespace-pre-wrap break-words text-fail">{failure}</p>}
         </div>
       )}
-      <Timeline events={block.timeline} />
+      <Timeline events={block.timeline} lifecycle={block} />
     </div>
   );
 }

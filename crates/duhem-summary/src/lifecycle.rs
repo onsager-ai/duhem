@@ -418,7 +418,12 @@ mod tests {
             fixture_name: None,
             index: 7,
             uses: "cli/invoke",
-            flow: None,
+            flow: Some(LifecycleFlowOrigin {
+                name: "prepare".into(),
+                invocation: "call-prepare".into(),
+                inner_index: 2,
+                iteration: Some(3),
+            }),
             timestamp_ms: 101,
         });
         fold.push(LifecycleEvent::StepFinished {
@@ -449,5 +454,14 @@ mod tests {
         assert_eq!(blocks[4].status, LifecycleStatus::Aborted);
         assert_eq!(blocks[4].failing_step, Some(0));
         assert_eq!(blocks[4].steps[0].detail.as_deref(), Some("boom"));
+        assert_eq!(
+            blocks[4].steps[0].flow,
+            Some(LifecycleFlowOrigin {
+                name: "prepare".into(),
+                invocation: "call-prepare".into(),
+                inner_index: 2,
+                iteration: Some(3),
+            })
+        );
     }
 }

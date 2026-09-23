@@ -14,7 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { fetchCheck, type ArtifactRef, type CheckDetail, type SpanModel, type TraceEvent } from "../api";
+import { fetchCheck, type ArtifactRef, type CheckDetail, type LifecycleBlock, type SpanModel, type TraceEvent } from "../api";
 import { VerdictBadge, formatDuration, isImageArtifact } from "../ui";
 import { compactValue, deliveryLayerLabel, describeWith, formatEvent, groupTimeline, parseComparison, stepDuration, stepStatus, summarizeCheck, type TimelineNode } from "../format";
 import { EventIcon } from "../components/EventIcon";
@@ -23,6 +23,7 @@ import { useVd } from "./definition-context";
 import { type LoopNode, groupLoops, stepNavigation as navigationForStep } from "../step-presentation";
 import { LoopGroup } from "../components/LoopGroup";
 import { flowOrigin, type FlowOrigin } from "../definition";
+import { lifecycleScopePath } from "./RunPage";
 
 // The check's wall-clock span — first recorded event to last.
 function checkDurationMs(timeline: TraceEvent[]): number | null {
@@ -919,6 +920,23 @@ export function Timeline({
         ),
       )}
     </ol>
+  );
+}
+
+export function LifecycleSections({ blocks }: { blocks: LifecycleBlock[] }) {
+  if (blocks.length === 0) return null;
+  return (
+    <section className="mb-4 space-y-3" aria-label={`${blocks[0].phase} lifecycle`}>
+      {blocks.map((block, index) => (
+        <div key={`${block.started_at}-${index}`} data-testid={`check-lifecycle-${block.phase}`}>
+          <h3 className="mb-2 text-sm font-semibold">
+            <span className="font-mono">{lifecycleScopePath(block)}</span>{" "}
+            {block.phase} — {block.status}
+          </h3>
+          <Timeline events={block.timeline} />
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -1842,6 +1860,7 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
 
   return (
     <>
+      <LifecycleSections blocks={(check.lifecycle ?? []).filter((block) => block.phase === "setup")} />
       <div ref={surfaceRef} className="run-detail-surface">
         <StepSelectionSync
           surfaceRef={surfaceRef}
@@ -1909,6 +1928,7 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
           />
         )}
       </div>
+      <LifecycleSections blocks={(check.lifecycle ?? []).filter((block) => block.phase === "teardown")} />
     </>
   );
 }

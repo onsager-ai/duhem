@@ -17,6 +17,39 @@
 //! callers add no output for it.
 
 use duhem_schema::VerificationDefinition;
+use duhem_summary::LifecycleBlock;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookEntry {
+    pub label: String,
+    criterion_id: Option<String>,
+    check_id: Option<String>,
+    fixture_name: Option<String>,
+}
+
+impl HookEntry {
+    fn new(
+        label: String,
+        criterion_id: Option<&str>,
+        check_id: Option<&str>,
+        fixture_name: Option<&str>,
+    ) -> Self {
+        Self {
+            label,
+            criterion_id: criterion_id.map(str::to_string),
+            check_id: check_id.map(str::to_string),
+            fixture_name: fixture_name.map(str::to_string),
+        }
+    }
+
+    pub fn matches(&self, block: &LifecycleBlock) -> bool {
+        block.matches_evidence_scope(
+            self.criterion_id.as_deref(),
+            self.check_id.as_deref(),
+            self.fixture_name.as_deref(),
+        )
+    }
+}
 
 /// The ordered, resolved hook chain for one check, split at the
 /// check's own `steps:` (which is not itself a hook). Each entry
@@ -26,12 +59,12 @@ use duhem_schema::VerificationDefinition;
 pub struct HookChain {
     /// In execution order: leaf `setup:` → criterion `setup:` → check
     /// `setup:` → each `needs:` fixture's `up:`, in `needs:` order.
-    pub before: Vec<String>,
+    pub before: Vec<HookEntry>,
     /// In execution order (exact reverse of `before`'s fixture/level
     /// nesting): each `needs:` fixture's `down:`, in reverse `needs:`
     /// order → check `teardown:` → criterion `teardown:` → leaf
     /// `teardown:`.
-    pub after: Vec<String>,
+    pub after: Vec<HookEntry>,
 }
 
 impl HookChain {
@@ -55,33 +88,66 @@ pub fn resolve(
 
     let mut chain = HookChain::default();
     if !def.setup.is_empty() {
-        chain.before.push("leaf setup".to_string());
-    }
-    if !criterion.setup.is_empty() {
         chain
             .before
-            .push(format!("criterion `{}` setup", criterion.id));
+            .push(HookEntry::new("leaf setup".to_string(), None, None, None));
+    }
+    if !criterion.setup.is_empty() {
+        chain.before.push(HookEntry::new(
+            format!("criterion `{}` setup", criterion.id),
+            Some(&criterion.id),
+            None,
+            None,
+        ));
     }
     if !check.setup.is_empty() {
-        chain.before.push(format!("check `{}` setup", check.id));
+        chain.before.push(HookEntry::new(
+            format!("check `{}` setup", check.id),
+            Some(&criterion.id),
+            Some(&check.id),
+            None,
+        ));
     }
     for name in &check.needs {
-        chain.before.push(format!("fixture `{name}` up"));
+        chain.before.push(HookEntry::new(
+            format!("fixture `{name}` up"),
+            None,
+            Some(&check.id),
+            Some(name),
+        ));
     }
 
     for name in check.needs.iter().rev() {
-        chain.after.push(format!("fixture `{name}` down"));
+        chain.after.push(HookEntry::new(
+            format!("fixture `{name}` down"),
+            None,
+            Some(&check.id),
+            Some(name),
+        ));
     }
     if !check.teardown.is_empty() {
-        chain.after.push(format!("check `{}` teardown", check.id));
+        chain.after.push(HookEntry::new(
+            format!("check `{}` teardown", check.id),
+            Some(&criterion.id),
+            Some(&check.id),
+            None,
+        ));
     }
     if !criterion.teardown.is_empty() {
-        chain
-            .after
-            .push(format!("criterion `{}` teardown", criterion.id));
+        chain.after.push(HookEntry::new(
+            format!("criterion `{}` teardown", criterion.id),
+            Some(&criterion.id),
+            None,
+            None,
+        ));
     }
     if !def.teardown.is_empty() {
-        chain.after.push("leaf teardown".to_string());
+        chain.after.push(HookEntry::new(
+            "leaf teardown".to_string(),
+            None,
+            None,
+            None,
+        ));
     }
 
     if chain.is_empty() { None } else { Some(chain) }
@@ -123,7 +189,8 @@ criteria:
         assertions: ["true"]
 "#);
         let chain = resolve(&v, "AC-1", "AC-1.1").expect("has a hook");
-        assert_eq!(chain.before, vec!["check `AC-1.1` setup".to_string()]);
+        assert_eq!(chain.before[0].label, "check `AC-1.1` setup");
+        assert_eq!(chain.before.len(), 1);
         assert!(chain.after.is_empty());
     }
 
@@ -151,21 +218,29 @@ criteria:
 "#);
         let chain = resolve(&v, "AC-1", "AC-1.1").expect("has hooks");
         assert_eq!(
-            chain.before,
+            chain
+                .before
+                .iter()
+                .map(|entry| entry.label.as_str())
+                .collect::<Vec<_>>(),
             vec![
-                "leaf setup".to_string(),
-                "criterion `AC-1` setup".to_string(),
-                "check `AC-1.1` setup".to_string(),
-                "fixture `res` up".to_string(),
+                "leaf setup",
+                "criterion `AC-1` setup",
+                "check `AC-1.1` setup",
+                "fixture `res` up",
             ]
         );
         assert_eq!(
-            chain.after,
+            chain
+                .after
+                .iter()
+                .map(|entry| entry.label.as_str())
+                .collect::<Vec<_>>(),
             vec![
-                "fixture `res` down".to_string(),
-                "check `AC-1.1` teardown".to_string(),
-                "criterion `AC-1` teardown".to_string(),
-                "leaf teardown".to_string(),
+                "fixture `res` down",
+                "check `AC-1.1` teardown",
+                "criterion `AC-1` teardown",
+                "leaf teardown",
             ]
         );
     }

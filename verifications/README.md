@@ -46,6 +46,7 @@ composition.
 | 12 | [`stepless-check-example`](stepless-check-example/) | Judge inputs and pure runtime expressions with `steps: []` while retaining check ownership in evidence | nothing — fully offline | #490 |
 | 13 | [`lifecycle-hooks-example`](lifecycle-hooks-example/) | Criterion- and check-level `setup:`/`teardown:`, symmetric with leaf `setup:`/`teardown:` and per-check fixtures — the run report's resolved hook chain names each level and where it was declared | local process (`cli/invoke`) | #441 |
 | 14 | [`lifecycle-call-example`](lifecycle-call-example/) | A direct `call:` to a reusable flow in leaf `setup:`/`teardown:` and check `teardown:` — no `for_each:` wrapper — with the call's declared output read back via `$setup.<call-id>.outputs.<name>` | local DB (`db/query` → sqlite `:memory:`) | #526 |
+| 15 | [`lifecycle-report-example`](lifecycle-report-example/) | Recorded lifecycle reporting — a passing setup, a per-check fixture, and a deliberately failing teardown remain visible by scope without changing the passing verdict | SQLite in memory (`db/query`) | #524 |
 
 The CLI self-verification suite also carries the leaf-scoped cleanup
 worked example at

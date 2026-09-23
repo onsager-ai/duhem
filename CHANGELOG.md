@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] `RunSummary` carries `lifecycle` — every setup/teardown/fixture block that ran, with its scope path, status, steps and failing step; reporters and the dashboard show them per scope. (#524)
 - [additive] `setup:`/`teardown:` at every level and fixture `up:`/`down:` accept a direct `call:` to a reusable flow, with flow-attributed evidence and masked secret params. (#526)
 - [breaking] A declared `teardown:` now always runs at leaf, criterion and check level, even with no same-level `setup:` or a setup that dispatched nothing; guard cleanup that assumes setup ran with `if:`. (#547)
 - [clarifying] The reserved `capture/` output-name prefix is rejected in every lifecycle and fixture block, not only in a check's `steps:`, and refused at runtime as a backstop. (#532)

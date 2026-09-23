@@ -276,6 +276,119 @@ async fn run_detail_carries_inputs_verdict_and_criteria() {
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0]["id"], "AC-1.1");
     assert_eq!(checks[0]["verdict"], "pass");
+    assert_eq!(json["lifecycle"][0]["scope"], serde_json::json!([]));
+    assert_eq!(json["lifecycle"][0]["status"], "passed");
+}
+
+#[tokio::test]
+async fn lifecycle_blocks_are_partitioned_between_run_and_check_detail() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let run_id = "01J000000000000000000000LC";
+    let mut writer = EvidenceWriter::begin(rw, run_id, "lifecycle.yml", BTreeMap::new())
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::SetupStarted {
+            phase: duhem_evidence::StepPhase::Setup,
+            step_count: 0,
+            fixture_name: None,
+            check_id: None,
+            criterion_id: Some("AC-1".into()),
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::SetupFinished {
+            phase: duhem_evidence::StepPhase::Setup,
+            aborted: false,
+            fixture_name: None,
+            check_id: None,
+            criterion_id: Some("AC-1".into()),
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::SetupStarted {
+            phase: duhem_evidence::StepPhase::Setup,
+            step_count: 0,
+            fixture_name: None,
+            check_id: Some("AC-1.1".into()),
+            criterion_id: Some("AC-1".into()),
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::SetupFinished {
+            phase: duhem_evidence::StepPhase::Setup,
+            aborted: false,
+            fixture_name: None,
+            check_id: Some("AC-1.1".into()),
+            criterion_id: Some("AC-1".into()),
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::SetupStarted {
+            phase: duhem_evidence::StepPhase::Teardown,
+            step_count: 0,
+            fixture_name: Some("db".into()),
+            check_id: Some("AC-1.1".into()),
+            criterion_id: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::SetupFinished {
+            phase: duhem_evidence::StepPhase::Teardown,
+            aborted: false,
+            fixture_name: Some("db".into()),
+            check_id: Some("AC-1.1".into()),
+            criterion_id: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::CheckFinished {
+            gated_judging_steps: 0,
+            check_id: "AC-1.1".into(),
+            criterion_id: Some("AC-1".into()),
+            verdict: VerdictState::Pass,
+            session_source: None,
+            session_digest: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::CriterionFinished {
+            criterion_id: "AC-1".into(),
+            verdict: VerdictState::Pass,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::RunFinished {
+            verdict: Some(VerdictState::Pass),
+        })
+        .await
+        .unwrap();
+    writer.finish().await.unwrap();
+
+    let reader = EvidenceReader::new(ro);
+    let (_, run) = get_json(reader.clone(), &format!("/api/runs/{run_id}")).await;
+    assert_eq!(run["lifecycle"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        run["lifecycle"][0]["scope"][0],
+        serde_json::json!({"kind":"criterion","id":"AC-1"})
+    );
+
+    let (_, check) = get_json(reader, &format!("/api/runs/{run_id}/checks/AC-1::AC-1.1")).await;
+    assert_eq!(check["lifecycle"].as_array().unwrap().len(), 2);
+    assert_eq!(check["lifecycle"][0]["phase"], "setup");
+    assert_eq!(check["lifecycle"][1]["phase"], "teardown");
+    assert_eq!(
+        check["lifecycle"][1]["scope"][1],
+        serde_json::json!({"kind":"fixture","id":"db"})
+    );
 }
 
 #[tokio::test]
@@ -385,6 +498,107 @@ async fn aborted_setup_run_surfaces_the_abort() {
     assert_eq!(json["setup_aborted"], true);
     assert_eq!(json["verdict"], "inconclusive:environment_error");
     assert_eq!(json["criteria"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn leaf_setup_abort_is_not_overwritten_by_scoped_setup_completion() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let run_id = "01J000000000000000000000AA";
+    let mut writer =
+        EvidenceWriter::begin(rw, run_id, "verifications/aborted.yml", BTreeMap::new())
+            .await
+            .unwrap();
+    writer
+        .append(EventPayload::SetupFinished {
+            phase: duhem_evidence::StepPhase::Setup,
+            aborted: true,
+            fixture_name: None,
+            check_id: None,
+            criterion_id: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::SetupFinished {
+            phase: duhem_evidence::StepPhase::Setup,
+            aborted: false,
+            fixture_name: None,
+            check_id: None,
+            criterion_id: Some("AC-1".into()),
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::RunAborted {
+            signal: "leaf setup failed".into(),
+        })
+        .await
+        .unwrap();
+    writer.finish().await.unwrap();
+
+    let (_, json) = get_json(EvidenceReader::new(ro), &format!("/api/runs/{run_id}")).await;
+    assert_eq!(json["setup_aborted"], true);
+}
+
+#[tokio::test]
+async fn cleanup_step_finish_is_keyed_by_criterion_scope() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    let run_id = "01J000000000000000000000AB";
+    let mut writer =
+        EvidenceWriter::begin(rw, run_id, "verifications/cleanup.yml", BTreeMap::new())
+            .await
+            .unwrap();
+    for criterion_id in ["AC-1", "AC-2"] {
+        writer
+            .append(EventPayload::SetupStepStarted {
+                phase: duhem_evidence::StepPhase::Teardown,
+                step_index: 0,
+                uses: format!("cli/{criterion_id}"),
+                layer: None,
+                with: BTreeMap::new(),
+                fixture_name: None,
+                check_id: None,
+                criterion_id: Some(criterion_id.into()),
+                flow: None,
+            })
+            .await
+            .unwrap();
+    }
+    writer
+        .append(EventPayload::SetupStepFinished {
+            phase: duhem_evidence::StepPhase::Teardown,
+            step_index: 0,
+            outcome: duhem_evidence::StepOutcome::Error,
+            detail: Some("AC-1 teardown failed".into()),
+            fixture_name: None,
+            check_id: None,
+            criterion_id: Some("AC-1".into()),
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::SetupStepFinished {
+            phase: duhem_evidence::StepPhase::Teardown,
+            step_index: 0,
+            outcome: duhem_evidence::StepOutcome::Ok,
+            detail: None,
+            fixture_name: None,
+            check_id: None,
+            criterion_id: Some("AC-2".into()),
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::RunFinished {
+            verdict: Some(VerdictState::Pass),
+        })
+        .await
+        .unwrap();
+    writer.finish().await.unwrap();
+
+    let (_, json) = get_json(EvidenceReader::new(ro), &format!("/api/runs/{run_id}")).await;
+    assert_eq!(json["cleanup"][0]["outcome"], "error");
+    assert_eq!(json["cleanup"][1]["outcome"], "ok");
 }
 
 #[tokio::test]

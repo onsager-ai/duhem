@@ -29,6 +29,12 @@ use std::path::PathBuf;
 use duhem_judge::VerdictState;
 use serde::{Deserialize, Serialize};
 
+mod lifecycle;
+pub use lifecycle::{
+    LifecycleBlock, LifecycleEvent, LifecycleFlowOrigin, LifecycleFold, LifecycleLocation,
+    LifecyclePhase, LifecycleScopeSegment, LifecycleStatus, LifecycleStep, LifecycleStepOutcome,
+};
+
 /// One run's summary, serialized as one JSON line on the reporter
 /// subprocess's stdin. The schema is the externally-frozen plugin
 /// contract; field renames / removals are schema-impacting.
@@ -82,6 +88,11 @@ pub struct RunSummary {
     /// as empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cleanup: Vec<CleanupFailureSummary>,
+    /// Every recorded setup/teardown/fixture block, including successful
+    /// blocks. Additive: old summaries deserialize it as empty and old
+    /// consumers ignore it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lifecycle: Vec<LifecycleBlock>,
 }
 
 impl RunSummary {
@@ -118,6 +129,7 @@ impl RunSummary {
             failures: Vec::new(),
             warnings: Vec::new(),
             cleanup: Vec::new(),
+            lifecycle: Vec::new(),
         }
     }
 
@@ -149,6 +161,11 @@ impl RunSummary {
 
     pub fn with_cleanup(mut self, cleanup: Vec<CleanupFailureSummary>) -> Self {
         self.cleanup = cleanup;
+        self
+    }
+
+    pub fn with_lifecycle(mut self, lifecycle: Vec<LifecycleBlock>) -> Self {
+        self.lifecycle = lifecycle;
         self
     }
 }

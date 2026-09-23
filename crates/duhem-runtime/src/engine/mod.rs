@@ -25,6 +25,7 @@ pub mod registry;
 pub mod runner;
 pub(crate) mod secret_output;
 pub(crate) mod session;
+mod session_scope;
 pub mod setup;
 pub mod shim;
 pub mod template;

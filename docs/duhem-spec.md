@@ -250,8 +250,9 @@ Verification environments must be production-equivalent. Duhem provides primitiv
 > an inline cookie would mock auth, so `session:` mechanically accepts
 > only a whole-string `$` reference. At least one criterion should still
 > exercise login itself; that authoring discipline remains human-reviewed
-> rather than inferred by the judge. v1 deliberately keeps `session:`
-> per check—there is no Verification-Definition or manifest cascade.
+> rather than inferred by the judge. #548 extends seed inheritance to
+> leaves and criteria; contexts remain fresh at every block boundary.
+> Manifest-level session declarations are not supported.
 
 This makes verification expensive relative to unit tests. That cost is acknowledged. It is the unavoidable price of holistic verification — and it is much cheaper than a production incident.
 
@@ -534,15 +535,23 @@ criteria:
               expected: visible
 ```
 
-`session:` is optional and per check. It must be exactly one `$` path
-reference (`$setup.…` or an operator-supplied `$inputs.…`); an inline value
-fails validation, and a dangling setup/input reference uses the ordinary
-missing-reference diagnostic. A check with no `ui/*` step is valid but warns
-that its session is unused. Omission preserves the ordinary fresh signed-out
-context. Presence still creates a **fresh** context seeded from the selected
-baseline—sibling mutations never cross between checks. State that cannot be
-resolved or that Playwright rejects makes the check
-`inconclusive:environment_error`.
+Scalar `session:` may be declared on a leaf, criterion, or check. Omission
+inherits the nearest declaration (check → criterion → leaf); explicit
+`session: ~` selects signed out and stops inheritance. A non-null declaration
+must be one whole-string `$` path reference to acquired storage state.
+Each scope resolves its seed when its first browser context opens, then
+reuses that immutable seed across its children and retries. Leaf declarations
+may reference declared `$inputs` only; criterion declarations may also read
+leaf `$setup.*` outputs; check declarations (including named entries) may
+also read criterion setup outputs. No declaration may read its own setup,
+check-body, or fixture outputs. Diagnostics include the declaration location.
+Checks retain their existing environment and locator reference support.
+
+Every leaf/criterion/check setup or teardown block, fixture up/down block,
+and check body opens **fresh** contexts from its effective seed, and closes
+them at block end. Mutations never cross these context boundaries. A block
+without browser actions opens no contexts. An unresolvable or rejected seed
+causes an environment failure in the consuming block.
 
 The check's `check_finished` evidence records only `session_source` (the
 literal expression) and `session_digest` (lowercase SHA-256 of the resolved
@@ -554,7 +563,12 @@ a map of bare name to an acquired-state expression or `~` for a deliberately
 signed-out context. `session:` and `sessions:` on a check are mutually exclusive.
 Every browser-driving step in a named-session check must select a declared name;
 including its check-level `setup:` and `teardown:`; there is no implicit default.
-Leaf/criterion hooks and fixtures keep their existing independent contexts. A step-level `$` expression is invalid: put the
+Fixtures use the consuming check's named entries and must select names too.
+Each lifecycle block opens fresh contexts for the entries; it never shares the
+body's live contexts. A `call:` step may select a named context for its flow:
+inner browser steps without a selector inherit it, while inner declarations
+win. This is expanded at load time, including nested calls. A call selector
+outside a named-sessions check is invalid. A step-level `$` expression is invalid: put the
 expression in the check's `sessions:` map. `api/*`, `db/*`, and `cli/*` steps
 reject `session:` with a source location.
 
@@ -590,6 +604,16 @@ The complete login/grant/independent-user flow, including a runnable application
 is in `verifications/named-sessions-example/`. Root-manifest
 `defaults.max_sessions` is an optional integer ceiling, default **4**. Declaring
 more contexts is a validation error at the check's `sessions:` source location.
+The ceiling counts contexts open **at once** within a check; a runtime guard
+fails closed with an engine error naming the check and ceiling. Lifecycle
+contexts close before the next block opens, so their peak is the named count.
+
+Each `setup_started` event for a block that opens contexts includes optional
+`session_source` and `session_digest` fields. Scalar contexts use the same
+expression and SHA-256 shape as `check_finished` (null for signed out); named
+contexts use maps keyed by context name, with null for signed-out entries.
+No storage-state credentials are recorded. Browser-free blocks omit the fields.
+See `verifications/session-cascade-example/` for a validation-only browser example.
 A single-entry map is allowed, with an authoring nudge toward the scalar form.
 Step events and screenshots, DOM, network and replay captures carry the selected
 session name. The dashboard labels steps and offers a separate replay per context.
@@ -876,6 +900,9 @@ steps must be idempotent.
 
 #### 10.3.4 Leaf cleanup (`teardown:`)
 
+Browser actions in leaf setup and teardown use fresh contexts seeded from
+the leaf's `session:`. Cleanup starts from the seed, not setup's live state.
+
 A leaf Verification Definition may pair `setup:` with action-model cleanup:
 
 ```yaml
@@ -933,6 +960,10 @@ is check-scoped (§10.7) and a lifecycle block never resolves it. A
 be dropped in favor of this direct form.
 
 #### 10.3.5 Per-check fixtures (`fixtures:` and `needs:`)
+
+Fixture up and down each open fresh contexts from their consuming check's
+scalar or named seeds, including inherited criterion/leaf seeds. A fixture
+never inherits a live context from the body or another lifecycle block.
 
 A leaf may declare named lifecycle resources once and let each consuming check
 request a fresh instance:
@@ -1078,33 +1109,19 @@ lifecycle step's `id` may not collide with an id already open in an outer
 scope — validation rejects it. Fixtures keep their own `$fixture.*`
 namespace and rules (§10.3.5) unchanged.
 
-**Hooks are for side effects; leaf `setup:` is still the only lifecycle
-source of check-readable values.** A check's own `steps:`/`assertions:`/
-`session:` keep resolving `$setup.*` against leaf `setup:` only — a
-criterion- or check-level `setup:` step's outputs are *not* addressable
-from the check body, and this is deliberate, not an oversight to close
-later. Criterion- and check-level `setup:` exist to run side effects that
-put the system in the right state before a check (navigate, seed a
-record, sign in) and to guarantee their cleanup; they are not a second
-way to hand a value to the check that declared them. When a check
-genuinely needs to *read* a produced value, that has to be a leaf-level
-`setup:` step — unchanged from before this feature (§10.3): `$setup.<id>
-.outputs.<name>` is read-only from inside any check regardless of which
-criterion or check it belongs to. `fixtures:` + `needs:` (§10.3.5) is a
-third, different tool, easy to reach for here but the wrong one: it gives
-guaranteed per-check cleanup that can *address what it created* through
-`$fixture.<name>.<step_id>.outputs.<output>`, but only from that
-fixture's own `down:` — never from a check body either. Referencing a
-criterion- or check-level `setup:` step's output from a check body (in
-`with:`, `assertions:`, or `session:`) is therefore a validation error
-naming that step as declared-but-out-of-scope and pointing at leaf
-`setup:`, distinct from the ordinary undeclared-reference diagnostic —
-the id is real, so the message says so, rather than sending an author
-looking for a typo in a declaration that's staring back at them. The
-restriction is not a stopgap: exposing check-level `setup:` ids to check
-bodies would raise cross-check collision questions in the same flat
-`$setup` namespace that belong in their own proposal, not folded into
-this one.
+**Setup-output visibility.** Check body `with:` and `assertions:` still read
+only leaf `$setup.*` outputs. Session declarations are resolved before their
+own setup runs and may additionally consume **enclosing** setup outputs:
+criterion sessions may read leaf setup, and check sessions may read leaf and
+criterion setup. Own-scope setup references are validation errors with a
+location. Lifecycle blocks retain the nested output visibility above; outputs
+are restored when leaving a scope and on retry, so siblings never supply a
+seed accidentally. Fixture outputs remain local to that fixture's down block.
+
+Check and criterion lifecycle contexts re-seed from their scope's nearest
+session. To preserve signed-out behavior under an authenticated parent,
+declare `session: ~` on the criterion or check. Named-session cleanup must
+re-establish page navigation and any state that was only in the body context.
 
 **Lookup surface.** With this, a check's effective setup can come from up
 to four declaration sites plus fixtures. Every block that starts is folded
@@ -1233,6 +1250,10 @@ Validation checks input closure, placeholder grammar and arity, and
 dangling catalog references offline.
 `duhem resolve --provenance` lists the composed entries and their
 winning source files.
+
+In a named-sessions check, `call: <flow>` accepts `session: <name>`. Expansion
+fills only undeclared inner browser selectors; explicit inner selectors win,
+including on nested calls. Scalar/session-less checks reject call selectors.
 
 `flows:` is a catalog of named action sequences, declared on a root,
 an `includes:` fragment, or a leaf and merged by flow name under the

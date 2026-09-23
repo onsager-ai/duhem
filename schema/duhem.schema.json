@@ -108,6 +108,13 @@
           "description": "Authored stable identifier (e.g. `AC-1`). Required and authored — auto-generation hides intent and breaks evidence-trace stability across runs.",
           "type": "string"
         },
+        "session": {
+          "description": "Browser seed inherited by this criterion's children. Null stops inheritance.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "setup": {
           "description": "Optional setup steps run once before this criterion's checks — after leaf `setup:` and before any check's own `setup:` (#441 Part B). Symmetric with leaf `setup:` (#20): non-judging and three-state-faithful. An aborted step makes every one of this criterion's checks `Inconclusive` with the triggering cause; none of them run.",
           "items": {
@@ -318,7 +325,7 @@
           "description": "How a criterion-level `inconclusive` verdict is treated at run aggregation. Absent → `block` (today's behavior)."
         },
         "max_sessions": {
-          "description": "Maximum browser contexts declared per check. Absent → 4. Enforced during validation, before any browser allocation.",
+          "description": "Maximum browser contexts open simultaneously per check. Absent → 4. Validated for named declarations and guarded at runtime allocation.",
           "format": "uint",
           "minimum": 0.0,
           "type": [
@@ -694,7 +701,7 @@
           "type": "array"
         },
         "session": {
-          "description": "Bare name of a browser context declared by the enclosing check.",
+          "description": "Bare name declared by the enclosing check. On a call, fills undeclared browser selectors inside the expanded flow; explicit inner selectors win.",
           "type": [
             "string",
             "null"
@@ -791,6 +798,13 @@
             }
           ],
           "description": "Optional operator-supplied provisioning lifecycle hooks. When present, the runtime forks `provision.up:` before `setup:`, polls `provision.ready:`, and forks `provision.down:` (if declared) after leaf `teardown:`. Absent → no behavior change vs setup-only definitions; the wire shape for `provision:`-less VDs is byte-identical to today."
+        },
+        "session": {
+          "description": "Browser seed inherited by criteria and checks. Null stops inheritance.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "setup": {
           "description": "Optional setup steps run once before the criteria.",

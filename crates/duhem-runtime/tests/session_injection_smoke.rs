@@ -38,7 +38,7 @@ const LOGIN_HTML: &str = r#"<!doctype html>
 const WORKSPACES_HTML: &str = r#"<!doctype html>
 <html><body>
   <h1>Workspaces</h1>
-  <button onclick="localStorage.setItem('mutated', 'yes')">Mutate session</button>
+  <button onclick="localStorage.setItem('mutated', 'yes'); document.cookie = 'session=body-mutated; path=/'">Mutate session</button>
 </body></html>"#;
 
 const MUTATION_HTML: &str = r#"<!doctype html>
@@ -423,3 +423,6 @@ criteria:
         VerdictState::Inconclusive(InconclusiveCause::EnvironmentError)
     );
 }
+
+#[path = "session_injection_smoke/cascade.rs"]
+mod cascade;

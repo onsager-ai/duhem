@@ -15,7 +15,6 @@ impl Engine {
         fixtures: &duhem_schema::FixtureCatalog,
         criterion_id: &str,
         check: &Check,
-        session: &SessionResolution,
         failures: &mut Vec<CheckFailure>,
         cleanup: &mut Vec<CleanupFailure>,
     ) -> Result<(CheckVerdict, u32), EngineError> {
@@ -29,11 +28,7 @@ impl Engine {
             // Discard any failures a prior (retried) attempt left behind
             // so only the final attempt's detail reaches the reporter.
             let failures_mark = failures.len();
-            let mut contexts = if check.sessions.is_some() {
-                Some(CheckContexts::open_named(session, self.browser.as_ref()).await)
-            } else {
-                None
-            };
+            let setup_baseline = run.setup_outputs.clone();
             let attempt_result: Result<(CheckVerdict, u32), EngineError> = async {
                 run.clear_fixture_outputs();
 
@@ -52,7 +47,6 @@ impl Engine {
                         &check.id,
                         &check.setup,
                         &self.child_process_env(writer.run_id()),
-                        contexts.as_ref(),
                     )
                     .await?;
                     if let Some(reason) = result.aborted {
@@ -131,15 +125,8 @@ impl Engine {
                         0,
                     )
                 } else {
-                    self.run_check(
-                        writer,
-                        run,
-                        (criterion_id, check),
-                        session,
-                        failures,
-                        contexts.as_mut(),
-                    )
-                    .await?
+                    self.run_check(writer, run, (criterion_id, check), failures)
+                        .await?
                 };
                 for name in active.into_iter().rev() {
                     let fixture = &fixtures[name];
@@ -175,7 +162,6 @@ impl Engine {
                         &check.id,
                         &check.teardown,
                         &self.child_process_env(writer.run_id()),
-                        contexts.as_ref(),
                     )
                     .await?;
                     for failure in &mut teardown_failures {
@@ -188,22 +174,7 @@ impl Engine {
             }
             .await;
             writer.set_session(None);
-            if let Some(contexts) = contexts.as_mut() {
-                let capture = match self.capture {
-                    CapturePolicy::Off => false,
-                    CapturePolicy::Always => true,
-                    CapturePolicy::OnFailure => attempt_result
-                        .as_ref()
-                        .map_or(true, |(cv, _)| cv.state != VerdictState::Pass),
-                };
-                let captures = contexts.finish(writer, capture, check).await;
-                if let Some(failure) = failures[failures_mark..]
-                    .iter_mut()
-                    .find(|f| f.check_id == check.id)
-                {
-                    failure.captures.extend(captures);
-                }
-            }
+            run.setup_outputs = setup_baseline;
             let (cv, gated_judging_steps) = attempt_result?;
             if attempt < max && check_is_retryable(cv.state) {
                 failures.truncate(failures_mark);
@@ -223,9 +194,7 @@ impl Engine {
         writer: &mut EvidenceWriter,
         run: &RunState,
         target: (&str, &Check),
-        session: &SessionResolution,
         failures: &mut Vec<CheckFailure>,
-        named: Option<&mut CheckContexts>,
     ) -> Result<(CheckVerdict, u32), EngineError> {
         let (criterion_id, check) = target;
         let mut ctx = RunContext::new(run);
@@ -257,34 +226,23 @@ impl Engine {
                 .unwrap_or(false)
         });
         let browser_missing = needs_browser && self.browser.is_none();
+        let session = if needs_browser {
+            crate::engine::session_scope::SessionScope::resolve(run)
+        } else {
+            crate::engine::session::resolve_source(None, run)
+        };
 
         // Track per-check environment failures from open_check, too:
         // a browser was attached but allocating a context failed.
         let mut environment_failed = browser_missing || session.failed;
 
-        let is_named = named.is_some();
-        let mut legacy = CheckContexts::default();
-        let contexts = match named {
-            Some(contexts) => contexts,
-            None => &mut legacy,
+        let mut contexts = if needs_browser && !any_unknown && !environment_failed {
+            CheckContexts::open(&session, self.browser.as_ref(), run.context_budget.as_ref())
+                .await?
+        } else {
+            CheckContexts::default()
         };
         environment_failed |= contexts.failed;
-        if !is_named
-            && !any_unknown
-            && !environment_failed
-            && !check.steps.is_empty()
-            && let Some(browser) = self.browser.as_ref()
-        {
-            match session.open_check(browser).await {
-                Ok(cb) => {
-                    contexts.browsers.insert(None, cb);
-                }
-                Err(error) => {
-                    debug!(%error, "open_check failed");
-                    environment_failed = true;
-                }
-            }
-        }
 
         // Always close contexts, including when evidence or reference resolution fails.
         let result = async {
@@ -294,7 +252,7 @@ impl Engine {
                     criterion_id,
                     check,
                     &mut ctx,
-                    contexts,
+                    &mut contexts,
                     environment_failed,
                     browser_missing,
                 )
@@ -315,15 +273,12 @@ impl Engine {
             // the `step_observation` blob channel under the reserved
             // `capture/` prefix — the dashboard's existing artifact
             // pipeline picks it up with no reader/SPA changes.
-            let mut captures: Vec<CapturedArtifact> = Vec::new();
             let wants_capture = match self.capture {
                 CapturePolicy::Off => false,
                 CapturePolicy::Always => true,
                 CapturePolicy::OnFailure => !matches!(verdict.state, VerdictState::Pass),
             };
-            if !is_named {
-                captures = contexts.finish(writer, wants_capture, check).await;
-            }
+            let captures = contexts.finish(writer, wants_capture, check).await;
             writer.set_session(None);
 
             // Surface this check's failing assertions only when the check
@@ -341,9 +296,7 @@ impl Engine {
         }
         .await;
         writer.set_session(None);
-        if !is_named {
-            contexts.finish(writer, false, check).await;
-        }
+        contexts.finish(writer, false, check).await;
         result
     }
 }

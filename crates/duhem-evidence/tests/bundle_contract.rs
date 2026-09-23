@@ -34,6 +34,8 @@ fn fixed_bundle() -> RunBundle {
             target_sha: Some("cafef00d".into()),
         },
         events: vec![Event {
+            session_source: None,
+            session_digest: None,
             session: None,
             seq: 0,
             ts: "2026-07-06T00:00:00.000Z".parse().unwrap(),

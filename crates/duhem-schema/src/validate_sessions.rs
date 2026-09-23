@@ -4,7 +4,16 @@ use crate::{Check, SourceLocation, Step, ValidationError, VerificationDefinition
 
 const DEFAULT_MAX_SESSIONS: usize = 4;
 
-pub(crate) fn validate(v: &VerificationDefinition, errors: &mut Vec<ValidationError>) {
+pub(crate) fn validate(
+    v: &VerificationDefinition,
+    outputs_for: &dyn Fn(&str) -> Vec<String>,
+    errors: &mut Vec<ValidationError>,
+) {
+    super::session::validate_scopes(v, outputs_for, errors);
+    // Validate authored selectors even if a flow has no browser actions.
+    // A second pass over expanded actions checks inherited coverage.
+    let mut expanded = v.clone();
+    let expanded_ok = crate::flows::validate_and_expand(&mut expanded).is_ok();
     for (ci, criterion) in v.criteria.iter().enumerate() {
         for (ki, check) in criterion.checks.iter().enumerate() {
             let path = check_path(ci, ki, "sessions");
@@ -42,6 +51,24 @@ pub(crate) fn validate(v: &VerificationDefinition, errors: &mut Vec<ValidationEr
                     }
                 }
             }
+            if expanded_ok {
+                let expanded_check = &expanded.criteria[ci].checks[ki];
+                for (field, steps) in [
+                    ("steps", &expanded_check.steps),
+                    ("setup", &expanded_check.setup),
+                    ("teardown", &expanded_check.teardown),
+                ] {
+                    for (i, step) in steps
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, step)| step.flow.is_some())
+                    {
+                        let mut path = check_path(ci, ki, field);
+                        path.push(S::index(i));
+                        validate_step(&expanded, step, Some(check), path, &site, errors);
+                    }
+                }
+            }
             for (i, step) in check.steps.iter().enumerate() {
                 let mut path = check_path(ci, ki, "steps");
                 path.push(S::index(i));
@@ -57,6 +84,22 @@ pub(crate) fn validate(v: &VerificationDefinition, errors: &mut Vec<ValidationEr
                     let mut path = check_path(ci, ki, field);
                     path.push(S::index(i));
                     validate_step(v, step, Some(check), path, &site, errors);
+                }
+            }
+            for name in &check.needs {
+                if let Some(fixture) = v.fixtures.get(name) {
+                    for (field, steps) in [("up", &fixture.up), ("down", &fixture.down)] {
+                        for (i, step) in steps.iter().enumerate() {
+                            validate_step(
+                                v,
+                                step,
+                                Some(check),
+                                vec![S::key("fixtures"), S::key(name), S::key(field), S::index(i)],
+                                &site,
+                                errors,
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -86,20 +129,6 @@ pub(crate) fn validate(v: &VerificationDefinition, errors: &mut Vec<ValidationEr
                 field,
                 errors,
             );
-        }
-    }
-    for (name, fixture) in &v.fixtures {
-        for (field, steps) in [("up", &fixture.up), ("down", &fixture.down)] {
-            for (i, step) in steps.iter().enumerate() {
-                validate_step(
-                    v,
-                    step,
-                    None,
-                    vec![S::key("fixtures"), S::key(name), S::key(field), S::index(i)],
-                    field,
-                    errors,
-                );
-            }
         }
     }
 }
@@ -155,7 +184,7 @@ fn validate_step(
     if let Some(name) = &step.session {
         let message = if name.trim_start().starts_with('$') {
             Some("step-level `session:` is a bare context name, never an expression; declare acquired state in check `sessions:`".to_string())
-        } else if !ui {
+        } else if !ui && step.call.is_none() {
             Some("`session:` is only valid on browser-driving `ui/*` steps".to_string())
         } else if !check
             .and_then(|check| check.sessions.as_ref())

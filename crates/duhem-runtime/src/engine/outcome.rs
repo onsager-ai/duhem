@@ -18,6 +18,8 @@ use crate::eval::{EvalResult, describe_comparison, eval};
 /// artifact yields `RunVerdict::Fail`, not `Err`.
 #[derive(Debug, Error)]
 pub enum EngineError {
+    #[error("check `{check}` exceeded defaults.max_sessions ({cap})")]
+    SessionLimit { check: String, cap: usize },
     /// Evidence could not be written to the store.
     #[error("evidence: {0}")]
     Evidence(#[from] WriterError),

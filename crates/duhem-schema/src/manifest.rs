@@ -172,8 +172,8 @@ pub struct ManifestDefaults {
     /// like `30s` / `2m`). Absent → the built-in 60s ceiling applies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_wait: Option<DurationSpec>,
-    /// Maximum browser contexts declared per check. Absent → 4.
-    /// Enforced during validation, before any browser allocation.
+    /// Maximum browser contexts open simultaneously per check. Absent → 4.
+    /// Validated for named declarations and guarded at runtime allocation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_sessions: Option<usize>,
     /// Headless size; defaults to 1280x720.

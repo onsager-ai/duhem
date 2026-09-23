@@ -249,6 +249,8 @@ async fn stale_unterminated_trace_is_orphaned() {
         .append_event(
             RUN_ID,
             &Event {
+                session_source: None,
+                session_digest: None,
                 session: None,
                 seq: 0,
                 ts: started_at,

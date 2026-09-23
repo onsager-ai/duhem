@@ -232,11 +232,19 @@ pub(crate) fn lint_warnings(def: &VerificationDefinition) -> Vec<String> {
             // on a page-free check is valid (the seed is ignored), but
             // almost always signals an authoring copy/paste mistake.
             if ch.session.is_some()
-                && !ch.steps.iter().any(|s| {
-                    s.uses
-                        .as_deref()
-                        .is_some_and(|uses| uses.starts_with("ui/"))
-                })
+                && !ch
+                    .steps
+                    .iter()
+                    .chain(&ch.setup)
+                    .chain(&ch.teardown)
+                    .chain(
+                        ch.needs
+                            .iter()
+                            .filter_map(|name| def.fixtures.get(name))
+                            .flat_map(|fixture| fixture.up.iter().chain(&fixture.down)),
+                    )
+                    .flat_map(duhem_schema::Step::actions)
+                    .any(|step| step.uses_name().starts_with("ui/"))
             {
                 warns.push(format!(
                     "criterion `{}` / check `{}`: `session:` is unused because the check has no `ui/*` step",

@@ -141,8 +141,14 @@ pub enum ObservationValue {
 /// One event on a run's wire-format stream. The `seq` field is
 /// monotonic per run (gap = bug) and `ts` is RFC 3339 with
 /// millisecond precision.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Event {
+    /// Seed references for a lifecycle block; a string/null or a map for named contexts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_source: Option<serde_json::Value>,
+    /// Credential-free seed digests, with the same scalar/map shape as the sources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_digest: Option<serde_json::Value>,
     /// Named browser context for this step or capture; absent on legacy runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
@@ -501,6 +507,8 @@ mod tests {
         let mut inputs = BTreeMap::new();
         inputs.insert("workspace_name".into(), serde_json::json!("test-ws-018f"));
         let evt = Event {
+            session_source: None,
+            session_digest: None,
             session: None,
             seq: 0,
             ts: ts(),
@@ -560,6 +568,8 @@ mod tests {
     #[test]
     fn step_observation_inline_vs_blob() {
         let inline = Event {
+            session_source: None,
+            session_digest: None,
             session: None,
             seq: 1,
             ts: ts(),
@@ -576,6 +586,8 @@ mod tests {
         assert!(!line.contains("blob_sha256"));
 
         let blob = Event {
+            session_source: None,
+            session_digest: None,
             session: None,
             seq: 2,
             ts: ts(),
@@ -597,6 +609,8 @@ mod tests {
     #[test]
     fn skipped_step_outcome_round_trips_with_reason() {
         let evt = Event {
+            session_source: None,
+            session_digest: None,
             session: None,
             seq: 2,
             ts: ts(),
@@ -662,6 +676,8 @@ mod tests {
         assert_eq!(serde_json::to_string(&event).unwrap(), old);
 
         let seeded = Event {
+            session_source: None,
+            session_digest: None,
             session: None,
             seq: 8,
             ts: ts(),
@@ -733,6 +749,8 @@ mod tests {
         ];
         for payload in cases {
             let evt = Event {
+                session_source: None,
+                session_digest: None,
                 session: None,
                 seq: 1,
                 ts: ts(),
@@ -748,6 +766,8 @@ mod tests {
     #[test]
     fn teardown_reuses_setup_step_events_with_a_phase_discriminator() {
         let event = Event {
+            session_source: None,
+            session_digest: None,
             session: None,
             seq: 1,
             ts: ts(),
@@ -860,6 +880,8 @@ mod tests {
         ];
         for payload in cases {
             let evt = Event {
+                session_source: None,
+                session_digest: None,
                 session: None,
                 seq: 1,
                 ts: ts(),

@@ -24,7 +24,6 @@ use duhem_actions::RunBrowser;
 use duhem_evidence::{EventPayload, EvidenceWriter, StepPhase};
 use duhem_judge::InconclusiveCause;
 use duhem_schema::Step;
-use tracing::debug;
 
 use crate::engine::context::RunState;
 use crate::engine::for_each::{process_lifecycle_step, run_for_each_step};
@@ -141,7 +140,6 @@ pub(crate) async fn run_setup(
         child_env,
         StepPhase::Setup,
         HookScope::Leaf,
-        None,
     )
     .await?;
     Ok(SetupResult {
@@ -169,7 +167,6 @@ pub(crate) async fn run_teardown(
         child_env,
         StepPhase::Teardown,
         HookScope::Leaf,
-        None,
     )
     .await?
     .cleanup)
@@ -194,7 +191,6 @@ pub(crate) async fn run_criterion_setup(
         child_env,
         StepPhase::Setup,
         HookScope::Criterion(criterion_id),
-        None,
     )
     .await?;
     Ok(SetupResult {
@@ -224,7 +220,6 @@ pub(crate) async fn run_criterion_teardown(
         child_env,
         StepPhase::Teardown,
         HookScope::Criterion(criterion_id),
-        None,
     )
     .await?
     .cleanup)
@@ -243,7 +238,6 @@ pub(crate) async fn run_check_setup(
     check_id: &str,
     setup: &[Step],
     child_env: &BTreeMap<String, String>,
-    contexts: Option<&super::session::CheckContexts>,
 ) -> Result<SetupResult, EngineError> {
     let result = run_lifecycle_steps(
         writer,
@@ -254,7 +248,6 @@ pub(crate) async fn run_check_setup(
         child_env,
         StepPhase::Setup,
         HookScope::Check(criterion_id, check_id),
-        contexts,
     )
     .await?;
     Ok(SetupResult {
@@ -275,7 +268,6 @@ pub(crate) async fn run_check_teardown(
     check_id: &str,
     teardown: &[Step],
     child_env: &BTreeMap<String, String>,
-    contexts: Option<&super::session::CheckContexts>,
 ) -> Result<Vec<CleanupFailure>, EngineError> {
     Ok(run_lifecycle_steps(
         writer,
@@ -286,7 +278,6 @@ pub(crate) async fn run_check_teardown(
         child_env,
         StepPhase::Teardown,
         HookScope::Check(criterion_id, check_id),
-        contexts,
     )
     .await?
     .cleanup)
@@ -312,7 +303,6 @@ pub(crate) async fn run_fixture_up(
         child_env,
         StepPhase::Setup,
         HookScope::Fixture(fixture, check_id),
-        None,
     )
     .await?;
     Ok(SetupResult {
@@ -341,7 +331,6 @@ pub(crate) async fn run_fixture_down(
         child_env,
         StepPhase::Teardown,
         HookScope::Fixture(fixture, check_id),
-        None,
     )
     .await?
     .cleanup)
@@ -357,18 +346,8 @@ async fn run_lifecycle_steps(
     child_env: &BTreeMap<String, String>,
     phase: StepPhase,
     scope: HookScope<'_>,
-    contexts: Option<&super::session::CheckContexts>,
 ) -> Result<LifecycleResult, EngineError> {
     let (fixture_name, check_id, criterion_id) = scope.evidence_fields();
-    writer
-        .append(EventPayload::SetupStarted {
-            phase,
-            step_count: steps.len() as u32,
-            fixture_name: fixture_name.clone(),
-            check_id: check_id.clone(),
-            criterion_id: criterion_id.clone(),
-        })
-        .await?;
 
     // Decide up front whether any step in this block needs a real
     // page. Mirrors the per-check logic in `Engine::run_check` so
@@ -396,23 +375,34 @@ async fn run_lifecycle_steps(
         .flat_map(dispatchable_uses)
         .any(|uses| !registry.contains_key(uses));
     let browser_missing = needs_browser && browser.is_none();
-    let mut environment_failed =
-        browser_missing || any_unknown || contexts.is_some_and(|c| c.failed);
+    let session = needs_browser.then(|| super::session_scope::SessionScope::resolve(run));
+    let mut owned_contexts = if let Some(session) = &session {
+        super::session::CheckContexts::open(session, browser, run.context_budget.as_ref()).await?
+    } else {
+        super::session::CheckContexts::default()
+    };
+    let environment_failed = browser_missing || any_unknown || owned_contexts.failed;
+    let contexts = Some(&owned_contexts);
+    let setup_browser: Option<&duhem_actions::CheckBrowser> = None;
 
-    // Setup gets its own browser context, never shared with checks.
-    let mut setup_browser = None;
-    if contexts.is_none()
-        && !environment_failed
-        && !steps.is_empty()
-        && let Some(b) = browser
+    let started = EventPayload::SetupStarted {
+        phase,
+        step_count: steps.len() as u32,
+        fixture_name: fixture_name.clone(),
+        check_id: check_id.clone(),
+        criterion_id: criterion_id.clone(),
+    };
+    let recorded = if let Some(session) = &session
+        && !owned_contexts.browsers.is_empty()
     {
-        match b.open_check().await {
-            Ok(cb) => setup_browser = Some(cb),
-            Err(e) => {
-                debug!(error = %e, ?phase, "open_check for lifecycle steps failed");
-                environment_failed = true;
-            }
-        }
+        let (sources, digests) = super::session::lifecycle_evidence(session, &owned_contexts);
+        writer.append_lifecycle(started, sources, digests).await
+    } else {
+        writer.append(started).await
+    };
+    if let Err(error) = recorded {
+        owned_contexts.close().await;
+        return Err(error.into());
     }
 
     // First-cause-wins: once we record an abort reason, later steps
@@ -427,12 +417,33 @@ async fn run_lifecycle_steps(
     let mut failed_by = environment_failed.then(|| "setup environment".to_string());
     let mut stored_error = None;
     let mut cleanup = Vec::new();
-    for (idx, step) in steps.iter().enumerate() {
-        if step.for_each.is_some() {
-            run_for_each_step(
+    let execution: Result<(), EngineError> = async {
+        for (idx, step) in steps.iter().enumerate() {
+            if step.for_each.is_some() {
+                run_for_each_step(
+                    writer,
+                    registry,
+                    setup_browser,
+                    run,
+                    child_env,
+                    phase,
+                    scope,
+                    environment_failed,
+                    step,
+                    idx,
+                    contexts,
+                    &mut aborted,
+                    &mut failed_by,
+                    &mut stored_error,
+                    &mut cleanup,
+                )
+                .await?;
+                continue;
+            }
+            process_lifecycle_step(
                 writer,
                 registry,
-                setup_browser.as_ref(),
+                setup_browser,
                 run,
                 child_env,
                 phase,
@@ -440,6 +451,7 @@ async fn run_lifecycle_steps(
                 environment_failed,
                 step,
                 idx,
+                None,
                 contexts,
                 &mut aborted,
                 &mut failed_by,
@@ -447,34 +459,14 @@ async fn run_lifecycle_steps(
                 &mut cleanup,
             )
             .await?;
-            continue;
         }
-        process_lifecycle_step(
-            writer,
-            registry,
-            setup_browser.as_ref(),
-            run,
-            child_env,
-            phase,
-            scope,
-            environment_failed,
-            step,
-            idx,
-            None,
-            contexts,
-            &mut aborted,
-            &mut failed_by,
-            &mut stored_error,
-            &mut cleanup,
-        )
-        .await?;
-    }
 
-    writer.set_session(None);
-    if let Some(cb) = setup_browser {
-        // Setup never keeps a video; skip the read + transfer entirely.
-        let _ = cb.close(false, 0).await;
+        Ok(())
     }
+    .await;
+    writer.set_session(None);
+    owned_contexts.close().await;
+    execution?;
 
     writer
         .append(EventPayload::SetupFinished {

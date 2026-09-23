@@ -54,6 +54,10 @@ worked example at
 `if: always` drains after an engine error, then `teardown:` runs before
 environment shutdown (#409).
 
+The [session cascade example](session-cascade-example/) demonstrates inherited
+seeds, signed-out opt-out, and named flow selectors. It is validated offline;
+execution requires a browser and operator-provided application inputs. (#548)
+
 ## Self-verification suites — Duhem's dogfood
 
 Real VDs that gate this repo's CI. Bigger, multi-step, and pointed at a

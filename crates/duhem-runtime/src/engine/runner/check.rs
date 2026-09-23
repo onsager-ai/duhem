@@ -40,7 +40,6 @@ impl Engine {
                 // Check-level `setup:` (#441 Part B) runs before this
                 // check's `needs:` fixtures, after criterion `setup:`.
                 // Re-run every retry attempt, like fixtures.
-                let mut check_setup_dispatched = false;
                 let mut check_setup_abort: Option<(crate::engine::setup::AbortReason, String)> =
                     None;
                 if !check.setup.is_empty() {
@@ -53,7 +52,6 @@ impl Engine {
                         &check.id,
                         &check.setup,
                         &self.child_process_env(writer.run_id()),
-                        &mut check_setup_dispatched,
                         contexts.as_ref(),
                     )
                     .await?;
@@ -163,10 +161,11 @@ impl Engine {
                 }
 
                 // Check-level `teardown:` runs after this check's fixtures
-                // are torn down — including after a check `setup:` abort
-                // that dispatched at least one action. Evidence-only: never
-                // replaces the check's verdict. Re-run every retry attempt.
-                if !check.teardown.is_empty() && check_setup_dispatched {
+                // are torn down — including after a check `setup:` abort,
+                // and even when `setup:` is empty or dispatched nothing
+                // (#543/#547). Evidence-only: never replaces the check's
+                // verdict. Re-run every retry attempt.
+                if !check.teardown.is_empty() {
                     let mut teardown_failures = crate::engine::setup::run_check_teardown(
                         writer,
                         &self.registry,

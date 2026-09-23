@@ -893,15 +893,25 @@ teardown:
 
 `teardown:` runs after the criteria loop and before leaf
 `provision.down:`, including when the criteria loop aborts with an engine
-error. It runs only if at least one `setup:` action actually dispatched;
-an error before setup's first dispatch leaves nothing to undo, while a
-mid-setup abort drains teardown for work already performed. Teardown
-action failures and teardown-local engine errors are recorded as
-phase-tagged step evidence and never alter the verdict or replace the
-original error. `--keep-env` skips both `teardown:` and
-`provision.down:`—it leaves the world as the run left it. The field is
-leaf-only; root manifests do not define a suite teardown or a shared
-`$setup` output scope.
+error, when `setup:` aborted partway through, and when `setup:` is empty
+or dispatched no action at all — a declared `teardown:` always runs once
+its level is entered. Teardown action failures and teardown-local engine
+errors are recorded as phase-tagged step evidence and never alter the
+verdict or replace the original error. `--keep-env` skips both
+`teardown:` and `provision.down:`—it leaves the world as the run left
+it. Per-step `if:` on a teardown step still applies as usual: cleanup
+that assumes `setup:` created something must guard itself with `if:`.
+The field is leaf-only; root manifests do not define a suite teardown or
+a shared `$setup` output scope.
+
+> **Alignment note (2026-09-23, #543/#547 — teardown no longer paired
+> with setup).** Leaf `teardown:` previously ran only if the same-level
+> `setup:` had dispatched at least one action (spec on issue #409). The
+> design review of #543 removed that pairing: a declared `teardown:` is
+> a commitment to clean up, and skipping it silently because `setup:`
+> happened to dispatch nothing left cleanup unexercised with no error
+> and no report line. §10.3.6 carries the matching change for criterion
+> and check level.
 
 `setup:`/`teardown:` steps may also invoke a reusable flow directly —
 `- id: cleanup, call: delete_skill, with: { slug: $inputs.slug }` — with
@@ -1035,16 +1045,27 @@ follow from the same rule — a level's hooks bracket exactly the scope
 that level owns, no more — rather than being two independent design
 choices.
 
-Teardown unwinds in the exact reverse of setup. A level's `teardown:` runs
-if — and only if — that same level's `setup:` actually dispatched an
-action, including when the check failed (the same "drain what setup
-created" rule §10.3.4 already states for leaf `teardown:`); a `teardown:`
-declared with no matching `setup:` at the same level never runs. A
-criterion `setup:` failure makes every one of that criterion's checks
-`inconclusive` with the triggering cause — none of them run, and no
-check-level hook fires for them. A check `setup:` failure makes only that
-check `inconclusive`; its fixtures and `steps:` do not run. A `teardown:`
-failure at either level is evidence-only and never changes a verdict.
+Teardown unwinds in the exact reverse of setup. A level's `teardown:`
+runs whenever it is declared and that level was entered — including
+when the check failed, when that same level's `setup:` aborted
+partway through, and when `setup:` is empty or dispatched no action at
+all (§10.3.4's rule, applied at every level). Per-step `if:` on a
+teardown step still applies; cleanup that assumes `setup:` created
+something must guard itself with `if:`. A criterion `setup:` failure
+makes every one of that criterion's checks `inconclusive` with the
+triggering cause — none of them run, and no check-level `setup:` fires
+for them, but the criterion's own `teardown:` still does. A check
+`setup:` failure makes only that check `inconclusive`; its fixtures and
+`steps:` do not run, but the check's own `teardown:` still does. A
+`teardown:` failure at either level is evidence-only and never changes
+a verdict.
+
+> **Alignment note (2026-09-23, #543/#547 — teardown no longer paired
+> with setup).** This section previously required a same-level
+> `setup:` to have dispatched an action before its `teardown:` would
+> run. The design review of #543 removed that pairing at every level
+> (leaf, criterion, check); see §10.3.4's Alignment note for the
+> rationale.
 
 `if:` value expressions on a nested `setup:`/`teardown:` step resolve
 against declared inputs, `$runtime`, `$pages`, and every lifecycle step

@@ -124,7 +124,6 @@ struct LifecycleResult {
 /// Caller is responsible for skipping the call entirely when
 /// `setup.is_empty()` so the wire shape stays byte-identical for
 /// setup-free definitions.
-#[cfg(test)]
 pub(crate) async fn run_setup(
     writer: &mut EvidenceWriter,
     registry: &ActionRegistry,
@@ -132,28 +131,6 @@ pub(crate) async fn run_setup(
     run: &mut RunState,
     setup: &[Step],
     child_env: &BTreeMap<String, String>,
-) -> Result<SetupResult, EngineError> {
-    let mut dispatched = false;
-    run_setup_tracking(
-        writer,
-        registry,
-        browser,
-        run,
-        setup,
-        child_env,
-        &mut dispatched,
-    )
-    .await
-}
-
-pub(crate) async fn run_setup_tracking(
-    writer: &mut EvidenceWriter,
-    registry: &ActionRegistry,
-    browser: Option<&RunBrowser>,
-    run: &mut RunState,
-    setup: &[Step],
-    child_env: &BTreeMap<String, String>,
-    dispatched: &mut bool,
 ) -> Result<SetupResult, EngineError> {
     let result = run_lifecycle_steps(
         writer,
@@ -163,7 +140,6 @@ pub(crate) async fn run_setup_tracking(
         setup,
         child_env,
         StepPhase::Setup,
-        dispatched,
         HookScope::Leaf,
         None,
     )
@@ -184,7 +160,6 @@ pub(crate) async fn run_teardown(
     teardown: &[Step],
     child_env: &BTreeMap<String, String>,
 ) -> Result<Vec<CleanupFailure>, EngineError> {
-    let mut dispatched = false;
     Ok(run_lifecycle_steps(
         writer,
         registry,
@@ -193,7 +168,6 @@ pub(crate) async fn run_teardown(
         teardown,
         child_env,
         StepPhase::Teardown,
-        &mut dispatched,
         HookScope::Leaf,
         None,
     )
@@ -201,11 +175,7 @@ pub(crate) async fn run_teardown(
     .cleanup)
 }
 
-/// Criterion-level `setup:` (#441 Part B). `dispatched` mirrors the
-/// leaf contract: `true` once any action was actually invoked, so the
-/// caller knows whether to drain the paired `teardown:` even when
-/// setup aborted partway through.
-#[allow(clippy::too_many_arguments)]
+/// Criterion-level `setup:` (#441 Part B).
 pub(crate) async fn run_criterion_setup(
     writer: &mut EvidenceWriter,
     registry: &ActionRegistry,
@@ -214,7 +184,6 @@ pub(crate) async fn run_criterion_setup(
     criterion_id: &str,
     setup: &[Step],
     child_env: &BTreeMap<String, String>,
-    dispatched: &mut bool,
 ) -> Result<SetupResult, EngineError> {
     let result = run_lifecycle_steps(
         writer,
@@ -224,7 +193,6 @@ pub(crate) async fn run_criterion_setup(
         setup,
         child_env,
         StepPhase::Setup,
-        dispatched,
         HookScope::Criterion(criterion_id),
         None,
     )
@@ -247,7 +215,6 @@ pub(crate) async fn run_criterion_teardown(
     teardown: &[Step],
     child_env: &BTreeMap<String, String>,
 ) -> Result<Vec<CleanupFailure>, EngineError> {
-    let mut dispatched = false;
     Ok(run_lifecycle_steps(
         writer,
         registry,
@@ -256,7 +223,6 @@ pub(crate) async fn run_criterion_teardown(
         teardown,
         child_env,
         StepPhase::Teardown,
-        &mut dispatched,
         HookScope::Criterion(criterion_id),
         None,
     )
@@ -277,7 +243,6 @@ pub(crate) async fn run_check_setup(
     check_id: &str,
     setup: &[Step],
     child_env: &BTreeMap<String, String>,
-    dispatched: &mut bool,
     contexts: Option<&super::session::CheckContexts>,
 ) -> Result<SetupResult, EngineError> {
     let result = run_lifecycle_steps(
@@ -288,7 +253,6 @@ pub(crate) async fn run_check_setup(
         setup,
         child_env,
         StepPhase::Setup,
-        dispatched,
         HookScope::Check(criterion_id, check_id),
         contexts,
     )
@@ -313,7 +277,6 @@ pub(crate) async fn run_check_teardown(
     child_env: &BTreeMap<String, String>,
     contexts: Option<&super::session::CheckContexts>,
 ) -> Result<Vec<CleanupFailure>, EngineError> {
-    let mut dispatched = false;
     Ok(run_lifecycle_steps(
         writer,
         registry,
@@ -322,7 +285,6 @@ pub(crate) async fn run_check_teardown(
         teardown,
         child_env,
         StepPhase::Teardown,
-        &mut dispatched,
         HookScope::Check(criterion_id, check_id),
         contexts,
     )
@@ -341,7 +303,6 @@ pub(crate) async fn run_fixture_up(
     steps: &[Step],
     child_env: &BTreeMap<String, String>,
 ) -> Result<SetupResult, EngineError> {
-    let mut dispatched = false;
     let result = run_lifecycle_steps(
         writer,
         registry,
@@ -350,7 +311,6 @@ pub(crate) async fn run_fixture_up(
         steps,
         child_env,
         StepPhase::Setup,
-        &mut dispatched,
         HookScope::Fixture(fixture, check_id),
         None,
     )
@@ -372,7 +332,6 @@ pub(crate) async fn run_fixture_down(
     steps: &[Step],
     child_env: &BTreeMap<String, String>,
 ) -> Result<Vec<CleanupFailure>, EngineError> {
-    let mut dispatched = false;
     Ok(run_lifecycle_steps(
         writer,
         registry,
@@ -381,7 +340,6 @@ pub(crate) async fn run_fixture_down(
         steps,
         child_env,
         StepPhase::Teardown,
-        &mut dispatched,
         HookScope::Fixture(fixture, check_id),
         None,
     )
@@ -398,7 +356,6 @@ async fn run_lifecycle_steps(
     steps: &[Step],
     child_env: &BTreeMap<String, String>,
     phase: StepPhase,
-    dispatched: &mut bool,
     scope: HookScope<'_>,
     contexts: Option<&super::session::CheckContexts>,
 ) -> Result<LifecycleResult, EngineError> {
@@ -484,7 +441,6 @@ async fn run_lifecycle_steps(
                 step,
                 idx,
                 contexts,
-                dispatched,
                 &mut aborted,
                 &mut failed_by,
                 &mut stored_error,
@@ -506,7 +462,6 @@ async fn run_lifecycle_steps(
             idx,
             None,
             contexts,
-            dispatched,
             &mut aborted,
             &mut failed_by,
             &mut stored_error,

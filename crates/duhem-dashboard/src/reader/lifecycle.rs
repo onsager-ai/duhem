@@ -2,10 +2,41 @@
 
 use duhem_evidence::{Event, EventPayload, FlowOrigin, StepOutcome, StepPhase};
 use duhem_summary::{
-    LifecycleEvent, LifecycleFlowOrigin, LifecycleFold, LifecyclePhase, LifecycleStepOutcome,
+    LifecycleEvent, LifecycleFlowOrigin, LifecycleFold, LifecyclePhase, LifecycleScopeSegment,
+    LifecycleStepOutcome,
 };
 
 use crate::model::LifecycleBlockDetail;
+
+/// The recorded shapes are leaf [], criterion [criterion], check
+/// [criterion, check], and fixture [check, fixture]. Older traces may
+/// carry a check without its criterion segment.
+pub(super) fn encloses_check(
+    scope: &[LifecycleScopeSegment],
+    criterion_id: &str,
+    check_id: &str,
+) -> bool {
+    let segment = |index: usize, kind: &str, id: &str| {
+        scope
+            .get(index)
+            .is_some_and(|s| s.kind == kind && s.id == id)
+    };
+    let kind = |index: usize, expected: &str| scope.get(index).is_some_and(|s| s.kind == expected);
+    match scope.len() {
+        0 => true,
+        1 => segment(0, "criterion", criterion_id) || segment(0, "check", check_id),
+        2 => {
+            (segment(0, "criterion", criterion_id) && segment(1, "check", check_id))
+                || (segment(0, "check", check_id) && kind(1, "fixture"))
+        }
+        3 => {
+            segment(0, "criterion", criterion_id)
+                && segment(1, "check", check_id)
+                && kind(2, "fixture")
+        }
+        _ => false,
+    }
+}
 
 pub(super) fn fold(events: &[Event]) -> Vec<LifecycleBlockDetail> {
     let mut fold = LifecycleFold::default();

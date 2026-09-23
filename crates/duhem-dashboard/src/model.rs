@@ -69,7 +69,7 @@ pub struct RunDetail {
     /// Teardown failures are shown as evidence and never folded into
     /// the judge-owned verdict.
     pub cleanup: Vec<CleanupStepDetail>,
-    /// Leaf- and criterion-scoped lifecycle blocks for the run page.
+    /// All recorded lifecycle blocks for the Results navigator.
     pub lifecycle: Vec<LifecycleBlockDetail>,
     pub criteria: Vec<CriterionDetail>,
 }

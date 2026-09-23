@@ -78,6 +78,23 @@ describe("foldRun", () => {
     ]);
   });
 
+  it("keeps check and fixture blocks in the live lifecycle fold for the Results rail", () => {
+    const events: TraceEvent[] = [];
+    for (const [seq, fields] of [
+      [1, { criterion_id: "AC-1" }],
+      [3, { criterion_id: "AC-1", check_id: "AC-1.1" }],
+      [5, { check_id: "AC-1.1", fixture_name: "db" }],
+    ] as const) {
+      events.push({ seq, ts: "2026-01-01T00:00:00.000Z", kind: "setup_started", ...fields });
+      events.push({ seq: seq + 1, ts: "2026-01-01T00:00:00.001Z", kind: "setup_finished", aborted: false, ...fields });
+    }
+    expect(foldRun("r1", events).lifecycle?.map((block) => block.scope)).toEqual([
+      [{ kind: "criterion", id: "AC-1" }],
+      [{ kind: "criterion", id: "AC-1" }, { kind: "check", id: "AC-1.1" }],
+      [{ kind: "check", id: "AC-1.1" }, { kind: "fixture", id: "db" }],
+    ]);
+  });
+
   it("folds teardown steps without treating teardown as setup", () => {
     const done = foldRun("r1", [
       trace[0],

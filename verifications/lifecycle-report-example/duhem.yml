@@ -37,9 +37,24 @@ criteria:
       ran, including their scope and outcome. Cleanup evidence remains separate
       from the artifact verdict, so a failed teardown cannot rewrite a passing
       check.
+    setup:
+      - uses: db/query
+        with:
+          connection: 'sqlite::memory:'
+          sql: 'select 1 as criterion_ready'
+    teardown:
+      - uses: db/query
+        with:
+          connection: 'sqlite::memory:'
+          sql: 'select 1 as criterion_closed'
     checks:
       - id: AC-1.1
         needs: [database_session]
+        setup:
+          - uses: db/query
+            with:
+              connection: 'sqlite::memory:'
+              sql: 'select 1 as check_ready'
         steps:
           - id: inspect
             uses: db/query

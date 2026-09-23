@@ -6,6 +6,7 @@ import { GatedJudgingNotice } from "../components/GatedJudgingNotice";
 
 import { Link, useParams } from "react-router-dom";
 import { traceUrl, type LifecycleBlock, type RunDetail } from "../api";
+import { lifecycleFailure, lifecycleHref, lifecycleScopePath } from "../lifecycle";
 import { formatDuration, formatStartedAt } from "../ui";
 import { RunScaffold } from "./RunScaffold";
 
@@ -198,7 +199,7 @@ export function RunSummary({ run }: { run: RunDetail }) {
         </div>
       )}
 
-      <LifecycleList blocks={run.lifecycle ?? []} />
+      <LifecycleList runId={run.run_id} blocks={(run.lifecycle ?? []).filter((block) => block.scope.length <= 1)} />
 
       {run.criteria.flatMap((criterion) => criterion.checks
         .filter((check) => (check.gated_judging_steps ?? 0) > 0)
@@ -296,13 +297,9 @@ export function RunSummary({ run }: { run: RunDetail }) {
   );
 }
 
-export function lifecycleScopePath(block: Pick<LifecycleBlock, "scope">): string {
-  return block.scope.length === 0
-    ? "leaf"
-    : block.scope.map((segment) => `${segment.kind}:${segment.id}`).join(" / ");
-}
+export { lifecycleScopePath } from "../lifecycle";
 
-export function LifecycleList({ blocks }: { blocks: LifecycleBlock[] }) {
+export function LifecycleList({ blocks, runId }: { blocks: LifecycleBlock[]; runId?: string }) {
   if (blocks.length === 0) return null;
   return (
     <section aria-label="Lifecycle" data-testid="run-lifecycle" className="space-y-2 border-y py-4">
@@ -310,10 +307,11 @@ export function LifecycleList({ blocks }: { blocks: LifecycleBlock[] }) {
       <ul className="space-y-1 text-sm">
         {blocks.map((block, index) => (
           <li key={`${block.started_at}-${index}`}>
-            <span className="font-mono">{lifecycleScopePath(block)}</span>{" "}
-            <span>{block.phase}</span>{" "}
+            {runId ? <Link to={lifecycleHref(runId, block)} className="text-primary hover:underline"><span className="font-mono">{lifecycleScopePath(block)}</span> {block.phase}</Link>
+              : <><span className="font-mono">{lifecycleScopePath(block)}</span> {block.phase}</>}{" "}
             <span data-status={block.status}>{block.status}</span>{" "}
             <span className="text-muted-foreground">({formatDuration(block.duration_ms)})</span>
+            {lifecycleFailure(block) && <p className="break-words text-xs text-fail">{lifecycleFailure(block)}</p>}
           </li>
         ))}
       </ul>

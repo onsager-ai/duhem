@@ -23,7 +23,8 @@ import { useVd } from "./definition-context";
 import { type LoopNode, groupLoops, stepNavigation as navigationForStep } from "../step-presentation";
 import { LoopGroup } from "../components/LoopGroup";
 import { flowOrigin, type FlowOrigin } from "../definition";
-import { lifecycleScopePath } from "./RunPage";
+import { lifecycleKey, lifecycleFailure, lifecycleScopePath } from "../lifecycle";
+import { LifecycleStatusBadge } from "../components/LifecycleStatusBadge";
 
 // The check's wall-clock span — first recorded event to last.
 function checkDurationMs(timeline: TraceEvent[]): number | null {
@@ -928,11 +929,13 @@ export function LifecycleSections({ blocks }: { blocks: LifecycleBlock[] }) {
   return (
     <section className="mb-4 space-y-3" aria-label={`${blocks[0].phase} lifecycle`}>
       {blocks.map((block, index) => (
-        <div key={`${block.started_at}-${index}`} data-testid={`check-lifecycle-${block.phase}`}>
-          <h3 className="mb-2 text-sm font-semibold">
+        <div key={`${block.started_at}-${index}`} id={`lifecycle-${lifecycleKey(block)}`} data-testid={`check-lifecycle-${block.phase}`} className="scroll-mt-20 rounded-md border-l-2 border-muted px-3 py-2">
+          <h3 className="mb-2 flex flex-wrap items-center gap-2 text-sm font-semibold">
             <span className="font-mono">{lifecycleScopePath(block)}</span>{" "}
-            {block.phase} — {block.status}
+            <span className="text-muted-foreground">{block.phase}</span>
+            <LifecycleStatusBadge status={block.status} />
           </h3>
+          {lifecycleFailure(block) && <p className="mb-2 whitespace-pre-wrap break-words text-sm text-fail">{lifecycleFailure(block)}</p>}
           <Timeline events={block.timeline} />
         </div>
       ))}
@@ -1694,6 +1697,7 @@ function StepSelectionSync({
   selectedStep,
   selectedNodeKey,
   selectedFromScroll,
+  lifecycleSelected,
   stepNavigation,
   view,
   onScrollSelection,
@@ -1705,6 +1709,7 @@ function StepSelectionSync({
   // True when the *current* selection was produced by scroll-sync (below)
   // rather than navigation (rail click / keyboard / deep link) — see #525.
   selectedFromScroll: boolean;
+  lifecycleSelected: boolean;
   stepNavigation: ReadonlyMap<string, { key: string; label: string; stepIndex: number }>;
   view: "steps" | "replay";
   onScrollSelection: (key: string) => void;
@@ -1748,7 +1753,7 @@ function StepSelectionSync({
   }, [selectedStep, selectedNodeKey, surfaceRef, view]);
 
   useEffect(() => {
-    if (view !== "steps") return;
+    if (view !== "steps" || lifecycleSelected) return;
     const surface = surfaceRef.current;
     const scroller = surface?.closest(".run-results-detail") as HTMLElement | null;
     if (!surface || !scroller) return;
@@ -1777,7 +1782,7 @@ function StepSelectionSync({
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
     return () => scroller.removeEventListener("scroll", onScroll);
-  }, [navigate, onScrollSelection, params, stepNavigation, stepParam, surfaceRef, view]);
+  }, [lifecycleSelected, navigate, onScrollSelection, params, stepNavigation, stepParam, surfaceRef, view]);
 
   return null;
 }
@@ -1822,6 +1827,12 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
   const vd = useVd();
   const [params] = useSearchParams();
   const stepParam = params.get("step") ?? undefined;
+  const lifecycleParam = params.get("lifecycle");
+  useEffect(() => {
+    if (!check || !lifecycleParam) return;
+    const target = document.getElementById(`lifecycle-${lifecycleParam}`);
+    target?.scrollIntoView?.({ block: "start" });
+  }, [check, lifecycleParam]);
   const selectedFromScroll = stepParam !== undefined && stepParam === scrollSelectedKey;
 
   useEffect(() => {
@@ -1868,6 +1879,7 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
           selectedStep={selectedStep}
           selectedNodeKey={selectedNode?.key}
           selectedFromScroll={selectedFromScroll}
+          lifecycleSelected={Boolean(lifecycleParam)}
           stepNavigation={stepNavigation}
           view={view}
           onScrollSelection={setScrollSelectedKey}

@@ -281,7 +281,7 @@ async fn run_detail_carries_inputs_verdict_and_criteria() {
 }
 
 #[tokio::test]
-async fn lifecycle_blocks_are_partitioned_between_run_and_check_detail() {
+async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
     let (_tmp, rw, ro) = common::open_stores().await;
     let run_id = "01J000000000000000000000LC";
     let mut writer = EvidenceWriter::begin(rw, run_id, "lifecycle.yml", BTreeMap::new())
@@ -366,6 +366,48 @@ async fn lifecycle_blocks_are_partitioned_between_run_and_check_detail() {
         .await
         .unwrap();
     writer
+        .append(EventPayload::CheckFinished {
+            gated_judging_steps: 0,
+            check_id: "AC-1.2".into(),
+            criterion_id: Some("AC-1".into()),
+            verdict: VerdictState::Pass,
+            session_source: None,
+            session_digest: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::CheckFinished {
+            gated_judging_steps: 0,
+            check_id: "AC-2.1".into(),
+            criterion_id: Some("AC-2".into()),
+            verdict: VerdictState::Pass,
+            session_source: None,
+            session_digest: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::SetupStarted {
+            phase: duhem_evidence::StepPhase::Setup,
+            step_count: 0,
+            fixture_name: Some("AC-2.1".into()),
+            check_id: Some("AC-1.1".into()),
+            criterion_id: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .append(EventPayload::SetupFinished {
+            phase: duhem_evidence::StepPhase::Setup,
+            aborted: false,
+            fixture_name: Some("AC-2.1".into()),
+            check_id: Some("AC-1.1".into()),
+            criterion_id: None,
+        })
+        .await
+        .unwrap();
+    writer
         .append(EventPayload::RunFinished {
             verdict: Some(VerdictState::Pass),
         })
@@ -375,20 +417,33 @@ async fn lifecycle_blocks_are_partitioned_between_run_and_check_detail() {
 
     let reader = EvidenceReader::new(ro);
     let (_, run) = get_json(reader.clone(), &format!("/api/runs/{run_id}")).await;
-    assert_eq!(run["lifecycle"].as_array().unwrap().len(), 1);
+    assert_eq!(run["lifecycle"].as_array().unwrap().len(), 4);
     assert_eq!(
         run["lifecycle"][0]["scope"][0],
         serde_json::json!({"kind":"criterion","id":"AC-1"})
     );
 
-    let (_, check) = get_json(reader, &format!("/api/runs/{run_id}/checks/AC-1::AC-1.1")).await;
-    assert_eq!(check["lifecycle"].as_array().unwrap().len(), 2);
+    let (_, check) = get_json(
+        reader.clone(),
+        &format!("/api/runs/{run_id}/checks/AC-1::AC-1.1"),
+    )
+    .await;
+    assert_eq!(check["lifecycle"].as_array().unwrap().len(), 4);
     assert_eq!(check["lifecycle"][0]["phase"], "setup");
-    assert_eq!(check["lifecycle"][1]["phase"], "teardown");
+    assert_eq!(check["lifecycle"][2]["phase"], "teardown");
     assert_eq!(
-        check["lifecycle"][1]["scope"][1],
+        check["lifecycle"][2]["scope"][1],
         serde_json::json!({"kind":"fixture","id":"db"})
     );
+    let (_, sibling) = get_json(
+        reader.clone(),
+        &format!("/api/runs/{run_id}/checks/AC-1::AC-1.2"),
+    )
+    .await;
+    assert_eq!(sibling["lifecycle"].as_array().unwrap().len(), 1);
+    assert_eq!(sibling["lifecycle"][0]["scope"][0]["id"], "AC-1");
+    let (_, other) = get_json(reader, &format!("/api/runs/{run_id}/checks/AC-2::AC-2.1")).await;
+    assert_eq!(other["lifecycle"].as_array().unwrap().len(), 0);
 }
 
 #[tokio::test]

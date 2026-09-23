@@ -158,7 +158,7 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
         break;
     }
   }
-  detail.lifecycle = foldLifecycle(events).filter((block) => block.scope.length <= 1);
+  detail.lifecycle = foldLifecycle(events);
   return detail;
 }
 

@@ -28,7 +28,14 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
             let authored = std::mem::take(&mut check.steps);
             let mut counter = 0usize;
             let mut expanded = expand_sequence(
-                authored, &catalog, "", None, None, &[], "steps", &mut counter,
+                authored,
+                &catalog,
+                "",
+                None,
+                None,
+                &[],
+                "steps",
+                &mut counter,
             );
             expand_check_loops(
                 &mut expanded.steps,
@@ -73,7 +80,12 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
     // every `for_each` body within it) so invocation ordinals stay
     // globally unique, matching check-step flow expansion.
     let mut lifecycle_counter = 0usize;
-    expand_lifecycle_calls_in_list(&mut definition.setup, &catalog, "setup", &mut lifecycle_counter);
+    expand_lifecycle_calls_in_list(
+        &mut definition.setup,
+        &catalog,
+        "setup",
+        &mut lifecycle_counter,
+    );
     expand_for_each_in_list(&mut definition.setup, &catalog, &mut lifecycle_counter);
     expand_lifecycle_calls_in_list(
         &mut definition.teardown,
@@ -155,7 +167,16 @@ fn expand_lifecycle_calls_in_list(
     counter: &mut usize,
 ) {
     let authored = std::mem::take(steps);
-    let expanded = expand_sequence(authored, catalog, "", None, None, &[], external_root, counter);
+    let expanded = expand_sequence(
+        authored,
+        catalog,
+        "",
+        None,
+        None,
+        &[],
+        external_root,
+        counter,
+    );
     *steps = expanded.steps;
     rewrite_steps(steps, &expanded.projections);
 }

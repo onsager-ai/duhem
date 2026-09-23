@@ -913,6 +913,25 @@ a shared `$setup` output scope.
 > and no report line. §10.3.6 carries the matching change for criterion
 > and check level.
 
+`setup:`/`teardown:` steps may also invoke a reusable flow directly —
+`- id: cleanup, call: delete_skill, with: { slug: $inputs.slug }` — with
+the same `params:`/`with:` validation, and the same load-time expansion
+into flattened, namespaced action steps, a check's own `call:` gets
+(§10.4). This is the same flow machinery `for_each:`'s `call:` body form
+already used here (§10.3.3); the direct form just drops the loop. Every
+expanded inner step still carries the `flow` origin (name, invocation
+id, inner index) in its evidence, with no `iteration` — a direct call
+runs its flow's steps once, not once per element. A failing step inside
+a `setup:` flow aborts setup exactly like any other setup step; inside a
+`teardown:` flow it is evidence only and teardown continues. A flow
+`secret: true` param stays masked in this evidence the same way it is
+in a check. The one difference from a check's `call:` is the accessor a
+later step in the *same* block uses to read the call's declared
+`outputs:`: `$setup.<call-id>.outputs.<name>`, not `$steps.*` — `$steps`
+is check-scoped (§10.7) and a lifecycle block never resolves it. A
+`for_each: [x]` wrapper used only to reach a flow with one iteration may
+be dropped in favor of this direct form.
+
 #### 10.3.5 Per-check fixtures (`fixtures:` and `needs:`)
 
 A leaf may declare named lifecycle resources once and let each consuming check
@@ -965,12 +984,17 @@ Only a fixture's own `down:` may read its `up:` outputs, through
 leaf lifecycle blocks, another fixture, or the fixture's own `up:` are
 validation errors. The action contract must declare the referenced output.
 
+Fixture `up:`/`down:` steps may also declare a direct `call:` to a
+reusable flow, with the same validation and load-time expansion as
+`setup:`/`teardown:` (§10.3.4) and a check's own `call:` (§10.4).
+
 ### 10.3.6 Criterion and check lifecycle (`setup:`/`teardown:`)
 
 A `Criterion` and a `Check` may each carry their own `setup:`/`teardown:`
 pair — symmetric with leaf `setup:`/`teardown:` (§10.3, §10.3.4) and no new
 concept: the same `Vec<Step>` shape, the same non-judging semantics, the
-same value-based `if:` support (§10.3.3 Tier 1). Criterion `setup:` runs
+same value-based `if:` support (§10.3.3 Tier 1), and the same direct
+`call:` support (§10.3.4). Criterion `setup:` runs
 once before that criterion's checks; check `setup:` runs before that
 check's own `steps:` (and, like fixtures, on every retry attempt).
 
@@ -1217,17 +1241,25 @@ human-facing `description:`, typed `params:`, ordered `steps:`, and an
 `call: <flow-name>`, an optional `description:`, an `id:`, and a
 `with:` map matching the flow's typed `params:`. `call:` is distinct
 from `uses:` so a flow cannot shadow or masquerade as a closed-catalog
-action. Exactly one of the two keys is valid on a step.
+action. Exactly one of the two keys is valid on a step. A lifecycle
+step — leaf/criterion/check `setup:`/`teardown:` or fixture
+`up:`/`down:` — accepts the same `call:` form directly, with the same
+`params:`/`with:` validation (§10.3.4/§10.3.5/§10.3.6); it is not
+limited to a `for_each:` step's body (§10.3.3).
 
 The loader expands every call into ordinary action steps before the
 runtime sees the definition. Parameters replace `$params.*`, inner ids
 are namespaced per invocation, and a flow's `outputs:` map is the whole
-caller-visible interface:
-`$steps.<call-id>.outputs.<declared-name>`. Inner ids cannot be
-referenced by the caller. A `secret: true` param joins the same
-evidence-masking boundary as a secret input. Flows may call other
-flows; cycles and chains deeper than the include-depth limit are
-offline validation errors.
+caller-visible interface, projected onto the caller's own accessor: in
+a check, `$steps.<call-id>.outputs.<declared-name>`; in a lifecycle
+block, `$setup.<call-id>.outputs.<declared-name>` (or, for a fixture's
+own `up:`/`down:`, `$fixture.<fixture-name>.<call-id>.outputs.<declared-name>`)
+— never `$steps.*`, which a lifecycle block does not resolve (§10.7).
+Inner ids cannot be referenced by the caller. A `secret: true` param
+joins the same evidence-masking boundary as a secret input, on the
+lifecycle path as well as the check path. Flows may call other flows;
+cycles and chains deeper than the include-depth limit are offline
+validation errors.
 
 Flow bodies are hygienic. Step `with:` values may reference only
 `$params.*` and `$pages.*`; a `$inputs.*` or `$steps.*` dependency in

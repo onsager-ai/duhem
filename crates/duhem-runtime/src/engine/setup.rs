@@ -1067,4 +1067,188 @@ mod tests {
         assert_eq!(always_calls.load(Ordering::SeqCst), 1);
         assert_eq!(failure_calls.load(Ordering::SeqCst), 1);
     }
+
+    /// #526 Test item 2 (setup half): a step already carrying flow
+    /// provenance (as the schema loader leaves it after expanding a
+    /// direct `call:`, spec #526) records that provenance on its
+    /// `SetupStepStarted` evidence, and a flow-tagged step's failure
+    /// aborts setup exactly like any other step's — later setup steps
+    /// do not run.
+    #[tokio::test]
+    async fn flow_tagged_setup_step_failure_aborts_with_flow_origin_in_evidence() {
+        let (mut w, _tmp) = make_writer().await;
+        let mut registry: ActionRegistry = BTreeMap::new();
+        registry.insert(
+            "fake/boom",
+            Box::new(StubAction {
+                uses: "fake/boom",
+                outcome: Outcome::Error,
+                outputs: vec![],
+                invocations: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
+        let after = Arc::new(AtomicUsize::new(0));
+        registry.insert(
+            "fake/tracker",
+            Box::new(StubAction {
+                uses: "fake/tracker",
+                outcome: Outcome::Ok,
+                outputs: vec![],
+                invocations: after.clone(),
+            }),
+        );
+        let mut boom = step(Some("opener__click"), "fake/boom");
+        boom.flow = Some(duhem_schema::ExpandedFlowOrigin {
+            name: "open_something".to_string(),
+            invocation: "opener".to_string(),
+            inner_index: 0,
+            iteration: None,
+        });
+        let mut run = RunState::new(BTreeMap::new());
+        let setup = vec![boom, step(None, "fake/tracker")];
+        let r = run_setup(&mut w, &registry, None, &mut run, &setup, &BTreeMap::new())
+            .await
+            .unwrap();
+        assert_eq!(r.aborted, Some(AbortReason::ActionError));
+        assert_eq!(
+            after.load(Ordering::SeqCst),
+            0,
+            "step after a flow-tagged failure must not invoke"
+        );
+        let events = duhem_evidence::Trace::from_store(w.store().as_ref(), w.run_id())
+            .await
+            .unwrap()
+            .into_events();
+        assert!(
+            events.iter().any(|event| matches!(
+                &event.payload,
+                EventPayload::SetupStepStarted { flow: Some(flow), .. }
+                    if flow.name == "open_something"
+                        && flow.invocation == "opener"
+                        && flow.inner_index == 0
+                        && flow.iteration.is_none()
+            )),
+            "expected SetupStepStarted to carry the flow origin: {events:?}"
+        );
+    }
+
+    /// #526 Test item 2 (teardown half): a flow-tagged teardown step's
+    /// failure is evidence only (recorded as a cleanup failure, not a
+    /// stored engine error) and does not stop the rest of teardown —
+    /// an `if: always` step declared after it still runs.
+    #[tokio::test]
+    async fn flow_tagged_teardown_step_failure_is_evidence_only_and_teardown_continues() {
+        let (mut w, _tmp) = make_writer().await;
+        let mut registry: ActionRegistry = BTreeMap::new();
+        registry.insert(
+            "fake/boom",
+            Box::new(StubAction {
+                uses: "fake/boom",
+                outcome: Outcome::Error,
+                outputs: vec![],
+                invocations: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
+        let after_calls = Arc::new(AtomicUsize::new(0));
+        registry.insert(
+            "fake/always",
+            Box::new(StubAction {
+                uses: "fake/always",
+                outcome: Outcome::Ok,
+                outputs: vec![],
+                invocations: after_calls.clone(),
+            }),
+        );
+        let mut boom = step(Some("cleanup__delete"), "fake/boom");
+        boom.flow = Some(duhem_schema::ExpandedFlowOrigin {
+            name: "delete_skill".to_string(),
+            invocation: "cleanup".to_string(),
+            inner_index: 0,
+            iteration: None,
+        });
+        let mut run = RunState::new(BTreeMap::new());
+        let teardown = vec![
+            boom,
+            conditioned_step(None, "fake/always", duhem_schema::StepCondition::Always),
+        ];
+        let failures = run_teardown(
+            &mut w,
+            &registry,
+            None,
+            &mut run,
+            &teardown,
+            &BTreeMap::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            after_calls.load(Ordering::SeqCst),
+            1,
+            "an `if: always` step after a flow-tagged teardown failure still runs"
+        );
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].step, "cleanup__delete");
+    }
+
+    /// #526 Test item 4: without registering the flow's `secret: true`
+    /// param bindings on the lifecycle path, this test fails — the
+    /// param's resolved value appears in plain text in
+    /// `SetupStepStarted.with`. `crate::engine::flow::register_secrets`
+    /// is called for every check step (`runner/check_steps.rs`) but,
+    /// before #526, never for a lifecycle step; this pins the fix.
+    #[tokio::test]
+    async fn flow_secret_param_is_masked_in_lifecycle_evidence() {
+        let (mut w, _tmp) = make_writer().await;
+        let mut registry: ActionRegistry = BTreeMap::new();
+        registry.insert(
+            "fake/announce",
+            Box::new(StubAction {
+                uses: "fake/announce",
+                outcome: Outcome::Ok,
+                outputs: vec![],
+                invocations: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
+        let mut run = RunState::new(BTreeMap::from([(
+            "token".to_string(),
+            crate::eval::Value::Str("s3cr3t-flow-value".to_string()),
+        )]));
+        let mut inner = step(Some("notify__say"), "fake/announce");
+        inner.with = serde_yml::from_str("value: $inputs.token").unwrap();
+        inner.flow = Some(duhem_schema::ExpandedFlowOrigin {
+            name: "announce_secret".to_string(),
+            invocation: "notify".to_string(),
+            inner_index: 0,
+            iteration: None,
+        });
+        inner.flow_secrets = vec![serde_yml::Value::String("$inputs.token".to_string())];
+        let setup = vec![inner];
+        let r = run_setup(&mut w, &registry, None, &mut run, &setup, &BTreeMap::new())
+            .await
+            .unwrap();
+        assert!(r.aborted.is_none());
+        let events = duhem_evidence::Trace::from_store(w.store().as_ref(), w.run_id())
+            .await
+            .unwrap()
+            .into_events();
+        let started_with = events
+            .iter()
+            .find_map(|event| match &event.payload {
+                EventPayload::SetupStepStarted { with, .. } => Some(with.clone()),
+                _ => None,
+            })
+            .expect("SetupStepStarted recorded");
+        let value = started_with
+            .get("value")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert!(
+            !value.contains("s3cr3t-flow-value"),
+            "flow `secret: true` param leaked unmasked in lifecycle evidence: {value}"
+        );
+        assert!(
+            value.contains("[redacted:"),
+            "expected a redaction marker, got {value}"
+        );
+    }
 }

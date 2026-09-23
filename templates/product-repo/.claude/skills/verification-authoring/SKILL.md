@@ -296,6 +296,33 @@ entire caller-visible interface. Callers read only
 inputs. Use `duhem resolve --provenance` to inspect the expanded action
 sequence and its flow origins.
 
+A `setup:`/`teardown:` block (leaf, criterion, or check) and a
+fixture's `up:`/`down:` accept `call:` too, with the same `with:`
+binding and the same masking for `secret: true` params:
+
+```yaml
+flows:
+  delete_workspace:
+    params:
+      slug: { type: string }
+    steps:
+      - uses: api/call
+        with: { method: DELETE, url: $runtime.format("/workspaces/{}", $params.slug) }
+
+# check teardown
+teardown:
+  - id: cleanup
+    call: delete_workspace
+    with: { slug: $inputs.slug }
+```
+
+The one difference from a check's `call:`: a lifecycle block reads the
+call's declared outputs through its own accessor —
+`$setup.<call-id>.outputs.<name>` in `setup:`/`teardown:` (or
+`$fixture.<fixture-name>.<call-id>.outputs.<name>` in that fixture's
+own `up:`/`down:`) — never `$steps.*`, which a lifecycle block does
+not resolve.
+
 ### 4. The holistic-environment tax — no mocks of the web
 
 A Duhem check exercises real behavior end-to-end. **No mocking the web.**

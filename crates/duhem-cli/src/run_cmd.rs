@@ -804,6 +804,19 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         eprintln!("suite teardown: {e}");
     }
 
+    // Reporters fold lifecycle evidence from the persisted trace. Keep this
+    // read-side: execution and evidence emission remain owned by the runtime.
+    let mut leaf_events = Vec::with_capacity(leaf_outcomes.len());
+    for (_, outcome) in &leaf_outcomes {
+        match store.run_events(&outcome.run_id).await {
+            Ok(events) => leaf_events.push(events),
+            Err(e) => {
+                eprintln!("reporter: could not read lifecycle evidence: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
     // Reporter rendering:
     //
     // - Single leaf: today's behavior — one `render(reporter, outcome)`
@@ -817,7 +830,14 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     let mut stdout = std::io::stdout().lock();
     if !is_manifest {
         let (_, outcome) = &leaf_outcomes[0];
-        if let Err(e) = reporter::render(&reporter, &mut stdout, outcome, &db_path, &leaf_defs[0]) {
+        if let Err(e) = reporter::render(
+            &reporter,
+            &mut stdout,
+            outcome,
+            &db_path,
+            &leaf_defs[0],
+            &leaf_events[0],
+        ) {
             eprintln!("reporter: {e}");
             return ExitCode::FAILURE;
         }
@@ -843,6 +863,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         &leaf_outcomes,
         &set_verdict,
         &db_path,
+        &leaf_events,
     ) {
         eprintln!("reporter: {e}");
         return ExitCode::FAILURE;

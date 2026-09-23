@@ -1124,17 +1124,18 @@ declare `session: ~` on the criterion or check. Named-session cleanup must
 re-establish page navigation and any state that was only in the body context.
 
 **Lookup surface.** With this, a check's effective setup can come from up
-to four declaration sites plus fixtures. `duhem run`'s default reporter
-mitigates that directly: for any **non-passing** check, it prints the
-resolved hook chain — in execution order, naming what ran and where each
-entry was declared (`leaf setup`, `` criterion `AC-1` setup ``, `` check
-`AC-1.1` setup ``, `` fixture `name` up ``, and their `teardown`/`down`
-counterparts) — right next to that check's failing assertions. This is
-gated on the check's own verdict, not printed unconditionally: the chain
-answers "why did this check just behave unexpectedly," a question a
-passing check hasn't raised, and printing it for every passing check in a
-large run would bury the signal it exists to surface. A check with no
-hooks at any level, passing or not, prints nothing extra.
+to four declaration sites plus fixtures. Every block that starts is folded
+into `RunSummary.lifecycle` with its ordered scope path, phase, status,
+timestamps, steps, flow provenance, and failing-step position. Scope paths
+are open `{kind, id}` segment lists rather than a fixed-depth enum, so a new
+scope does not require reporter changes. The default reporter shows the
+recorded chain beside every non-passing check, marks declared entries that
+did not run, and always shows a failed lifecycle block. Pretty groups all
+blocks by their recorded path; JUnit emits failed blocks as test cases and
+passing blocks in `system-out`. The dashboard shows leaf/criterion blocks
+on the run page and check/fixture setup before check steps and teardown
+after them. This evidence remains non-judging: teardown failures do not
+change the run verdict, and the compatibility `cleanup` field remains.
 
 ### 10.4 Root manifest (`duhem.yml`)
 
@@ -1557,6 +1558,7 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 **Run Summary & Reporters** (`duhem-summary`, `duhem-reporter-pretty`, `duhem-reporter-junit`)
 
 - `duhem-summary` defines the run-summary types the CLI emits. `RunSummary.totals` carries `total`, `passed`, `failed`, and `inconclusive` check counts; `RunSetSummary.totals` aggregates them across leaves. `total` means checks that executed and emitted a verdict, not checks authored in the Verification Definition, so `--filter` exclusions are absent. Both fields default to all-zero counts when an older summary is deserialized.
+- `RunSummary.lifecycle` folds every recorded setup, teardown, and fixture block, including successful blocks, into an ordered generic scope path plus status, timing, steps, flow provenance, and failing-step position. It is derived from evidence, not the compatibility cleanup list, and remains outside verdict aggregation.
 - The reporters render those summaries for humans (pretty) and CI (JUnit XML); they consume judge output and never produce a verdict, so they sit on the delivery side of the trust boundary (§11.2)
 
 **Delivery Layer**

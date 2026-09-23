@@ -49,7 +49,34 @@ export interface RunDetail {
   /** Fixed dimensions in headless mode; null means the headed window. */
   viewport?: { width: number; height: number } | null;
   cleanup?: CleanupStepDetail[];
+  lifecycle?: LifecycleBlock[];
   criteria: CriterionDetail[];
+}
+
+export interface LifecycleScopeSegment {
+  kind: string;
+  id: string;
+}
+
+export interface LifecycleStep {
+  index: number;
+  id?: string;
+  uses: string;
+  flow?: { name: string; invocation: string; inner_index: number; iteration?: number };
+  outcome: "ok" | "error" | "timeout" | { skipped: { reason: string } };
+  detail?: string;
+  duration_ms: number;
+}
+
+export interface LifecycleBlock {
+  phase: "setup" | "teardown";
+  scope: LifecycleScopeSegment[];
+  status: "passed" | "failed" | "aborted";
+  started_at: string;
+  duration_ms: number;
+  steps: LifecycleStep[];
+  failing_step?: number;
+  timeline: TraceEvent[];
 }
 
 export interface CleanupStepDetail {
@@ -58,6 +85,7 @@ export interface CleanupStepDetail {
   outcome: "ok" | "error" | "timeout" | { skipped: { reason: string; condition?: string; operands?: Record<string, unknown> } };
   fixture_name?: string;
   check_id?: string;
+  criterion_id?: string;
 }
 
 export interface TraceEvent {
@@ -89,6 +117,7 @@ export interface CheckDetail {
   verdict: Verdict | null;
   spans: SpanModel[];
   timeline: TraceEvent[];
+  lifecycle?: LifecycleBlock[];
   artifacts: ArtifactRef[];
   replay?: ReplayModel;
   sessions?: ReplayModel[];

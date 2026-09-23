@@ -26,7 +26,8 @@ use duhem_runtime::RunOutcome;
 use duhem_schema::VerificationDefinition;
 use duhem_summary::{
     CheckFailureSummary, CheckTotals, CleanupFailureSummary, CriterionSummary,
-    FailedAssertionSummary, RunSetSummary, RunSummary,
+    FailedAssertionSummary, LifecycleBlock, LifecycleEvent, LifecycleFlowOrigin, LifecycleFold,
+    LifecyclePhase, LifecycleStatus, LifecycleStepOutcome, RunSetSummary, RunSummary,
 };
 
 /// Selectable reporter. Built-ins are tagged variants; plugins carry
@@ -116,20 +117,22 @@ pub fn render(
     outcome: &RunOutcome,
     store_db: &std::path::Path,
     def: &VerificationDefinition,
+    events: &[duhem_evidence::Event],
 ) -> Result<(), RenderError> {
+    let summary = build_summary(outcome, store_db, events);
     match reporter {
         Reporter::Default => {
             writeln!(out, "{}", outcome.verdict.state)?;
-            write_failures(out, &outcome.failures, def)?;
+            write_failures(out, &outcome.failures, def, &summary.lifecycle)?;
+            write_failed_lifecycle(out, &summary.lifecycle, &outcome.failures)?;
             write_gated_checks(out, outcome)?;
             write_warnings(out, &outcome.warnings)?;
             write_cleanup(out, &outcome.cleanup)?;
-            write_totals(out, check_totals(outcome))?;
+            write_totals(out, check_totals(outcome), &summary.lifecycle)?;
             Ok(())
         }
         Reporter::Quiet => Ok(()),
         Reporter::Json => {
-            let summary = build_summary(outcome, store_db);
             // One JSON object per run, newline-terminated. Authors
             // who want bulk-parsing get JSON-lines-friendly output.
             serde_json::to_writer(&mut *out, &summary)
@@ -137,7 +140,9 @@ pub fn render(
             writeln!(out)?;
             Ok(())
         }
-        Reporter::Plugin { name, argv } => render_plugin(name, argv, out, outcome, store_db),
+        Reporter::Plugin { name, argv } => {
+            render_plugin(name, argv, out, outcome, store_db, events)
+        }
     }
 }
 
@@ -159,22 +164,27 @@ pub fn render_set(
     leaves: &[(String, RunOutcome)],
     set_verdict: &RunSetVerdict,
     store_db: &std::path::Path,
+    leaf_events: &[Vec<duhem_evidence::Event>],
 ) -> Result<(), RenderError> {
     match reporter {
         Reporter::Default => {
-            for (name, outcome) in leaves {
+            for ((name, outcome), events) in leaves.iter().zip(leaf_events) {
                 writeln!(out, "{name}: {}", outcome.verdict.state)?;
                 write_gated_checks(out, outcome)?;
+                let lifecycle = fold_lifecycle(events);
+                write_failed_lifecycle(out, &lifecycle, &[])?;
             }
             writeln!(out, "{}", set_verdict.state)?;
-            write_totals(out, check_totals_for_set(leaves))?;
+            let lifecycle: Vec<_> = leaf_events.iter().flat_map(|e| fold_lifecycle(e)).collect();
+            write_totals(out, check_totals_for_set(leaves), &lifecycle)?;
             Ok(())
         }
         Reporter::Quiet => Ok(()),
         Reporter::Json => {
             let runs: Vec<RunSummary> = leaves
                 .iter()
-                .map(|(_, o)| build_summary(o, store_db))
+                .zip(leaf_events)
+                .map(|((_, o), events)| build_summary(o, store_db, events))
                 .collect();
             let summary = RunSetSummary::new(set_verdict.state, runs);
             serde_json::to_writer(&mut *out, &summary)
@@ -190,8 +200,8 @@ pub fn render_set(
             // line is the aggregate verdict" contract (Copilot PR
             // #60 review).
             let mut tracked = NewlineTracker::new(out);
-            for (_, outcome) in leaves {
-                render_plugin(name, argv, &mut tracked, outcome, store_db)?;
+            for ((_, outcome), events) in leaves.iter().zip(leaf_events) {
+                render_plugin(name, argv, &mut tracked, outcome, store_db, events)?;
             }
             if !tracked.at_line_start() {
                 writeln!(&mut tracked)?;
@@ -249,6 +259,7 @@ fn write_failures(
     out: &mut dyn Write,
     failures: &[CheckFailure],
     def: &VerificationDefinition,
+    lifecycle: &[LifecycleBlock],
 ) -> Result<(), RenderError> {
     for f in failures {
         writeln!(out, "  {}::{}:", f.criterion_id, f.check_id)?;
@@ -277,12 +288,33 @@ fn write_failures(
         // entry was declared, right where a non-passing check is
         // already being explained. A hook-free check (the common
         // case) prints nothing here.
+        let relevant: Vec<_> = lifecycle
+            .iter()
+            .filter(|block| {
+                block.scope.is_empty()
+                    || block
+                        .scope
+                        .iter()
+                        .any(|segment| segment.id == f.criterion_id || segment.id == f.check_id)
+            })
+            .collect();
+        for block in &relevant {
+            write_lifecycle_block(out, block, "    ")?;
+        }
         if let Some(chain) = hook_chain::resolve(def, &f.criterion_id, &f.check_id) {
             if !chain.before.is_empty() {
-                writeln!(out, "    hooks before: {}", chain.before.join(" -> "))?;
+                writeln!(
+                    out,
+                    "    hooks before: {}",
+                    mark_unrecorded(&chain.before, LifecyclePhase::Setup, &relevant).join(" -> ")
+                )?;
             }
             if !chain.after.is_empty() {
-                writeln!(out, "    hooks after:  {}", chain.after.join(" -> "))?;
+                writeln!(
+                    out,
+                    "    hooks after:  {}",
+                    mark_unrecorded(&chain.after, LifecyclePhase::Teardown, &relevant).join(" -> ")
+                )?;
             }
         }
     }
@@ -341,15 +373,139 @@ fn write_gated_checks(out: &mut dyn Write, outcome: &RunOutcome) -> Result<(), R
     Ok(())
 }
 
-fn write_totals(out: &mut dyn Write, totals: CheckTotals) -> Result<(), RenderError> {
+fn write_totals(
+    out: &mut dyn Write,
+    totals: CheckTotals,
+    lifecycle: &[LifecycleBlock],
+) -> Result<(), RenderError> {
+    let suffix = lifecycle_counts(lifecycle);
     if totals.total == 0 {
-        writeln!(out, "Total: 0 checks")?;
+        writeln!(out, "Total: 0 checks{suffix}")?;
     } else {
         writeln!(
             out,
-            "Total: {} checks · {} passed · {} failed · {} inconclusive",
-            totals.total, totals.passed, totals.failed, totals.inconclusive,
+            "Total: {} checks · {} passed · {} failed · {} inconclusive{}",
+            totals.total, totals.passed, totals.failed, totals.inconclusive, suffix,
         )?;
+    }
+    Ok(())
+}
+
+fn lifecycle_counts(blocks: &[LifecycleBlock]) -> String {
+    if blocks.is_empty() {
+        return String::new();
+    }
+    [LifecyclePhase::Setup, LifecyclePhase::Teardown]
+        .into_iter()
+        .filter_map(|phase| {
+            let total = blocks.iter().filter(|block| block.phase == phase).count();
+            (total > 0).then(|| {
+                let passed = blocks
+                    .iter()
+                    .filter(|block| block.phase == phase && block.status == LifecycleStatus::Passed)
+                    .count();
+                format!("{} {passed}/{total}", phase_label(phase))
+            })
+        })
+        .fold(String::new(), |mut suffix, count| {
+            suffix.push_str(" · ");
+            suffix.push_str(&count);
+            suffix
+        })
+}
+
+fn mark_unrecorded(
+    declared: &[hook_chain::HookEntry],
+    phase: LifecyclePhase,
+    recorded: &[&LifecycleBlock],
+) -> Vec<String> {
+    declared
+        .iter()
+        .map(|entry| {
+            if recorded
+                .iter()
+                .any(|block| block.phase == phase && entry.matches(block))
+            {
+                entry.label.clone()
+            } else {
+                format!("{} (did not run)", entry.label)
+            }
+        })
+        .collect()
+}
+
+fn phase_label(phase: LifecyclePhase) -> &'static str {
+    match phase {
+        LifecyclePhase::Setup => "setup",
+        LifecyclePhase::Teardown => "teardown",
+    }
+}
+
+fn status_label(status: LifecycleStatus) -> &'static str {
+    match status {
+        LifecycleStatus::Passed => "passed",
+        LifecycleStatus::Failed => "failed",
+        LifecycleStatus::Aborted => "aborted",
+    }
+}
+
+fn step_outcome_label(outcome: &LifecycleStepOutcome) -> &'static str {
+    match outcome {
+        LifecycleStepOutcome::Ok => "ok",
+        LifecycleStepOutcome::Error => "error",
+        LifecycleStepOutcome::Timeout => "timeout",
+        LifecycleStepOutcome::Skipped { .. } => "skipped",
+    }
+}
+
+fn write_lifecycle_block(
+    out: &mut dyn Write,
+    block: &LifecycleBlock,
+    indent: &str,
+) -> Result<(), RenderError> {
+    writeln!(
+        out,
+        "{indent}lifecycle: {} {} {} ({} ms)",
+        block.scope_path(),
+        phase_label(block.phase),
+        status_label(block.status),
+        block.duration_ms,
+    )?;
+    if let Some(position) = block.failing_step
+        && let Some(step) = block.steps.get(position)
+    {
+        writeln!(
+            out,
+            "{indent}  failing step {position}: {} #{} ({})",
+            step.uses,
+            step.index,
+            step_outcome_label(&step.outcome),
+        )?;
+        if let Some(detail) = &step.detail {
+            writeln!(out, "{indent}      ({detail})")?;
+        }
+    }
+    Ok(())
+}
+
+fn write_failed_lifecycle(
+    out: &mut dyn Write,
+    lifecycle: &[LifecycleBlock],
+    failures: &[CheckFailure],
+) -> Result<(), RenderError> {
+    for block in lifecycle
+        .iter()
+        .filter(|block| block.status != LifecycleStatus::Passed)
+        .filter(|block| {
+            !failures.iter().any(|failure| {
+                block.scope.is_empty()
+                    || block.scope.iter().any(|segment| {
+                        segment.id == failure.criterion_id || segment.id == failure.check_id
+                    })
+            })
+        })
+    {
+        write_lifecycle_block(out, block, "  ")?;
     }
     Ok(())
 }
@@ -383,7 +539,129 @@ fn cleanup_outcome(outcome: &duhem_evidence::StepOutcome) -> &'static str {
     }
 }
 
-fn build_summary(o: &RunOutcome, store_db: &std::path::Path) -> RunSummary {
+fn lifecycle_phase(phase: duhem_evidence::StepPhase) -> LifecyclePhase {
+    match phase {
+        duhem_evidence::StepPhase::Setup => LifecyclePhase::Setup,
+        duhem_evidence::StepPhase::Teardown => LifecyclePhase::Teardown,
+    }
+}
+
+fn lifecycle_step_outcome(outcome: &duhem_evidence::StepOutcome) -> LifecycleStepOutcome {
+    match outcome {
+        duhem_evidence::StepOutcome::Ok => LifecycleStepOutcome::Ok,
+        duhem_evidence::StepOutcome::Error => LifecycleStepOutcome::Error,
+        duhem_evidence::StepOutcome::Timeout => LifecycleStepOutcome::Timeout,
+        duhem_evidence::StepOutcome::Skipped { reason, .. } => LifecycleStepOutcome::Skipped {
+            reason: reason.clone(),
+        },
+    }
+}
+
+fn lifecycle_flow(flow: &duhem_evidence::FlowOrigin) -> LifecycleFlowOrigin {
+    LifecycleFlowOrigin {
+        name: flow.name.clone(),
+        invocation: flow.invocation.clone(),
+        inner_index: flow.inner_index,
+        iteration: flow.iteration,
+    }
+}
+
+fn fold_lifecycle(events: &[duhem_evidence::Event]) -> Vec<LifecycleBlock> {
+    use duhem_evidence::EventPayload;
+
+    let mut fold = LifecycleFold::default();
+    for event in events {
+        let timestamp_ms = event.ts.timestamp_millis();
+        let normalized = match &event.payload {
+            EventPayload::SetupStarted {
+                phase,
+                fixture_name,
+                check_id,
+                criterion_id,
+                ..
+            } => LifecycleEvent::Started {
+                phase: lifecycle_phase(*phase),
+                criterion_id: criterion_id.as_deref(),
+                check_id: check_id.as_deref(),
+                fixture_name: fixture_name.as_deref(),
+                started_at: event.ts.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+                timestamp_ms,
+            },
+            EventPayload::SetupStepStarted {
+                phase,
+                step_index,
+                uses,
+                fixture_name,
+                check_id,
+                criterion_id,
+                flow,
+                ..
+            } => LifecycleEvent::StepStarted {
+                phase: lifecycle_phase(*phase),
+                criterion_id: criterion_id.as_deref(),
+                check_id: check_id.as_deref(),
+                fixture_name: fixture_name.as_deref(),
+                index: *step_index,
+                uses,
+                flow: flow.as_ref().map(lifecycle_flow),
+                timestamp_ms,
+            },
+            EventPayload::SetupStepObservation {
+                phase,
+                fixture_name,
+                check_id,
+                criterion_id,
+                ..
+            } => LifecycleEvent::Observation {
+                phase: lifecycle_phase(*phase),
+                criterion_id: criterion_id.as_deref(),
+                check_id: check_id.as_deref(),
+                fixture_name: fixture_name.as_deref(),
+            },
+            EventPayload::SetupStepFinished {
+                phase,
+                step_index,
+                outcome,
+                detail,
+                fixture_name,
+                check_id,
+                criterion_id,
+            } => LifecycleEvent::StepFinished {
+                phase: lifecycle_phase(*phase),
+                criterion_id: criterion_id.as_deref(),
+                check_id: check_id.as_deref(),
+                fixture_name: fixture_name.as_deref(),
+                index: *step_index,
+                outcome: lifecycle_step_outcome(outcome),
+                detail: detail.clone(),
+                timestamp_ms,
+            },
+            EventPayload::SetupFinished {
+                phase,
+                aborted,
+                fixture_name,
+                check_id,
+                criterion_id,
+            } => LifecycleEvent::Finished {
+                phase: lifecycle_phase(*phase),
+                criterion_id: criterion_id.as_deref(),
+                check_id: check_id.as_deref(),
+                fixture_name: fixture_name.as_deref(),
+                aborted: *aborted,
+                timestamp_ms,
+            },
+            _ => continue,
+        };
+        fold.push(normalized);
+    }
+    fold.into_blocks()
+}
+
+fn build_summary(
+    o: &RunOutcome,
+    store_db: &std::path::Path,
+    events: &[duhem_evidence::Event],
+) -> RunSummary {
     let failures = o
         .failures
         .iter()
@@ -418,6 +696,7 @@ fn build_summary(o: &RunOutcome, store_db: &std::path::Path) -> RunSummary {
     .with_gated_checks(gated_checks(o))
     .with_failures(failures)
     .with_warnings(o.warnings.clone())
+    .with_lifecycle(fold_lifecycle(events))
     .with_cleanup(
         o.cleanup
             .iter()
@@ -453,6 +732,7 @@ fn render_plugin(
     out: &mut dyn Write,
     outcome: &RunOutcome,
     store_db: &std::path::Path,
+    events: &[duhem_evidence::Event],
 ) -> Result<(), RenderError> {
     // argv is non-empty per `PluginRegistry::load`'s validation, so
     // [0] is safe.
@@ -468,7 +748,7 @@ fn render_plugin(
 
     // Serialize the RunSummary up-front so the writer thread doesn't
     // need to know about it.
-    let summary = build_summary(outcome, store_db);
+    let summary = build_summary(outcome, store_db, events);
     let line =
         serde_json::to_vec(&summary).map_err(|e| RenderError::Io(std::io::Error::other(e)))?;
 
@@ -519,7 +799,7 @@ fn render_plugin(
 /// without going through stdout.
 #[cfg(test)]
 pub(crate) fn json_line_for(outcome: &RunOutcome) -> String {
-    let summary = build_summary(outcome, std::path::Path::new("state/duhem.db"));
+    let summary = build_summary(outcome, std::path::Path::new("state/duhem.db"), &[]);
     serde_json::to_string(&summary).unwrap()
 }
 
@@ -560,6 +840,168 @@ mod tests {
     use duhem_judge::{
         CheckVerdict, CriterionVerdict, InconclusiveCause, RunVerdict, VerdictState,
     };
+
+    #[test]
+    fn built_in_lifecycle_snapshot_handles_unknown_scope_depth() {
+        let block = LifecycleBlock {
+            phase: LifecyclePhase::Teardown,
+            scope: ["alpha", "beta", "gamma"]
+                .into_iter()
+                .enumerate()
+                .map(|(index, kind)| duhem_summary::LifecycleScopeSegment {
+                    kind: kind.into(),
+                    id: (index + 1).to_string(),
+                })
+                .collect(),
+            status: LifecycleStatus::Failed,
+            started_at: "t".into(),
+            duration_ms: 9,
+            steps: vec![],
+            failing_step: None,
+        };
+        let mut out = Vec::new();
+        write_lifecycle_block(&mut out, &block, "  ").unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "  lifecycle: alpha:1 / beta:2 / gamma:3 teardown failed (9 ms)\n"
+        );
+    }
+
+    #[test]
+    fn summary_fold_records_scopes_pass_abort_and_teardown_without_cleanup_mutation() {
+        let raw = [
+            serde_json::json!({"seq":0,"ts":"2026-01-01T00:00:00.000Z","kind":"setup_started","step_count":0}),
+            serde_json::json!({"seq":1,"ts":"2026-01-01T00:00:00.001Z","kind":"setup_finished","aborted":false}),
+            serde_json::json!({"seq":2,"ts":"2026-01-01T00:00:00.002Z","kind":"setup_started","step_count":0,"criterion_id":"AC-1"}),
+            serde_json::json!({"seq":3,"ts":"2026-01-01T00:00:00.003Z","kind":"setup_finished","aborted":false,"criterion_id":"AC-1"}),
+            serde_json::json!({"seq":4,"ts":"2026-01-01T00:00:00.004Z","kind":"setup_started","step_count":1,"criterion_id":"AC-1","check_id":"AC-1.1"}),
+            serde_json::json!({"seq":5,"ts":"2026-01-01T00:00:00.005Z","kind":"setup_step_started","step_index":7,"uses":"cli/invoke","criterion_id":"AC-1","check_id":"AC-1.1"}),
+            serde_json::json!({"seq":6,"ts":"2026-01-01T00:00:00.006Z","kind":"setup_step_finished","step_index":7,"outcome":"error","detail":"boom","criterion_id":"AC-1","check_id":"AC-1.1"}),
+            serde_json::json!({"seq":7,"ts":"2026-01-01T00:00:00.007Z","kind":"setup_finished","aborted":true,"criterion_id":"AC-1","check_id":"AC-1.1"}),
+            serde_json::json!({"seq":8,"ts":"2026-01-01T00:00:00.008Z","kind":"setup_started","phase":"teardown","step_count":1,"check_id":"AC-1.1","fixture_name":"db"}),
+            serde_json::json!({"seq":9,"ts":"2026-01-01T00:00:00.009Z","kind":"setup_step_started","phase":"teardown","step_index":0,"uses":"db/query","check_id":"AC-1.1","fixture_name":"db"}),
+            serde_json::json!({"seq":10,"ts":"2026-01-01T00:00:00.010Z","kind":"setup_step_finished","phase":"teardown","step_index":0,"outcome":"error","detail":"cleanup failed","check_id":"AC-1.1","fixture_name":"db"}),
+            serde_json::json!({"seq":11,"ts":"2026-01-01T00:00:00.011Z","kind":"setup_finished","phase":"teardown","aborted":false,"check_id":"AC-1.1","fixture_name":"db"}),
+        ];
+        let events: Vec<duhem_evidence::Event> = raw
+            .into_iter()
+            .map(|value| serde_json::from_value(value).unwrap())
+            .collect();
+        let outcome = outcome(VerdictState::Pass);
+        let summary = build_summary(&outcome, std::path::Path::new("."), &events);
+
+        assert_eq!(summary.lifecycle.len(), 4);
+        assert_eq!(summary.lifecycle[0].scope_path(), "leaf");
+        assert_eq!(summary.lifecycle[1].scope_path(), "criterion:AC-1");
+        assert_eq!(
+            summary.lifecycle[2].scope_path(),
+            "criterion:AC-1 / check:AC-1.1"
+        );
+        assert_eq!(
+            summary.lifecycle[3].scope_path(),
+            "check:AC-1.1 / fixture:db"
+        );
+        assert_eq!(summary.lifecycle[0].status, LifecycleStatus::Passed);
+        assert_eq!(summary.lifecycle[2].status, LifecycleStatus::Aborted);
+        assert_eq!(summary.lifecycle[2].failing_step, Some(0));
+        assert_eq!(summary.lifecycle[3].status, LifecycleStatus::Failed);
+        assert!(
+            summary.cleanup.is_empty(),
+            "lifecycle teardown must not synthesize compatibility cleanup"
+        );
+        let mut rendered = Vec::new();
+        render(
+            &Reporter::Default,
+            &mut rendered,
+            &outcome,
+            std::path::Path::new("."),
+            &minimal_def(),
+            &events,
+        )
+        .unwrap();
+        assert!(
+            String::from_utf8(rendered)
+                .unwrap()
+                .ends_with(" · setup 2/3 · teardown 0/1\n")
+        );
+    }
+
+    #[test]
+    fn declared_hook_that_did_not_run_is_marked() {
+        let mut outcome = outcome(VerdictState::Fail);
+        outcome.failures.push(duhem_runtime::CheckFailure {
+            criterion_id: "AC-1".into(),
+            check_id: "AC-1.1".into(),
+            assertions: vec![],
+            captures: vec![],
+        });
+        let def = VerificationDefinition::from_yaml_str(
+            r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        setup: [{ uses: cli/invoke, with: { command: ["true"] } }]
+        assertions: ["false"]
+"#,
+        )
+        .unwrap();
+        let rendered = capture_with_def(&Reporter::Default, &outcome, &def);
+        assert!(
+            rendered.contains("check `AC-1.1` setup (did not run)"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn recorded_hook_chain_matches_outer_teardown_by_scope() {
+        let mut outcome = outcome(VerdictState::Fail);
+        outcome.failures.push(duhem_runtime::CheckFailure {
+            criterion_id: "AC-1".into(),
+            check_id: "AC-1.1".into(),
+            assertions: vec![],
+            captures: vec![],
+        });
+        let def = VerificationDefinition::from_yaml_str(
+            r#"
+verification: x
+teardown: [{ uses: cli/invoke, with: { command: ["true"] } }]
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        teardown: [{ uses: cli/invoke, with: { command: ["true"] } }]
+        assertions: ["false"]
+"#,
+        )
+        .unwrap();
+        let events = [
+            serde_json::json!({"seq":0,"ts":"2026-01-01T00:00:00.000Z","kind":"setup_started","phase":"teardown","step_count":0}),
+            serde_json::json!({"seq":1,"ts":"2026-01-01T00:00:00.001Z","kind":"setup_finished","phase":"teardown","aborted":false}),
+        ]
+        .into_iter()
+        .map(|value| serde_json::from_value(value).unwrap())
+        .collect::<Vec<_>>();
+        let mut bytes = Vec::new();
+        render(
+            &Reporter::Default,
+            &mut bytes,
+            &outcome,
+            std::path::Path::new("."),
+            &def,
+            &events,
+        )
+        .unwrap();
+        let rendered = String::from_utf8(bytes).unwrap();
+        assert!(
+            rendered
+                .contains("hooks after:  check `AC-1.1` teardown (did not run) -> leaf teardown"),
+            "{rendered}"
+        );
+    }
 
     fn outcome(state: VerdictState) -> RunOutcome {
         RunOutcome {
@@ -689,6 +1131,7 @@ criteria:
             o,
             std::path::Path::new("state/duhem.db"),
             def,
+            &[],
         )
         .unwrap();
         String::from_utf8(buf).unwrap()
@@ -926,6 +1369,7 @@ criteria:
             &o,
             std::path::Path::new("state/duhem.db"),
             &minimal_def(),
+            &[],
         )
         .unwrap_err();
         match err {
@@ -962,6 +1406,7 @@ criteria:
             leaves,
             set,
             std::path::Path::new("state/duhem.db"),
+            &vec![Vec::new(); leaves.len()],
         )
         .unwrap();
         String::from_utf8(buf).unwrap()
@@ -1027,6 +1472,7 @@ criteria:
             &o,
             std::path::Path::new("state/duhem.db"),
             &minimal_def(),
+            &[],
         )
         .unwrap_err();
         match err {

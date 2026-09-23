@@ -22,7 +22,7 @@
 use std::io::{self, Read};
 
 use duhem_judge::VerdictState;
-use duhem_summary::RunSummary;
+use duhem_summary::{LifecyclePhase, LifecycleStatus, LifecycleStepOutcome, RunSummary};
 
 fn main() {
     let mut buf = String::new();
@@ -98,6 +98,47 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
             }
         }
     }
+    if !s.lifecycle.is_empty() {
+        writeln!(out)?;
+        writeln!(out, "LIFECYCLE")?;
+        let mut paths = Vec::new();
+        for block in &s.lifecycle {
+            let path = block.scope_path();
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+        for path in paths {
+            writeln!(out, "  {path}")?;
+            for block in s
+                .lifecycle
+                .iter()
+                .filter(|block| block.scope_path() == path)
+            {
+                writeln!(
+                    out,
+                    "    {}  {}  {} ms",
+                    phase_label(block.phase),
+                    status_label(block.status),
+                    block.duration_ms,
+                )?;
+                if let Some(position) = block.failing_step
+                    && let Some(step) = block.steps.get(position)
+                {
+                    writeln!(
+                        out,
+                        "      failing step {position}: {} #{} ({})",
+                        step.uses,
+                        step.index,
+                        outcome_label(&step.outcome),
+                    )?;
+                    if let Some(detail) = &step.detail {
+                        writeln!(out, "        ({detail})")?;
+                    }
+                }
+            }
+        }
+    }
     for check in &s.gated_checks {
         if check.gated_judging_steps > 0 {
             writeln!(out, "  {check}")?;
@@ -117,6 +158,30 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
     Ok(())
 }
 
+fn phase_label(phase: LifecyclePhase) -> &'static str {
+    match phase {
+        LifecyclePhase::Setup => "setup",
+        LifecyclePhase::Teardown => "teardown",
+    }
+}
+
+fn status_label(status: LifecycleStatus) -> &'static str {
+    match status {
+        LifecycleStatus::Passed => "passed",
+        LifecycleStatus::Failed => "failed",
+        LifecycleStatus::Aborted => "aborted",
+    }
+}
+
+fn outcome_label(outcome: &LifecycleStepOutcome) -> &'static str {
+    match outcome {
+        LifecycleStepOutcome::Ok => "ok",
+        LifecycleStepOutcome::Error => "error",
+        LifecycleStepOutcome::Timeout => "timeout",
+        LifecycleStepOutcome::Skipped { .. } => "skipped",
+    }
+}
+
 fn verdict_label(v: &VerdictState) -> String {
     // Same string the CLI built-in `default` reporter uses. Reusing
     // the canonical format keeps a `pretty` plugin output greppable
@@ -132,7 +197,37 @@ mod tests {
 
     use duhem_summary::{
         CheckFailureSummary, CleanupFailureSummary, CriterionSummary, FailedAssertionSummary,
+        LifecycleBlock, LifecycleScopeSegment,
     };
+
+    #[test]
+    fn lifecycle_snapshot_renders_unknown_three_segment_scope() {
+        let block = LifecycleBlock {
+            phase: LifecyclePhase::Setup,
+            scope: ["alpha", "beta", "gamma"]
+                .into_iter()
+                .enumerate()
+                .map(|(i, kind)| LifecycleScopeSegment {
+                    kind: kind.into(),
+                    id: (i + 1).to_string(),
+                })
+                .collect(),
+            status: LifecycleStatus::Passed,
+            started_at: "2026-01-01T00:00:00.000Z".into(),
+            duration_ms: 12,
+            steps: vec![],
+            failing_step: None,
+        };
+        let summary = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from("."))
+            .with_lifecycle(vec![block]);
+        let mut out = Vec::new();
+        render(&summary, &mut out).unwrap();
+        let rendered = String::from_utf8(out).unwrap();
+        assert!(
+            rendered.contains("LIFECYCLE\n  alpha:1 / beta:2 / gamma:3\n    setup  passed  12 ms"),
+            "{rendered}"
+        );
+    }
 
     #[test]
     fn shrunken_and_whole_checks_render_differently() {

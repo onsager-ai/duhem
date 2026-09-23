@@ -21,7 +21,7 @@
 use std::io::{self, Read, Write};
 
 use duhem_judge::VerdictState;
-use duhem_summary::RunSummary;
+use duhem_summary::{LifecyclePhase, LifecycleStatus, RunSummary};
 
 fn main() {
     let mut buf = String::new();
@@ -65,12 +65,18 @@ fn render(s: &RunSummary) -> String {
     // criteria. Substituting `RunSummary.totals` here would claim N
     // checks while emitting one element per criterion, which parsers
     // read as a malformed suite (#493).
-    let total = s.criteria.len();
+    let lifecycle_failures = s
+        .lifecycle
+        .iter()
+        .filter(|block| block.status != LifecycleStatus::Passed)
+        .count();
+    let total = s.criteria.len() + lifecycle_failures;
     let failures = s
         .criteria
         .iter()
         .filter(|c| matches!(c.verdict, VerdictState::Fail))
-        .count();
+        .count()
+        + lifecycle_failures;
     let skipped = s
         .criteria
         .iter()
@@ -110,6 +116,45 @@ fn render(s: &RunSummary) -> String {
             }
         }
     }
+    for block in s
+        .lifecycle
+        .iter()
+        .filter(|block| block.status != LifecycleStatus::Passed)
+    {
+        let name = format!("{} {}", block.scope_path(), phase_label(block.phase));
+        let detail = block
+            .failing_step
+            .and_then(|position| block.steps.get(position).map(|step| (position, step)))
+            .map(|(position, step)| {
+                let suffix = step
+                    .detail
+                    .as_deref()
+                    .map(|detail| format!(": {detail}"))
+                    .unwrap_or_default();
+                format!(
+                    "failing step {position}: {} #{}{}",
+                    step.uses, step.index, suffix
+                )
+            })
+            .unwrap_or_else(|| format!("{} lifecycle block", status_label(block.status)));
+        out.push_str(&format!(
+            "  <testcase name=\"{}\"><failure type=\"lifecycle\">{}</failure></testcase>\n",
+            xml_escape(&name),
+            xml_escape(&detail),
+        ));
+    }
+    let passed_lifecycle = s
+        .lifecycle
+        .iter()
+        .filter(|block| block.status == LifecycleStatus::Passed)
+        .map(|block| format!("{} {} passed", block.scope_path(), phase_label(block.phase)))
+        .collect::<Vec<_>>();
+    if !passed_lifecycle.is_empty() {
+        out.push_str(&format!(
+            "  <system-out>{}</system-out>\n",
+            xml_escape(&passed_lifecycle.join("\n")),
+        ));
+    }
     if !s.cleanup.is_empty() {
         let detail = s
             .cleanup
@@ -133,6 +178,21 @@ fn render(s: &RunSummary) -> String {
     out
 }
 
+fn phase_label(phase: LifecyclePhase) -> &'static str {
+    match phase {
+        LifecyclePhase::Setup => "setup",
+        LifecyclePhase::Teardown => "teardown",
+    }
+}
+
+fn status_label(status: LifecycleStatus) -> &'static str {
+    match status {
+        LifecycleStatus::Passed => "passed",
+        LifecycleStatus::Failed => "failed",
+        LifecycleStatus::Aborted => "aborted",
+    }
+}
+
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -146,7 +206,45 @@ mod tests {
     use std::path::PathBuf;
 
     use duhem_judge::InconclusiveCause;
-    use duhem_summary::{CheckTotals, CleanupFailureSummary, CriterionSummary};
+    use duhem_summary::{
+        CheckTotals, CleanupFailureSummary, CriterionSummary, LifecycleBlock, LifecycleScopeSegment,
+    };
+
+    #[test]
+    fn lifecycle_snapshot_handles_unknown_scope_depth() {
+        let scope = ["alpha", "beta", "gamma"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, kind)| LifecycleScopeSegment {
+                kind: kind.into(),
+                id: (index + 1).to_string(),
+            })
+            .collect();
+        let passed = LifecycleBlock {
+            phase: LifecyclePhase::Setup,
+            scope,
+            status: LifecycleStatus::Passed,
+            started_at: "t".into(),
+            duration_ms: 1,
+            steps: vec![],
+            failing_step: None,
+        };
+        let mut failed = passed.clone();
+        failed.phase = LifecyclePhase::Teardown;
+        failed.status = LifecycleStatus::Failed;
+        let summary = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from("."))
+            .with_lifecycle(vec![passed, failed]);
+        let xml = render(&summary);
+        assert!(xml.contains("tests=\"1\" failures=\"1\""), "{xml}");
+        assert!(
+            xml.contains("name=\"alpha:1 / beta:2 / gamma:3 teardown\""),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<system-out>alpha:1 / beta:2 / gamma:3 setup passed</system-out>"),
+            "{xml}"
+        );
+    }
 
     fn totals(total: u32, passed: u32, failed: u32, inconclusive: u32) -> CheckTotals {
         CheckTotals {

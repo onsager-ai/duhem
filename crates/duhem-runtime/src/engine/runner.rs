@@ -383,29 +383,21 @@ impl Engine {
             // Run-level `setup:` runs once before any criterion. Skipped
             // entirely when empty so the wire shape stays byte-identical
             // for setup-free Verification Definitions (issue #20).
-            let mut setup_dispatched = false;
             if !def.setup.is_empty() {
-                let setup_result = crate::engine::setup::run_setup_tracking(
+                let setup_result = crate::engine::setup::run_setup(
                     &mut writer,
                     &self.registry,
                     self.browser.as_ref(),
                     &mut run_state,
                     &def.setup,
                     &self.child_process_env(&run_id),
-                    &mut setup_dispatched,
                 )
                 .await;
                 let r = match setup_result {
                     Ok(result) => result,
                     Err(error) => {
                         let _ = self
-                            .drain_leaf_teardown(
-                                &mut writer,
-                                &mut run_state,
-                                def,
-                                setup_dispatched,
-                                &run_id,
-                            )
+                            .drain_leaf_teardown(&mut writer, &mut run_state, def, &run_id)
                             .await;
                         let down_result = match def.provision.as_ref() {
                             Some(env) => {
@@ -435,13 +427,7 @@ impl Engine {
                         criteria: Vec::new(),
                     };
                     let cleanup = self
-                        .drain_leaf_teardown(
-                            &mut writer,
-                            &mut run_state,
-                            def,
-                            setup_dispatched,
-                            &run_id,
-                        )
+                        .drain_leaf_teardown(&mut writer, &mut run_state, def, &run_id)
                         .await;
                     if let Some(env) = def.provision.as_ref() {
                         crate::engine::env::tear_environment_down(
@@ -504,7 +490,7 @@ impl Engine {
             .await;
 
             let mut cleanup = self
-                .drain_leaf_teardown(&mut writer, &mut run_state, def, setup_dispatched, &run_id)
+                .drain_leaf_teardown(&mut writer, &mut run_state, def, &run_id)
                 .await;
             fixture_cleanup.append(&mut cleanup);
             let cleanup = fixture_cleanup;
@@ -580,10 +566,9 @@ impl Engine {
         writer: &mut EvidenceWriter,
         run: &mut RunState,
         def: &VerificationDefinition,
-        setup_dispatched: bool,
         run_id: &str,
     ) -> Vec<CleanupFailure> {
-        if self.keep_env || !setup_dispatched || def.teardown.is_empty() {
+        if self.keep_env || def.teardown.is_empty() {
             return Vec::new();
         }
         match crate::engine::setup::run_teardown(
@@ -621,7 +606,6 @@ impl Engine {
         // of this criterion's checks — after leaf `setup:`, before any
         // check's own `setup:`. Skipped entirely when empty so the
         // wire shape stays byte-identical for hook-free criteria.
-        let mut criterion_setup_dispatched = false;
         let mut criterion_setup_abort: Option<(crate::engine::setup::AbortReason, String)> = None;
         if !criterion.setup.is_empty() {
             let result = crate::engine::setup::run_criterion_setup(
@@ -632,7 +616,6 @@ impl Engine {
                 &criterion.id,
                 &criterion.setup,
                 &self.child_process_env(writer.run_id()),
-                &mut criterion_setup_dispatched,
             )
             .await?;
             if let Some(reason) = result.aborted {
@@ -732,11 +715,11 @@ impl Engine {
         }
 
         // Criterion-level `teardown:` runs once after every check in
-        // this criterion — including after a criterion `setup:` abort
-        // that dispatched at least one action — before leaf
-        // `teardown:`. Evidence-only: never replaces the criterion's
-        // verdict.
-        if !criterion.teardown.is_empty() && criterion_setup_dispatched {
+        // this criterion — including after a criterion `setup:` abort,
+        // and even when `setup:` is empty or dispatched nothing
+        // (#543/#547) — before leaf `teardown:`. Evidence-only: never
+        // replaces the criterion's verdict.
+        if !criterion.teardown.is_empty() {
             let mut teardown_failures = crate::engine::setup::run_criterion_teardown(
                 writer,
                 &self.registry,
@@ -1407,9 +1390,9 @@ criteria:
 
     #[tokio::test]
     async fn criterion_and_check_teardown_failures_are_evidence_only() {
-        // Teardown drains what its matching setup created (mirrors
-        // leaf `teardown:` — #409), so each teardown here is paired
-        // with a (trivially succeeding) setup at the same level.
+        // A same-level `setup:` is included here to exercise ordering
+        // (setup then teardown), not because teardown requires it —
+        // #547 removed that pairing.
         let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(StubAction::new("fake/crit_setup", Outcome::Ok)));
         engine.register_test_action(Box::new(StubAction::new("fake/check_setup", Outcome::Ok)));
@@ -1967,42 +1950,134 @@ criteria:
         )));
     }
 
-    #[tokio::test]
-    async fn teardown_requires_a_dispatched_setup_action() {
-        let (mut first, _tmp) = engine_for_test().await;
-        first.register_test_action(Box::new(StubAction::new("fake/setup", Outcome::Ok)));
-        let first_cleanup = StubAction::new("fake/cleanup", Outcome::Ok);
-        let first_cleanup_calls = first_cleanup.invocations.clone();
-        first.register_test_action(Box::new(first_cleanup));
-        let no_dispatch = def(r#"
-verification: no setup dispatch
-setup:
-  - id: abort
-    uses: fake/setup
-    with: { value: $setup.never.outputs.value }
-teardown: [{ uses: fake/cleanup }]
-criteria: []
-"#);
-        assert!(first.run(&no_dispatch, BTreeMap::new()).await.is_err());
-        assert_eq!(first_cleanup_calls.load(Ordering::SeqCst), 0);
+    // #543/#547: a declared `teardown:` runs whenever its level is
+    // entered, whether or not the same-level `setup:` dispatched an
+    // action. Replaces `teardown_requires_a_dispatched_setup_action`,
+    // which asserted the old (now-removed) pairing rule.
 
-        let (mut mid, _tmp) = engine_for_test().await;
-        mid.register_test_action(Box::new(StubAction::new("fake/setup", Outcome::Ok)));
-        let mid_cleanup = StubAction::new("fake/cleanup", Outcome::Ok);
-        let mid_cleanup_calls = mid_cleanup.invocations.clone();
-        mid.register_test_action(Box::new(mid_cleanup));
-        let partial = def(r#"
-verification: partial setup
+    #[tokio::test]
+    async fn leaf_teardown_runs_with_no_setup_block() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        let cleanup = StubAction::new("fake/cleanup", Outcome::Ok);
+        let cleanup_calls = cleanup.invocations.clone();
+        engine.register_test_action(Box::new(cleanup));
+        let v = def(r#"
+verification: no setup at all
+teardown: [{ uses: fake/cleanup }]
+criteria:
+  - id: AC-1
+    description: pass
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Pass);
+        assert_eq!(cleanup_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn leaf_teardown_runs_when_setup_dispatches_nothing() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        let setup = StubAction::new("fake/setup", Outcome::Ok);
+        let setup_calls = setup.invocations.clone();
+        engine.register_test_action(Box::new(setup));
+        let cleanup = StubAction::new("fake/cleanup", Outcome::Ok);
+        let cleanup_calls = cleanup.invocations.clone();
+        engine.register_test_action(Box::new(cleanup));
+        let v = def(r#"
+verification: setup step gated off
 setup:
   - uses: fake/setup
+    if: 1 == 2
+teardown: [{ uses: fake/cleanup }]
+criteria:
+  - id: AC-1
+    description: pass
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#);
+        let verdict = engine.run(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(verdict.state, VerdictState::Pass);
+        assert_eq!(
+            setup_calls.load(Ordering::SeqCst),
+            0,
+            "the gated-off setup step must not dispatch"
+        );
+        assert_eq!(cleanup_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn leaf_teardown_runs_after_setup_aborts_before_dispatching_anything() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/setup", Outcome::Ok)));
+        let cleanup = StubAction::new("fake/cleanup", Outcome::Ok);
+        let cleanup_calls = cleanup.invocations.clone();
+        engine.register_test_action(Box::new(cleanup));
+        let v = def(r#"
+verification: setup aborts before its first dispatch
+setup:
   - id: abort
     uses: fake/setup
     with: { value: $setup.never.outputs.value }
 teardown: [{ uses: fake/cleanup }]
 criteria: []
 "#);
-        assert!(mid.run(&partial, BTreeMap::new()).await.is_err());
-        assert_eq!(mid_cleanup_calls.load(Ordering::SeqCst), 1);
+        assert!(engine.run(&v, BTreeMap::new()).await.is_err());
+        assert_eq!(cleanup_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn criterion_teardown_runs_with_no_setup_block() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        let cleanup = StubAction::new("fake/crit_td", Outcome::Ok);
+        let cleanup_calls = cleanup.invocations.clone();
+        engine.register_test_action(Box::new(cleanup));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/check", Outcome::Ok)
+                .judging()
+                .with_output("satisfied", serde_json::json!(true)),
+        ));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: no criterion setup, only teardown
+    teardown: [{ uses: fake/crit_td }]
+    checks:
+      - id: AC-1.1
+        steps: [{ uses: fake/check }]
+"#);
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(outcome.verdict.state, VerdictState::Pass);
+        assert_eq!(cleanup_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn check_teardown_runs_with_no_setup_block() {
+        let (mut engine, _tmp) = engine_for_test().await;
+        let cleanup = StubAction::new("fake/check_td", Outcome::Ok);
+        let cleanup_calls = cleanup.invocations.clone();
+        engine.register_test_action(Box::new(cleanup));
+        engine.register_test_action(Box::new(
+            StubAction::new("fake/check", Outcome::Ok)
+                .judging()
+                .with_output("satisfied", serde_json::json!(true)),
+        ));
+        let v = def(r#"
+verification: t
+criteria:
+  - id: AC-1
+    description: no check setup, only teardown
+    checks:
+      - id: AC-1.1
+        teardown: [{ uses: fake/check_td }]
+        steps: [{ uses: fake/check }]
+"#);
+        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
+        assert_eq!(outcome.verdict.state, VerdictState::Pass);
+        assert_eq!(cleanup_calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

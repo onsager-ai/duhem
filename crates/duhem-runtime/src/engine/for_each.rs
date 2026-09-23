@@ -71,7 +71,6 @@ pub(crate) async fn process_lifecycle_step(
     idx: usize,
     loop_ctx: Option<&LoopIterationCtx<'_>>,
     contexts: Option<&super::session::CheckContexts>,
-    dispatched: &mut bool,
     aborted: &mut Option<AbortReason>,
     failed_by: &mut Option<String>,
     stored_error: &mut Option<EngineError>,
@@ -158,7 +157,6 @@ pub(crate) async fn process_lifecycle_step(
                 (Outcome::Error, true)
             }
             Some(dispatcher) => {
-                *dispatched = true;
                 let page_ref: Option<&Page> = match contexts {
                     Some(contexts) => contexts.browsers.get(&step.session).map(|cb| &cb.page),
                     None => setup_browser.map(|cb| &cb.page),
@@ -271,7 +269,6 @@ pub(crate) async fn run_for_each_step(
     step: &Step,
     idx: usize,
     contexts: Option<&super::session::CheckContexts>,
-    dispatched: &mut bool,
     aborted: &mut Option<AbortReason>,
     failed_by: &mut Option<String>,
     stored_error: &mut Option<EngineError>,
@@ -479,7 +476,6 @@ pub(crate) async fn run_for_each_step(
                 idx,
                 Some(&loop_ctx),
                 contexts,
-                dispatched,
                 aborted,
                 failed_by,
                 stored_error,

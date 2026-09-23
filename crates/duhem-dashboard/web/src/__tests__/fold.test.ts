@@ -57,6 +57,27 @@ describe("foldRun", () => {
     expect(aborted.verdict).toBe("inconclusive:environment_error");
   });
 
+  it("does not overwrite a leaf abort with scoped setup completion", () => {
+    const done = foldRun("r1", [
+      { seq: 0, ts: "2026-06-10T10:00:00.000Z", kind: "setup_finished", aborted: true },
+      { seq: 1, ts: "2026-06-10T10:00:01.000Z", kind: "setup_finished", aborted: false, criterion_id: "AC-1" },
+    ]);
+    expect(done.setup_aborted).toBe(true);
+  });
+
+  it("keys teardown cleanup by criterion scope", () => {
+    const done = foldRun("r1", [
+      { seq: 0, ts: "2026-06-10T10:00:00.000Z", kind: "setup_step_started", phase: "teardown", criterion_id: "AC-1", step_index: 0, uses: "cli/one" },
+      { seq: 1, ts: "2026-06-10T10:00:01.000Z", kind: "setup_step_started", phase: "teardown", criterion_id: "AC-2", step_index: 0, uses: "cli/two" },
+      { seq: 2, ts: "2026-06-10T10:00:02.000Z", kind: "setup_step_finished", phase: "teardown", criterion_id: "AC-1", step_index: 0, outcome: "error" },
+      { seq: 3, ts: "2026-06-10T10:00:03.000Z", kind: "setup_step_finished", phase: "teardown", criterion_id: "AC-2", step_index: 0, outcome: "ok" },
+    ]);
+    expect(done.cleanup?.map((step) => [step.criterion_id, step.outcome])).toEqual([
+      ["AC-1", "error"],
+      ["AC-2", "ok"],
+    ]);
+  });
+
   it("folds teardown steps without treating teardown as setup", () => {
     const done = foldRun("r1", [
       trace[0],

@@ -45,6 +45,7 @@ composition.
 | 11 | [`flows-example`](flows-example/) | Reuse a parameterized `flows:` sign-in sequence from sibling leaves while preserving expanded-step evidence | browser + inline fixture pages | #367 |
 | 12 | [`stepless-check-example`](stepless-check-example/) | Judge inputs and pure runtime expressions with `steps: []` while retaining check ownership in evidence | nothing — fully offline | #490 |
 | 13 | [`lifecycle-hooks-example`](lifecycle-hooks-example/) | Criterion- and check-level `setup:`/`teardown:`, symmetric with leaf `setup:`/`teardown:` and per-check fixtures — the run report's resolved hook chain names each level and where it was declared | local process (`cli/invoke`) | #441 |
+| 14 | [`lifecycle-report-example`](lifecycle-report-example/) | Recorded lifecycle reporting — a passing setup, a per-check fixture, and a deliberately failing teardown remain visible by scope without changing the passing verdict | SQLite in memory (`db/query`) | #524 |
 
 The CLI self-verification suite also carries the leaf-scoped cleanup
 worked example at

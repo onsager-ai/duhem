@@ -1,0 +1,50 @@
+# Lifecycle report worked example (#524). Run with:
+#   duhem run verifications/lifecycle-report-example --reporter json
+# The check passes while the deliberately invalid leaf teardown query is
+# recorded as a lifecycle failure. The fixture supplies check-scoped blocks.
+verification: Lifecycle execution remains inspectable
+spec_ref: https://github.com/onsager-ai/duhem/issues/524
+
+setup:
+  - uses: db/query
+    with:
+      connection: 'sqlite::memory:'
+      sql: 'select 1 as ready'
+
+teardown:
+  - uses: db/query
+    with:
+      connection: 'sqlite::memory:'
+      sql: 'this is deliberately invalid SQL'
+
+fixtures:
+  database_session:
+    up:
+      - uses: db/query
+        with:
+          connection: 'sqlite::memory:'
+          sql: 'select 1 as opened'
+    down:
+      - uses: db/query
+        with:
+          connection: 'sqlite::memory:'
+          sql: 'select 1 as closed'
+
+criteria:
+  - id: AC-1
+    description: |
+      A verification report shows which preparation and cleanup blocks actually
+      ran, including their scope and outcome. Cleanup evidence remains separate
+      from the artifact verdict, so a failed teardown cannot rewrite a passing
+      check.
+    checks:
+      - id: AC-1.1
+        needs: [database_session]
+        steps:
+          - id: inspect
+            uses: db/query
+            with:
+              connection: 'sqlite::memory:'
+              sql: 'select 42 as answer'
+        assertions:
+          - $steps.inspect.outputs.rows[0].answer == 42

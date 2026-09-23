@@ -32,6 +32,7 @@ mod run_detail;
 
 use diff::{CheckProjection, diff_criteria, project_run};
 
+mod lifecycle;
 mod mime;
 mod replay;
 pub use mime::{extension_for, sniff_content_type};
@@ -558,6 +559,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
     }
     let mut run_verdict = None;
     let mut viewport = None;
+    let lifecycle = lifecycle::fold(&run.events);
 
     fn note_check(
         criterion_order: &mut Vec<String>,
@@ -602,8 +604,13 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 phase,
                 aborted,
                 fixture_name,
-                ..
-            } if phase == &duhem_evidence::StepPhase::Setup && fixture_name.is_none() => {
+                check_id,
+                criterion_id,
+            } if phase == &duhem_evidence::StepPhase::Setup
+                && fixture_name.is_none()
+                && check_id.is_none()
+                && criterion_id.is_none() =>
+            {
                 setup_aborted = *aborted;
             }
             EventPayload::SetupStepStarted {
@@ -612,6 +619,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 uses,
                 fixture_name,
                 check_id,
+                criterion_id,
                 ..
             } => cleanup.push(crate::model::CleanupStepDetail {
                 step_index: *step_index,
@@ -619,6 +627,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 outcome: duhem_evidence::StepOutcome::Ok,
                 fixture_name: fixture_name.clone(),
                 check_id: check_id.clone(),
+                criterion_id: criterion_id.clone(),
             }),
             EventPayload::SetupStepFinished {
                 phase: duhem_evidence::StepPhase::Teardown,
@@ -626,12 +635,14 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 outcome,
                 fixture_name,
                 check_id,
+                criterion_id,
                 ..
             } => {
                 if let Some(step) = cleanup.iter_mut().rev().find(|step| {
                     step.step_index == *step_index
                         && step.fixture_name == *fixture_name
                         && step.check_id == *check_id
+                        && step.criterion_id == *criterion_id
                 }) {
                     step.outcome = outcome.clone();
                 }
@@ -741,6 +752,10 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         has_definition,
         viewport,
         cleanup,
+        lifecycle: lifecycle
+            .into_iter()
+            .filter(|detail| detail.block.scope.len() <= 1)
+            .collect(),
         criteria,
     }
 }
@@ -780,6 +795,16 @@ fn build_check_detail(
     let mut gated_judging_steps = 0;
     let mut timeline = Vec::new();
     let mut verdict = None;
+    let lifecycle = lifecycle::fold(&run.events)
+        .into_iter()
+        .filter(|detail| {
+            detail
+                .block
+                .scope
+                .iter()
+                .any(|segment| segment.id == check_id)
+        })
+        .collect();
     // `step_observation` / `step_finished` carry only `step_index`;
     // attribution is positional — they belong to the pair iff the most
     // recent `step_started` opened it.
@@ -846,6 +871,7 @@ fn build_check_detail(
         verdict,
         spans,
         timeline,
+        lifecycle,
         artifacts,
         replay: None,
         sessions: Vec::new(),

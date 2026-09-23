@@ -5,8 +5,8 @@ import { GatedJudgingNotice } from "../components/GatedJudgingNotice";
 // Live runs (#84) fold their SSE stream in RunScaffold's `useRun`.
 
 import { Link, useParams } from "react-router-dom";
-import { traceUrl, type RunDetail } from "../api";
-import { formatStartedAt } from "../ui";
+import { traceUrl, type LifecycleBlock, type RunDetail } from "../api";
+import { formatDuration, formatStartedAt } from "../ui";
 import { RunScaffold } from "./RunScaffold";
 
 // #280 Phase 2/3: an Allure-style status roll-up for a run — a donut of
@@ -198,6 +198,8 @@ export function RunSummary({ run }: { run: RunDetail }) {
         </div>
       )}
 
+      <LifecycleList blocks={run.lifecycle ?? []} />
+
       {run.criteria.flatMap((criterion) => criterion.checks
         .filter((check) => (check.gated_judging_steps ?? 0) > 0)
         .map((check) => (
@@ -291,5 +293,30 @@ export function RunSummary({ run }: { run: RunDetail }) {
         </details>
       )}
     </div>
+  );
+}
+
+export function lifecycleScopePath(block: Pick<LifecycleBlock, "scope">): string {
+  return block.scope.length === 0
+    ? "leaf"
+    : block.scope.map((segment) => `${segment.kind}:${segment.id}`).join(" / ");
+}
+
+export function LifecycleList({ blocks }: { blocks: LifecycleBlock[] }) {
+  if (blocks.length === 0) return null;
+  return (
+    <section aria-label="Lifecycle" data-testid="run-lifecycle" className="space-y-2 border-y py-4">
+      <h3 className="text-sm font-semibold">Lifecycle</h3>
+      <ul className="space-y-1 text-sm">
+        {blocks.map((block, index) => (
+          <li key={`${block.started_at}-${index}`}>
+            <span className="font-mono">{lifecycleScopePath(block)}</span>{" "}
+            <span>{block.phase}</span>{" "}
+            <span data-status={block.status}>{block.status}</span>{" "}
+            <span className="text-muted-foreground">({formatDuration(block.duration_ms)})</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

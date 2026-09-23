@@ -69,7 +69,17 @@ pub struct RunDetail {
     /// Teardown failures are shown as evidence and never folded into
     /// the judge-owned verdict.
     pub cleanup: Vec<CleanupStepDetail>,
+    /// Leaf- and criterion-scoped lifecycle blocks for the run page.
+    pub lifecycle: Vec<LifecycleBlockDetail>,
     pub criteria: Vec<CriterionDetail>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LifecycleBlockDetail {
+    #[serde(flatten)]
+    pub block: duhem_summary::LifecycleBlock,
+    /// Raw lifecycle events for the existing step/flow presentation.
+    pub timeline: Vec<Event>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -81,6 +91,8 @@ pub struct CleanupStepDetail {
     pub fixture_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub check_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub criterion_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -116,6 +128,8 @@ pub struct CheckDetail {
     /// `trace.jsonl` lines) — the trace is the truth, the timeline is
     /// a filter over it.
     pub timeline: Vec<Event>,
+    /// Check- and fixture-scoped blocks, in recorded order.
+    pub lifecycle: Vec<LifecycleBlockDetail>,
     pub artifacts: Vec<ArtifactRef>,
     /// Synchronized browser evidence when the run carries the #337
     /// session document. `None` is the explicit old-run degradation path.

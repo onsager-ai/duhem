@@ -3,7 +3,7 @@
 // serves. The browser never computes a verdict: every verdict below
 // is lifted verbatim from the judge's `*_finished` events.
 
-import type { CriterionDetail, RunDetail, TraceEvent } from "./api";
+import type { CriterionDetail, LifecycleBlock, RunDetail, TraceEvent } from "./api";
 
 /** Fields `foldRun` cannot derive from the event stream. `useRun` carries
  *  them over from the authoritative `GET /api/runs/:id` so a live run shows
@@ -41,6 +41,7 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
     // fetched value forward instead — see `carryFetched` (#491).
     has_definition: false,
     cleanup: [],
+    lifecycle: [],
     criteria: [],
   };
   const criteria = new Map<string, CriterionDetail>();
@@ -79,7 +80,8 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
         detail.inputs = (evt.inputs as Record<string, unknown>) ?? {};
         break;
       case "setup_finished":
-        if (evt.phase !== "teardown") {
+        if (evt.phase !== "teardown" && evt.criterion_id == null &&
+            evt.check_id == null && evt.fixture_name == null) {
           detail.setup_aborted = Boolean(evt.aborted);
         }
         break;
@@ -89,6 +91,9 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
             step_index: Number(evt.step_index),
             uses: String(evt.uses),
             outcome: "ok",
+            fixture_name: typeof evt.fixture_name === "string" ? evt.fixture_name : undefined,
+            check_id: typeof evt.check_id === "string" ? evt.check_id : undefined,
+            criterion_id: typeof evt.criterion_id === "string" ? evt.criterion_id : undefined,
           });
         }
         break;
@@ -96,7 +101,10 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
         if (evt.phase === "teardown") {
           const step = [...detail.cleanup!]
             .reverse()
-            .find((candidate) => candidate.step_index === Number(evt.step_index));
+            .find((candidate) => candidate.step_index === Number(evt.step_index) &&
+              candidate.fixture_name === evt.fixture_name &&
+              candidate.check_id === evt.check_id &&
+              candidate.criterion_id === evt.criterion_id);
           if (step) {
             step.outcome = evt.outcome as typeof step.outcome;
           }
@@ -150,5 +158,77 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
         break;
     }
   }
+  detail.lifecycle = foldLifecycle(events).filter((block) => block.scope.length <= 1);
   return detail;
+}
+
+function foldLifecycle(events: TraceEvent[]): LifecycleBlock[] {
+  const blocks: (LifecycleBlock & {
+    started_ms: number;
+    finished: boolean;
+    step_started: number[];
+    step_finished: boolean[];
+  })[] = [];
+  const scope = (evt: TraceEvent) => [
+    ["criterion", evt.criterion_id],
+    ["check", evt.check_id],
+    ["fixture", evt.fixture_name],
+  ].filter((item): item is [string, string] => typeof item[1] === "string")
+    .map(([kind, id]) => ({ kind, id }));
+  const same = (a: LifecycleBlock["scope"], b: LifecycleBlock["scope"]) =>
+    JSON.stringify(a) === JSON.stringify(b);
+  const active = (evt: TraceEvent) => [...blocks].reverse().find((block) =>
+    !block.finished && block.phase === (evt.phase === "teardown" ? "teardown" : "setup") &&
+    same(block.scope, scope(evt)));
+
+  for (const evt of events) {
+    if (evt.kind === "setup_started") {
+      blocks.push({
+        phase: evt.phase === "teardown" ? "teardown" : "setup",
+        scope: scope(evt), status: "aborted", started_at: evt.ts,
+        duration_ms: 0, steps: [], timeline: [evt],
+        started_ms: Date.parse(evt.ts), finished: false, step_started: [], step_finished: [],
+      });
+      continue;
+    }
+    if (!evt.kind.startsWith("setup_step_") && evt.kind !== "setup_finished") continue;
+    const block = active(evt);
+    if (!block) continue;
+    block.timeline.push(evt);
+    if (evt.kind === "setup_step_started") {
+      block.steps.push({
+        index: Number(evt.step_index), uses: String(evt.uses),
+        flow: typeof evt.flow === "object" ? evt.flow as LifecycleBlock["steps"][number]["flow"] : undefined,
+        outcome: "ok", duration_ms: 0,
+      });
+      block.step_started.push(Date.parse(evt.ts));
+      block.step_finished.push(false);
+    } else if (evt.kind === "setup_step_finished") {
+      const position = [...block.steps].map((step, index) => ({ step, index })).reverse()
+        .find(({ step, index }) => step.index === Number(evt.step_index) && !block.step_finished[index])?.index;
+      if (position !== undefined) {
+        const step = block.steps[position];
+        step.outcome = evt.outcome as typeof step.outcome;
+        step.detail = typeof evt.detail === "string" ? evt.detail : undefined;
+        step.duration_ms = Math.max(0, Date.parse(evt.ts) - block.step_started[position]);
+        block.step_finished[position] = true;
+        if ((evt.outcome === "error" || evt.outcome === "timeout") && block.failing_step === undefined) {
+          block.failing_step = position;
+        }
+      }
+    } else if (evt.kind === "setup_finished") {
+      block.duration_ms = Math.max(0, Date.parse(evt.ts) - block.started_ms);
+      block.status = Boolean(evt.aborted) && block.phase === "setup" ? "aborted"
+        : block.failing_step !== undefined ? "failed"
+        : Boolean(evt.aborted) ? "aborted" : "passed";
+      block.finished = true;
+    }
+  }
+  return blocks.map(({
+    started_ms: _started,
+    finished: _finished,
+    step_started: _steps,
+    step_finished: _stepFinished,
+    ...block
+  }) => block);
 }

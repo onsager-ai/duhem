@@ -1,0 +1,70 @@
+# A direct `call:` in setup:/teardown: — worked example (#526).
+#
+# Before this feature, a flow could only be invoked from a check's own
+# `steps:`, or from a lifecycle block by wrapping it in a single-
+# iteration `for_each:` (#443 Tier 1). This example authors the same
+# reusable flow twice, directly, with no `for_each:` in sight:
+#
+#   - leaf `setup:` calls it once, and a later `setup:` step reads the
+#     call's declared output back through `$setup.<call-id>.outputs.*`
+#     — the lifecycle block's own accessor, not `$steps.*` (that root
+#     is check-scoped and a lifecycle block never resolves it).
+#   - the check's own `teardown:` calls it again for cleanup, the same
+#     shape the spec's worked example uses.
+#
+# `db/query` against sqlite `:memory:` stands in for "some real
+# action with an output worth reusing" — it needs no fixture, no
+# network, and no browser, so this runs everywhere `cargo test` does.
+
+verification: "Direct call: in lifecycle blocks"
+spec_ref: https://github.com/onsager-ai/duhem/issues/526
+
+flows:
+  record_marker:
+    description: Round-trip a label through a real (if trivial) action, standing in for "some real cleanup/precondition action with a useful output".
+    params:
+      label: { type: string }
+    steps:
+      - id: insert
+        uses: db/query
+        with:
+          connection: 'sqlite::memory:'
+          sql: 'select ? as label'
+          params: [$params.label]
+    outputs:
+      label: $steps.insert.outputs.rows[0].label
+
+setup:
+  - id: seed
+    call: record_marker
+    with: { label: leaf-setup-marker }
+  - id: echo_seed
+    uses: db/query
+    with:
+      connection: 'sqlite::memory:'
+      sql: 'select ? as echoed'
+      params: [$setup.seed.outputs.label]
+
+criteria:
+  - id: AC-1
+    description: >
+      A direct call: in leaf setup: runs its flow once (not wrapped in
+      for_each:), and the flow's declared output is reachable from a
+      later setup: step through $setup.<call-id>.outputs.<name>.
+    checks:
+      - id: AC-1.1
+        description: The setup-seeded marker was echoed by the later setup step.
+        steps:
+          - id: inspect
+            uses: db/query
+            with:
+              connection: 'sqlite::memory:'
+              sql: 'select ? as value'
+              params: ['$setup.echo_seed.outputs.rows[0].echoed']
+        assertions:
+          - $steps.inspect.outputs.rows[0].value == "leaf-setup-marker"
+        teardown:
+          - id: cleanup
+            description: The same flow, called directly from a check's own teardown:, matching the spec's worked example.
+            call: record_marker
+            with: { label: check-teardown-marker }

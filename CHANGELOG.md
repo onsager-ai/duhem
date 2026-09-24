@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+## v0.5.1 — 2026-09-24
+
 - [clarifying] The dashboard Results rail links recorded setup, teardown, and fixture blocks at their scopes, with full lifecycle detail and enclosing context on check pages. (#557)
 
 ## v0.5.0 — 2026-09-23

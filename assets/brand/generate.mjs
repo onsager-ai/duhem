@@ -220,13 +220,21 @@ function horizontalLockupSvg(font, { fill = 'currentColor', title = 'Duhem' } = 
   });
 }
 
+// Vertical lockup only: the mark sits over its full-width wordmark line
+// rather than beside a single cap-height line, so mark-height=cap-height
+// (the horizontal-lockup rule, §7) reads undersized here. Brand doc §7
+// gives no rule for the vertical variant, so we scale the mark to ~1.5x
+// the wordmark cap height instead — documented in assets/brand/README.md.
+const VERTICAL_MARK_CAP_RATIO = 1.5;
+
 function verticalLockupSvg(font, { fill = 'currentColor', title = 'Duhem' } = {}) {
   const FS = 64;
-  // Mark sized against the wordmark cap height, same rule as the
-  // horizontal lockup, then stacked with a frame-thickness gap.
+  // Mark sized against the wordmark cap height (scaled by
+  // VERTICAL_MARK_CAP_RATIO — see comment above), then stacked with a
+  // frame-thickness gap.
   const { bbox, d, width } = wordmarkGeometry(font, FS);
   const capHeightPx = -bbox.y1;
-  const markScale = capHeightPx / MARK_VISUAL_SPAN;
+  const markScale = (capHeightPx * VERTICAL_MARK_CAP_RATIO) / MARK_VISUAL_SPAN;
   const markCanvasPx = CANVAS * markScale;
   const gapPx = FRAME_THICKNESS * markScale;
 
@@ -272,7 +280,11 @@ function rasterMarkSvg(fill, sizePx) {
     width: sizePx,
     height: sizePx,
     title: 'Duhem',
-    body: `<g fill="${fill}">
+    // crispEdges: several of these sizes (e.g. 48px -> 1.5px/unit) put a
+    // rect edge on a fractional pixel; without this the anti-aliaser
+    // leaves a partial-coverage (mid-grey) row/column along that edge.
+    // The mark is all axis-aligned rects, so snapping is always correct.
+    body: `<g fill="${fill}" shape-rendering="crispEdges">
     ${markRectsSvg(fill)}
   </g>`,
   });
@@ -318,19 +330,28 @@ function roundedRectPath(x, y, w, h, r) {
   return `M${x + r},${y} H${x + w - r} A${r},${r} 0 0 1 ${x + w},${y + r} V${y + h - r} A${r},${r} 0 0 1 ${x + w - r},${y + h} H${x + r} A${r},${r} 0 0 1 ${x},${y + h - r} V${y + r} A${r},${r} 0 0 1 ${x + r},${y}Z`;
 }
 
+// §9: "mark occupies ~60% of plate width". The mark's *visual* ink only
+// fills MARK_VISUAL_SPAN (28) of its own 32-unit canvas — scaling the
+// full canvas to 60% of the plate (as an earlier version of this script
+// did) under-sizes the visible mark to ~52.5% of the plate. Instead we
+// pick an integer px-per-grid-unit scale whose 28-unit visual span lands
+// closest to 60% of the plate, so every rect edge (mark canvas and
+// visual span alike) sits on a whole pixel.
+const APP_ICON_TARGET_VISUAL_RATIO = 0.6;
+
 function appIconSvg() {
   const SIZE = 1024;
-  const plateRadius = round(SIZE * 0.223);
-  const markPx = round(SIZE * 0.6);
-  const offset = round((SIZE - markPx) / 2);
-  const markScale = round(markPx / CANVAS, 6);
+  const plateRadius = Math.round(SIZE * 0.223);
+  const markScale = Math.round((APP_ICON_TARGET_VISUAL_RATIO * SIZE) / MARK_VISUAL_SPAN);
+  const markCanvasPx = CANVAS * markScale;
+  const offset = (SIZE - markCanvasPx) / 2;
   return svgDoc({
     viewBox: `0 0 ${SIZE} ${SIZE}`,
     width: SIZE,
     height: SIZE,
     title: 'Duhem app icon',
     body: `<path fill="${ACCENT_NAVY}" d="${roundedRectPath(0, 0, SIZE, SIZE, plateRadius)}"/>
-  <g fill="#FFFFFF" transform="translate(${offset} ${offset}) scale(${markScale})">
+  <g fill="#FFFFFF" shape-rendering="crispEdges" transform="translate(${offset} ${offset}) scale(${markScale})">
     ${markRectsSvg('#FFFFFF')}
   </g>`,
   });
@@ -342,15 +363,25 @@ function appIconSvg() {
 
 const TAGLINE = 'Holistic verification for AI-built software.';
 
+// This is a raster (PNG) output, so the mark's axis-aligned rect edges
+// need to land on whole pixels — a fractional px-per-grid-unit leaves a
+// partial-coverage (mid-grey) row/column along an edge (e.g. the old
+// ≈4.57 px/unit put the bottom-bar seam at a fractional y). Pick a
+// fixed integer px-per-grid-unit for the mark, then choose the wordmark
+// size that makes the mark read at roughly VERTICAL_MARK_CAP_RATIO of
+// its cap height (same "undersized next to the wordmark" fix as the
+// vertical lockup, documented in assets/brand/README.md).
+const SOCIAL_MARK_PX_PER_UNIT = 7;
+const SOCIAL_LOCKUP_FONT_SIZE = 180;
+
 function socialPreviewSvg(font) {
   const W = 1280;
   const H = 640;
 
   // Vertical lockup, scaled up, centered in the safe area.
-  const lockupFS = 176;
+  const lockupFS = SOCIAL_LOCKUP_FONT_SIZE;
   const { bbox: wmBbox, d: wmD, width: wmWidth } = wordmarkGeometry(font, lockupFS);
-  const capHeightPx = -wmBbox.y1;
-  const markScale = capHeightPx / MARK_VISUAL_SPAN;
+  const markScale = SOCIAL_MARK_PX_PER_UNIT; // integer: crisp rect edges
   const markCanvasPx = CANVAS * markScale;
   const gapPx = FRAME_THICKNESS * markScale;
 
@@ -371,9 +402,8 @@ function socialPreviewSvg(font) {
   const blockHeight = lockupHeight + tagGap + (tagline.bbox.y2 - tagline.bbox.y1);
   const blockTop = (H - blockHeight) / 2;
 
-  const markX = (W - lockupWidth) / 2 - wmBbox.x1 < 0 ? (W - lockupWidth) / 2 : (W - markCanvasPx) / 2;
-  const markLeft = (W - markCanvasPx) / 2;
-  const markTop = blockTop;
+  const markLeft = Math.round((W - markCanvasPx) / 2);
+  const markTop = Math.round(blockTop);
 
   const textLeft = (W - inkWidth) / 2 - wmBbox.x1;
   const textBaselineY = markTop + markCanvasPx + gapPx - wmBbox.y1;
@@ -389,7 +419,7 @@ function socialPreviewSvg(font) {
     title: 'Duhem — Holistic verification for AI-built software.',
     extraAttrs: '',
     body: `<rect x="0" y="0" width="${W}" height="${H}" fill="#FFFFFF"/>
-  <g fill="#000000" transform="translate(${round(markLeft)} ${round(markTop)}) scale(${round(markScale, 5)})">
+  <g fill="#000000" shape-rendering="crispEdges" transform="translate(${markLeft} ${markTop}) scale(${markScale})">
     ${markRectsSvg('#000000')}
   </g>
   <path fill="#000000" transform="translate(${round(textLeft)} ${round(textBaselineY)})" d="${wmD}"/>

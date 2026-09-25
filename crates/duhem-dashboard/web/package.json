@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
+    "icons": "node scripts/icons.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

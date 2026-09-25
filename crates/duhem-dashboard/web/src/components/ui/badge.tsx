@@ -17,7 +17,7 @@ const badgeVariants = cva(
         outline:
           "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 [a&]:hover:underline",
+        link: "text-brand underline-offset-4 [a&]:hover:underline",
         // Verdict variants — soft tinted pills that read in light + dark.
         pass: "border-pass/25 bg-pass/10 text-pass [a&]:hover:bg-pass/20",
         fail: "border-fail/25 bg-fail/10 text-fail [a&]:hover:bg-fail/20",

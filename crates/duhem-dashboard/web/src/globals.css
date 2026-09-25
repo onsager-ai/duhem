@@ -6,82 +6,96 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ---- Design tokens -------------------------------------------------- */
-/* Neutral shadcn base with a Duhem indigo primary. Verdict colors
-   (pass/fail/inconclusive plus the running accent) are first-class tokens so both the
-   shadcn components and the bespoke evidence views read from one place.
+/* Brand palette per docs/duhem-brand.md §5: monochrome-dominant. The
+   primary is ink (near-black on light, near-white on dark); neutrals
+   carry a trace of the navy hue (256); the navy accent `--brand` appears
+   only where a hue is wanted. Verdict colors (pass/fail/inconclusive plus
+   the running accent) are first-class semantic tokens so both the shadcn
+   components and the bespoke evidence views read from one place; every
+   one clears WCAG AA as text on the page and on its own 10% tint.
    Values are oklch for perceptually-even light/dark pairs. */
 
 :root {
   --radius: 0.625rem;
 
   --background: oklch(1 0 0);
-  --foreground: oklch(0.21 0.006 285);
+  --foreground: oklch(0.21 0.006 256);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.006 285);
+  --card-foreground: oklch(0.21 0.006 256);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.006 285);
+  --popover-foreground: oklch(0.21 0.006 256);
 
-  --primary: oklch(0.51 0.19 277);
+  --primary: oklch(0.21 0.006 256);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.004 286);
-  --secondary-foreground: oklch(0.21 0.006 285);
-  --muted: oklch(0.967 0.004 286);
-  --muted-foreground: oklch(0.552 0.014 285);
-  --accent: oklch(0.967 0.004 286);
-  --accent-foreground: oklch(0.21 0.006 285);
-  --destructive: oklch(0.58 0.22 27);
+  --secondary: oklch(0.967 0.004 256);
+  --secondary-foreground: oklch(0.21 0.006 256);
+  --muted: oklch(0.967 0.004 256);
+  --muted-foreground: oklch(0.53 0.014 256);
+  --accent: oklch(0.967 0.004 256);
+  --accent-foreground: oklch(0.21 0.006 256);
+  --destructive: oklch(0.54 0.2 27);
 
-  --border: oklch(0.92 0.004 286);
-  --input: oklch(0.92 0.004 286);
-  --ring: oklch(0.51 0.19 277);
+  --border: oklch(0.92 0.004 256);
+  --input: oklch(0.92 0.004 256);
+  --ring: oklch(0.346 0.074 256);
+
+  /* Brand accent — deep navy #1E3A5F (docs/duhem-brand.md §5). Used
+     sparingly where a hue is wanted: links, focus rings, the active nav
+     icon. Everything else stays monochrome ink. */
+  --brand: oklch(0.346 0.074 256);
+  --brand-foreground: oklch(0.985 0 0);
 
   /* Verdict palette — the semantic heart of the product. */
-  --pass: oklch(0.62 0.16 149);
+  --pass: oklch(0.51 0.14 150);
   --pass-foreground: oklch(0.98 0.02 150);
-  --fail: oklch(0.58 0.22 27);
+  --fail: oklch(0.54 0.2 27);
   --fail-foreground: oklch(0.98 0.02 20);
-  --inconclusive: oklch(0.70 0.15 75);
-  --inconclusive-foreground: oklch(0.28 0.07 75);
-  --live: oklch(0.58 0.17 250);
+  --inconclusive: oklch(0.53 0.12 70);
+  --inconclusive-foreground: oklch(0.98 0.02 80);
+  --live: oklch(0.52 0.15 252);
   --live-foreground: oklch(0.98 0.02 250);
 
-  --sidebar: oklch(0.985 0.002 286);
-  --sidebar-foreground: oklch(0.21 0.006 285);
-  --sidebar-primary: oklch(0.51 0.19 277);
+  --sidebar: oklch(0.985 0.002 256);
+  --sidebar-foreground: oklch(0.21 0.006 256);
+  --sidebar-primary: oklch(0.21 0.006 256);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.967 0.004 286);
-  --sidebar-accent-foreground: oklch(0.21 0.006 285);
-  --sidebar-border: oklch(0.92 0.004 286);
-  --sidebar-ring: oklch(0.51 0.19 277);
+  --sidebar-accent: oklch(0.967 0.004 256);
+  --sidebar-accent-foreground: oklch(0.21 0.006 256);
+  --sidebar-border: oklch(0.92 0.004 256);
+  --sidebar-ring: oklch(0.346 0.074 256);
 
   /* Scrollbars. The thumb is `--foreground` at low alpha rather than a
      fixed grey, so it keeps the same optical weight against either
      background. The track is always transparent. */
-  --scrollbar-thumb: oklch(0.21 0.006 285 / 22%);
-  --scrollbar-thumb-hover: oklch(0.21 0.006 285 / 42%);
+  --scrollbar-thumb: oklch(0.21 0.006 256 / 22%);
+  --scrollbar-thumb-hover: oklch(0.21 0.006 256 / 42%);
 }
 
 .dark {
-  --background: oklch(0.17 0.005 285);
-  --foreground: oklch(0.92 0.004 286);
-  --card: oklch(0.21 0.006 285);
-  --card-foreground: oklch(0.92 0.004 286);
-  --popover: oklch(0.21 0.006 285);
-  --popover-foreground: oklch(0.92 0.004 286);
+  --background: oklch(0.17 0.005 256);
+  --foreground: oklch(0.92 0.004 256);
+  --card: oklch(0.21 0.006 256);
+  --card-foreground: oklch(0.92 0.004 256);
+  --popover: oklch(0.21 0.006 256);
+  --popover-foreground: oklch(0.92 0.004 256);
 
-  --primary: oklch(0.72 0.15 277);
-  --primary-foreground: oklch(0.17 0.02 280);
-  --secondary: oklch(0.27 0.007 286);
-  --secondary-foreground: oklch(0.92 0.004 286);
-  --muted: oklch(0.27 0.007 286);
-  --muted-foreground: oklch(0.71 0.012 286);
-  --accent: oklch(0.27 0.007 286);
-  --accent-foreground: oklch(0.92 0.004 286);
+  --primary: oklch(0.92 0.004 256);
+  --primary-foreground: oklch(0.21 0.006 256);
+  --secondary: oklch(0.27 0.007 256);
+  --secondary-foreground: oklch(0.92 0.004 256);
+  --muted: oklch(0.27 0.007 256);
+  --muted-foreground: oklch(0.71 0.012 256);
+  --accent: oklch(0.27 0.007 256);
+  --accent-foreground: oklch(0.92 0.004 256);
   --destructive: oklch(0.70 0.19 22);
 
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.72 0.15 277);
+  --ring: oklch(0.74 0.08 252);
+
+  /* The navy accent lifted for a dark ground (same hue family). */
+  --brand: oklch(0.74 0.08 252);
+  --brand-foreground: oklch(0.21 0.03 256);
 
   --pass: oklch(0.74 0.17 150);
   --pass-foreground: oklch(0.20 0.05 150);
@@ -92,19 +106,28 @@
   --live: oklch(0.72 0.14 250);
   --live-foreground: oklch(0.18 0.04 250);
 
-  --sidebar: oklch(0.21 0.006 285);
-  --sidebar-foreground: oklch(0.92 0.004 286);
-  --sidebar-primary: oklch(0.72 0.15 277);
-  --sidebar-primary-foreground: oklch(0.17 0.02 280);
-  --sidebar-accent: oklch(0.27 0.007 286);
-  --sidebar-accent-foreground: oklch(0.92 0.004 286);
+  --sidebar: oklch(0.21 0.006 256);
+  --sidebar-foreground: oklch(0.92 0.004 256);
+  --sidebar-primary: oklch(0.92 0.004 256);
+  --sidebar-primary-foreground: oklch(0.21 0.006 256);
+  --sidebar-accent: oklch(0.27 0.007 256);
+  --sidebar-accent-foreground: oklch(0.92 0.004 256);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.72 0.15 277);
+  --sidebar-ring: oklch(0.74 0.08 252);
 
   /* Slightly lower alpha than light: a pale thumb on a dark ground
      reads heavier at equal opacity. */
-  --scrollbar-thumb: oklch(0.92 0.004 286 / 18%);
-  --scrollbar-thumb-hover: oklch(0.92 0.004 286 / 36%);
+  --scrollbar-thumb: oklch(0.92 0.004 256 / 18%);
+  --scrollbar-thumb-hover: oklch(0.92 0.004 256 / 36%);
+}
+
+/* ---- Typography ---------------------------------------------------- */
+/* Inter is bundled (@fontsource-variable/inter, imported in main.tsx):
+   the dashboard is embedded in the binary and must render offline. Mono
+   stays Tailwind's system mono stack. */
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, "Segoe UI", Roboto,
+    sans-serif;
 }
 
 /* ---- Tailwind theme mapping ---------------------------------------- */
@@ -134,6 +157,8 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
 
   --color-pass: var(--pass);
   --color-pass-foreground: var(--pass-foreground);
@@ -165,7 +190,7 @@
     cursor: pointer;
   }
   html {
-    font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+    font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
     overflow-x: clip;
@@ -209,5 +234,27 @@
     ::-webkit-scrollbar-thumb:hover {
       background-color: var(--scrollbar-thumb-hover);
     }
+  }
+}
+
+/* ---- Verdict mark (docs/duhem-brand.md Appendix B) ------------------ */
+/* While a run is in flight the mark's center square pulses 0.8 → 1.0
+   opacity on a 1.5s cycle. A display state, never the brand mark; off
+   entirely for users who ask for reduced motion. */
+@keyframes duhem-verdict-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+.verdict-mark-pulse {
+  animation: duhem-verdict-pulse 1.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .verdict-mark-pulse {
+    animation: none;
   }
 }

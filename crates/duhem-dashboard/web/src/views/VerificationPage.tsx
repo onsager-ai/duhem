@@ -90,7 +90,7 @@ export default function VerificationPage() {
         {latest?.has_definition && latestRun && (
           <Link
             to={`/run/${encodeURIComponent(latestRun.run_id)}/definition`}
-            className="mt-2 inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+            className="mt-2 inline-flex items-center gap-1.5 text-sm text-brand hover:underline"
           >
             <FileText className="size-3.5" /> View current definition
           </Link>
@@ -153,7 +153,7 @@ export default function VerificationPage() {
                   <TableCell>
                     <Link
                       to={`/run/${encodeURIComponent(run.run_id)}`}
-                      className="font-mono text-sm text-primary hover:underline"
+                      className="font-mono text-sm text-brand hover:underline"
                     >
                       {run.run_id}
                     </Link>

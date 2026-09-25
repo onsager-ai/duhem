@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] The dashboard wears the Duhem brand: the real mark and wordmark, a favicon set, bundled Inter for offline use, an ink-and-navy palette whose verdict colors meet WCAG AA in both themes, and a verdict mark in the run header that pulses while a run is live. (#560)
+
 ## v0.5.1 — 2026-09-24
 
 - [clarifying] The dashboard Results rail links recorded setup, teardown, and fixture blocks at their scopes, with full lifecycle detail and enclosing context on check pages. (#557)

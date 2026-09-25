@@ -1,9 +1,9 @@
-<p align="center">
+<h1 align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/brand/duhem-lockup-dark.svg">
     <img src="assets/brand/duhem-lockup-light.svg" alt="Duhem" width="280">
   </picture>
-</p>
+</h1>
 
 <p align="center"><strong>Holistic verification for AI-built software.</strong></p>
 

@@ -356,18 +356,21 @@ The family rule: **outer form follows thesis; center remains fixed**.
 
 ## Appendix A — File assets
 
-The brand mark is provided in the following formats. (Exports are produced from a single SVG source of truth.)
+The brand mark is provided in the following formats, committed under [`assets/brand/`](../assets/brand/). Exports are produced from a single generator (`assets/brand/generate.mjs`) that emits every file from the mark geometry in §1 and an outlined Inter 400 wordmark (§6) — see [`assets/brand/README.md`](../assets/brand/README.md) for the regeneration command and determinism guarantee.
 
-|File                       |Use                                |
-|---------------------------|-----------------------------------|
-|`duhem.svg`                |Master vector, scalable to any size|
-|`duhem-32.png`             |Standard UI icon                   |
-|`duhem-favicon.ico`        |Browser favicon                    |
-|`duhem-app-icon.png`       |App icon (1024×1024 base)          |
-|`duhem-lockup.svg`         |Horizontal lockup with wordmark    |
-|`duhem-lockup-vertical.svg`|Vertical lockup                    |
-|`duhem-mark-only.svg`      |Mark without wordmark              |
-|`duhem-wordmark.svg`       |Wordmark without mark              |
+|File                                                                     |Use                                                                |
+|--------------------------------------------------------------------------|--------------------------------------------------------------------|
+|[`assets/brand/duhem.svg`](../assets/brand/duhem.svg)                     |Master vector, `currentColor`, scalable to any size                |
+|[`assets/brand/duhem-mark-only.svg`](../assets/brand/duhem-mark-only.svg) |Mark without wordmark, `currentColor`                              |
+|[`assets/brand/duhem-wordmark.svg`](../assets/brand/duhem-wordmark.svg)   |Wordmark without mark, outlined, `currentColor`                    |
+|[`assets/brand/duhem-lockup.svg`](../assets/brand/duhem-lockup.svg)       |Horizontal lockup with wordmark, `currentColor`                    |
+|[`assets/brand/duhem-lockup-vertical.svg`](../assets/brand/duhem-lockup-vertical.svg)|Vertical lockup, `currentColor`                          |
+|[`assets/brand/duhem-lockup-light.svg`](../assets/brand/duhem-lockup-light.svg)|Horizontal lockup, fixed black fill, transparent background — for READMEs/pages on a light background |
+|[`assets/brand/duhem-lockup-dark.svg`](../assets/brand/duhem-lockup-dark.svg)|Horizontal lockup, fixed white fill, transparent background — dark-background counterpart |
+|`assets/brand/duhem-{16,32,48,64,192,512}.png`                            |Mark-only PNGs at each standard size                                |
+|[`assets/brand/duhem-favicon.ico`](../assets/brand/duhem-favicon.ico)     |Browser favicon (16/32/48 multi-size ICO)                           |
+|[`assets/brand/duhem-app-icon.png`](../assets/brand/duhem-app-icon.png)   |App icon (1024×1024), mark on a solid navy rounded-square plate     |
+|[`assets/brand/social-preview.png`](../assets/brand/social-preview.png)   |1280×640 GitHub/social preview image (vertical lockup + tagline)    |
 
 ## Appendix B — Reserved variants
 

@@ -13,6 +13,7 @@ default:
     @printf '  just validate-suites         Validate every verifications/ suite\n'
     @printf '  just preflight               Full CI-equivalent gate before pushing\n\n'
     @printf '  just dashboard [dev|build|test]  Develop, build, or test the dashboard\n'
+    @printf '  just brand                   Regenerate assets/brand/ (the brand kit)\n'
     @printf '  just worktree [add|list]     Manage task worktrees\n'
 
 # Manage isolated task worktrees (`add <branch> [base]` or `list`).
@@ -115,6 +116,11 @@ dashboard action="help" *args:
             exit 2
             ;;
     esac
+
+# Regenerate the committed brand asset kit (assets/brand/) from its
+# geometry source; re-running produces byte-identical output.
+brand:
+    (cd assets/brand && npm install && npm run generate)
 
 # Run the CLI locally; arguments are forwarded (`just dev run ...`).
 dev *args:

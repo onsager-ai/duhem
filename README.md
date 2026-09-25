@@ -1,10 +1,17 @@
-# Duhem
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/duhem-lockup-dark.svg">
+    <img src="assets/brand/duhem-lockup-light.svg" alt="Duhem" width="280">
+  </picture>
+</h1>
 
-**Holistic verification for AI-built software.**
+<p align="center"><strong>Holistic verification for AI-built software.</strong></p>
 
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![CI](https://github.com/onsager-ai/duhem/actions/workflows/ci.yml/badge.svg)](https://github.com/onsager-ai/duhem/actions/workflows/ci.yml)
-[![Schema](https://img.shields.io/badge/schema-v0.x-blue.svg)](CHANGELOG.md)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="https://github.com/onsager-ai/duhem/actions/workflows/ci.yml"><img src="https://github.com/onsager-ai/duhem/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/schema-v0.x-blue.svg" alt="Schema"></a>
+</p>
 
 Duhem turns your acceptance criteria into mechanically judged checks that exercise the real thing you ship — code, prompts, tools, data, and runtime, together — and gates merge on the verdict.
 

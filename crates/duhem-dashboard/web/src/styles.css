@@ -27,7 +27,7 @@
   --lg-radius: 8px;
   --lg-radius-lg: 14px;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 4px 14px rgba(0, 0, 0, 0.08);
-  --lg-ring: 0 0 0 3px rgba(124, 136, 255, 0.28);
+  --lg-ring: 0 0 0 3px color-mix(in oklab, var(--ring) 35%, transparent);
   /* Row hover / anchor tints that follow the theme: a foreground-tinted
      overlay darkens on light and lightens on dark (the old fixed
      rgba(255,255,255,…) only worked on the dark canvas). */
@@ -37,7 +37,7 @@
 
 /* Bare links inside the legacy evidence views (reskinned links carry their
    own Tailwind color/decoration utilities, which win from the higher layer). */
-a { color: var(--live); text-decoration: none; }
+a { color: var(--brand); text-decoration: none; }
 
 table.runs {
   width: 100%;
@@ -62,11 +62,11 @@ tr.nested td:first-child { padding-left: 2rem; }
   border: 1px solid transparent;
   vertical-align: middle;
 }
-.verdict-pass { color: var(--pass); background: rgba(63, 185, 80, 0.12); border-color: rgba(63, 185, 80, 0.35); }
-.verdict-fail { color: var(--fail); background: rgba(248, 81, 73, 0.13); border-color: rgba(248, 81, 73, 0.38); }
-.verdict-inconclusive { color: var(--inconclusive); background: rgba(210, 153, 34, 0.12); border-color: rgba(210, 153, 34, 0.35); }
+.verdict-pass { color: var(--pass); background: color-mix(in oklab, var(--pass) 12%, transparent); border-color: color-mix(in oklab, var(--pass) 35%, transparent); }
+.verdict-fail { color: var(--fail); background: color-mix(in oklab, var(--fail) 12%, transparent); border-color: color-mix(in oklab, var(--fail) 38%, transparent); }
+.verdict-inconclusive { color: var(--inconclusive); background: color-mix(in oklab, var(--inconclusive) 12%, transparent); border-color: color-mix(in oklab, var(--inconclusive) 35%, transparent); }
 .verdict-none { color: var(--lg-muted); border-color: var(--lg-border); }
-.badge-live { color: var(--live); background: rgba(88, 166, 255, 0.12); border-color: rgba(88, 166, 255, 0.35); }
+.badge-live { color: var(--live); background: color-mix(in oklab, var(--live) 12%, transparent); border-color: color-mix(in oklab, var(--live) 35%, transparent); }
 
 .filters {
   display: flex;
@@ -90,7 +90,7 @@ tr.nested td:first-child { padding-left: 2rem; }
   padding: 0.2rem 0.7rem;
   color: var(--lg-muted);
 }
-.filters .chip.on { color: var(--text); border-color: var(--live); }
+.filters .chip.on { color: var(--text); border-color: var(--brand); }
 
 .panel {
   background: var(--panel);
@@ -449,7 +449,7 @@ li.ev.tone-inconclusive > .ev-raw > summary {
 .target-box {
   position: absolute;
   border: 2px solid var(--fail);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 12px rgba(248, 81, 73, 0.5);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 12px color-mix(in oklab, var(--fail) 50%, transparent);
   border-radius: 2px;
   pointer-events: none;
 }
@@ -501,8 +501,8 @@ table.har td.har-url {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.status-pill.ok { color: var(--pass); background: rgba(63, 185, 80, 0.12); }
-.status-pill.bad { color: var(--fail); background: rgba(248, 81, 73, 0.14); }
+.status-pill.ok { color: var(--pass); background: color-mix(in oklab, var(--pass) 12%, transparent); }
+.status-pill.bad { color: var(--fail); background: color-mix(in oklab, var(--fail) 14%, transparent); }
 
 /* -- #212/#213: run-to-run diff ------------------------------------- */
 .diff-heads { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; font-size: 0.92rem; }
@@ -1140,7 +1140,7 @@ li.ev.step-group.tone-skipped > details > summary .ev-label { color: var(--lg-mu
   font-size: 0.82rem;
 }
 .chips .chip:hover { color: var(--text); }
-.chips .chip.on { color: var(--text); border-color: var(--lg-accent); background: rgba(124, 136, 255, 0.12); }
+.chips .chip.on { color: var(--text); border-color: var(--lg-accent); background: color-mix(in oklab, var(--brand) 10%, transparent); }
 .chips .chip .n { font-weight: 700; }
 .chips .chip .n.ok { color: var(--pass); }
 .chips .chip .n.bad { color: var(--fail); }
@@ -1232,8 +1232,8 @@ li.ev.step-group.tone-skipped > details > summary .ev-label { color: var(--lg-mu
   font-size: 0.68rem;
   opacity: 0.72;
 }
-.span-ok { color: #4ade80; border-color: #4ade8055; }
-.span-fail { color: #f87171; border-color: #f8717155; }
+.span-ok { color: var(--pass); border-color: color-mix(in oklab, var(--pass) 33%, transparent); }
+.span-fail { color: var(--fail); border-color: color-mix(in oklab, var(--fail) 33%, transparent); }
 /* The chain's connector + fail marker are lucide SVGs (#284 follow-up),
    sized to sit on the layer-pill text baseline. */
 .span-sep {
@@ -1285,10 +1285,10 @@ li.ev.step-group.tone-skipped > details > summary .ev-label { color: var(--lg-mu
   border-radius: 50%;
   display: inline-block;
 }
-.dot.verdict-pass { background: #4ade80; }
-.dot.verdict-fail { background: #f87171; }
-.dot.verdict-inconclusive { background: #facc15; }
-.dot.dot-absent { background: transparent; border: 1px dashed #4b5563; }
+.dot.verdict-pass { background: var(--pass); }
+.dot.verdict-fail { background: var(--fail); }
+.dot.verdict-inconclusive { background: var(--inconclusive); }
+.dot.dot-absent { background: transparent; border: 1px dashed var(--lg-muted); }
 
 .checks-note { font-size: 0.8rem; margin-top: 0.15rem; }
 tr.assertion td { font-size: 0.85rem; padding-left: 2.4rem; }

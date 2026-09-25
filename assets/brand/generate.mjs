@@ -274,28 +274,107 @@ function verticalLockupSvg(font, { fill = 'currentColor', title = 'Duhem' } = {}
 // 4. Raster (PNG / ICO) generation
 // ---------------------------------------------------------------------
 
+// CANVAS (32) doesn't divide evenly into 16 or 48 (0.5 and 1.5 px per
+// grid unit). At those sizes, scaling the 32-unit geometry — even with
+// shape-rendering="crispEdges" — lands rect edges on a half pixel, and
+// the rasterizer's crisp-edge snap rounds each edge independently rather
+// than as a symmetric whole: measured on duhem-16.png, a 6px centre
+// square sat 3px from the left frame and 2px from the right. For these
+// two sizes we hand-author an explicit, whole-pixel, mirror-symmetric
+// grid instead of scaling. See assets/brand/README.md.
+const HAND_SNAPPED_MARK_PX = {
+  16: [
+    { x: 1, y: 1, w: 14, h: 2 }, // top bar
+    { x: 1, y: 13, w: 14, h: 2 }, // bottom bar
+    { x: 1, y: 3, w: 2, h: 10 }, // left bar
+    { x: 13, y: 3, w: 2, h: 10 }, // right bar
+    { x: 5, y: 5, w: 6, h: 6 }, // center — 2px gap on every side
+  ],
+  48: [
+    { x: 3, y: 3, w: 42, h: 6 }, // top bar
+    { x: 3, y: 39, w: 42, h: 6 }, // bottom bar
+    { x: 3, y: 9, w: 6, h: 30 }, // left bar
+    { x: 39, y: 9, w: 6, h: 30 }, // right bar
+    { x: 16, y: 16, w: 16, h: 16 }, // center — 7px gap on every side
+  ],
+};
+
+function handSnappedRectsSvg(rects, fill) {
+  return rects
+    .map((r) => `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="${fill}"/>`)
+    .join('\n    ');
+}
+
 function rasterMarkSvg(fill, sizePx) {
+  const snapped = HAND_SNAPPED_MARK_PX[sizePx];
+  if (snapped) {
+    return svgDoc({
+      viewBox: `0 0 ${sizePx} ${sizePx}`,
+      width: sizePx,
+      height: sizePx,
+      title: 'Duhem',
+      body: `<g fill="${fill}" shape-rendering="crispEdges">
+    ${handSnappedRectsSvg(snapped, fill)}
+  </g>`,
+    });
+  }
   return svgDoc({
     viewBox: `0 0 ${CANVAS} ${CANVAS}`,
     width: sizePx,
     height: sizePx,
     title: 'Duhem',
-    // crispEdges: several of these sizes (e.g. 48px -> 1.5px/unit) put a
-    // rect edge on a fractional pixel; without this the anti-aliaser
-    // leaves a partial-coverage (mid-grey) row/column along that edge.
-    // The mark is all axis-aligned rects, so snapping is always correct.
+    // crispEdges: at the remaining sizes CANVAS still divides evenly
+    // (1, 2, 6, 16 px/unit), so this is a no-op precision safety net,
+    // not a correction — those scales were already whole-pixel.
     body: `<g fill="${fill}" shape-rendering="crispEdges">
     ${markRectsSvg(fill)}
   </g>`,
   });
 }
 
-function renderPng(svgString, sizePx) {
+// Every mark-only raster must be mirror-symmetric left-right and
+// top-bottom (the mark itself is). Throws with the exact offending row
+// or column so a regression fails the generate step, not a later visual
+// inspection.
+function assertMarkSymmetry(rendered, label) {
+  const { width, height, pixels } = rendered;
+  const at = (x, y) => {
+    const i = (y * width + x) * 4;
+    return [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]];
+  };
+  const eq = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < Math.floor(width / 2); x++) {
+      const l = at(x, y);
+      const r = at(width - 1 - x, y);
+      if (!eq(l, r)) {
+        throw new Error(
+          `${label}: row ${y} is not a left-right palindrome at x=${x} (${l}) vs x=${width - 1 - x} (${r})`
+        );
+      }
+    }
+  }
+  for (let x = 0; x < width; x++) {
+    for (let y = 0; y < Math.floor(height / 2); y++) {
+      const t = at(x, y);
+      const b = at(x, height - 1 - y);
+      if (!eq(t, b)) {
+        throw new Error(
+          `${label}: column ${x} is not a top-bottom palindrome at y=${y} (${t}) vs y=${height - 1 - y} (${b})`
+        );
+      }
+    }
+  }
+}
+
+function renderPng(svgString, sizePx, { assertSymmetry = false, label } = {}) {
   const resvg = new Resvg(svgString, {
     fitTo: { mode: 'width', value: sizePx },
     background: 'rgba(0,0,0,0)',
   });
-  return resvg.render().asPng();
+  const rendered = resvg.render();
+  if (assertSymmetry) assertMarkSymmetry(rendered, label ?? `${sizePx}px`);
+  return rendered.asPng();
 }
 
 function writeIco(outPath, entries) {
@@ -460,7 +539,10 @@ async function main() {
   const icoPngs = [];
   for (const size of pngSizes) {
     const svg = rasterMarkSvg('#000000', size);
-    const png = renderPng(svg, size);
+    const png = renderPng(svg, size, {
+      assertSymmetry: true,
+      label: `duhem-${size}.png`,
+    });
     write(`duhem-${size}.png`, png);
     if ([16, 32, 48].includes(size)) icoPngs.push({ size, png });
   }

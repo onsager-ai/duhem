@@ -20,3 +20,7 @@ tmp/
 # placeholder when absent)
 crates/duhem-dashboard/web/node_modules/
 crates/duhem-dashboard/web/dist/
+
+# Brand asset generator deps (assets/brand/generate.mjs). Generated
+# outputs (SVG/PNG/ICO) are committed; only node_modules is ignored.
+assets/brand/node_modules/

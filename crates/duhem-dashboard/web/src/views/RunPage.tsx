@@ -248,7 +248,7 @@ export function RunSummary({ run }: { run: RunDetail }) {
           <dd className="flex flex-wrap gap-x-4 gap-y-1">
             <Link
               to={`/run/${encodeURIComponent(run.run_id)}/diff`}
-              className="text-primary hover:underline"
+              className="text-brand hover:underline"
             >
               compare to baseline
             </Link>
@@ -256,7 +256,7 @@ export function RunSummary({ run }: { run: RunDetail }) {
               href={traceUrl(run.run_id)}
               target="_blank"
               rel="noreferrer"
-              className="text-primary hover:underline"
+              className="text-brand hover:underline"
             >
               raw trace.jsonl
             </a>
@@ -307,7 +307,7 @@ export function LifecycleList({ blocks, runId }: { blocks: LifecycleBlock[]; run
       <ul className="space-y-1 text-sm">
         {blocks.map((block, index) => (
           <li key={`${block.started_at}-${index}`}>
-            {runId ? <Link to={lifecycleHref(runId, block)} className="text-primary hover:underline"><span className="font-mono">{lifecycleScopePath(block)}</span> {block.phase}</Link>
+            {runId ? <Link to={lifecycleHref(runId, block)} className="text-brand hover:underline"><span className="font-mono">{lifecycleScopePath(block)}</span> {block.phase}</Link>
               : <><span className="font-mono">{lifecycleScopePath(block)}</span> {block.phase}</>}{" "}
             <span data-status={block.status}>{block.status}</span>{" "}
             <span className="text-muted-foreground">({formatDuration(block.duration_ms)})</span>

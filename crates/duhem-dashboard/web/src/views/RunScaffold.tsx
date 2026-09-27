@@ -37,6 +37,7 @@ import {
   type SuiteStatus,
 } from "../suite-tree";
 import { StatusBadge, VerdictBadge } from "../ui";
+import { VerdictMark } from "../components/brand/VerdictMark";
 import { DefinitionProvider, useVd } from "./definition-context";
 
 export type ConnectionState = "connected" | "reconnecting" | "disconnected";
@@ -594,6 +595,13 @@ export function RunScaffold({
       <div className="run-workspace -my-6 min-w-0 max-w-full md:-my-8">
         <header className="run-workspace-header sticky top-14 z-30 -mx-4 mb-2 border-b bg-background/95 px-4 pt-2 backdrop-blur md:-mx-8 md:px-8">
           <h2 className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-base font-semibold tracking-tight">
+            {/* Appendix B verdict mark; aria-hidden — the badges below
+                announce status and verdict as text. */}
+            <VerdictMark
+              verdict={run.verdict}
+              status={run.status}
+              className="size-6"
+            />
             <span className="min-w-0 truncate">
               {run.verification}
             </span>

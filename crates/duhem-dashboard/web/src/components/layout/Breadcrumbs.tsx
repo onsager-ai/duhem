@@ -67,7 +67,7 @@ export function Breadcrumbs() {
             <Fragment key={`${crumb.label}-${i}`}>
               <BreadcrumbItem>
                 {crumb.to && !last ? (
-                  <BreadcrumbLink asChild>
+                  <BreadcrumbLink asChild className="text-muted-foreground">
                     <Link to={crumb.to} title={crumb.title}>
                       {crumb.label}
                     </Link>

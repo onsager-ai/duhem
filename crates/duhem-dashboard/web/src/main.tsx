@@ -1,6 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+// Inter, bundled (not a CDN): the dashboard is embedded in the binary and
+// must render offline. Registers the "Inter Variable" family.
+import "@fontsource-variable/inter";
 // globals.css: Tailwind + design tokens (owns the theme). styles.css:
 // the not-yet-reskinned evidence-view component rules (#285 migrates
 // them onto the design system, then this second import goes away).

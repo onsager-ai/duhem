@@ -126,7 +126,10 @@ pub fn run(args: Vec<String>) -> Result<()> {
 
 enum Outcome {
     Current(Version),
-    Stale { pin: Version, breaking: BTreeSet<u64> },
+    Stale {
+        pin: Version,
+        breaking: BTreeSet<u64>,
+    },
 }
 
 struct StaleRow {
@@ -274,7 +277,8 @@ fn parse_consumer_args(args: &[String]) -> Result<HashMap<String, String>> {
 }
 
 fn parse_registry(src: &str) -> Result<Vec<ConsumerEntry>> {
-    let doc: serde_yml::Value = serde_yml::from_str(src).map_err(|e| anyhow!("invalid YAML: {e}"))?;
+    let doc: serde_yml::Value =
+        serde_yml::from_str(src).map_err(|e| anyhow!("invalid YAML: {e}"))?;
     let items = doc
         .as_sequence()
         .ok_or_else(|| anyhow!("expected a top-level YAML sequence of consumer entries"))?;
@@ -321,7 +325,11 @@ fn parse_version(raw: &str) -> Option<Version> {
     if parts.next().is_some() {
         return None;
     }
-    Some(Version { major, minor, patch })
+    Some(Version {
+        major,
+        minor,
+        patch,
+    })
 }
 
 fn parse_component(raw: &str) -> Option<u64> {
@@ -450,7 +458,14 @@ mod tests {
             "duhem.yml",
         )
         .expect("pin extracts");
-        assert_eq!(pin, Version { major: 0, minor: 2, patch: 1 });
+        assert_eq!(
+            pin,
+            Version {
+                major: 0,
+                minor: 2,
+                patch: 1
+            }
+        );
     }
 
     #[test]
@@ -461,7 +476,14 @@ mod tests {
             "ci.yml",
         )
         .expect("pin extracts");
-        assert_eq!(pin, Version { major: 0, minor: 4, patch: 0 });
+        assert_eq!(
+            pin,
+            Version {
+                major: 0,
+                minor: 4,
+                patch: 0
+            }
+        );
     }
 
     #[test]
@@ -485,7 +507,11 @@ mod tests {
     #[test]
     fn pin_equal_to_current_has_no_breaking_entries() {
         let sections = parse_release_sections(FIXTURE_CHANGELOG);
-        let current = Version { major: 0, minor: 5, patch: 1 };
+        let current = Version {
+            major: 0,
+            minor: 5,
+            patch: 1,
+        };
         let breaking = breaking_entries_in_range(&sections, current, current);
         assert!(breaking.is_empty());
     }
@@ -493,8 +519,16 @@ mod tests {
     #[test]
     fn breaking_range_excludes_entries_at_or_below_the_pin() {
         let sections = parse_release_sections(FIXTURE_CHANGELOG);
-        let pin = Version { major: 0, minor: 4, patch: 0 };
-        let current = Version { major: 0, minor: 5, patch: 1 };
+        let pin = Version {
+            major: 0,
+            minor: 4,
+            patch: 0,
+        };
+        let current = Version {
+            major: 0,
+            minor: 5,
+            patch: 1,
+        };
         let breaking = breaking_entries_in_range(&sections, pin, current);
         // Only v0.5.0's two breaking entries are strictly above the
         // v0.4.0 pin and at-or-below v0.5.1 current. v0.4.0's own
@@ -509,8 +543,16 @@ mod tests {
     #[test]
     fn breaking_range_from_the_issues_worked_example() {
         let sections = parse_release_sections(FIXTURE_CHANGELOG);
-        let pin = Version { major: 0, minor: 2, patch: 1 };
-        let current = Version { major: 0, minor: 5, patch: 1 };
+        let pin = Version {
+            major: 0,
+            minor: 2,
+            patch: 1,
+        };
+        let current = Version {
+            major: 0,
+            minor: 5,
+            patch: 1,
+        };
         let breaking = breaking_entries_in_range(&sections, pin, current);
         // The spec issue's own worked example: pin 0.2.1, current
         // 0.5.1, seven `[breaking]` entries (#430-432 share one bullet).

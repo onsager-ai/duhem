@@ -3,7 +3,7 @@
 // inside Results. The criteria → checks rail is deliberately scoped to
 // Results; Summary and Definition get the full content width.
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, FileText, ListChecks, LayoutList } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -36,9 +36,21 @@ import {
   type SuiteCriterionNode,
   type SuiteStatus,
 } from "../suite-tree";
-import { StatusBadge, VerdictBadge } from "../ui";
+import { VerdictBadge, formatDuration, formatStartedAt } from "../ui";
 import { VerdictMark } from "../components/brand/VerdictMark";
 import { DefinitionProvider, useVd } from "./definition-context";
+import { useCollapseOnScroll } from "../hooks/use-collapse-on-scroll";
+import { useOptionalRunsData } from "../runs-context";
+import {
+  criteriaTally,
+  findRunEntry,
+  finishedAt,
+  firstFailedAssertion,
+  firstFailedCheck,
+  verdictWord,
+  type BandTone,
+  type FirstFailure,
+} from "../verdict-band";
 
 export type ConnectionState = "connected" | "reconnecting" | "disconnected";
 
@@ -558,6 +570,179 @@ function RunTabs({ run, active }: { run: RunDetail; active: RunTab }) {
   );
 }
 
+// Verdict colour only where it carries meaning (brand Appendix B): the
+// verdict word. Every token clears WCAG AA on `--background` in both
+// themes (light ≥ 5.3:1, dark ≥ 6.8:1). A run with no verdict stays ink.
+const TONE_TEXT: Record<BandTone, string> = {
+  pass: "text-pass",
+  fail: "text-fail",
+  inconclusive: "text-inconclusive",
+  live: "text-live",
+  none: "text-foreground",
+};
+
+// The first failed check's recorded failure. The check id comes from the
+// run detail (the same criteria → checks the Results tree lists); its
+// expected/observed pair needs that check's slice of the trace, fetched
+// once per failed check — the Results tree fetches the active check the
+// same way.
+function useFirstFailure(run: RunDetail): {
+  criterionId: string;
+  checkId: string;
+  failure: FirstFailure | null;
+} | null {
+  const target = useMemo(() => firstFailedCheck(run), [run]);
+  const criterionId = target?.criterionId;
+  const checkId = target?.checkId;
+  const [failure, setFailure] = useState<FirstFailure | null>(null);
+  useEffect(() => {
+    setFailure(null);
+    if (criterionId === undefined || checkId === undefined) return;
+    let live = true;
+    fetchCheck(run.run_id, criterionId, checkId).then(
+      (detail) => live && setFailure(firstFailedAssertion(detail)),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [run.run_id, criterionId, checkId]);
+  if (criterionId === undefined || checkId === undefined) return null;
+  return { criterionId, checkId, failure };
+}
+
+// The run header's verdict band (#563) — the image people share.
+// Expanded, it reads in a thumbnail: a 40px verdict mark, the verdict as
+// a word at display size, a summary line, and on fail the first failure.
+// Collapsed (the reader has scrolled), it is the single-line header it
+// replaced. Brand §8: no gradients, shadows or glows; monochrome apart
+// from the verdict colour.
+export function VerdictBand({
+  run,
+  connection,
+  collapsed = false,
+  durationMs = null,
+}: {
+  run: RunDetail;
+  connection: ConnectionState;
+  collapsed?: boolean;
+  /** From the runs list — `RunDetail` records no duration. */
+  durationMs?: number | null;
+}) {
+  const { word, tone } = verdictWord(run.verdict, run.status);
+  const cause =
+    run.status !== "running" && run.verdict?.startsWith("inconclusive:")
+      ? run.verdict.slice("inconclusive:".length)
+      : null;
+  const first = useFirstFailure(run);
+  const finished = run.status === "running" ? null : finishedAt(run.started_at, durationMs);
+  return (
+    <div
+      data-testid="verdict-band"
+      data-collapsed={collapsed ? "true" : "false"}
+      className={cn("flex min-w-0", collapsed ? "items-center gap-2" : "items-start gap-3 sm:gap-5")}
+    >
+      {/* Appendix B verdict mark; aria-hidden — the verdict word beside
+          it announces the verdict as text. */}
+      <VerdictMark
+        verdict={run.verdict}
+        status={run.status}
+        className={collapsed ? "size-6" : "mt-1 size-10"}
+      />
+      <div className={cn("min-w-0 flex-1", !collapsed && "pb-3")}>
+        {/* The verdict word stays inside this heading: the
+            self-verification VD locates `{role: heading, text: pass}`. */}
+        <h2
+          className={cn(
+            "flex min-w-0 font-semibold tracking-tight",
+            collapsed ? "flex-wrap items-center gap-x-2 gap-y-1 text-base" : "flex-col gap-0.5",
+          )}
+        >
+          <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+            <span
+              data-testid="verdict-word"
+              data-tone={tone}
+              className={cn(TONE_TEXT[tone], collapsed ? "text-base" : "text-3xl leading-tight sm:text-4xl")}
+            >
+              {word}
+            </span>
+            {cause && (
+              <span className="font-mono text-xs font-normal text-muted-foreground" title={run.verdict ?? undefined}>
+                {cause}
+              </span>
+            )}
+          </span>
+          <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm font-normal">
+            <span className="min-w-0 truncate font-medium text-foreground">
+              {run.verification}
+            </span>
+            <code
+              className="max-w-[22ch] truncate font-mono text-xs text-muted-foreground"
+              title={run.run_id}
+            >
+              {run.run_id}
+            </code>
+            {run.status === "running" && (
+              <span className="text-xs text-muted-foreground">{connection}</span>
+            )}
+          </span>
+        </h2>
+        {!collapsed && (
+          <p
+            data-testid="verdict-summary"
+            className="mt-1.5 flex flex-wrap gap-x-2 gap-y-0.5 text-sm text-muted-foreground"
+          >
+            <span className="font-medium text-foreground">{criteriaTally(run)}</span>
+            {run.status !== "running" && durationMs !== null && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="tabular-nums">took {formatDuration(durationMs)}</span>
+              </>
+            )}
+            {(finished || run.started_at) && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="tabular-nums">
+                  {finished
+                    ? `finished ${finished.toLocaleString()}`
+                    : `started ${formatStartedAt(run.started_at)}`}
+                </span>
+              </>
+            )}
+          </p>
+        )}
+        {!collapsed && first && (
+          <Link
+            to={checkHref(run.run_id, first.criterionId, first.checkId)}
+            data-testid="first-failure"
+            title={first.failure?.full}
+            className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-sm text-sm hover:underline"
+          >
+            <span className="text-muted-foreground">First failure</span>
+            <span className="font-mono font-medium text-foreground">{first.checkId}</span>
+            {first.failure?.expected !== undefined ? (
+              <>
+                <span className="text-muted-foreground">expected</span>
+                <code data-testid="first-failure-expected" className="font-mono text-foreground [overflow-wrap:anywhere]">
+                  {first.failure.expected}
+                </code>
+                <span className="text-muted-foreground">observed</span>
+                <code data-testid="first-failure-observed" className="font-mono text-fail [overflow-wrap:anywhere]">
+                  {first.failure.observed}
+                </code>
+              </>
+            ) : first.failure?.reason !== undefined ? (
+              <span data-testid="first-failure-reason" className="text-foreground [overflow-wrap:anywhere]">
+                {first.failure.reason}
+              </span>
+            ) : null}
+          </Link>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // The run report frame. `children` is the detail panel, given the
 // resolved run so a page can derive from it (RunPage's donut, inputs).
 export function RunScaffold({
@@ -581,6 +766,26 @@ export function RunScaffold({
 }) {
   const { run, error, connection } = useRun(runId);
   const railWidth = useRailWidth();
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
+  const collapsed = useCollapseOnScroll(workspaceRef);
+  const runs = useOptionalRunsData()?.runs;
+  const durationMs = findRunEntry(runs, runId)?.duration_ms ?? null;
+  const loaded = run !== null;
+  // The Results panes size to the viewport minus the sticky header. The
+  // expanded band is taller than the single-line header, so its measured
+  // height feeds `--run-header-h`; the fallback (no ResizeObserver, first
+  // paint) is the collapsed height, which keeps the prior 10.5rem total.
+  useEffect(() => {
+    const header = headerRef.current;
+    const workspace = workspaceRef.current;
+    if (!header || !workspace || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      workspace.style.setProperty("--run-header-h", `${header.offsetHeight}px`);
+    });
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [loaded]);
 
   if (error) return <p className="error">{error}</p>;
   if (run === null) return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -592,33 +797,20 @@ export function RunScaffold({
       : "summary";
   return (
     <DefinitionProvider runId={runId} enabled={run.has_definition}>
-      <div className="run-workspace -my-6 min-w-0 max-w-full md:-my-8">
-        <header className="run-workspace-header sticky top-14 z-30 -mx-4 mb-2 border-b bg-background/95 px-4 pt-2 backdrop-blur md:-mx-8 md:px-8">
-          <h2 className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-base font-semibold tracking-tight">
-            {/* Appendix B verdict mark; aria-hidden — the badges below
-                announce status and verdict as text. */}
-            <VerdictMark
-              verdict={run.verdict}
-              status={run.status}
-              className="size-6"
-            />
-            <span className="min-w-0 truncate">
-              {run.verification}
-            </span>
-            <code
-              className="max-w-[22ch] truncate font-mono text-xs font-normal text-muted-foreground"
-              title={run.run_id}
-            >
-              {run.run_id}
-            </code>
-            <StatusBadge status={run.status} />
-            <VerdictBadge verdict={run.verdict} />
-            {run.status === "running" && (
-              <span className="text-xs font-normal text-muted-foreground">
-                {connection}
-              </span>
-            )}
-          </h2>
+      <div ref={workspaceRef} className="run-workspace -my-6 min-w-0 max-w-full md:-my-8">
+        <header
+          ref={headerRef}
+          className={cn(
+            "run-workspace-header sticky top-14 z-30 -mx-4 mb-2 border-b bg-background/95 px-4 backdrop-blur md:-mx-8 md:px-8",
+            collapsed ? "pt-2" : "pt-4",
+          )}
+        >
+          <VerdictBand
+            run={run}
+            connection={connection}
+            collapsed={collapsed}
+            durationMs={durationMs}
+          />
           <RunTabs run={run} active={active} />
         </header>
 
@@ -632,7 +824,7 @@ export function RunScaffold({
             className="run-results-grid grid min-w-0 max-w-full md:grid-cols-[var(--run-rail-width,17rem)_0.75rem_minmax(0,1fr)]"
             style={{ "--run-rail-width": `${railWidth.width}px` } as React.CSSProperties}
           >
-            <aside className="min-w-0 max-w-full border-b md:grid md:max-h-[calc(100vh-10.5rem)] md:grid-rows-[auto_minmax(0,1fr)] md:border-b-0">
+            <aside className="min-w-0 max-w-full border-b md:grid md:max-h-[calc(100vh_-_99px_-_var(--run-header-h,69px))] md:grid-rows-[auto_minmax(0,1fr)] md:border-b-0">
               <RunTree
                 run={run}
                 activeLifecycle={activeLifecycle}
@@ -648,7 +840,7 @@ export function RunScaffold({
               onChange={railWidth.setRailWidth}
               onReset={railWidth.resetRailWidth}
             />
-            <section className="run-results-detail min-w-0 py-3 md:max-h-[calc(100vh-10.5rem)] md:overflow-y-auto md:py-0 md:pl-4">
+            <section className="run-results-detail min-w-0 py-3 md:max-h-[calc(100vh_-_99px_-_var(--run-header-h,69px))] md:overflow-y-auto md:py-0 md:pl-4">
               {children(run)}
             </section>
           </div>

@@ -930,8 +930,10 @@ li.ev.step-group.tone-skipped > details > summary .ev-label { color: var(--lg-mu
  * `check-context` happens to be (verified: `check-context`'s sticky
  * range itself ends exactly when the trailing content clears it, so a
  * taller `check-context` does not change how much runway is needed).
- * `.run-results-detail`'s visible height is `calc(100vh - 10.5rem)`
- * (RunScaffold.tsx, duplicated here for lack of a shared token) with
+ * `.run-results-detail`'s visible height is at most `calc(100vh -
+ * 10.5rem)` — the collapsed single-line header; the expanded verdict
+ * band (#563) only shortens it (RunScaffold.tsx sizes it from the
+ * measured `--run-header-h`, duplicated here for lack of a shared token) with
  * a 1rem margin for subpixel/scrollbar rounding — confirmed against
  * both that same worst case and a realistic mid-list step (a
  * screenshot capture) that continuous forward scrolling now always

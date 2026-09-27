@@ -200,7 +200,7 @@ fn breaking_entries_in_range(
 ) -> BTreeSet<u64> {
     sections
         .iter()
-        .filter(|section| section.version >= pin && section.version <= current)
+        .filter(|section| section.version > pin && section.version <= current)
         .flat_map(|section| section.breaking_prs.iter().copied())
         .collect()
 }

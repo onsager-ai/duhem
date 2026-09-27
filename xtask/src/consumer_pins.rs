@@ -489,9 +489,15 @@ mod tests {
 
     #[test]
     fn unparseable_pin_is_reported_not_silently_passed() {
+        // The pin regex's character class ([0-9.]+) only ever captures
+        // digits and dots, so a genuinely non-numeric pin (`latest`)
+        // can't match at all — that's `unmatched_pin_regex_is_reported`
+        // below. This covers the shape that *does* match the regex but
+        // still isn't a version: a trailing dot leaves an empty
+        // component.
         let err = extract_pin_version(
             r"DUHEM_VERSION: '([0-9.]+)'",
-            "  DUHEM_VERSION: 'latest'\n",
+            "  DUHEM_VERSION: '1.'\n",
             "duhem.yml",
         )
         .unwrap_err();

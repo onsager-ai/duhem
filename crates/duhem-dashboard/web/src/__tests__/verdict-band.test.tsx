@@ -16,6 +16,7 @@ import {
   finishedAt,
   firstFailedAssertion,
   firstFailedCheck,
+  utcStamp,
   verdictWord,
 } from "../verdict-band";
 
@@ -197,6 +198,36 @@ describe("verdict band derivations", () => {
   });
 });
 
+describe("verdict band timestamps", () => {
+  it("stamps a fixed UTC minute whatever the input offset", () => {
+    expect(utcStamp("2026-09-27T14:24:59.900Z")).toEqual({
+      text: "2026-09-27 14:24 UTC",
+      iso: "2026-09-27T14:24:59.900Z",
+    });
+    expect(utcStamp("2026-09-27T23:24:00+09:00")?.text).toBe("2026-09-27 14:24 UTC");
+    expect(utcStamp(null)).toBeNull();
+    expect(utcStamp("not a date")).toBeNull();
+  });
+
+  it("shows the finished time in UTC with the full ISO timestamp in the title", () => {
+    stubFetch();
+    renderBand(run(), { durationMs: 1234 });
+    const time = screen.getByTestId("verdict-time");
+    expect(time.textContent).toBe("finished 2026-07-22 14:03 UTC");
+    const stamp = time.querySelector("time");
+    expect(stamp?.getAttribute("title")).toBe("2026-07-22T14:03:01.234Z");
+    expect(stamp?.getAttribute("datetime")).toBe("2026-07-22T14:03:01.234Z");
+  });
+
+  it("falls back to the started time in the same format", () => {
+    stubFetch();
+    renderBand(run({ verdict: null, status: "running" }), { durationMs: null });
+    const time = screen.getByTestId("verdict-time");
+    expect(time.textContent).toBe("started 2026-07-22 14:03 UTC");
+    expect(time.querySelector("time")?.getAttribute("title")).toBe("2026-07-22T14:03:00.000Z");
+  });
+});
+
 describe("VerdictBand", () => {
   it("renders a pass at display size inside the heading", () => {
     stubFetch();
@@ -338,6 +369,26 @@ describe("RunScaffold verdict band", () => {
     await screen.findByTestId("verdict-band");
     scroll(container.querySelector(".run-results-detail")!, 60, 80);
     expect(screen.getByTestId("verdict-band").getAttribute("data-collapsed")).toBe("false");
+  });
+
+  it("leaves the failed check's id naming only its Results-tree link", async () => {
+    // Duhem compiles `{role: link, name: X}` to Playwright's public
+    // `role=link[name="X"]`, a whole-name, case-insensitive match. This
+    // asserts the stricter case-insensitive *substring* match (what
+    // `getByRole({ name })` does by default), which covers both.
+    stubFetch();
+    renderScaffold();
+    const band = await screen.findByTestId("first-failure");
+    await waitFor(() => expect(screen.getByTestId("first-failure-expected")).toBeTruthy());
+    const named = screen.getAllByRole("link", {
+      name: (accessibleName) => accessibleName.toLowerCase().includes("ac-5.2"),
+    });
+    expect(named).toHaveLength(1);
+    expect(screen.getByTestId("run-tree").contains(named[0])).toBe(true);
+    // The band link keeps the id visible and the detail in its title.
+    expect(screen.getByRole("link", { name: "Open first failed check" })).toBe(band);
+    expect(band.textContent).toContain("AC-5.2");
+    expect(band.getAttribute("title")).toBe("actual 500, expected 201");
   });
 
   it("shows the duration recorded on the runs list", async () => {

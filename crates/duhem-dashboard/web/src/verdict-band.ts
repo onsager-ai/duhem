@@ -59,6 +59,18 @@ export function finishedAt(
   return new Date(start + durationMs);
 }
 
+/** A fixed, locale- and timezone-independent stamp to the minute —
+ *  `2026-09-27 14:24 UTC` — so a shared screenshot reads the same for
+ *  every viewer; `iso` is the full timestamp for a tooltip. Null for a
+ *  missing or unparseable value. */
+export function utcStamp(value: Date | string | null): { text: string; iso: string } | null {
+  if (value === null) return null;
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return null;
+  const iso = date.toISOString();
+  return { text: `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`, iso };
+}
+
 /** The first check the judge recorded as `fail`, in criteria → check
  *  order — the same order the Results tree lists them. */
 export function firstFailedCheck(

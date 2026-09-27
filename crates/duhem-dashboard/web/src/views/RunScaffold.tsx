@@ -36,7 +36,7 @@ import {
   type SuiteCriterionNode,
   type SuiteStatus,
 } from "../suite-tree";
-import { VerdictBadge, formatDuration, formatStartedAt } from "../ui";
+import { VerdictBadge, formatDuration } from "../ui";
 import { VerdictMark } from "../components/brand/VerdictMark";
 import { DefinitionProvider, useVd } from "./definition-context";
 import { useCollapseOnScroll } from "../hooks/use-collapse-on-scroll";
@@ -47,6 +47,7 @@ import {
   finishedAt,
   firstFailedAssertion,
   firstFailedCheck,
+  utcStamp,
   verdictWord,
   type BandTone,
   type FirstFailure,
@@ -636,7 +637,9 @@ export function VerdictBand({
       ? run.verdict.slice("inconclusive:".length)
       : null;
   const first = useFirstFailure(run);
-  const finished = run.status === "running" ? null : finishedAt(run.started_at, durationMs);
+  const finished = run.status === "running" ? null : utcStamp(finishedAt(run.started_at, durationMs));
+  const started = utcStamp(run.started_at);
+  const stamp = finished ?? started;
   return (
     <div
       data-testid="verdict-band"
@@ -700,13 +703,14 @@ export function VerdictBand({
                 <span className="tabular-nums">took {formatDuration(durationMs)}</span>
               </>
             )}
-            {(finished || run.started_at) && (
+            {stamp && (
               <>
                 <span aria-hidden="true">·</span>
-                <span className="tabular-nums">
-                  {finished
-                    ? `finished ${finished.toLocaleString()}`
-                    : `started ${formatStartedAt(run.started_at)}`}
+                <span className="tabular-nums" data-testid="verdict-time">
+                  {finished ? "finished " : "started "}
+                  <time dateTime={stamp.iso} title={stamp.iso}>
+                    {stamp.text}
+                  </time>
                 </span>
               </>
             )}
@@ -716,6 +720,10 @@ export function VerdictBand({
           <Link
             to={checkHref(run.run_id, first.criterionId, first.checkId)}
             data-testid="first-failure"
+            // Not the bare check id: the Results tree's check link is
+            // named exactly `chk.id`, and VDs click `{role: link, name:
+            // <id>}`. The id stays visible; the detail is in `title`.
+            aria-label="Open first failed check"
             title={first.failure?.full}
             className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-sm text-sm hover:underline"
           >

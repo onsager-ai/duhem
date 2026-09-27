@@ -171,6 +171,10 @@ describe("verdict band derivations", () => {
     expect(reason?.reason).toBe(`${"y".repeat(80)}…`);
   });
 
+  it("returns null for a check detail without a timeline", () => {
+    expect(firstFailedAssertion({ ...check([]), timeline: undefined } as unknown as CheckDetail)).toBeNull();
+  });
+
   it("returns null when no assertion failed", () => {
     expect(firstFailedAssertion(check([assertion("pass", "actual 1, expected 1")]))).toBeNull();
   });
@@ -234,6 +238,19 @@ describe("VerdictBand", () => {
     // The first-failure line sits outside the heading, so the heading's
     // accessible name stays the verdict and the run.
     expect(within(screen.getByRole("heading")).queryByTestId("first-failure")).toBeNull();
+  });
+
+  it("still names the failed check when its detail cannot be read", async () => {
+    // A payload without a timeline, as a stub that answers every URL
+    // with the run detail returns: no pair, no unhandled error.
+    stubFetch(FAILING as unknown as CheckDetail);
+    renderBand(FAILING);
+    const line = screen.getByTestId("first-failure");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(line.textContent).toBe("First failureAC-5.2");
+    expect(screen.queryByTestId("first-failure-expected")).toBeNull();
   });
 
   it("renders an inconclusive run with its cause and no failure line", () => {

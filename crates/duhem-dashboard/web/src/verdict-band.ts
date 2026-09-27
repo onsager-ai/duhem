@@ -87,7 +87,9 @@ export interface FirstFailure {
  *  split by the same `failureParts` the check page renders, then
  *  truncated so the band stays a single legible line. */
 export function firstFailedAssertion(detail: CheckDetail): FirstFailure | null {
-  const evt = detail.timeline.find(
+  // A response without a timeline (a stubbed or foreign payload) names
+  // no failure rather than throwing inside the fetch callback.
+  const evt = (detail.timeline ?? []).find(
     (e) => e.kind === "assertion_evaluated" && e.state === "fail",
   );
   if (!evt) return null;

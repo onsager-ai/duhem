@@ -599,10 +599,11 @@ function useFirstFailure(run: RunDetail): {
     setFailure(null);
     if (criterionId === undefined || checkId === undefined) return;
     let live = true;
-    fetchCheck(run.run_id, criterionId, checkId).then(
-      (detail) => live && setFailure(firstFailedAssertion(detail)),
-      () => {},
-    );
+    // The band names the check either way; a failed fetch or an
+    // unreadable detail only drops the expected/observed pair.
+    fetchCheck(run.run_id, criterionId, checkId)
+      .then((detail) => live && setFailure(firstFailedAssertion(detail)))
+      .catch(() => {});
     return () => {
       live = false;
     };

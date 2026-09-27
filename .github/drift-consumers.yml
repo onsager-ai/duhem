@@ -1,0 +1,19 @@
+# Registry of drift-monitored consumer repos for
+# `cargo xtask consumer-pins` (issue #380). Plain YAML, one parser
+# (`parse_registry` in xtask/src/consumer_pins.rs) — the workflow
+# discovers (repo, path) pairs via `cargo xtask consumer-pins --list`
+# rather than re-parsing this file itself.
+#
+# Each entry:
+#   - repo: <owner>/<name>   the consumer's GitHub repo
+#     path: <path>           the workflow file (in that repo) that pins duhem
+#     pin:  <regex>          one capture group extracting the pinned version
+#
+# Adding a consumer here is enough — no workflow edit needed.
+
+- repo: onsager-ai/chreode
+  path: .github/workflows/duhem.yml
+  pin: "DUHEM_VERSION: '([0-9.]+)'"
+- repo: onsager-ai/ostrom-hub
+  path: .github/workflows/ci.yml
+  pin: "npx duhem@([0-9.]+)"

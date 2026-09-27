@@ -1,0 +1,89 @@
+# Consumer pin currency (issue #380).
+#
+# This is a SEPARATE signal from `drift-chreode.yml`. That job proves a
+# consumer's Verification Definition still *passes* against a
+# freshly-built `duhem`. This job only reads a consumer's pinned
+# `duhem` version and warns when it has fallen behind a `[breaking]`
+# CHANGELOG entry — a consumer can be passing (or, like ostrom-hub, not
+# drift-monitored at all) and still carry a pin that will bite on the
+# next upgrade.
+#
+# Warn-only for consumer problems: a stale or unreadable consumer is
+# an annotation (`::warning::` when a breaking entry is crossed,
+# `::notice::` when a pin is merely behind current), never a non-zero
+# exit — this job never blocks a PR. `cargo xtask consumer-pins` does
+# still exit non-zero on a structural failure (the registry, the
+# CHANGELOG, or the current version failing to read/parse), which is
+# a duhem-repo bug, not a consumer's problem.
+#
+# Consumers are listed in `.github/drift-consumers.yml`; adding one
+# there is enough — this workflow needs no edit.
+#
+# To arm this job:
+#   1. add repo secret CONSUMER_PINS_TOKEN — a fine-grained PAT with
+#      Contents: read on onsager-ai/chreode and onsager-ai/ostrom-hub
+#      (extend its repo access as the registry grows);
+#   2. set repo variable CONSUMER_PINS_READY=true.
+# Until then the job is skipped (never red).
+
+name: consumer-pins
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # weekly, Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: consumer-pins-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  consumer-pins:
+    name: consumer pin currency
+    runs-on: ubuntu-latest
+    # Gated until the read credential is configured — see the header
+    # comment above for how to arm it.
+    if: ${{ vars.CONSUMER_PINS_READY == 'true' }}
+    steps:
+      - name: Checkout duhem (registry + CHANGELOG + current version)
+        uses: actions/checkout@v7
+
+      - name: Show toolchain
+        run: |
+          rustup show active-toolchain
+          cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      # `consumer-pins --list` reads `.github/drift-consumers.yml`
+      # through the xtask's own registry parser and prints
+      # `repo<TAB>path` per entry, so the registry has exactly one
+      # parser rather than a second, format-coupled one here. Each
+      # file is then fetched through the contents API with the
+      # read-only token, and the fetched local paths are handed to the
+      # xtask — which does no networking of its own.
+      - name: Fetch consumer files + check pin currency
+        env:
+          GH_TOKEN: ${{ secrets.CONSUMER_PINS_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/consumer-pins"
+
+          args=()
+          while IFS=$'\t' read -r repo path; do
+            [ -z "$repo" ] && continue
+            dest="${RUNNER_TEMP}/consumer-pins/$(echo "$repo" | tr '/' '_').txt"
+            if gh api "repos/${repo}/contents/${path}" --jq '.content' | base64 -d > "$dest"; then
+              args+=("--consumer" "${repo}=${dest}")
+            else
+              echo "::warning::consumer-pins: could not fetch ${repo}/${path}"
+            fi
+          done < <(cargo run -p xtask --quiet -- consumer-pins --list)
+
+          cargo run -p xtask --quiet -- consumer-pins "${args[@]}"

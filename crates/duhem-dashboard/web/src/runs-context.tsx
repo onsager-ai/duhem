@@ -31,3 +31,10 @@ export function useRunsData(): RunsData {
   if (!ctx) throw new Error("useRunsData must be used within a RunsProvider");
   return ctx;
 }
+
+/** The shared runs list when a provider is mounted, else `null`. The run
+ *  header reads its duration from here (#563) and must still render in
+ *  isolation — tests and embeds mount the run views without the shell. */
+export function useOptionalRunsData(): RunsData | null {
+  return useContext(RunsContext);
+}

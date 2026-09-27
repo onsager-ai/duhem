@@ -162,12 +162,13 @@ describe("run report tree", () => {
   it("renders the run verdict inside a heading", async () => {
     stub();
     renderAt("/run/R1");
-    // The run header is a heading carrying the verification, run id, and
-    // the verdict badge text — the self-verification VD asserts the
-    // verdict is rendered inside a heading.
+    // The run header is a heading carrying the verdict word, then the
+    // verification and run id on its secondary line (#563) — the
+    // self-verification VD asserts the verdict is rendered inside a
+    // heading.
     await waitFor(() =>
       expect(
-        screen.getByRole("heading", { name: /pegasus-register.*fail/s }),
+        screen.getByRole("heading", { name: /^Failed\s*pegasus-register\s*R1$/ }),
       ).toBeTruthy(),
     );
   });

@@ -322,6 +322,28 @@ export function parseComparison(
   return { actual: m[1], expected: m[2] };
 }
 
+// Plain-language "what happened", derived mechanically from the
+// recorded timeline (never re-judged, never LLM-authored): a failed
+// comparison or a semantic "expected X, but Y" detail splits into its
+// expected/observed pair; anything else is shown verbatim as a reason.
+// Shared by the check page's failure cards and the run header's
+// first-failure line (#563).
+export function failureParts(detail: string): {
+  expected?: string;
+  observed?: string;
+  reason?: string;
+} {
+  const comparison = parseComparison(detail);
+  if (comparison) {
+    return { expected: comparison.expected, observed: comparison.actual };
+  }
+  const semantic = /^expected (.+?)(?:,\s+but|\s+but)\s+(.+)$/s.exec(detail);
+  if (semantic) {
+    return { expected: semantic[1], observed: semantic[2] };
+  }
+  return { reason: detail };
+}
+
 export interface CheckSummaryModel {
   verdict: CheckDetail["verdict"];
   /** Plain-language "what happened" line. */

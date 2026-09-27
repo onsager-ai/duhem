@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/card";
 import { fetchCheck, type ArtifactRef, type CheckDetail, type LifecycleBlock, type SpanModel, type TraceEvent } from "../api";
 import { VerdictBadge, formatDuration, isImageArtifact } from "../ui";
-import { compactValue, deliveryLayerLabel, describeWith, formatEvent, groupTimeline, parseComparison, stepDuration, stepStatus, summarizeCheck, type TimelineNode } from "../format";
+import { compactValue, deliveryLayerLabel, describeWith, failureParts, formatEvent, groupTimeline, stepDuration, stepStatus, summarizeCheck, type TimelineNode } from "../format";
 import { EventIcon } from "../components/EventIcon";
 import { RunScaffold } from "./RunScaffold";
 import { useVd } from "./definition-context";
@@ -78,24 +78,6 @@ export function CheckMetadata({ detail }: { detail: CheckDetail }) {
       </CardContent>
     </Card>
   );
-}
-
-// Plain-language "what happened", derived mechanically from the
-// recorded timeline (never re-judged, never LLM-authored).
-function failureParts(detail: string): {
-  expected?: string;
-  observed?: string;
-  reason?: string;
-} {
-  const comparison = parseComparison(detail);
-  if (comparison) {
-    return { expected: comparison.expected, observed: comparison.actual };
-  }
-  const semantic = /^expected (.+?)(?:,\s+but|\s+but)\s+(.+)$/s.exec(detail);
-  if (semantic) {
-    return { expected: semantic[1], observed: semantic[2] };
-  }
-  return { reason: detail };
 }
 
 function FailureBreakdown({

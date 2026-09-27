@@ -8,10 +8,13 @@
 # drift-monitored at all) and still carry a pin that will bite on the
 # next upgrade.
 #
-# Warn-only: `cargo xtask consumer-pins` always exits 0. This job never
-# blocks a PR — it's a scheduled/manual advisory that annotates the run
-# (`::warning::` when a breaking entry is crossed, `::notice::` when a
-# pin is merely behind current) and appends a job-summary table.
+# Warn-only for consumer problems: a stale or unreadable consumer is
+# an annotation (`::warning::` when a breaking entry is crossed,
+# `::notice::` when a pin is merely behind current), never a non-zero
+# exit — this job never blocks a PR. `cargo xtask consumer-pins` does
+# still exit non-zero on a structural failure (the registry, the
+# CHANGELOG, or the current version failing to read/parse), which is
+# a duhem-repo bug, not a consumer's problem.
 #
 # Consumers are listed in `.github/drift-consumers.yml`; adding one
 # there is enough — this workflow needs no edit.
@@ -29,6 +32,9 @@ on:
   schedule:
     - cron: '0 6 * * 1' # weekly, Monday 06:00 UTC
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: consumer-pins-${{ github.workflow }}-${{ github.ref }}

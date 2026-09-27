@@ -67,8 +67,17 @@
 //! A GitHub annotation per consumer behind current or unreadable (see
 //! "Severity" above for `::warning::` vs `::notice::`), plus a
 //! Markdown table appended to `$GITHUB_STEP_SUMMARY` when that env var
-//! is set. Always exits `0` — this is an advisory, scheduled signal,
-//! never a gate.
+//! is set. Every consumer-derived value in an annotation (a raw pin,
+//! a regex, a path, an error string) is escaped per GitHub's
+//! workflow-command rules before printing, so one can't inject a
+//! newline and forge a second annotation line.
+//!
+//! A consumer problem (stale pin, missing file, bad regex, bad
+//! version) is warn-only — an annotation, never a non-zero exit; this
+//! is an advisory, scheduled signal, not a gate. A *structural*
+//! failure — the registry, the CHANGELOG, or the current version
+//! itself failing to read or parse — is a duhem-repo bug, not a
+//! consumer's problem, and does exit non-zero.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -130,7 +139,13 @@ pub fn run(args: Vec<String>) -> Result<()> {
             }
             Err(reason) => {
                 warning_count += 1;
-                println!("::warning::consumer-pins: {}: {reason}", entry.repo);
+                println!(
+                    "{}",
+                    escape_annotation(&format!(
+                        "::warning::consumer-pins: {}: {reason}",
+                        entry.repo
+                    ))
+                );
             }
         }
     }
@@ -179,13 +194,15 @@ fn format_registry_list(entries: &[ConsumerEntry]) -> Vec<String> {
 /// when it crosses at least one `[breaking]` entry (the migration-cost
 /// signal), `::notice::` otherwise — real but lower-severity
 /// information, and not counted toward the run's warning count.
+/// `repo` is registry data (this repo's own file) but is escaped
+/// along with everything else — see `escape_annotation`.
 fn stale_annotation(
     repo: &str,
     pin: Version,
     current: Version,
     breaking: &BTreeSet<u64>,
 ) -> String {
-    if breaking.is_empty() {
+    let message = if breaking.is_empty() {
         format!(
             "::notice::consumer-pins: {repo} pin v{pin} is behind current v{current}, no breaking change crossed"
         )
@@ -194,7 +211,28 @@ fn stale_annotation(
             "::warning::consumer-pins: {repo} pin v{pin} is behind current v{current}; crosses breaking change(s) {}",
             format_pr_list(breaking)
         )
-    }
+    };
+    escape_annotation(&message)
+}
+
+/// Escapes a full `::warning::`/`::notice::` annotation line per
+/// GitHub's workflow-command data-escaping rules (`%` first, then
+/// `\r`, then `\n` — escaping `%` first keeps a literal `%0D`/`%0A`
+/// already present in consumer data from being mistaken for one of
+/// our own escape sequences). Applied to the whole rendered line
+/// rather than to each interpolated field individually: every
+/// consumer-derived value that can reach an annotation (a raw
+/// captured pin, a registry `pin` regex or `path`, an error string
+/// quoting any of those) flows through exactly one call, so a value
+/// containing a newline can't inject a second, forged annotation
+/// line (e.g. a fake `::error::`). The literal `::warning::`/
+/// `::notice::` prefix and `:` separators are untouched — none of the
+/// escaped characters is `:`.
+fn escape_annotation(message: &str) -> String {
+    message
+        .replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
 }
 
 /// Breaking-PR display for the job-summary table: `format_pr_list`
@@ -689,6 +727,31 @@ mod tests {
     fn breaking_display_shows_none_for_an_empty_set() {
         assert_eq!(breaking_display(&BTreeSet::new()), "none");
         assert_eq!(breaking_display(&BTreeSet::from([547])), "#547");
+    }
+
+    #[test]
+    fn escape_annotation_neutralizes_an_embedded_forged_annotation() {
+        // A consumer-derived value (e.g. a captured pin, or a path
+        // quoted in an error) containing a real newline must not let
+        // a forged second command through as its own line.
+        let raw = "boom\n::error::forged";
+        let escaped = escape_annotation(raw);
+        assert_eq!(escaped.lines().count(), 1, "{escaped}");
+        assert!(!escaped.contains('\n'), "{escaped}");
+        assert!(escaped.contains("%0A::error::forged"), "{escaped}");
+    }
+
+    #[test]
+    fn escape_annotation_round_trips_percent() {
+        assert_eq!(escape_annotation("100%"), "100%25");
+    }
+
+    #[test]
+    fn escape_annotation_does_not_double_escape_its_own_sequences() {
+        // Escaping `%` before `\r`/`\n` means the `%` introduced by
+        // escaping a real CR/LF is never itself re-escaped to `%25`.
+        assert_eq!(escape_annotation("\r"), "%0D");
+        assert_eq!(escape_annotation("\n"), "%0A");
     }
 
     #[test]

@@ -1,0 +1,20 @@
+# Registry of drift-monitored consumer repos for
+# `cargo xtask consumer-pins` (issue #380).
+#
+# Each entry is a 3-line stanza — both the xtask's YAML parser and the
+# `consumer-pins.yml` workflow's line-oriented `awk` scan depend on
+# this exact shape: `- repo:` at column 0, `path:`/`pin:` indented two
+# spaces, one entry per stanza.
+#
+#   - repo: <owner>/<name>   the consumer's GitHub repo
+#     path: <path>           the workflow file (in that repo) that pins duhem
+#     pin:  <regex>          one capture group extracting the pinned version
+#
+# Adding a consumer here is enough — no workflow edit needed.
+
+- repo: onsager-ai/chreode
+  path: .github/workflows/duhem.yml
+  pin: "DUHEM_VERSION: '([0-9.]+)'"
+- repo: onsager-ai/ostrom-hub
+  path: .github/workflows/ci.yml
+  pin: "npx duhem@([0-9.]+)"

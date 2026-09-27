@@ -62,11 +62,11 @@ tr.nested td:first-child { padding-left: 2rem; }
   border: 1px solid transparent;
   vertical-align: middle;
 }
-.verdict-pass { color: var(--pass); background: color-mix(in oklab, var(--pass) 12%, transparent); border-color: color-mix(in oklab, var(--pass) 35%, transparent); }
-.verdict-fail { color: var(--fail); background: color-mix(in oklab, var(--fail) 12%, transparent); border-color: color-mix(in oklab, var(--fail) 38%, transparent); }
-.verdict-inconclusive { color: var(--inconclusive); background: color-mix(in oklab, var(--inconclusive) 12%, transparent); border-color: color-mix(in oklab, var(--inconclusive) 35%, transparent); }
+.verdict-pass { color: var(--pass); background: color-mix(in oklab, var(--pass) 10%, transparent); border-color: color-mix(in oklab, var(--pass) 35%, transparent); }
+.verdict-fail { color: var(--fail); background: color-mix(in oklab, var(--fail) 10%, transparent); border-color: color-mix(in oklab, var(--fail) 38%, transparent); }
+.verdict-inconclusive { color: var(--inconclusive); background: color-mix(in oklab, var(--inconclusive) 10%, transparent); border-color: color-mix(in oklab, var(--inconclusive) 35%, transparent); }
 .verdict-none { color: var(--lg-muted); border-color: var(--lg-border); }
-.badge-live { color: var(--live); background: color-mix(in oklab, var(--live) 12%, transparent); border-color: color-mix(in oklab, var(--live) 35%, transparent); }
+.badge-live { color: var(--live); background: color-mix(in oklab, var(--live) 10%, transparent); border-color: color-mix(in oklab, var(--live) 35%, transparent); }
 
 .filters {
   display: flex;
@@ -501,8 +501,8 @@ table.har td.har-url {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.status-pill.ok { color: var(--pass); background: color-mix(in oklab, var(--pass) 12%, transparent); }
-.status-pill.bad { color: var(--fail); background: color-mix(in oklab, var(--fail) 14%, transparent); }
+.status-pill.ok { color: var(--pass); background: color-mix(in oklab, var(--pass) 10%, transparent); }
+.status-pill.bad { color: var(--fail); background: color-mix(in oklab, var(--fail) 10%, transparent); }
 
 /* -- #212/#213: run-to-run diff ------------------------------------- */
 .diff-heads { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; font-size: 0.92rem; }

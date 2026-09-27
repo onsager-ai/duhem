@@ -138,6 +138,7 @@ struct StaleRow {
     breaking: BTreeSet<u64>,
 }
 
+#[derive(Debug)]
 struct ConsumerEntry {
     repo: String,
     path: String,

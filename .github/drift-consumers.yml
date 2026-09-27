@@ -1,11 +1,10 @@
 # Registry of drift-monitored consumer repos for
-# `cargo xtask consumer-pins` (issue #380).
+# `cargo xtask consumer-pins` (issue #380). Plain YAML, one parser
+# (`parse_registry` in xtask/src/consumer_pins.rs) — the workflow
+# discovers (repo, path) pairs via `cargo xtask consumer-pins --list`
+# rather than re-parsing this file itself.
 #
-# Each entry is a 3-line stanza — both the xtask's YAML parser and the
-# `consumer-pins.yml` workflow's line-oriented `awk` scan depend on
-# this exact shape: `- repo:` at column 0, `path:`/`pin:` indented two
-# spaces, one entry per stanza.
-#
+# Each entry:
 #   - repo: <owner>/<name>   the consumer's GitHub repo
 #     path: <path>           the workflow file (in that repo) that pins duhem
 #     pin:  <regex>          one capture group extracting the pinned version

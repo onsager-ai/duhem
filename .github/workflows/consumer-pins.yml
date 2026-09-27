@@ -9,8 +9,9 @@
 # next upgrade.
 #
 # Warn-only: `cargo xtask consumer-pins` always exits 0. This job never
-# blocks a PR — it's a scheduled/manual advisory that annotates the
-# run with `::warning::` and a job-summary table.
+# blocks a PR — it's a scheduled/manual advisory that annotates the run
+# (`::warning::` when a breaking entry is crossed, `::notice::` when a
+# pin is merely behind current) and appends a job-summary table.
 #
 # Consumers are listed in `.github/drift-consumers.yml`; adding one
 # there is enough — this workflow needs no edit.
@@ -54,10 +55,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # Reads `.github/drift-consumers.yml` for the (repo, path) pairs,
-      # fetches each consumer's workflow file through the contents API
-      # with the read-only token, then hands the fetched local paths to
-      # the xtask — which does no networking of its own.
+      # `consumer-pins --list` reads `.github/drift-consumers.yml`
+      # through the xtask's own registry parser and prints
+      # `repo<TAB>path` per entry, so the registry has exactly one
+      # parser rather than a second, format-coupled one here. Each
+      # file is then fetched through the contents API with the
+      # read-only token, and the fetched local paths are handed to the
+      # xtask — which does no networking of its own.
       - name: Fetch consumer files + check pin currency
         env:
           GH_TOKEN: ${{ secrets.CONSUMER_PINS_TOKEN }}
@@ -74,9 +78,6 @@ jobs:
             else
               echo "::warning::consumer-pins: could not fetch ${repo}/${path}"
             fi
-          done < <(awk '
-            /^- repo:/ { repo = $0; sub(/^- repo: */, "", repo) }
-            /^  path:/ { path = $0; sub(/^  path: */, "", path); print repo "\t" path }
-          ' .github/drift-consumers.yml)
+          done < <(cargo run -p xtask --quiet -- consumer-pins --list)
 
-          cargo run -p xtask -- consumer-pins "${args[@]}"
+          cargo run -p xtask --quiet -- consumer-pins "${args[@]}"

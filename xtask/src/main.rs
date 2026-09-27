@@ -7,6 +7,7 @@
 //!     cargo run -p xtask -- schema-json [--check]    # emit/verify JSON Schema
 //!     cargo run -p xtask -- skill-scrub              # published skills ↔ no internal vocab
 //!     cargo run -p xtask -- dx-drift [--mode=warn|fail]  # DX surfaces ↔ product currency
+//!     cargo run -p xtask -- consumer-pins --list  # repo<TAB>path per registry entry (#380)
 //!     cargo run -p xtask -- consumer-pins --consumer <repo>=<path> ...  # pin currency (#380)
 //!
 //! `check-file-budget` enforces a per-file token budget on every `.rs`
@@ -49,7 +50,7 @@ fn main() -> ExitCode {
         Some("consumer-pins") => consumer_pins::run(args.collect()),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage:\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- schema-drift\n  cargo run -p xtask -- schema-changelog-check [--lint]\n  cargo run -p xtask -- schema-json [--check]\n  cargo run -p xtask -- action-reference [--check]\n  cargo run -p xtask -- skill-scrub\n  cargo run -p xtask -- dx-drift [--mode=warn|fail]\n  cargo run -p xtask -- consumer-pins --consumer <repo>=<path> ..."
+            "usage:\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- schema-drift\n  cargo run -p xtask -- schema-changelog-check [--lint]\n  cargo run -p xtask -- schema-json [--check]\n  cargo run -p xtask -- action-reference [--check]\n  cargo run -p xtask -- skill-scrub\n  cargo run -p xtask -- dx-drift [--mode=warn|fail]\n  cargo run -p xtask -- consumer-pins --list\n  cargo run -p xtask -- consumer-pins --consumer <repo>=<path> ..."
         )),
     };
 

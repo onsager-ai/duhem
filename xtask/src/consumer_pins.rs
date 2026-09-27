@@ -37,6 +37,23 @@
 //! pin value is reported as a warning naming the reason — never a
 //! silent pass.
 //!
+//! `--list` prints `repo<TAB>path` per registry entry and exits —
+//! the caller uses this to discover which files to fetch, so
+//! `.github/drift-consumers.yml` has exactly one parser
+//! (`parse_registry`) instead of a second, format-coupled one in the
+//! workflow:
+//!
+//!     cargo run -p xtask -- consumer-pins --list
+//!
+//! ## Severity
+//!
+//! A pin behind current that crosses at least one `[breaking]` entry
+//! is a `::warning::` (and counts toward the exit summary's warning
+//! count). A pin merely behind current with no breaking entry crossed
+//! is a `::notice::` — real information (worth a line in the job
+//! summary), but not the "this will bite on upgrade" signal the
+//! warning is for.
+//!
 //! ## Current version
 //!
 //! Compared against `duhem_schema::SCHEMA_VERSION` — the same
@@ -47,10 +64,11 @@
 //!
 //! ## Output
 //!
-//! A GitHub `::warning::` annotation per stale or unreadable consumer,
-//! plus a Markdown table appended to `$GITHUB_STEP_SUMMARY` when that
-//! env var is set. Always exits `0` — this is an advisory, scheduled
-//! signal, never a gate.
+//! A GitHub annotation per consumer behind current or unreadable (see
+//! "Severity" above for `::warning::` vs `::notice::`), plus a
+//! Markdown table appended to `$GITHUB_STEP_SUMMARY` when that env var
+//! is set. Always exits `0` — this is an advisory, scheduled signal,
+//! never a gate.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -63,6 +81,10 @@ const REGISTRY_PATH: &str = ".github/drift-consumers.yml";
 const CHANGELOG_PATH: &str = "CHANGELOG.md";
 
 pub fn run(args: Vec<String>) -> Result<()> {
+    if args.iter().any(|arg| arg == "--list") {
+        return list_registry();
+    }
+
     let root = workspace_root()?;
     let consumer_files = parse_consumer_args(&args)?;
 
@@ -96,12 +118,10 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 );
             }
             Ok(Outcome::Stale { pin, breaking }) => {
-                warning_count += 1;
-                println!(
-                    "::warning::consumer-pins: {} pin v{pin} is behind current v{current}; crosses breaking change(s) {}",
-                    entry.repo,
-                    format_pr_list(&breaking)
-                );
+                if !breaking.is_empty() {
+                    warning_count += 1;
+                }
+                println!("{}", stale_annotation(&entry.repo, pin, current, &breaking));
                 stale_rows.push(StaleRow {
                     repo: entry.repo.clone(),
                     pin,
@@ -130,6 +150,61 @@ enum Outcome {
         pin: Version,
         breaking: BTreeSet<u64>,
     },
+}
+
+/// `repo<TAB>path` per registry entry, printed by `--list` and used
+/// directly by the workflow to discover which files to fetch — so the
+/// registry has one parser, not a workflow-side format contract too.
+fn list_registry() -> Result<()> {
+    let root = workspace_root()?;
+    let registry_path = root.join(REGISTRY_PATH);
+    let registry_src = std::fs::read_to_string(&registry_path)
+        .with_context(|| format!("read {}", registry_path.display()))?;
+    let entries =
+        parse_registry(&registry_src).with_context(|| format!("parse {REGISTRY_PATH}"))?;
+    for line in format_registry_list(&entries) {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+fn format_registry_list(entries: &[ConsumerEntry]) -> Vec<String> {
+    entries
+        .iter()
+        .map(|entry| format!("{}\t{}", entry.repo, entry.path))
+        .collect()
+}
+
+/// The GitHub annotation for a pin behind `current`. `::warning::`
+/// when it crosses at least one `[breaking]` entry (the migration-cost
+/// signal), `::notice::` otherwise — real but lower-severity
+/// information, and not counted toward the run's warning count.
+fn stale_annotation(
+    repo: &str,
+    pin: Version,
+    current: Version,
+    breaking: &BTreeSet<u64>,
+) -> String {
+    if breaking.is_empty() {
+        format!(
+            "::notice::consumer-pins: {repo} pin v{pin} is behind current v{current}, no breaking change crossed"
+        )
+    } else {
+        format!(
+            "::warning::consumer-pins: {repo} pin v{pin} is behind current v{current}; crosses breaking change(s) {}",
+            format_pr_list(breaking)
+        )
+    }
+}
+
+/// Breaking-PR display for the job-summary table: `format_pr_list`
+/// joined, or `none` when nothing was crossed.
+fn breaking_display(breaking: &BTreeSet<u64>) -> String {
+    if breaking.is_empty() {
+        "none".to_string()
+    } else {
+        format_pr_list(breaking)
+    }
 }
 
 struct StaleRow {
@@ -238,7 +313,7 @@ fn write_job_summary(
                 "| {} | v{} | v{current} | {} |\n",
                 row.repo,
                 row.pin,
-                format_pr_list(&row.breaking)
+                breaking_display(&row.breaking)
             ));
         }
     }
@@ -570,6 +645,47 @@ mod tests {
     }
 
     #[test]
+    fn stale_annotation_is_a_notice_when_no_breaking_change_crossed() {
+        let pin = Version {
+            major: 0,
+            minor: 5,
+            patch: 0,
+        };
+        let current = Version {
+            major: 0,
+            minor: 5,
+            patch: 1,
+        };
+        let annotation = stale_annotation("onsager-ai/chreode", pin, current, &BTreeSet::new());
+        assert!(annotation.starts_with("::notice::"), "{annotation}");
+        assert!(annotation.contains("no breaking change crossed"), "{annotation}");
+    }
+
+    #[test]
+    fn stale_annotation_is_a_warning_when_a_breaking_change_is_crossed() {
+        let pin = Version {
+            major: 0,
+            minor: 4,
+            patch: 0,
+        };
+        let current = Version {
+            major: 0,
+            minor: 5,
+            patch: 1,
+        };
+        let breaking = BTreeSet::from([547, 548]);
+        let annotation = stale_annotation("onsager-ai/chreode", pin, current, &breaking);
+        assert!(annotation.starts_with("::warning::"), "{annotation}");
+        assert!(annotation.contains("crosses breaking change(s) #547, #548"), "{annotation}");
+    }
+
+    #[test]
+    fn breaking_display_shows_none_for_an_empty_set() {
+        assert_eq!(breaking_display(&BTreeSet::new()), "none");
+        assert_eq!(breaking_display(&BTreeSet::from([547])), "#547");
+    }
+
+    #[test]
     fn registry_parses_the_two_seeded_consumers() {
         let src = "\
 - repo: onsager-ai/chreode
@@ -593,6 +709,26 @@ mod tests {
         let src = "- repo: onsager-ai/chreode\n  path: x\n";
         let err = parse_registry(src).unwrap_err();
         assert!(format!("{err:#}").contains("missing or non-string field `pin`"));
+    }
+
+    #[test]
+    fn list_output_is_tab_separated_repo_and_path() {
+        let src = "\
+- repo: onsager-ai/chreode
+  path: .github/workflows/duhem.yml
+  pin: \"DUHEM_VERSION: '([0-9.]+)'\"
+- repo: onsager-ai/ostrom-hub
+  path: .github/workflows/ci.yml
+  pin: \"npx duhem@([0-9.]+)\"
+";
+        let entries = parse_registry(src).expect("registry parses");
+        assert_eq!(
+            format_registry_list(&entries),
+            vec![
+                "onsager-ai/chreode\t.github/workflows/duhem.yml".to_string(),
+                "onsager-ai/ostrom-hub\t.github/workflows/ci.yml".to_string(),
+            ]
+        );
     }
 
     #[test]

@@ -658,7 +658,10 @@ mod tests {
         };
         let annotation = stale_annotation("onsager-ai/chreode", pin, current, &BTreeSet::new());
         assert!(annotation.starts_with("::notice::"), "{annotation}");
-        assert!(annotation.contains("no breaking change crossed"), "{annotation}");
+        assert!(
+            annotation.contains("no breaking change crossed"),
+            "{annotation}"
+        );
     }
 
     #[test]
@@ -676,7 +679,10 @@ mod tests {
         let breaking = BTreeSet::from([547, 548]);
         let annotation = stale_annotation("onsager-ai/chreode", pin, current, &breaking);
         assert!(annotation.starts_with("::warning::"), "{annotation}");
-        assert!(annotation.contains("crosses breaking change(s) #547, #548"), "{annotation}");
+        assert!(
+            annotation.contains("crosses breaking change(s) #547, #548"),
+            "{annotation}"
+        );
     }
 
     #[test]

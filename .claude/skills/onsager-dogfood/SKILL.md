@@ -141,6 +141,8 @@ is the worked example (`onsager-ai/chreode#288` / `#289`).
      `duhem` (`.github/workflows/drift-chreode.yml`; copy per
      product, swapping the target + env bring-up). A red here = a
      Duhem regression against that product.
+
+   Pin currency and passing are separate signals (issue #380). Mode B proves a consumer's VD still passes against the freshly-built `duhem` at HEAD; it says nothing about what version the consumer is actually pinned to in its own CI. A consumer can be green on Mode B (or not drift-monitored at all) while its pinned version sits several `[breaking]` CHANGELOG entries behind current — the migration cost is real even though nothing is failing today. `.github/workflows/consumer-pins.yml` (`cargo xtask consumer-pins`, registry at `.github/drift-consumers.yml`) is the scheduled, warn-only lane that surfaces that gap; it's gated the same way as Mode B and skipped until armed.
 5. Open the product PR (`Closes #N` on the product spec). Any
    Duhem-side wiring (a new drift lane, a new action) is its own Duhem
    PR under the Duhem spec from step 2. Cross-repo: spell out

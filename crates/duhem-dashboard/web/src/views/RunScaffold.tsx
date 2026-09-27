@@ -722,8 +722,10 @@ export function VerdictBand({
             data-testid="first-failure"
             // Not the bare check id: the Results tree's check link is
             // named exactly `chk.id`, and VDs click `{role: link, name:
-            // <id>}`. The id stays visible; the detail is in `title`.
-            aria-label="Open first failed check"
+            // <id>}`. The name is the visible text's opening words, so
+            // Label in Name (WCAG 2.5.3) holds. The id stays visible; the
+            // detail is in `title`.
+            aria-label="First failure"
             title={first.failure?.full}
             className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-sm text-sm hover:underline"
           >

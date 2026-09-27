@@ -386,7 +386,9 @@ describe("RunScaffold verdict band", () => {
     expect(named).toHaveLength(1);
     expect(screen.getByTestId("run-tree").contains(named[0])).toBe(true);
     // The band link keeps the id visible and the detail in its title.
-    expect(screen.getByRole("link", { name: "Open first failed check" })).toBe(band);
+    // Label in Name (WCAG 2.5.3): the name is where the visible text starts.
+    expect(screen.getByRole("link", { name: "First failure" })).toBe(band);
+    expect(band.textContent?.startsWith("First failure")).toBe(true);
     expect(band.textContent).toContain("AC-5.2");
     expect(band.getAttribute("title")).toBe("actual 500, expected 201");
   });

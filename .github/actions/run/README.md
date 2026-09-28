@@ -128,7 +128,10 @@ UI-heavy suites.
 **Mode B** (Duhem's dogfood CI monitors drift by running a product's
 co-located suite with a freshly-built `duhem`) does not use this action
 at all — it invokes the CLI directly against a checked-out product ref.
-See [`.github/workflows/drift-chreode.yml`](../../workflows/drift-chreode.yml).
+The Chreode lane that did this, `drift-chreode.yml`, is retired (last
+on main at `be5a8b2`): chreode ADR 0016 retired the managed-app suites
+it targeted, and Mode B re-points at Chreode's deploy-contract
+replacement once it ships (#380). No product currently runs Mode B.
 
 ## Trust contract (§11.2) — the default `duhem` seam
 

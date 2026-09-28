@@ -2,12 +2,13 @@
 //! `duhem` version has fallen behind a `[breaking]` CHANGELOG entry
 //! (issue #380).
 //!
-//! This is a separate signal from `drift-chreode.yml`: that job proves
-//! a consumer's Verification Definition still *passes* against a
-//! freshly-built `duhem`. This one only reads the consumer's pin and
-//! warns when it's stale — a consumer can be passing (or, like
-//! ostrom-hub, not drift-monitored at all) and still carry a pin that
-//! will bite on the next upgrade.
+//! This is a separate signal from a product's Mode B drift lane (e.g.
+//! the retired `drift-chreode.yml`, last on main at `be5a8b2`): that
+//! kind of job proves a consumer's Verification Definition still
+//! *passes* against a freshly-built `duhem`. This one only reads the
+//! consumer's pin and warns when it's stale — a consumer can be
+//! passing (or, like ostrom-hub, not drift-monitored at all) and
+//! still carry a pin that will bite on the next upgrade.
 //!
 //! ## Registry format
 //!

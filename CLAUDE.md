@@ -19,11 +19,13 @@ runtime), and gates merge/deploy on the verdict.
 > `api/call` / `observe` / `poll` / `stream`,
 > `db/query` / `observe` / `seed`, `cli/invoke`); environment
 > provisioning (`up:` / `down:` hooks) is wired into the runtime;
-> product Verification
-> Definitions are co-located with the products they verify under a
-> `.duhem/` suite (Chreode ships them in `onsager-ai/chreode/.duhem/`,
-> self-gated in its own CI and drift-monitored here; epic #225). The
-> `duhem/run` composite GitHub Action and `templates/product-repo/`
+> product Verification Definitions are co-located with the products
+> they verify under a `.duhem/` suite (Chreode ships them in
+> `onsager-ai/chreode/.duhem/`, self-gated in its own CI; both
+> suites are retired by chreode ADR 0016 pending a deploy-contract
+> replacement, and the Duhem-side drift lane that watched them was
+> retired too (`be5a8b2`; #380); epic #225). The `duhem/run`
+> composite GitHub Action and `templates/product-repo/`
 > support that model. The project is open-source
 > under **Apache-2.0** (relicensed for the first public v0.1.0 release;
 > see `docs/duhem-spec.md` §11.3). Schema is still v0.x — breaking
@@ -108,10 +110,13 @@ person is building both, but they are **parallel, not shared**:
 - Product Verification Definitions live **with the product** they
   verify, in a co-located `.duhem/` suite — Duhem is used as a tool
   (epic #225, migration complete). Chreode moved
-  (`onsager-ai/chreode/.duhem/`, self-gated in its own CI +
-  drift-monitored here); Onsager's in-tree VD was retired (P4 of
-  #225) and re-homes when Onsager work resumes — no product VDs
-  remain in-tree, only Duhem's own self-verification suites.
+  (`onsager-ai/chreode/.duhem/`, self-gated in its own CI); both
+  suites are retired by chreode ADR 0016 (a page-free
+  deploy-contract lane replaces them), and the Duhem-side drift
+  lane that watched them is retired too (last on main at
+  `be5a8b2`; #380). Onsager's in-tree VD was retired (P4 of #225)
+  and re-homes when Onsager work resumes — no product VDs remain
+  in-tree, only Duhem's own self-verification suites.
 - Onsager's product surfaces (forge, stiglab, synodic, dashboard,
   events, migrations) live on `onsager-ai/onsager`.
 - Cross-repo work is two specs (one on each repo) with a contract in

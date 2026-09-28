@@ -25,9 +25,12 @@ why the relationship is structured the way it is.
 > judge is mechanical (no LLM) and Duhem's own contract stays
 > self-verified — **not** because the checks are hoarded here. The
 > worked, shipped example is **Chreode**
-> (`onsager-ai/chreode/.duhem/`): self-gated in its own CI (**Mode A**)
-> and drift-monitored here via `.github/workflows/drift-chreode.yml`
-> (**Mode B**). Onsager is the same pattern with its VD still in-tree
+> (`onsager-ai/chreode/.duhem/`): self-gated in its own CI (**Mode
+> A**). Its Duhem-side drift lane (**Mode B**,
+> `drift-chreode.yml`) is retired (last on main at `be5a8b2`):
+> chreode ADR 0016 retires the managed-app suites it targeted, and
+> Mode B re-points at Chreode's deploy-contract replacement once it
+> ships (#380). Onsager is the same pattern with its VD still in-tree
 > until P4 (Onsager is paused). Where this skill below says "the
 > dogfood VDs are Duhem artifacts in `onsager-ai/duhem`", read it
 > through this reframe — the cross-repo/two-specs/no-mocks discipline
@@ -138,9 +141,12 @@ is the worked example (`onsager-ai/chreode#288` / `#289`).
      `duhem/run` with `verification-source: workspace`.
    - **Mode B (drift monitoring, this repo).** Duhem's CI runs the
      product's suite from a checked-out ref with a freshly-built
-     `duhem` (`.github/workflows/drift-chreode.yml`; copy per
-     product, swapping the target + env bring-up). A red here = a
-     Duhem regression against that product.
+     `duhem`. Copy the pattern from the retired
+     `.github/workflows/drift-chreode.yml` (last on main at
+     `be5a8b2`, #380), swapping the target repo, env bring-up, and
+     VD path. A red here = a Duhem regression against that product.
+     No product currently runs Mode B — Chreode's lane retired with
+     chreode ADR 0016, pending its deploy-contract replacement.
 
    Pin currency and passing are separate signals (issue #380). Mode B proves a consumer's VD still passes against the freshly-built `duhem` at HEAD; it says nothing about what version the consumer is actually pinned to in its own CI. A consumer can be green on Mode B (or not drift-monitored at all) while its pinned version sits several `[breaking]` CHANGELOG entries behind current — the migration cost is real even though nothing is failing today. `.github/workflows/consumer-pins.yml` (`cargo xtask consumer-pins`, registry at `.github/drift-consumers.yml`) is the scheduled, warn-only lane that surfaces that gap; it's gated the same way as Mode B and skipped until armed.
 5. Open the product PR (`Closes #N` on the product spec). Any

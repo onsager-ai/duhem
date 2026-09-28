@@ -1,12 +1,13 @@
 # Consumer pin currency (issue #380).
 #
-# This is a SEPARATE signal from `drift-chreode.yml`. That job proves a
-# consumer's Verification Definition still *passes* against a
-# freshly-built `duhem`. This job only reads a consumer's pinned
-# `duhem` version and warns when it has fallen behind a `[breaking]`
-# CHANGELOG entry — a consumer can be passing (or, like ostrom-hub, not
-# drift-monitored at all) and still carry a pin that will bite on the
-# next upgrade.
+# This is a SEPARATE signal from a product's Mode B drift lane (e.g.
+# the retired `drift-chreode.yml`, last on main at `be5a8b2`). That
+# kind of job proves a consumer's Verification Definition still
+# *passes* against a freshly-built `duhem`. This job only reads a
+# consumer's pinned `duhem` version and warns when it has fallen
+# behind a `[breaking]` CHANGELOG entry — a consumer can be passing
+# (or, like ostrom-hub, not drift-monitored at all) and still carry a
+# pin that will bite on the next upgrade.
 #
 # Warn-only for consumer problems: a stale or unreadable consumer is
 # an annotation (`::warning::` when a breaking entry is crossed,

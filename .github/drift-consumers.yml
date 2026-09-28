@@ -1,4 +1,4 @@
-# Registry of drift-monitored consumer repos for
+# Registry of consumer repos whose duhem pin is checked by
 # `cargo xtask consumer-pins` (issue #380). Plain YAML, one parser
 # (`parse_registry` in xtask/src/consumer_pins.rs) — the workflow
 # discovers (repo, path) pairs via `cargo xtask consumer-pins --list`

@@ -22,7 +22,7 @@ runtime), and gates merge/deploy on the verdict.
 > product Verification Definitions are co-located with the products
 > they verify under a `.duhem/` suite (Chreode ships them in
 > `onsager-ai/chreode/.duhem/`, self-gated in its own CI; both
-> suites are retired by chreode ADR 0016 pending a deploy-contract
+> suites are scheduled for deletion by chreode ADR 0016 pending a deploy-contract
 > replacement, and the Duhem-side drift lane that watched them was
 > retired too (`be5a8b2`; #380); epic #225). The `duhem/run`
 > composite GitHub Action and `templates/product-repo/`
@@ -111,7 +111,7 @@ person is building both, but they are **parallel, not shared**:
   verify, in a co-located `.duhem/` suite — Duhem is used as a tool
   (epic #225, migration complete). Chreode moved
   (`onsager-ai/chreode/.duhem/`, self-gated in its own CI); both
-  suites are retired by chreode ADR 0016 (a page-free
+  suites are scheduled for deletion by chreode ADR 0016 (a page-free
   deploy-contract lane replaces them), and the Duhem-side drift
   lane that watched them is retired too (last on main at
   `be5a8b2`; #380). Onsager's in-tree VD was retired (P4 of #225)

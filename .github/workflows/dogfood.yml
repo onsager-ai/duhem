@@ -11,7 +11,7 @@
 # epic #225 P4: product VDs are co-located with their products now
 # (Chreode self-gates in `onsager-ai/chreode/.duhem/`; its Duhem-side
 # drift lane, `drift-chreode.yml`, is retired — chreode ADR 0016
-# retires the managed-app suites it targeted, last on main at
+# schedules for deletion the managed-app suites it targeted, last on main at
 # `be5a8b2`, #380 — and Mode B re-points at Chreode's deploy-contract
 # replacement once it ships; Onsager the same once it resumes). See
 # `.github/actions/run/README.md`.

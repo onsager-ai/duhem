@@ -28,7 +28,7 @@ why the relationship is structured the way it is.
 > (`onsager-ai/chreode/.duhem/`): self-gated in its own CI (**Mode
 > A**). Its Duhem-side drift lane (**Mode B**,
 > `drift-chreode.yml`) is retired (last on main at `be5a8b2`):
-> chreode ADR 0016 retires the managed-app suites it targeted, and
+> chreode ADR 0016 schedules for deletion the managed-app suites it targeted, and
 > Mode B re-points at Chreode's deploy-contract replacement once it
 > ships (#380). Onsager is the same pattern with its VD still in-tree
 > until P4 (Onsager is paused). Where this skill below says "the

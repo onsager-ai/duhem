@@ -2,7 +2,7 @@
   "schema": 1,
   "source": {
     "repository": "onsager-ai/dev-skills",
-    "revision": "5b23fa4a7c12cadc1ca32bbee1e08440bafc69d8"
+    "revision": "ca8be67f226d3e718d0894a075274b713ef1a439"
   },
   "skills": [
     "issue-spec",
@@ -15,7 +15,8 @@
     "authority",
     "checks",
     "discovery",
-    "ownership"
+    "ownership",
+    "workflow-policy"
   ],
   "local_skills": [
     "duhem-dev-process",

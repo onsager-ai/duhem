@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "manifest_sha256": "f6781a6463bfe347ab9eac16203a39a89c5e735d00d6d3a9709fbb99191dd5ed",
-  "block_sha256": "97fff3ea0874aa721cda72e06af5758fb94c502e878a0875d6f5d7cae1fde7b2",
+  "manifest_sha256": "3e5feb5506b61740401b63e25bbce9492fce19fff6dddbd4808b2ec7ed08ea67",
+  "block_sha256": "aa73270c6b78d4a83770cdcee14ed2c7d280c8378796c57f442351092112ce1b",
   "resolved_skills": [
     "ci-triage",
     "docs-drift-guard",
@@ -16,12 +16,12 @@
       "mode": "100644"
     },
     ".agents/skills/ci-triage/SKILL.md": {
-      "sha256": "52149de19c6095c8e4dc9f3b27072ec1cf98963499874fb28339cf06fb562417",
+      "sha256": "0b81315c3a92d78e0acfb40df3ae6fb1c9985e51de2b8a93a2e050c99818f43a",
       "owner": "shared",
       "mode": "100644"
     },
     ".agents/skills/docs-drift-guard/SKILL.md": {
-      "sha256": "5a9de403e4a73671fd5c520438aabb2b10c3c51b9f2539e5032502b6abf34d7b",
+      "sha256": "d308a6d76b73f254eb76be42ad845a466c2f009506bad0010cabdd5a4e59ec85",
       "owner": "shared",
       "mode": "100644"
     },
@@ -41,7 +41,7 @@
       "mode": "100755"
     },
     ".agents/skills/issue-spec/SKILL.md": {
-      "sha256": "0b61a0c5b9be9ffb32e7abb7fb46cc64a3d8bb55f30a7d4aad68627a56e1101d",
+      "sha256": "ff722e725fb119edd39bbd82e4b555ccf2865ceefd068b9dae84084a23b4a769",
       "owner": "shared",
       "mode": "100644"
     },
@@ -51,12 +51,12 @@
       "mode": "100644"
     },
     ".agents/skills/pr-lifecycle/SKILL.md": {
-      "sha256": "568abed5ac1c5ab0c0af2603b90e8134bd47fd581b3101a87a43c3c0dafa48c8",
+      "sha256": "a962efc52231c20a9aeef3078781dc59a1c71b90e902637f4028b36273eec1a5",
       "owner": "shared",
       "mode": "100644"
     },
     ".agents/skills/pre-push/SKILL.md": {
-      "sha256": "f6c1bddd819a3d02b49d2b6c4b12eb0db56ce23a99b02e43271224e4d2cc2e1e",
+      "sha256": "34bd3a68733c34d98be17bc48c124f4b9a4f98cae60d7563871812ca67edaccc",
       "owner": "shared",
       "mode": "100644"
     },
@@ -66,12 +66,12 @@
       "mode": "100644"
     },
     ".claude/skills/ci-triage/SKILL.md": {
-      "sha256": "52149de19c6095c8e4dc9f3b27072ec1cf98963499874fb28339cf06fb562417",
+      "sha256": "0b81315c3a92d78e0acfb40df3ae6fb1c9985e51de2b8a93a2e050c99818f43a",
       "owner": "shared",
       "mode": "100644"
     },
     ".claude/skills/docs-drift-guard/SKILL.md": {
-      "sha256": "5a9de403e4a73671fd5c520438aabb2b10c3c51b9f2539e5032502b6abf34d7b",
+      "sha256": "d308a6d76b73f254eb76be42ad845a466c2f009506bad0010cabdd5a4e59ec85",
       "owner": "shared",
       "mode": "100644"
     },
@@ -96,7 +96,7 @@
       "mode": "100755"
     },
     ".claude/skills/issue-spec/SKILL.md": {
-      "sha256": "0b61a0c5b9be9ffb32e7abb7fb46cc64a3d8bb55f30a7d4aad68627a56e1101d",
+      "sha256": "ff722e725fb119edd39bbd82e4b555ccf2865ceefd068b9dae84084a23b4a769",
       "owner": "shared",
       "mode": "100644"
     },
@@ -111,12 +111,12 @@
       "mode": "100644"
     },
     ".claude/skills/pr-lifecycle/SKILL.md": {
-      "sha256": "568abed5ac1c5ab0c0af2603b90e8134bd47fd581b3101a87a43c3c0dafa48c8",
+      "sha256": "a962efc52231c20a9aeef3078781dc59a1c71b90e902637f4028b36273eec1a5",
       "owner": "shared",
       "mode": "100644"
     },
     ".claude/skills/pre-push/SKILL.md": {
-      "sha256": "f6c1bddd819a3d02b49d2b6c4b12eb0db56ce23a99b02e43271224e4d2cc2e1e",
+      "sha256": "34bd3a68733c34d98be17bc48c124f4b9a4f98cae60d7563871812ca67edaccc",
       "owner": "shared",
       "mode": "100644"
     },

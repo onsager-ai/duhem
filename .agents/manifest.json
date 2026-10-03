@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "source": {
+    "repository": "onsager-ai/dev-skills",
+    "revision": "5b23fa4a7c12cadc1ca32bbee1e08440bafc69d8"
+  },
+  "skills": [
+    "issue-spec",
+    "pre-push",
+    "pr-lifecycle",
+    "ci-triage",
+    "docs-drift-guard"
+  ],
+  "rules": [
+    "authority",
+    "checks",
+    "discovery",
+    "ownership"
+  ],
+  "local_skills": [
+    "duhem-dev-process",
+    "onsager-dogfood",
+    "verification-authoring"
+  ]
+}

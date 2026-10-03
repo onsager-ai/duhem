@@ -65,7 +65,7 @@ explicit rationale in the spec.
   true is its own contract — schema, judge, docs — consistent and
   self-verified; the dogfood's job is drift monitoring (catch a Duhem
   change that would break a consumer's VDs). Epic #225;
-  `.claude/skills/onsager-dogfood/SKILL.md`; `docs/duhem-spec.md`
+  `.agents/skills/onsager-dogfood/SKILL.md`; `docs/duhem-spec.md`
   §11.2.
 
 Changes to those four bullets are spec-level changes to
@@ -141,12 +141,12 @@ just points at them.
 
 | Stage                          | Skill                                    |
 |--------------------------------|------------------------------------------|
-| Decide what to build           | `.claude/skills/duhem-dev-process`       |
-| Write the spec                 | `issue-spec` (global, from `onsager-ai/dev-skills`) |
-| Author Verification Definitions| `.claude/skills/verification-authoring`  |
-| Pre-push checks                | `pre-push` (global, from `onsager-ai/dev-skills`); Duhem gate/collision overlay in `duhem-dev-process` |
-| PR triage / review / merge     | `pr-lifecycle` (global); CI-failure table in `duhem-dev-process`, taxonomy from `ci-triage` |
-| Dogfood on Onsager             | `.claude/skills/onsager-dogfood`         |
+| Decide what to build           | `.agents/skills/duhem-dev-process`       |
+| Write the spec                 | `issue-spec` (checkout-local, from `onsager-ai/dev-skills`) |
+| Author Verification Definitions| `.agents/skills/verification-authoring`  |
+| Pre-push checks                | `pre-push` (checkout-local, from `onsager-ai/dev-skills`); Duhem gate/collision overlay in `duhem-dev-process` |
+| PR triage / review / merge     | `pr-lifecycle` (checkout-local); CI-failure table in `duhem-dev-process`, taxonomy from `ci-triage` |
+| Dogfood on Onsager             | `.agents/skills/onsager-dogfood`         |
 
 Hard rule: **no spec, no PR**, unless the PR is labeled `trivial`
 (typo, doc-only, one-line obvious fix). Schema-impacting changes

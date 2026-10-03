@@ -1,6 +1,6 @@
 ---
 name: duhem-dev-process
-description: The end-to-end spec-issue-driven dev loop for Duhem — spec → branch → implement → PR → merge → closure. Use when asked "how do I start work", "what's the process", "SDD loop", "spec-driven development", "how do we ship a change on Duhem", "from scratch what do I do", or when you're about to begin a non-trivial change on the Duhem repo and haven't yet decided how to split spec/PR. Delegates to `issue-spec` (spec writing), the global `pre-push` (pre-push checks) and `pr-lifecycle` (post-push) skills, `verification-authoring` (authoring Verification Definitions for the platform itself), and `onsager-dogfood` (running Duhem against the Onsager repo). This skill carries Duhem's overlay for `pre-push` / `pr-lifecycle` — the check gate, merge-collision patterns, and CI-failure table.
+description: The end-to-end spec-issue-driven dev loop for Duhem — spec → branch → implement → PR → merge → closure. Use when asked "how do I start work", "what's the process", "SDD loop", "spec-driven development", "how do we ship a change on Duhem", "from scratch what do I do", or when you're about to begin a non-trivial change on the Duhem repo and haven't yet decided how to split spec/PR. Delegates to `issue-spec` (spec writing), the shared `pre-push` (pre-push checks) and `pr-lifecycle` (post-push) skills, `verification-authoring` (authoring Verification Definitions for the platform itself), and `onsager-dogfood` (running Duhem against the Onsager repo). This skill carries Duhem's overlay for `pre-push` / `pr-lifecycle` — the check gate, merge-collision patterns, and CI-failure table.
 ---
 
 # duhem-dev-process
@@ -30,90 +30,23 @@ below is intentionally lean — it mirrors the discipline used on
 taxonomy, or Rust toolchain checks beyond what `cargo`, `clippy`, and
 the `xtask` gates already enforce.
 
-## The loop
+## Shared workflow and Duhem overlay
 
-```
-     ┌─────────────────────────────────────────────────────────────────┐
-     │                                                                 │
-     │   idea/request                                                  │
-     │        ↓                                                        │
-     │   spec(<area>): ...    ← issue-spec skill                       │
-     │        │                                                        │
-     │        ↓                                                        │
-     │   branch + implement                                            │
-     │        │                                                        │
-     │        ↓                                                        │
-     │   pre-push skill        ← merge preview, build/test (when wired)│
-     │        │                                                        │
-     │        ↓                                                        │
-     │   git push → open PR (body: "Closes #N" or "Part of #N")        │
-     │        │                                                        │
-     │        ↓                                                        │
-     │   pr-lifecycle skill    ← CI triage, review, iterate            │
-     │        │                                                        │
-     │        ↓                                                        │
-     │   merge                                                         │
-     │        │                                                        │
-     │        │ Closes #N → GitHub auto-closes spec                    │
-     │        │ Part of #N → tick Plan items manually (pr-lifecycle)   │
-     │        ↓                                                        │
-     │   spec closed (Closes) OR Plan items ticked (Part of)           │
-     │                                                                 │
-     └─────────────────────────────────────────────────────────────────┘
-```
+Use the checkout-local `issue-spec` → `pre-push` → `pr-lifecycle` workflow.
+Those skills own generic spec structure, alignment handling, issue/PR linking,
+review and CI lifecycle, and progress updates. This file owns Duhem's delta.
 
-This is the same shape as Onsager's loop. The two products share an
-SDD discipline by design: Duhem is built using Claude Code under the
-same process discipline it will eventually verify (see `onsager-dogfood`).
-
-## Stages
-
-### 1. Write the spec
-
-Trigger `issue-spec` (or say "spec this"). It creates a GitHub issue
-on `onsager-ai/duhem` with:
-
-- `## Overview`, `## Design`, `## Plan`, `## Test`, `## Alignment`, `## Notes`
-- Open questions live under `## Alignment` as a `### Open questions`
-  subsection (omit if none) — `pre-push` blocks on unresolved
-  items there.
-- Labels: `spec`, one type (`feat` / `fix` / `refactor` / `perf`),
-  one or more `area:*`, one `priority:*`. The full area taxonomy
-  lives in `issue-spec`'s SKILL.md and `references/spec-format.md`.
-
-Hard rule: no spec → no PR, unless the PR is labeled `trivial` (typos,
-doc-only fixes, one-line obvious bug repair).
-
-Body size: <~2000 tokens. Larger features split into parent + sub-issues
-via `mcp__github__sub_issue_write`. The SDD loop runs independently on
-each sub-issue; the parent tracks overall progress.
-
-If the spec proposes new **product surface** (new action type, new
-schema field, new CLI command, new judge behavior), the spec must
-either include or link a worked Verification Definition example
-showing how the surface is exercised — see `verification-authoring`.
-A surface that has no example by the time implementation starts is
-a surface we cannot dogfood, which means we cannot ship it on
-Onsager, which means we cannot validate it. Skip this only for
-purely internal scaffolding (build configuration, repo hygiene).
-
-### 2. Resolve open questions
-
-Before opening a PR, resolve any open questions on the spec issue
-thread. A spec with unanswered `### Open questions` is not ready to
-implement — its design isn't pinned yet.
-
-### 3. Branch and implement
-
-Branch naming convention:
-
-- Human-owned branches: any name.
-- Claude-owned branches: `claude/spec-<N>-<slug>` or
-  `claude/<descriptor>`. The harness enforces the `claude/` prefix
-  on cloud sessions.
-
-Implement the spec's Plan items in order. Keep commits small and
-focused. Commit messages should be imperative and under 72 chars.
+- Non-trivial changes require a spec issue on `onsager-ai/duhem`; `trivial` is
+  limited to typos, formatting and one-line obvious fixes, never multi-file work
+  or product-identity changes.
+- Use area/priority labels from this repository. Spec bodies stay under ~2000
+  tokens; use the shared issue-spec structure and reconcile answered decisions.
+- Product-surface changes require a worked Verification Definition; skip this
+  only for internal scaffolding/build configuration/repository hygiene.
+- Claude-owned branches retain the native `claude/` convention. Other harnesses
+  use their declared task branch and the root contract's worktree parking policy.
+- The Claude-only session restriction is in CLAUDE.md. Skill availability does
+  not expand that scope. Repo-owned gates and public-surface overlays follow.
 
 **Schema-stability discipline.** While the schema is in pre-1.0
 iteration (Phase 0 / Phase 1), every change to the Verification
@@ -196,135 +129,26 @@ user should never read how Duhem is *built*. This is distinct from the
 docs-site drift gate (#279 = docs↔site sourcing; this = product↔DX
 content currency).
 
-### 4. Pre-push
+## Workflow integration
 
-Trigger the global `pre-push` skill (or say "ready to push"). It owns
-the generic flow — sync the merge preview, the conflict walkthrough,
-the spec-link check, the push. Duhem's overlay (the check gate, the
-collision patterns it should watch for) is in the "Pre-push & PR
-overlay" section at the bottom of this skill; `pre-push` reads it.
+`pre-push` runs the merge-preview gate and applicable additional checks below.
+`pr-lifecycle` owns spec linking, review/CI triage and issue progress. Link full
+spec completion with `Closes #N`; link partial work with `Part of #N` and list
+exact delivered Plan items. Tick spec Plan items after merge, not before it.
+The shared workflow grants no publication or merge authority.
 
-Don't paper over warnings with `--no-verify`. If a hook fails,
-investigate.
-
-### 5. Open the PR
-
-PR body must begin with a linking line:
-
-| PR delivers                                         | Use            |
-| --------------------------------------------------- | -------------- |
-| The full spec / acceptance test / vertical slice    | `Closes #N`    |
-| A bug fix for a specific defect                     | `Fixes #N`     |
-| Scaffolding / one phase of a multi-phase spec       | `Part of #N`   |
-| Related work that shouldn't close the spec          | `Refs #N`      |
-
-Under `## Delivers`, list the Plan items this PR ticks (exact text
-from the spec's Plan). After merge, tick those checkboxes manually
-on the parent spec — see `pr-lifecycle`.
-
-If the PR is genuinely trivial (typo, doc-only, one-line obvious
-fix), apply the `trivial` label and skip the spec-linking
-requirement. Use sparingly — if reviewers flag it as needing
-context, escalate to a spec.
-
-**Decide before opening, not after.** Answer the spec-vs-trivial
-gate at PR creation: pass `Closes #N` / `Part of #N` in the PR
-body, or pass `labels: ["trivial"]` to
-`mcp__github__create_pull_request`. Don't push and let a reviewer
-ask.
-
-### 6. During review
-
-Trigger the global `pr-lifecycle` skill (or say "triage PR" / "CI is
-failing" / respond to a webhook). It covers:
-
-- CI triage: build / test / schema-validation failures (the Duhem
-  failure table is in the overlay section below).
-- Review-comment discipline: fix the code, don't reply per comment.
-- Webhook subscription + the post-push CI sweep.
-
-### 7. Merge
-
-- `Closes #N` PRs auto-close the spec on merge.
-- `Part of #N` / `Refs #N` PRs leave the spec open; tick the
-  delivered Plan items manually on the parent spec, and if all
-  sub-issues of a parent are closed, ping the parent. See
-  `pr-lifecycle`.
-- For schema-impacting PRs, also append the change to `CHANGELOG.md`
-  under `## Unreleased`.
-
-### 8. Closed-unmerged path
-
-If you close a PR without merging (e.g. abandoned approach), the
-spec issue stays open as-is — the next implementer can pick it up
-from there.
-
-## The `trivial` escape hatch
-
-Not every change needs a spec. The `trivial` label on a PR
-explicitly opts out. Use for:
-
-- Typos in comments, docs, commit messages.
-- One-line obvious bug fixes where the repro is in the diff itself.
-- Formatting-only changes.
-- Dependency version bumps (unless they break APIs).
-
-Do NOT use for:
-
-- Anything touching multiple files.
-- Anything that changes `docs/duhem-spec.md` semantics (schema,
-  judge contract, source-posture).
-- Anything that could plausibly merit a follow-up.
-
-When in doubt, write the spec.
-
-## Issue progress is the source of truth
-
-A spec issue's open/closed state plus its Plan checkboxes are the
-source of truth. Use `Closes #N` only on a PR that delivers the final
-unticked Plan items, so GitHub's auto-close fires once the spec is
-actually complete; use `Part of #N` for partial slices that leave
-items behind, then tick the delivered checkboxes manually on merge.
-If a multi-PR spec finishes via `Part of` PRs only, a human closes
-the parent once the last Plan item ticks. Plan-item ticks on merge
-are manual; `pr-lifecycle` covers the mechanics.
-
-## Anti-patterns (don't)
-
-- **PR without a spec and no `trivial` label.** Reviewers will ask;
-  the PR should not merge until the author either adds a spec link
-  or the `trivial` label.
-- **Closing a spec manually when you meant `Closes #N`.** Let GitHub
-  do it via the PR merge so the timeline has the auditable link.
-- **Editing Plan checkboxes to mark items done before the PR
-  merges.** Tick them on merge, not before.
-- **Schema change without `## Schema impact` callout.** The pre-1.0
-  schema's breaking-change rate is what determines when we OSS the
-  spec; mis-tracking a change skews that signal.
-- **Product-surface change without a `## DX impact` callout.** A new
-  action / flag / schema field whose authoring skill, README, or
-  getting-started stays stale ships a surface users can't learn. The
-  `dx-drift` gate reminds you; the callout records the decision.
-- **Internal vocabulary in a user-facing artifact.** A `dogfood` /
-  customer name / `seam` / dev-skill reference in the published skill or
-  adoption README leaks how Duhem is built to someone using it.
-  `skill-scrub` / `dx-drift` readme-framing hard-fail on it — fix, don't
-  annotate.
-- **Skipping `pre-push`.** Even a thin checklist catches the
-  cheap mistakes.
-- **Shipping a CLI / schema feature without a worked example.** A
-  feature that has no Verification Definition demonstrating it is
-  a feature we cannot dogfood, full stop. See
-  `verification-authoring`.
+Use the schema/DX overlays above and PR-body requirements below. Do not suppress
+warnings, weaken verification, leak internal development vocabulary into
+published adoption artifacts, or omit a worked example for new product surface.
 
 ## Delegation map
 
 | Stage                                       | Skill / workflow                                                |
 |---------------------------------------------|-----------------------------------------------------------------|
-| Write the spec                              | [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) (installed globally from `onsager-ai/dev-skills`) |
-| Pre-push checks                             | [`pre-push`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pre-push/SKILL.md) (global) + the overlay below |
-| CI triage, review, iterate                  | [`pr-lifecycle`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pr-lifecycle/SKILL.md) (global) + the overlay below |
-| On PR merge → tick Plan items               | [`pr-lifecycle`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pr-lifecycle/SKILL.md) (global, manual) |
+| Write the spec                              | [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) (checkout-local from `onsager-ai/dev-skills`) |
+| Pre-push checks                             | [`pre-push`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pre-push/SKILL.md) (checkout-local) + the overlay below |
+| CI triage, review, iterate                  | [`pr-lifecycle`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pr-lifecycle/SKILL.md) (checkout-local) + the overlay below |
+| On PR merge → tick Plan items               | [`pr-lifecycle`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pr-lifecycle/SKILL.md) (checkout-local, manual) |
 | Author Verification Definitions             | [`verification-authoring`](../verification-authoring/SKILL.md)  |
 | Run Duhem against the Onsager repo (dogfood)| [`onsager-dogfood`](../onsager-dogfood/SKILL.md)                |
 
@@ -338,9 +162,9 @@ the Onsager repo. The two only meet at the dogfood seam — see
 verifications run against Onsager PRs; Onsager's PRs surface
 Duhem verdicts as a check).
 
-## Pre-push & PR overlay (for the global `pre-push` / `pr-lifecycle` skills)
+## Pre-push & PR overlay (for the shared `pre-push` / `pr-lifecycle` skills)
 
-The global `pre-push` and `pr-lifecycle` skills carry the generic
+The shared `pre-push` and `pr-lifecycle` skills carry the generic
 methodology. This is Duhem's repo-specific overlay — the gate command,
 the collision patterns to watch, and the CI-failure table they reference.
 
@@ -441,7 +265,7 @@ past it.
 If the linked spec is labeled `schema-impact`, the PR body must include a
 `## Schema impact` subsection (copy the spec's verbatim), and a breaking
 change must touch `CHANGELOG.md`. See the schema-stability discipline in
-§3 above.
+the schema/DX requirements above.
 
 ### DX-impact in the PR body
 
@@ -452,4 +276,4 @@ CI's `dx-drift` currency check treats it as declared (warn-only today).
 `skill-scrub` and `dx-drift`'s readme-framing are hard gates with no such
 escape — a published skill or adoption README that leaks internal
 vocabulary must be fixed, not annotated. See the DX-currency discipline
-in §3 above.
+in the schema/DX requirements above.

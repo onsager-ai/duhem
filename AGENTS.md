@@ -42,26 +42,26 @@ Claude additionally has native branch guards; those hooks do not enforce Codex.
 - Dashboard changes use applicable `just dashboard` checks and dashboard CI.
 - Apply modified-VD validation and all additional gates in duhem-dev-process.
 
-Use justfile and owning workflows for exact stages. Record commands/results,
-blocked checks and remaining scope accurately; warn-only and strict checks differ.
+Use justfile and owning workflows for exact stages; warn-only and strict checks differ.
 
 ## Conditional reading and skill discovery
 
-Find applicable module contracts before editing. Schema/judge/identity work loads
+Schema/judge/identity work loads
 relevant duhem-spec sections. Branding work loads duhem-brand, not every task.
 Development workflow loads duhem-dev-process; authoring loads verification-authoring.
 Dogfood ownership loads the detailed reference and onsager-dogfood only within the
 session's authorized scope. Claude's existing repo-only scope is in its adapter.
 
-Repo skills are canonical under .agents/skills with Claude discovery projections.
-Shared issue-spec/pre-push/pr-lifecycle/ci-triage still depend on existing global
-installation in this pilot. Pinned checkout-local distribution is migration debt;
-do not claim those workflows are available without checking the session's catalog.
-Opening, updating or merging a pull request requires authority supplied by the
-task or this repository's declared workflow policy. Shared procedures grant no
-authority themselves. Once authorized, complete the spec/trivial decision,
-relevant checks and accurate reporting before creating or updating the PR.
-This resolves adoption decision D1; older global pr-lifecycle installations may
-still contain the conflicting explicit-request-only rule. Update them from the
-reviewed dev-skills change before relying on that workflow. Decision D2 preserves
-the Claude-only session restriction exactly; no scope expansion is implied.
+Local workflow overlays remain in the repo-owned skills. The Claude-only
+session restriction remains exactly in CLAUDE.md. Common publication authority,
+reporting and discovery conventions are generated below from the pinned shared
+source. The manifest identifies selected shared and repo-owned skill names.
+
+<!-- agent-config:begin -->
+## Shared agent conventions (generated)
+
+- **authority:** Opening, updating or merging a pull request requires authority from the task or declared repository policy. Shared procedures grant no authority themselves; opening or updating authority does not authorize merging.
+- **checks:** Run checks appropriate to the affected behavior. Report commands, actual results, blocked prerequisites and remaining scope. A quick check does not replace a declared merge gate.
+- **discovery:** Before editing a module, locate applicable ancestor/module instruction files and load only relevant references. Shared workflows and their dependencies are checked in under .agents/skills; Claude discovery copies are generated under .claude/skills.
+- **ownership:** Edit repo-owned contracts and local skills at their canonical paths. Shared skills, Claude projections, this managed section and synchronization tooling are generated: change the upstream source or manifest selection and regenerate; do not hand-edit generated copies.
+<!-- agent-config:end -->

@@ -1,0 +1,134 @@
+{
+  "schema": 1,
+  "manifest_sha256": "f6781a6463bfe347ab9eac16203a39a89c5e735d00d6d3a9709fbb99191dd5ed",
+  "block_sha256": "97fff3ea0874aa721cda72e06af5758fb94c502e878a0875d6f5d7cae1fde7b2",
+  "resolved_skills": [
+    "ci-triage",
+    "docs-drift-guard",
+    "issue-spec",
+    "pr-lifecycle",
+    "pre-push"
+  ],
+  "files": {
+    ".agents/LICENSE.dev-skills": {
+      "sha256": "1141cb7b9b803241d6214c6bb0934f9c7f0d57eecdae8c35a4a2478fcdd6546c",
+      "owner": "shared-license",
+      "mode": "100644"
+    },
+    ".agents/skills/ci-triage/SKILL.md": {
+      "sha256": "52149de19c6095c8e4dc9f3b27072ec1cf98963499874fb28339cf06fb562417",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/docs-drift-guard/SKILL.md": {
+      "sha256": "5a9de403e4a73671fd5c520438aabb2b10c3c51b9f2539e5032502b6abf34d7b",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/issue-spec/references/spec-format.md": {
+      "sha256": "f27b69993ac16496cf77e5a1ef186e98edc40071ad15b4563651eab5efcdcd2f",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/issue-spec/scripts/spec-list.sh": {
+      "sha256": "8a8abf9c5ae4b325604a836d23f735660034332d478b49af00a1029a9a16c0d4",
+      "owner": "shared",
+      "mode": "100755"
+    },
+    ".agents/skills/issue-spec/scripts/spec-show.sh": {
+      "sha256": "752c49df15a924a0b9c400c4d5cef8542ea14a90b0d49e813eccb47d56f01442",
+      "owner": "shared",
+      "mode": "100755"
+    },
+    ".agents/skills/issue-spec/SKILL.md": {
+      "sha256": "0b61a0c5b9be9ffb32e7abb7fb46cc64a3d8bb55f30a7d4aad68627a56e1101d",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/issue-spec/templates/issue-spec-template.md": {
+      "sha256": "04ce60e915f25ef57d730b101c1ed1e420baaf184b564c5f7d4ac43abe95a515",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/pr-lifecycle/SKILL.md": {
+      "sha256": "568abed5ac1c5ab0c0af2603b90e8134bd47fd581b3101a87a43c3c0dafa48c8",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/pre-push/SKILL.md": {
+      "sha256": "f6c1bddd819a3d02b49d2b6c4b12eb0db56ce23a99b02e43271224e4d2cc2e1e",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/sync.mjs": {
+      "sha256": "68ab4378c640a8f89e6718c30b0903d853defcab2a8723436d082005b34099c2",
+      "owner": "tooling",
+      "mode": "100644"
+    },
+    ".claude/skills/ci-triage/SKILL.md": {
+      "sha256": "52149de19c6095c8e4dc9f3b27072ec1cf98963499874fb28339cf06fb562417",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/docs-drift-guard/SKILL.md": {
+      "sha256": "5a9de403e4a73671fd5c520438aabb2b10c3c51b9f2539e5032502b6abf34d7b",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/duhem-dev-process/SKILL.md": {
+      "sha256": "f8dde00733ebd5d7bae22fa65f8942c26437ae09c1b537c65d7c3dbf1d9b5cdb",
+      "owner": "local-projection",
+      "mode": "100644"
+    },
+    ".claude/skills/issue-spec/references/spec-format.md": {
+      "sha256": "f27b69993ac16496cf77e5a1ef186e98edc40071ad15b4563651eab5efcdcd2f",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/issue-spec/scripts/spec-list.sh": {
+      "sha256": "8a8abf9c5ae4b325604a836d23f735660034332d478b49af00a1029a9a16c0d4",
+      "owner": "shared",
+      "mode": "100755"
+    },
+    ".claude/skills/issue-spec/scripts/spec-show.sh": {
+      "sha256": "752c49df15a924a0b9c400c4d5cef8542ea14a90b0d49e813eccb47d56f01442",
+      "owner": "shared",
+      "mode": "100755"
+    },
+    ".claude/skills/issue-spec/SKILL.md": {
+      "sha256": "0b61a0c5b9be9ffb32e7abb7fb46cc64a3d8bb55f30a7d4aad68627a56e1101d",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/issue-spec/templates/issue-spec-template.md": {
+      "sha256": "04ce60e915f25ef57d730b101c1ed1e420baaf184b564c5f7d4ac43abe95a515",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/onsager-dogfood/SKILL.md": {
+      "sha256": "50ddbb6b80da274494ef9a4e5b5cd837aa9cd1757f91f6fde3460ceea16618e2",
+      "owner": "local-projection",
+      "mode": "100644"
+    },
+    ".claude/skills/pr-lifecycle/SKILL.md": {
+      "sha256": "568abed5ac1c5ab0c0af2603b90e8134bd47fd581b3101a87a43c3c0dafa48c8",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/pre-push/SKILL.md": {
+      "sha256": "f6c1bddd819a3d02b49d2b6c4b12eb0db56ce23a99b02e43271224e4d2cc2e1e",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/verification-authoring/SKILL.md": {
+      "sha256": "87ad259c2655c767870bcde3f06c73246bf084177e6b336aa6bbe52778fc1497",
+      "owner": "local-projection",
+      "mode": "100644"
+    },
+    ".github/workflows/agent-config.yml": {
+      "sha256": "60dca4b2ee7022d76732df2654190e246cdd510f9e6adef3941e3d9b602e3cb2",
+      "owner": "tooling",
+      "mode": "100644"
+    }
+  }
+}

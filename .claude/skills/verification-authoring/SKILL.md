@@ -515,7 +515,7 @@ criteria:
 | [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) | Specs that introduce product surface link a worked example here. Installed globally from `onsager-ai/dev-skills`. |
 | [`duhem-dev-process`](../duhem-dev-process/SKILL.md)         | Top-level SDD loop — the dogfood discipline that requires worked examples. |
 | [`onsager-dogfood`](../onsager-dogfood/SKILL.md)             | Verifications that target `onsager-ai/onsager`; this skill writes them. |
-| [`pr-lifecycle`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pr-lifecycle/SKILL.md) (global) | Verifies the worked-example check on schema-impacting PRs.        |
+| [`pr-lifecycle`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pr-lifecycle/SKILL.md) (checkout-local) | Verifies the worked-example check on schema-impacting PRs.        |
 
 ## References
 

@@ -1,0 +1,467 @@
+# Duhem authoring detail
+
+Repository paths below are relative to the repository root. This reference owns
+the detailed criteria/check, action/assertion, example and refusal-test guidance.
+Read relevant sections during authoring; current schema/CLI remain authoritative.
+
+## The two-layer structure
+
+Duhem deliberately separates a feature's commitments from the
+mechanism that verifies them:
+
+```
+Criterion  →  natural language, human-authored, stable across
+              implementations.
+
+Checks     →  structured YAML, AI-translatable, frozen after
+              human review, one-or-many per criterion.
+```
+
+**Criteria are stable; checks are derivative.** When the
+implementation changes, criteria do not. When criteria change,
+that's a real change to the contract.
+
+When you draft a Verification Definition, write criteria first,
+then translate each into checks. If you're translating a criterion
+that already exists (e.g. lifted from a spec issue's `## Test`
+section), don't re-author it — copy verbatim and translate
+mechanically.
+
+**Where the VD lives (Pattern D).** A VD that verifies a *product*
+(Onsager, Chreode, Crawlab) lives **in the product's repo** under a
+co-located `.duhem/` suite — Duhem is used as a tool, not a host
+(`docs/duhem-spec.md` §10.1 Pattern D; epic #225). Only Duhem's own
+**self-verification** VDs live here in `verifications/`. Chreode is the
+worked example (`onsager-ai/chreode/.duhem/`); `templates/product-repo/`
+is the drop-in `.duhem/` skeleton (manifest + example leaf + CODEOWNERS)
+to copy into a product repo. Author the VD there, self-gate it in the
+product's own CI (Mode A), and let Duhem's drift lane monitor it (Mode
+B) — see `onsager-dogfood`.
+
+## Authoring loop
+
+```
+0. Scaffold the skeleton: `duhem init --name <slug>` produces a
+   runnable Pattern A skeleton (or `--pattern B` for co-located). Its
+   target defaults to `./verifications/<slug>/` (Duhem
+   self-verification); for a product VD, pass the path explicitly —
+   `duhem init --name <slug> .duhem/<slug>` (Pattern D) — or copy
+   `templates/product-repo/`. The skeleton is a single passing
+   check against https://example.com — your known-good baseline to
+   mutate. Spec on issue #48.
+1. Lift criteria from the spec / acceptance test / PRD
+2. Validate criteria are stable, intent-bearing, scoped to one commitment
+3. Translate each criterion to one or more checks (steps + assertions)
+4. Review the holistic-environment tax — no mocks of the web
+5. Self-validate: every assertion is mechanical, every step is named, every
+   ID is referenced
+6. Save the file (any name; self-identifies via top-level `verification:`)
+7. Update duhem.yml (if Pattern B/C) to register the file
+```
+
+Start every new Verification Definition with `duhem init`; for a
+product VD, copy the `.duhem/` skeleton in `templates/product-repo/`
+rather than hand-writing a fresh tree from scratch. The skeleton bakes the
+criteria-vs-checks two-document discipline into the first commit
+and gives you a passing run to confirm your environment works
+before you've authored anything.
+
+### 1. Lift criteria
+
+Find the source of intent for the feature:
+
+- A spec issue's `## Test` items, when the spec is well-formed.
+- A PRD or feature description in plain English.
+- The "what does done mean for this PR" answer the human gives
+  when you ask.
+
+Each criterion is **a single coherent commitment, in 1–3 sentences,
+that a non-technical stakeholder can read and validate.** A feature
+typically has 2–6 criteria.
+
+A criterion expresses *intent*, not *procedure*:
+
+> ✅ A user can create a workspace from the dashboard. The new
+> workspace becomes immediately visible in their workspace list,
+> and the user is navigated to the workspace's home page. No
+> errors are shown.
+>
+> ❌ When the user clicks the "Create Workspace" button, the
+> system POSTs to `/workspaces` with `{name, owner_id}`, receives
+> a 200 with the workspace ID, then redirects to
+> `/workspaces/<id>`.
+
+The first describes what "done" means. The second describes how —
+and would have to be rewritten any time the implementation changes.
+That's a check, not a criterion.
+
+### 2. Validate criteria
+
+Before translating, sanity-check each criterion:
+
+- [ ] One coherent commitment (not "and also and also …")
+- [ ] 1–3 sentences
+- [ ] Free of implementation language (no endpoint paths, no
+      function names, no DB tables)
+- [ ] Free of step-by-step procedure
+- [ ] A non-technical stakeholder could read it and say yes/no
+- [ ] Stable across plausible implementation changes
+
+If a criterion violates any of these, rewrite it before
+translating.
+
+### 3. Translate to checks
+
+Each criterion gets one or more checks. A check is a sequence of
+`steps` (named actions) followed by `assertions` (mechanical
+predicates over named outputs).
+
+**A single check should exercise a slice of the holistic web** —
+not a single component. The example in `docs/duhem-spec.md` §10.3
+(`AC-1.1`) exercises five layers (UI input capture, UI button
+activation, network observation, API response shape, ID semantics)
+in one check, and that's the *intended* shape, not over-reach. Per
+the Holistic Verification Principle, decomposing a check into per-
+component sub-checks loses what makes Duhem Duhem.
+
+**Retrieval, not recall.** Duhem is a v0.x framework no model has a
+reliable pretraining corpus for — and any corpus would be the *wrong
+version*, since the schema breaks by design. So do not guess `with:`
+keys or output names from memory. Retrieve the version-exact contract:
+
+- `duhem actions` — list the action catalog.
+- `duhem describe <uses>` — one action's `with:` fields (+ closed enums),
+  `outputs`, and a worked example. (e.g. `duhem describe ui/assert-element`
+  tells you it produces `satisfied`.)
+- or read the generated
+  [`docs/action-reference.md`](../../../../docs/action-reference.md), the
+  same contract for every action in one page.
+- `duhem mcp` — exposes `describe` / `actions` / `validate` to a coding
+  agent over MCP, so AI-assisted authoring retrieves the same contract
+  programmatically (#252).
+
+Then let **`duhem validate` close the loop**: it field-checks each step's
+`with:` keys, `outputs:` action-fields, and closed-enum values against the
+same contract and names the valid options on a miss. Author → validate →
+fix converges to correct without prior Duhem knowledge — retrieval +
+verification, not pretraining.
+
+Use the existing catalog; if you genuinely need a new action type, that's
+an `area:schema` spec — see `issue-spec`. Do not silently mint new
+`uses:` strings.
+
+**Terse by default** (#267 / #253). Duhem infers the ceremony, so author
+the minimal form:
+
+- **`outputs:` is optional.** Reference any output an action declares
+  directly as `$steps.<id>.outputs.<name>`, including nested paths
+  (`…outputs.body.data._id`). Add `outputs:` only to *rename* a field
+  (`outputs: { code: status }`) or bind a *deep extraction* to a short
+  alias (`outputs: { project_id: body.data._id }`, #273). An identity
+  binding `outputs: { foo: foo }` is a redundant no-op — `validate`
+  flags it.
+- **`assertions:` is optional for a judging step.** A `ui/assert-*` or
+  `api/poll` step *is* the judgment (it emits `satisfied`, implicitly
+  asserted `== true`), so an all-assert check needs no `assertions:`
+  block. Bind `satisfied` and assert it yourself only for manual control.
+  A check with neither `assertions:` nor a judging step is rejected at
+  validate time.
+- **`ui/extract` is deliberately *non*-judging.** It reads an attribute,
+  DOM property, or text into `outputs.value`; it emits no `satisfied`,
+  so it does **not** satisfy the rule above. A check whose only step is
+  `ui/extract` needs an explicit `assertions:` block — extraction
+  observes, `assertions:` judges, and that separation is the point.
+  Use `field:` for the everyday cases (`checked`, `value`, `href`,
+  `class`, `aria-*`, `data-*`); it resolves through a closed documented
+  table, and a name outside that table is a validation error rather than
+  a guess. Reach for `attribute:` / `property:` when you need to be
+  exact about which one you mean — they genuinely differ (a ticked
+  checkbox has the `checked` *property* `true` while the *attribute* may
+  be absent entirely).
+- **For a simple state check, prefer `ui/assert-element`'s `expect:`.**
+  `expect: { field: checked, equals: true }` judges in one step and
+  keeps `satisfied`, so you need no step id, no output binding, and no
+  check-level assertion. Reach for `ui/extract` when the value has to
+  travel — into a later step, or into a check-level `assertions:` block
+  alongside other evidence.
+
+Common shape (terse):
+
+```yaml
+- id: AC-1.1
+  description: <what this check verifies — paraphrase the criterion slice>
+  steps:
+    - uses: ui/click
+      with: {role: "button", name: "Create Workspace"}
+    - uses: api/observe
+      id: api_call
+      with:
+        method: POST
+        path: /workspaces
+        timeout: 3s
+      # no outputs: block — status / body resolve directly; add a binding
+      # only to alias a deep path, e.g. outputs: { workspace_id: body.id }
+  assertions:
+    - $steps.api_call.outputs.status == 200
+    - type_check:
+        value: $steps.api_call.outputs.body.id
+        is: uuid
+```
+
+Authoring rules:
+
+- Every step whose output an assertion reads gets an `id:`.
+- Reference outputs by their fully-qualified path,
+  `$steps.<id>.outputs.<name>`; `outputs:` blocks are only for a rename
+  or a deep-extraction alias, not for re-declaring native fields.
+- Timeouts (`timeout:`) are explicit on steps that observe
+  something asynchronous.
+- Steps default to `if: success`; use `if: always` for per-attempt
+  cleanup and `if: failure` for failure-only diagnostics. Both still
+  run after a step-level engine error before the original error aborts
+  the run. A retried check runs its cleanup once per attempt, so cleanup
+  steps must be idempotent.
+- Use role-based locators (`{role: "button", name: "..."}`)
+  rather than CSS or XPath — UI churn invalidates the latter
+  while role-based selectors track the user-visible affordance.
+- A check that has no `assertions:` is a script, not a check.
+  Reject it.
+- The `capture/` output-name prefix is reserved for runner-emitted
+  failure evidence (specs #202 / #204): a failing ui check
+  automatically records `capture/screenshot` + `capture/dom` +
+  `capture/network` (a HAR 1.2 log of the page's traffic) blob
+  observations (`duhem run --capture` controls the policy). An
+  authored output under `capture/` is rejected at validate time, and
+  captures are never recorded as `$steps.<id>.outputs.*` bindings —
+  so nothing can forge a capture and no assertion can bind one.
+  Captures are evidence for humans/agents, never judge input. The
+  network HAR redacts sensitive headers and auth request bodies.
+  Registered secret input values are additionally exact-substring
+  masked from response bodies, DOM snapshots, and other recorded text
+  at the evidence boundary. Screenshots/video remain unmasked pixels,
+  so keep credentials out of rendered UI (or use `--capture off`).
+
+#### Share locators instead of copying them
+
+Put locators reused by multiple leaves in an ordinary manifest include:
+
+```yaml
+# pages.yml
+pages:
+  login:
+    username: { role: textbox, name: Username }
+    submit: { role: button, name: Sign In }
+
+# leaf step
+- uses: ui/type
+  with: { locator: $pages.login.username, text: $inputs.user }
+```
+
+The catalog is exactly two levels (`page → element`), with no
+`locators:` container. Root entries win over includes; leaf-local
+entries win over the composed manifest. A locator may contain
+`$inputs.*`, but every leaf receiving it must declare those names.
+Validate dangling references offline; use `duhem resolve --provenance`
+to inspect the effective catalog and each winning source file.
+
+#### Share step flows instead of copying sequences
+
+Put a repeated action sequence in a `flows:` catalog on the root
+manifest, an included fragment, or a leaf. Bind its typed parameters at
+each `call:`:
+
+```yaml
+flows:
+  sign_in:
+    params:
+      password: { type: string, secret: true }
+      user: { type: string }
+    steps:
+      - uses: ui/type
+        with: { locator: $pages.login.username, text: $params.user }
+      - uses: ui/click
+        with: { locator: $pages.login.submit }
+      - id: landed
+        uses: ui/assert-element
+        with: { locator: $pages.login.welcome, expected: visible }
+    outputs:
+      signed_in: $steps.landed.outputs.satisfied
+
+- id: login
+  call: sign_in
+  with: { user: $inputs.user, password: $inputs.password }
+```
+
+Flow step bodies are hygienic: they may reference `$params.*` and
+`$pages.*` only, never the caller's `$inputs.*` or `$steps.*`. Pass
+every dependency explicitly. The exception is the flow's `outputs:`
+map, where `$steps.*` selects the inner value exposed to callers as
+`$steps.<call-id>.outputs.<declared-name>`. Inner ids are private, and
+`secret: true` params are masked like secret inputs. Inspect the flat
+expanded sequence and flow origins with `duhem resolve --provenance`.
+
+### 4. The holistic-environment tax
+
+Per §8, a Duhem check, by default, exercises real behavior
+end-to-end. **No mocking the web.** When you author a check:
+
+- Don't propose an `api/mock` or `db/stub` action — they don't
+  exist by design.
+- Don't write a check that runs against an in-memory test double
+  of any subsystem the artifact depends on.
+- If a check requires data preconditions (a seeded user, a
+  pre-existing workspace), use `db/seed` or `event/publish` in
+  the verification's `setup:` block, against the **real**
+  database / event bus.
+- Use `setup:` for once-per-verification preconditions; don't
+  duplicate them inside every check.
+
+If verifying the criterion would require mocking the web, that's
+either:
+
+1. A signal the feature's auxiliary assumptions are unstated and
+   the criterion should be reformulated against the real web,
+   **or**
+2. A signal that this check is the wrong shape for Duhem and a
+   different check (or the spec being verified) needs to change.
+
+Don't paper over it with a mock. Stop and escalate.
+
+### 5. Mechanical judgment
+
+Per §11.2, **no LLM is in the verdict loop.** Every assertion must
+be a deterministic predicate evaluable by the judge. Allowed forms
+(§10.6):
+
+- Boolean expression: `$steps.X.outputs.Y == 200`
+- Type check: `type_check: {value: ..., is: uuid|string|integer|float|boolean|object|array|null}`
+- Pattern match: `matches: {value: ..., pattern: ...}`
+- Set membership: `in: {value: ..., set: [...]}`
+- Existence: `exists: $steps.X.outputs.Y`
+- Cross-step consistency: `equal: [$steps.A.outputs.X, $steps.B.outputs.X]`
+
+Things that look like assertions but aren't:
+
+- "The response makes sense" — not mechanical.
+- "An LLM grades the output" — explicitly forbidden by §11.2.
+- "The screenshot looks right" — no L3 visual baseline yet
+  (`docs/duhem-spec.md` §14 Phase 3 roadmap).
+
+If a criterion seems to require non-mechanical judgment, that's
+either a criterion in the wrong shape (split it until each piece is
+mechanical) or a criterion that genuinely cannot be Duhem-verified
+today — note that explicitly in the spec, don't paper over it.
+
+### 6. Self-validate
+
+Before saving, walk through:
+
+- [ ] Each criterion appears verbatim under `criteria:` with an
+      `id:` (`AC-1`, `AC-2`, …)
+- [ ] Each criterion has at least one check
+- [ ] Each check has a non-empty `steps:` and a verdict — an
+      `assertions:` block **or** a judging step (`ui/assert-*`,
+      `api/poll`)
+- [ ] Every referenced output is one the action declares (or bound via
+      `outputs:` for a rename/extraction)
+- [ ] Every assertion is one of the six allowed forms
+- [ ] No mock action types
+- [ ] No LLM-grading anywhere
+- [ ] Action types come from the documented catalog (or are
+      called out as new in the linked spec)
+
+### 7. Save and register
+
+The file can be named anything (§10.2 self-identification by
+top-level `verification:`/`criteria:`). Conventional names:
+`<feature>.verification.yml`, `<feature>.yml`, `verification.yml`.
+
+If the project uses Pattern B/C with a root `duhem.yml` manifest,
+add the file to `verifications:` (§10.4). If it's a standalone
+file run via `duhem run <file>`, no manifest update needed.
+
+`duhem run` discovers the manifest by walking the current directory
+and its ancestors (capped at the enclosing `.git`), so `cd
+anywhere-in-the-repo && duhem run` finds the repo-root `duhem.yml`
+(or `.duhem.yml`) without a path argument (#69). `-f path/to/manifest.yml`
+overrides discovery for an out-of-tree manifest.
+
+Running a leaf directly by path (an explicit positional path or
+`-f`/`--file`) uses this same ancestor walk from the leaf's own
+directory, not just the no-path case: if it finds a root manifest, it
+merges that manifest's composed `pages:`/`flows:` catalog into the leaf
+before flow expansion, so `$pages.*` and `call:` references the leaf
+doesn't declare locally still resolve. Sibling `verifications:` entries
+the manifest lists are never loaded or executed — the run stays scoped
+to the requested leaf. A leaf with an unresolved `$pages.*`/`call:` name
+and no discoverable manifest fails naming exactly what's missing and
+where it would normally be defined (#384/#388).
+
+## Worked example template
+
+Use this as the skeleton for any spec that needs a worked example:
+
+```yaml
+verification: <descriptive name>
+spec_ref: <link to spec issue or doc>
+
+inputs:
+  # named inputs — e.g. test fixture values, defaults
+  example_input:
+    type: string
+    # Defaults are literal; use $runtime.uuid() in a step's with:.
+    default: "fixture-workspace"
+
+setup:
+  # once-per-verification preconditions — real environment, no mocks
+  - uses: db/seed
+    with:
+      table: users
+      rows:
+        - {id: $runtime.uuid(), email: "test@example.com"}
+
+criteria:
+  - id: AC-1
+    description: |
+      <verbatim from spec; 1-3 sentences; intent over implementation>
+    checks:
+      - id: AC-1.1
+        description: <what slice of the web this check exercises>
+        steps:
+          - uses: <action-type>
+            id: <step-id>
+            with: { ... }
+            outputs:
+              <name>: <expression>
+        assertions:
+          - <mechanical predicate over $steps.<id>.outputs.<name>>
+```
+
+## Anti-patterns (don't)
+
+- **Criteria with implementation details.** "Click the button at
+  `#create-workspace`" is a check pretending to be a criterion.
+  Rewrite as "User can create a workspace from the dashboard."
+- **A check with no assertions.** It's a recording, not a check.
+  Add the assertion or delete the check.
+- **Redundant identity bindings.** `outputs: { foo: foo }` does nothing
+  now that `outputs:` is optional (#267) — reference
+  `$steps.<id>.outputs.foo` directly. Reserve `outputs:` for a *rename*
+  (`{ code: status }`) or a *deep extraction* (`{ id: body.data._id }`);
+  `validate` flags the identity no-op.
+- **Mocks anywhere.** No `api/mock`, no `db/stub`, no
+  `time/freeze` short-circuits. The web Duhem verifies is the
+  real one.
+- **LLM-grading assertions.** Non-mechanical judgment is
+  explicitly out per §11.2.
+- **One mega-criterion.** Each criterion should be one coherent
+  commitment. "User can create, list, edit, archive, and delete
+  workspaces" is five criteria.
+- **Re-authoring frozen checks every run.** §7.3: checks are
+  authored once, reviewed, then frozen. Regenerating them from
+  scratch every run reintroduces drift Duhem exists to prevent.
+- **Verifications that smuggle in unit tests.** A check that
+  exercises a single function in isolation isn't holistic — it's a
+  unit test in a Verification Definition's clothing. Either expand
+  its scope to a real web slice or remove it.
+

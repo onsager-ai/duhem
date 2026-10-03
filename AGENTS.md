@@ -57,6 +57,9 @@ session restriction remains exactly in CLAUDE.md. Common publication authority,
 reporting and discovery conventions are generated below from the pinned shared
 source. The manifest identifies selected shared and repo-owned skill names.
 
+For native capability mapping, use harness-operations; Codex-specific reference
+routing is in .agents/adapters/codex.md. These adapters grant no extra scope.
+
 <!-- agent-config:begin -->
 ## Shared agent conventions (generated)
 

@@ -30,7 +30,13 @@ below is intentionally lean — it mirrors the discipline used on
 taxonomy, or Rust toolchain checks beyond what `cargo`, `clippy`, and
 the `xtask` gates already enforce.
 
-## Shared workflow and Duhem overlay
+## Scope and prerequisites
+
+Read AGENTS.md and applicable spec sections. This skill owns only Duhem's delta;
+common procedure comes from the checkout-local shared skills. Use
+[harness-operations](../harness-operations/SKILL.md) when tool mapping is needed.
+
+## Procedure and Duhem overlay
 
 Use the checkout-local `issue-spec` → `pre-push` → `pr-lifecycle` workflow.
 Those skills own generic spec structure, alignment handling, issue/PR linking,
@@ -43,10 +49,9 @@ review and CI lifecycle, and progress updates. This file owns Duhem's delta.
   tokens; use the shared issue-spec structure and reconcile answered decisions.
 - Product-surface changes require a worked Verification Definition; skip this
   only for internal scaffolding/build configuration/repository hygiene.
-- Claude-owned branches retain the native `claude/` convention. Other harnesses
-  use their declared task branch and the root contract's worktree parking policy.
-- The Claude-only session restriction is in CLAUDE.md. Skill availability does
-  not expand that scope. Repo-owned gates and public-surface overlays follow.
+- Use the root contract's task-worktree rules. The harness adapter supplies native
+  branch/tool mechanics and any harness-specific session restriction; skill
+  availability does not expand that scope. Repo-owned overlays follow.
 
 **Schema-stability discipline.** While the schema is in pre-1.0
 iteration (Phase 0 / Phase 1), every change to the Verification
@@ -145,10 +150,10 @@ published adoption artifacts, or omit a worked example for new product surface.
 
 | Stage                                       | Skill / workflow                                                |
 |---------------------------------------------|-----------------------------------------------------------------|
-| Write the spec                              | [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) (checkout-local from `onsager-ai/dev-skills`) |
-| Pre-push checks                             | [`pre-push`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pre-push/SKILL.md) (checkout-local) + the overlay below |
-| CI triage, review, iterate                  | [`pr-lifecycle`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pr-lifecycle/SKILL.md) (checkout-local) + the overlay below |
-| On PR merge → tick Plan items               | [`pr-lifecycle`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pr-lifecycle/SKILL.md) (checkout-local, manual) |
+| Write the spec                              | [`issue-spec`](../issue-spec/SKILL.md) (checkout-local from `onsager-ai/dev-skills`) |
+| Pre-push checks                             | [`pre-push`](../pre-push/SKILL.md) (checkout-local) + the overlay below |
+| CI triage, review, iterate                  | [`pr-lifecycle`](../pr-lifecycle/SKILL.md) (checkout-local) + the overlay below |
+| On PR merge → tick Plan items               | [`pr-lifecycle`](../pr-lifecycle/SKILL.md) (checkout-local, manual) |
 | Author Verification Definitions             | [`verification-authoring`](../verification-authoring/SKILL.md)  |
 | Run Duhem against the Onsager repo (dogfood)| [`onsager-dogfood`](../onsager-dogfood/SKILL.md)                |
 
@@ -277,3 +282,9 @@ CI's `dx-drift` currency check treats it as declared (warn-only today).
 escape — a published skill or adoption README that leaks internal
 vocabulary must be fixed, not annotated. See the DX-currency discipline
 in the schema/DX requirements above.
+
+## Completion
+
+Report the spec/PR slice, schema/DX impact where applicable, actual merge-preview
+and diff-specific gate results, and blocked prerequisites. Do not substitute
+quick checks for preflight or claim a warning-only check passed its strict gate.

@@ -1,5 +1,7 @@
 @AGENTS.md
 
+When tool mapping is needed, use the [Claude mechanics reference](.agents/skills/harness-operations/references/claude-code.md).
+
 ## Session scope (Claude Code sessions on this repo)
 
 A session on this repo works the **duhem repo only**. It is consulted on duhem-the-tool; it is not a gatekeeper or reviewer for another repo's work unless that work bears directly on duhem. (Principal ruling, 2026-09-18.)

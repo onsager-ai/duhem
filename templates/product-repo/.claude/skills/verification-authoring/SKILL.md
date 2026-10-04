@@ -16,7 +16,7 @@ by deterministic evaluation of structured assertions. No LLM is in the
 verdict loop.
 
 **Retrieve, don't recall.** Duhem's action catalog is versioned and
-evolves; don't guess `with:` keys or output names from memory. Ask the
+evolves; don't guess `with:` keys or output names from memory. Use the available structured question tool to ask the
 CLI for the version-exact contract as you author:
 
 ```bash

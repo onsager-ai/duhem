@@ -164,8 +164,18 @@ jobs:
       - name: Install Chromium system libs
         run: npx --yes playwright@1.61.1 install-deps chromium
 
-      - name: Write a browser-needing VD (known-good example.com baseline)
+      # Test browser provisioning, not an external site's content or uptime.
+      - name: Write a local HTTP fixture and browser-needing VD
         run: |
+          mkdir -p "${RUNNER_TEMP}/browser-fixture"
+          cat > "${RUNNER_TEMP}/browser-fixture/index.html" <<'HTML'
+          <!doctype html>
+          <html lang="en">
+            <meta charset="utf-8">
+            <title>Duhem browser auto-provision smoke</title>
+            <h1>Duhem browser auto-provision smoke</h1>
+          </html>
+          HTML
           cat > "${RUNNER_TEMP}/autoprovision.duhem.yml" <<'YAML'
           verification: browser auto-provision smoke (#295)
           criteria:
@@ -173,14 +183,14 @@ jobs:
               description: A ui/* run auto-provisions Chromium when none is installed.
               checks:
                 - id: AP.1
-                  description: Load example.com and confirm its canonical heading is visible.
+                  description: Load the local HTTP fixture and confirm its heading is visible.
                   steps:
                     - uses: ui/navigate
                       with:
-                        url: https://example.com
+                        url: http://127.0.0.1:8765/
                     - uses: ui/assert-element
                       with:
-                        locator: { role: heading, name: "Example Domain" }
+                        locator: { role: heading, name: "Duhem browser auto-provision smoke" }
                         expected: visible
                         timeout: 15s
           YAML
@@ -195,16 +205,28 @@ jobs:
       - name: Run — expect auto-provision, then pass
         run: |
           set -o pipefail
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory "${RUNNER_TEMP}/browser-fixture" > "${RUNNER_TEMP}/fixture.log" 2>&1 &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid"; wait "$fixture_pid" || true' EXIT
+          curl --fail --silent --show-error --retry 20 --retry-connrefused --retry-delay 1 --retry-max-time 20 http://127.0.0.1:8765/ > /dev/null
           SC="${RUNNER_TEMP}/sidecar"; mkdir -p "$SC"
           cp crates/duhem-actions/sidecar/{index.mjs,package.json,package-lock.json,jsconfig.json} "$SC"/
+          export PLAYWRIGHT_BROWSERS_PATH="${RUNNER_TEMP}/autoprovision-browsers"
+          test ! -e "$SC/node_modules"
+          test ! -e "$PLAYWRIGHT_BROWSERS_PATH"
           DUHEM_SIDECAR_DIR="$SC" cargo run -p duhem-cli --quiet -- run "${RUNNER_TEMP}/autoprovision.duhem.yml" 2> >(tee "${RUNNER_TEMP}/run.stderr" >&2)
           grep -q "Chromium not found — installing it once" "${RUNNER_TEMP}/run.stderr" \
             || { echo "::error::auto-provision notice not emitted — the run did not take the install path"; exit 1; }
+          # A system-browser fallback alone must not satisfy this test.
+          (cd "$SC" && node --input-type=module -e 'import { chromium } from "playwright"; import { accessSync, constants } from "node:fs"; accessSync(chromium.executablePath(), constants.X_OK);')
 
       - name: Opt-out (DUHEM_NO_BROWSER_INSTALL=1) must fail fast with the hint
         run: |
           SC="${RUNNER_TEMP}/sidecar-optout"; mkdir -p "$SC"
           cp crates/duhem-actions/sidecar/{index.mjs,package.json,package-lock.json,jsconfig.json} "$SC"/
+          export PLAYWRIGHT_BROWSERS_PATH="${RUNNER_TEMP}/optout-browsers"
+          test ! -e "$SC/node_modules"
+          test ! -e "$PLAYWRIGHT_BROWSERS_PATH"
           set +e
           DUHEM_NO_BROWSER_INSTALL=1 DUHEM_SIDECAR_DIR="$SC" cargo run -p duhem-cli --quiet -- run "${RUNNER_TEMP}/autoprovision.duhem.yml" 2> "${RUNNER_TEMP}/optout.stderr"
           code=$?
@@ -213,3 +235,5 @@ jobs:
           test "$code" -ne 0 || { echo "::error::opt-out still succeeded — auto-provision was not suppressed"; exit 1; }
           grep -q "duhem browser install" "${RUNNER_TEMP}/optout.stderr" \
             || { echo "::error::opt-out did not surface the actionable install hint"; exit 1; }
+          test ! -e "$SC/node_modules"
+          test ! -e "$PLAYWRIGHT_BROWSERS_PATH"

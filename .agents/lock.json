@@ -1,0 +1,170 @@
+{
+  "schema": 1,
+  "manifest_sha256": "5655dde099ef3f27be556002f1aa71f32ee0cf671f8626e99caad9c9c7e90105",
+  "block_sha256": "aa73270c6b78d4a83770cdcee14ed2c7d280c8378796c57f442351092112ce1b",
+  "resolved_skills": [
+    "ci-triage",
+    "docs-drift-guard",
+    "harness-operations",
+    "issue-spec",
+    "pr-lifecycle",
+    "pre-push"
+  ],
+  "files": {
+    ".agents/LICENSE.dev-skills": {
+      "sha256": "1141cb7b9b803241d6214c6bb0934f9c7f0d57eecdae8c35a4a2478fcdd6546c",
+      "owner": "shared-license",
+      "mode": "100644"
+    },
+    ".agents/skills/ci-triage/SKILL.md": {
+      "sha256": "bea5ab26de21e414f7da94576d96bbfff79db27ad0f8a26f72550d41eaaf51a2",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/docs-drift-guard/SKILL.md": {
+      "sha256": "055577de81943f8b09f0515b5306592a768686eeaace9739285555cba0213277",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/harness-operations/references/claude-code.md": {
+      "sha256": "d7cb59b15930bcc9ef9abf3d993e100cb167cb9868b87396f2ea828335fc5fab",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/harness-operations/references/codex.md": {
+      "sha256": "6a1d913e5b3c822c3c0553252c36630d9b6b1bf945e9a433dc0988d615fda303",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/harness-operations/SKILL.md": {
+      "sha256": "9f5956be686ea9ea01a61377179fca4699ccb137d5b60eb9684d18afa8c338c7",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/issue-spec/references/spec-format.md": {
+      "sha256": "b9285cb3819d707566976e103905e308354d0c26c65eeb3b10f526e8e2ad36b7",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/issue-spec/scripts/spec-list.sh": {
+      "sha256": "8a8abf9c5ae4b325604a836d23f735660034332d478b49af00a1029a9a16c0d4",
+      "owner": "shared",
+      "mode": "100755"
+    },
+    ".agents/skills/issue-spec/scripts/spec-show.sh": {
+      "sha256": "752c49df15a924a0b9c400c4d5cef8542ea14a90b0d49e813eccb47d56f01442",
+      "owner": "shared",
+      "mode": "100755"
+    },
+    ".agents/skills/issue-spec/SKILL.md": {
+      "sha256": "77300da34a1871f9097285150b5baf8cc037a82d41a55ecb6fde6fe8fa7ce0ea",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/issue-spec/templates/issue-spec-template.md": {
+      "sha256": "34d9d61056cbeddaeb1b4e2df62fb446545bce18bc1a0990389a412582ca17f2",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/pr-lifecycle/SKILL.md": {
+      "sha256": "96eb01ca0051b6c5d79b324225aaa739b5cc59fcfa15bdba6bf0dbff403d9f31",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/pre-push/SKILL.md": {
+      "sha256": "4621cb413dedacec154b3bfebcf6e34cf2ef208cd500fa87525b07f8baf4f377",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/sync.mjs": {
+      "sha256": "68ab4378c640a8f89e6718c30b0903d853defcab2a8723436d082005b34099c2",
+      "owner": "tooling",
+      "mode": "100644"
+    },
+    ".claude/skills/ci-triage/SKILL.md": {
+      "sha256": "bea5ab26de21e414f7da94576d96bbfff79db27ad0f8a26f72550d41eaaf51a2",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/docs-drift-guard/SKILL.md": {
+      "sha256": "055577de81943f8b09f0515b5306592a768686eeaace9739285555cba0213277",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/duhem-dev-process/SKILL.md": {
+      "sha256": "a74aa3a4d84a98a93f74e1b865064b68b3ca1e7e5bd6f884ad59b7fb5dc95ed3",
+      "owner": "local-projection",
+      "mode": "100644"
+    },
+    ".claude/skills/harness-operations/references/claude-code.md": {
+      "sha256": "d7cb59b15930bcc9ef9abf3d993e100cb167cb9868b87396f2ea828335fc5fab",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/harness-operations/references/codex.md": {
+      "sha256": "6a1d913e5b3c822c3c0553252c36630d9b6b1bf945e9a433dc0988d615fda303",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/harness-operations/SKILL.md": {
+      "sha256": "9f5956be686ea9ea01a61377179fca4699ccb137d5b60eb9684d18afa8c338c7",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/issue-spec/references/spec-format.md": {
+      "sha256": "b9285cb3819d707566976e103905e308354d0c26c65eeb3b10f526e8e2ad36b7",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/issue-spec/scripts/spec-list.sh": {
+      "sha256": "8a8abf9c5ae4b325604a836d23f735660034332d478b49af00a1029a9a16c0d4",
+      "owner": "shared",
+      "mode": "100755"
+    },
+    ".claude/skills/issue-spec/scripts/spec-show.sh": {
+      "sha256": "752c49df15a924a0b9c400c4d5cef8542ea14a90b0d49e813eccb47d56f01442",
+      "owner": "shared",
+      "mode": "100755"
+    },
+    ".claude/skills/issue-spec/SKILL.md": {
+      "sha256": "77300da34a1871f9097285150b5baf8cc037a82d41a55ecb6fde6fe8fa7ce0ea",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/issue-spec/templates/issue-spec-template.md": {
+      "sha256": "34d9d61056cbeddaeb1b4e2df62fb446545bce18bc1a0990389a412582ca17f2",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/onsager-dogfood/SKILL.md": {
+      "sha256": "8913e86fdee0b284f115c1a3d4b548b64c791f9afb8ecb0712ba38b4cb99d21b",
+      "owner": "local-projection",
+      "mode": "100644"
+    },
+    ".claude/skills/pr-lifecycle/SKILL.md": {
+      "sha256": "96eb01ca0051b6c5d79b324225aaa739b5cc59fcfa15bdba6bf0dbff403d9f31",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/pre-push/SKILL.md": {
+      "sha256": "4621cb413dedacec154b3bfebcf6e34cf2ef208cd500fa87525b07f8baf4f377",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/verification-authoring/references/authoring-reference.md": {
+      "sha256": "2094ad6db8226ba21221db5a314a009228e946a9ee0c8fa16bb03654983a72af",
+      "owner": "local-projection",
+      "mode": "100644"
+    },
+    ".claude/skills/verification-authoring/SKILL.md": {
+      "sha256": "b59a9577b7efdccb68451120aeee52bca02329e77ff339a9df7a88c69e76d0f2",
+      "owner": "local-projection",
+      "mode": "100644"
+    },
+    ".github/workflows/agent-config.yml": {
+      "sha256": "60dca4b2ee7022d76732df2654190e246cdd510f9e6adef3941e3d9b602e3cb2",
+      "owner": "tooling",
+      "mode": "100644"
+    }
+  }
+}

@@ -241,6 +241,7 @@ mod tests {
         };
         let mut failed = passed.clone();
         failed.phase = LifecyclePhase::Teardown;
+        failed.cleanup_policy = Some("required".into());
         failed.status = LifecycleStatus::Failed;
         let summary = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from("."))
             .with_lifecycle(vec![passed, failed]);

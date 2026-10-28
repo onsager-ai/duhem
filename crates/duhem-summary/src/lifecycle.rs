@@ -51,6 +51,8 @@ impl LifecycleStepOutcome {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LifecycleStep {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judgment: Option<duhem_judge::VerdictState>,
     pub index: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
@@ -132,6 +134,7 @@ pub enum LifecycleEvent<'a> {
         fixture_name: Option<&'a str>,
     },
     StepFinished {
+        judgment: Option<duhem_judge::VerdictState>,
         phase: LifecyclePhase,
         criterion_id: Option<&'a str>,
         check_id: Option<&'a str>,
@@ -218,6 +221,7 @@ impl LifecycleFold {
                 let block = self.active_block(phase, criterion_id, check_id, fixture_name)?;
                 let folded = &mut self.blocks[block];
                 folded.block.steps.push(LifecycleStep {
+                    judgment: None,
                     index,
                     id: None,
                     uses: uses.to_string(),
@@ -242,6 +246,7 @@ impl LifecycleFold {
                 .active_block(phase, criterion_id, check_id, fixture_name)
                 .map(|block| LifecycleLocation { block, step: None }),
             LifecycleEvent::StepFinished {
+                judgment,
                 phase,
                 criterion_id,
                 check_id,
@@ -264,11 +269,13 @@ impl LifecycleFold {
                     })
                     .map(|(position, _)| position)?;
                 folded.block.steps[step].outcome = outcome;
+                folded.block.steps[step].judgment = judgment;
                 folded.block.steps[step].detail = detail;
                 folded.block.steps[step].duration_ms =
                     elapsed(folded.step_started_ms[step], timestamp_ms);
                 folded.step_finished[step] = true;
-                if folded.block.steps[step].outcome.is_failure()
+                if (folded.block.steps[step].outcome.is_failure()
+                    || judgment.is_some_and(|state| state != duhem_judge::VerdictState::Pass))
                     && folded.block.failing_step.is_none()
                 {
                     folded.block.failing_step = Some(step);
@@ -435,6 +442,7 @@ mod tests {
             timestamp_ms: 101,
         });
         fold.push(LifecycleEvent::StepFinished {
+            judgment: None,
             phase: LifecyclePhase::Setup,
             criterion_id: None,
             check_id: None,

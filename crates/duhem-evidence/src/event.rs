@@ -314,6 +314,8 @@ pub enum EventPayload {
         criterion_id: Option<String>,
     },
     SetupStepFinished {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        judgment: Option<VerdictState>,
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
         phase: StepPhase,
         step_index: u32,
@@ -737,6 +739,7 @@ mod tests {
                 criterion_id: None,
             },
             EventPayload::SetupStepFinished {
+                judgment: None,
                 phase: StepPhase::Setup,
                 step_index: 0,
                 outcome: StepOutcome::Ok,
@@ -778,6 +781,7 @@ mod tests {
             seq: 1,
             ts: ts(),
             payload: EventPayload::SetupStepFinished {
+                judgment: None,
                 phase: StepPhase::Teardown,
                 step_index: 0,
                 outcome: StepOutcome::Error,
@@ -819,6 +823,7 @@ mod tests {
         );
         assert!(
             EventPayload::SetupStepFinished {
+                judgment: None,
                 phase: StepPhase::Setup,
                 step_index: 0,
                 outcome: StepOutcome::Ok,

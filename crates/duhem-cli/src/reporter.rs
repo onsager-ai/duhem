@@ -173,6 +173,10 @@ pub fn render_set(
         Reporter::Default => {
             for ((name, outcome), events) in leaves.iter().zip(leaf_events) {
                 writeln!(out, "{name}: {}", outcome.verdict.state)?;
+                if let Some(body) = outcome.body_verdict {
+                    writeln!(out, "  body: {body}")?;
+                }
+                write_cleanup(out, &outcome.cleanup)?;
                 write_gated_checks(out, outcome)?;
                 let lifecycle = fold_lifecycle(events);
                 write_failed_lifecycle(out, &lifecycle, &[])?;
@@ -625,6 +629,7 @@ fn fold_lifecycle(events: &[duhem_evidence::Event]) -> Vec<LifecycleBlock> {
                 fixture_name: fixture_name.as_deref(),
             },
             EventPayload::SetupStepFinished {
+                judgment,
                 phase,
                 step_index,
                 outcome,
@@ -633,6 +638,7 @@ fn fold_lifecycle(events: &[duhem_evidence::Event]) -> Vec<LifecycleBlock> {
                 check_id,
                 criterion_id,
             } => LifecycleEvent::StepFinished {
+                judgment: *judgment,
                 phase: lifecycle_phase(*phase),
                 criterion_id: criterion_id.as_deref(),
                 check_id: check_id.as_deref(),

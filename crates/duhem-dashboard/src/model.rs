@@ -48,6 +48,8 @@ pub struct RunsListEntry {
 /// `GET /api/runs/:run_id`.
 #[derive(Debug, Clone, Serialize)]
 pub struct RunDetail {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body_verdict: Option<VerdictState>,
     pub run_id: String,
     pub verification: String,
     pub started_at: Option<DateTime<Utc>>,

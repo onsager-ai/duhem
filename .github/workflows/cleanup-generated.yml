@@ -1,0 +1,24 @@
+name: Cleanup generated artifacts (temporary)
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  generated:
+    if: github.head_ref == 'codex/567-required-cleanup'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all
+      - run: cargo run -p xtask -- schema-json
+        continue-on-error: true
+      - run: git diff --binary > /tmp/generated.patch
+        if: always()
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: cleanup-generated-${{ github.event.pull_request.head.sha }}
+          path: /tmp/generated.patch
+      - run: cargo clippy --workspace --all-targets -- -D warnings

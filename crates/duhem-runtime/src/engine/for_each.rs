@@ -132,6 +132,7 @@ pub(crate) async fn process_lifecycle_step(
     {
         writer
             .append(EventPayload::SetupStepFinished {
+                judgment: None,
                 phase,
                 step_index: idx as u32,
                 outcome: StepOutcome::Skipped {
@@ -149,6 +150,7 @@ pub(crate) async fn process_lifecycle_step(
     }
 
     let mut error_detail = step_error.as_ref().map(ToString::to_string);
+    let mut judgment = None;
     let (outcome, failed) = if step_error.is_some() || environment_failed {
         if error_detail.is_none() {
             error_detail = Some(format!(
@@ -184,7 +186,8 @@ pub(crate) async fn process_lifecycle_step(
                 )
                 .await
                 {
-                    Ok((outcome, failed, action_detail)) => {
+                    Ok((outcome, failed, action_detail, implicit)) => {
+                        judgment = implicit;
                         error_detail = action_detail;
                         (outcome, failed)
                     }
@@ -207,11 +210,7 @@ pub(crate) async fn process_lifecycle_step(
         *stored_error = Some(error);
     }
 
-    let evidence_outcome = if phase == StepPhase::Teardown && failed && matches!(outcome, Outcome::Ok) {
-        StepOutcome::Error
-    } else {
-        outcome_to_evidence(&outcome)
-    };
+    let evidence_outcome = outcome_to_evidence(&outcome);
     let detail = match &outcome {
         Outcome::Timeout => {
             error_detail.or_else(|| Some(format!("action `{}` timed out", step.uses_name())))
@@ -224,6 +223,7 @@ pub(crate) async fn process_lifecycle_step(
     .map(|detail| writer.mask_text(&detail));
     writer
         .append(EventPayload::SetupStepFinished {
+            judgment,
             phase,
             step_index: idx as u32,
             outcome: evidence_outcome.clone(),
@@ -331,6 +331,7 @@ pub(crate) async fn run_for_each_step(
     if let Some(outcome) = gate {
         writer
             .append(EventPayload::SetupStepFinished {
+                judgment: None,
                 phase,
                 step_index: idx as u32,
                 outcome,
@@ -347,6 +348,7 @@ pub(crate) async fn run_for_each_step(
         let detail = writer.mask_text(&error.to_string());
         writer
             .append(EventPayload::SetupStepFinished {
+                judgment: None,
                 phase,
                 step_index: idx as u32,
                 outcome: StepOutcome::Error,
@@ -378,6 +380,7 @@ pub(crate) async fn run_for_each_step(
             ));
             writer
                 .append(EventPayload::SetupStepFinished {
+                judgment: None,
                     phase,
                     step_index: idx as u32,
                     outcome: StepOutcome::Error,
@@ -402,6 +405,7 @@ pub(crate) async fn run_for_each_step(
             let detail = writer.mask_text(&error.to_string());
             writer
                 .append(EventPayload::SetupStepFinished {
+                judgment: None,
                     phase,
                     step_index: idx as u32,
                     outcome: StepOutcome::Error,
@@ -439,6 +443,7 @@ pub(crate) async fn run_for_each_step(
         ));
         writer
             .append(EventPayload::SetupStepFinished {
+                judgment: None,
                 phase,
                 step_index: idx as u32,
                 outcome: StepOutcome::Error,
@@ -458,6 +463,7 @@ pub(crate) async fn run_for_each_step(
     // R7: an empty array is zero iterations, not an error.
     writer
         .append(EventPayload::SetupStepFinished {
+                judgment: None,
             phase,
             step_index: idx as u32,
             outcome: StepOutcome::Ok,
@@ -555,7 +561,7 @@ async fn invoke_and_record(
     idx: usize,
     resolved_with: &serde_yml::Value,
     invocation: SetupInvocation<'_>,
-) -> Result<(Outcome, bool, Option<String>), EngineError> {
+) -> Result<(Outcome, bool, Option<String>, Option<duhem_judge::VerdictState>), EngineError> {
     let SetupInvocation {
         step,
         run,
@@ -673,7 +679,7 @@ async fn invoke_and_record(
         .flatten()
         .map(|outcome| outcome.state);
     let failed = step_failed(&outcome, judgment);
-    Ok((outcome, failed, action_detail))
+    Ok((outcome, failed, action_detail, judgment))
 }
 
 /// Mirror of `EvidenceWriter::append_observation` for setup. The

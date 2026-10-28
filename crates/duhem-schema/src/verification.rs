@@ -44,13 +44,36 @@ pub struct Flow {
 
 pub type FlowCatalog = BTreeMap<String, Flow>;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CleanupPolicy {
+    #[default]
+    Required,
+    DiagnosticOnly,
+}
+
+impl CleanupPolicy {
+    pub fn is_required(&self) -> bool {
+        *self == Self::Required
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Required => "required",
+            Self::DiagnosticOnly => "diagnostic_only",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Fixture {
     /// Actions that establish one fresh instance for a check.
     pub up: Vec<Step>,
-    /// Best-effort cleanup actions for that instance.
+    /// Cleanup actions for that instance, required by default.
     pub down: Vec<Step>,
+    #[serde(default, skip_serializing_if = "CleanupPolicy::is_required")]
+    pub cleanup_policy: CleanupPolicy,
 }
 
 pub type FixtureCatalog = BTreeMap<String, Fixture>;

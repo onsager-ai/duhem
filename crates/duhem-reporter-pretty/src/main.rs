@@ -62,6 +62,9 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
     writeln!(out, "{title}")?;
     // Column width: long enough for `AC-99.99` style ids; verdict
     // column shares a single space-padded gap. Plain text only at
+    if let Some(body) = s.body_verdict {
+        writeln!(out, "body: {body}")?;
+    }
     // v1 — see the module docstring for the rationale.
     let id_w = s
         .criteria
@@ -122,6 +125,9 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
                     status_label(block.status),
                     block.duration_ms,
                 )?;
+                if let Some(policy) = &block.cleanup_policy {
+                    writeln!(out, "      cleanup policy: {policy}")?;
+                }
                 if let Some(position) = block.failing_step
                     && let Some(step) = block.steps.get(position)
                 {
@@ -146,9 +152,10 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
     }
     if !s.cleanup.is_empty() {
         writeln!(out)?;
-        writeln!(out, "CLEANUP (evidence only)")?;
+        writeln!(out, "CLEANUP")?;
         for failure in &s.cleanup {
-            writeln!(out, "  {}  {}", failure.outcome, failure.step)?;
+            let policy = if failure.required { "required" } else { "diagnostic_only" };
+            writeln!(out, "  {}  {} [{policy}]", failure.outcome, failure.step)?;
             if let Some(detail) = &failure.detail {
                 writeln!(out, "      ({detail})")?;
             }
@@ -203,6 +210,7 @@ mod tests {
     #[test]
     fn lifecycle_snapshot_renders_unknown_three_segment_scope() {
         let block = LifecycleBlock {
+            cleanup_policy: None,
             phase: LifecyclePhase::Setup,
             scope: ["alpha", "beta", "gamma"]
                 .into_iter()
@@ -378,6 +386,7 @@ mod tests {
     fn renders_cleanup_as_evidence_without_changing_verdict() {
         let s = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from(".")).with_cleanup(
             vec![CleanupFailureSummary {
+                required: false,
                 step: "delete-record".into(),
                 outcome: "error".into(),
                 detail: Some("synthetic cleanup error".into()),

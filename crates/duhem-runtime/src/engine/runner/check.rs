@@ -138,6 +138,7 @@ impl Engine {
                         name,
                         &check.id,
                         &fixture.down,
+                        fixture.cleanup_policy,
                         &self.child_process_env(writer.run_id()),
                     )
                     .await?;

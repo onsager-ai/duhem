@@ -207,13 +207,18 @@ pub(crate) async fn process_lifecycle_step(
         *stored_error = Some(error);
     }
 
-    let evidence_outcome = outcome_to_evidence(&outcome);
+    let evidence_outcome = if phase == StepPhase::Teardown && failed && matches!(outcome, Outcome::Ok) {
+        StepOutcome::Error
+    } else {
+        outcome_to_evidence(&outcome)
+    };
     let detail = match &outcome {
         Outcome::Timeout => {
             error_detail.or_else(|| Some(format!("action `{}` timed out", step.uses_name())))
         }
         Outcome::Error => error_detail
             .or_else(|| Some(format!("action `{}` returned an error", step.uses_name()))),
+        Outcome::Ok if failed => Some("judging action reported failure".to_string()),
         Outcome::Ok | Outcome::Skipped { .. } => None,
     }
     .map(|detail| writer.mask_text(&detail));
@@ -234,6 +239,7 @@ pub(crate) async fn process_lifecycle_step(
             matches!(outcome, Outcome::Ok).then(|| "judging action reported failure".to_string())
         });
         cleanup.push(CleanupFailure {
+            required: scope.cleanup_policy().is_required(),
             step: display_step_label(step, idx),
             outcome: evidence_outcome,
             detail,
@@ -589,7 +595,7 @@ async fn invoke_and_record(
                 &step.outputs,
                 &r.outputs,
                 |local, v| {
-                    if let HookScope::Fixture(fixture, _) = scope {
+                    if let HookScope::Fixture(fixture, _) | HookScope::FixtureDown(fixture, _, _) = scope {
                         run.record_fixture_output(fixture, id, local, v);
                     } else {
                         // Leaf, criterion, and check `setup:`/`teardown:`

@@ -56,7 +56,7 @@ pub use validate::{
     ValidationError, validate, validate_with_action_catalog, validate_with_contract_outputs,
 };
 pub use verification::{
-    Fixture, FixtureCatalog, Flow, FlowCatalog, InputDecl, InputType, PageCatalog, SchemaError,
+    CleanupPolicy, Fixture, FixtureCatalog, Flow, FlowCatalog, InputDecl, InputType, PageCatalog, SchemaError,
     VerificationDefinition,
 };
 pub use viewport::Viewport;

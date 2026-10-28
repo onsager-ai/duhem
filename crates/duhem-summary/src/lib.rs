@@ -49,6 +49,8 @@ pub struct RunSummary {
     pub run_id: String,
     /// Top-level verdict.
     pub verdict: VerdictState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_verdict: Option<VerdictState>,
     /// Per-criterion verdicts, in document order.
     pub criteria: Vec<CriterionSummary>,
     /// Path to the evidence store (SQLite DB) the run was recorded
@@ -122,6 +124,7 @@ impl RunSummary {
             schema_version: Self::SCHEMA_VERSION.to_string(),
             run_id: run_id.into(),
             verdict,
+            body_verdict: None,
             criteria,
             store,
             totals: CheckTotals::default(),
@@ -161,6 +164,11 @@ impl RunSummary {
 
     pub fn with_cleanup(mut self, cleanup: Vec<CleanupFailureSummary>) -> Self {
         self.cleanup = cleanup;
+        self
+    }
+
+    pub fn with_body_verdict(mut self, body_verdict: Option<VerdictState>) -> Self {
+        self.body_verdict = body_verdict.filter(|state| *state != self.verdict);
         self
     }
 
@@ -240,6 +248,8 @@ impl std::fmt::Display for CheckGatingSummary {
 /// One teardown step that failed without changing the run verdict.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CleanupFailureSummary {
+    #[serde(default)]
+    pub required: bool,
     pub step: String,
     pub outcome: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -440,6 +450,7 @@ mod tests {
 
         let s = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from(".")).with_cleanup(
             vec![CleanupFailureSummary {
+                required: false,
                 step: "delete-record".into(),
                 outcome: "error".into(),
                 detail: Some("synthetic cleanup error".into()),

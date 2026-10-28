@@ -371,7 +371,7 @@ impl Store for SqliteStore {
                     }
                 }
             }
-            EventPayload::RunFinished { verdict } => {
+            EventPayload::RunFinished { verdict, .. } => {
                 let started_at: Option<String> =
                     sqlx::query_scalar("SELECT started_at FROM runs WHERE run_id = ?")
                         .bind(run_id)

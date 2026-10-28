@@ -66,12 +66,14 @@ fn normalize(event: &Event) -> Option<LifecycleEvent<'_>> {
     let timestamp_ms = event.ts.timestamp_millis();
     Some(match &event.payload {
         EventPayload::SetupStarted {
+            cleanup_policy,
             phase,
             fixture_name,
             check_id,
             criterion_id,
             ..
         } => LifecycleEvent::Started {
+            cleanup_policy: cleanup_policy.as_deref(),
             phase: phase_of(*phase),
             criterion_id: criterion_id.as_deref(),
             check_id: check_id.as_deref(),

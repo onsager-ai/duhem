@@ -675,6 +675,8 @@ pub trait CheckFilter: Send + Sync {
 /// store by `run_id`.
 #[derive(Debug, Clone)]
 pub struct RunOutcome {
+    /// Original body state when required cleanup changes the effective gate.
+    pub body_verdict: Option<VerdictState>,
     /// Non-zero gated judging-step counts, keyed by criterion and check.
     /// Kept separate from the judge's verdict and lifecycle outcomes.
     pub gated_checks: std::collections::BTreeMap<(String, String), u32>,
@@ -699,6 +701,8 @@ pub struct RunOutcome {
 /// One non-verdict-altering teardown failure.
 #[derive(Debug, Clone)]
 pub struct CleanupFailure {
+    /// Only required fixture down failures block the run gate.
+    pub required: bool,
     pub step: String,
     pub outcome: duhem_evidence::StepOutcome,
     pub detail: Option<String>,

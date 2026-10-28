@@ -68,7 +68,7 @@ fn render(s: &RunSummary) -> String {
     let lifecycle_failures = s
         .lifecycle
         .iter()
-        .filter(|block| block.status != LifecycleStatus::Passed)
+        .filter(|block| lifecycle_blocks_gate(block))
         .count();
     let total = s.criteria.len() + lifecycle_failures;
     let failures = s
@@ -89,6 +89,9 @@ fn render(s: &RunSummary) -> String {
         "<testsuite name=\"{}\" tests=\"{total}\" failures=\"{failures}\" skipped=\"{skipped}\">\n",
         xml_escape(&s.run_id),
     ));
+    if let Some(body) = s.body_verdict {
+        out.push_str(&format!("  <properties><property name=\"body_verdict\" value=\"{}\"/></properties>\n", xml_escape(&body.to_string())));
+    }
     for c in &s.criteria {
         match &c.verdict {
             VerdictState::Pass => {
@@ -119,7 +122,7 @@ fn render(s: &RunSummary) -> String {
     for block in s
         .lifecycle
         .iter()
-        .filter(|block| block.status != LifecycleStatus::Passed)
+        .filter(|block| lifecycle_blocks_gate(block))
     {
         let name = format!("{} {}", block.scope_path(), phase_label(block.phase));
         let detail = block
@@ -165,7 +168,7 @@ fn render(s: &RunSummary) -> String {
                     .as_deref()
                     .map(|detail| format!(": {detail}"))
                     .unwrap_or_default();
-                format!("{} {}{}", failure.outcome, failure.step, suffix)
+                format!("{} {} [{}]{}", failure.outcome, failure.step, if failure.required { "required" } else { "diagnostic_only" }, suffix)
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -176,6 +179,12 @@ fn render(s: &RunSummary) -> String {
     }
     out.push_str("</testsuite>\n");
     out
+}
+
+fn lifecycle_blocks_gate(block: &duhem_summary::LifecycleBlock) -> bool {
+    block.status != LifecycleStatus::Passed
+        && (block.phase == LifecyclePhase::Setup
+            || block.cleanup_policy.as_deref() == Some("required"))
 }
 
 fn phase_label(phase: LifecyclePhase) -> &'static str {
@@ -221,6 +230,7 @@ mod tests {
             })
             .collect();
         let passed = LifecycleBlock {
+            cleanup_policy: None,
             phase: LifecyclePhase::Setup,
             scope,
             status: LifecycleStatus::Passed,
@@ -333,6 +343,7 @@ mod tests {
     fn cleanup_is_system_error_evidence_not_a_test_failure() {
         let s = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from(".")).with_cleanup(
             vec![CleanupFailureSummary {
+                required: false,
                 step: "delete-record".into(),
                 outcome: "error".into(),
                 detail: Some("synthetic cleanup error".into()),

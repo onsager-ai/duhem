@@ -607,6 +607,7 @@ impl Engine {
         {
             Ok(failures) => failures,
             Err(error) => vec![CleanupFailure {
+                required: false,
                 step: "teardown evidence".to_string(),
                 outcome: duhem_evidence::StepOutcome::Error,
                 detail: Some(writer.mask_text(&error.to_string())),

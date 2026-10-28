@@ -1269,7 +1269,7 @@ criteria:
 
         let default = capture(&Reporter::Default, &o);
         assert!(default.starts_with("pass\n"), "got: {default}");
-        assert!(default.contains("cleanup: delete-record (error)"));
+        assert!(default.contains("cleanup: delete-record (error, diagnostic_only)"));
         assert_eq!(
             default.lines().last(),
             Some("Total: 1 checks · 1 passed · 0 failed · 0 inconclusive")
@@ -1280,6 +1280,21 @@ criteria:
         assert_eq!(value["verdict"], "pass");
         assert_eq!(value["cleanup"][0]["step"], "delete-record");
         assert_eq!(value["cleanup"][0]["outcome"], "error");
+    }
+
+    #[test]
+    fn default_reporter_preserves_body_for_required_cleanup_gate() {
+        let mut o = outcome(VerdictState::Fail);
+        o.body_verdict = Some(VerdictState::Pass);
+        o.cleanup.push(duhem_runtime::CleanupFailure {
+            required: true,
+            step: "release".into(),
+            outcome: duhem_evidence::StepOutcome::Error,
+            detail: Some("could not release".into()),
+        });
+        let default = capture(&Reporter::Default, &o);
+        assert!(default.starts_with("fail\n  body: pass\n"), "{default}");
+        assert!(default.contains("cleanup: release (error, required)"), "{default}");
     }
 
     #[test]

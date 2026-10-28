@@ -193,10 +193,9 @@ export function RunSummary({ run }: { run: RunDetail }) {
           artifact.
         </div>
       )}
-      {(run.cleanup ?? []).some((step) => step.outcome !== "ok") && (
+      {(run.lifecycle ?? []).some((block) => block.phase === "teardown" && block.status !== "passed") && (
         <div className="border-l-2 border-muted-foreground/50 bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
-          Teardown recorded cleanup failures. Required fixture cleanup blocks the gate;
-          diagnostic cleanup is retained as evidence. See each block&apos;s policy below.
+          Cleanup failures are retained below with each block&apos;s policy.
         </div>
       )}
 

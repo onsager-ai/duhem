@@ -185,7 +185,7 @@ async fn runs_list_nests_recorded_suite_and_invocation_children() {
             .await
             .unwrap();
         writer
-            .append(EventPayload::RunFinished { verdict: None })
+            .append(EventPayload::RunFinished { body_verdict: None, verdict: None })
             .await
             .unwrap();
     }
@@ -288,7 +288,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
         .await
         .unwrap();
     writer
-        .append(EventPayload::SetupStarted {
+        .append(EventPayload::SetupStarted { cleanup_policy: None,
             phase: duhem_evidence::StepPhase::Setup,
             step_count: 0,
             fixture_name: None,
@@ -308,7 +308,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
         .await
         .unwrap();
     writer
-        .append(EventPayload::SetupStarted {
+        .append(EventPayload::SetupStarted { cleanup_policy: None,
             phase: duhem_evidence::StepPhase::Setup,
             step_count: 0,
             fixture_name: None,
@@ -328,7 +328,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
         .await
         .unwrap();
     writer
-        .append(EventPayload::SetupStarted {
+        .append(EventPayload::SetupStarted { cleanup_policy: None,
             phase: duhem_evidence::StepPhase::Teardown,
             step_count: 0,
             fixture_name: Some("db".into()),
@@ -388,7 +388,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
         .await
         .unwrap();
     writer
-        .append(EventPayload::SetupStarted {
+        .append(EventPayload::SetupStarted { cleanup_policy: None,
             phase: duhem_evidence::StepPhase::Setup,
             step_count: 0,
             fixture_name: Some("AC-2.1".into()),
@@ -408,7 +408,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
         .await
         .unwrap();
     writer
-        .append(EventPayload::RunFinished {
+        .append(EventPayload::RunFinished { body_verdict: None,
             verdict: Some(VerdictState::Pass),
         })
         .await
@@ -468,7 +468,7 @@ async fn run_detail_surfaces_teardown_evidence_without_changing_verdict() {
         .await
         .unwrap();
     writer
-        .append(EventPayload::SetupStepFinished {
+        .append(EventPayload::SetupStepFinished { judgment: None,
             phase: duhem_evidence::StepPhase::Teardown,
             step_index: 0,
             outcome: duhem_evidence::StepOutcome::Error,
@@ -490,7 +490,7 @@ async fn run_detail_surfaces_teardown_evidence_without_changing_verdict() {
         .await
         .unwrap();
     writer
-        .append(EventPayload::RunFinished {
+        .append(EventPayload::RunFinished { body_verdict: None,
             verdict: Some(duhem_evidence::VerdictState::Pass),
         })
         .await
@@ -513,7 +513,7 @@ async fn finished_unjudged_run_has_status_without_a_verdict() {
         .await
         .unwrap();
     writer
-        .append(EventPayload::RunFinished { verdict: None })
+        .append(EventPayload::RunFinished { body_verdict: None, verdict: None })
         .await
         .unwrap();
     writer.finish().await.unwrap();
@@ -620,7 +620,7 @@ async fn cleanup_step_finish_is_keyed_by_criterion_scope() {
             .unwrap();
     }
     writer
-        .append(EventPayload::SetupStepFinished {
+        .append(EventPayload::SetupStepFinished { judgment: None,
             phase: duhem_evidence::StepPhase::Teardown,
             step_index: 0,
             outcome: duhem_evidence::StepOutcome::Error,
@@ -632,7 +632,7 @@ async fn cleanup_step_finish_is_keyed_by_criterion_scope() {
         .await
         .unwrap();
     writer
-        .append(EventPayload::SetupStepFinished {
+        .append(EventPayload::SetupStepFinished { judgment: None,
             phase: duhem_evidence::StepPhase::Teardown,
             step_index: 0,
             outcome: duhem_evidence::StepOutcome::Ok,
@@ -644,7 +644,7 @@ async fn cleanup_step_finish_is_keyed_by_criterion_scope() {
         .await
         .unwrap();
     writer
-        .append(EventPayload::RunFinished {
+        .append(EventPayload::RunFinished { body_verdict: None,
             verdict: Some(VerdictState::Pass),
         })
         .await
@@ -797,7 +797,7 @@ async fn run_definition_is_served_verbatim_and_flagged_on_run_detail() {
     ))
     .await
     .unwrap();
-    w.append(EventPayload::RunFinished {
+    w.append(EventPayload::RunFinished { body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await
@@ -832,7 +832,7 @@ async fn run_detail_surfaces_recorded_viewport_metadata() {
     ))
     .await
     .unwrap();
-    w.append(EventPayload::RunFinished {
+    w.append(EventPayload::RunFinished { body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await
@@ -1057,7 +1057,7 @@ async fn write_stepless_run(
         .await
         .unwrap();
     writer
-        .append(EventPayload::RunFinished {
+        .append(EventPayload::RunFinished { body_verdict: None,
             verdict: Some(VerdictState::Fail),
         })
         .await
@@ -1160,7 +1160,7 @@ async fn colliding_check_ids_attribute_to_the_first_owner() {
     })
     .await
     .unwrap();
-    w.append(EventPayload::RunFinished {
+    w.append(EventPayload::RunFinished { body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await

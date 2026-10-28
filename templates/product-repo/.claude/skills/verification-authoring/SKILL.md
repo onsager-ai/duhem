@@ -360,8 +360,62 @@ provision:
 Duhem forks `up:` once before `setup:`, polls the optional `ready:`
 probe, runs every check against the now-real environment, then forks
 `down:` after the criteria loop completes. If the environment never
-comes up, the run is `inconclusive` — never a false `pass`. Teardown
-failures are recorded as evidence and don't flip the verdict.
+comes up, the run is `inconclusive` — never a false `pass`.
+Provisioning `down:` failures are recorded as evidence and don't flip the
+verdict; per-check fixture `down:` uses the policy below.
+
+#### Fixture cleanup
+
+Each fixture's `down:` is required by default. Set
+`cleanup_policy: diagnostic_only` on that fixture when its cleanup should
+remain visible without blocking the run. The policy applies only to that
+fixture's `down:`; fixture `up:`, leaf/criterion/check `teardown:`,
+`provision.down:`, and diagnostic capture keep their existing behavior.
+
+A required cleanup execution error, timeout, step-local runtime or dispatch
+error, or false implicit judgment from an action that reports `satisfied`
+makes the effective run gate `fail` after the body. The check and criterion
+results keep their body judgments. When the gate changes the run verdict, the
+run record retains `body_verdict`; required failures from earlier retry
+attempts remain gate-blocking even if a later body passes.
+
+Returned values are observations unless the action judges them. A non-zero
+`exit_code` from `cli/invoke` or an HTTP 500 response from `api/call` does not
+by itself fail cleanup. To judge an HTTP cleanup result, use `api/poll` with
+`method: GET` and `until: {status: 200}`.
+
+This page-free example deliberately names a nonexistent executable, which
+produces an execution error rather than a non-zero exit-code observation.
+The body passes, the run gate fails, and `body_verdict` is `pass`:
+
+```yaml
+verification: Required fixture cleanup
+fixtures:
+  resource:
+    up:
+      - uses: cli/invoke
+        with: {command: [sh, -c, "true"]}
+    down:
+      - id: release
+        uses: cli/invoke
+        with: {command: [duhem-intentionally-nonexistent-cleanup-command]}
+criteria:
+  - id: CLEANUP
+    description: Required resource cleanup must succeed before acceptance.
+    checks:
+      - id: CLEANUP.1
+        needs: [resource]
+        steps:
+          - id: body
+            uses: cli/invoke
+            with: {command: [sh, -c, "true"]}
+        assertions:
+          - $steps.body.outputs.exit_code == 0
+```
+
+For the diagnostic control, add `cleanup_policy: diagnostic_only` under
+`fixtures.resource`. The cleanup failure is still reported, but the passing
+body leaves the run gate `pass`.
 
 ### 5. Mechanical judgment — no LLM in the verdict
 

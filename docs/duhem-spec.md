@@ -185,7 +185,7 @@ assertion.
 - **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Every evaluated assertion carries the same three-state `VerdictState` as the final verdict. An assertion that is not evaluated because one of its operands comes from a skipped step is omitted; absence is not a fourth state. A step that terminates in `error` or `timeout` contributes an `inconclusive` judgment naming that step, whether or not its action judges. Execution failure of an actuator is an observability gap, not an absence: the steps it was meant to enable never ran, so the check's claims were never exercised. A check whose step sequence aborted therefore cannot aggregate to `pass`. Gated-out steps (`if:` did not match) and cleanup steps (`if: always` after a failure) are exempt — they contribute nothing, as above. An environment failure likewise contributes an `inconclusive` judgment for every non-exempt step, not only judging ones: when the environment never came up, no step observed anything. Aggregation applies fail → inconclusive → pass precedence directly, and an empty assertion set becomes `inconclusive:empty_aggregation`. A check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
 - **Conditional claim-set legibility:** absence is not a fourth state; gated steps still contribute nothing. A check records its non-zero count of **judging** steps gated by **value-based** conditions (static gates, upstream blocking, and lifecycle steps never count), and the run report, default/pretty reporters, and agent failure envelope expose that smaller claim set even when the verdict is `pass`. Value-based gating records the authored condition and the operand values actually evaluated in `StepOutcome::Skipped`; upstream failure blocking carries no condition evaluation. These optional fields are omitted, never null. A check with no value-gated judging steps gains no new output, and older traces render unchanged. This clarifies legibility only: verdict aggregation remains the same deterministic, LLM-free evaluation.
 - **Per-criterion verdict**: aggregated from its checks (any check `fail` → criterion `fail`; any `inconclusive` and no `fail` → criterion `inconclusive`; all `pass` → criterion `pass`).
-- **Per-run verdict**: aggregated from all criteria, same rules.
+- **Per-run body verdict**: aggregated from all criteria, same rules. The effective run verdict applies the required fixture-cleanup gate after the body: any retained required fixture `down:` failure makes the run `fail`; otherwise the effective verdict is the body verdict. `CheckFinished` and `CriterionFinished` remain body judgments. The run outcome, persisted `RunFinished.verdict`, CLI exit status, reporters, and dashboard run state use the effective verdict. When the gate changes the run verdict, optional `body_verdict` preserves the body verdict on `RunOutcome`, persisted `RunFinished`, and `RunSummary`; it is omitted when the body and effective verdict match.
 
 The three-state model is non-negotiable. `inconclusive` exists because real systems have flakes, environment failures, and observability gaps. Forcing flaky outcomes into `pass` corrupts trust; forcing them into `fail` blocks delivery without cause. `inconclusive` triggers escalation to human review without false signals.
 
@@ -750,7 +750,7 @@ criteria:
           - $steps.health.outputs.status == 200
 ```
 
-Failure policy is **inconclusive, never false**: a non-zero `up:` exit (or an unrunnable script) yields a run verdict of `Inconclusive(environment_error)`; a `ready:` probe that exhausts its `timeout:` yields `Inconclusive(timeout)`. A failed `up:` skips teardown (nothing came up to tear down); `down:` failures are recorded as evidence but never alter the verdict. Relative script paths resolve against the Verification Definition's directory. `up:`/`down:` scripts run under the runtime's sanitized subprocess environment (§9 Stage 3, §11.1 Runtime). The `ready:` catalog is closed at `http:` for v1.
+Failure policy is **inconclusive, never false**: a non-zero `up:` exit (or an unrunnable script) yields a run verdict of `Inconclusive(environment_error)`; a `ready:` probe that exhausts its `timeout:` yields `Inconclusive(timeout)`. A failed `up:` skips teardown (nothing came up to tear down); `provision.down:` failures are recorded as diagnostic evidence and never alter the verdict. Only per-check fixture `down:` supports the required cleanup gate (§10.3.5). Relative script paths resolve against the Verification Definition's directory. `up:`/`down:` scripts run under the runtime's sanitized subprocess environment (§9 Stage 3, §11.1 Runtime). The `ready:` catalog is closed at `http:` for v1.
 
 A manifest can also provision **one shared environment for the whole suite** rather than per-leaf — see the manifest `provision:` block in §10.4.
 
@@ -992,22 +992,89 @@ criteria:
         assertions: ["true"]
 ```
 
-`fixtures:` is a map of name to non-empty `up:` and `down:` step lists.
-`needs:` names declared fixtures in bring-up order. Each check (and each retry
-attempt) receives fresh instances: fixture `up:` runs in `needs:` order, then
-the check steps run, then fixture `down:` runs in reverse order. Leaf `setup:`
-precedes every fixture and leaf `teardown:` follows every fixture. Fixtures do
-not share state, nest, or depend on other fixtures in v1; a fixture step cannot
-carry `needs:`.
+`fixtures:` is a map of name to non-empty `up:` and `down:` step lists, plus
+optional `cleanup_policy: required | diagnostic_only`. The policy applies only
+to that fixture's `down:`. Omitting it means `required`, and serializers omit
+that default. `needs:` names declared fixtures in bring-up order. Each check
+(and each retry attempt) receives fresh instances: fixture `up:` runs in
+`needs:` order, then the check steps run, then fixture `down:` runs in reverse
+order. Leaf `setup:` precedes every fixture and leaf `teardown:` follows every
+fixture. Fixtures do not share state, nest, or depend on other fixtures in v1;
+a fixture step cannot carry `needs:`.
 
-Fixture steps are lifecycle actions and contribute no implicit judgments, even
-when their action contract judges. Their failure semantics are:
+Fixture lifecycle actions do not change the consuming check's body verdict.
+Fixture `up:` retains its existing non-judging behavior. Under the default
+`required` policy, a fixture `down:` cleanup failure changes the effective run
+gate to `fail` while preserving the check and criterion body judgments. A
+failure is a step execution error, timeout, step-local runtime/dispatch error,
+or a false implicit `satisfied == true` judgment from a judging action. A
+returned observation is data: a non-zero `exit_code` from `cli/invoke` or an
+HTTP 500 response from `api/call` does not by itself fail cleanup. To judge an
+HTTP cleanup result, use `api/poll` with `method: GET` and
+`until: {status: 200}`. Set `cleanup_policy: diagnostic_only` when a fixture's
+cleanup should remain visible without changing the effective run gate.
 
-| Event | Check result |
-| --- | --- |
-| A fixture `up:` step fails | `inconclusive` with the existing timeout or environment-error cause; check steps do not run |
-| A fixture `down:` step fails | failure remains in attributed evidence; the check verdict is unchanged |
-| The check fails or is inconclusive | every activated fixture still runs `down:` |
+| Event | Check/body result | Effective run gate |
+| --- | --- | --- |
+| A fixture `up:` step fails | `inconclusive` with the existing timeout or environment-error cause; check steps do not run | Existing body aggregation applies; no cleanup override |
+| A fixture `down:` step fails under `required` | Body check and criterion verdicts are unchanged | `fail`, even when the body passes or is inconclusive |
+| A fixture `down:` step fails under `diagnostic_only` | Body check and criterion verdicts are unchanged | Unchanged; failure remains diagnostic evidence |
+| The check fails or is inconclusive | Every activated fixture still runs `down:` | Body aggregation remains unchanged |
+
+This page-free example deliberately names a nonexistent cleanup executable,
+which produces an execution error rather than a non-zero exit-code
+observation. The check body passes, but required cleanup fails, so the
+effective run gate is `fail`, `body_verdict` is `pass`, and the CLI exits
+nonzero:
+
+```yaml
+verification: Required fixture cleanup
+fixtures:
+  resource:
+    up:
+      - uses: cli/invoke
+        with: {command: [sh, -c, "true"]}
+    down:
+      - id: release
+        uses: cli/invoke
+        with: {command: [duhem-intentionally-nonexistent-cleanup-command]}
+criteria:
+  - id: CLEANUP
+    description: Required resource cleanup must succeed before acceptance.
+    checks:
+      - id: CLEANUP.1
+        needs: [resource]
+        steps:
+          - id: body
+            uses: cli/invoke
+            with: {command: [sh, -c, "true"]}
+        assertions:
+          - $steps.body.outputs.exit_code == 0
+```
+
+For the diagnostic control, add `cleanup_policy: diagnostic_only` under
+`fixtures.resource`. The same cleanup failure remains visible as diagnostic
+evidence, while the passing body leaves the run gate `pass`.
+
+Required cleanup failures from every retry attempt are retained, so a later
+passing body cannot erase an earlier required cleanup failure. This does not
+change retry eligibility. Continue draining declared cleanup and reporting
+independent checks after a required failure; an engine error still fails
+execution and preserves available evidence.
+
+The fixture's `down:` lifecycle evidence and its folded `RunSummary.lifecycle`
+block record `cleanup_policy`; this fold is a report projection, while the run
+gate uses retained cleanup-failure records. Older lifecycle evidence without
+the policy field remains unknown. Retained cleanup-failure records carry
+`required`, which defaults to `false` when old summaries are read and for
+non-fixture cleanup.
+Lifecycle step evidence separates execution from judgment: a judging cleanup
+action that executes successfully but returns `satisfied: false` retains
+`outcome: ok` and records `judgment: fail`. `SetupStepFinished` and the folded
+`LifecycleStep` (including normalized lifecycle events) carry optional
+`judgment` of type `VerdictState`; lifecycle failure and `failing_step`
+account for either an execution failure or failed judgment. Missing judgment
+on old evidence remains unknown.
 
 Fixture lifecycle events carry both the fixture name and consuming check id.
 Only a fixture's own `down:` may read its `up:` outputs, through
@@ -1134,8 +1201,10 @@ did not run, and always shows a failed lifecycle block. Pretty groups all
 blocks by their recorded path; JUnit emits failed blocks as test cases and
 passing blocks in `system-out`. The dashboard shows leaf/criterion blocks
 on the run page and check/fixture setup before check steps and teardown
-after them. This evidence remains non-judging: teardown failures do not
-change the run verdict, and the compatibility `cleanup` field remains.
+after them. Leaf, criterion, and check teardown failures remain
+diagnostic-only; required fixture `down:` failures use the separate cleanup
+gate in §10.3.5. Diagnostic capture remains evidence-only (§7.7). The
+compatibility `cleanup` field remains.
 
 ### 10.4 Root manifest (`duhem.yml`)
 

@@ -284,6 +284,35 @@ Authoring rules:
   at the evidence boundary. Screenshots/video remain unmasked pixels,
   so keep credentials out of rendered UI (or use `--capture off`).
 
+#### Fixture cleanup judgment
+
+`fixtures.<name>.cleanup_policy` applies only to that fixture's `down:`.
+Omitting it means `required`; the default is omitted on serialization. A
+required fixture-down execution error, timeout, step-local runtime or
+dispatch error, or false implicit judgment from a catalog action makes the
+effective run gate `fail` after the body finishes. The check and criterion
+verdicts remain the body judgments; optional `body_verdict` on the run
+outcome, `RunFinished`, and `RunSummary` preserves the body result only when
+it differs from the gate. A required failure from any retry attempt is
+retained, even if a later body attempt passes, without changing retry
+eligibility.
+
+An action's returned values remain observations unless its contract judges
+them. For example, a non-zero `cli/invoke` `exit_code` or an HTTP 500 returned
+by `api/call` is data, not an automatic cleanup failure. To judge an HTTP
+cleanup result, use `api/poll` with `method: GET` and `until: {status: 200}`.
+`fixture.up:` stays non-judging. Leaf/criterion/check `teardown:`,
+`provision.down:`, and diagnostic capture remain diagnostic-only in this
+slice. Set `cleanup_policy: diagnostic_only` for a fixture whose `down:`
+should keep its evidence without blocking the run.
+
+Lifecycle evidence separates execution from judgment. A successfully
+executed cleanup judging step with `satisfied: false` has execution `ok` and
+`judgment: fail`. `SetupStepFinished` and folded `LifecycleStep` evidence
+carry optional `judgment: VerdictState`; lifecycle failure and its failing
+step account for either execution failure or failed judgment. Missing
+`judgment` or `cleanup_policy` in older evidence remains unknown.
+
 #### Share locators instead of copying them
 
 Put locators reused by multiple leaves in an ordinary manifest include:

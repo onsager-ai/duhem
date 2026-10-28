@@ -163,7 +163,10 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                 }
                 recorded_criteria.insert(criterion_id.clone(), *verdict);
             }
-            EventPayload::RunFinished { verdict, body_verdict } => {
+            EventPayload::RunFinished {
+                verdict,
+                body_verdict,
+            } => {
                 recorded_run = *verdict;
                 recorded_body = *body_verdict;
             }
@@ -302,7 +305,8 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
         return Err(ReplayDivergence::Body {
             recorded,
             recomputed: run.state,
-        }.into());
+        }
+        .into());
     }
     if cleanup_failed {
         run.state = VerdictState::Fail;

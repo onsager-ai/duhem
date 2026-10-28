@@ -721,7 +721,13 @@ async fn invoke_and_record(
             )
         })
         .flatten();
-    let judgment_detail = judgment.as_ref().and_then(|outcome| outcome.detail.clone());
+    let judgment_detail = if matches!(scope, HookScope::FixtureDown(..))
+        && matches!(outcome, Outcome::Ok)
+    {
+        judgment.as_ref().and_then(|outcome| outcome.detail.clone())
+    } else {
+        None
+    };
     let action_detail = action_detail.or(judgment_detail);
     let judgment = judgment.map(|outcome| outcome.state);
     let failed = step_failed(&outcome, judgment)

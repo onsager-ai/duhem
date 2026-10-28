@@ -167,7 +167,9 @@ fn real_api_poll_judges_cleanup_but_call_status_and_cli_exit_are_observations() 
         ),
         (
             "api/poll",
-            format!("{{method: GET, url: 'http://{address}/', until: {{status: 500}}, timeout: 50ms, interval: 5ms}}"),
+            format!(
+                "{{method: GET, url: 'http://{address}/', until: {{status: 500}}, timeout: 50ms, interval: 5ms}}"
+            ),
             true,
         ),
         (

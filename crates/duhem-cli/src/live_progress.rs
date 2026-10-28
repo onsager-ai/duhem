@@ -996,6 +996,7 @@ criteria:
                     5,
                     2000,
                     EventPayload::RunFinished {
+                        body_verdict: None,
                         verdict: Some(VerdictState::Fail),
                     },
                 ),
@@ -1067,6 +1068,7 @@ criteria:
                     6,
                     3100,
                     EventPayload::RunFinished {
+                        body_verdict: None,
                         verdict: Some(VerdictState::Pass),
                     },
                 ),
@@ -1088,6 +1090,7 @@ criteria:
             0,
             0,
             EventPayload::RunFinished {
+                body_verdict: None,
                 verdict: Some(VerdictState::Pass),
             },
         ))
@@ -1527,6 +1530,7 @@ criteria:
             3,
             5200,
             EventPayload::RunFinished {
+                body_verdict: None,
                 verdict: Some(VerdictState::Pass),
             },
         ))

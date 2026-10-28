@@ -373,7 +373,8 @@ fixture's `down:`; fixture `up:`, leaf/criterion/check `teardown:`,
 `provision.down:`, and diagnostic capture keep their existing behavior.
 
 A required cleanup execution error, timeout, step-local runtime or dispatch
-error, or false implicit judgment from an action that reports `satisfied`
+error, or a non-passing implicit judgment from an action that reports
+`satisfied` (including a missing required judging output)
 makes the effective run gate `fail` after the body. The check and criterion
 results keep their body judgments. When the gate changes the run verdict, the
 run record retains `body_verdict`; required failures from earlier retry

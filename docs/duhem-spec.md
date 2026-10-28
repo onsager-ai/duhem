@@ -1007,7 +1007,8 @@ Fixture `up:` retains its existing non-judging behavior. Under the default
 `required` policy, a fixture `down:` cleanup failure changes the effective run
 gate to `fail` while preserving the check and criterion body judgments. A
 failure is a step execution error, timeout, step-local runtime/dispatch error,
-or a false implicit `satisfied == true` judgment from a judging action. A
+or a non-passing implicit judgment from a judging action, including a false
+`satisfied == true` condition or a missing required judging output. A
 returned observation is data: a non-zero `exit_code` from `cli/invoke` or an
 HTTP 500 response from `api/call` does not by itself fail cleanup. To judge an
 HTTP cleanup result, use `api/poll` with `method: GET` and

@@ -39,6 +39,11 @@ pub enum ReplayError {
 /// A verdict the replay computed differs from what was recorded.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ReplayDivergence {
+    #[error("run body: recorded verdict {recorded}, recomputed {recomputed}")]
+    Body {
+        recorded: VerdictState,
+        recomputed: VerdictState,
+    },
     #[error("check {check_id}: recorded verdict {recorded}, recomputed {recomputed}")]
     Check {
         check_id: String,
@@ -81,6 +86,7 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     // recomputed `RunVerdict.criteria` matches the recorded ordering.
     let mut criterion_order: Vec<String> = Vec::new();
     let mut recorded_run: Option<VerdictState> = None;
+    let mut recorded_body = None;
     let mut required_cleanup = std::collections::BTreeSet::new();
     let mut cleanup_failed = false;
     let mut saw_run_started = false;
@@ -157,8 +163,9 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                 }
                 recorded_criteria.insert(criterion_id.clone(), *verdict);
             }
-            EventPayload::RunFinished { verdict, .. } => {
+            EventPayload::RunFinished { verdict, body_verdict } => {
                 recorded_run = *verdict;
+                recorded_body = *body_verdict;
             }
             EventPayload::SetupStarted {
                 phase: crate::StepPhase::Teardown,
@@ -289,6 +296,14 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
 
     // Recompute the run verdict.
     let mut run = aggregate_run(recomputed_criteria);
+    if let Some(recorded) = recorded_body
+        && recorded != run.state
+    {
+        return Err(ReplayDivergence::Body {
+            recorded,
+            recomputed: run.state,
+        }.into());
+    }
     if cleanup_failed {
         run.state = VerdictState::Fail;
     }

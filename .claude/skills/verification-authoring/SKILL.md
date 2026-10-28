@@ -289,7 +289,8 @@ Authoring rules:
 `fixtures.<name>.cleanup_policy` applies only to that fixture's `down:`.
 Omitting it means `required`; the default is omitted on serialization. A
 required fixture-down execution error, timeout, step-local runtime or
-dispatch error, or false implicit judgment from a catalog action makes the
+dispatch error, or a non-passing implicit judgment from a catalog action
+(including a missing required judging output) makes the
 effective run gate `fail` after the body finishes. The check and criterion
 verdicts remain the body judgments; optional `body_verdict` on the run
 outcome, `RunFinished`, and `RunSummary` preserves the body result only when

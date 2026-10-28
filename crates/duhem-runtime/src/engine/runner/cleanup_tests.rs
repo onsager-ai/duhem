@@ -206,3 +206,38 @@ criteria:
     let events = Trace::from_store(engine.store.as_ref().unwrap().as_ref(), &outcome.run_id).await.unwrap().into_events();
     assert!(!serde_json::to_string(&events).unwrap().contains(secret));
 }
+
+#[tokio::test]
+async fn missing_cleanup_judging_output_blocks_required_gate_and_replays() {
+    for policy in ["required", "diagnostic_only"] {
+        let (mut engine, _tmp) = engine_for_test().await;
+        engine.register_test_action(Box::new(StubAction::new("fake/judge", Outcome::Ok).judging()));
+        let definition = def(&format!(r#"
+verification: Missing cleanup judging output
+fixtures:
+  resource:
+    cleanup_policy: {policy}
+    up: []
+    down: [{{uses: fake/judge}}]
+criteria:
+  - id: AC
+    description: A required cleanup judgment must be observable
+    checks: [{{id: body, needs: [resource], assertions: ["true"]}}]
+"#));
+        let outcome = engine.run_with_metadata(&definition, BTreeMap::new()).await.unwrap();
+        assert_eq!(outcome.verdict.state, if policy == "required" { VerdictState::Fail } else { VerdictState::Pass });
+        assert_eq!(outcome.cleanup.len(), 1);
+        assert_eq!(outcome.cleanup[0].required, policy == "required");
+        assert!(outcome.cleanup[0].detail.as_ref().unwrap().contains("satisfied"));
+        let trace = Trace::from_store(engine.store.as_ref().unwrap().as_ref(), &outcome.run_id).await.unwrap();
+        let replayed = duhem_evidence::replay(&trace).unwrap();
+        assert_eq!(replayed.run.state, outcome.verdict.state);
+        let mut events = trace.into_events();
+        if let EventPayload::RunFinished { body_verdict, .. } = &mut events.last_mut().unwrap().payload {
+            *body_verdict = Some(VerdictState::Fail);
+        }
+        let malformed = Trace::from_events(events).unwrap();
+        assert!(matches!(duhem_evidence::replay(&malformed),
+            Err(duhem_evidence::ReplayError::Divergence(duhem_evidence::ReplayDivergence::Body { .. }))));
+    }
+}

@@ -499,3 +499,17 @@ mod tests {
         assert_eq!(back.totals, CheckTotals::default());
     }
 }
+
+#[cfg(test)]
+mod cleanup_compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_cleanup_is_diagnostic_and_body_defaults_absent() {
+        let json = r#"{"schema_version":"2","run_id":"old","verdict":"pass","criteria":[],"store":".","cleanup":[{"step":"release","outcome":"error"}]}"#;
+        let summary: RunSummary = serde_json::from_str(json).unwrap();
+        assert!(!summary.cleanup[0].required);
+        assert_eq!(summary.body_verdict, None);
+        assert!(!serde_json::to_value(summary).unwrap().as_object().unwrap().contains_key("body_verdict"));
+    }
+}

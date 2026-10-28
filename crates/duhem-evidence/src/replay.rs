@@ -81,6 +81,8 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     // recomputed `RunVerdict.criteria` matches the recorded ordering.
     let mut criterion_order: Vec<String> = Vec::new();
     let mut recorded_run: Option<VerdictState> = None;
+    let mut required_cleanup = std::collections::BTreeSet::new();
+    let mut cleanup_failed = false;
     let mut saw_run_started = false;
 
     // A step owner is stronger than the additive check_finished fallback,
@@ -155,8 +157,28 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                 }
                 recorded_criteria.insert(criterion_id.clone(), *verdict);
             }
-            EventPayload::RunFinished { verdict } => {
+            EventPayload::RunFinished { verdict, .. } => {
                 recorded_run = *verdict;
+            }
+            EventPayload::SetupStarted {
+                phase: crate::StepPhase::Teardown,
+                fixture_name: Some(fixture),
+                check_id,
+                cleanup_policy: Some(policy),
+                ..
+            } if policy == "required" => {
+                required_cleanup.insert((fixture.clone(), check_id.clone()));
+            }
+            EventPayload::SetupStepFinished {
+                phase: crate::StepPhase::Teardown,
+                fixture_name: Some(fixture),
+                check_id,
+                outcome,
+                judgment,
+                ..
+            } if required_cleanup.contains(&(fixture.clone(), check_id.clone())) => {
+                cleanup_failed |= matches!(outcome, crate::StepOutcome::Error | crate::StepOutcome::Timeout)
+                    || judgment.is_some_and(|state| state != VerdictState::Pass);
             }
             EventPayload::StepObservation { .. }
             | EventPayload::RunHeartbeat
@@ -264,7 +286,10 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     }
 
     // Recompute the run verdict.
-    let run = aggregate_run(recomputed_criteria);
+    let mut run = aggregate_run(recomputed_criteria);
+    if cleanup_failed {
+        run.state = VerdictState::Fail;
+    }
     if run.state != recorded_run {
         return Err(ReplayDivergence::Run {
             recorded: recorded_run,

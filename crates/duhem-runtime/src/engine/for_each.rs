@@ -352,12 +352,20 @@ pub(crate) async fn run_for_each_step(
                 phase,
                 step_index: idx as u32,
                 outcome: StepOutcome::Error,
-                detail: Some(detail),
+                detail: Some(detail.clone()),
                 fixture_name: fixture_name.clone(),
                 check_id: check_id.clone(),
                 criterion_id: criterion_id.clone(),
             })
             .await?;
+        if phase == StepPhase::Teardown {
+            cleanup.push(CleanupFailure {
+                required: scope.cleanup_policy().is_required(),
+                step: display_step_label(step, idx),
+                outcome: StepOutcome::Error,
+                detail: Some(detail),
+            });
+        }
         if aborted.is_none() {
             *aborted = Some(AbortReason::ActionError);
             *failed_by = Some(display_step_label(step, idx));
@@ -384,12 +392,20 @@ pub(crate) async fn run_for_each_step(
                     phase,
                     step_index: idx as u32,
                     outcome: StepOutcome::Error,
-                    detail: Some(detail),
+                    detail: Some(detail.clone()),
                     fixture_name: fixture_name.clone(),
                     check_id: check_id.clone(),
                     criterion_id: criterion_id.clone(),
                 })
                 .await?;
+            if phase == StepPhase::Teardown {
+                cleanup.push(CleanupFailure {
+                    required: scope.cleanup_policy().is_required(),
+                    step: display_step_label(step, idx),
+                    outcome: StepOutcome::Error,
+                    detail: Some(detail),
+                });
+            }
             if aborted.is_none() {
                 *aborted = Some(AbortReason::ActionError);
                 *failed_by = Some(display_step_label(step, idx));
@@ -409,12 +425,20 @@ pub(crate) async fn run_for_each_step(
                     phase,
                     step_index: idx as u32,
                     outcome: StepOutcome::Error,
-                    detail: Some(detail),
+                    detail: Some(detail.clone()),
                     fixture_name: fixture_name.clone(),
                     check_id: check_id.clone(),
                     criterion_id: criterion_id.clone(),
                 })
                 .await?;
+            if phase == StepPhase::Teardown {
+                cleanup.push(CleanupFailure {
+                    required: scope.cleanup_policy().is_required(),
+                    step: display_step_label(step, idx),
+                    outcome: StepOutcome::Error,
+                    detail: Some(detail),
+                });
+            }
             if aborted.is_none() {
                 *aborted = Some(AbortReason::ActionError);
                 *failed_by = Some(display_step_label(step, idx));
@@ -447,12 +471,20 @@ pub(crate) async fn run_for_each_step(
                 phase,
                 step_index: idx as u32,
                 outcome: StepOutcome::Error,
-                detail: Some(detail),
+                detail: Some(detail.clone()),
                 fixture_name: fixture_name.clone(),
                 check_id: check_id.clone(),
                 criterion_id: criterion_id.clone(),
             })
             .await?;
+        if phase == StepPhase::Teardown {
+            cleanup.push(CleanupFailure {
+                required: scope.cleanup_policy().is_required(),
+                step: display_step_label(step, idx),
+                outcome: StepOutcome::Error,
+                detail: Some(detail),
+            });
+        }
         if aborted.is_none() {
             *aborted = Some(AbortReason::ActionError);
             *failed_by = Some(display_step_label(step, idx));

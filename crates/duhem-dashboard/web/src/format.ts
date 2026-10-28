@@ -519,17 +519,17 @@ export function stepStatus(node: StepNode): {
   reason: string;
   failed: boolean;
 } {
-  const jstate = node.judgment ? (str(node.judgment.state) ?? "") : "";
-  const reason = node.judgment ? assertionText(node.judgment) : "";
+  const finished = node.events.find(
+    (e) => e.kind === "step_finished" || e.kind === "setup_step_finished",
+  );
+  const jstate = node.judgment ? (str(node.judgment.state) ?? "") : str(finished?.judgment) ?? "";
+  const reason = node.judgment ? assertionText(node.judgment) : str(finished?.detail) ?? "";
   if (jstate === "fail") {
     return { icon: "fail", label: "step failed", tone: "fail", reason, failed: true };
   }
   if (jstate.startsWith("inconclusive")) {
     return { icon: "inconclusive", label: "step inconclusive", tone: "inconclusive", reason, failed: true };
   }
-  const finished = node.events.find(
-    (e) => e.kind === "step_finished" || e.kind === "setup_step_finished",
-  );
   const outcome = stepOutcome(finished?.outcome);
   const map: Record<string, { icon: IconName; label: string; tone: Tone }> = {
     ok: { icon: "pass", label: "step ok", tone: "ok" },

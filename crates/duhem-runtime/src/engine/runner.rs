@@ -814,6 +814,7 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
+    include!("runner/cleanup_tests.rs");
     use super::*;
     use crate::engine::registry::{ConcreteAction, Dispatch};
     use async_trait::async_trait;

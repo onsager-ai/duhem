@@ -39,7 +39,7 @@ fn fixed_bundle() -> RunBundle {
             session: None,
             seq: 0,
             ts: "2026-07-06T00:00:00.000Z".parse().unwrap(),
-            payload: EventPayload::RunFinished {
+            payload: EventPayload::RunFinished { body_verdict: None,
                 verdict: Some(VerdictState::Pass),
             },
         }],
@@ -138,7 +138,7 @@ async fn store_to_bundle_round_trips_through_the_export_directory() {
     })
     .await
     .unwrap();
-    w.append(EventPayload::RunFinished {
+    w.append(EventPayload::RunFinished { body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await

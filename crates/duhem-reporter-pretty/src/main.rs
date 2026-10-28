@@ -154,7 +154,11 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
         writeln!(out)?;
         writeln!(out, "CLEANUP")?;
         for failure in &s.cleanup {
-            let policy = if failure.required { "required" } else { "diagnostic_only" };
+            let policy = if failure.required {
+                "required"
+            } else {
+                "diagnostic_only"
+            };
             writeln!(out, "  {}  {} [{policy}]", failure.outcome, failure.step)?;
             if let Some(detail) = &failure.detail {
                 writeln!(out, "      ({detail})")?;

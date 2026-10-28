@@ -348,7 +348,11 @@ fn write_cleanup(
             "  cleanup: {} ({}, {})",
             failure.step,
             cleanup_outcome(&failure.outcome),
-            if failure.required { "required" } else { "diagnostic_only" }
+            if failure.required {
+                "required"
+            } else {
+                "diagnostic_only"
+            }
         )?;
         if let Some(detail) = &failure.detail {
             writeln!(out, "      ({detail})")?;

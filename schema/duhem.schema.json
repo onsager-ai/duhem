@@ -90,6 +90,13 @@
       ],
       "type": "object"
     },
+    "CleanupPolicy": {
+      "enum": [
+        "required",
+        "diagnostic_only"
+      ],
+      "type": "string"
+    },
     "Criterion": {
       "additionalProperties": false,
       "properties": {
@@ -153,8 +160,11 @@
     "Fixture": {
       "additionalProperties": false,
       "properties": {
+        "cleanup_policy": {
+          "$ref": "#/definitions/CleanupPolicy"
+        },
         "down": {
-          "description": "Best-effort cleanup actions for that instance.",
+          "description": "Cleanup actions for that instance, required by default.",
           "items": {
             "$ref": "#/definitions/Step"
           },

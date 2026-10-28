@@ -351,7 +351,10 @@ impl SuiteEnvironment {
             }
         }
         self.writer
-            .append(EventPayload::RunFinished { verdict: None, body_verdict: None })
+            .append(EventPayload::RunFinished {
+                verdict: None,
+                body_verdict: None,
+            })
             .await?;
         self.writer.finish().await?;
         Ok(())

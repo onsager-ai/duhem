@@ -418,7 +418,7 @@ mod tests {
             });
         }
         fold.push(LifecycleEvent::Started {
-                cleanup_policy: None,
+            cleanup_policy: None,
             phase: LifecyclePhase::Setup,
             criterion_id: None,
             check_id: None,

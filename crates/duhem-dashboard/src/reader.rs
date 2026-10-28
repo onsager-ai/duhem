@@ -714,7 +714,10 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 criterion_order.push(criterion_id.clone());
                 checks_by_criterion.push((criterion_id.clone(), Vec::new()));
             }
-            EventPayload::RunFinished { verdict, body_verdict: body } => {
+            EventPayload::RunFinished {
+                verdict,
+                body_verdict: body,
+            } => {
                 run_verdict = *verdict;
                 body_verdict = *body;
             }

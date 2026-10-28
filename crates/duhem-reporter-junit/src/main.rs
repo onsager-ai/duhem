@@ -90,7 +90,10 @@ fn render(s: &RunSummary) -> String {
         xml_escape(&s.run_id),
     ));
     if let Some(body) = s.body_verdict {
-        out.push_str(&format!("  <properties><property name=\"body_verdict\" value=\"{}\"/></properties>\n", xml_escape(&body.to_string())));
+        out.push_str(&format!(
+            "  <properties><property name=\"body_verdict\" value=\"{}\"/></properties>\n",
+            xml_escape(&body.to_string())
+        ));
     }
     for c in &s.criteria {
         match &c.verdict {
@@ -168,7 +171,17 @@ fn render(s: &RunSummary) -> String {
                     .as_deref()
                     .map(|detail| format!(": {detail}"))
                     .unwrap_or_default();
-                format!("{} {} [{}]{}", failure.outcome, failure.step, if failure.required { "required" } else { "diagnostic_only" }, suffix)
+                format!(
+                    "{} {} [{}]{}",
+                    failure.outcome,
+                    failure.step,
+                    if failure.required {
+                        "required"
+                    } else {
+                        "diagnostic_only"
+                    },
+                    suffix
+                )
             })
             .collect::<Vec<_>>()
             .join("\n");

@@ -388,7 +388,7 @@ pub(crate) async fn run_for_each_step(
             ));
             writer
                 .append(EventPayload::SetupStepFinished {
-                judgment: None,
+                    judgment: None,
                     phase,
                     step_index: idx as u32,
                     outcome: StepOutcome::Error,
@@ -421,7 +421,7 @@ pub(crate) async fn run_for_each_step(
             let detail = writer.mask_text(&error.to_string());
             writer
                 .append(EventPayload::SetupStepFinished {
-                judgment: None,
+                    judgment: None,
                     phase,
                     step_index: idx as u32,
                     outcome: StepOutcome::Error,
@@ -495,7 +495,7 @@ pub(crate) async fn run_for_each_step(
     // R7: an empty array is zero iterations, not an error.
     writer
         .append(EventPayload::SetupStepFinished {
-                judgment: None,
+            judgment: None,
             phase,
             step_index: idx as u32,
             outcome: StepOutcome::Ok,
@@ -593,7 +593,15 @@ async fn invoke_and_record(
     idx: usize,
     resolved_with: &serde_yml::Value,
     invocation: SetupInvocation<'_>,
-) -> Result<(Outcome, bool, Option<String>, Option<duhem_judge::VerdictState>), EngineError> {
+) -> Result<
+    (
+        Outcome,
+        bool,
+        Option<String>,
+        Option<duhem_judge::VerdictState>,
+    ),
+    EngineError,
+> {
     let SetupInvocation {
         step,
         run,
@@ -633,7 +641,9 @@ async fn invoke_and_record(
                 &step.outputs,
                 &r.outputs,
                 |local, v| {
-                    if let HookScope::Fixture(fixture, _) | HookScope::FixtureDown(fixture, _, _) = scope {
+                    if let HookScope::Fixture(fixture, _) | HookScope::FixtureDown(fixture, _, _) =
+                        scope
+                    {
                         run.record_fixture_output(fixture, id, local, v);
                     } else {
                         // Leaf, criterion, and check `setup:`/`teardown:`

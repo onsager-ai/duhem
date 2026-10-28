@@ -1,15 +1,11 @@
 //! CLI-level integration tests for `duhem run` flags (issue #23).
 //!
-//! `#[ignore]`'d by default: the `duhem run` dispatch unconditionally
-//! launches a Playwright browser before invoking the engine (a
-//! launch-once-then-reuse policy that predates this spec), so even
-//! browser-free fixtures need `npx playwright install chromium` to
-//! reach the reporter / store code paths these tests exercise.
-//! `just test-cli-smoke` (or `cargo test -p duhem-cli -- --ignored`)
-//! runs them locally; the matching unit tests in `filter.rs`,
+//! Page-free reporter fixtures run through the real CLI without starting
+//! Playwright. Browser-backed cases remain `#[ignore]`'d by default and
+//! can be run with `cargo test -p duhem-cli --test run_flags -- --ignored`
+//! after installing Chromium. Matching unit tests in `filter.rs`,
 //! `reporter.rs`, and the engine-level test in
-//! `duhem-runtime::engine::runner` cover the same behaviour without
-//! the browser dependency.
+//! `duhem-runtime::engine::runner` cover related behavior.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -216,7 +212,6 @@ fn explicit_and_disabled_env_file_controls_work() {
 }
 
 #[test]
-#[ignore = "requires `npx playwright install chromium`; `duhem run` launches a browser unconditionally"]
 fn default_reporter_prints_verdict_then_check_totals() {
     // Spec #493 extends the default reporter while retaining the
     // verdict as the first line for existing CI scripts.
@@ -241,7 +236,6 @@ fn default_reporter_prints_verdict_then_check_totals() {
 }
 
 #[test]
-#[ignore = "requires `npx playwright install chromium`; `duhem run` launches a browser unconditionally"]
 fn quiet_reporter_writes_nothing_to_stdout() {
     let tmp = tempfile::tempdir().unwrap();
     let path = fixture(&tmp, ONE_CRITERION);
@@ -266,10 +260,37 @@ fn quiet_reporter_writes_nothing_to_stdout() {
 }
 
 #[test]
-#[ignore = "requires `npx playwright install chromium`; `duhem run` launches a browser unconditionally"]
-fn json_reporter_emits_one_valid_json_line() {
+fn run_help_describes_both_json_shapes() {
+    let out = Command::new(bin())
+        .arg("run")
+        .arg("--help")
+        .output()
+        .expect("spawn duhem");
+
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let help = String::from_utf8(out.stdout).unwrap();
+    for token in [
+        "RunSummary",
+        "RunSetSummary",
+        "criteria:",
+        "verifications:",
+        "filename",
+    ] {
+        assert!(help.contains(token), "help should mention {token}: {help}");
+    }
+}
+
+#[test]
+fn json_reporter_emits_leaf_shape_for_duhem_yml() {
     let tmp = tempfile::tempdir().unwrap();
-    let path = fixture(&tmp, ONE_CRITERION);
+    // The filename conventionally used for manifests is still a leaf
+    // when the target's contents have the leaf `criteria:` key.
+    let path = tmp.path().join("duhem.yml");
+    std::fs::write(&path, ONE_CRITERION).unwrap();
     let db = tmp.path().join("duhem.db");
 
     let out = Command::new(bin())
@@ -294,10 +315,13 @@ fn json_reporter_emits_one_valid_json_line() {
         "expected single line, got: {stdout:?}"
     );
     let v: serde_json::Value = serde_json::from_str(trimmed).expect("valid JSON");
+    assert_eq!(v["schema_version"], "2");
     assert_eq!(v["verdict"], "pass");
     assert_eq!(v["criteria"][0]["id"], "AC-1");
     assert_eq!(v["totals"]["total"], 1);
     assert_eq!(v["totals"]["passed"], 1);
+    assert!(v["failures"].as_array().is_some());
+    assert!(v.get("runs").is_none());
     assert_eq!(
         v["store"].as_str().unwrap(),
         db.to_str().unwrap(),
@@ -889,6 +913,82 @@ verifications:
     )
     .unwrap();
     manifest
+}
+
+#[test]
+fn json_reporter_emits_run_set_shape_for_manifest_duhem_yml() {
+    let tmp = tempfile::tempdir().unwrap();
+    let manifest = manifest_with_two_leaves(tmp.path());
+    // One passing and one failing leaf demonstrate that failure detail
+    // lives inside the corresponding RunSummary in `runs[]`.
+    std::fs::write(
+        tmp.path().join("leaf-b/duhem.yml"),
+        r#"
+verification: leaf-b
+criteria:
+  - id: AC-1
+    description: fails
+    checks:
+      - id: AC-1.1
+        assertions: ["false"]
+"#,
+    )
+    .unwrap();
+    let db = tmp.path().join("duhem.db");
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&manifest)
+        .arg("--reporter")
+        .arg("json")
+        .arg("--db")
+        .arg(&db)
+        .output()
+        .expect("spawn duhem");
+
+    assert!(
+        !out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let trimmed = stdout.trim_end_matches('\n');
+    assert!(
+        !trimmed.contains('\n'),
+        "expected single line, got: {stdout:?}"
+    );
+    let summary: serde_json::Value = serde_json::from_str(trimmed).expect("valid JSON");
+    assert_eq!(summary["schema_version"], "1");
+    assert_eq!(summary["verdict"], "fail");
+    assert_eq!(summary["totals"]["total"], 2);
+    assert_eq!(summary["totals"]["passed"], 1);
+    assert_eq!(summary["totals"]["failed"], 1);
+    assert!(summary.get("criteria").is_none());
+    assert!(summary.get("failures").is_none());
+
+    let runs = summary["runs"].as_array().expect("runs array");
+    assert_eq!(runs.len(), 2);
+    assert_eq!(runs[0]["schema_version"], "2");
+    assert_eq!(runs[0]["verdict"], "pass");
+    assert_eq!(runs[0]["criteria"][0]["id"], "AC-1");
+    assert!(runs[0]["failures"].as_array().is_some());
+    assert_eq!(runs[1]["schema_version"], "2");
+    assert_eq!(runs[1]["verdict"], "fail");
+    assert_eq!(runs[1]["criteria"][0]["id"], "AC-1");
+    assert_eq!(runs[1]["failures"].as_array().unwrap().len(), 1);
+    assert_eq!(runs[1]["failures"][0]["criterion_id"], "AC-1");
+    assert_eq!(runs[1]["failures"][0]["check_id"], "AC-1.1");
+    for field in ["total", "passed", "failed", "inconclusive"] {
+        let leaf_total: u64 = runs
+            .iter()
+            .map(|run| run["totals"][field].as_u64().unwrap())
+            .sum();
+        assert_eq!(
+            summary["totals"][field].as_u64(),
+            Some(leaf_total),
+            "run-set {field} total should sum the leaves"
+        );
+    }
 }
 
 #[test]

@@ -110,6 +110,14 @@ up) and deliberately refuses to call that a pass. The final line counts
 checks that actually executed. A check excluded by `--filter` is not
 included in `Total`; it emits no verdict for the run to count.
 
+For machine consumption, add `--reporter json`. A leaf target with a
+top-level `criteria:` key emits a `RunSummary` v2; a manifest with
+`verifications:` emits a `RunSetSummary` v1 containing its leaf summaries
+in `runs[]`. The target's content selects the shape, not its filename.
+The two schema versions are independent, and the run-set totals sum the
+leaf totals. See [the reporter contract](./duhem-spec.md#11-architecture)
+for one-line examples of both shapes.
+
 When a step itself cannot complete, the failure includes the recorded
 engine/action cause rather than stopping at a bare `error`. For example:
 

@@ -64,7 +64,7 @@ verification: Cleanup gate
 fixtures:
   resource:
     cleanup_policy: {policy}
-    up: []
+    up: [{{uses: cli/invoke, with: {{command: [sh, -c, "true"]}}}}]
     down:
       - uses: cli/invoke
         with: {{command: [duhem-intentionally-nonexistent-cleanup-command]}}
@@ -156,13 +156,18 @@ fn real_api_poll_judges_cleanup_but_call_status_and_cli_exit_are_observations() 
         (
             "api/poll",
             format!(
-                "{{url: 'http://{address}/', until: {{status: 200}}, timeout: 50ms, interval: 5ms}}"
+                "{{method: GET, url: 'http://{address}/', until: {{status: 200}}, timeout: 50ms, interval: 5ms}}"
             ),
             false,
         ),
         (
             "api/call",
             format!("{{url: 'http://{address}/', method: GET}}"),
+            true,
+        ),
+        (
+            "api/poll",
+            format!("{{method: GET, url: 'http://{address}/', until: {{status: 500}}, timeout: 50ms, interval: 5ms}}"),
             true,
         ),
         (
@@ -185,7 +190,7 @@ fn real_api_poll_judges_cleanup_but_call_status_and_cli_exit_are_observations() 
 verification: Cleanup action
 fixtures:
   resource:
-    up: []
+    up: [{{uses: cli/invoke, with: {{command: [sh, -c, "true"]}}}}]
     down:
       - uses: {action}
         with: {with}
@@ -202,6 +207,11 @@ criteria:
         if !passes {
             assert_eq!(summary["body_verdict"], "pass");
             assert_eq!(summary["lifecycle"][1]["status"], "failed");
+            assert_eq!(summary["lifecycle"][1]["steps"][0]["outcome"], "ok");
+            assert_eq!(summary["lifecycle"][1]["steps"][0]["judgment"], "fail");
+        } else {
+            assert!(summary.get("cleanup").is_none());
+            assert_eq!(summary["lifecycle"][1]["status"], "passed");
         }
     }
     stopped.store(true, Ordering::SeqCst);

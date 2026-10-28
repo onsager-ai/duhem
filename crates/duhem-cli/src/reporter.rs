@@ -1294,7 +1294,10 @@ criteria:
         });
         let default = capture(&Reporter::Default, &o);
         assert!(default.starts_with("fail\n  body: pass\n"), "{default}");
-        assert!(default.contains("cleanup: release (error, required)"), "{default}");
+        assert!(
+            default.contains("cleanup: release (error, required)"),
+            "{default}"
+        );
     }
 
     #[test]

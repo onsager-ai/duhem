@@ -121,7 +121,8 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, screenshot: boo
     })
     .await
     .unwrap();
-    w.append(EventPayload::RunFinished { body_verdict: None,
+    w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(verdict),
     })
     .await

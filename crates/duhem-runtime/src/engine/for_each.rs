@@ -217,7 +217,9 @@ pub(crate) async fn process_lifecycle_step(
         }
         Outcome::Error => error_detail
             .or_else(|| Some(format!("action `{}` returned an error", step.uses_name()))),
-        Outcome::Ok if failed => error_detail.or_else(|| Some("judging action reported failure".to_string())),
+        Outcome::Ok if failed => {
+            error_detail.or_else(|| Some("judging action reported failure".to_string()))
+        }
         Outcome::Ok | Outcome::Skipped { .. } => None,
     }
     .map(|detail| writer.mask_text(&detail));
@@ -719,7 +721,8 @@ async fn invoke_and_record(
             )
         })
         .flatten();
-    let action_detail = action_detail.or_else(|| judgment.as_ref().and_then(|outcome| outcome.detail.clone()));
+    let judgment_detail = judgment.as_ref().and_then(|outcome| outcome.detail.clone());
+    let action_detail = action_detail.or(judgment_detail);
     let judgment = judgment.map(|outcome| outcome.state);
     let failed = step_failed(&outcome, judgment)
         || (matches!(scope, HookScope::FixtureDown(..))

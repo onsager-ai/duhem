@@ -362,10 +362,12 @@ impl Engine {
                     .await?;
                     writer
                         .append(EventPayload::RunFinished {
+                            body_verdict: None,
                             verdict: Some(verdict.state),
                         })
                         .await?;
                     return Ok(RunOutcome {
+                        body_verdict: None,
                         gated_checks: Default::default(),
                         verdict,
                         run_id,
@@ -442,10 +444,12 @@ impl Engine {
                     }
                     writer
                         .append(EventPayload::RunFinished {
+                            body_verdict: None,
                             verdict: Some(verdict.state),
                         })
                         .await?;
                     return Ok(RunOutcome {
+                        body_verdict: None,
                         gated_checks: Default::default(),
                         verdict,
                         run_id,
@@ -522,14 +526,22 @@ impl Engine {
             criteria_result?;
             down_result?;
 
-            let run_verdict = aggregate_run(criterion_verdicts);
+            let mut run_verdict = aggregate_run(criterion_verdicts);
+            let body_verdict = (cleanup.iter().any(|failure| failure.required)
+                && run_verdict.state != VerdictState::Fail)
+                .then_some(run_verdict.state);
+            if cleanup.iter().any(|failure| failure.required) {
+                run_verdict.state = VerdictState::Fail;
+            }
             writer
                 .append(EventPayload::RunFinished {
+                    body_verdict,
                     verdict: Some(run_verdict.state),
                 })
                 .await?;
 
             Ok(RunOutcome {
+                body_verdict,
                 gated_checks,
                 verdict: run_verdict,
                 run_id,
@@ -595,6 +607,7 @@ impl Engine {
         {
             Ok(failures) => failures,
             Err(error) => vec![CleanupFailure {
+                required: false,
                 step: "teardown evidence".to_string(),
                 outcome: duhem_evidence::StepOutcome::Error,
                 detail: Some(writer.mask_text(&error.to_string())),
@@ -802,6 +815,7 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
+    include!("runner/cleanup_tests.rs");
     use super::*;
     use crate::engine::registry::{ConcreteAction, Dispatch};
     use async_trait::async_trait;
@@ -4908,6 +4922,7 @@ criteria:
         assert!(matches!(
             events.last().map(|event| &event.payload),
             Some(EventPayload::RunFinished {
+                body_verdict: None,
                 verdict: Some(VerdictState::Inconclusive(
                     InconclusiveCause::EnvironmentError
                 ))

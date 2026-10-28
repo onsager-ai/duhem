@@ -86,6 +86,7 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await
@@ -105,6 +106,7 @@ async fn round_trip_worked_example() {
     assert!(matches!(
         events.last().unwrap().payload,
         EventPayload::RunFinished {
+            body_verdict: None,
             verdict: Some(VerdictState::Pass)
         }
     ));
@@ -195,9 +197,12 @@ async fn terminal_marker_can_finish_a_run_without_a_verdict() {
     )
     .await
     .unwrap();
-    w.append(EventPayload::RunFinished { verdict: None })
-        .await
-        .unwrap();
+    w.append(EventPayload::RunFinished {
+        body_verdict: None,
+        verdict: None,
+    })
+    .await
+    .unwrap();
     w.finish().await.unwrap();
 
     let run = store.get_run(RUN_ID).await.unwrap().unwrap();
@@ -388,6 +393,7 @@ async fn stepless_check_owner_projects_and_replays() {
         .unwrap();
     writer
         .append(EventPayload::RunFinished {
+            body_verdict: None,
             verdict: Some(VerdictState::Pass),
         })
         .await
@@ -615,6 +621,7 @@ async fn a_finished_run_is_sealed_against_further_events() {
         .await
         .unwrap();
     w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await
@@ -622,6 +629,7 @@ async fn a_finished_run_is_sealed_against_further_events() {
 
     let err = w
         .append(EventPayload::SetupStarted {
+            cleanup_policy: None,
             phase: duhem_evidence::StepPhase::Setup,
             step_count: 1,
             fixture_name: None,
@@ -684,6 +692,7 @@ async fn events_after_supports_live_tailing() {
         .await
         .unwrap();
     w.append(EventPayload::SetupStarted {
+        cleanup_policy: None,
         phase: duhem_evidence::StepPhase::Setup,
         step_count: 1,
         fixture_name: None,
@@ -757,6 +766,7 @@ async fn write_scoped_run(
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(verdict),
     })
     .await
@@ -1222,6 +1232,7 @@ async fn setup_phase_spans_carry_no_check_id() {
     .await
     .unwrap();
     w.append(EventPayload::SetupStepFinished {
+        judgment: None,
         phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         outcome: StepOutcome::Ok,
@@ -1275,6 +1286,7 @@ async fn writer_tee_mirrors_persisted_events_in_order() {
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await
@@ -1393,6 +1405,7 @@ async fn secret_registry_masks_events_artifacts_and_bundle_exports() {
         .unwrap();
     writer
         .append(EventPayload::RunFinished {
+            body_verdict: None,
             verdict: Some(VerdictState::Pass),
         })
         .await

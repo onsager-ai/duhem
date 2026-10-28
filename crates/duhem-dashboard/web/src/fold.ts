@@ -149,6 +149,7 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
         break;
       }
       case "run_finished":
+        detail.body_verdict = typeof evt.body_verdict === "string" ? evt.body_verdict : undefined;
         detail.verdict =
           typeof evt.verdict === "string" ? String(evt.verdict) : null;
         detail.status = "finished";
@@ -184,6 +185,7 @@ function foldLifecycle(events: TraceEvent[]): LifecycleBlock[] {
   for (const evt of events) {
     if (evt.kind === "setup_started") {
       blocks.push({
+        cleanup_policy: evt.cleanup_policy === "required" || evt.cleanup_policy === "diagnostic_only" ? evt.cleanup_policy : undefined,
         phase: evt.phase === "teardown" ? "teardown" : "setup",
         scope: scope(evt), status: "aborted", started_at: evt.ts,
         duration_ms: 0, steps: [], timeline: [evt],
@@ -209,10 +211,11 @@ function foldLifecycle(events: TraceEvent[]): LifecycleBlock[] {
       if (position !== undefined) {
         const step = block.steps[position];
         step.outcome = evt.outcome as typeof step.outcome;
+        step.judgment = typeof evt.judgment === "string" ? evt.judgment : undefined;
         step.detail = typeof evt.detail === "string" ? evt.detail : undefined;
         step.duration_ms = Math.max(0, Date.parse(evt.ts) - block.step_started[position]);
         block.step_finished[position] = true;
-        if ((evt.outcome === "error" || evt.outcome === "timeout") && block.failing_step === undefined) {
+        if ((evt.outcome === "error" || evt.outcome === "timeout" || (step.judgment !== undefined && step.judgment !== "pass")) && block.failing_step === undefined) {
           block.failing_step = position;
         }
       }

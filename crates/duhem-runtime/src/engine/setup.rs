@@ -64,8 +64,8 @@ impl AbortReason {
 /// `down:`) was declared (#441 Part B). Drives both the evidence
 /// scope fields (`fixture_name` / `check_id` / `criterion_id`) and
 /// whether the block's judging actions gate its own abort — fixtures
-/// keep their established Part-A behavior (no implicit-judgment
-/// gating); every other level behaves like leaf `setup:`/`teardown:`.
+/// up keeps its non-judging behavior; fixture down judges and records
+/// the declared cleanup policy.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum HookScope<'a> {
     /// Leaf-level `setup:` / `teardown:` (#20 / #409). No scope
@@ -78,6 +78,7 @@ pub(crate) enum HookScope<'a> {
     Check(&'a str, &'a str),
     /// Fixture `up:` / `down:` for a consuming check (#449 Part A).
     Fixture(&'a str, &'a str),
+    FixtureDown(&'a str, &'a str, duhem_schema::CleanupPolicy),
 }
 
 impl<'a> HookScope<'a> {
@@ -90,7 +91,7 @@ impl<'a> HookScope<'a> {
             HookScope::Check(criterion, check) => {
                 (None, Some(check.to_string()), Some(criterion.to_string()))
             }
-            HookScope::Fixture(fixture, check) => {
+            HookScope::Fixture(fixture, check) | HookScope::FixtureDown(fixture, check, _) => {
                 (Some(fixture.to_string()), Some(check.to_string()), None)
             }
         }
@@ -98,6 +99,13 @@ impl<'a> HookScope<'a> {
 
     pub(crate) fn is_fixture(self) -> bool {
         matches!(self, HookScope::Fixture(..))
+    }
+
+    pub(crate) fn cleanup_policy(self) -> duhem_schema::CleanupPolicy {
+        match self {
+            Self::FixtureDown(_, _, policy) => policy,
+            _ => duhem_schema::CleanupPolicy::DiagnosticOnly,
+        }
     }
 }
 
@@ -320,6 +328,7 @@ pub(crate) async fn run_fixture_down(
     fixture: &str,
     check_id: &str,
     steps: &[Step],
+    cleanup_policy: duhem_schema::CleanupPolicy,
     child_env: &BTreeMap<String, String>,
 ) -> Result<Vec<CleanupFailure>, EngineError> {
     Ok(run_lifecycle_steps(
@@ -330,7 +339,7 @@ pub(crate) async fn run_fixture_down(
         steps,
         child_env,
         StepPhase::Teardown,
-        HookScope::Fixture(fixture, check_id),
+        HookScope::FixtureDown(fixture, check_id, cleanup_policy),
     )
     .await?
     .cleanup)
@@ -386,6 +395,8 @@ async fn run_lifecycle_steps(
     let setup_browser: Option<&duhem_actions::CheckBrowser> = None;
 
     let started = EventPayload::SetupStarted {
+        cleanup_policy: (phase == StepPhase::Teardown)
+            .then(|| scope.cleanup_policy().as_str().to_string()),
         phase,
         step_count: steps.len() as u32,
         fixture_name: fixture_name.clone(),

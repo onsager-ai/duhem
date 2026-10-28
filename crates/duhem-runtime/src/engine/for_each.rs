@@ -132,6 +132,7 @@ pub(crate) async fn process_lifecycle_step(
     {
         writer
             .append(EventPayload::SetupStepFinished {
+                judgment: None,
                 phase,
                 step_index: idx as u32,
                 outcome: StepOutcome::Skipped {
@@ -149,6 +150,7 @@ pub(crate) async fn process_lifecycle_step(
     }
 
     let mut error_detail = step_error.as_ref().map(ToString::to_string);
+    let mut judgment = None;
     let (outcome, failed) = if step_error.is_some() || environment_failed {
         if error_detail.is_none() {
             error_detail = Some(format!(
@@ -184,7 +186,8 @@ pub(crate) async fn process_lifecycle_step(
                 )
                 .await
                 {
-                    Ok((outcome, failed, action_detail)) => {
+                    Ok((outcome, failed, action_detail, implicit)) => {
+                        judgment = implicit;
                         error_detail = action_detail;
                         (outcome, failed)
                     }
@@ -214,11 +217,15 @@ pub(crate) async fn process_lifecycle_step(
         }
         Outcome::Error => error_detail
             .or_else(|| Some(format!("action `{}` returned an error", step.uses_name()))),
+        Outcome::Ok if failed => {
+            error_detail.or_else(|| Some("judging action reported failure".to_string()))
+        }
         Outcome::Ok | Outcome::Skipped { .. } => None,
     }
     .map(|detail| writer.mask_text(&detail));
     writer
         .append(EventPayload::SetupStepFinished {
+            judgment,
             phase,
             step_index: idx as u32,
             outcome: evidence_outcome.clone(),
@@ -234,6 +241,7 @@ pub(crate) async fn process_lifecycle_step(
             matches!(outcome, Outcome::Ok).then(|| "judging action reported failure".to_string())
         });
         cleanup.push(CleanupFailure {
+            required: scope.cleanup_policy().is_required(),
             step: display_step_label(step, idx),
             outcome: evidence_outcome,
             detail,
@@ -325,6 +333,7 @@ pub(crate) async fn run_for_each_step(
     if let Some(outcome) = gate {
         writer
             .append(EventPayload::SetupStepFinished {
+                judgment: None,
                 phase,
                 step_index: idx as u32,
                 outcome,
@@ -341,15 +350,24 @@ pub(crate) async fn run_for_each_step(
         let detail = writer.mask_text(&error.to_string());
         writer
             .append(EventPayload::SetupStepFinished {
+                judgment: None,
                 phase,
                 step_index: idx as u32,
                 outcome: StepOutcome::Error,
-                detail: Some(detail),
+                detail: Some(detail.clone()),
                 fixture_name: fixture_name.clone(),
                 check_id: check_id.clone(),
                 criterion_id: criterion_id.clone(),
             })
             .await?;
+        if phase == StepPhase::Teardown {
+            cleanup.push(CleanupFailure {
+                required: scope.cleanup_policy().is_required(),
+                step: display_step_label(step, idx),
+                outcome: StepOutcome::Error,
+                detail: Some(detail),
+            });
+        }
         if aborted.is_none() {
             *aborted = Some(AbortReason::ActionError);
             *failed_by = Some(display_step_label(step, idx));
@@ -372,15 +390,24 @@ pub(crate) async fn run_for_each_step(
             ));
             writer
                 .append(EventPayload::SetupStepFinished {
+                    judgment: None,
                     phase,
                     step_index: idx as u32,
                     outcome: StepOutcome::Error,
-                    detail: Some(detail),
+                    detail: Some(detail.clone()),
                     fixture_name: fixture_name.clone(),
                     check_id: check_id.clone(),
                     criterion_id: criterion_id.clone(),
                 })
                 .await?;
+            if phase == StepPhase::Teardown {
+                cleanup.push(CleanupFailure {
+                    required: scope.cleanup_policy().is_required(),
+                    step: display_step_label(step, idx),
+                    outcome: StepOutcome::Error,
+                    detail: Some(detail),
+                });
+            }
             if aborted.is_none() {
                 *aborted = Some(AbortReason::ActionError);
                 *failed_by = Some(display_step_label(step, idx));
@@ -396,15 +423,24 @@ pub(crate) async fn run_for_each_step(
             let detail = writer.mask_text(&error.to_string());
             writer
                 .append(EventPayload::SetupStepFinished {
+                    judgment: None,
                     phase,
                     step_index: idx as u32,
                     outcome: StepOutcome::Error,
-                    detail: Some(detail),
+                    detail: Some(detail.clone()),
                     fixture_name: fixture_name.clone(),
                     check_id: check_id.clone(),
                     criterion_id: criterion_id.clone(),
                 })
                 .await?;
+            if phase == StepPhase::Teardown {
+                cleanup.push(CleanupFailure {
+                    required: scope.cleanup_policy().is_required(),
+                    step: display_step_label(step, idx),
+                    outcome: StepOutcome::Error,
+                    detail: Some(detail),
+                });
+            }
             if aborted.is_none() {
                 *aborted = Some(AbortReason::ActionError);
                 *failed_by = Some(display_step_label(step, idx));
@@ -433,15 +469,24 @@ pub(crate) async fn run_for_each_step(
         ));
         writer
             .append(EventPayload::SetupStepFinished {
+                judgment: None,
                 phase,
                 step_index: idx as u32,
                 outcome: StepOutcome::Error,
-                detail: Some(detail),
+                detail: Some(detail.clone()),
                 fixture_name: fixture_name.clone(),
                 check_id: check_id.clone(),
                 criterion_id: criterion_id.clone(),
             })
             .await?;
+        if phase == StepPhase::Teardown {
+            cleanup.push(CleanupFailure {
+                required: scope.cleanup_policy().is_required(),
+                step: display_step_label(step, idx),
+                outcome: StepOutcome::Error,
+                detail: Some(detail),
+            });
+        }
         if aborted.is_none() {
             *aborted = Some(AbortReason::ActionError);
             *failed_by = Some(display_step_label(step, idx));
@@ -452,6 +497,7 @@ pub(crate) async fn run_for_each_step(
     // R7: an empty array is zero iterations, not an error.
     writer
         .append(EventPayload::SetupStepFinished {
+            judgment: None,
             phase,
             step_index: idx as u32,
             outcome: StepOutcome::Ok,
@@ -549,7 +595,15 @@ async fn invoke_and_record(
     idx: usize,
     resolved_with: &serde_yml::Value,
     invocation: SetupInvocation<'_>,
-) -> Result<(Outcome, bool, Option<String>), EngineError> {
+) -> Result<
+    (
+        Outcome,
+        bool,
+        Option<String>,
+        Option<duhem_judge::VerdictState>,
+    ),
+    EngineError,
+> {
     let SetupInvocation {
         step,
         run,
@@ -589,7 +643,9 @@ async fn invoke_and_record(
                 &step.outputs,
                 &r.outputs,
                 |local, v| {
-                    if let HookScope::Fixture(fixture, _) = scope {
+                    if let HookScope::Fixture(fixture, _) | HookScope::FixtureDown(fixture, _, _) =
+                        scope
+                    {
                         run.record_fixture_output(fixture, id, local, v);
                     } else {
                         // Leaf, criterion, and check `setup:`/`teardown:`
@@ -664,10 +720,19 @@ async fn invoke_and_record(
                 false,
             )
         })
-        .flatten()
-        .map(|outcome| outcome.state);
-    let failed = step_failed(&outcome, judgment);
-    Ok((outcome, failed, action_detail))
+        .flatten();
+    let judgment_detail =
+        if matches!(scope, HookScope::FixtureDown(..)) && matches!(outcome, Outcome::Ok) {
+            judgment.as_ref().and_then(|outcome| outcome.detail.clone())
+        } else {
+            None
+        };
+    let action_detail = action_detail.or(judgment_detail);
+    let judgment = judgment.map(|outcome| outcome.state);
+    let failed = step_failed(&outcome, judgment)
+        || (matches!(scope, HookScope::FixtureDown(..))
+            && judgment.is_some_and(|state| state != duhem_judge::VerdictState::Pass));
+    Ok((outcome, failed, action_detail, judgment))
 }
 
 /// Mirror of `EvidenceWriter::append_observation` for setup. The

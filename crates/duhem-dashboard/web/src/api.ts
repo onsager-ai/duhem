@@ -36,6 +36,7 @@ export interface CriterionDetail {
 }
 
 export interface RunDetail {
+  body_verdict?: Verdict;
   run_id: string;
   verification: string;
   started_at: string | null;
@@ -59,6 +60,7 @@ export interface LifecycleScopeSegment {
 }
 
 export interface LifecycleStep {
+  judgment?: Verdict;
   index: number;
   id?: string;
   uses: string;
@@ -69,6 +71,7 @@ export interface LifecycleStep {
 }
 
 export interface LifecycleBlock {
+  cleanup_policy?: "required" | "diagnostic_only";
   phase: "setup" | "teardown";
   scope: LifecycleScopeSegment[];
   status: "passed" | "failed" | "aborted";

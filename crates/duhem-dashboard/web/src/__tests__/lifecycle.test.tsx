@@ -66,3 +66,12 @@ describe("lifecycle presentation", () => {
     expect(container.textContent).toContain("cli/invoke");
   });
 });
+
+it("shows required, diagnostic and legacy unknown policies on check cleanup blocks", () => {
+  const required = { ...block("teardown", [], 1), cleanup_policy: "required" as const };
+  const diagnostic = { ...block("teardown", [], 10), cleanup_policy: "diagnostic_only" as const };
+  render(<LifecycleSections blocks={[required, diagnostic, block("teardown", [], 20)]} />);
+  expect(screen.getByText("Required cleanup")).toBeTruthy();
+  expect(screen.getByText("Diagnostic cleanup")).toBeTruthy();
+  expect(screen.getByText("Cleanup policy unknown")).toBeTruthy();
+});

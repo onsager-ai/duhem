@@ -458,3 +458,14 @@ describe("summarizeCheck", () => {
     expect(s.headline).toContain("environment_error");
   });
 });
+
+it("marks a false lifecycle judgment failed while retaining successful execution evidence", () => {
+  const events = [
+    ev("setup_step_started", { uses: "api/poll", step_index: 0, phase: "teardown" }, 1),
+    ev("setup_step_finished", { step_index: 0, phase: "teardown", outcome: "ok", judgment: "fail", detail: "condition remained false" }, 2),
+  ];
+  const node = groupTimeline(events).find((item): item is StepNode => item.kind === "step")!;
+  expect(stepStatus(node).failed).toBe(true);
+  expect(stepStatus(node).tone).toBe("fail");
+  expect(events[1].outcome).toBe("ok");
+});

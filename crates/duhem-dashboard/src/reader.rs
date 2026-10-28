@@ -558,6 +558,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         }
     }
     let mut run_verdict = None;
+    let mut body_verdict = None;
     let mut viewport = None;
     let lifecycle = lifecycle::fold(&run.events);
 
@@ -713,7 +714,13 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 criterion_order.push(criterion_id.clone());
                 checks_by_criterion.push((criterion_id.clone(), Vec::new()));
             }
-            EventPayload::RunFinished { verdict } => run_verdict = *verdict,
+            EventPayload::RunFinished {
+                verdict,
+                body_verdict: body,
+            } => {
+                run_verdict = *verdict;
+                body_verdict = *body;
+            }
             _ => {}
         }
     }
@@ -742,6 +749,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         .collect();
 
     RunDetail {
+        body_verdict,
         run_id: run.record.run_id.clone(),
         verification: run.verification(),
         started_at: run.started_at(),

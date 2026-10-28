@@ -186,16 +186,16 @@ export function RunSummary({ run }: { run: RunDetail }) {
   const inputs = Object.entries(run.inputs);
   return (
     <div className="min-w-0 max-w-full space-y-5" data-testid="run-summary">
+      {run.body_verdict && <p className="border-l-2 border-fail px-4 py-3 text-sm">Gate: {run.verdict}. Body: {run.body_verdict}. Required fixture cleanup failed.</p>}
       {run.setup_aborted && (
         <div className="border-l-2 border-fail bg-fail/5 px-4 py-3 text-sm text-fail">
           Setup aborted — no checks ran. The verdict reflects the abort, not the
           artifact.
         </div>
       )}
-      {(run.cleanup ?? []).some((step) => step.outcome !== "ok") && (
+      {(run.lifecycle ?? []).some((block) => block.phase === "teardown" && block.status !== "passed") && (
         <div className="border-l-2 border-muted-foreground/50 bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
-          Teardown recorded cleanup failures. They are evidence only and did
-          not change this run&apos;s verdict.
+          Cleanup failures are retained below with each block&apos;s policy.
         </div>
       )}
 
@@ -310,6 +310,7 @@ export function LifecycleList({ blocks, runId }: { blocks: LifecycleBlock[]; run
             {runId ? <Link to={lifecycleHref(runId, block)} className="text-brand hover:underline"><span className="font-mono">{lifecycleScopePath(block)}</span> {block.phase}</Link>
               : <><span className="font-mono">{lifecycleScopePath(block)}</span> {block.phase}</>}{" "}
             <span data-status={block.status}>{block.status}</span>{" "}
+            {block.phase === "teardown" && <span>{block.cleanup_policy === "required" ? "required" : block.cleanup_policy === "diagnostic_only" ? "diagnostic only" : "policy unknown"}{" "}</span>}
             <span className="text-muted-foreground">({formatDuration(block.duration_ms)})</span>
             {lifecycleFailure(block) && <p className="break-words text-xs text-fail">{lifecycleFailure(block)}</p>}
           </li>

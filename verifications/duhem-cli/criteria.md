@@ -49,3 +49,11 @@ anything.
 Running an offline example end-to-end reaches a pass verdict — the full
 `duhem run` pipeline (load → validate → execute → judge → report) works
 on a known-green definition without any external dependency.
+
+## AC-17 — Required fixture cleanup gates acceptance
+
+A fixture's required cleanup must succeed before a passing body can be
+accepted. A cleanup failure makes the effective run verdict fail, preserves
+the original body judgment, and retains the failure as required cleanup
+evidence. Explicitly diagnostic cleanup retains its failure evidence while
+leaving the body verdict in control of acceptance.

@@ -88,6 +88,7 @@ impl Engine {
                         }
                     }
                 }
+                let mut body_error = None;
                 let (cv, gated_judging_steps) = if let Some((reason, step)) = &check_setup_abort {
                     failures.push(CheckFailure {
                         criterion_id: criterion_id.to_string(),
@@ -125,12 +126,28 @@ impl Engine {
                         0,
                     )
                 } else {
-                    self.run_check(writer, run, (criterion_id, check), failures)
-                        .await?
+                    match self
+                        .run_check(writer, run, (criterion_id, check), failures)
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(error) => {
+                            body_error = Some(error);
+                            (
+                                CheckVerdict {
+                                    check_id: check.id.clone(),
+                                    state: VerdictState::Inconclusive(
+                                        duhem_judge::InconclusiveCause::EnvironmentError,
+                                    ),
+                                },
+                                0,
+                            )
+                        }
+                    }
                 };
                 for name in active.into_iter().rev() {
                     let fixture = &fixtures[name];
-                    let mut failures = crate::engine::setup::run_fixture_down(
+                    let result = crate::engine::setup::run_fixture_down(
                         writer,
                         &self.registry,
                         self.browser.as_ref(),
@@ -138,9 +155,17 @@ impl Engine {
                         name,
                         &check.id,
                         &fixture.down,
+                        fixture.cleanup_policy,
                         &self.child_process_env(writer.run_id()),
                     )
-                    .await?;
+                    .await;
+                    let mut failures = match result {
+                        Ok(failures) => failures,
+                        Err(error) => {
+                            body_error.get_or_insert(error);
+                            continue;
+                        }
+                    };
                     for failure in &mut failures {
                         failure.step = format!("fixture `{name}`: {}", failure.step);
                     }
@@ -153,7 +178,7 @@ impl Engine {
                 // (#543/#547). Evidence-only: never replaces the check's
                 // verdict. Re-run every retry attempt.
                 if !check.teardown.is_empty() {
-                    let mut teardown_failures = crate::engine::setup::run_check_teardown(
+                    let result = crate::engine::setup::run_check_teardown(
                         writer,
                         &self.registry,
                         self.browser.as_ref(),
@@ -163,14 +188,23 @@ impl Engine {
                         &check.teardown,
                         &self.child_process_env(writer.run_id()),
                     )
-                    .await?;
+                    .await;
+                    let mut teardown_failures = match result {
+                        Ok(failures) => failures,
+                        Err(error) => {
+                            return Err(body_error.unwrap_or(error));
+                        }
+                    };
                     for failure in &mut teardown_failures {
                         failure.step = format!("check `{}` teardown: {}", check.id, failure.step);
                     }
                     cleanup.append(&mut teardown_failures);
                 }
 
-                Ok((cv, gated_judging_steps))
+                match body_error {
+                    Some(error) => Err(error),
+                    None => Ok((cv, gated_judging_steps)),
+                }
             }
             .await;
             writer.set_session(None);

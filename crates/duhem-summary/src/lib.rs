@@ -49,6 +49,9 @@ pub struct RunSummary {
     pub run_id: String,
     /// Top-level verdict.
     pub verdict: VerdictState,
+    /// Original body state when required fixture cleanup changes the effective verdict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_verdict: Option<VerdictState>,
     /// Per-criterion verdicts, in document order.
     pub criteria: Vec<CriterionSummary>,
     /// Path to the evidence store (SQLite DB) the run was recorded
@@ -83,7 +86,7 @@ pub struct RunSummary {
     /// addition. Additive — `SCHEMA_VERSION` is unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
-    /// Non-verdict-altering failures from leaf `teardown:`. Additive:
+    /// Cleanup failures, including required fixture failures. Additive:
     /// older plugins ignore the field and old summaries deserialize it
     /// as empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -122,6 +125,7 @@ impl RunSummary {
             schema_version: Self::SCHEMA_VERSION.to_string(),
             run_id: run_id.into(),
             verdict,
+            body_verdict: None,
             criteria,
             store,
             totals: CheckTotals::default(),
@@ -161,6 +165,11 @@ impl RunSummary {
 
     pub fn with_cleanup(mut self, cleanup: Vec<CleanupFailureSummary>) -> Self {
         self.cleanup = cleanup;
+        self
+    }
+
+    pub fn with_body_verdict(mut self, body_verdict: Option<VerdictState>) -> Self {
+        self.body_verdict = body_verdict.filter(|state| *state != self.verdict);
         self
     }
 
@@ -237,9 +246,11 @@ impl std::fmt::Display for CheckGatingSummary {
     }
 }
 
-/// One teardown step that failed without changing the run verdict.
+/// One cleanup failure and whether it blocks the effective run gate.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CleanupFailureSummary {
+    #[serde(default)]
+    pub required: bool,
     pub step: String,
     pub outcome: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -440,6 +451,7 @@ mod tests {
 
         let s = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from(".")).with_cleanup(
             vec![CleanupFailureSummary {
+                required: false,
                 step: "delete-record".into(),
                 outcome: "error".into(),
                 detail: Some("synthetic cleanup error".into()),
@@ -486,5 +498,25 @@ mod tests {
         let bare = r#"{"schema_version":"1","verdict":"pass","runs":[]}"#;
         let back: RunSetSummary = serde_json::from_str(bare).unwrap();
         assert_eq!(back.totals, CheckTotals::default());
+    }
+}
+
+#[cfg(test)]
+mod cleanup_compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_cleanup_is_diagnostic_and_body_defaults_absent() {
+        let json = r#"{"schema_version":"2","run_id":"old","verdict":"pass","criteria":[],"store":".","cleanup":[{"step":"release","outcome":"error"}]}"#;
+        let summary: RunSummary = serde_json::from_str(json).unwrap();
+        assert!(!summary.cleanup[0].required);
+        assert_eq!(summary.body_verdict, None);
+        assert!(
+            !serde_json::to_value(summary)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .contains_key("body_verdict")
+        );
     }
 }

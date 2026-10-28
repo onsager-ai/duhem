@@ -252,6 +252,8 @@ pub enum EventPayload {
         stderr_blob_sha256: Option<String>,
     },
     SetupStarted {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cleanup_policy: Option<String>,
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
         phase: StepPhase,
         step_count: u32,
@@ -312,6 +314,8 @@ pub enum EventPayload {
         criterion_id: Option<String>,
     },
     SetupStepFinished {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        judgment: Option<VerdictState>,
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
         phase: StepPhase,
         step_index: u32,
@@ -433,6 +437,8 @@ pub enum EventPayload {
         verdict: VerdictState,
     },
     RunFinished {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_verdict: Option<VerdictState>,
         /// A run can complete without being judged. The suite-level
         /// environment container is the canonical example.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -663,6 +669,7 @@ mod tests {
         assert_eq!(
             event.payload,
             EventPayload::RunFinished {
+                body_verdict: None,
                 verdict: Some(VerdictState::Pass)
             }
         );
@@ -702,6 +709,7 @@ mod tests {
     fn setup_variants_round_trip() {
         let cases: Vec<EventPayload> = vec![
             EventPayload::SetupStarted {
+                cleanup_policy: None,
                 phase: StepPhase::Setup,
                 step_count: 2,
                 fixture_name: None,
@@ -731,6 +739,7 @@ mod tests {
                 criterion_id: None,
             },
             EventPayload::SetupStepFinished {
+                judgment: None,
                 phase: StepPhase::Setup,
                 step_index: 0,
                 outcome: StepOutcome::Ok,
@@ -772,6 +781,7 @@ mod tests {
             seq: 1,
             ts: ts(),
             payload: EventPayload::SetupStepFinished {
+                judgment: None,
                 phase: StepPhase::Teardown,
                 step_index: 0,
                 outcome: StepOutcome::Error,
@@ -813,6 +823,7 @@ mod tests {
         );
         assert!(
             EventPayload::SetupStepFinished {
+                judgment: None,
                 phase: StepPhase::Setup,
                 step_index: 0,
                 outcome: StepOutcome::Ok,
@@ -827,6 +838,7 @@ mod tests {
         // same as their per-check counterparts.
         assert!(
             !EventPayload::SetupStarted {
+                cleanup_policy: None,
                 phase: StepPhase::Setup,
                 step_count: 1,
                 fixture_name: None,
@@ -906,6 +918,7 @@ mod tests {
     fn is_finished_flags_the_right_variants() {
         assert!(
             EventPayload::RunFinished {
+                body_verdict: None,
                 verdict: Some(VerdictState::Pass)
             }
             .is_finished()

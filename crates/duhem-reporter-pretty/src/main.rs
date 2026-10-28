@@ -404,3 +404,26 @@ mod tests {
         assert!(out.contains("delete-record"), "got: {out}");
     }
 }
+
+#[cfg(test)]
+mod cleanup_gate_tests {
+    use super::*;
+
+    #[test]
+    fn renders_required_cleanup_and_preserved_body_state() {
+        let summary = RunSummary::new("r", VerdictState::Fail, vec![], ".".into())
+            .with_body_verdict(Some(VerdictState::Pass))
+            .with_cleanup(vec![duhem_summary::CleanupFailureSummary {
+                required: true,
+                step: "release".into(),
+                outcome: "error".into(),
+                detail: None,
+            }]);
+        let mut output = Vec::new();
+        render(&summary, &mut output).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("run r — fail"), "{output}");
+        assert!(output.contains("body: pass"), "{output}");
+        assert!(output.contains("release [required]"), "{output}");
+    }
+}

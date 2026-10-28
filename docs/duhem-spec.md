@@ -1017,7 +1017,7 @@ cleanup should remain visible without changing the effective run gate.
 
 | Event | Check/body result | Effective run gate |
 | --- | --- | --- |
-| A fixture `up:` step fails | `inconclusive` with the existing timeout or environment-error cause; check steps do not run | Body aggregation applies unless required `down:` fails |
+| A fixture `up:` step fails | `inconclusive` with the existing specific cause; check steps do not run | Body aggregation applies unless required `down:` fails |
 | A fixture `down:` step fails under `required` | Body check and criterion verdicts are unchanged | `fail`, even when the body passes or is inconclusive |
 | A fixture `down:` step fails under `diagnostic_only` | Body check and criterion verdicts are unchanged | Unchanged; failure remains diagnostic evidence |
 | The check fails or is inconclusive | Every activated fixture still runs `down:` | Body aggregation applies unless required `down:` fails |

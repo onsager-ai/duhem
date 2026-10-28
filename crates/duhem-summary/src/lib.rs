@@ -49,6 +49,7 @@ pub struct RunSummary {
     pub run_id: String,
     /// Top-level verdict.
     pub verdict: VerdictState,
+    /// Original body state when required fixture cleanup changes the effective verdict.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_verdict: Option<VerdictState>,
     /// Per-criterion verdicts, in document order.

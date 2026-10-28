@@ -78,7 +78,7 @@ pub async fn write_passing_run(
     })
     .await
     .unwrap();
-    w.append(EventPayload::SetupStarted {
+    w.append(EventPayload::SetupStarted { cleanup_policy: None,
         phase: duhem_evidence::StepPhase::Setup,
         step_count: 1,
         fixture_name: None,
@@ -113,7 +113,7 @@ pub async fn write_passing_run(
     })
     .await
     .unwrap();
-    w.append(EventPayload::SetupStepFinished {
+    w.append(EventPayload::SetupStepFinished { judgment: None,
         phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         outcome: StepOutcome::Ok,
@@ -219,7 +219,7 @@ pub async fn write_passing_run(
     })
     .await
     .unwrap();
-    w.append(EventPayload::RunFinished {
+    w.append(EventPayload::RunFinished { body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await
@@ -357,7 +357,7 @@ pub async fn write_replay_run(store: Arc<SqliteStore>, run_id: &str) -> (String,
     })
     .await
     .unwrap();
-    w.append(EventPayload::RunFinished {
+    w.append(EventPayload::RunFinished { body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await
@@ -420,7 +420,7 @@ pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition
     })
     .await
     .unwrap();
-    w.append(EventPayload::RunFinished {
+    w.append(EventPayload::RunFinished { body_verdict: None,
         verdict: Some(VerdictState::Fail),
     })
     .await
@@ -438,7 +438,7 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
     w.append(run_started(definition_path, BTreeMap::new()))
         .await
         .unwrap();
-    w.append(EventPayload::SetupStarted {
+    w.append(EventPayload::SetupStarted { cleanup_policy: None,
         phase: duhem_evidence::StepPhase::Setup,
         step_count: 1,
         fixture_name: None,
@@ -460,7 +460,7 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
     })
     .await
     .unwrap();
-    w.append(EventPayload::SetupStepFinished {
+    w.append(EventPayload::SetupStepFinished { judgment: None,
         phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         outcome: StepOutcome::Error,
@@ -480,7 +480,7 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
     })
     .await
     .unwrap();
-    w.append(EventPayload::RunFinished {
+    w.append(EventPayload::RunFinished { body_verdict: None,
         verdict: Some(VerdictState::Inconclusive(
             InconclusiveCause::EnvironmentError,
         )),

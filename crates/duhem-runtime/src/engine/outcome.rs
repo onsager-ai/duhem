@@ -693,12 +693,12 @@ pub struct RunOutcome {
     /// manifest default. Empty unless `warn` softened something. The
     /// reporter surfaces these in the run summary.
     pub warnings: Vec<String>,
-    /// Failures observed while draining leaf `teardown:`. They are
-    /// retained for reporters but never enter verdict aggregation.
+    /// Failures observed while draining cleanup across all attempts.
+    /// Required fixture failures block the effective run gate.
     pub cleanup: Vec<CleanupFailure>,
 }
 
-/// One non-verdict-altering teardown failure.
+/// One cleanup failure, classified by whether it blocks the run gate.
 #[derive(Debug, Clone)]
 pub struct CleanupFailure {
     /// Only required fixture down failures block the run gate.

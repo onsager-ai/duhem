@@ -85,7 +85,7 @@ pub struct RunSummary {
     /// addition. Additive — `SCHEMA_VERSION` is unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
-    /// Non-verdict-altering failures from leaf `teardown:`. Additive:
+    /// Cleanup failures, including required fixture failures. Additive:
     /// older plugins ignore the field and old summaries deserialize it
     /// as empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -245,7 +245,7 @@ impl std::fmt::Display for CheckGatingSummary {
     }
 }
 
-/// One teardown step that failed without changing the run verdict.
+/// One cleanup failure and whether it blocks the effective run gate.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CleanupFailureSummary {
     #[serde(default)]

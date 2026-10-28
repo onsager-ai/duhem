@@ -142,3 +142,67 @@ criteria:
         assert_eq!(outcome.cleanup[0].required, policy == "required");
     }
 }
+
+#[tokio::test]
+async fn body_engine_error_drains_fixture_and_keeps_original_error() {
+    let (mut engine, _tmp) = engine_for_test().await;
+    let down = StubAction::new("fake/down", Outcome::Error);
+    let down_calls = down.invocations.clone();
+    engine.register_test_action(Box::new(down));
+    engine.register_test_action(Box::new(StubAction::new("fake/body", Outcome::Ok)));
+    let teardown = StubAction::new("fake/teardown", Outcome::Ok);
+    let teardown_calls = teardown.invocations.clone();
+    engine.register_test_action(Box::new(teardown));
+    let definition = def(r#"
+verification: Drain after engine error
+fixtures:
+  resource:
+    up: []
+    down: [{uses: fake/down}]
+criteria:
+  - id: AC
+    description: Original engine failure survives cleanup
+    checks:
+      - id: body
+        needs: [resource]
+        steps:
+          - uses: fake/body
+            with: {value: $steps.missing.outputs.value}
+        teardown: [{uses: fake/teardown}]
+        assertions: ["true"]
+"#);
+    let error = engine.run_with_metadata(&definition, BTreeMap::new()).await.unwrap_err();
+    assert!(error.to_string().contains("missing"), "{error}");
+    assert_eq!(down_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(teardown_calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn required_cleanup_dispatch_error_masks_registered_secrets() {
+    let (mut engine, _tmp) = engine_for_test().await;
+    engine.register_test_action(Box::new(FailingAction {
+        uses: "fake/down", field: "token", message: "cleanup could not release",
+    }));
+    let definition = def(r#"
+verification: Mask cleanup failure
+inputs:
+  token: {type: string, secret: true}
+fixtures:
+  resource:
+    up: []
+    down:
+      - uses: fake/down
+        with: {token: $inputs.token}
+criteria:
+  - id: AC
+    description: Cleanup errors are masked at the evidence boundary
+    checks: [{id: body, needs: [resource], assertions: ["true"]}]
+"#);
+    let secret = "registered-cleanup-secret";
+    let outcome = engine.run_with_metadata(&definition,
+        BTreeMap::from([("token".into(), serde_json::json!(secret))])).await.unwrap();
+    assert_eq!(outcome.verdict.state, VerdictState::Fail);
+    assert!(!outcome.cleanup[0].detail.as_ref().unwrap().contains(secret));
+    let events = Trace::from_store(engine.store.as_ref().unwrap().as_ref(), &outcome.run_id).await.unwrap().into_events();
+    assert!(!serde_json::to_string(&events).unwrap().contains(secret));
+}

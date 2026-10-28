@@ -64,8 +64,8 @@ impl AbortReason {
 /// `down:`) was declared (#441 Part B). Drives both the evidence
 /// scope fields (`fixture_name` / `check_id` / `criterion_id`) and
 /// whether the block's judging actions gate its own abort — fixtures
-/// keep their established Part-A behavior (no implicit-judgment
-/// gating); every other level behaves like leaf `setup:`/`teardown:`.
+/// up keeps its non-judging behavior; fixture down judges and records
+/// the declared cleanup policy.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum HookScope<'a> {
     /// Leaf-level `setup:` / `teardown:` (#20 / #409). No scope

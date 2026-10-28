@@ -177,8 +177,10 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                 judgment,
                 ..
             } if required_cleanup.contains(&(fixture.clone(), check_id.clone())) => {
-                cleanup_failed |= matches!(outcome, crate::StepOutcome::Error | crate::StepOutcome::Timeout)
-                    || judgment.is_some_and(|state| state != VerdictState::Pass);
+                cleanup_failed |= matches!(
+                    outcome,
+                    crate::StepOutcome::Error | crate::StepOutcome::Timeout
+                ) || judgment.is_some_and(|state| state != VerdictState::Pass);
             }
             EventPayload::StepObservation { .. }
             | EventPayload::RunHeartbeat

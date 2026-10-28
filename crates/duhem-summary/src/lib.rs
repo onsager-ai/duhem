@@ -510,6 +510,12 @@ mod cleanup_compatibility_tests {
         let summary: RunSummary = serde_json::from_str(json).unwrap();
         assert!(!summary.cleanup[0].required);
         assert_eq!(summary.body_verdict, None);
-        assert!(!serde_json::to_value(summary).unwrap().as_object().unwrap().contains_key("body_verdict"));
+        assert!(
+            !serde_json::to_value(summary)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .contains_key("body_verdict")
+        );
     }
 }

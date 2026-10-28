@@ -21,4 +21,4 @@ jobs:
         with:
           name: cleanup-generated-${{ github.event.pull_request.head.sha }}
           path: /tmp/generated.patch
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets --keep-going -- -D warnings

@@ -400,20 +400,48 @@ mod cleanup_gate_tests {
     fn diagnostic_failure_does_not_fail_junit_and_required_judgment_does() {
         for policy in ["diagnostic_only", "required"] {
             let block = LifecycleBlock {
-                cleanup_policy: Some(policy.into()), phase: LifecyclePhase::Teardown,
-                scope: vec![], status: LifecycleStatus::Failed, started_at: "t".into(),
-                duration_ms: 0, failing_step: Some(0), steps: vec![LifecycleStep {
-                    index: 0, id: None, uses: "api/poll".into(), flow: None,
-                    outcome: LifecycleStepOutcome::Ok, judgment: Some(VerdictState::Fail),
-                    detail: Some("condition remained false".into()), duration_ms: 0,
+                cleanup_policy: Some(policy.into()),
+                phase: LifecyclePhase::Teardown,
+                scope: vec![],
+                status: LifecycleStatus::Failed,
+                started_at: "t".into(),
+                duration_ms: 0,
+                failing_step: Some(0),
+                steps: vec![LifecycleStep {
+                    index: 0,
+                    id: None,
+                    uses: "api/poll".into(),
+                    flow: None,
+                    outcome: LifecycleStepOutcome::Ok,
+                    judgment: Some(VerdictState::Fail),
+                    detail: Some("condition remained false".into()),
+                    duration_ms: 0,
                 }],
             };
             let required = policy == "required";
-            let summary = RunSummary::new("r", if required { VerdictState::Fail } else { VerdictState::Pass }, vec![], ".".into())
-                .with_body_verdict(required.then_some(VerdictState::Pass)).with_lifecycle(vec![block]);
+            let summary = RunSummary::new(
+                "r",
+                if required {
+                    VerdictState::Fail
+                } else {
+                    VerdictState::Pass
+                },
+                vec![],
+                ".".into(),
+            )
+            .with_body_verdict(required.then_some(VerdictState::Pass))
+            .with_lifecycle(vec![block]);
             let xml = render(&summary);
-            assert_eq!(xml.contains("<failure type=\"lifecycle\">"), required, "{xml}");
-            assert_eq!(xml.contains("name=\"body_verdict\" value=\"pass\""), required, "{xml}");
+            assert_eq!(
+                xml.contains("<failure type=\"lifecycle\">"),
+                required,
+                "{xml}"
+            );
+            assert_eq!(
+                xml.contains("name=\"body_verdict\" value=\"pass\""),
+                required,
+                "{xml}"
+            );
         }
     }
 }

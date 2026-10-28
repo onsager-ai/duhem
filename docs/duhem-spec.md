@@ -1002,7 +1002,7 @@ order. Leaf `setup:` precedes every fixture and leaf `teardown:` follows every
 fixture. Fixtures do not share state, nest, or depend on other fixtures in v1;
 a fixture step cannot carry `needs:`.
 
-Fixture lifecycle actions do not change the consuming check's body verdict.
+Fixture `down:` actions do not change the consuming check's body verdict.
 Fixture `up:` retains its existing non-judging behavior. Under the default
 `required` policy, a fixture `down:` cleanup failure changes the effective run
 gate to `fail` while preserving the check and criterion body judgments. A
@@ -1016,10 +1016,10 @@ cleanup should remain visible without changing the effective run gate.
 
 | Event | Check/body result | Effective run gate |
 | --- | --- | --- |
-| A fixture `up:` step fails | `inconclusive` with the existing timeout or environment-error cause; check steps do not run | Existing body aggregation applies; no cleanup override |
+| A fixture `up:` step fails | `inconclusive` with the existing timeout or environment-error cause; check steps do not run | Body aggregation applies unless required `down:` fails |
 | A fixture `down:` step fails under `required` | Body check and criterion verdicts are unchanged | `fail`, even when the body passes or is inconclusive |
 | A fixture `down:` step fails under `diagnostic_only` | Body check and criterion verdicts are unchanged | Unchanged; failure remains diagnostic evidence |
-| The check fails or is inconclusive | Every activated fixture still runs `down:` | Body aggregation remains unchanged |
+| The check fails or is inconclusive | Every activated fixture still runs `down:` | Body aggregation applies unless required `down:` fails |
 
 This page-free example deliberately names a nonexistent cleanup executable,
 which produces an execution error rather than a non-zero exit-code
@@ -1198,7 +1198,7 @@ are open `{kind, id}` segment lists rather than a fixed-depth enum, so a new
 scope does not require reporter changes. The default reporter shows the
 recorded chain beside every non-passing check, marks declared entries that
 did not run, and always shows a failed lifecycle block. Pretty groups all
-blocks by their recorded path; JUnit emits failed blocks as test cases and
+blocks by their recorded path; JUnit emits failed setup and required-cleanup blocks as test cases, retains diagnostic cleanup as evidence, and
 passing blocks in `system-out`. The dashboard shows leaf/criterion blocks
 on the run page and check/fixture setup before check steps and teardown
 after them. Leaf, criterion, and check teardown failures remain

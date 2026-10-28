@@ -646,10 +646,22 @@ mod cleanup_policy_tests {
     fn fixture_policy_defaults_required_omits_default_and_rejects_unknown() {
         let fixture: Fixture = serde_yml::from_str("up: []\ndown: []\n").unwrap();
         assert_eq!(fixture.cleanup_policy, CleanupPolicy::Required);
-        assert!(!serde_yml::to_string(&fixture).unwrap().contains("cleanup_policy"));
-        let diagnostic: Fixture = serde_yml::from_str("up: []\ndown: []\ncleanup_policy: diagnostic_only\n").unwrap();
+        assert!(
+            !serde_yml::to_string(&fixture)
+                .unwrap()
+                .contains("cleanup_policy")
+        );
+        let diagnostic: Fixture =
+            serde_yml::from_str("up: []\ndown: []\ncleanup_policy: diagnostic_only\n").unwrap();
         assert_eq!(diagnostic.cleanup_policy, CleanupPolicy::DiagnosticOnly);
-        assert!(serde_yml::to_string(&diagnostic).unwrap().contains("diagnostic_only"));
-        assert!(serde_yml::from_str::<Fixture>("up: []\ndown: []\ncleanup_policy: best_effort\n").is_err());
+        assert!(
+            serde_yml::to_string(&diagnostic)
+                .unwrap()
+                .contains("diagnostic_only")
+        );
+        assert!(
+            serde_yml::from_str::<Fixture>("up: []\ndown: []\ncleanup_policy: best_effort\n")
+                .is_err()
+        );
     }
 }

@@ -206,7 +206,10 @@ enum Cmd {
         run_id: Option<String>,
         /// Stdout formatting for the post-run summary. Built-in
         /// names: `default` (verdict line), `quiet` (exit code
-        /// only), `json` (one-line `RunSummary`). Other names are
+        /// only), `json` (`RunSummary` v2 for a leaf, or `RunSetSummary`
+        /// v1 with per-leaf `RunSummary` v2 objects in `runs[]` for a
+        /// manifest). The target's `criteria:` or `verifications:` key
+        /// selects the shape, regardless of filename. Other names are
         /// resolved against `.duhem.toml` (repo) + `~/.duhem/config.toml`
         /// (user) per the reporter-plugin spec on issue #34. Built-ins
         /// always win over a same-named plugin entry.

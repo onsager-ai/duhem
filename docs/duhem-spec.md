@@ -1558,6 +1558,19 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 **Run Summary & Reporters** (`duhem-summary`, `duhem-reporter-pretty`, `duhem-reporter-junit`)
 
 - `duhem-summary` defines the run-summary types the CLI emits. `RunSummary.totals` carries `total`, `passed`, `failed`, and `inconclusive` check counts; `RunSetSummary.totals` aggregates them across leaves. `total` means checks that executed and emitted a verdict, not checks authored in the Verification Definition, so `--filter` exclusions are absent. Both fields default to all-zero counts when an older summary is deserialized.
+- `duhem run --reporter json` writes one JSON line. The target's top-level content selects its document shape: a leaf with `criteria:` emits `RunSummary` with `schema_version: "2"`; a manifest with `verifications:` emits `RunSetSummary` with `schema_version: "1"` and one leaf `RunSummary` in each `runs[]` entry. This follows the content-sniffing rule in §10.2, so the filename does not select the shape. The two version fields are independent: a `RunSetSummary` v1 wrapping `RunSummary` v2 is the current contract, not a schema bump. In a manifest result, criterion verdicts and failure details stay inside the leaf summaries, such as `runs[0].criteria` and `runs[0].failures`; the envelope has neither field. `RunSetSummary.totals` is the sum of the totals for every leaf in `runs[]`.
+- For a passing one-check leaf, the reporter line has this shape (the run ID and store path vary):
+
+  ```json
+  {"schema_version":"2","run_id":"01ARZ3NDEKTSV4RRFFQ69G5FAV","verdict":"pass","criteria":[{"id":"AC-1","verdict":"pass"}],"store":"state/duhem.db","totals":{"total":1,"passed":1,"failed":0,"inconclusive":0},"failures":[]}
+  ```
+
+- For a passing two-leaf manifest, the reporter line wraps each leaf summary; the outer totals sum their totals:
+
+  ```json
+  {"schema_version":"1","verdict":"pass","totals":{"total":2,"passed":2,"failed":0,"inconclusive":0},"runs":[{"schema_version":"2","run_id":"01ARZ3NDEKTSV4RRFFQ69G5FAV","verdict":"pass","criteria":[{"id":"AC-1","verdict":"pass"}],"store":"state/duhem.db","totals":{"total":1,"passed":1,"failed":0,"inconclusive":0},"failures":[]},{"schema_version":"2","run_id":"01ARZ3NDEKTSV4RRFFQ69G5FAW","verdict":"pass","criteria":[{"id":"AC-1","verdict":"pass"}],"store":"state/duhem.db","totals":{"total":1,"passed":1,"failed":0,"inconclusive":0},"failures":[]}]}
+  ```
+
 - `RunSummary.lifecycle` folds every recorded setup, teardown, and fixture block, including successful blocks, into an ordered generic scope path plus status, timing, steps, flow provenance, and failing-step position. It is derived from evidence, not the compatibility cleanup list, and remains outside verdict aggregation.
 - The reporters render those summaries for humans (pretty) and CI (JUnit XML); they consume judge output and never produce a verdict, so they sit on the delivery side of the trust boundary (§11.2)
 

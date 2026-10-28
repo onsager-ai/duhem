@@ -87,6 +87,7 @@ The repo's development process lives under [`.claude/skills/`](.claude/skills/):
 
 - **`duhem-dev-process`** — the end-to-end SDD loop (spec → branch → implement → PR → merge), the check gate, and the CI-failure table.
 - **`verification-authoring`** — how to author Verification Definitions (criteria + checks), enforcing the Holistic Verification Principle and the criteria-vs-checks separation.
+- **[Product regression migration](docs/product-regression-migration.md)** — the current Duhem producer/consumer contract, capability inventory, and qualification sequence for #575.
 
 ## Sign-off / CLA
 

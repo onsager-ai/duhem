@@ -167,7 +167,8 @@ async fn export_refuses_traversal_shaped_ids() {
     })
     .await
     .unwrap();
-    w.append(EventPayload::RunFinished { body_verdict: None,
+    w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await

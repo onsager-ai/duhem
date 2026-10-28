@@ -126,14 +126,22 @@ impl Engine {
                         0,
                     )
                 } else {
-                    match self.run_check(writer, run, (criterion_id, check), failures).await {
+                    match self
+                        .run_check(writer, run, (criterion_id, check), failures)
+                        .await
+                    {
                         Ok(result) => result,
                         Err(error) => {
                             body_error = Some(error);
-                            (CheckVerdict {
-                                check_id: check.id.clone(),
-                                state: VerdictState::Inconclusive(duhem_judge::InconclusiveCause::EnvironmentError),
-                            }, 0)
+                            (
+                                CheckVerdict {
+                                    check_id: check.id.clone(),
+                                    state: VerdictState::Inconclusive(
+                                        duhem_judge::InconclusiveCause::EnvironmentError,
+                                    ),
+                                },
+                                0,
+                            )
                         }
                     }
                 };

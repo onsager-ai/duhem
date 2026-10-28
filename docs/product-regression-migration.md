@@ -52,11 +52,11 @@ The first domain can qualify incrementally, but a required consumer pass must id
 | Owner | Current state | Qualification consequence |
 |---|---|---|
 | [#531](https://github.com/onsager-ai/duhem/issues/531) | Open; claim-set reporting lacks count/provenance. | Distinguish authored, selected, executed, gated, and excluded claims; a filtered pass must not imply full coverage. |
-| [#546](https://github.com/onsager-ai/duhem/issues/546) | Open; the requested store has no recorded run. | Report the missing record for that store; do not claim the invocation never occurred. |
+| [#546](https://github.com/onsager-ai/duhem/issues/546) | Open; declared definitions are not yet inventoried against recorded runs. | Report absent records in the specified store; do not claim an unseen invocation never occurred. |
 | [#544](https://github.com/onsager-ai/duhem/issues/544) | Open; manifest result attribution to its leaf is unresolved. | Attribute each result to its leaf. Check, parameter-instance, attempt, and executed-scope identity are additional qualification fields where #544 does not supply them. |
 | [#535](https://github.com/onsager-ai/duhem/issues/535) | Open; help text names one of the two existing JSON reporter shapes. | Document both already-shipped single-leaf and manifest shapes; consume the selected existing shape without waiting for a new report version. |
 | [#567](https://github.com/onsager-ai/duhem/issues/567) | Open; required teardown failure can leave the case passing. | Preserve the body verdict and cleanup finding; required cleanup failure must block the aggregate, while diagnostic-only cleanup is explicit. |
-| [#574](https://github.com/onsager-ai/duhem/issues/574) | Open; failed assertion expressions and values are missing from report details. | Show expression, expected/actual values, and evidence with secret masking. |
+| [#574](https://github.com/onsager-ai/duhem/issues/574) | Open; assertion visibility in the steps rail and resolved operand values are incomplete. | Show expression, expected/actual values, and evidence with secret masking. |
 | [#524](https://github.com/onsager-ai/duhem/issues/524) | Closed; lifecycle evidence landed. | Reuse landed setup/teardown evidence and ownership in the consumer report. |
 | [#543](https://github.com/onsager-ai/duhem/issues/543) | Open; session cascade and teardown pairing landed; nested groups and fixture folding remain. | Reuse landed scope, then qualify only the remaining group/fixture behavior the mapped first domain requires. |
 

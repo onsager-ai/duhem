@@ -1083,7 +1083,7 @@ criteria:
     /// hooks at any level, so `capture()` exercises the common
     /// hook-free path by default.
     #[tokio::test]
-    async fn actual_gating_reaches_the_default_reporter() {
+    async fn actual_non_judging_gates_do_not_shrink_the_reported_judgment_scope() {
         let tmp = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             duhem_evidence::SqliteStore::open(tmp.path().join("evidence.db"))
@@ -1101,9 +1101,9 @@ criteria:
     checks:
       - id: AC-1.1
         steps:
-          - uses: db/observe
+          - uses: db/query
             if: {condition}
-            with: {{ connection: 'sqlite::memory:', sql: 'select 1', until: {{ row_count: 1 }} }}
+            with: {{ connection: 'sqlite::memory:', sql: 'select 1' }}
         assertions: ["true"]
 "#
             ))
@@ -1120,8 +1120,8 @@ criteria:
             rendered[0],
             "pass\nTotal: 1 checks · 1 passed · 0 failed · 0 inconclusive\n"
         );
-        assert_ne!(rendered[0], rendered[1]);
-        assert!(rendered[1].contains("AC-1::AC-1.1: 1 judging step gated"));
+        assert_eq!(rendered[0], rendered[1]);
+        assert!(!rendered[1].contains("judging step gated"));
     }
 
     #[test]

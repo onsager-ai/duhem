@@ -554,3 +554,10 @@ which stays on your side (local or CI), never in the server.
   verdict; the `duhem/run` composite action wraps this.
 - **The full model.** [`docs/duhem-spec.md`](./duhem-spec.md) —
   especially §7 (Core Concepts) and §8 (Holistic Verification).
+
+
+### Profile selection spelling
+
+Use `--profile NAME` with `duhem run` or `duhem resolve` to select a
+manifest profile. The former `--environment NAME` alias is removed in
+the next release after v0.6.0; replace that spelling in scripts and CI.

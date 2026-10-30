@@ -30,7 +30,6 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 
 - [clarifying] Remove private consumer names from source; scan tracked files and tracker content with runtime secret vocabulary; move pin currency checks into consumer CI. (#605)
-
 - [additive] Owned process actions record readiness, bounded logs, stop/restart and required cleanup for long-lived local binaries; process outputs from criterion/check setup and consumed fixtures are addressable from the check; non-process visibility unchanged. (#579)
 - [additive] UI locators accept frame scoping, including nested and cross-origin iframes, for assertions and interactions. (#568)
 

@@ -2,6 +2,7 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import os
 from pathlib import Path
+import socketserver
 import sys
 
 state = Path(sys.argv[1])
@@ -18,4 +19,12 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-HTTPServer(("127.0.0.1", int(os.environ["PORT"])), Handler).serve_forever()
+class LoopbackServer(HTTPServer):
+    def server_bind(self):
+        # A numeric loopback fixture needs no reverse-DNS lookup.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
+
+
+LoopbackServer(("127.0.0.1", int(os.environ["PORT"])), Handler).serve_forever()

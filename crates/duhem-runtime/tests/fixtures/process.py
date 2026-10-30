@@ -3,11 +3,23 @@ import http.server
 import os
 from pathlib import Path
 import signal
+import socketserver
 import subprocess
 import sys
 import time
 
 mode = sys.argv[1]
+
+
+class LoopbackServer(http.server.HTTPServer):
+    def server_bind(self):
+        # The fixture already has a numeric loopback address. HTTPServer's
+        # otherwise unused reverse-DNS lookup can block on CI host DNS.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
+
+
 if mode == "server":
     state = Path(sys.argv[2])
     state.write_text(str(int(state.read_text()) + 1) if state.exists() else "1")
@@ -26,7 +38,7 @@ if mode == "server":
         def log_message(self, *_):
             pass
 
-    server = http.server.HTTPServer(("127.0.0.1", int(sys.argv[3])), Handler)
+    server = LoopbackServer(("127.0.0.1", int(sys.argv[3])), Handler)
     print("READY", flush=True)
     server.serve_forever()
 elif mode == "exit":

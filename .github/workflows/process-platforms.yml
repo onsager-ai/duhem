@@ -26,14 +26,11 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
-      - name: Permit the fixture interpreter through the macOS application firewall
+      - name: Diagnose loopback reverse DNS (temporary)
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          fixture_python=$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.executable).resolve())')
-          sudo /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
-          sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$fixture_python"
-          sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$fixture_python"
+          python3 -u -c "import socket,faulthandler; faulthandler.dump_traceback_later(3, exit=True); print('numeric loopback reverse DNS'); print(socket.getfqdn('127.0.0.1'))" || true
       # Temporary diagnosis for the macOS HTTP readiness boundary.
       - name: Direct loopback fixture probe (temporary)
         if: runner.os == 'macOS'

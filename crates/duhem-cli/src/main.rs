@@ -12,6 +12,7 @@
 
 mod browser_cmd;
 mod contract_check;
+mod coverage_cmd;
 mod dashboard;
 mod describe_cmd;
 mod env_file;
@@ -97,6 +98,9 @@ enum Cmd {
     },
     /// List the built-in action catalog (`uses` + one-line summary).
     Actions,
+    /// Report definitions with no recorded run in a supplied evidence store.
+    /// Reports only what that store contains; never infers gate coverage.
+    Coverage(coverage_cmd::CoverageArgs),
     /// Print one action's contract: its `with:` fields and `outputs`.
     ///
     /// Version-exact ground truth for authoring a check — e.g.
@@ -135,7 +139,7 @@ enum Cmd {
         /// Omit to auto-discover a manifest from the current directory.
         path: Option<PathBuf>,
         /// Select a named profile from the manifest's `profiles:` block.
-        #[arg(long = "profile", alias = "environment", value_name = "NAME")]
+        #[arg(long = "profile", value_name = "NAME")]
         profile: Option<String>,
         /// Inputs, repeatable and last-wins: `KEY=VALUE` or `@FILE`.
         #[arg(long = "inputs", value_name = "KEY=VALUE|@FILE")]
@@ -223,7 +227,7 @@ enum Cmd {
         /// manifest declares exactly one profile it auto-selects;
         /// with two or more, this flag is required. Inert on a
         /// single-leaf run (no manifest).
-        #[arg(long = "profile", alias = "environment", value_name = "NAME")]
+        #[arg(long = "profile", value_name = "NAME")]
         profile: Option<String>,
         /// Parse + validate the definition, resolve the filter, print
         /// the `(criterion::check)` pairs that *would* run, and exit
@@ -347,6 +351,13 @@ fn main() -> ExitCode {
             force,
         }) => init::run_init(path, &pattern, &kind, name, force),
         Some(Cmd::Actions) => describe_cmd::run_actions(),
+        Some(Cmd::Coverage(args)) => {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            rt.block_on(coverage_cmd::run(&args))
+        }
         Some(Cmd::Describe { uses }) => describe_cmd::run_describe(&uses),
         Some(Cmd::Mcp) => mcp_cmd::run(),
         Some(Cmd::Validate { path }) => match validate_cmd::run_validate(path.as_deref()) {
@@ -1062,22 +1073,19 @@ mod tests {
     }
 
     #[test]
-    fn profile_flag_and_environment_alias_parse() {
-        let parsed =
-            Cli::try_parse_from(["duhem", "run", "v.yml", "--profile", "prod"]).expect("parse");
-        match parsed.cmd {
-            Some(Cmd::Run { profile, .. }) => {
-                assert_eq!(profile, Some("prod".to_string()));
+    fn profile_is_supported_and_retired_environment_alias_is_rejected() {
+        for command in ["run", "resolve"] {
+            let parsed = Cli::try_parse_from(["duhem", command, "v.yml", "--profile", "prod"])
+                .expect("profile parses");
+            match parsed.cmd {
+                Some(Cmd::Run { profile, .. } | Cmd::Resolve { profile, .. }) => {
+                    assert_eq!(profile.as_deref(), Some("prod"))
+                }
+                _ => panic!("expected Run or Resolve"),
             }
-            _ => panic!("expected Run"),
-        }
-        let parsed =
-            Cli::try_parse_from(["duhem", "run", "v.yml", "--environment", "prod"]).expect("parse");
-        match parsed.cmd {
-            Some(Cmd::Run { profile, .. }) => {
-                assert_eq!(profile, Some("prod".to_string()));
-            }
-            _ => panic!("expected Run"),
+            let error = Cli::try_parse_from(["duhem", command, "v.yml", "--environment", "prod"])
+                .unwrap_err();
+            assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
         }
     }
 

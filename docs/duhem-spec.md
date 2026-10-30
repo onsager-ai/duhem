@@ -1476,7 +1476,7 @@ Borrowed from Arazzo. References available in expressions:
 - `$steps.<id>.outputs.<name>` — outputs from a prior step (scoped to the declaring check)
 - `$setup.<id>.outputs.<name>` — outputs from a run-level `setup:` step (§10.3), read-only from inside any check
 - `$fixture.<fixture_name>.<step_id>.outputs.<name>` — outputs from one fixture instance's `up:` steps, valid only in that same fixture's `down:` block (§10.3.5)
-- `$env.<name>` — a value from the selected named profile. The `$env` whitelist is **empty by default**. An author opts a key in by declaring it (with a string value) under a manifest `profiles:` entry (§10.4) and selecting that profile with `--profile <name>` (`--environment` remains an alias; one profile auto-selects); the selected entry's string-valued keys seed the whitelist for that run. There is no process-environment passthrough and no `--env` CLI flag. A reference to a key that isn't whitelisted evaluates to `inconclusive` (it carries a missing-env cause, §10.6), never a parse error.
+- `$env.<name>` — a value from the selected named profile. The `$env` whitelist is **empty by default**. An author opts a key in by declaring it (with a string value) under a manifest `profiles:` entry (§10.4) and selecting that profile with `--profile <name>` (one profile auto-selects); the selected entry's string-valued keys seed the whitelist for that run. There is no process-environment passthrough and no `--env` CLI flag. A reference to a key that isn't whitelisted evaluates to `inconclusive` (it carries a missing-env cause, §10.6), never a parse error.
 - `$runtime.uuid()` — a stable per-run UUID / `$runtime.now()` — the run's current time as epoch milliseconds
 - `$runtime.format(fmt, args...)` — **pure** string composition: the
   `{}` placeholders in `fmt` are filled, in order, by the remaining
@@ -1624,6 +1624,31 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 - Sole writer: the runtime; the dashboard reads through a read-only
   handle
 - Portable via `duhem export` (self-contained per-run bundle)
+
+
+
+### Report definitions with no recorded run
+
+`duhem coverage verifications --db /path/to/existing/duhem.db --base .` lists each
+declared definition and its latest recorded run start, run status, and
+verdict. `--format json` emits the same report as JSON. You can also supply
+a leaf file or manifest directly. A directory tree discovers conventional
+`duhem.yml`, `duhem.yaml`, `.duhem.yml`, or `.duhem.yaml` files; a found
+manifest supplies its declared leaves, including globs. Other directories
+are searched recursively, excluding `.git`, `node_modules`, and `target`,
+without following directory symlinks. An explicit leaf may have any filename.
+
+The supplied store opens read-only and must already exist. `no_recorded_run`
+means no matching canonical absolute source path has a run in this store.
+It does not claim an invocation never happened elsewhere. For ordinary relative-path runs, pass `--base` with their original invocation
+directory (often the repository root). The store key is hashed and cannot
+recover that directory safely. The command never guesses the base from
+today's cwd. Without `--base`, relative records are counted as unmatched;
+both output formats report total and relative unmatched-run counts. Moved
+working copies or stores shipped from another machine may still not match.
+A timestamp records the latest run start, including incomplete runs, and
+does not prove a check body completed. This command reports observations;
+missing runs do not fail a gate or change its successful exit code.
 
 ### Assertion operand evidence
 

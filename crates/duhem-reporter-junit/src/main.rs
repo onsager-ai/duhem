@@ -70,7 +70,12 @@ fn render(s: &RunSummary) -> String {
         .iter()
         .filter(|block| lifecycle_blocks_gate(block))
         .count();
-    let total = s.criteria.len() + lifecycle_failures;
+    let exclusions = s
+        .claim_scope
+        .as_ref()
+        .map(|scope| scope.excluded.as_slice())
+        .unwrap_or(&[]);
+    let total = s.criteria.len() + lifecycle_failures + exclusions.len();
     let failures = s
         .criteria
         .iter()
@@ -81,7 +86,8 @@ fn render(s: &RunSummary) -> String {
         .criteria
         .iter()
         .filter(|c| matches!(c.verdict, VerdictState::Inconclusive(_)))
-        .count();
+        .count()
+        + exclusions.len();
 
     let mut out = String::new();
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
@@ -121,6 +127,12 @@ fn render(s: &RunSummary) -> String {
                 ));
             }
         }
+    }
+    for excluded in exclusions {
+        out.push_str(&format!(
+            "  <testcase name=\"excluded:{}::{}\"><skipped type=\"selection\">{}</skipped></testcase>\n",
+            xml_escape(&excluded.criterion_id), xml_escape(&excluded.check_id), xml_escape(&excluded.reason),
+        ));
     }
     for block in s
         .lifecycle
@@ -231,6 +243,31 @@ mod tests {
     use duhem_summary::{
         CheckTotals, CleanupFailureSummary, CriterionSummary, LifecycleBlock, LifecycleScopeSegment,
     };
+
+    #[test]
+    fn excluded_pairs_are_skipped_cases_and_suite_counts_agree() {
+        let scope = duhem_summary::ClaimScope {
+            excluded: vec![duhem_summary::ExcludedClaim {
+                criterion_id: "AC&1".into(),
+                check_id: "excluded".into(),
+                reason: "check_filter".into(),
+            }],
+            ..Default::default()
+        };
+        let summary = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from("."))
+            .with_claim_scope(Some(scope));
+        let xml = render(&summary);
+        assert!(
+            xml.contains("tests=\"1\" failures=\"0\" skipped=\"1\""),
+            "{xml}"
+        );
+        assert!(xml.contains("excluded:AC&amp;1::excluded"), "{xml}");
+        assert!(
+            xml.contains("<skipped type=\"selection\">check_filter</skipped>"),
+            "{xml}"
+        );
+        assert_eq!(xml.matches("<testcase").count(), 1);
+    }
 
     #[test]
     fn lifecycle_snapshot_handles_unknown_scope_depth() {

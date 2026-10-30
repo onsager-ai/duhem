@@ -80,6 +80,8 @@ pub struct Engine {
     /// matching checks execute; non-matching checks are skipped with
     /// no evidence emission.
     filter: Option<Box<dyn CheckFilter>>,
+    filter_patterns: Vec<String>,
+    manifest_selection: Option<duhem_summary::ManifestSelection>,
     /// Optional u64 seed for runtime entropy (spec on issue #33). When
     /// set, the per-run `$runtime.uuid()` value is derived
     /// deterministically from the seed instead of `Uuid::new_v4`. No
@@ -147,6 +149,7 @@ pub struct Engine {
 }
 
 mod builder;
+mod claim_scope;
 mod masking;
 mod missing_input;
 mod signal;
@@ -166,6 +169,8 @@ impl Engine {
             definition_path: None,
             definition_source: None,
             filter: None,
+            filter_patterns: Vec::new(),
+            manifest_selection: None,
             seed: None,
             run_id: None,
             scope: RunScope::default(),
@@ -317,6 +322,11 @@ impl Engine {
             .await?;
 
         let execution = async {
+            writer
+                .append(EventPayload::ClaimScopeDeclared {
+                    scope: self.declared_claim_scope(def),
+                })
+                .await?;
             if let Some(name) = missing_declared {
                 return missing_input::finish(&mut writer, &name, &run_id).await;
             }
@@ -1615,6 +1625,8 @@ criteria:
             definition_path: None,
             definition_source: None,
             filter: None,
+            filter_patterns: Vec::new(),
+            manifest_selection: None,
             seed: None,
             run_id: None,
             scope: RunScope::default(),

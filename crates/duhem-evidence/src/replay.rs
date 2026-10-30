@@ -194,6 +194,7 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
             }
             EventPayload::StepObservation { .. }
             | EventPayload::RunHeartbeat
+            | EventPayload::ClaimScopeDeclared { .. }
             | EventPayload::RunAborted { .. }
             | EventPayload::StepFinished { .. }
             | EventPayload::SetupStarted { .. }

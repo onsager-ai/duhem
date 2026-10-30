@@ -3,11 +3,10 @@ use std::collections::HashSet;
 
 use crate::{Step, ValidationError, VerificationDefinition};
 
-fn starts(steps: &[Step]) -> HashSet<&str> {
+fn setup_ids(steps: &[Step]) -> HashSet<&str> {
     steps
         .iter()
         .flat_map(Step::actions)
-        .filter(|step| step.uses.as_deref() == Some("process/start"))
         .filter_map(|step| step.id.as_deref())
         .collect()
 }
@@ -44,7 +43,7 @@ fn check(
 }
 
 pub(crate) fn validate(definition: &VerificationDefinition, errs: &mut Vec<ValidationError>) {
-    let leaf = starts(&definition.setup);
+    let leaf = setup_ids(&definition.setup);
     check(&definition.setup, "leaf setup", &leaf, false, errs);
     check(&definition.teardown, "leaf teardown", &leaf, false, errs);
     for (name, fixture) in &definition.fixtures {
@@ -65,7 +64,7 @@ pub(crate) fn validate(definition: &VerificationDefinition, errs: &mut Vec<Valid
     }
     for criterion in &definition.criteria {
         let mut outer = leaf.clone();
-        outer.extend(starts(&criterion.setup));
+        outer.extend(setup_ids(&criterion.setup));
         check(
             &criterion.setup,
             &format!("criterion `{}` setup", criterion.id),

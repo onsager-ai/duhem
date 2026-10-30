@@ -26,6 +26,14 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
+      - name: Permit the fixture interpreter through the macOS application firewall
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          fixture_python=$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.executable).resolve())')
+          sudo /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
+          sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$fixture_python"
+          sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$fixture_python"
       # Temporary diagnosis for the macOS HTTP readiness boundary.
       - name: Direct loopback fixture probe (temporary)
         if: runner.os == 'macOS'
@@ -33,7 +41,7 @@ jobs:
         run: |
           python3 -u crates/duhem-runtime/tests/fixtures/process.py server "$RUNNER_TEMP/direct-state" 18769 > "$RUNNER_TEMP/direct-http.log" 2>&1 &
           fixture_pid=$!
-          trap 'kill "$fixture_pid"; wait "$fixture_pid" || true' EXIT
+          trap 'cat "$RUNNER_TEMP/direct-http.log"; kill "$fixture_pid"; wait "$fixture_pid" || true' EXIT
           curl --fail --silent --show-error --max-time 2 --retry 10 --retry-connrefused --retry-delay 1 -H 'X-Ready: yes' http://127.0.0.1:18769/health
           cat "$RUNNER_TEMP/direct-http.log"
       - run: cargo test -p duhem-runtime --test owned_processes

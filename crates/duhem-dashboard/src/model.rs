@@ -49,6 +49,8 @@ pub struct RunsListEntry {
 #[derive(Debug, Clone, Serialize)]
 pub struct RunDetail {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim_scope: Option<duhem_summary::ClaimScope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub body_verdict: Option<VerdictState>,
     pub run_id: String,
     pub verification: String,

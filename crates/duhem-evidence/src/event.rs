@@ -215,6 +215,10 @@ pub enum EventPayload {
     },
     /// Periodic proof that the runtime still owns this unterminated run.
     RunHeartbeat,
+    /// The immutable authored selection, before lifecycle or checks execute.
+    ClaimScopeDeclared {
+        scope: duhem_summary::ClaimScope,
+    },
     EnvUpStarted {
         command: String,
     },
@@ -465,6 +469,7 @@ impl EventPayload {
         match self {
             EventPayload::RunStarted { .. } => "run_started",
             EventPayload::RunHeartbeat => "run_heartbeat",
+            EventPayload::ClaimScopeDeclared { .. } => "claim_scope_declared",
             EventPayload::EnvUpStarted { .. } => "env_up_started",
             EventPayload::EnvUpFinished { .. } => "env_up_finished",
             EventPayload::EnvReady { .. } => "env_ready",

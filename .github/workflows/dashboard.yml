@@ -59,7 +59,7 @@ jobs:
         working-directory: crates/duhem-dashboard/web
         run: npm run build
 
-      - name: Upload dashboard for browser review
+      - name: Upload dashboard preview for review
         uses: actions/upload-artifact@v7
         with:
           name: dashboard-spa

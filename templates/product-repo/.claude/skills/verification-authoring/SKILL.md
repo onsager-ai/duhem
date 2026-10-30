@@ -665,8 +665,13 @@ criteria:
   output. The command has no browser, provisioning, evidence-write, or
   network side effects.
 - `duhem run <dir>` — runs the suite (exit 0 == pass). Add
-  `--reporter json` for a per-criterion verdict breakdown; the default
-  reporter prints only the overall pass/fail.
+  `--reporter json` for structured verdicts and recorded claim scope;
+  the default reporter prints the verdict, totals and scope. A filtered
+  pass covers only selected claims: inspect authored, selected and recorded
+  counts plus exclusions. Manifest directory/name selection also records
+  authored versus selected leaves. Reports written before these fields
+  existed have unknown authored scope; recorded counts alone cannot prove
+  complete coverage. Keep required CI claim scope explicit.
 - `duhem mcp` — exposes describe/actions/validate to your coding agent
   over MCP for AI-assisted authoring.
 - The Duhem documentation for the Holistic Verification Principle, the

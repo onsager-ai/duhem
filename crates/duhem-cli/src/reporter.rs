@@ -123,6 +123,16 @@ pub fn render(
     match reporter {
         Reporter::Default => {
             writeln!(out, "{}", outcome.verdict.state)?;
+            if let Some(scope) = &summary.claim_scope {
+                writeln!(out, "Scope: {scope}")?;
+                for excluded in &scope.excluded {
+                    writeln!(
+                        out,
+                        "  excluded {}::{} ({})",
+                        excluded.criterion_id, excluded.check_id, excluded.reason
+                    )?;
+                }
+            }
             if let Some(body) = outcome.body_verdict {
                 writeln!(out, "  body: {body}")?;
             }
@@ -168,11 +178,15 @@ pub fn render_set(
     set_verdict: &RunSetVerdict,
     store_db: &std::path::Path,
     leaf_events: &[Vec<duhem_evidence::Event>],
+    selection: Option<&duhem_summary::ManifestSelection>,
 ) -> Result<(), RenderError> {
     match reporter {
         Reporter::Default => {
             for ((name, outcome), events) in leaves.iter().zip(leaf_events) {
                 writeln!(out, "{name}: {}", outcome.verdict.state)?;
+                if let Some(scope) = duhem_evidence::claim_scope::claim_scope(events) {
+                    writeln!(out, "  Scope: {scope}")?;
+                }
                 if let Some(body) = outcome.body_verdict {
                     writeln!(out, "  body: {body}")?;
                 }
@@ -182,6 +196,16 @@ pub fn render_set(
                 write_failed_lifecycle(out, &lifecycle, &[])?;
             }
             writeln!(out, "{}", set_verdict.state)?;
+            if let Some(selection) = selection {
+                writeln!(out, "Scope: {selection}")?;
+                for excluded in &selection.excluded {
+                    writeln!(
+                        out,
+                        "  excluded {} ({})",
+                        excluded.verification, excluded.reason
+                    )?;
+                }
+            }
             let lifecycle: Vec<_> = leaf_events.iter().flat_map(|e| fold_lifecycle(e)).collect();
             write_totals(out, check_totals_for_set(leaves), &lifecycle)?;
             Ok(())
@@ -193,7 +217,8 @@ pub fn render_set(
                 .zip(leaf_events)
                 .map(|((_, o), events)| build_summary(o, store_db, events))
                 .collect();
-            let summary = RunSetSummary::new(set_verdict.state, runs);
+            let mut summary = RunSetSummary::new(set_verdict.state, runs);
+            summary.selection = selection.cloned();
             serde_json::to_writer(&mut *out, &summary)
                 .map_err(|e| RenderError::Io(std::io::Error::other(e)))?;
             writeln!(out)?;
@@ -212,6 +237,9 @@ pub fn render_set(
             }
             if !tracked.at_line_start() {
                 writeln!(&mut tracked)?;
+            }
+            if let Some(selection) = selection {
+                writeln!(&mut tracked, "Scope: {selection}")?;
             }
             writeln!(&mut tracked, "{}", set_verdict.state)?;
             Ok(())
@@ -709,6 +737,7 @@ fn build_summary(
         store_db.to_path_buf(),
     )
     .with_totals(check_totals(o))
+    .with_claim_scope(duhem_evidence::claim_scope::claim_scope(events))
     .with_verification(events.iter().find_map(|event| match &event.payload {
         duhem_evidence::EventPayload::RunStarted {
             verification_path, ..
@@ -1454,6 +1483,7 @@ criteria:
             set,
             std::path::Path::new("state/duhem.db"),
             &vec![Vec::new(); leaves.len()],
+            None,
         )
         .unwrap();
         String::from_utf8(buf).unwrap()

@@ -53,7 +53,8 @@ explicit rationale in the spec.
   judge has no LLM in the loop and the verdict is recorded by Duhem,
   not the product (§11.2), *not* because the checks are hoarded in one
   repo. Duhem is a standalone, self-verified tool: product
-  Verification Definitions live *with the product*, and only Duhem's self-verification VDs live here. A
+  Verification Definitions live *with the product*, and only Duhem's
+  self-verification VDs live here. A
   product PR still can't silently self-weaken its check (optional
   per-repo CODEOWNERS) or self-attest past a `fail` (hub-recorded
   verdict), but there is no special anchor repo. What Duhem must keep
@@ -112,7 +113,8 @@ uses independent repositories and co-located verification suites:
 
 Onsager is the **workload** Duhem verifies — the dogfood pair is how
 Duhem gets exercised at real complexity. Product owners run their
-verification suites and pin-currency checks in their own CI (#380). Onsager is not (yet) the production line
+verification suites and pin-currency checks in their own CI (#380).
+Onsager is not (yet) the production line
 that builds Duhem either — that's a Phase 4+ future state in
 `docs/duhem-spec.md` §14.
 

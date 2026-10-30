@@ -3,7 +3,7 @@
 // serves. The browser never computes a verdict: every verdict below
 // is lifted verbatim from the judge's `*_finished` events.
 
-import type { CriterionDetail, LifecycleBlock, RunDetail, TraceEvent } from "./api";
+import type { ClaimScope, CriterionDetail, LifecycleBlock, RunDetail, TraceEvent } from "./api";
 
 /** Fields `foldRun` cannot derive from the event stream. `useRun` carries
  *  them over from the authoritative `GET /api/runs/:id` so a live run shows
@@ -78,6 +78,9 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
       case "run_started":
         detail.verification = String(evt.verification_path ?? runId);
         detail.inputs = (evt.inputs as Record<string, unknown>) ?? {};
+        break;
+      case "claim_scope_declared":
+        detail.claim_scope = structuredClone(evt.scope as ClaimScope);
         break;
       case "setup_finished":
         if (evt.phase !== "teardown" && evt.criterion_id == null &&
@@ -160,6 +163,11 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
     }
   }
   detail.lifecycle = foldLifecycle(events);
+  if (detail.claim_scope) {
+    const completed = detail.criteria.map((criterion) => criterion.checks.filter((check) => check.verdict !== null));
+    detail.claim_scope.criteria.executed = completed.filter((checks) => checks.length > 0).length;
+    detail.claim_scope.checks.executed = completed.reduce((total, checks) => total + checks.length, 0);
+  }
   return detail;
 }
 

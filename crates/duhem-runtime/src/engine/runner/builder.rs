@@ -100,6 +100,17 @@ impl Engine {
         self
     }
 
+    /// Retain CLI selection provenance without changing the filter's judgment.
+    pub fn with_claim_provenance(
+        mut self,
+        patterns: Vec<String>,
+        manifest: Option<duhem_summary::ManifestSelection>,
+    ) -> Self {
+        self.filter_patterns = patterns;
+        self.manifest_selection = manifest;
+        self
+    }
+
     /// Seed the runtime's entropy source so `$runtime.uuid()` is
     /// derived deterministically from `seed`. Two runs with the same
     /// seed see identical uuid output (spec on issue #33).

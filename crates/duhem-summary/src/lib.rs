@@ -29,7 +29,9 @@ use std::path::PathBuf;
 use duhem_judge::VerdictState;
 use serde::{Deserialize, Serialize};
 
+mod claim_scope;
 mod lifecycle;
+pub use claim_scope::{ClaimCounts, ClaimScope, ExcludedClaim, ExcludedLeaf, ManifestSelection};
 pub use lifecycle::{
     LifecycleBlock, LifecycleEvent, LifecycleFlowOrigin, LifecycleFold, LifecycleLocation,
     LifecyclePhase, LifecycleScopeSegment, LifecycleStatus, LifecycleStep, LifecycleStepOutcome,
@@ -40,6 +42,9 @@ pub use lifecycle::{
 /// contract; field renames / removals are schema-impacting.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSummary {
+    /// Declared selection and recorded claim population; absent on old reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_scope: Option<ClaimScope>,
     /// Contract version. Bumped only on a **breaking** change; additive
     /// fields (like `failures`) keep the version. Authored explicitly so
     /// a plugin can refuse to parse a *breaking* future shape rather
@@ -122,6 +127,7 @@ impl RunSummary {
         store: PathBuf,
     ) -> Self {
         Self {
+            claim_scope: None,
             schema_version: Self::SCHEMA_VERSION.to_string(),
             run_id: run_id.into(),
             verdict,
@@ -142,6 +148,11 @@ impl RunSummary {
             .into_iter()
             .filter(|c| c.gated_judging_steps > 0)
             .collect();
+        self
+    }
+
+    pub fn with_claim_scope(mut self, scope: Option<ClaimScope>) -> Self {
+        self.claim_scope = scope;
         self
     }
 
@@ -296,6 +307,9 @@ pub struct FailedAssertionSummary {
 /// requires a `CHANGELOG.md` entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSetSummary {
+    /// Authored versus selected manifest leaves, including excluded leaves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection: Option<ManifestSelection>,
     /// Always `"1"` at v1. See [`RunSummary::schema_version`] for the
     /// rationale.
     pub schema_version: String,
@@ -323,6 +337,7 @@ impl RunSetSummary {
             totals.add(run.totals);
         }
         Self {
+            selection: None,
             schema_version: Self::SCHEMA_VERSION.to_string(),
             verdict,
             totals,
@@ -334,6 +349,23 @@ impl RunSetSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_reports_do_not_invent_authored_scope() {
+        let bare =
+            r#"{"schema_version":"2","run_id":"r","verdict":"pass","criteria":[],"store":"."}"#;
+        let summary: RunSummary = serde_json::from_str(bare).unwrap();
+        assert!(summary.claim_scope.is_none());
+        assert!(
+            serde_json::to_value(summary)
+                .unwrap()
+                .get("claim_scope")
+                .is_none()
+        );
+        let old_set = r#"{"schema_version":"1","verdict":"pass","runs":[]}"#;
+        let set: RunSetSummary = serde_json::from_str(old_set).unwrap();
+        assert!(set.selection.is_none());
+    }
 
     #[test]
     fn round_trips_through_json() {

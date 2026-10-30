@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Reports and evidence retain authored, selected and recorded claim counts, filter exclusions and manifest leaf selection; human reports, JUnit and the dashboard expose reduced scope. (#531)
 - [clarifying] Assertion type mismatches gate as fail; the spec distinguishes present null operands from absent fields, which remain inconclusive missing observations. (#537)
 
 ## v0.6.0 — 2026-10-30

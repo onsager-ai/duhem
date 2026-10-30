@@ -20,6 +20,7 @@
 //!   run header, event stream, and artifacts.
 
 pub mod bundle;
+pub mod claim_scope;
 pub mod event;
 pub mod reader;
 pub mod replay;

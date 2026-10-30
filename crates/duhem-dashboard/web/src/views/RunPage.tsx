@@ -1,4 +1,5 @@
 import { GatedJudgingNotice } from "../components/GatedJudgingNotice";
+import { ClaimScopeNotice } from "../components/ClaimScopeNotice";
 // Run report (#86): the run summary panel — a check-verdict roll-up,
 // run metadata, and inputs — rendered inside the shared RunScaffold
 // tree (criteria → checks in the rail, this summary in the panel).
@@ -200,6 +201,7 @@ export function RunSummary({ run }: { run: RunDetail }) {
       )}
 
       <LifecycleList runId={run.run_id} blocks={(run.lifecycle ?? []).filter((block) => block.scope.length <= 1)} />
+      <ClaimScopeNotice scope={run.claim_scope} />
 
       {run.criteria.flatMap((criterion) => criterion.checks
         .filter((check) => (check.gated_judging_steps ?? 0) > 0)

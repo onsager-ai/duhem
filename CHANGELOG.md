@@ -30,6 +30,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 
 - [additive] UI locators accept frame scoping, including nested and cross-origin iframes, for assertions and interactions. (#568)
+
 ## v0.7.0 — 2026-10-30
 
 - [breaking] Remove ui/assert-state; assert the state's marker with ui/assert-element instead. (#588)

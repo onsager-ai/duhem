@@ -102,6 +102,7 @@ impl Engine {
                     });
                     writer
                         .append(EventPayload::AssertionEvaluated {
+                            operands: None,
                             check_id: check.id.clone(),
                             assertion_index: control_index as u32,
                             iteration: None,
@@ -210,6 +211,7 @@ impl Engine {
                     VerdictState::Inconclusive(duhem_judge::InconclusiveCause::EmptyAggregation);
                 writer
                     .append(EventPayload::AssertionEvaluated {
+                        operands: None,
                         check_id: check.id.clone(),
                         assertion_index: index as u32,
                         iteration: None,

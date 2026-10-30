@@ -62,11 +62,18 @@ jobs:
       - name: action-reference drift check
         run: cargo run -p xtask --quiet -- action-reference --check
 
+      - name: private names in tracked source (locations only)
+        env:
+          DUHEM_PRIVATE_NAMES: ${{ secrets.DUHEM_PRIVATE_NAMES }}
+        run: cargo run -p xtask --quiet -- source-scrub
+
       # The user-facing authoring skill published under
       # templates/product-repo/.claude/skills/ is a sanitized sibling of
       # Duhem's internal dev skills; it must not leak internal dev context
       # (dogfood framing, seam/trust internals, dev-skill names). (#287)
       - name: skill-scrub (published skills ↔ no internal vocab)
+        env:
+          DUHEM_PRIVATE_NAMES: ${{ secrets.DUHEM_PRIVATE_NAMES }}
         run: cargo run -p xtask --quiet -- skill-scrub
 
       # DX-currency gate (#288). readme-framing hard-fails; the currency
@@ -75,6 +82,7 @@ jobs:
       # declare it deliberate with a `<!-- dx:none -->` marker in the body.
       - name: dx-drift (DX surfaces ↔ product currency)
         env:
+          DUHEM_PRIVATE_NAMES: ${{ secrets.DUHEM_PRIVATE_NAMES }}
           DUHEM_DX_IMPACT_NONE: ${{ contains(github.event.pull_request.body, '<!-- dx:none -->') && '1' || '' }}
         run: cargo run -p xtask --quiet -- dx-drift --mode=warn
 

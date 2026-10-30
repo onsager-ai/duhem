@@ -1,5 +1,5 @@
 //! Scheduled, read-only detection for configured authors after a date baseline.
-use crate::private_vocab::{PRIVATE_NAMES, all_skill_terms, scan_line, scan_private_line};
+use crate::private_vocab::{all_skill_terms, load_private_names, scan_line, scan_private_line};
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Datelike, Utc};
 use serde_json::{Value, json};
@@ -30,9 +30,9 @@ struct Scan {
 }
 #[derive(Default)]
 struct Measurement {
-    skill_vocabulary: BTreeMap<String, BTreeMap<i32, usize>>,
-    private_names: BTreeMap<String, BTreeMap<i32, usize>>,
-    private_names_in_date_scope: BTreeMap<String, BTreeMap<i32, usize>>,
+    skill_vocabulary: BTreeMap<usize, BTreeMap<i32, usize>>,
+    private_names: BTreeMap<usize, BTreeMap<i32, usize>>,
+    private_names_in_date_scope: BTreeMap<usize, BTreeMap<i32, usize>>,
 }
 
 pub fn run(args: Vec<String>) -> Result<()> {
@@ -60,25 +60,19 @@ pub fn run(args: Vec<String>) -> Result<()> {
     let config = read_config(&config_path)?;
     let mut scan = Scan::default();
     let mut counts = Measurement::default();
-    for term in all_skill_terms() {
-        counts.skill_vocabulary.insert(term.into(), BTreeMap::new());
+    let names = load_private_names()?;
+    let rules = names.iter().map(String::as_str).collect::<Vec<_>>();
+    for id in 0..all_skill_terms().count() {
+        counts.skill_vocabulary.insert(id, BTreeMap::new());
     }
-    for rule in PRIVATE_NAMES {
-        counts.private_names.insert((*rule).into(), BTreeMap::new());
+    for id in 0..rules.len() {
+        counts.private_names.insert(id, BTreeMap::new());
         counts
             .private_names_in_date_scope
-            .insert((*rule).into(), BTreeMap::new());
+            .insert(id, BTreeMap::new());
     }
-    let mut inspect = |records: &Value| {
-        scan_records(
-            records,
-            &config,
-            PRIVATE_NAMES,
-            measure,
-            &mut scan,
-            &mut counts,
-        )
-    };
+    let mut inspect =
+        |records: &Value| scan_records(records, &config, &rules, measure, &mut scan, &mut counts);
     if let Some(path) = fixture {
         let records = serde_json::from_str(&std::fs::read_to_string(path).context("read fixture")?)
             .context("parse fixture")?;
@@ -272,7 +266,10 @@ fn scan_records(
                 for (line, text) in text.lines().enumerate() {
                     let private = scan_private_line(text, rules);
                     if measure {
-                        for id in scan_line(text) {
+                        for term in scan_line(text) {
+                            let id = all_skill_terms()
+                                .position(|candidate| candidate == term)
+                                .expect("known skill rule");
                             *counts
                                 .skill_vocabulary
                                 .entry(id)
@@ -283,14 +280,14 @@ fn scan_records(
                         for id in &private {
                             *counts
                                 .private_names
-                                .entry((*id).into())
+                                .entry(*id)
                                 .or_default()
                                 .entry(updated.year())
                                 .or_default() += 1;
                             if eligible {
                                 *counts
                                     .private_names_in_date_scope
-                                    .entry((*id).into())
+                                    .entry(*id)
                                     .or_default()
                                     .entry(updated.year())
                                     .or_default() += 1;
@@ -356,17 +353,16 @@ mod tests {
     #[test]
     fn public_names_and_process_words_are_not_private_names() {
         assert!(
+            scan_private_line("Public Project dogfood CODEOWNERS pre-push", &policy()).is_empty()
+        );
+        assert!(
             scan_private_line(
-                "Onsager Semon Ostrom Ostrom Hub dogfood CODEOWNERS pre-push",
-                PRIVATE_NAMES
+                "https://github.com/onsager-ai/duhem on GitHub",
+                &["onsager"]
             )
             .is_empty()
         );
-        assert!(scan_line("https://github.com/onsager-ai/duhem on GitHub").is_empty());
-        assert_eq!(
-            scan_private_line("CHREODE ostrom-hub", PRIVATE_NAMES),
-            PRIVATE_NAMES
-        );
+        assert_eq!(scan_private_line("RESTRICTED-EXAMPLE", &policy()), [0]);
     }
     #[test]
     fn measurement_ignores_cutoff_and_counts_both_policies_without_locations() {
@@ -375,8 +371,11 @@ mod tests {
         let mut counts = Measurement::default();
         scan_records(&records, &config(), &policy(), true, &mut scan, &mut counts).unwrap();
         assert!(scan.hits.is_empty());
-        assert_eq!(counts.skill_vocabulary["dogfood"][&2025], 1);
-        assert_eq!(counts.private_names["restricted-example"][&2025], 1);
+        assert_eq!(counts.skill_vocabulary[&0][&2025], 1);
+        assert_eq!(counts.private_names[&0][&2025], 1);
+        let output = serde_json::to_string(&counts.private_names).unwrap();
+        assert!(!output.contains("restricted-example"));
+        assert!(!output.contains("do-not-output"));
     }
     #[test]
     fn edited_old_review_reenters_scope_using_graphql_updated_at() {

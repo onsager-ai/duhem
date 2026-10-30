@@ -5,9 +5,8 @@ Two Claude sessions pointed at the same working tree stomp each other's branch
 state (this cost us a real incident). The fix is one session per git worktree.
 This hook denies in-place branch switches and points at `git worktree add`.
 
-Repo-agnostic: byte-identical across onsager-ai repos (crawlab-pro, chreode,
-duhem, ...). Nothing here names a specific repo — the worktree hint is derived
-from the checkout at runtime.
+Repo-agnostic: the worktree hint is derived from the checkout at runtime.
+Copies in other repositories may differ in comments.
 
 Contract (Claude Code PreToolUse):
   - stdin: JSON with .tool_input.command (the Bash command about to run)

@@ -71,15 +71,13 @@ section), don't re-author it — copy verbatim and translate
 mechanically.
 
 **Where the VD lives (Pattern D).** A VD that verifies a *product*
-(Onsager, Chreode, Crawlab) lives **in the product's repo** under a
+lives **in the product's repo** under a
 co-located `.duhem/` suite — Duhem is used as a tool, not a host
 (`docs/duhem-spec.md` §10.1 Pattern D; epic #225). Only Duhem's own
-**self-verification** VDs live here in `verifications/`. Chreode is the
-worked example (`onsager-ai/chreode/.duhem/`); `templates/product-repo/`
-is the drop-in `.duhem/` skeleton (manifest + example leaf + CODEOWNERS)
-to copy into a product repo. Author the VD there, self-gate it in the
-product's own CI (Mode A), and let Duhem's drift lane monitor it (Mode
-B) — see `onsager-dogfood`.
+**self-verification** VDs live here in `verifications/`.
+`templates/product-repo/` is the drop-in `.duhem/` skeleton (manifest +
+example leaf + CODEOWNERS). Copy it into the product repo and self-gate
+it in that product's CI — see `onsager-dogfood`.
 
 ## Authoring loop
 

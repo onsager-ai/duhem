@@ -110,7 +110,7 @@ and masks every secret as `••••••`.
 
 `duhem run` auto-discovers the manifest: with no path it walks the current directory and its ancestors (capped at the enclosing `.git`) for a `duhem.yml` / `.duhem.yml`, so `cd anywhere-in-the-repo && duhem run` finds the repo-root manifest — same as `git`, `cargo`, `pnpm`. Pass an explicit path to override, or `-f path/to/manifest.yml` for an out-of-tree manifest.
 
-For a real-world example — including the `provision.up:` / `down:` hooks Duhem sequences around a check — see [`verifications/duhem-dashboard/`](verifications/duhem-dashboard/). Product suites live co-located in their own repos under `.duhem/` (e.g. `onsager-ai/chreode/.duhem/`); [`templates/product-repo/`](templates/product-repo/) is the drop-in skeleton.
+For a real-world example — including the `provision.up:` / `down:` hooks Duhem sequences around a check — see [`verifications/duhem-dashboard/`](verifications/duhem-dashboard/). Product suites live co-located in their own repos under `.duhem/`; [`templates/product-repo/`](templates/product-repo/) is the drop-in skeleton.
 
 ## Core concepts
 
@@ -153,7 +153,7 @@ Run `duhem <command> --help` for the full flag surface (filters, inputs, profile
 
 ## Status
 
-**Phase 0 — Foundation.** The Cargo workspace ships the CLI plus the runtime, judge, schema, actions, evidence, summary, dashboard, and reporter crates. The `ui/*`, `api/*`, `db/*`, and `cli/*` action families are implemented, environment provisioning (`up:` / `down:` hooks) is wired into the runtime, and Duhem self-verifies in-tree while product suites run co-located in their own repos under `.duhem/` (e.g. `onsager-ai/chreode`).
+**Phase 0 — Foundation.** The Cargo workspace ships the CLI plus the runtime, judge, schema, actions, evidence, summary, dashboard, and reporter crates. The `ui/*`, `api/*`, `db/*`, and `cli/*` action families are implemented, environment provisioning (`up:` / `down:` hooks) is wired into the runtime, and Duhem self-verifies in-tree while product suites run co-located in their own repos under `.duhem/`.
 
 Schema is **v0.x** — breaking changes are expected before v0.5. The live schema version is the `duhem_schema::SCHEMA_VERSION` constant (surfaced by `duhem --version` and `duhem validate`); per-landing changes are recorded in [`CHANGELOG.md`](CHANGELOG.md). See `docs/duhem-spec.md` §14 for the roadmap.
 

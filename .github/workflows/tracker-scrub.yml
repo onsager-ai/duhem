@@ -20,4 +20,5 @@ jobs:
       - name: Detect configured authors' tracker vocabulary
         env:
           GH_TOKEN: ${{ github.token }}
+          DUHEM_PRIVATE_NAMES: ${{ secrets.DUHEM_PRIVATE_NAMES }}
         run: cargo run -p xtask -- tracker-scrub

@@ -72,8 +72,7 @@ provision:
 
 inputs:
   # The dashboard's default loopback host:port. Whole-string URL inputs
-  # (no string concatenation in templates yet — same constraint the
-  # chreode/onsager VDs work around), one per endpoint the VD touches. The
+  # (no string concatenation in templates yet), one per endpoint. The
   # fixed run id `dashboard-fixture-run` is pinned by `scripts/up.sh`
   # via `duhem run --run-id`.
   runs_url:

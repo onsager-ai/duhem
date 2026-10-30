@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [breaking] Remove ui/assert-state; assert the state's marker with ui/assert-element instead. (#588)
 - [clarifying] Identify failing for_each iterations in existing reporter detail text. (#519)
 
 - [additive] Add duhem coverage to report definitions with no recorded run in a supplied store. (#546)

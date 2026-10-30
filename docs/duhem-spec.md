@@ -634,8 +634,11 @@ inputs:
 setup:                                  # runs once before all criteria
   - uses: ui/navigate
     with: {url: "/dashboard"}
-  - uses: ui/assert-state
-    with: {role: "page", state: "authenticated"}
+  - uses: ui/assert-element
+    with:
+      locator: {testid: "signed-in-user"}
+      expected: visible
+      timeout: 20s
 
 criteria:
   - id: AC-1
@@ -756,7 +759,7 @@ A manifest can also provision **one shared environment for the whole suite** rat
 
 #### 10.3.2 Implicit judgment (judging steps)
 
-An action whose contract emits a boolean `satisfied` output — `ui/assert-element`, `ui/assert-url`, `ui/assert-state`, `api/poll` — is a **judging action**. A judging step **implicitly asserts `satisfied == true`**: it contributes one assertion outcome to the check’s verdict without any `assertions:` entry. So the four checks above collapse to their steps alone — no `id`, no `outputs:`, no `$steps.…` line:
+An action whose contract emits a boolean `satisfied` output — `ui/assert-element`, `ui/assert-url`, `api/poll`, `db/observe` — is a **judging action**. A judging step **implicitly asserts `satisfied == true`**: it contributes one assertion outcome to the check’s verdict without any `assertions:` entry. So the four checks above collapse to their steps alone — no `id`, no `outputs:`, no `$steps.…` line:
 
 ```yaml
       - id: AC-1.2
@@ -1387,7 +1390,6 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 - `ui/assert-element` — judge existence/visibility with `expected:`, or directly judge an extracted field with `expect: { field: checked, equals: true }`
 - `ui/extract` — non-judging extraction of an attribute, live DOM property, or rendered `innerText`; exposes `value`, `found`, `count`, and (with `all: true`) DOM-ordered `values`
 - `ui/assert-url` — observe URL state
-- `ui/assert-state` — observe page-level state (authenticated, loaded, etc.)
 - `ui/capture-session` — capture cookies/local storage as a secret state value for later checks
 - `ui/wait` — wait for a fixed `duration` (`TimeoutSpec`, e.g. `500ms` or `2s`) without requiring a browser page. Prefer `ui/assert-element` with `timeout:`; fixed waits are a debugging and transitional-authoring escape hatch with a 60-second default ceiling that root-manifest `defaults.max_wait` may raise or lower.
 

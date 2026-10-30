@@ -368,7 +368,7 @@ fn assert_element_fail_detail(ev: &StepEvidence) -> Option<String> {
 }
 
 /// Generic humanizer for the other judging actions (`ui/assert-url`,
-/// `ui/assert-state`, `api/poll`, …): compose a short "what was
+/// `api/poll`, `db/observe`, …): compose a short "what was
 /// expected" line from the well-known `with:` fields, plus the last
 /// observed HTTP status when the action recorded one. `None` when
 /// there's nothing legible to say — the caller falls back to the plain

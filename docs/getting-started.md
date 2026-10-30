@@ -597,3 +597,25 @@ reports retain their existing text rather than inventing an unknown count.
 Use `--profile NAME` with `duhem run` or `duhem resolve` to select a
 manifest profile. The former `--environment NAME` alias is removed in
 the next release after v0.6.0; replace that spelling in scripts and CI.
+
+### Migrate page-state assertions
+
+In the next release after v0.6.0, replace `ui/assert-state` steps with
+`ui/assert-element` on the application's state marker. For example, a
+product that exposes `data-testid="signed-in-user"` when signed in can
+assert that marker directly:
+
+```yaml
+- uses: ui/assert-element
+  with:
+    locator: { testid: signed-in-user }
+    expected: visible
+    timeout: 20s
+```
+
+For a loaded page, assert its ready heading or other stable ready marker;
+for signed-out state, assert the sign-in affordance. Choose the marker
+that establishes the product's intended claim. `ui/assert-element` emits
+`satisfied` and retains implicit judgment; any explicit bindings to
+`satisfied` can remain. `api/poll`, `db/observe` and `ui/select` remain
+supported native actions.

@@ -114,8 +114,7 @@ impl SelectBy {
     }
 }
 
-/// A browser cookie. Extra Playwright fields are ignored on
-/// deserialize; `ui/assert-state` only needs the name.
+/// A browser cookie. Extra Playwright fields are ignored on deserialize.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Cookie {
     pub name: String,

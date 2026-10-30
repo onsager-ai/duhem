@@ -1,8 +1,8 @@
 //! Action registry — `Step.uses` → action dispatcher.
 //!
 //! The v1 registry is keyed by `Step.uses` and contains the closed
-//! action catalog: the full `ui/*` slice (three from #12, four from
-//! #37) plus `api/call` from the spec on issue #21. Pluggable /
+//! action catalog, including the `ui/*` slice and `api/call`
+//! from the spec on issue #21. Pluggable /
 //! user-defined `uses:` is §10.8 and lands in Phase 2+. The registry
 //! is `pub(crate)`-shaped: external callers only see
 //! [`Engine::new`](super::Engine), which wires the default catalog.
@@ -27,9 +27,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use duhem_actions::Page;
 use duhem_actions::{
-    Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertState, AssertUrl, Call,
-    CaptureSession, Click, DbObserve, Extract, Invoke, Navigate, Observe, Poll, Query, Seed,
-    Select, Stream, Type, Wait,
+    Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertUrl, Call, CaptureSession,
+    Click, DbObserve, Extract, Invoke, Navigate, Observe, Poll, Query, Seed, Select, Stream, Type,
+    Wait,
 };
 use serde::Deserialize;
 use serde::de::Error as _;
@@ -217,8 +217,8 @@ fn inject_child_env(with: &mut serde_yml::Value, child_env: &BTreeMap<String, St
 pub(crate) type ActionRegistry = BTreeMap<&'static str, Box<dyn Dispatch>>;
 
 /// The v1 catalog: the full `ui/*` slice (`ui/navigate`, `ui/click`,
-/// `ui/assert-element`, `ui/type`, `ui/select`, `ui/assert-url`,
-/// `ui/assert-state`) and `api/call`.
+/// `ui/assert-element`, `ui/type`, `ui/select`, `ui/assert-url`)
+/// and the API, database and command actions.
 pub(crate) fn default_registry() -> ActionRegistry {
     let mut m: ActionRegistry = BTreeMap::new();
     insert(&mut m, ConcreteAction::new(Box::new(Navigate)));
@@ -228,7 +228,6 @@ pub(crate) fn default_registry() -> ActionRegistry {
     insert(&mut m, ConcreteAction::new(Box::new(Type)));
     insert(&mut m, ConcreteAction::new(Box::new(Select)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertUrl)));
-    insert(&mut m, ConcreteAction::new(Box::new(AssertState)));
     insert(&mut m, ConcreteAction::new(Box::new(CaptureSession)));
     insert(&mut m, ConcreteAction::new(Box::new(Wait)));
     insert(&mut m, ConcreteAction::new(Box::new(Call)));
@@ -267,7 +266,6 @@ mod tests {
                 "db/query",
                 "db/seed",
                 "ui/assert-element",
-                "ui/assert-state",
                 "ui/assert-url",
                 "ui/capture-session",
                 "ui/click",

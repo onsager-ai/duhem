@@ -301,7 +301,6 @@ mod tests {
             "ui/select",
             "ui/assert-element",
             "ui/assert-url",
-            "ui/assert-state",
         ] {
             assert!(uses_requires_page(u), "{u} should need a page");
         }

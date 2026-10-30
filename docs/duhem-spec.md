@@ -1650,6 +1650,23 @@ A timestamp records the latest run start, including incomplete runs, and
 does not prove a check body completed. This command reports observations;
 missing runs do not fail a gate or change its successful exit code.
 
+### Assertion operand evidence
+
+Explicit `assertions:` record an `assertion_evaluated.operands` map from
+visited path/helper labels to resolved JSON values. The values come from
+the evaluation that produces the assertion outcome, including short
+circuiting; helpers are not evaluated again to produce reporting evidence.
+Repeated paths/helpers retain evaluation suffixes rather than overwriting
+earlier values. JSON `null` is a resolved value; missing or unevaluated
+paths have no entry. A present empty map means no resolved path/helper
+values were recorded. Legacy evidence and implicit judgments omit the map.
+Registered secrets are masked before storage and live delivery.
+
+The dashboard lists explicit assertions after check steps and before
+teardown. Selecting an assertion opens its recorded details, including
+assertions correlated with a single step. Legacy reports display their
+recorded expression and result without inventing operand values.
+
 **Run Summary & Reporters** (`duhem-summary`, `duhem-reporter-pretty`, `duhem-reporter-junit`)
 
 - `duhem-summary` defines the run-summary types the CLI emits. `RunSummary.totals` carries `total`, `passed`, `failed`, and `inconclusive` check counts; `RunSetSummary.totals` aggregates them across leaves. `total` means checks that executed and emitted a verdict, not checks authored in the Verification Definition, so `--filter` exclusions are absent. Both fields default to all-zero counts when an older summary is deserialized.

@@ -125,6 +125,9 @@ pub trait EvalContext {
     /// Optional observation of values already evaluated; never a judge input.
     fn record_operand(&self, _expr: &Expr, _value: &Value) {}
 
+    /// Observe comparison values without evaluating either operand again.
+    fn record_comparison(&self, _op: BinOp, _lhs: &Value, _rhs: &Value) {}
+
     fn input(&self, name: &str) -> Option<&Value>;
     fn page(&self, _page: &str, _element: &str) -> Option<&Value> {
         None
@@ -174,6 +177,12 @@ pub fn describe_comparison(expr: &Expr, ctx: &dyn EvalContext) -> Option<String>
     let Expr::BinOp { op, lhs, rhs } = expr else {
         return None;
     };
+    let l = eval_value(lhs, ctx).ok()?;
+    let r = eval_value(rhs, ctx).ok()?;
+    comparison_detail(*op, &l, &r)
+}
+
+pub(crate) fn comparison_detail(op: BinOp, l: &Value, r: &Value) -> Option<String> {
     let role = match op {
         BinOp::Eq => "expected",
         BinOp::Ne => "disallowed",
@@ -183,12 +192,10 @@ pub fn describe_comparison(expr: &Expr, ctx: &dyn EvalContext) -> Option<String>
         BinOp::Ge => "expected >=",
         BinOp::And | BinOp::Or => return None,
     };
-    let l = eval_value(lhs, ctx).ok()?;
-    let r = eval_value(rhs, ctx).ok()?;
     Some(format!(
         "actual {}, {role} {}",
-        display_value(&l),
-        display_value(&r)
+        display_value(l),
+        display_value(r)
     ))
 }
 
@@ -749,6 +756,7 @@ fn to_bool3(r: EvalRes) -> Bool3 {
 fn eval_compare(op: BinOp, lhs: &Expr, rhs: &Expr, ctx: &dyn EvalContext) -> EvalRes {
     let l = eval_value(lhs, ctx)?;
     let r = eval_value(rhs, ctx)?;
+    ctx.record_comparison(op, &l, &r);
     compare(op, &l, &r)
 }
 

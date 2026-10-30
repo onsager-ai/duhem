@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/card";
 import { fetchCheck, type ArtifactRef, type CheckDetail, type LifecycleBlock, type SpanModel, type TraceEvent } from "../api";
 import { VerdictBadge, formatDuration, isImageArtifact } from "../ui";
-import { compactValue, deliveryLayerLabel, describeWith, failureParts, formatEvent, groupTimeline, stepDuration, stepStatus, summarizeCheck, type TimelineNode } from "../format";
+import { assertionKey, isExplicitAssertion, compactValue, deliveryLayerLabel, describeWith, failureParts, formatEvent, groupTimeline, stepDuration, stepStatus, summarizeCheck, type TimelineNode } from "../format";
 import { EventIcon } from "../components/EventIcon";
 import { RunScaffold } from "./RunScaffold";
 import { useVd } from "./definition-context";
@@ -146,10 +146,21 @@ export function CheckSummary({ detail }: { detail: CheckDetail }) {
 // failed comparison's `expected`/`actual` operands as a labelled pair
 // (the `actual` carries the fail accent), or the verbatim detail for a
 // non-comparison outcome (an inconclusive cause, a freeform judgment).
-function AssertionDetail({ expr, detail }: { expr?: string; detail: string }) {
+function AssertionDetail({ expr, detail, operands }: { expr?: string; detail: string; operands?: unknown }) {
+  const values = operands && typeof operands === "object" && !Array.isArray(operands)
+    ? Object.entries(operands) : [];
   return (
     <div className="assert-detail" data-testid="assert-detail">
       <FailureBreakdown detail={detail} expr={expr} compact />
+      {values.length > 0 ? <dl className="mt-2 space-y-1 font-mono text-xs" data-testid="assertion-operands">
+        {values.map(([path, value]) => <div key={path} className="flex flex-wrap gap-x-2">
+          <dt className="break-all text-muted-foreground">{path}</dt>
+          <dd className="whitespace-pre-wrap break-all">= {JSON.stringify(value)}</dd>
+        </div>)}
+      </dl> : <p className="mt-2 text-xs text-muted-foreground">{operands === undefined
+        ? "Operand values were not recorded in this trace."
+        : "No resolved operand values were recorded for this evaluation."}</p>}
+      {operands !== undefined && <p className="mt-1 text-xs text-muted-foreground">Only evaluated, resolved paths and helpers are shown. Missing or unevaluated values are not JSON null.</p>}
     </div>
   );
 }
@@ -176,6 +187,8 @@ function TimelineRow({
     <li
       className={`ev tone-${fe.tone}${isAssertion ? " ev-assertion" : ""}`}
       data-testid={isAssertion ? "assertion-row" : undefined}
+      data-assertion-key={isAssertion ? assertionKey(evt) : undefined}
+      style={isAssertion ? { scrollMarginTop: "calc(var(--check-context-height, 0px) + 1rem)" } : undefined}
     >
       <details className="ev-raw">
         <summary className="ev-summary">
@@ -216,7 +229,7 @@ function TimelineRow({
             <ChevronRight className="ev-caret" aria-hidden="true" />
           </span>
           {isAssertion && (fe.expr || fe.detail) && (
-            <AssertionDetail expr={fe.expr} detail={fe.detail} />
+            <AssertionDetail expr={fe.expr} detail={fe.detail} operands={evt.operands} />
           )}
         </summary>
         <pre className="ev-raw-pre">{fe.raw}</pre>
@@ -717,6 +730,10 @@ function StepGroup({
               the step (the api analogue of a screenshot attachment). */}
           <ApiExchange node={node} />
           <StructuredOutputs outputs={structuredObs} />
+          {node.events.some(isExplicitAssertion) && <ol className="mt-3 space-y-2">
+            {node.events.filter(isExplicitAssertion).map((event) => <TimelineRow
+              key={event.seq} evt={event} prev={prevOf(event)} artifacts={artifacts} />)}
+          </ol>}
           {/* ui evidence (screenshot / DOM / network / video) nested under
               the step that captured it, not a side panel. */}
           {status.tone !== "fail" && <StepCaptures node={node} artifacts={artifacts} />}
@@ -1823,6 +1840,17 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
   const [params] = useSearchParams();
   const stepParam = params.get("step") ?? undefined;
   const lifecycleParam = params.get("lifecycle");
+  const assertionParam = params.get("assertion");
+  useLayoutEffect(() => {
+    if (!check || !assertionParam || !/^a\d+$/.test(assertionParam)) return;
+    const surface = surfaceRef.current;
+    const target = surface?.querySelector<HTMLElement>(`[data-assertion-key="${assertionParam}"]`);
+    if (!target) return;
+    for (let parent = target.parentElement; parent && parent !== surface; parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement) parent.open = true;
+    }
+    target.scrollIntoView?.({ block: "start" });
+  }, [check, assertionParam]);
   useEffect(() => {
     if (!check || !lifecycleParam) return;
     const target = document.getElementById(`lifecycle-${lifecycleParam}`);
@@ -1874,7 +1902,7 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
           selectedStep={selectedStep}
           selectedNodeKey={selectedNode?.key}
           selectedFromScroll={selectedFromScroll}
-          lifecycleSelected={Boolean(lifecycleParam)}
+          lifecycleSelected={Boolean(lifecycleParam || assertionParam)}
           stepNavigation={stepNavigation}
           view={view}
           onScrollSelection={setScrollSelectedKey}

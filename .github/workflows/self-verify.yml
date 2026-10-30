@@ -134,6 +134,13 @@ jobs:
             --db .duhem/duhem.db \
             --inputs duhem_bin="$PWD/target/release/duhem"
 
+      - name: Run owned-process example against a real local HTTP service
+        run: |
+          ./target/release/duhem run verifications/owned-process-example \
+            --db .duhem/duhem.db \
+            --inputs state_file="${RUNNER_TEMP}/owned-process-example-state"
+          test ! -e "${RUNNER_TEMP}/owned-process-example-state"
+
       # Hub replication (#194's ship contract; hub per
       # onsager-ai/duhem-hub#6). `if: always()` ships red runs too —
       # failure evidence is the point — and never gates the verdict.

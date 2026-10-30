@@ -583,3 +583,29 @@ Select a name on each browser step, or put `session: <name>` on a `call:`:
 undeclared inner browser selectors inherit it; explicit inner selectors win.
 Call selectors require a named-sessions check. `defaults.max_sessions` caps
 simultaneously open contexts per check (default 4).
+
+### Own long-lived local services
+
+For a server or watcher that must remain alive across steps, retrieve
+`duhem describe process/start` / `inspect` / `stop` / `restart` from the
+installed version. These actions are available after v0.7.0. `command` is
+an executable, `args` is a string array, and stdin is closed. Pass secrets
+through declared secret inputs. HTTP or stdout/stderr-regex readiness has
+an explicit timeout; without a probe `ready: false` means spawned only.
+
+Start in check `setup` or a fixture when the check must stop/restart it.
+Enclosing leaf/criterion handles are inspect-only; sibling checks and
+retries cannot mutate each other's processes. Restart returns a fresh
+handle/generation, stops the old group before replacement, and preserves
+product-owned state. Assert actual response/publication/recovery facts;
+none of the four actions implicitly judges the product.
+
+`inspect` logs are bounded (64 KiB and 1024 records per stream), masked
+across reads, and carry cursors, generation, truncation and dropped-byte
+facts. A cursor belongs to its original handle. Always-required runtime
+cleanup follows authored cleanup at owner scope exit, even in a
+`diagnostic_only` fixture or with `--keep-env`. Failed finalization blocks
+the effective gate while preserving body judgment. Linux/macOS are
+supported first; other platforms reject before spawn. Do not daemonize or
+escape the owned group. Fixed ports and disposable state remain fixture
+responsibilities.

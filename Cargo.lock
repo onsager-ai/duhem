@@ -926,6 +926,7 @@ dependencies = [
  "duhem-schema",
  "duhem-summary",
  "hex",
+ "libc",
  "regex",
  "reqwest",
  "serde",

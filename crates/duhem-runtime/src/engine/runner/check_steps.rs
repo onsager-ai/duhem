@@ -59,6 +59,7 @@ impl Engine {
             // gap. With no manifest default, the action's built-in
             // `DEFAULT_TIMEOUT` (5s) remains the last resort.
             if gate.is_none()
+                && !step.uses_name().starts_with("process/")
                 && let Some(default) = self.default_timeout
             {
                 apply_default_timeout(&mut resolved_with, default);
@@ -201,14 +202,17 @@ impl Engine {
                         Some(Err(error))
                     } else {
                         let page_ref: Option<&Page> = check_browser.as_ref().map(|cb| &cb.page);
-                        let result = dispatcher
-                            .invoke(
-                                page_ref,
-                                idx,
-                                &resolved_with,
-                                &self.child_process_env(writer.run_id()),
-                            )
-                            .await;
+                        let result = crate::engine::registry::invoke_scoped(
+                            dispatcher.as_ref(),
+                            page_ref,
+                            idx,
+                            &resolved_with,
+                            &self.child_process_env(writer.run_id()),
+                            ctx.run_state(),
+                            &ctx.run_state().process_owner,
+                            writer,
+                        )
+                        .await;
                         if let Ok(r) = &result {
                             crate::engine::secret_output::register(
                                 writer,

@@ -48,6 +48,7 @@ pub fn validate_with_contract_outputs(
 ) -> Result<(), Vec<ValidationError>> {
     let mut errs = Vec::new();
     crate::validate_sessions::validate(v, outputs_for, &mut errs);
+    crate::validate_process::validate(v, &mut errs);
 
     errs.extend(
         crate::flows::validate_authored(v)
@@ -265,6 +266,7 @@ pub fn validate_with_contract_outputs(
     }
 
     let definition_scope = DefinitionScope {
+        fixtures: &v.fixtures,
         inputs: &v.inputs,
         pages: &v.pages,
         flows: &v.flows,
@@ -583,6 +585,7 @@ fn matches_with_promotion(declared: InputType, actual: InputType) -> bool {
 }
 
 struct DefinitionScope<'a> {
+    fixtures: &'a crate::verification::FixtureCatalog,
     inputs: &'a BTreeMap<String, InputDecl>,
     pages: &'a PageCatalog,
     flows: &'a FlowCatalog,
@@ -612,6 +615,7 @@ fn validate_criterion(
 /// Per-check view of resolvable references — bundled to keep
 /// `check_path`'s arity within clippy's `too_many_arguments` lint.
 struct PathScope<'a> {
+    process_fixture_outputs: &'a HashMap<(&'a str, &'a str), HashSet<String>>,
     active_loop: Option<&'a str>,
     c: &'a Criterion,
     ch: &'a Check,
@@ -673,6 +677,7 @@ fn check_path(
     errs: &mut Vec<ValidationError>,
 ) {
     let PathScope {
+        process_fixture_outputs,
         active_loop,
         c,
         ch,
@@ -736,10 +741,20 @@ fn check_path(
             out_of_scope_setup_ids,
             errs,
         ),
-        PathRoot::Fixture => errs.push(ValidationError::FixtureRefOutsideDown {
-            site: format!("criterion `{}` / check `{}`: {site}", c.id, ch.id),
-            location,
-        }),
+        PathRoot::Fixture => {
+            let parts = path.segments();
+            let available = parts.len() >= 4
+                && parts[2] == "outputs"
+                && process_fixture_outputs
+                    .get(&(parts[0].as_str(), parts[1].as_str()))
+                    .is_some_and(|outputs| outputs.contains(&parts[3]));
+            if !available {
+                errs.push(ValidationError::FixtureRefOutsideDown {
+                    site: format!("criterion `{}` / check `{}`: {site}", c.id, ch.id),
+                    location,
+                });
+            }
+        }
         PathRoot::Inputs => {
             let segs = path.segments();
             // Leading `$inputs.<name>`; deeper segments navigate into a

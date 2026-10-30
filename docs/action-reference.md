@@ -365,3 +365,80 @@ Invoke a local command and observe its exit code, stdout, and stderr.
   outputs: { code: exit_code }
 ```
 
+## `process/*`
+
+### `process/start`
+
+Start an owned local process with optional bounded HTTP or log readiness.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `command` | yes | — |
+| `args` | no | — |
+| `cwd` | no | — |
+| `env` | no | — |
+| `ready` | no | — |
+| `stop_timeout` | no | — |
+| `kill_timeout` | no | — |
+
+**outputs:** `handle`, `generation`, `pid`, `ready`
+
+```yaml
+- id: server
+  uses: process/start
+  with:
+    command: ./server
+    args: [serve]
+    ready:
+      http: { url: http://127.0.0.1:8080/health, status: 200 }
+      timeout: 10s
+```
+
+### `process/inspect`
+
+Read an owned process's exit facts and bounded, masked stdout/stderr logs.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `handle` | yes | — |
+| `cursor` | no | — |
+
+**outputs:** `state`, `running`, `exit_code`, `signal`, `logs`, `next_cursor`, `truncated`, `dropped_bytes`, `generation`, `stream_errors`
+
+```yaml
+- id: status
+  uses: process/inspect
+  with: { handle: $setup.server.outputs.handle }
+```
+
+### `process/stop`
+
+Stop and reap a current-check or fixture process group with bounded escalation.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `handle` | yes | — |
+
+**outputs:** `stopped`, `already_exited`, `exit_code`, `signal`, `escalated`
+
+```yaml
+- uses: process/stop
+  with: { handle: $setup.server.outputs.handle }
+```
+
+### `process/restart`
+
+Stop the old generation before restarting a current-check or fixture process.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `handle` | yes | — |
+
+**outputs:** `handle`, `generation`, `pid`, `ready`
+
+```yaml
+- id: replacement
+  uses: process/restart
+  with: { handle: $setup.server.outputs.handle }
+```
+

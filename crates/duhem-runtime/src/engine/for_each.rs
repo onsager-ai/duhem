@@ -251,6 +251,9 @@ pub(crate) async fn process_lifecycle_step(
     if aborted.is_none() {
         *aborted = match outcome {
             Outcome::Timeout => Some(AbortReason::Timeout),
+            Outcome::Error if step.uses_name().starts_with("process/") => {
+                Some(AbortReason::Environment)
+            }
             Outcome::Error => Some(AbortReason::ActionError),
             Outcome::Ok if failed => Some(AbortReason::Environment),
             Outcome::Ok | Outcome::Skipped { .. } => None,
@@ -613,7 +616,23 @@ async fn invoke_and_record(
     } = invocation;
     // The caller persisted `SetupStepStarted` before dispatch so slow
     // actions and gated skips share one honest lifecycle shape.
-    let result = dispatcher.invoke(page, idx, resolved_with, child_env).await;
+    let owner = match scope {
+        HookScope::Fixture(name, _) | HookScope::FixtureDown(name, _, _) => {
+            run.process_owner.fixture(name)
+        }
+        _ => run.process_owner.clone(),
+    };
+    let result = crate::engine::registry::invoke_scoped(
+        dispatcher,
+        page,
+        idx,
+        resolved_with,
+        child_env,
+        run,
+        &owner,
+        writer,
+    )
+    .await;
     let outcome = match &result {
         Ok(r) => r.outcome.clone(),
         Err(_) => Outcome::Error,

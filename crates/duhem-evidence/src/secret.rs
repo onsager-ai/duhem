@@ -56,7 +56,50 @@ pub struct SecretRegistry {
     risky: BTreeMap<String, Vec<&'static str>>,
 }
 
+/// Read-only access to the writer's live registry for continuously drained
+/// streams. Registration remains owned by EvidenceWriter.
+#[derive(Clone)]
+pub struct StreamMasker {
+    secrets: std::sync::Arc<std::sync::RwLock<SecretRegistry>>,
+}
+
+impl StreamMasker {
+    pub(crate) fn new(secrets: std::sync::Arc<std::sync::RwLock<SecretRegistry>>) -> Self {
+        Self { secrets }
+    }
+
+    pub fn mask_prefix(&self, text: &str, eof: bool) -> (String, usize) {
+        self.secrets
+            .read()
+            .expect("secret registry lock poisoned")
+            .mask_stream_prefix(text, eof)
+    }
+}
+
 impl SecretRegistry {
+    /// Mask a complete prefix of a UTF-8 stream, retaining enough source
+    /// bytes for a secret spanning the next read. `eof` flushes the tail.
+    pub fn mask_stream_prefix(&self, text: &str, eof: bool) -> (String, usize) {
+        let longest = self.patterns.keys().map(String::len).max().unwrap_or(0);
+        let mut end = if eof {
+            text.len()
+        } else {
+            text.len().saturating_sub(longest.saturating_sub(1))
+        };
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        if let Some(matcher) = &self.matcher {
+            for found in matcher.find_iter(text) {
+                if found.start() < end && found.end() > end {
+                    end = found.start();
+                    break;
+                }
+            }
+        }
+        (self.mask(&text[..end]).text, end)
+    }
+
     pub fn new() -> Self {
         Self::default()
     }

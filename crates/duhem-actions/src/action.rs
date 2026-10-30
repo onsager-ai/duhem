@@ -159,7 +159,7 @@ pub fn layer_for_uses(uses: &str) -> Option<&'static str> {
         Some("api")
     } else if uses.starts_with("db/") {
         Some("data")
-    } else if uses.starts_with("cli/") {
+    } else if uses.starts_with("cli/") || uses.starts_with("process/") {
         Some("runtime")
     } else {
         None

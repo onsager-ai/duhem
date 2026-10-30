@@ -29,6 +29,13 @@ impl Engine {
             // so only the final attempt's detail reaches the reporter.
             let failures_mark = failures.len();
             let setup_baseline = run.setup_outputs.clone();
+            let parent_owner = run.process_owner.clone();
+            run.process_owner = parent_owner.check(&check.id);
+            run.register_process_cleanup(
+                run.process_owner.clone(),
+                &check.teardown,
+                duhem_schema::CleanupPolicy::DiagnosticOnly,
+            );
             let attempt_result: Result<(CheckVerdict, u32), EngineError> = async {
                 run.clear_fixture_outputs();
 
@@ -65,6 +72,11 @@ impl Engine {
                     for name in &check.needs {
                         let fixture = &fixtures[name];
                         active.push(name.as_str());
+                        run.register_process_cleanup(
+                            run.process_owner.fixture(name),
+                            &fixture.down,
+                            fixture.cleanup_policy,
+                        );
                         let result = crate::engine::setup::run_fixture_up(
                             writer,
                             &self.registry,
@@ -147,6 +159,7 @@ impl Engine {
                 };
                 for name in active.into_iter().rev() {
                     let fixture = &fixtures[name];
+                    run.begin_process_cleanup(&run.process_owner.fixture(name));
                     let result = crate::engine::setup::run_fixture_down(
                         writer,
                         &self.registry,
@@ -159,6 +172,13 @@ impl Engine {
                         &self.child_process_env(writer.run_id()),
                     )
                     .await;
+                    cleanup.extend(
+                        run.processes
+                            .lock()
+                            .await
+                            .finalize(writer, Some(&run.process_owner.fixture(name)))
+                            .await,
+                    );
                     let mut failures = match result {
                         Ok(failures) => failures,
                         Err(error) => {
@@ -178,6 +198,7 @@ impl Engine {
                 // (#543/#547). Evidence-only: never replaces the check's
                 // verdict. Re-run every retry attempt.
                 if !check.teardown.is_empty() {
+                    run.begin_process_cleanup(&run.process_owner.clone());
                     let result = crate::engine::setup::run_check_teardown(
                         writer,
                         &self.registry,
@@ -207,6 +228,15 @@ impl Engine {
                 }
             }
             .await;
+            cleanup.extend(
+                run.processes
+                    .lock()
+                    .await
+                    .finalize(writer, Some(&run.process_owner))
+                    .await,
+            );
+            run.begin_process_cleanup(&run.process_owner.clone());
+            run.process_owner = parent_owner;
             writer.set_session(None);
             run.setup_outputs = setup_baseline;
             let (cv, gated_judging_steps) = attempt_result?;

@@ -89,6 +89,7 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     let mut recorded_body = None;
     let mut required_cleanup = std::collections::BTreeSet::new();
     let mut cleanup_failed = false;
+    let mut process_setup = crate::replay_process::ProcessSetup::default();
     let mut saw_run_started = false;
 
     // A step owner is stronger than the additive check_finished fallback,
@@ -115,6 +116,7 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     }
 
     for evt in events {
+        process_setup.observe(&evt.payload);
         match &evt.payload {
             EventPayload::RunStarted { .. } => {
                 if saw_run_started {
@@ -153,6 +155,19 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                     check_to_criterion.insert(check_id.clone(), criterion_id.clone());
                 }
                 recorded_checks.insert(check_id.clone(), *verdict);
+                if !assertions_by_check.contains_key(check_id)
+                    && let Some(state) = process_setup.failed_for(criterion_id.as_deref(), check_id)
+                {
+                    assertions_by_check.insert(
+                        check_id.clone(),
+                        vec![AssertionOutcome {
+                            iteration: None,
+                            assertion_index: 0,
+                            state,
+                            detail: Some("process setup precondition failed".into()),
+                        }],
+                    );
+                }
             }
             EventPayload::CriterionFinished {
                 criterion_id,
@@ -172,27 +187,40 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
             }
             EventPayload::SetupStarted {
                 phase: crate::StepPhase::Teardown,
-                fixture_name: Some(fixture),
+                fixture_name,
                 check_id,
-                cleanup_policy: Some(policy),
+                criterion_id,
+                cleanup_policy,
                 ..
-            } if policy == "required" => {
-                required_cleanup.insert((fixture.clone(), check_id.clone()));
+            } => {
+                let scope = (criterion_id.clone(), check_id.clone(), fixture_name.clone());
+                if cleanup_policy.as_deref() == Some("required") {
+                    required_cleanup.insert(scope);
+                } else {
+                    required_cleanup.remove(&scope);
+                }
             }
             EventPayload::SetupStepFinished {
                 phase: crate::StepPhase::Teardown,
-                fixture_name: Some(fixture),
+                fixture_name,
                 check_id,
+                criterion_id,
                 outcome,
                 judgment,
                 ..
-            } if required_cleanup.contains(&(fixture.clone(), check_id.clone())) => {
+            } if required_cleanup.contains(&(
+                criterion_id.clone(),
+                check_id.clone(),
+                fixture_name.clone(),
+            )) =>
+            {
                 cleanup_failed |= matches!(
                     outcome,
                     crate::StepOutcome::Error | crate::StepOutcome::Timeout
                 ) || judgment.is_some_and(|state| state != VerdictState::Pass);
             }
             EventPayload::StepObservation { .. }
+            | EventPayload::ProcessObserved { .. }
             | EventPayload::RunHeartbeat
             | EventPayload::ClaimScopeDeclared { .. }
             | EventPayload::RunAborted { .. }

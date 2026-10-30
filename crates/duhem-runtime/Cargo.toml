@@ -29,6 +29,9 @@ signal-hook = "0.3"
 sha2 = "0.10"
 hex = "0.4"
 
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 axum.workspace = true
 tempfile = "3"

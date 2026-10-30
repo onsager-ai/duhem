@@ -35,6 +35,8 @@ The baseline catalog is closed and generated in the [v0.7.0 action reference](ht
 
 **Post-baseline capability:** [#568 / PR #601](https://github.com/onsager-ai/duhem/pull/601) merged at `e26c21005d50510f589678917d826b5f7adece3c` after the v0.7.0 tag. Its recursive `frame:` locators support nested and cross-origin iframe contents across existing locator-taking UI actions. They are on main under Unreleased and are **not in v0.7.0**; consumers needing them must pin that commit or a later release that includes it. The browser row calls out this delta explicitly.
 
+**Post-baseline owned processes (#579):** Unreleased `process/start`, `inspect`, `stop` and `restart` own local Linux/macOS process groups across steps, with readiness, bounded masked logs, generation-bound handles and always-required scope finalizers. Enclosing leaf/criterion handles are inspect-only; mutations belong to the current check/fixtures. See [the exact contract](owned-processes.md). These actions are **not in v0.7.0**. The baseline gaps below remain accurate for that tag; a containing source pin supplies this process contract, while port/resource leases remain separate. Consumer Receive/watch/restart assertions still need product-owned qualification.
+
 | Area | Current contract | Migration disposition / gap |
 |---|---|---|
 | Local command | `cli/invoke` runs one command with optional `cwd`, `env`, `stdin`, and `timeout`; outputs are `exit_code`, `stdout`, and `stderr`. | Native for narrow command results. There is no catalog action that owns a background process across steps and exposes its identity, logs, readiness, and stop result as structured outputs. Do not make a whole product suite's exit code the acceptance assertion. |

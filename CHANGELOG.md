@@ -30,6 +30,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 
 - [clarifying] Unknown-action, contract-field, redundancy-lint and secret-path validation cover criterion- and check-level setup/teardown through the same block walker as other steps. (#538)
+
 ## v0.6.0 — 2026-10-30
 
 - [breaking] Fixture down failures block the run gate by default while retaining body verdict and cleanup evidence; use cleanup_policy: diagnostic_only for intentional diagnostic cleanup. (#567)

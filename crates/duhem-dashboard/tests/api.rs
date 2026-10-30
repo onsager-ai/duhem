@@ -1046,6 +1046,7 @@ async fn write_stepless_run(
         .unwrap();
     writer
         .append(EventPayload::AssertionEvaluated {
+            operands: None,
             check_id: "AC-1.1".into(),
             iteration: None,
             assertion_index: 0,

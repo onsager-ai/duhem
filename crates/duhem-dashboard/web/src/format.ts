@@ -90,6 +90,17 @@ export function assertionText(evt: TraceEvent): string {
   return detail || expr || "";
 }
 
+/** Legacy implicit judgments have a runtime-owned expression, never VD syntax. */
+export function isExplicitAssertion(evt: TraceEvent): boolean {
+  return evt.kind === "assertion_evaluated" &&
+    (evt.operands !== undefined ||
+      (typeof evt.expr === "string" && !evt.expr.startsWith("step `")));
+}
+
+export function assertionKey(evt: TraceEvent): string {
+  return `a${evt.seq}`;
+}
+
 /** Compact one-line value for an inline observation or arg scalar. */
 export function compactValue(v: unknown): string {
   if (v === null) return "null";

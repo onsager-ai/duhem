@@ -12,20 +12,46 @@ pub(crate) fn evaluate(
     expr: &ExprStr,
     inner: &dyn EvalContext,
 ) -> (EvalResult, BTreeMap<String, serde_json::Value>) {
+    let (result, values, _) = evaluate_assertion(&expr.parsed, inner);
+    (result, values)
+}
+
+/// The last comparison belongs to the root when the root is a comparison:
+/// nested comparisons finish first. Logical roots have no comparison detail.
+pub(crate) fn evaluate_assertion(
+    expr: &Expr,
+    inner: &dyn EvalContext,
+) -> (
+    EvalResult,
+    BTreeMap<String, serde_json::Value>,
+    Option<String>,
+) {
     let ctx = RecordingContext {
         inner,
         values: RefCell::new(BTreeMap::new()),
+        comparison: RefCell::new(None),
     };
-    let result = super::eval(&expr.parsed, &ctx);
-    (result, ctx.values.into_inner())
+    let result = super::eval(expr, &ctx);
+    let detail = if result == EvalResult::False
+        && matches!(expr, Expr::BinOp { op, .. } if !matches!(op, BinOp::And | BinOp::Or))
+    {
+        ctx.comparison.into_inner()
+    } else {
+        None
+    };
+    (result, ctx.values.into_inner(), detail)
 }
 
 struct RecordingContext<'a> {
     inner: &'a dyn EvalContext,
     values: RefCell<BTreeMap<String, serde_json::Value>>,
+    comparison: RefCell<Option<String>>,
 }
 
 impl EvalContext for RecordingContext<'_> {
+    fn record_comparison(&self, op: BinOp, lhs: &Value, rhs: &Value) {
+        *self.comparison.borrow_mut() = super::comparison_detail(op, lhs, rhs);
+    }
     fn input(&self, name: &str) -> Option<&Value> {
         self.inner.input(name)
     }
@@ -158,5 +184,42 @@ mod tests {
             operands["$runtime.uuid() [evaluation 2]"],
             json!(state.uuid)
         );
+    }
+
+    #[test]
+    fn failure_detail_uses_the_original_helper_evaluation() {
+        use std::cell::Cell;
+        struct Context {
+            calls: Cell<i64>,
+        }
+        impl EvalContext for Context {
+            fn input(&self, _: &str) -> Option<&Value> {
+                None
+            }
+            fn output(&self, _: &str, _: &str) -> Option<&Value> {
+                None
+            }
+            fn env(&self, _: &str) -> Option<&str> {
+                None
+            }
+            fn uuid(&self) -> &str {
+                "test"
+            }
+            fn now(&self) -> DateTime<Utc> {
+                let n = self.calls.get();
+                self.calls.set(n + 1);
+                DateTime::from_timestamp(n, 0).unwrap()
+            }
+        }
+        let ctx = Context {
+            calls: Cell::new(0),
+        };
+        let expr = ExprStr::from_source("$runtime.now() == $runtime.now()").unwrap();
+        let (result, values, detail) = evaluate_assertion(&expr.parsed, &ctx);
+        assert_eq!(result, EvalResult::False);
+        assert_eq!(ctx.calls.get(), 2, "reporting must not invoke now again");
+        assert_eq!(values.len(), 2);
+        let detail = detail.unwrap();
+        assert_eq!(detail, "actual 0, expected 1000");
     }
 }

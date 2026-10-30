@@ -1,0 +1,23 @@
+name: private source scan
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  source-inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Temporary inventory (locations only)
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, subprocess
+          source = pathlib.Path('xtask/src/private_vocab.rs').read_text()
+          rules = re.findall(r'"([^"]+)"', re.search(r'const PRIVATE_NAMES:.*?= &\[(.*?)\];', source, re.S).group(1))
+          for raw in subprocess.check_output(['git', 'ls-files', '-z']).split(b'\0'):
+              if not raw: continue
+              path = pathlib.Path(raw.decode())
+              if not path.is_file(): continue
+              for n, line in enumerate(path.read_bytes().splitlines(), 1):
+                  if any(rule.encode() in line.lower() for rule in rules):
+                      print(f'{path}:{n}')
+          PY

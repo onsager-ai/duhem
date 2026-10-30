@@ -738,6 +738,12 @@ fn build_summary(
     )
     .with_totals(check_totals(o))
     .with_claim_scope(duhem_evidence::claim_scope::claim_scope(events))
+    .with_verification(events.iter().find_map(|event| match &event.payload {
+        duhem_evidence::EventPayload::RunStarted {
+            verification_path, ..
+        } => Some(verification_path.clone()),
+        _ => None,
+    }))
     .with_body_verdict(o.body_verdict)
     .with_gated_checks(gated_checks(o))
     .with_failures(failures)

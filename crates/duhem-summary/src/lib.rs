@@ -45,6 +45,9 @@ pub struct RunSummary {
     /// Declared selection and recorded claim population; absent on old reports.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claim_scope: Option<ClaimScope>,
+    /// Source path recorded on this run, matching run-bundle vocabulary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<String>,
     /// Contract version. Bumped only on a **breaking** change; additive
     /// fields (like `failures`) keep the version. Authored explicitly so
     /// a plugin can refuse to parse a *breaking* future shape rather
@@ -128,6 +131,7 @@ impl RunSummary {
     ) -> Self {
         Self {
             claim_scope: None,
+            verification: None,
             schema_version: Self::SCHEMA_VERSION.to_string(),
             run_id: run_id.into(),
             verdict,
@@ -153,6 +157,11 @@ impl RunSummary {
 
     pub fn with_claim_scope(mut self, scope: Option<ClaimScope>) -> Self {
         self.claim_scope = scope;
+        self
+    }
+
+    pub fn with_verification(mut self, verification: Option<String>) -> Self {
+        self.verification = verification;
         self
     }
 
@@ -365,6 +374,27 @@ mod tests {
         let old_set = r#"{"schema_version":"1","verdict":"pass","runs":[]}"#;
         let set: RunSetSummary = serde_json::from_str(old_set).unwrap();
         assert!(set.selection.is_none());
+    }
+
+    #[test]
+    fn verification_is_optional_for_old_reports_and_round_trips_when_present() {
+        let bare =
+            r#"{"schema_version":"2","run_id":"r","verdict":"pass","criteria":[],"store":"."}"#;
+        let summary: RunSummary = serde_json::from_str(bare).unwrap();
+        assert!(summary.verification.is_none());
+        assert!(
+            serde_json::to_value(&summary)
+                .unwrap()
+                .get("verification")
+                .is_none()
+        );
+        let identified = summary.with_verification(Some("verifications/login/duhem.yml".into()));
+        let json = serde_json::to_string(&identified).unwrap();
+        assert_eq!(
+            serde_json::from_str::<RunSummary>(&json).unwrap(),
+            identified
+        );
+        assert_eq!(identified.schema_version, "2");
     }
 
     #[test]

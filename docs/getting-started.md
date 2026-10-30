@@ -554,3 +554,14 @@ which stays on your side (local or CI), never in the server.
   verdict; the `duhem/run` composite action wraps this.
 - **The full model.** [`docs/duhem-spec.md`](./duhem-spec.md) —
   especially §7 (Core Concepts) and §8 (Holistic Verification).
+
+
+### Locate a failing loop iteration
+
+Current runs prefix a failing `for_each` assertion's existing report detail
+with its authored loop step and one-based iteration, for example
+`for_each step 1, iteration 2 of 3: actual 0, expected 1`. The count is the
+resolved source array's full length; step and ordinal distinguish multiple
+loops in one check. Default, pretty and JUnit reporters consume that same
+failure detail. The RunSummary contract adds no iteration fields, and older
+reports retain their existing text rather than inventing an unknown count.

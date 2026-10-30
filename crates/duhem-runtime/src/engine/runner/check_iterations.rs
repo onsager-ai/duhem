@@ -133,7 +133,8 @@ impl Engine {
             let outer = ctx.clone();
             let outer_failed = failed_by.clone();
             let outer_cleanup = cleanup.clone();
-            for element in items {
+            let iteration_count = items.len();
+            for (local_ordinal, element) in items.into_iter().enumerate() {
                 *ctx = outer.clone();
                 if let Some(name) = &step.as_binding {
                     *ctx = ctx.clone().with_loop_binding(name, element);
@@ -159,6 +160,7 @@ impl Engine {
                     &mut gated,
                 )
                 .await?;
+                let first_failure = failed.len();
                 self.judge_iteration(
                     writer,
                     &check,
@@ -174,6 +176,23 @@ impl Engine {
                     &mut failed,
                 )
                 .await?;
+                // The runtime knows the resolved loop's full cardinality.
+                // Keep that presentational context in the existing failure
+                // detail, shared by default and plugin reporters (#519).
+                // The authored step identifies the loop when a check has
+                // several; ordinals are one-based within that loop.
+                for failure in &mut failed[first_failure..] {
+                    let location = format!(
+                        "for_each step {}, iteration {} of {}",
+                        wrapper_index + 1,
+                        local_ordinal + 1,
+                        iteration_count,
+                    );
+                    failure.detail = Some(match failure.detail.take() {
+                        Some(detail) => format!("{location}: {detail}"),
+                        None => location,
+                    });
+                }
                 ordinal += 1;
             }
             *ctx = outer;

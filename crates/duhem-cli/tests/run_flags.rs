@@ -34,7 +34,7 @@ criteria:
 "#;
 
 const ONE_PASS_DEFAULT_REPORT: &[u8] =
-    b"pass\nTotal: 1 checks \xc2\xb7 1 passed \xc2\xb7 0 failed \xc2\xb7 0 inconclusive\n";
+    b"pass\nScope: 1 of 1 criteria, 1 of 1 checks recorded (1 criteria, 1 checks selected)\nTotal: 1 checks \xc2\xb7 1 passed \xc2\xb7 0 failed \xc2\xb7 0 inconclusive\n";
 
 const TWO_CRITERIA: &str = r#"
 verification: smoke

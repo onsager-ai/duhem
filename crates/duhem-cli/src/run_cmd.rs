@@ -158,7 +158,11 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // failures with the offending path; we prefix the schema version
     // so authors see at a glance which schema the loader parsed
     // against (spec on #51).
+    let mut authored_leaf_paths = Vec::new();
     let loaded = match load_definition(&target).and_then(|loaded| {
+        if let Loaded::Manifest { leaves, .. } = &loaded {
+            authored_leaf_paths = leaves.iter().map(|leaf| leaf.path.clone()).collect();
+        }
         if let Some(directory) = &directory_filter {
             return filter_loaded_to_directory(loaded, directory);
         }
@@ -268,6 +272,37 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         }
     }
     let is_manifest = matches!(scope, Scope::Manifest { .. });
+    let manifest_selection = is_manifest.then(|| {
+        let mut selection = duhem_summary::ManifestSelection {
+            authored: authored_leaf_paths.len() as u32,
+            directory: directory_filter
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            filters: raw_filter.clone(),
+            ..Default::default()
+        };
+        for path in &authored_leaf_paths {
+            let reason = if !leaves.iter().any(|leaf| &leaf.path == path) {
+                Some("directory_selection")
+            } else if check_filter
+                .as_ref()
+                .is_some_and(|filter| filter.for_verification(&leaf_name(path)).is_none())
+            {
+                Some("verification_filter")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                selection.excluded.push(duhem_summary::ExcludedLeaf {
+                    verification: path.display().to_string(),
+                    reason: reason.into(),
+                });
+            } else {
+                selection.selected += 1;
+            }
+        }
+        selection
+    });
     // Suite-wide `defaults:` (spec #66) applied to every leaf's engine.
     // A single-leaf run has no manifest, so defaults are inert there —
     // Pattern A authors pay no cost.
@@ -758,6 +793,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         if let Some(f) = leaf_filter {
             engine = engine.with_filter(f);
         }
+        engine = engine.with_claim_provenance(raw_filter.clone(), manifest_selection.clone());
         // Live terminal progress (#299): subscribe a renderer to the
         // engine's progress sink. It folds the same evidence events
         // the store persists onto stderr and returns at
@@ -864,6 +900,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         &set_verdict,
         &db_path,
         &leaf_events,
+        manifest_selection.as_ref(),
     ) {
         eprintln!("reporter: {e}");
         return ExitCode::FAILURE;

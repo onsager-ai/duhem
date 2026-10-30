@@ -110,6 +110,15 @@ up) and deliberately refuses to call that a pass. The final line counts
 checks that actually executed. A check excluded by `--filter` is not
 included in `Total`; it emits no verdict for the run to count.
 
+Every new run also reports authored, selected and recorded-outcome counts.
+For example, selecting one of two checks prints `1 of 2 checks recorded`
+and names the excluded pair; a passing subset does not claim full coverage.
+Recorded inconclusive outcomes do not prove a body passed. Manifest directory
+or verification-name selection likewise states how many authored leaves were
+selected and why the others were excluded. JSON carries these facts under
+`claim_scope` on leaf summaries and `selection` on the manifest envelope;
+older reports without them have unknown authored scope.
+
 For machine consumption, add `--reporter json`. A leaf target with a
 top-level `criteria:` key emits a `RunSummary` v2; a manifest with
 `verifications:` emits a `RunSetSummary` v1 containing its leaf summaries

@@ -60,6 +60,16 @@ fn main() {
 fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
     let title = format!("run {} — {}", s.run_id, verdict_label(&s.verdict));
     writeln!(out, "{title}")?;
+    if let Some(scope) = &s.claim_scope {
+        writeln!(out, "Scope: {scope}")?;
+        for excluded in &scope.excluded {
+            writeln!(
+                out,
+                "  excluded {}::{} ({})",
+                excluded.criterion_id, excluded.check_id, excluded.reason
+            )?;
+        }
+    }
     // Column width: long enough for `AC-99.99` style ids; verdict
     // column shares a single space-padded gap. Plain text only at
     if let Some(body) = s.body_verdict {

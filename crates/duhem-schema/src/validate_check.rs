@@ -79,14 +79,6 @@ pub(super) fn validate_check(
                     .flatten(),
             });
         }
-        let contract_outputs = s.uses.as_deref().map(outputs_for).unwrap_or_default();
-        check_secret_paths(
-            s,
-            &contract_outputs,
-            &format!("criterion `{}` / check `{}`", c.id, ch.id),
-            &step_label(s, idx),
-            errs,
-        );
         if let Some(id) = &s.id {
             if !seen_step_ids.insert(id.as_str()) {
                 errs.push(ValidationError::DuplicateStepId {

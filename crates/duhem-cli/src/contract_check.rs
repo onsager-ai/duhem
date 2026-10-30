@@ -24,46 +24,19 @@ use duhem_schema::{
 /// Empty = clean.
 pub(crate) fn field_errors(def: &VerificationDefinition) -> Vec<String> {
     let mut errs = Vec::new();
-    for (i, s) in def.setup.iter().enumerate() {
-        check_step(s, &format!("setup step {i}"), &mut errs);
-        check_field_source(s, &format!("setup step {i}"), "", &mut errs);
-    }
-    for (i, s) in def.teardown.iter().enumerate() {
-        check_step(s, &format!("teardown step {i}"), &mut errs);
-        check_field_source(s, &format!("teardown step {i}"), "", &mut errs);
-    }
-    for (name, fixture) in &def.fixtures {
-        for (i, step) in fixture.up.iter().enumerate() {
-            check_step(step, &format!("fixture `{name}` up step {i}"), &mut errs);
-            check_field_source(
-                step,
-                &format!("fixture `{name}` up step {i}"),
-                "",
-                &mut errs,
-            );
-        }
-        for (i, step) in fixture.down.iter().enumerate() {
-            check_step(step, &format!("fixture `{name}` down step {i}"), &mut errs);
-            check_field_source(
-                step,
-                &format!("fixture `{name}` down step {i}"),
-                "",
-                &mut errs,
-            );
+    for block in duhem_schema::step_walk::step_blocks(def) {
+        for (index, step) in block.steps.iter().enumerate() {
+            let site = block.step_site(index);
+            check_step(step, &site, &mut errs);
+            let location = block
+                .location(def, index, "with")
+                .map(|at| format!(" at {}:{}", at.line, at.column))
+                .unwrap_or_default();
+            check_field_source(step, &site, &location, &mut errs);
         }
     }
-    for (criterion_index, c) in def.criteria.iter().enumerate() {
-        for (check_index, ch) in c.checks.iter().enumerate() {
-            for (i, s) in ch.steps.iter().flat_map(Step::actions).enumerate() {
-                let site = format!("criterion `{}` / check `{}` / step {i}", c.id, ch.id);
-                check_step(s, &site, &mut errs);
-                let location = def
-                    .source_map
-                    .check_step_with_location(criterion_index, check_index, i)
-                    .map(|at| format!(" at {}:{}", at.line, at.column))
-                    .unwrap_or_default();
-                check_field_source(s, &site, &location, &mut errs);
-            }
+    for c in &def.criteria {
+        for ch in &c.checks {
             check_judgment(c, ch, &mut errs);
         }
     }
@@ -194,29 +167,9 @@ pub(crate) fn catalog_outputs(uses: &str) -> Option<Vec<String>> {
 /// `== true` (that is the legitimate manual-control seam).
 pub(crate) fn lint_warnings(def: &VerificationDefinition) -> Vec<String> {
     let mut warns = Vec::new();
-    for (i, s) in def.setup.iter().enumerate() {
-        // Setup steps don't judge — only the identity-output lint applies.
-        lint_step(s, None, &format!("setup step {i}"), &mut warns);
-    }
-    for (i, s) in def.teardown.iter().enumerate() {
-        lint_step(s, None, &format!("teardown step {i}"), &mut warns);
-    }
-    for (name, fixture) in &def.fixtures {
-        for (i, step) in fixture.up.iter().enumerate() {
-            lint_step(
-                step,
-                None,
-                &format!("fixture `{name}` up step {i}"),
-                &mut warns,
-            );
-        }
-        for (i, step) in fixture.down.iter().enumerate() {
-            lint_step(
-                step,
-                None,
-                &format!("fixture `{name}` down step {i}"),
-                &mut warns,
-            );
+    for block in duhem_schema::step_walk::step_blocks(def) {
+        for (index, step) in block.steps.iter().enumerate() {
+            lint_step(step, block.check, &block.step_site(index), &mut warns);
         }
     }
     for c in &def.criteria {
@@ -250,10 +203,6 @@ pub(crate) fn lint_warnings(def: &VerificationDefinition) -> Vec<String> {
                     "criterion `{}` / check `{}`: `session:` is unused because the check has no `ui/*` step",
                     c.id, ch.id
                 ));
-            }
-            for (i, s) in ch.steps.iter().enumerate() {
-                let site = format!("criterion `{}` / check `{}` / step {i}", c.id, ch.id);
-                lint_step(s, Some(ch), &site, &mut warns);
             }
         }
     }

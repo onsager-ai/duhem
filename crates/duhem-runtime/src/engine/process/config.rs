@@ -109,7 +109,7 @@ impl Launch {
 }
 
 pub(super) fn error(message: impl Into<String>) -> ActionError {
-    ActionError::Process(message.into())
+    ActionError::OwnedProcess(message.into())
 }
 
 pub(super) fn parse<T: serde::de::DeserializeOwned>(

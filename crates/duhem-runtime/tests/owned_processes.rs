@@ -20,7 +20,7 @@ fn definition(scenario: &str, dir: &std::path::Path) -> VerificationDefinition {
 }
 
 async fn run(scenario: &str) -> (RunOutcome, Trace, tempfile::TempDir) {
-    run_config(scenario, duhem_schema::ManifestDefaults::default()).await
+    run_config(scenario, serde_yml::from_str("{}").unwrap()).await
 }
 
 async fn run_config(

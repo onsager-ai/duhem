@@ -121,7 +121,7 @@ impl Dispatch for OwnedProcess {
         _: &serde_yml::Value,
         _: &BTreeMap<String, String>,
     ) -> Result<ActionResult, ActionError> {
-        Err(ActionError::Process(
+        Err(ActionError::OwnedProcess(
             "owned process dispatch requires a runtime scope".into(),
         ))
     }

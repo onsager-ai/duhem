@@ -135,7 +135,7 @@ lives in the **product's** repo under `.duhem/` (Pattern D).
 5. Open the product PR (`Closes #N` on the product spec). Any
    Duhem-side wiring (a new drift lane, a new action) is its own Duhem
    PR under the Duhem spec from step 2. Cross-repo: spell out
-   `owner/repo#N`, land both before either merges, chreode-style.
+   `owner/repo#N`, coordinate both contracts before either merges.
 
 ## Verdict surfacing on Onsager PRs
 

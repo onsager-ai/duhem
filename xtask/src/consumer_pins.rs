@@ -87,6 +87,14 @@ fn breaking_entries_in_range(
         .collect()
 }
 
+fn breaking_display(breaking: &BTreeSet<u64>) -> String {
+    if breaking.is_empty() {
+        "none".to_string()
+    } else {
+        format_pr_list(breaking)
+    }
+}
+
 fn format_pr_list(prs: &BTreeSet<u64>) -> String {
     prs.iter()
         .map(|n| format!("#{n}"))

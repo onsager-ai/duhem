@@ -1,5 +1,5 @@
 //! Shared policy definitions. Published-skill process vocabulary and verified
-//! private-name signatures are distinct policies with one maintained source.
+//! private names are distinct policies with one maintained source.
 
 /// Substrings stripped from each line *before* scanning, so a legitimate
 /// public reference to the open-source project isn't flagged by the
@@ -34,10 +34,7 @@ const DENY: &[(&str, Match)] = &[
 /// Return every denied token found on a line, after stripping the
 /// allow-listed substrings. Case-insensitive.
 pub(crate) fn scan_line(line: &str) -> Vec<String> {
-    let mut hay = line.to_lowercase();
-    for allow in ALLOW_SUBSTRINGS {
-        hay = hay.replace(allow, "");
-    }
+    let hay = allowed_line(line);
     let mut hits: Vec<String> = Vec::new();
     for (needle, kind) in DENY {
         let found = match kind {
@@ -49,6 +46,14 @@ pub(crate) fn scan_line(line: &str) -> Vec<String> {
         }
     }
     hits
+}
+
+fn allowed_line(line: &str) -> String {
+    let mut hay = line.to_lowercase();
+    for allow in ALLOW_SUBSTRINGS {
+        hay = hay.replace(allow, "");
+    }
+    hay
 }
 
 /// Whole-word (bounded by non-`[a-z0-9_]`) case-insensitive match.
@@ -74,63 +79,20 @@ fn is_word_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-/// Private-name policy uses opaque IDs/signatures so the policy source and
-/// measurement logs do not republish the identifiers being protected.
-/// Visibility verified on 2026-10-30. Remove a signature when its repository
+/// Tracker policy: repository visibility verified PRIVATE on 2026-10-30.
+/// These terms already occur in public source. Remove a term when its repository
 /// becomes public; additions require a fresh visibility check.
-pub(crate) struct PrivateName {
-    pub id: &'static str,
-    pub length: usize,
-    pub digest: [u8; 32],
-}
+pub(crate) const PRIVATE_NAMES: &[&str] = &["chreode", "ostrom-hub"];
 
-pub(crate) const PRIVATE_NAMES: &[PrivateName] = &[
-    PrivateName {
-        id: "P01",
-        length: 7,
-        digest: [
-            134, 237, 146, 26, 232, 92, 126, 155, 130, 77, 186, 34, 106, 95, 128, 215, 200, 81,
-            216, 125, 130, 184, 141, 72, 123, 67, 49, 159, 243, 32, 193, 195,
-        ],
-    },
-    PrivateName {
-        id: "P02",
-        length: 10,
-        digest: [
-            106, 26, 13, 243, 225, 68, 240, 161, 44, 37, 0, 240, 255, 73, 123, 80, 31, 253, 224,
-            145, 133, 70, 98, 25, 80, 224, 197, 33, 153, 58, 23, 206,
-        ],
-    },
-];
-
-pub(crate) fn scan_private_line<'a>(line: &str, rules: &'a [PrivateName]) -> Vec<&'a str> {
-    use sha2::{Digest, Sha256};
-    let hay = line.to_ascii_lowercase();
+pub(crate) fn scan_private_line<'a>(line: &str, rules: &[&'a str]) -> Vec<&'a str> {
+    let hay = allowed_line(line);
     rules
         .iter()
-        .filter(|rule| {
-            hay.as_bytes()
-                .windows(rule.length)
-                .any(|window| Sha256::digest(window)[..] == rule.digest)
-        })
-        .map(|rule| rule.id)
+        .copied()
+        .filter(|rule| hay.contains(*rule))
         .collect()
 }
 
-/// Stable opaque IDs allow aggregate per-term measurement without logging names.
-pub(crate) fn skill_rule_ids(line: &str) -> Vec<String> {
-    scan_line(line)
-        .iter()
-        .map(|token| {
-            let index = DENY
-                .iter()
-                .position(|(needle, _)| needle == token)
-                .expect("known token");
-            format!("S{:02}", index + 1)
-        })
-        .collect()
-}
-
-pub(crate) fn all_skill_rule_ids() -> impl Iterator<Item = String> {
-    (1..=DENY.len()).map(|index| format!("S{index:02}"))
+pub(crate) fn all_skill_terms() -> impl Iterator<Item = &'static str> {
+    DENY.iter().map(|(term, _)| *term)
 }

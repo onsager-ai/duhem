@@ -20,21 +20,28 @@ The tracker uses a separate, verified private-name policy in the same
 shared module. Ordinary process words and public repository names are
 not denied by the tracker policy.
 
-Private-name rules use opaque IDs and SHA-256/length signatures rather
-than repeating the protected identifiers in source or logs. Adding a
-rule requires a current visibility check; remove its signature when its
-repository becomes public. This is a way to avoid republishing names,
-not a secrecy guarantee for predictable identifiers.
+The tracker list in `xtask/src/private_vocab.rs` uses plain terms. The
+initial terms, `chreode` and `ostrom-hub`, were checked with
+`gh repo view onsager-ai/<name> --json visibility` on 2026-10-30 and both
+were PRIVATE. Both names already appear in this repository's public source.
+A term enters the list only if it names a repository or product whose
+visibility is PRIVATE (or which does not publicly exist), checked with
+`gh repo view` at review time. Record the check date with the policy;
+remove a term when its repository or product becomes public. Ordinary
+process terms and now-public repositories remain outside this policy.
 
 The normal scan reports only artifact URLs, field names and line numbers.
 It never logs matching text, edits or deletes artifacts, or posts comments.
+Public URLs form an index of hit locations, a trade-off accepted so the
+owner can find and fix the already-public artifacts.
 It states its limits on every run: detection after publication, the timestamp
 baseline, configured authors only, and this tracker only.
 
 `--measure` examines both the unchanged skill policy and the private-name
 policy over all configured-author history, independently of the cutoff.
-It emits only aggregate matching-line counts per opaque rule ID and UTC
+It emits only aggregate matching-line counts per term and UTC
 update year, with no artifact URLs or content. `--fixture PATH` reads an
 offline array of GitHub-shaped records; `--config PATH` selects explicit
 configuration. Tests cover old untouched, old edited, new and excluded
-author records, public names, process words and missing timestamps.
+author records, public names, process words, same-day cutoff precision,
+edited old reviews and missing timestamps.

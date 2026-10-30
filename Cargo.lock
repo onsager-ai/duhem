@@ -4631,7 +4631,6 @@ dependencies = [
  "rustc-hash 1.1.0",
  "serde_json",
  "serde_yml",
- "sha2",
  "syn",
  "tiktoken-rs",
 ]

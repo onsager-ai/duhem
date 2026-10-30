@@ -1,7 +1,5 @@
 //! Scheduled, read-only detection for configured authors after a date baseline.
-use crate::private_vocab::{
-    PRIVATE_NAMES, PrivateName, all_skill_rule_ids, scan_private_line, skill_rule_ids,
-};
+use crate::private_vocab::{PRIVATE_NAMES, all_skill_terms, scan_line, scan_private_line};
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Datelike, Utc};
 use serde_json::{Value, json};
@@ -62,14 +60,14 @@ pub fn run(args: Vec<String>) -> Result<()> {
     let config = read_config(&config_path)?;
     let mut scan = Scan::default();
     let mut counts = Measurement::default();
-    for id in all_skill_rule_ids() {
-        counts.skill_vocabulary.insert(id, BTreeMap::new());
+    for term in all_skill_terms() {
+        counts.skill_vocabulary.insert(term.into(), BTreeMap::new());
     }
     for rule in PRIVATE_NAMES {
-        counts.private_names.insert(rule.id.into(), BTreeMap::new());
+        counts.private_names.insert((*rule).into(), BTreeMap::new());
         counts
             .private_names_in_date_scope
-            .insert(rule.id.into(), BTreeMap::new());
+            .insert((*rule).into(), BTreeMap::new());
     }
     let mut inspect = |records: &Value| {
         scan_records(
@@ -206,16 +204,43 @@ fn fetch_reviews(number: u64) -> Result<Vec<Value>> {
     // REST reviews expose submitted_at, not their last edit time. GraphQL's
     // updatedAt is required so editing an old review re-enters the date scope.
     let query = r#"query($number:Int!,$endCursor:String){repository(owner:"onsager-ai",name:"duhem"){pullRequest(number:$number){reviews(first:100,after:$endCursor){nodes{author{login} body url createdAt updatedAt} pageInfo{hasNextPage endCursor}}}}}"#;
-    gh_pages(&["api", "graphql", "--paginate", "--slurp", "-f", &format!("query={query}"), "-F", &format!("number={number}")])?.iter().map(|page| {
-        let nodes = page.pointer("/data/repository/pullRequest/reviews/nodes").and_then(Value::as_array).context("review nodes missing")?;
-        Ok(Value::Array(nodes.iter().map(|node| json!({"user":{"login":node["author"]["login"]}, "html_url":node["url"], "body":node["body"], "updated_at":node["updatedAt"]})).collect()))
-    }).collect()
+    gh_pages(&[
+        "api",
+        "graphql",
+        "--paginate",
+        "--slurp",
+        "-f",
+        &format!("query={query}"),
+        "-F",
+        &format!("number={number}"),
+    ])?
+    .iter()
+    .map(review_records)
+    .collect()
+}
+
+fn review_records(page: &Value) -> Result<Value> {
+    let nodes = page
+        .pointer("/data/repository/pullRequest/reviews/nodes")
+        .and_then(Value::as_array)
+        .context("review nodes missing")?;
+    Ok(Value::Array(
+        nodes
+            .iter()
+            .map(|node| {
+                json!({
+                    "user":{"login":node["author"]["login"]}, "html_url":node["url"],
+                    "body":node["body"], "updated_at":node["updatedAt"]
+                })
+            })
+            .collect(),
+    ))
 }
 
 fn scan_records(
     records: &Value,
     config: &Config,
-    rules: &[PrivateName],
+    rules: &[&str],
     measure: bool,
     scan: &mut Scan,
     counts: &mut Measurement,
@@ -247,7 +272,7 @@ fn scan_records(
                 for (line, text) in text.lines().enumerate() {
                     let private = scan_private_line(text, rules);
                     if measure {
-                        for id in skill_rule_ids(text) {
+                        for id in scan_line(text) {
                             *counts
                                 .skill_vocabulary
                                 .entry(id)
@@ -292,13 +317,8 @@ fn scan_records(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sha2::{Digest, Sha256};
-    fn policy() -> Vec<PrivateName> {
-        vec![PrivateName {
-            id: "test",
-            length: 18,
-            digest: Sha256::digest(b"restricted-example").into(),
-        }]
+    fn policy() -> Vec<&'static str> {
+        vec!["restricted-example"]
     }
     fn config() -> Config {
         Config {
@@ -342,7 +362,11 @@ mod tests {
             )
             .is_empty()
         );
-        assert!(skill_rule_ids("https://github.com/onsager-ai/duhem on GitHub").is_empty());
+        assert!(scan_line("https://github.com/onsager-ai/duhem on GitHub").is_empty());
+        assert_eq!(
+            scan_private_line("CHREODE ostrom-hub", PRIVATE_NAMES),
+            PRIVATE_NAMES
+        );
     }
     #[test]
     fn measurement_ignores_cutoff_and_counts_both_policies_without_locations() {
@@ -351,8 +375,32 @@ mod tests {
         let mut counts = Measurement::default();
         scan_records(&records, &config(), &policy(), true, &mut scan, &mut counts).unwrap();
         assert!(scan.hits.is_empty());
-        assert_eq!(counts.skill_vocabulary["S01"][&2025], 1);
-        assert_eq!(counts.private_names["test"][&2025], 1);
+        assert_eq!(counts.skill_vocabulary["dogfood"][&2025], 1);
+        assert_eq!(counts.private_names["restricted-example"][&2025], 1);
+    }
+    #[test]
+    fn edited_old_review_reenters_scope_using_graphql_updated_at() {
+        let page: Value =
+            serde_json::from_str(include_str!("../fixtures/tracker-scrub-reviews.json")).unwrap();
+        let records = review_records(&page).unwrap();
+        let mut scan = Scan::default();
+        let mut counts = Measurement::default();
+        scan_records(
+            &records,
+            &config(),
+            &policy(),
+            false,
+            &mut scan,
+            &mut counts,
+        )
+        .unwrap();
+        assert_eq!(
+            scan.hits
+                .iter()
+                .map(|hit| hit.url.as_str())
+                .collect::<Vec<_>>(),
+            vec!["edited-old-review"]
+        );
     }
     #[test]
     fn exact_merge_day_timestamp_excludes_earlier_activity_on_the_same_day() {

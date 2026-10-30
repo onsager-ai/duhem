@@ -291,8 +291,8 @@ impl EvidenceWriter {
 
     /// Live masking registry for continuously drained process streams. It
     /// includes credentials registered after the process was started.
-    pub fn stream_secrets(&self) -> std::sync::Arc<std::sync::RwLock<SecretRegistry>> {
-        self.shared.secrets.clone()
+    pub fn stream_masker(&self) -> crate::secret::StreamMasker {
+        crate::secret::StreamMasker::new(self.shared.secrets.clone())
     }
 
     /// Append one event. The caller supplies the `payload`; `seq` and

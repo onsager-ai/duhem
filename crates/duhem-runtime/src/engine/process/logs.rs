@@ -1,9 +1,9 @@
 //! Continuously drained, bounded stream records; masking precedes retention.
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use duhem_evidence::SecretRegistry;
+use duhem_evidence::secret::StreamMasker;
 use regex::Regex;
 use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -93,7 +93,7 @@ impl Logs {
 
 pub(super) struct Drain {
     pub logs: Arc<Mutex<Logs>>,
-    pub secrets: Arc<RwLock<SecretRegistry>>,
+    pub masker: StreamMasker,
     pub stream: &'static str,
     pub generation: u64,
     pub started: Instant,
@@ -139,11 +139,7 @@ pub(super) async fn drain(reader: impl AsyncRead + Unpin, config: Drain) {
                 config.logs.lock().unwrap().ready = true;
             }
         }
-        let (masked, consumed) = config
-            .secrets
-            .read()
-            .unwrap()
-            .mask_stream_prefix(&text, eof);
+        let (masked, consumed) = config.masker.mask_prefix(&text, eof);
         // For invalid UTF-8 the lossy representation changes byte offsets.
         // Hold its unconsumed suffix in normalized UTF-8 for the next read.
         let mut remaining = text[consumed..].as_bytes().to_vec();

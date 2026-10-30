@@ -14,6 +14,7 @@ if mode == "server":
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
+            print(f"REQUEST {self.path}", flush=True)
             if self.path == "/health" and self.headers.get("X-Ready") != "yes":
                 self.send_response(403)
                 self.end_headers()

@@ -67,11 +67,13 @@ async fn run_config(
     for event in trace.events() {
         if let EventPayload::ProcessObserved {
             operation,
+            facts,
             detail: Some(detail),
             ..
         } = &event.payload
         {
             eprintln!("{operation}: {detail}");
+            eprintln!("process log facts: {}", facts["logs"]);
         }
     }
     assert_eq!(replay(&trace).unwrap().run.state, result.verdict.state);
@@ -360,7 +362,9 @@ fixtures:
       - id: child
         uses: process/start
         with: { command: python3, args: [-u, @FIXTURE@, idle] }
-    down: []
+    down:
+      - uses: process/inspect
+        with: { handle: $fixture.watcher.child.outputs.handle }
 criteria:
   - id: AC-1
     description: A diagnostic fixture cannot weaken owned cleanup.
@@ -566,7 +570,9 @@ fixtures:
           args: [-u, @FIXTURE@, escaped-pipe, @STATE@]
           kill_timeout: 100ms
           ready: {{ log: {{ stream: stdout, pattern: READY }}, timeout: 5s }}
-    down: []
+    down:
+      - uses: process/inspect
+        with: {{ handle: $fixture.watcher.child.outputs.handle }}
 criteria:
   - id: AC-1
     description: Incomplete owned cleanup independently blocks the gate.

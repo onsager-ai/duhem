@@ -103,7 +103,9 @@ fixtures:
       - id: worker
         uses: process/start
         with: { command: sleep, args: ["30"] }
-    down: []
+    down:
+      - uses: process/inspect
+        with: { handle: $fixture.watcher.worker.outputs.handle }
 criteria:
   - id: AC-1
     description: Only the consuming check receives the process handle.

@@ -196,7 +196,7 @@ impl Processes {
         let mut drains = Vec::new();
         let drain_config = |stream| Drain {
             logs: logs.clone(),
-            secrets: writer.stream_secrets(),
+            masker: writer.stream_masker(),
             stream,
             generation,
             started,
@@ -327,7 +327,7 @@ impl Entry {
             .build()
             .map_err(|err| error(format!("readiness client: {err}")))?;
         let deadline = tokio::time::Instant::now() + ready.timeout.0;
-        let mut last_probe;
+        let mut last_probe = "no HTTP response observed".to_string();
         loop {
             self.observe()?;
             if self.exit.is_some() {
@@ -348,11 +348,13 @@ impl Entry {
                         response.status().as_u16() == http.status
                     }
                     Ok(Err(err)) => {
-                        last_probe = format!("HTTP request: {err}");
+                        last_probe = format!("HTTP request: {err:?}");
                         false
                     }
                     Err(_) => {
-                        last_probe = "HTTP request exceeded readiness deadline".into();
+                        last_probe = format!(
+                            "HTTP readiness deadline exceeded; previous probe: {last_probe}"
+                        );
                         false
                     }
                 }

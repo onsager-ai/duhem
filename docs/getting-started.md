@@ -567,3 +567,10 @@ behavior before upgrading. `ui/assert-element` and `ui/assert-url` remain
 judging actions; data-returning actions require explicit assertions. In
 fixture `down:`, an HTTP status is still data and has no general assertion
 surface; check any required cleanup effect separately.
+
+
+### Profile selection spelling
+
+Use `--profile NAME` with `duhem run` or `duhem resolve` to select a
+manifest profile. The former `--environment NAME` alias is removed in
+the next release after v0.6.0; replace that spelling in scripts and CI.

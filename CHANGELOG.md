@@ -30,6 +30,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 
 - [breaking] Remove ui/select, ui/assert-state, api/poll and db/observe; migrate definitions to supported actions and explicit assertions before upgrading. (#588)
+- [breaking] Remove the --environment alias from run and resolve; use --profile NAME instead. (#589)
 - [additive] Show explicit assertions in the dashboard rail and record their resolved operand values with existing secret masking. (#574)
 
 - [additive] Reports and evidence retain authored, selected and recorded claim counts, filter exclusions and manifest leaf selection; human reports, JUnit and the dashboard expose reduced scope. (#531)

@@ -34,6 +34,7 @@ struct Scan {
 struct Measurement {
     skill_vocabulary: BTreeMap<String, BTreeMap<i32, usize>>,
     private_names: BTreeMap<String, BTreeMap<i32, usize>>,
+    private_names_in_date_scope: BTreeMap<String, BTreeMap<i32, usize>>,
 }
 
 pub fn run(args: Vec<String>) -> Result<()> {
@@ -66,6 +67,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
     }
     for rule in PRIVATE_NAMES {
         counts.private_names.insert(rule.id.into(), BTreeMap::new());
+        counts
+            .private_names_in_date_scope
+            .insert(rule.id.into(), BTreeMap::new());
     }
     let mut inspect = |records: &Value| {
         scan_records(
@@ -110,8 +114,11 @@ pub fn run(args: Vec<String>) -> Result<()> {
         println!(
             "{}",
             json!({"repository":REPO, "configured_artifacts":scan.inspected,
+            "in_date_scope_artifacts":scan.eligible, "updated_on_or_after":config.since.to_string(),
+            "private_matching_locations_in_date_scope":scan.hits.len(),
             "year_basis":"updated_at UTC year; all history for configured authors; per-rule matching lines",
-            "skill_vocabulary":counts.skill_vocabulary, "private_names":counts.private_names})
+            "skill_vocabulary":counts.skill_vocabulary, "private_names":counts.private_names,
+            "private_names_in_date_scope":counts.private_names_in_date_scope})
         );
         return Ok(());
     }
@@ -255,6 +262,14 @@ fn scan_records(
                                 .or_default()
                                 .entry(updated.year())
                                 .or_default() += 1;
+                            if eligible {
+                                *counts
+                                    .private_names_in_date_scope
+                                    .entry((*id).into())
+                                    .or_default()
+                                    .entry(updated.year())
+                                    .or_default() += 1;
+                            }
                         }
                     }
                     if eligible && !private.is_empty() {

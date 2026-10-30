@@ -261,6 +261,17 @@ async function requireFrames(req) {
         const frame = await handle.contentFrame()
         if (!frame) throw new Error('selected element is not an iframe document')
         if (deadline !== undefined) {
+          const source = await handle.evaluate(element => ({
+            src: element.getAttribute('src'), srcdoc: element.hasAttribute('srcdoc'),
+          }))
+          // An attached iframe can still expose its initial about:blank
+          // document while its declared source is loading. That document
+          // cannot prove the eventual report's heading/error is absent.
+          if (source.srcdoc || (source.src && source.src !== 'about:blank')) {
+            await frame.waitForURL(url => url.href !== 'about:blank', {
+              waitUntil: 'domcontentloaded', timeout: remaining(),
+            })
+          }
           await frame.waitForLoadState('domcontentloaded', { timeout: remaining() })
         }
       } finally {

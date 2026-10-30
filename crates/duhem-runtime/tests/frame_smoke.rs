@@ -239,9 +239,13 @@ async fn waits_for_late_frame_and_document_and_keeps_one_deadline() {
         .await
         .unwrap();
     let started = Instant::now();
+    // The delayed frame's initial about:blank document must not prove
+    // absence before its HTTP document arrives with the heading present.
+    let absent = AssertElement.invoke(&ctx, &yaml("locator: {frame: {testid: delayed}, role: heading, name: Weekly report}\nexpected: not_exists\ntimeout: 2s")).await.unwrap();
+    assert_eq!(absent.outputs["satisfied"], serde_json::json!(false));
     let result = AssertElement.invoke(&ctx, &yaml("locator: {frame: {testid: delayed}, role: heading, name: Weekly report}\nexpected: visible\ntimeout: 2s")).await.unwrap();
     assert_eq!(result.outputs["satisfied"], serde_json::json!(true));
-    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(started.elapsed() < Duration::from_secs(5));
 
     let started = Instant::now();
     let result = Click

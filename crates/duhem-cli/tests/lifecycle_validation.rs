@@ -31,6 +31,7 @@ fn validate(scope: &str, phase: &str, step: serde_json::Value) -> Output {
 
 #[test]
 fn lifecycle_unknown_actions_fields_enums_outputs_and_secret_paths_are_rejected() {
+    let mut failures = Vec::new();
     for scope in ["criterion", "check"] {
         for phase in ["setup", "teardown"] {
             let valid = validate(
@@ -64,18 +65,18 @@ fn lifecycle_unknown_actions_fields_enums_outputs_and_secret_paths_are_rejected(
             ] {
                 let output = validate(scope, phase, step);
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                assert!(
-                    !output.status.success(),
-                    "{scope} {phase} accepted {diagnostic}: {stderr}"
-                );
-                assert!(stderr.contains(diagnostic), "{scope} {phase}: {stderr}");
+                if output.status.success() || !stderr.contains(diagnostic) {
+                    failures.push(format!("{scope} {phase} missed {diagnostic}: {stderr}"));
+                }
             }
         }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]
 fn lifecycle_identity_bindings_warn_without_changing_validation_success() {
+    let mut failures = Vec::new();
     for scope in ["criterion", "check"] {
         for phase in ["setup", "teardown"] {
             let output = validate(
@@ -88,14 +89,15 @@ fn lifecycle_identity_bindings_warn_without_changing_validation_success() {
             );
             let stderr = String::from_utf8_lossy(&output.stderr);
             assert!(output.status.success(), "{scope} {phase}: {stderr}");
-            assert!(
-                stderr.contains("identity binding"),
-                "{scope} {phase}: {stderr}"
-            );
-            assert!(
-                stderr.contains(phase) && stderr.contains("AC-1"),
-                "{stderr}"
-            );
+            if !stderr.contains("identity binding")
+                || !stderr.contains(phase)
+                || !stderr.contains("AC-1")
+            {
+                failures.push(format!(
+                    "{scope} {phase} missed identity-binding warning: {stderr}"
+                ));
+            }
         }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

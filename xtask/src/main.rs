@@ -53,7 +53,7 @@ fn main() -> ExitCode {
         Some("consumer-pins") => consumer_pins::run(args.collect()),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage:\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- schema-drift\n  cargo run -p xtask -- schema-changelog-check [--lint]\n  cargo run -p xtask -- schema-json [--check]\n  cargo run -p xtask -- action-reference [--check]\n  cargo run -p xtask -- skill-scrub\n  cargo run -p xtask -- tracker-scrub [--authors-file PATH] [--fixture PATH]\n  cargo run -p xtask -- dx-drift [--mode=warn|fail]\n  cargo run -p xtask -- consumer-pins --list\n  cargo run -p xtask -- consumer-pins --consumer <repo>=<path> ..."
+            "usage:\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- schema-drift\n  cargo run -p xtask -- schema-changelog-check [--lint]\n  cargo run -p xtask -- schema-json [--check]\n  cargo run -p xtask -- action-reference [--check]\n  cargo run -p xtask -- skill-scrub\n  cargo run -p xtask -- tracker-scrub [--config PATH] [--fixture PATH] [--measure]\n  cargo run -p xtask -- dx-drift [--mode=warn|fail]\n  cargo run -p xtask -- consumer-pins --list\n  cargo run -p xtask -- consumer-pins --consumer <repo>=<path> ..."
         )),
     };
 

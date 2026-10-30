@@ -51,3 +51,47 @@ fn consumer_pin_entry_point_accepts_a_pin_and_rejects_invalid_input() {
         assert!(!xtask().args(args).output().unwrap().status.success());
     }
 }
+
+#[test]
+fn tracker_measurement_and_findings_never_print_private_terms() {
+    let root = std::env::temp_dir().join(format!("duhem-tracker-boundary-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let config = root.join("config.json");
+    let fixture = root.join("records.json");
+    std::fs::write(
+        &config,
+        r#"{"authors":["configured"],"updated_on_or_after":"2026-10-30T00:00:00Z"}"#,
+    )
+    .unwrap();
+    std::fs::write(&fixture, r#"[{"user":{"login":"configured"},"html_url":"https://github.com/onsager-ai/duhem/issues/1","updated_at":"2026-10-30T12:00:00Z","body":"RESTRICTED-EXAMPLE"}]"#).unwrap();
+    for measure in [false, true] {
+        let mut command = xtask();
+        command
+            .arg("tracker-scrub")
+            .arg("--config")
+            .arg(&config)
+            .arg("--fixture")
+            .arg(&fixture)
+            .env("DUHEM_PRIVATE_NAMES", "restricted-example");
+        if measure {
+            command.arg("--measure");
+        }
+        let output = command.output().unwrap();
+        assert_eq!(output.status.success(), measure);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(!stdout.to_lowercase().contains("restricted-example"));
+        assert!(
+            !String::from_utf8_lossy(&output.stderr)
+                .to_lowercase()
+                .contains("restricted-example")
+        );
+        if measure {
+            let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(value["private_names"]["0"]["2026"], 1);
+            assert!(!stdout.contains("/issues/1"));
+        } else {
+            assert!(stdout.contains("/issues/1 (body:1)"));
+        }
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}

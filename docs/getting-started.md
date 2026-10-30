@@ -565,3 +565,10 @@ resolved source array's full length; step and ordinal distinguish multiple
 loops in one check. Default, pretty and JUnit reporters consume that same
 failure detail. The RunSummary contract adds no iteration fields, and older
 reports retain their existing text rather than inventing an unknown count.
+
+
+### Profile selection spelling
+
+Use `--profile NAME` with `duhem run` or `duhem resolve` to select a
+manifest profile. The former `--environment NAME` alias is removed in
+the next release after v0.6.0; replace that spelling in scripts and CI.

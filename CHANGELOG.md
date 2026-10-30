@@ -29,13 +29,13 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+## v0.7.0 — 2026-10-30
+
 - [breaking] Remove ui/assert-state; assert the state's marker with ui/assert-element instead. (#588)
 - [clarifying] Identify failing for_each iterations in existing reporter detail text. (#519)
-
 - [additive] Add duhem coverage to report definitions with no recorded run in a supplied store. (#546)
 - [breaking] Remove the --environment alias from run and resolve; use --profile NAME instead. (#589)
 - [additive] Show explicit assertions in the dashboard rail and record their resolved operand values with existing secret masking. (#574)
-
 - [additive] Reports and evidence retain authored, selected and recorded claim counts, filter exclusions and manifest leaf selection; human reports, JUnit and the dashboard expose reduced scope. (#531)
 - [additive] RunSummary.verification carries the recorded leaf source path for single-leaf and manifest reports, so consumers can attribute verdicts without relying on array order. (#544)
 - [clarifying] Unknown-action, contract-field, redundancy-lint and secret-path validation cover criterion- and check-level setup/teardown through the same block walker as other steps. (#538)

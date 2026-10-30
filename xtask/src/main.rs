@@ -25,10 +25,12 @@ mod changelog_lint;
 mod check_file_budget;
 mod consumer_pins;
 mod dx_drift;
+mod private_vocab;
 mod schema_changelog_check;
 mod schema_drift;
 mod schema_json;
 mod skill_scrub;
+mod tracker_scrub;
 
 use std::process::ExitCode;
 
@@ -46,11 +48,12 @@ fn main() -> ExitCode {
         Some("schema-json") => schema_json::run(args.collect()),
         Some("action-reference") => action_reference::run(args.collect()),
         Some("skill-scrub") => skill_scrub::run(args.collect()),
+        Some("tracker-scrub") => tracker_scrub::run(args.collect()),
         Some("dx-drift") => dx_drift::run(args.collect()),
         Some("consumer-pins") => consumer_pins::run(args.collect()),
         Some(other) => Err(anyhow!("unknown subcommand: {other}")),
         None => Err(anyhow!(
-            "usage:\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- schema-drift\n  cargo run -p xtask -- schema-changelog-check [--lint]\n  cargo run -p xtask -- schema-json [--check]\n  cargo run -p xtask -- action-reference [--check]\n  cargo run -p xtask -- skill-scrub\n  cargo run -p xtask -- dx-drift [--mode=warn|fail]\n  cargo run -p xtask -- consumer-pins --list\n  cargo run -p xtask -- consumer-pins --consumer <repo>=<path> ..."
+            "usage:\n  cargo run -p xtask -- check-file-budget [--mode=warn|fail] [--budget=N]\n  cargo run -p xtask -- count-tokens <file>\n  cargo run -p xtask -- schema-drift\n  cargo run -p xtask -- schema-changelog-check [--lint]\n  cargo run -p xtask -- schema-json [--check]\n  cargo run -p xtask -- action-reference [--check]\n  cargo run -p xtask -- skill-scrub\n  cargo run -p xtask -- tracker-scrub [--config PATH] [--fixture PATH] [--measure]\n  cargo run -p xtask -- dx-drift [--mode=warn|fail]\n  cargo run -p xtask -- consumer-pins --list\n  cargo run -p xtask -- consumer-pins --consumer <repo>=<path> ..."
         )),
     };
 

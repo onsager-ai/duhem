@@ -1,0 +1,7 @@
+[
+  {"user":{"login":"configured"},"html_url":"untouched-old","created_at":"2025-01-01T00:00:00Z","updated_at":"2025-01-01T00:00:00Z","body":"restricted-example"},
+  {"user":{"login":"configured"},"html_url":"edited-old","created_at":"2025-01-01T00:00:00Z","updated_at":"2026-10-30T00:00:00Z","body":"First line\nrestricted-example"},
+  {"user":{"login":"configured"},"html_url":"new","created_at":"2026-10-30T01:00:00Z","updated_at":"2026-10-30T01:00:00Z","body":"restricted-example"},
+  {"user":{"login":"third-party"},"html_url":"excluded","updated_at":"2026-10-30T01:00:00Z","body":"restricted-example"},
+  {"user":{"login":"configured"},"html_url":"allowed","updated_at":"2026-10-30T01:00:00Z","body":"https://github.com/onsager-ai/duhem dogfood on GitHub"}
+]

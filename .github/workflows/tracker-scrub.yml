@@ -1,0 +1,23 @@
+name: tracker vocabulary scan
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+concurrency:
+  group: tracker-scrub
+  cancel-in-progress: false
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: Detect configured authors' tracker vocabulary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: cargo run -p xtask -- tracker-scrub

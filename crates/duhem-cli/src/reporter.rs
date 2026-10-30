@@ -709,6 +709,12 @@ fn build_summary(
         store_db.to_path_buf(),
     )
     .with_totals(check_totals(o))
+    .with_verification(events.iter().find_map(|event| match &event.payload {
+        duhem_evidence::EventPayload::RunStarted {
+            verification_path, ..
+        } => Some(verification_path.clone()),
+        _ => None,
+    }))
     .with_body_verdict(o.body_verdict)
     .with_gated_checks(gated_checks(o))
     .with_failures(failures)

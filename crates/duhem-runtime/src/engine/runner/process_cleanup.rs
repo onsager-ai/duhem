@@ -49,6 +49,8 @@ impl Engine {
         }
         while let Some(hook) = run.process_cleanup.pop() {
             run.process_owner = hook.owner.clone();
+            run.session = hook.session;
+            run.context_budget = hook.budget;
             let env = self.child_process_env(writer.run_id());
             let result =
                 if let (Some(fixture), Some(check)) = (&hook.owner.fixture, &hook.owner.check) {

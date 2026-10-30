@@ -436,6 +436,100 @@ criteria:
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[tokio::test]
+async fn sibling_run_and_retired_generation_handles_are_rejected() {
+    let (outcome, trace, dir) = run(r#"
+criteria:
+  - id: AC-1
+    description: Process handles carry run, owner and generation identity.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: child
+            uses: process/start
+            with: { command: python3, args: [-u, @FIXTURE@, idle] }
+          - uses: cli/invoke
+            with:
+              command: [python3, -c, "from pathlib import Path; import sys; Path(sys.argv[1]).write_text(sys.argv[2])", @STATE@, $steps.child.outputs.handle]
+          - uses: process/restart
+            with: { handle: $steps.child.outputs.handle }
+          - uses: process/restart
+            with: { handle: $steps.child.outputs.handle }
+        assertions: ["true"]
+      - id: AC-1.2
+        steps:
+          - id: loaded
+            uses: cli/invoke
+            with:
+              command: [python3, -c, "from pathlib import Path; import sys; sys.stdout.write(Path(sys.argv[1]).read_text())", @STATE@]
+          - uses: process/stop
+            with: { handle: $steps.loaded.outputs.stdout }
+        assertions: ["true"]
+"#).await;
+    assert!(matches!(
+        outcome.verdict.state,
+        VerdictState::Inconclusive(_)
+    ));
+    assert_eq!(process_facts(&trace, "process/start").len(), 2);
+    let details: Vec<_> = trace
+        .events()
+        .iter()
+        .filter_map(|event| match &event.payload {
+            EventPayload::StepFinished {
+                detail: Some(detail),
+                ..
+            } => Some(detail.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        details
+            .iter()
+            .any(|detail| detail.contains("already been restarted"))
+    );
+    assert!(
+        details
+            .iter()
+            .any(|detail| detail.contains("sibling check or another retry"))
+    );
+
+    let handle = std::fs::read_to_string(dir.path().join("state")).unwrap();
+    let next = definition(
+        r#"
+criteria:
+  - id: AC-1
+    description: A different run cannot use the old handle.
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: process/stop
+            with: { handle: $inputs.secret }
+        assertions: ["true"]
+"#,
+        dir.path(),
+    );
+    let store = Arc::new(
+        SqliteStore::open(dir.path().join("other.db"))
+            .await
+            .unwrap(),
+    );
+    let result = Engine::new()
+        .with_store(store.clone())
+        .run_with_metadata(&next, BTreeMap::from([("secret".into(), json!(handle))]))
+        .await
+        .unwrap();
+    let trace = Trace::from_store(store.as_ref(), &result.run_id)
+        .await
+        .unwrap();
+    assert!(matches!(
+        result.verdict.state,
+        VerdictState::Inconclusive(_)
+    ));
+    assert!(trace.events().iter().any(|event| matches!(&event.payload,
+        EventPayload::StepFinished { detail: Some(detail), .. } if detail.contains("unknown process handle"))));
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[tokio::test]
 async fn required_finalizer_failure_preserves_body_and_prevents_restart() {
     struct EscapedFixture(std::path::PathBuf);
     impl Drop for EscapedFixture {

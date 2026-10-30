@@ -236,7 +236,11 @@ impl Processes {
         // Register before the first await: cancellation/readiness failure still
         // leaves an owned generation for the always-required finalizer.
         let entry = self.entries.last_mut().unwrap();
-        let result = entry.readiness().await.map(|()| entry.started_result());
+        let result = entry
+            .readiness()
+            .await
+            .and_then(|()| entry.observe())
+            .map(|()| entry.started_result());
         entry
             .record(writer, "process/start", result.as_ref().err())
             .await?;
@@ -319,9 +323,11 @@ impl Entry {
         };
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
+            .timeout(ready.timeout.0.min(Duration::from_secs(2)))
             .build()
             .map_err(|err| error(format!("readiness client: {err}")))?;
         let deadline = tokio::time::Instant::now() + ready.timeout.0;
+        let mut last_probe;
         loop {
             self.observe()?;
             if self.exit.is_some() {
@@ -333,10 +339,25 @@ impl Entry {
                     request = request.header(name, value);
                 }
                 match tokio::time::timeout_at(deadline, request.send()).await {
-                    Ok(Ok(response)) => response.status().as_u16() == http.status,
-                    _ => false,
+                    Ok(Ok(response)) => {
+                        last_probe = format!(
+                            "HTTP status {}, expected {}",
+                            response.status().as_u16(),
+                            http.status
+                        );
+                        response.status().as_u16() == http.status
+                    }
+                    Ok(Err(err)) => {
+                        last_probe = format!("HTTP request: {err}");
+                        false
+                    }
+                    Err(_) => {
+                        last_probe = "HTTP request exceeded readiness deadline".into();
+                        false
+                    }
                 }
             } else {
+                last_probe = "log marker not observed".into();
                 self.logs.lock().unwrap().ready
             };
             if matched {
@@ -348,7 +369,7 @@ impl Entry {
                 return Ok(());
             }
             if tokio::time::Instant::now() >= deadline {
-                return Err(error("process readiness timed out"));
+                return Err(error(format!("process readiness timed out ({last_probe})")));
             }
             tokio::time::sleep_until(
                 deadline.min(tokio::time::Instant::now() + Duration::from_millis(25)),

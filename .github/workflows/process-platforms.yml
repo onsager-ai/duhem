@@ -10,6 +10,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   RUSTFLAGS: -D warnings
+  # These fixtures bind real loopback listeners; host proxy configuration
+  # must not send their requests outside the runner.
+  NO_PROXY: 127.0.0.1,localhost
 jobs:
   process-platform:
     strategy:

@@ -9,6 +9,8 @@ pub(crate) struct CleanupHook {
     pub(crate) owner: Owner,
     pub(crate) steps: Vec<Step>,
     pub(crate) policy: CleanupPolicy,
+    pub(crate) session: Option<std::sync::Arc<crate::engine::session_scope::SessionScope>>,
+    pub(crate) budget: Option<std::sync::Arc<crate::engine::session_scope::ContextBudget>>,
 }
 
 impl RunState {
@@ -22,6 +24,8 @@ impl RunState {
             owner,
             steps: steps.to_vec(),
             policy,
+            session: self.session.clone(),
+            budget: self.context_budget.clone(),
         });
     }
 

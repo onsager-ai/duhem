@@ -26,7 +26,7 @@ ready:
   http:
     url: http://127.0.0.1:8769/health
     status: 200
-    headers: { X-Ready: yes }
+    headers: { X-Ready: "yes" }
   timeout: 10s
 ```
 
@@ -65,6 +65,12 @@ only processes owned by that check attempt or its fixtures. Sibling checks
 and later retries cannot use each other's handles. Validation rejects
 resolvable enclosing mutations; runtime ownership checks cover dynamically
 supplied handles.
+
+Process outputs from criterion/check setup are addressable as
+`$setup.<step>.outputs.<name>`; a consuming check reads its fixture's process
+outputs as `$fixture.<fixture>.<step>.outputs.<name>`. This is a narrow
+addition for the new process actions; existing non-process setup/fixture
+visibility is unchanged.
 
 `process/stop` takes `handle`, sends SIGTERM to its owned group, waits for
 the stop budget, then escalates to SIGKILL if needed. It waits for live

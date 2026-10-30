@@ -495,17 +495,17 @@ impl Engine {
                 for criterion in &def.criteria {
                     let parent_owner = run_state.process_owner.clone();
                     run_state.process_owner = parent_owner.criterion(&criterion.id);
-                    run_state.register_process_cleanup(
-                        run_state.process_owner.clone(),
-                        &criterion.teardown,
-                        duhem_schema::CleanupPolicy::DiagnosticOnly,
-                    );
                     let parent_session = run_state.session.clone();
                     let parent_outputs = run_state.setup_outputs.clone();
                     crate::engine::session_scope::SessionScope::enter(
                         &mut run_state,
                         &criterion.session,
                         None,
+                    );
+                    run_state.register_process_cleanup(
+                        run_state.process_owner.clone(),
+                        &criterion.teardown,
+                        duhem_schema::CleanupPolicy::DiagnosticOnly,
                     );
                     let cv = self
                         .run_criterion(

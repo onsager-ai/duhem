@@ -60,6 +60,11 @@ execution requires a browser and operator-provided application inputs. (#548)
 
 ## Self-verification suites — Duhem's dogfood
 
+The [iframe example](iframe-example/duhem.yml) demonstrates named and
+inline frame locators, assertions and interactions. It is validated
+offline and executed against a two-origin browser fixture in
+`crates/duhem-runtime/tests/frame_smoke.rs` by browser CI. (#568)
+
 Real VDs that gate this repo's CI. Bigger, multi-step, and pointed at a
 real system stood up by `provision:` hooks. This is what production
 Duhem usage looks like — and, being Duhem-on-Duhem, it catches

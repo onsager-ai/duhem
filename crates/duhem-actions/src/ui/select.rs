@@ -94,6 +94,7 @@ impl Action for Select {
             })?;
         let timeout: Duration = with.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
         let selector = to_selector(&with.locator);
+        let page = page.for_locator(&with.locator);
 
         let by = match with.by {
             By::Value(v) => SelectBy::Value(v.value),

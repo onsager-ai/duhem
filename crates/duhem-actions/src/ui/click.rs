@@ -40,6 +40,8 @@ struct WithWire {
     #[serde(default)]
     scope: Option<Box<Locator>>,
     #[serde(default)]
+    frame: Option<Box<Locator>>,
+    #[serde(default)]
     timeout: Option<TimeoutSpec>,
 }
 
@@ -64,6 +66,7 @@ impl TryFrom<WithWire> for With {
             name: w.name,
             text: w.text,
             scope: w.scope,
+            frame: w.frame,
         };
         let has_inline = inline.role.is_some()
             || inline.label.is_some()
@@ -73,7 +76,8 @@ impl TryFrom<WithWire> for With {
             || inline.xpath.is_some()
             || inline.name.is_some()
             || inline.text.is_some()
-            || inline.scope.is_some();
+            || inline.scope.is_some()
+            || inline.frame.is_some();
         let locator = match (w.locator, has_inline) {
             (Some(_), true) => {
                 return Err(
@@ -122,6 +126,7 @@ impl Action for Click {
                 FieldSpec::optional("name"),
                 FieldSpec::optional("text"),
                 FieldSpec::optional("scope"),
+                FieldSpec::optional("frame"),
                 FieldSpec::optional("locator"),
                 FieldSpec::optional("timeout"),
             ],
@@ -143,6 +148,7 @@ impl Action for Click {
                 source: e,
             })?;
         let (locator, timeout) = with.into_locator();
+        let page = page.for_locator(&locator);
         let selector = to_selector(&locator);
 
         match page.click(&selector, timeout.as_millis() as f64).await {
@@ -156,6 +162,24 @@ impl Action for Click {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_works_in_both_click_forms_and_cannot_mix_forms() {
+        for yaml in [
+            "frame: {testid: report}\nrole: button\nname: Save",
+            "locator: {frame: {testid: report}, role: button, name: Save}",
+        ] {
+            let with: With = serde_yml::from_str(yaml).unwrap();
+            assert_eq!(
+                with.locator.frame.unwrap().testid.as_deref(),
+                Some("report")
+            );
+        }
+        assert!(
+            serde_yml::from_str::<With>("locator: {role: button}\nframe: {testid: report}")
+                .is_err()
+        );
+    }
 
     #[test]
     fn parses_minimal_click() {

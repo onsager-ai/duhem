@@ -1,0 +1,69 @@
+# Executed against a two-origin fixture by runtime tests/frame_smoke.rs in CI.
+verification: Embedded report is ready
+inputs:
+  fixture_url: { type: string }
+pages:
+  report:
+    heading:
+      frame: { testid: report-shell-iframe }
+      role: heading
+      name: Weekly report
+    save:
+      frame: { testid: report-shell-iframe }
+      role: button
+      name: Save
+criteria:
+  - id: AC-1
+    description: The embedded report renders and accepts changes inside its own document.
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.fixture_url }
+          - uses: ui/assert-element
+            with:
+              locator: { testid: report-shell-iframe }
+              expected: visible
+          - uses: ui/assert-element
+            with:
+              locator: $pages.report.heading
+              expected: visible
+              timeout: 2s
+          - uses: ui/assert-element
+            with:
+              locator:
+                frame: { testid: report-shell-iframe }
+                text: Report failed to load
+              expected: not_exists
+          - uses: ui/type
+            with:
+              locator: { frame: { testid: report-shell-iframe }, label: Title }
+              text: Weekly
+          - uses: ui/type
+            with:
+              locator: { frame: { testid: report-shell-iframe }, label: Title }
+              text: ' report'
+              clear: false
+          - uses: ui/select
+            with:
+              locator: { frame: { testid: report-shell-iframe }, role: combobox, name: Format }
+              by: { label: Detailed }
+          - uses: ui/click
+            with: { locator: $pages.report.save }
+          - uses: ui/assert-element
+            with:
+              locator: { frame: { testid: report-shell-iframe }, role: status, text: Saved }
+              expected: visible
+          - id: title
+            uses: ui/extract
+            with:
+              locator: { frame: { testid: report-shell-iframe }, css: input }
+              field: value
+          - id: format
+            uses: ui/extract
+            with:
+              locator: { frame: { testid: report-shell-iframe }, xpath: '//select' }
+              field: value
+        assertions:
+          - $steps.title.outputs.value == 'Weekly report'
+          - $steps.format.outputs.value == 'detailed'

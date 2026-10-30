@@ -239,7 +239,43 @@ const performanceInit = `(() => {
 })()`
 
 /** @param {any} req */
+async function requireFrames(req) {
+  if (!req.frameSelectors?.length) return
+  const deadline = req.timeoutMs === undefined ? undefined : performance.now() + req.timeoutMs
+  const remaining = () => {
+    if (deadline === undefined) return undefined
+    const ms = deadline - performance.now()
+    if (ms <= 0) throw new Error(`Frame document deadline expired for ${req.selector}`)
+    return ms
+  }
+  for (const selector of req.frameSelectors) {
+    const target = page(req).locator(selector)
+    try {
+      // Snapshot operations must not turn an unavailable frame into zero
+      // inner matches. Timed operations share one frame + action deadline.
+      if (deadline === undefined && await target.count() !== 1) {
+        throw new Error('expected exactly one attached iframe')
+      }
+      const handle = await target.elementHandle({ timeout: remaining() })
+      try {
+        const frame = await handle.contentFrame()
+        if (!frame) throw new Error('selected element is not an iframe document')
+        if (deadline !== undefined) {
+          await frame.waitForLoadState('domcontentloaded', { timeout: remaining() })
+        }
+      } finally {
+        await handle.dispose()
+      }
+    } catch (error) {
+      throw new Error(`Frame ${selector} for inner locator ${req.selector}: ${errMsg(error)}`)
+    }
+  }
+  if (deadline !== undefined) req.timeoutMs = remaining()
+}
+
+/** @param {any} req */
 async function dispatch(req) {
+  await requireFrames(req)
   switch (req.op) {
     case 'launch': {
       // By default Playwright launches its own bundled Chromium. On a

@@ -619,3 +619,27 @@ that establishes the product's intended claim. `ui/assert-element` emits
 `satisfied` and retains implicit judgment; any explicit bindings to
 `satisfied` can remain. `api/poll`, `db/observe` and `ui/select` remain
 supported native actions.
+
+### Assert or interact inside an iframe
+
+Add `frame:` to a locator to address the iframe's contents rather than
+the iframe element. The same form works for `ui/assert-element`,
+`ui/click`, `ui/type`, `ui/select`, `ui/extract` and named `$pages.*` entries:
+
+```yaml
+- uses: ui/assert-element
+  with:
+    locator:
+      frame: { testid: report-shell-iframe }
+      role: heading
+      name: Weekly report
+    expected: visible
+    timeout: 30s
+```
+
+For nested frames, place `frame:` on the inner iframe's locator too:
+`frame: { frame: { testid: shell }, testid: report }`. `scope:` narrows
+within the selected document. Cross-origin frames work through the
+browser driver. Missing/ambiguous frames cannot establish inner absence,
+even for `not_exists`; the action deadline includes frame readiness.
+See the [executed example](../verifications/iframe-example/duhem.yml).

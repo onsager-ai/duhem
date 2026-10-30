@@ -60,6 +60,7 @@ impl Action for Extract {
                 source,
             })?;
         let selector = to_selector(&with.locator);
+        let page = page.for_locator(&with.locator);
         let values = page
             .extract(&selector, with.source.kind(), with.source.name())
             .await

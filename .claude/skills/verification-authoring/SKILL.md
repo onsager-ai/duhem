@@ -316,6 +316,13 @@ step account for either execution failure or failed judgment. Missing
 
 #### Share locators instead of copying them
 
+Use optional `frame: <Locator>` on any UI target to enter its containing
+iframe before applying same-document `scope:` and primary strategy.
+Frame locators can themselves carry `frame:` for nested documents;
+cross-origin embeds work through Playwright. This applies to inline and
+named `$pages.*` locators. Never treat a missing iframe as proof that
+its contents are absent; frame readiness shares the action deadline.
+
 Put locators reused by multiple leaves in an ordinary manifest include:
 
 ```yaml

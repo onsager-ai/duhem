@@ -639,11 +639,26 @@ impl CheckBrowser {
 pub struct Page {
     conn: Arc<Conn>,
     id: String,
+    frame_selectors: Vec<String>,
 }
 
 impl Page {
     fn p(&self) -> Value {
-        json!({ "pageId": self.id })
+        let mut request = json!({ "pageId": self.id });
+        if !self.frame_selectors.is_empty() {
+            request["frameSelectors"] = json!(self.frame_selectors);
+        }
+        request
+    }
+
+    /// View of the same page carrying this action's frame preconditions.
+    /// Selector translation retains frame boundaries for all driver operations.
+    pub(crate) fn for_locator(&self, locator: &crate::Locator) -> Self {
+        Self {
+            conn: self.conn.clone(),
+            id: self.id.clone(),
+            frame_selectors: crate::playwright::frame_selectors(locator),
+        }
     }
 
     pub async fn goto(&self, url: &str, timeout_ms: f64) -> Result<(), PwError> {

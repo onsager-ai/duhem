@@ -133,6 +133,9 @@ function describeLocator(loc: Record<string, unknown>): string {
   if (loc.scope && typeof loc.scope === "object") {
     parts.push(`in {${describeLocator(loc.scope as Record<string, unknown>)}}`);
   }
+  if (loc.frame && typeof loc.frame === "object") {
+    parts.push(`inside frame {${describeLocator(loc.frame as Record<string, unknown>)}}`);
+  }
   return parts.join(", ");
 }
 
@@ -159,6 +162,7 @@ export function describeWith(withObj: unknown): string {
       "name",
       "text",
       "scope",
+      "frame",
     ];
     const inlineLocator = Object.fromEntries(
       locatorKeys.filter((key) => w[key] !== undefined).map((key) => [key, w[key]]),

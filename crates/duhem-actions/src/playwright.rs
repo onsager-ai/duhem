@@ -64,6 +64,11 @@ pub fn to_selector(loc: &Locator) -> String {
 }
 
 fn collect(loc: &Locator, chain: &mut Vec<String>) {
+    if let Some(frame) = loc.frame.as_deref() {
+        collect(frame, chain);
+        // Playwright's FrameLocator boundary; never page-side DOM traversal.
+        chain.push("internal:control=enter-frame".into());
+    }
     if let Some(scope) = loc.scope.as_deref() {
         collect(scope, chain);
     }
@@ -113,6 +118,17 @@ fn collect(loc: &Locator, chain: &mut Vec<String>) {
     }
 }
 
+/// Full selectors for each iframe, outermost first, so the driver can
+/// require frame documents even for negative assertions and snapshot reads.
+pub(crate) fn frame_selectors(loc: &Locator) -> Vec<String> {
+    let Some(frame) = loc.frame.as_deref() else {
+        return Vec::new();
+    };
+    let mut selectors = frame_selectors(frame);
+    selectors.push(to_selector(frame));
+    selectors
+}
+
 fn escape_quotes(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
@@ -120,6 +136,32 @@ fn escape_quotes(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_boundaries_precede_same_document_scopes_and_keep_quoted_text_intact() {
+        let loc: Locator = serde_yml::from_str(
+            r#"
+frame:
+  frame: {testid: outer}
+  css: iframe.report
+role: heading
+name: 'Weekly "report"'
+scope: {role: main}
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            to_selector(&loc),
+            r#"css=[data-testid="outer"] >> internal:control=enter-frame >> css=iframe.report >> internal:control=enter-frame >> role=main >> role=heading[name="Weekly \"report\""]"#
+        );
+        assert_eq!(
+            frame_selectors(&loc),
+            vec![
+                r#"css=[data-testid="outer"]"#,
+                r#"css=[data-testid="outer"] >> internal:control=enter-frame >> css=iframe.report"#
+            ]
+        );
+    }
 
     /// Build a `role`-primary locator the terse way; other fields default.
     fn role(name: &str) -> Locator {

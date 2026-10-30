@@ -79,7 +79,7 @@ mod catalog_tests {
         let mut uses: Vec<&str> = cat.iter().map(|c| c.uses).collect();
         uses.sort();
         uses.dedup();
-        assert_eq!(uses.len(), 18, "every `uses` is unique");
+        assert_eq!(uses.len(), cat.len(), "every `uses` is unique");
     }
 
     #[test]

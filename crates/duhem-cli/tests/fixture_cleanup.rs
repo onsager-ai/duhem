@@ -123,7 +123,7 @@ criteria:
 }
 
 #[test]
-fn real_api_poll_judges_cleanup_but_call_status_and_cli_exit_are_observations() {
+fn real_call_status_and_cli_exit_are_cleanup_observations() {
     use std::io::{Read, Write};
     use std::sync::{
         Arc,

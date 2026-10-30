@@ -123,7 +123,7 @@ criteria:
 }
 
 #[test]
-fn real_call_status_and_cli_exit_are_cleanup_observations() {
+fn real_api_poll_judges_cleanup_but_call_status_and_cli_exit_are_observations() {
     use std::io::{Read, Write};
     use std::sync::{
         Arc,
@@ -154,8 +154,22 @@ fn real_call_status_and_cli_exit_are_cleanup_observations() {
     });
     for (action, with, passes) in [
         (
+            "api/poll",
+            format!(
+                "{{method: GET, url: 'http://{address}/', until: {{status: 200}}, timeout: 50ms, interval: 5ms}}"
+            ),
+            false,
+        ),
+        (
             "api/call",
             format!("{{url: 'http://{address}/', method: GET}}"),
+            true,
+        ),
+        (
+            "api/poll",
+            format!(
+                "{{method: GET, url: 'http://{address}/', until: {{status: 500}}, timeout: 50ms, interval: 5ms}}"
+            ),
             true,
         ),
         (

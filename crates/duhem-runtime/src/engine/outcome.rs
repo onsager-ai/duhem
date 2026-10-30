@@ -368,7 +368,7 @@ fn assert_element_fail_detail(ev: &StepEvidence) -> Option<String> {
 }
 
 /// Generic humanizer for the other judging actions (`ui/assert-url`,
-/// such as `ui/assert-url`: compose a short "what was
+/// `api/poll`, `db/observe`, …): compose a short "what was
 /// expected" line from the well-known `with:` fields, plus the last
 /// observed HTTP status when the action recorded one. `None` when
 /// there's nothing legible to say — the caller falls back to the plain
@@ -848,15 +848,15 @@ mod fail_detail_tests {
     }
 
     #[test]
-    fn url_intent_names_expected_url() {
-        let s = step("ui/assert-url");
+    fn poll_intent_names_endpoint_and_last_status() {
+        let s = step("api/poll");
         let e = ev(
-            r#"{ equals: "http://example.test/ready", timeout: "30s" }"#,
-            &[("satisfied", json!(false))],
+            r#"{ method: GET, url: "http://x/job", until: "$response.body.done == true", timeout: "30s" }"#,
+            &[("satisfied", json!(false)), ("status", json!(500))],
         );
         assert_eq!(
-            judging_fail_detail(&s, &e, "ready"),
-            "`ui/assert-url`: expected equals \"http://example.test/ready\" within 30s, but it did not hold"
+            judging_fail_detail(&s, &e, "api/poll #0"),
+            "`api/poll`: expected GET http://x/job until $response.body.done == true within 30s, but it did not hold — last status 500",
         );
     }
 

@@ -114,6 +114,23 @@ Type text into an element.
   with: { locator: { css: "#email" }, text: "a@b.com" }
 ```
 
+### `ui/select`
+
+Select an option in a <select> by value, label, or index.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `locator` | yes | — |
+| `by` | yes | — |
+| `timeout` | no | — |
+
+**outputs:** (none)
+
+```yaml
+- uses: ui/select
+  with: { locator: { css: "#role" }, by: { label: "Admin" } }
+```
+
 ### `ui/assert-element`
 
 Assert an element reaches an existence/visibility state within a deadline.
@@ -147,6 +164,23 @@ Assert the page URL equals a string or matches a regex (exactly one of equals/ma
 ```yaml
 - uses: ui/assert-url
   with: { equals: https://example.com/ }
+```
+
+### `ui/assert-state`
+
+Assert an app state (e.g. signed in/out, or a marker) via `state:`.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `state` | yes | — |
+| `marker` | no | — |
+| `timeout` | no | — |
+
+**outputs:** `satisfied`
+
+```yaml
+- uses: ui/assert-state
+  with: { state: signed_in }
 ```
 
 ### `ui/capture-session`
@@ -221,6 +255,27 @@ Observe a network request the page made (matched by method + URL pattern).
   with: { method: POST, url_pattern: "**/api/login" }
 ```
 
+### `api/poll`
+
+Poll an HTTP endpoint until a condition holds or the deadline elapses.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `method` | yes | — |
+| `url` | yes | — |
+| `headers` | no | — |
+| `body` | no | — |
+| `timeout` | no | — |
+| `interval` | no | — |
+| `until` | yes | — |
+
+**outputs:** `satisfied`, `status`, `body`, `body_text`
+
+```yaml
+- uses: api/poll
+  with: { method: GET, url: $inputs.job_url, until: "$response.body.state == 'done'" }
+```
+
 ### `api/stream`
 
 Consume a streaming (SSE) endpoint, collecting events until a condition.
@@ -263,6 +318,28 @@ Run a read query and observe the returned rows.
 - uses: db/query
   with: { connection: $inputs.db, sql: "select id from users" }
   outputs: { n: row_count }
+```
+
+### `db/observe`
+
+Poll a query until a condition holds or the deadline elapses.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `connection` | yes | — |
+| `sql` | yes | — |
+| `params` | no | — |
+| `find` | no | — |
+| `timeout` | no | — |
+| `interval` | no | — |
+| `until` | no | — |
+
+**outputs:** `satisfied`, `rows`, `row_count`
+
+```yaml
+- uses: db/observe
+  with: { connection: $inputs.db, sql: "select status from jobs where id=1", until: "$rows[0].status == 'done'" }
+  outputs: { satisfied: satisfied }
 ```
 
 ### `db/seed`

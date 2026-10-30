@@ -16,6 +16,7 @@
 //!
 //! Shipped in #37 (rest of slice):
 //! - `ui/type`
+//! - `ui/select`
 //! - `ui/assert-url`
 //!
 //! Shipped in #347 (authenticated-check adapter):
@@ -23,7 +24,7 @@
 //!
 //! ## Waiter-action outcome shape
 //!
-//! The three "waiter" actions diverge on the verdict shape they
+//! The two "waiter" actions diverge on the verdict shape they
 //! emit when their deadline elapses without the expectation being
 //! met. The divergence is intentional but easy to miss:
 //!
@@ -48,6 +49,7 @@ pub mod click;
 pub mod extract;
 mod field;
 pub mod navigate;
+pub mod select;
 pub mod type_;
 pub mod wait;
 
@@ -58,6 +60,7 @@ pub use click::Click;
 pub use extract::Extract;
 pub use field::validate_field_source;
 pub use navigate::Navigate;
+pub use select::Select;
 pub use type_::Type;
 pub use wait::Wait;
 

@@ -19,7 +19,9 @@
 //!   "we waited and it never appeared" observation), and elapsed
 //!   wall time stays inside a loose multiple of `timeout:`.
 //! - `type_fills_input_then_assert_element_reads_it_back`
+//! - `select_by_value_label_index_dispatches_to_playwright`
 //! - `assert_url_passes_on_navigation_and_times_out_on_stale_url`
+//! - `assert_element_observes_loaded_page_marker`
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -30,7 +32,7 @@ use axum::routing::get;
 use base64::Engine as _;
 use duhem_actions::{
     Action, ActionCtx, AssertElement, AssertUrl, Click, Extract, Navigate, Outcome, RunBrowser,
-    Type,
+    Select, Type,
 };
 use serde_yml::Value;
 use tokio::net::TcpListener;
@@ -615,6 +617,40 @@ async fn extract_distinguishes_attribute_property_counts_and_direct_assertion() 
 
 #[tokio::test]
 #[ignore = "requires `npx playwright install chromium`"]
+async fn select_by_value_label_index_dispatches_to_playwright() {
+    let fx = start_fixture().await;
+    let run = fresh_browser().await;
+
+    for (by_yaml, expected) in [
+        (r#"by: { value: editor }"#, "editor"),
+        (r#"by: { label: "Admin" }"#, "admin"),
+        // Index 3 in the option list: [--, admin, editor, viewer].
+        (r#"by: { index: 3 }"#, "viewer"),
+    ] {
+        let check = run.open_check().await.unwrap();
+        let ctx = ActionCtx {
+            page: Some(&check.page),
+            step_index: 0,
+        };
+        Navigate
+            .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
+            .await
+            .unwrap();
+        let with = format!("locator: {{ role: combobox, name: Role }}\n{}\n", by_yaml);
+        let r = Select.invoke(&ctx, &yaml(&with)).await.unwrap();
+        assert_eq!(r.outcome, Outcome::Ok, "by_yaml = {by_yaml}");
+
+        let observed: String = check
+            .page
+            .eval("document.getElementById('role').value")
+            .await
+            .unwrap();
+        assert_eq!(observed, expected, "by_yaml = {by_yaml}");
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
 async fn assert_url_passes_on_navigation_and_times_out_on_stale_url() {
     let fx = start_fixture().await;
     let run = fresh_browser().await;
@@ -679,6 +715,36 @@ async fn assert_url_passes_on_navigation_and_times_out_on_stale_url() {
     assert_eq!(r.outcome, Outcome::Ok);
     assert_eq!(
         r.outputs.get("satisfied").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
+async fn assert_element_observes_loaded_page_marker() {
+    let fx = start_fixture().await;
+    let run = fresh_browser().await;
+    let check = run.open_check().await.unwrap();
+    let ctx = ActionCtx {
+        page: Some(&check.page),
+        step_index: 0,
+    };
+    Navigate
+        .invoke(&ctx, &yaml(&format!("url: http://{}/thanks", fx.addr)))
+        .await
+        .unwrap();
+    let result = AssertElement
+        .invoke(
+            &ctx,
+            &yaml(
+                r#"{ locator: { role: heading, name: Thanks }, expected: visible, timeout: 2s }"#,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.outcome, Outcome::Ok);
+    assert_eq!(
+        result.outputs.get("satisfied").and_then(|v| v.as_bool()),
         Some(true)
     );
 }

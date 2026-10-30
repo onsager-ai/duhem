@@ -26,18 +26,18 @@ pub use action::{
     Action, ActionContract, ActionCtx, ActionResult, DEFAULT_TIMEOUT, FieldSpec, Observation,
     Outcome, layer_for_uses, uses_requires_page,
 };
-pub use api::{Call, Observe, Stream};
+pub use api::{Call, Observe, Poll, Stream};
 pub use browser::{
     BrowserPerformanceObservation, BrowserSessionEvidence, CheckBrowser, Cookie, ElementState,
-    NetworkBatch, NetworkEvent, Page, PwError, Rect, RunBrowser,
+    NetworkBatch, NetworkEvent, Page, PwError, Rect, RunBrowser, SelectBy,
 };
 pub use cli::Invoke;
-pub use db::{Query, Seed};
+pub use db::{DbObserve, Query, Seed};
 pub use error::ActionError;
 pub use locator::{ExistenceState, Locator};
 pub use playwright::to_selector;
 pub use ui::{
-    AssertElement, AssertUrl, CaptureSession, Click, Extract, Navigate, Type, Wait,
+    AssertElement, AssertUrl, CaptureSession, Click, Extract, Navigate, Select, Type, Wait,
     validate_field_source,
 };
 pub use with::TimeoutSpec;
@@ -50,14 +50,17 @@ pub fn catalog() -> Vec<ActionContract> {
         Click.contract(),
         Extract.contract(),
         Type.contract(),
+        Select.contract(),
         AssertElement.contract(),
         AssertUrl.contract(),
         CaptureSession.contract(),
         Wait.contract(),
         Call.contract(),
         Observe.contract(),
+        Poll.contract(),
         Stream.contract(),
         Query.contract(),
+        DbObserve.contract(),
         Seed.contract(),
         Invoke.contract(),
     ]
@@ -75,11 +78,11 @@ mod catalog_tests {
     #[test]
     fn catalog_is_complete_with_unique_uses() {
         let cat = catalog();
-        assert_eq!(cat.len(), 14, "expected 14 action contracts");
+        assert_eq!(cat.len(), 17, "expected 17 action contracts");
         let mut uses: Vec<&str> = cat.iter().map(|c| c.uses).collect();
         uses.sort();
         uses.dedup();
-        assert_eq!(uses.len(), cat.len(), "every `uses` is unique");
+        assert_eq!(uses.len(), 17, "every `uses` is unique");
     }
 
     #[test]

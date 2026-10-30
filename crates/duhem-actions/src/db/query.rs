@@ -146,8 +146,9 @@ pub(crate) fn is_mongo_url(url: &str) -> bool {
 }
 
 /// Run one read (SQL or Mongo) and return the raw JSON rows — the shared
-/// executor behind `db/query`. The `find:`/`sql:` shapes, `_id` coercion,
-/// and value mapping share one read path. `action` labels
+/// executor behind both `db/query` and `db/observe` (spec #181), so the
+/// `find:`/`sql:` shapes, `_id` coercion, and value mapping stay
+/// identical across the one-shot read and the poll loop. `action` labels
 /// the error messages; the `find:` vs `sql:`/`params:` combo is validated
 /// here.
 pub(crate) async fn fetch_rows(

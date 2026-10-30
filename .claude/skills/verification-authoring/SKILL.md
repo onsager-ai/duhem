@@ -203,8 +203,8 @@ the minimal form:
   alias (`outputs: { project_id: body.data._id }`, #273). An identity
   binding `outputs: { foo: foo }` is a redundant no-op — `validate`
   flags it.
-- **`assertions:` is optional for a judging step.** A `ui/assert-element` or
-  `ui/assert-url` step *is* the judgment (it emits `satisfied`, implicitly
+- **`assertions:` is optional for a judging step.** A `ui/assert-*` or
+  `api/poll` step *is* the judgment (it emits `satisfied`, implicitly
   asserted `== true`), so an all-assert check needs no `assertions:`
   block. Bind `satisfied` and assert it yourself only for manual control.
   A check with neither `assertions:` nor a judging step is rejected at
@@ -300,8 +300,8 @@ eligibility.
 
 An action's returned values remain observations unless its contract judges
 them. For example, a non-zero `cli/invoke` `exit_code` or an HTTP 500 returned
-by `api/call` is data, not an automatic cleanup failure. Verify required HTTP cleanup effects in a separate explicit check;
-`fixture.down:` itself has no general HTTP-status assertion surface.
+by `api/call` is data, not an automatic cleanup failure. To judge an HTTP
+cleanup result, use `api/poll` with `method: GET` and `until: {status: 200}`.
 `fixture.up:` stays non-judging. Leaf/criterion/check `teardown:`,
 `provision.down:`, and diagnostic capture remain diagnostic-only in this
 slice. Set `cleanup_policy: diagnostic_only` for a fixture whose `down:`
@@ -433,8 +433,8 @@ Before saving, walk through:
       `id:` (`AC-1`, `AC-2`, …)
 - [ ] Each criterion has at least one check
 - [ ] Each check has a non-empty `steps:` and a verdict — an
-      `assertions:` block **or** a judging step (`ui/assert-element`,
-      `ui/assert-url`)
+      `assertions:` block **or** a judging step (`ui/assert-*`,
+      `api/poll`)
 - [ ] Every referenced output is one the action declares (or bound via
       `outputs:` for a rename/extraction)
 - [ ] Every assertion is one of the six allowed forms

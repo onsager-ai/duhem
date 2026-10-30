@@ -247,7 +247,7 @@ criteria:
   one action; failures are evidence only. `--keep-env` skips both cleanup
   layers and leaves the world as the run left it.
 - **`assertions`** are evaluated deterministically — no model in the
-  judging loop. They're also **optional**: a `ui/assert-*`
+  judging loop. They're also **optional**: a `ui/assert-*` (or `api/poll`)
   step *is* the judgment, so an all-assert check needs no `assertions:`
   block at all. Bind `satisfied` and assert it yourself only for manual
   control (e.g. a disjunction across steps).
@@ -581,19 +581,6 @@ which stays on your side (local or CI), never in the server.
   especially §7 (Core Concepts) and §8 (Holistic Verification).
 
 
-### Removed action types after v0.6.0
-
-The next release removes `ui/select`, `ui/assert-state`, `api/poll`, and
-`db/observe`. `ui/wait` remains available. Use supported interactions and
-explicit assertions on `api/call` or `db/query` outputs where they express
-the same requirement. There is no equivalent native select or generic
-polling action: redesign those verifications against supported observable
-behavior before upgrading. `ui/assert-element` and `ui/assert-url` remain
-judging actions; data-returning actions require explicit assertions. In
-fixture `down:`, an HTTP status is still data and has no general assertion
-surface; check any required cleanup effect separately.
-
-
 ### Locate a failing loop iteration
 
 Current runs prefix a failing `for_each` assertion's existing report detail
@@ -610,3 +597,25 @@ reports retain their existing text rather than inventing an unknown count.
 Use `--profile NAME` with `duhem run` or `duhem resolve` to select a
 manifest profile. The former `--environment NAME` alias is removed in
 the next release after v0.6.0; replace that spelling in scripts and CI.
+
+### Migrate page-state assertions
+
+In the next release after v0.6.0, replace `ui/assert-state` steps with
+`ui/assert-element` on the application's state marker. For example, a
+product that exposes `data-testid="signed-in-user"` when signed in can
+assert that marker directly:
+
+```yaml
+- uses: ui/assert-element
+  with:
+    locator: { testid: signed-in-user }
+    expected: visible
+    timeout: 20s
+```
+
+For a loaded page, assert its ready heading or other stable ready marker;
+for signed-out state, assert the sign-in affordance. Choose the marker
+that establishes the product's intended claim. `ui/assert-element` emits
+`satisfied` and retains implicit judgment; any explicit bindings to
+`satisfied` can remain. `api/poll`, `db/observe` and `ui/select` remain
+supported native actions.

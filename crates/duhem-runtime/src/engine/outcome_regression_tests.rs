@@ -78,7 +78,7 @@ fn unknown_action_without_assertions_names_label_and_uses() {
 #[test]
 fn environment_failure_contributes_for_each_non_gated_actuator() {
     let check = check(
-        "  - id: first\n    uses: ui/click\n  - id: gated\n    uses: ui/type\n  - id: second\n    uses: ui/type\n",
+        "  - id: first\n    uses: ui/click\n  - id: gated\n    uses: ui/type\n  - id: second\n    uses: ui/select\n",
     );
     let evidence = vec![
         evidence(Outcome::Error, "{}"),

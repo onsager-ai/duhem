@@ -1,0 +1,18 @@
+# Temporary generator for #588; removed after importing the generated reference.
+name: action reference preview
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  generate:
+    if: github.head_ref == 'codex/spec-588-remove-unused-actions'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo run -p xtask -- action-reference
+      - uses: actions/upload-artifact@v7
+        with:
+          name: generated-action-reference
+          path: docs/action-reference.md

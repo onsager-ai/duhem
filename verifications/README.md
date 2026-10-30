@@ -34,7 +34,7 @@ composition.
 |--:|-----------|---------|--------------|:----:|
 | 1 | [`defaults-example`](defaults-example/) | Root-manifest `defaults:` — set the suite-wide timeout + inconclusive policy **once**, not per leaf | nothing — fully offline (`noop/*`) | #66 |
 | 2 | [`implicit-outputs-example`](implicit-outputs-example/) | Reference `$steps.<id>.outputs.<field>` with **no `outputs:` ceremony** — the validator resolves it against the action contract | network (`api/call` → example.com) | #267 |
-| 3 | [`implicit-judgment-example`](implicit-judgment-example/) | Judging steps (`ui/assert-element`, `ui/assert-url`) **self-assert** — an all-assert check needs no `assertions:` block; contrasts terse vs. explicit authoring | browser + a local login app on `:8080` | #253 |
+| 3 | [`implicit-judgment-example`](implicit-judgment-example/) | Judging steps (`ui/assert-*`, `api/poll`) **self-assert** — an all-assert check needs no `assertions:` block; contrasts terse vs. explicit authoring | browser + a local login app on `:8080` | #253 |
 | 4 | [`includes-example`](includes-example/) | `includes:` composition — a shared committed fragment plus a per-developer override, under the root-wins merge rule | network | #67 |
 | 5 | [`environments-example`](environments-example/) | Named `profiles:` — declare configs, select one (`--profile`), feed the leaf input chain and the `$env.*` whitelist | network | #68 |
 | 6 | [`inherits-example`](inherits-example/) | Inherited inputs — a leaf marks names `inherit: true` under `inputs:` and reads suite-wide values the manifest provides (a DI container) | network | #135 |

@@ -96,8 +96,25 @@ impl ElementState {
     }
 }
 
-/// A browser cookie. Extra Playwright fields are ignored on
-/// deserialize; `ui/assert-state` only needs the name.
+/// `selectOption` discriminator — exactly one of value / label / index.
+#[derive(Debug)]
+pub enum SelectBy {
+    Value(String),
+    Label(String),
+    Index(usize),
+}
+
+impl SelectBy {
+    fn to_json(&self) -> Value {
+        match self {
+            SelectBy::Value(v) => json!({ "value": v }),
+            SelectBy::Label(l) => json!({ "label": l }),
+            SelectBy::Index(i) => json!({ "index": i }),
+        }
+    }
+}
+
+/// A browser cookie. Extra Playwright fields are ignored on deserialize.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Cookie {
     pub name: String,
@@ -663,6 +680,19 @@ impl Page {
         req["text"] = json!(text);
         req["timeoutMs"] = json!(timeout_ms);
         self.conn.request("type", req).await.map(|_| ())
+    }
+
+    pub async fn select_option(
+        &self,
+        selector: &str,
+        by: &SelectBy,
+        timeout_ms: f64,
+    ) -> Result<(), PwError> {
+        let mut req = self.p();
+        req["selector"] = json!(selector);
+        req["by"] = by.to_json();
+        req["timeoutMs"] = json!(timeout_ms);
+        self.conn.request("selectOption", req).await.map(|_| ())
     }
 
     /// Wait for `selector` to reach `state`. `Ok(())` on success;

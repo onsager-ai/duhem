@@ -54,12 +54,12 @@ criteria:
           - $setup.probe.outputs.satisfied == true
 
   # Exercises the rest-of-slice actions from #37 — `ui/type`,
-  # `ui/assert-url` — on the same
+  # `ui/select`, `ui/assert-url` — on the same
   # fixture page. Same trait / lifecycle / Locator as AC-1.
   - id: AC-2
     description: |
-      Fill the name input, submit, and
-      observe the post-submit URL.
+      Fill the name input, pick a role from the select, submit, and
+      observe the post-submit URL and the loaded page's marker heading.
     checks:
       - id: AC-2.1
         steps:
@@ -69,13 +69,24 @@ criteria:
             with:
               locator: { role: "textbox", name: "Name" }
               text: "Alice"
+          - uses: ui/select
+            with:
+              locator: { role: "combobox", name: "Role" }
+              by: { label: "Admin" }
           - uses: ui/click
             with: { role: "button", name: "Submit" }
           - id: landed
             uses: ui/assert-url
             with: { matches: "/thanks", timeout: 2s }
+          - id: loaded
+            uses: ui/assert-element
+            with:
+              locator: { role: heading, name: Thanks }
+              expected: visible
+              timeout: 2s
         assertions:
           - $steps.landed.outputs.satisfied == true
+          - $steps.loaded.outputs.satisfied == true
 
   - id: AC-3
     description: |

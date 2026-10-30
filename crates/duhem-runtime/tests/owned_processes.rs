@@ -38,6 +38,19 @@ async fn run(scenario: &str) -> (RunOutcome, Trace, tempfile::TempDir) {
     let trace = Trace::from_store(store.as_ref(), &result.run_id)
         .await
         .unwrap();
+    if !result.cleanup.is_empty() {
+        eprintln!("cleanup findings: {:?}", result.cleanup);
+    }
+    for event in trace.events() {
+        if let EventPayload::ProcessObserved {
+            operation,
+            detail: Some(detail),
+            ..
+        } = &event.payload
+        {
+            eprintln!("{operation}: {detail}");
+        }
+    }
     assert_eq!(replay(&trace).unwrap().run.state, result.verdict.state);
     (result, trace, dir)
 }

@@ -1454,6 +1454,17 @@ later reuse and check-level assertions.
 
 - `cli/invoke` — run a subprocess command and capture its exit code, stdout, and stderr for assertion
 
+**Owned local processes** (Unreleased, after v0.7.0; #579)
+
+- `process/start` — executable `command`, string-array `args`, optional `cwd`/`env`, optional bounded HTTP/log `ready`; returns run/owner/generation-bound `handle`, `generation`, diagnostic `pid`, and `ready`. No readiness probe means spawned only (`ready: false`).
+- `process/inspect` — reads state, exit/signal and bounded masked stdout/stderr logs with cursor, generation and explicit truncation/drop facts.
+- `process/stop` — bounded SIGTERM/SIGKILL of the owned Unix group, descendant termination, direct-child reaping and log draining; idempotent exit/stop facts.
+- `process/restart` — stop/reap the old generation before reusing its launch/readiness contract; preserve product-owned state and both generations' evidence.
+
+All four are non-judging. Setup/fixture-up spawn/readiness failure makes dependent checks inconclusive with environment-error semantics; body errors retain masked detail and inconclusive missing observations. Ownership follows declaring leaf/criterion/check/fixture scope, independently of browser context. Only the current check or its fixtures may be stopped/restarted; enclosing handles are inspect-only, and sibling/retry handles are rejected. After authored cleanup, reverse-order process finalizers are always required, including diagnostic-only fixtures, retries and observed cancellation; failures block the effective gate while preserving body judgments. Ordinary teardown/provision diagnostics retain their semantics.
+
+Linux/macOS use owned process groups; unsupported platforms reject before spawn. Detached daemons, interactive protocols and port leases are outside the contract. See [exact lifecycle/log/timeout semantics](owned-processes.md) and the [executable HTTP/restart example](../verifications/owned-process-example/duhem.yml). These actions are not in the v0.7.0 tag.
+
 #### Planned (Phase 2+ — §14)
 
 Roadmap surfaces that are **not** registered today; a `uses:` naming one fails catalog-aware validation. They are listed here so authors can see the intended direction, not author against them yet.
@@ -1842,7 +1853,7 @@ The milestone is complete only when the relevant gate-integrity contracts have C
 
 **Goal:** qualify a complete product journey against actual supported binaries and services, including setup, readiness, evidence and cleanup.
 
-[Milestone M2](https://github.com/onsager-ai/duhem/milestone/2) carries the remaining [#543](https://github.com/onsager-ai/duhem/issues/543) nested-group/fixture-to-flow scope, [#440](https://github.com/onsager-ai/duhem/issues/440) Tier 2 conditions, and the [owned background-process draft (#579)](https://github.com/onsager-ai/duhem/issues/579). Reuse landed session cascade, teardown and flow work; do not rebuild it. The process action's exact start/readiness/log/stop contract is blocked on Semon #501's assertion map.
+[Milestone M2](https://github.com/onsager-ai/duhem/milestone/2) carries the remaining [#543](https://github.com/onsager-ai/duhem/issues/543) nested-group/fixture-to-flow scope, [#440](https://github.com/onsager-ai/duhem/issues/440) Tier 2 conditions, and the [owned local-process contract (#579)](https://github.com/onsager-ai/duhem/issues/579). Reuse landed session cascade, teardown and flow work; do not rebuild it. The Semon #516 map supplied the Receive/watch/restart cases for #579. Its start/inspect/stop/restart contract is implemented under Unreleased; qualify the real-binary consumer at a containing source pin, with product-owned readiness and assertions.
 
 Pilot the complete native-log → Push/Receive → publication and authorized reading → paging → append/restart/recovery/revocation journey described in the migration contract, split into independently runnable checks. Products own criteria, real fixtures, thresholds and CI policy. Helpers expose facts under explicit contracts; the VD keeps the acceptance rule visible. A whole acceptance runner hidden behind `cli/invoke` and `exit_code == 0` does not qualify the journey.
 

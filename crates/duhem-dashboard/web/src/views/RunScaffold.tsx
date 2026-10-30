@@ -17,7 +17,7 @@ import {
   type TraceEvent,
 } from "../api";
 import { carryFetched, foldRun } from "../fold";
-import { deliveryLayerLabel, groupTimeline, stepStatus } from "../format";
+import { assertionKey, isExplicitAssertion, deliveryLayerLabel, groupTimeline, stepStatus } from "../format";
 import { groupLoops, stepNavigation } from "../step-presentation";
 import { LoopGroup } from "../components/LoopGroup";
 import { RailSplitter } from "../components/RailSplitter";
@@ -258,6 +258,8 @@ function TreeGroup({
             const steps = active && activeCheck
               ? groupTimeline(activeCheck.timeline).filter((node) => node.kind === "step")
               : [];
+            const assertions = active && activeCheck
+              ? activeCheck.timeline.filter(isExplicitAssertion) : [];
             const renderStep = (node: (typeof steps)[number]) => {
               if (node.kind !== "step") return null;
               const started = node.events[0];
@@ -265,6 +267,7 @@ function TreeGroup({
               const { key, label } = stepNavigation(node, vd, criterion.id, chk.id);
               const stepSearch = new URLSearchParams(search);
               stepSearch.delete("lifecycle");
+              stepSearch.delete("assertion");
               stepSearch.set("step", key);
               const status = stepStatus(node);
               const layer = deliveryLayerLabel(started.layer);
@@ -285,6 +288,7 @@ function TreeGroup({
                 const targetKey = stepNavigation(target, vd, criterion.id, chk.id).key;
                 const targetSearch = new URLSearchParams(search);
                 targetSearch.delete("lifecycle");
+                targetSearch.delete("assertion");
                 targetSearch.set("step", targetKey);
                 navigate({
                   pathname: checkHref(runId, criterion.id, chk.id),
@@ -380,6 +384,28 @@ function TreeGroup({
                         selectedKey={steps.find((step) => stepNavigation(step, vd, criterion.id, chk.id).key === activeStep)?.key}
                         renderStep={renderStep} />
                     : node.kind === "step" ? renderStep(node) : null)}
+                </div>
+              )}
+              {assertions.length > 0 && (
+                <div className="ml-3 border-l pl-2" data-testid="assertion-children">
+                  {assertions.map((evt) => {
+                    const key = assertionKey(evt);
+                    const label = `Assertion ${Number(evt.assertion_index) + 1}${typeof evt.iteration === "number" ? ` (iteration ${evt.iteration + 1})` : ""}`;
+                    const assertionSearch = new URLSearchParams(search);
+                    assertionSearch.delete("lifecycle");
+                    assertionSearch.delete("step");
+                    assertionSearch.set("assertion", key);
+                    assertionSearch.delete("view");
+                    return <Link key={key} data-testid="assertion-rail-row"
+                      to={{ pathname: checkHref(runId, criterion.id, chk.id), search: `?${assertionSearch}` }}
+                      aria-label={label} title={typeof evt.expr === "string" ? evt.expr : label}
+                      aria-current={new URLSearchParams(search).get("assertion") === key ? "step" : undefined}
+                      className={cn("flex min-w-0 items-center gap-2 rounded px-2 py-1 text-xs",
+                        new URLSearchParams(search).get("assertion") === key ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/60")}>
+                      <span className="min-w-0 flex-1 truncate">{label}</span>
+                      <VerdictBadge verdict={typeof evt.state === "string" ? evt.state : null} compact />
+                    </Link>;
+                  })}
                 </div>
               )}
               {lifecycle.some((block) => block.phase === "teardown" && lifecycleAtCheck(block, criterion.id, chk.id)) && (

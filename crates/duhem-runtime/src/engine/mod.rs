@@ -7,6 +7,8 @@
 //! belong to `duhem-schema`, `duhem-judge`, `duhem-actions`, and
 //! `duhem-evidence` respectively; the engine is purely compositional.
 
+#[cfg(test)]
+mod assertion_evidence_tests;
 pub mod capture;
 pub mod context;
 pub mod env;

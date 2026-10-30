@@ -12,7 +12,7 @@ use thiserror::Error;
 use crate::engine::context::RunContext;
 use crate::engine::shim::assertion_to_expr;
 use crate::engine::translate::{eval_cause_detail, eval_to_state};
-use crate::eval::{EvalResult, describe_comparison, eval};
+use crate::eval::EvalResult;
 
 /// Surfaces only "the runtime itself failed" cases. A failing
 /// artifact yields `RunVerdict::Fail`, not `Err`.
@@ -442,6 +442,7 @@ pub(crate) async fn evaluate_explicit_assertions(
         if skipped_reference_reason(&expr, check, step_evidence).is_some() {
             continue;
         }
+        let mut operands = BTreeMap::new();
         let (state, detail) = if any_unknown {
             (
                 VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
@@ -457,7 +458,8 @@ pub(crate) async fn evaluate_explicit_assertions(
                 }),
             )
         } else {
-            let r = eval(&expr, ctx);
+            let (r, values, comparison) = crate::eval::operands::evaluate_assertion(&expr, ctx);
+            operands = values;
             let detail = match &r {
                 EvalResult::Inconclusive(c) => Some(eval_cause_detail(c)),
                 // A failed comparison gets its observed operands —
@@ -466,7 +468,7 @@ pub(crate) async fn evaluate_explicit_assertions(
                 // (`disallowed {rhs}`, `expected < {rhs}`; #407) — so
                 // the reporter shows the values, not just the
                 // expression.
-                EvalResult::False => describe_comparison(&expr, ctx),
+                EvalResult::False => comparison,
                 EvalResult::True => None,
             };
             (eval_to_state(&r), detail)
@@ -474,6 +476,7 @@ pub(crate) async fn evaluate_explicit_assertions(
         writer
             .append(EventPayload::AssertionEvaluated {
                 check_id: check.id.clone(),
+                operands: Some(operands),
                 iteration,
                 assertion_index: i as u32,
                 state,
@@ -610,6 +613,7 @@ pub(crate) async fn append_implicit_judgment(
         writer
             .append(EventPayload::AssertionEvaluated {
                 check_id: check_id.to_string(),
+                operands: None,
                 iteration,
                 assertion_index: index as u32,
                 state: imp.state,

@@ -375,16 +375,6 @@ async function dispatch(req) {
         .pressSequentially(req.text, { timeout: req.timeoutMs })
       return null
 
-    case 'selectOption': {
-      const by = req.by
-      let option
-      if (by.value !== undefined) option = { value: by.value }
-      else if (by.label !== undefined) option = { label: by.label }
-      else option = { index: by.index }
-      await page(req).selectOption(req.selector, option, { timeout: req.timeoutMs })
-      return null
-    }
-
     case 'waitForSelector':
       // Resolves on reaching `state`; throws TimeoutError otherwise. The
       // Rust side maps the throw (message contains "Timeout") to

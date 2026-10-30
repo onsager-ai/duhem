@@ -48,14 +48,7 @@ fn fixture_parses_at_schema_layer() {
     let uses: Vec<&str> = ac2_steps.iter().map(|s| s.uses_name()).collect();
     assert_eq!(
         uses,
-        vec![
-            "ui/navigate",
-            "ui/type",
-            "ui/select",
-            "ui/click",
-            "ui/assert-url",
-            "ui/assert-state",
-        ]
+        vec!["ui/navigate", "ui/type", "ui/click", "ui/assert-url",]
     );
 
     let ac3_steps = &def.criteria[2].checks[0].steps;

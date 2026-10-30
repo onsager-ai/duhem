@@ -619,7 +619,7 @@ Step events and screenshots, DOM, network and replay captures carry the selected
 session name. The dashboard labels steps and offers a separate replay per context.
 Definitions using neither session field retain their existing wire shape.
 
-**Locators.** UI actions (`ui/click`, `ui/type`, `ui/assert-element`, `ui/select`) address an element by exactly one *primary strategy*: `role` (paired with an optional `name`), `label` (associated label text — how to reach an input with no ARIA role, e.g. `type=password`), `testid` (the `data-testid` attribute), `placeholder`, `css` (a raw CSS selector escape hatch), `xpath` (a raw XPath selector escape hatch), or a standalone `text`. A `text` substring may additionally *filter* a non-text primary, and a recursive `scope:` narrows the search to inside a container. Prefer `role`, `testid`, or `scope:` + `text:`; use `css:` or `xpath:` only when those cannot reach the element, because markup-coupled selectors—especially absolute XPath paths—break readily as markup changes. `ui/click` takes these fields inline in its `with:`; the other actions nest them under `locator:`. Two primaries at once, or none, is rejected. Each named strategy maps to the corresponding Playwright selector engine.
+**Locators.** UI actions (`ui/click`, `ui/type`, `ui/assert-element`) address an element by exactly one *primary strategy*: `role` (paired with an optional `name`), `label` (associated label text — how to reach an input with no ARIA role, e.g. `type=password`), `testid` (the `data-testid` attribute), `placeholder`, `css` (a raw CSS selector escape hatch), `xpath` (a raw XPath selector escape hatch), or a standalone `text`. A `text` substring may additionally *filter* a non-text primary, and a recursive `scope:` narrows the search to inside a container. Prefer `role`, `testid`, or `scope:` + `text:`; use `css:` or `xpath:` only when those cannot reach the element, because markup-coupled selectors—especially absolute XPath paths—break readily as markup changes. `ui/click` takes these fields inline in its `with:`; the other actions nest them under `locator:`. Two primaries at once, or none, is rejected. Each named strategy maps to the corresponding Playwright selector engine.
 
 ```yaml
 # Any filename. Self-identifies by top-level fields.
@@ -634,8 +634,8 @@ inputs:
 setup:                                  # runs once before all criteria
   - uses: ui/navigate
     with: {url: "/dashboard"}
-  - uses: ui/assert-state
-    with: {role: "page", state: "authenticated"}
+  - uses: ui/assert-element
+    with: {locator: {role: button, name: "Create workspace"}, expected: visible}
 
 criteria:
   - id: AC-1
@@ -756,7 +756,7 @@ A manifest can also provision **one shared environment for the whole suite** rat
 
 #### 10.3.2 Implicit judgment (judging steps)
 
-An action whose contract emits a boolean `satisfied` output — `ui/assert-element`, `ui/assert-url`, `ui/assert-state`, `api/poll` — is a **judging action**. A judging step **implicitly asserts `satisfied == true`**: it contributes one assertion outcome to the check’s verdict without any `assertions:` entry. So the four checks above collapse to their steps alone — no `id`, no `outputs:`, no `$steps.…` line:
+An action whose contract emits a boolean `satisfied` output — `ui/assert-element`, `ui/assert-url` — is a **judging action**. A judging step **implicitly asserts `satisfied == true`**: it contributes one assertion outcome to the check’s verdict without any `assertions:` entry. So the four checks above collapse to their steps alone — no `id`, no `outputs:`, no `$steps.…` line:
 
 ```yaml
       - id: AC-1.2
@@ -1010,9 +1010,9 @@ failure is a step execution error, timeout, step-local runtime/dispatch error,
 or a non-passing implicit judgment from a judging action, including a false
 `satisfied == true` condition or a missing required judging output. A
 returned observation is data: a non-zero `exit_code` from `cli/invoke` or an
-HTTP 500 response from `api/call` does not by itself fail cleanup. To judge an
-HTTP cleanup result, use `api/poll` with `method: GET` and
-`until: {status: 200}`. Set `cleanup_policy: diagnostic_only` when a fixture's
+HTTP 500 response from `api/call` does not by itself fail cleanup. To verify an HTTP cleanup effect, use a separate explicit check with
+`api/call` and assertions; fixture `down:` itself has no general HTTP-status
+judgment after the polling action removal. Set `cleanup_policy: diagnostic_only` when a fixture's
 cleanup should remain visible without changing the effective run gate.
 
 | Event | Check/body result | Effective run gate |
@@ -1383,11 +1383,9 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 - `ui/navigate` — go to a URL
 - `ui/click` — click an element (role-based locators preferred)
 - `ui/type` — type into an input
-- `ui/select` — select an option
 - `ui/assert-element` — judge existence/visibility with `expected:`, or directly judge an extracted field with `expect: { field: checked, equals: true }`
 - `ui/extract` — non-judging extraction of an attribute, live DOM property, or rendered `innerText`; exposes `value`, `found`, `count`, and (with `all: true`) DOM-ordered `values`
 - `ui/assert-url` — observe URL state
-- `ui/assert-state` — observe page-level state (authenticated, loaded, etc.)
 - `ui/capture-session` — capture cookies/local storage as a secret state value for later checks
 - `ui/wait` — wait for a fixed `duration` (`TimeoutSpec`, e.g. `500ms` or `2s`) without requiring a browser page. Prefer `ui/assert-element` with `timeout:`; fixed waits are a debugging and transitional-authoring escape hatch with a 60-second default ceiling that root-manifest `defaults.max_wait` may raise or lower.
 
@@ -1417,7 +1415,6 @@ later reuse and check-level assertions.
 
 - `api/call` — make an HTTP request actively
 - `api/observe` — passively observe an HTTP request the UI triggers (network sniffing)
-- `api/poll` — re-hit an endpoint until a response condition holds or a timeout elapses
 - `api/stream` — follow an open-ended SSE / `text/event-stream` from an in-progress source, collecting ordered events until a terminal condition (`until_event` / `max_events` / server close) or the `timeout:` budget; outputs `events` / `event_count` / `last_event` for mechanical assertion
 
 **Database actions**

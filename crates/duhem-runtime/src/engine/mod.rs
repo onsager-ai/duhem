@@ -39,3 +39,10 @@ pub use runner::{
     CapturedArtifact, CheckFailure, CheckFilter, CleanupFailure, Engine, EngineError,
     FailedAssertion, RunOutcome,
 };
+
+#[cfg(test)]
+mod check_for_each_tests;
+#[cfg(test)]
+mod shrunken_claims_tests;
+#[cfg(test)]
+mod testing;

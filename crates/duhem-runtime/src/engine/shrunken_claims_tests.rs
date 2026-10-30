@@ -4,7 +4,6 @@ use std::{collections::BTreeMap, sync::Arc};
 use duhem_dashboard::EvidenceReader;
 use duhem_evidence::{EventPayload, EvidenceWriter, SqliteStore, StepOutcome, Trace, replay};
 use duhem_judge::VerdictState;
-use duhem_runtime::Engine;
 use duhem_schema::VerificationDefinition;
 use serde_json::json;
 
@@ -16,18 +15,18 @@ setup:
   - id: count_rows
     uses: db/query
     with: {{ connection: 'sqlite::memory:', sql: 'select 1 where 0' }}
-  - uses: db/observe
+  - uses: test/sql-judgment
     if: $setup.count_rows.outputs.row_count > 0
-    with: {{ connection: 'sqlite::memory:', sql: 'select 1', until: {{ row_count: 1 }} }}
+    with: {{ connection: 'sqlite::memory:', sql: 'select 1' }}
 criteria:
   - id: AC-1
     description: Conditional claims remain legible
     checks:
       - id: AC-1.1
         steps:
-          - uses: db/observe
+          - uses: test/sql-judgment
             if: {condition}
-            with: {{ connection: 'sqlite::memory:', sql: 'select 1', until: {{ row_count: 1 }} }}
+            with: {{ connection: 'sqlite::memory:', sql: 'select 1' }}
         assertions: ["true"]
 "#
     ))
@@ -48,7 +47,7 @@ async fn lifecycle_conditions_record_actual_operands_but_only_value_check_gates_
         ("failure", 0),
         ("$setup.count_rows.outputs.row_count > 0", 1),
     ] {
-        let outcome = Engine::new()
+        let outcome = super::testing::engine()
             .with_store(store.clone())
             .run_with_metadata(&definition(condition), BTreeMap::new())
             .await
@@ -113,7 +112,7 @@ async fn value_gated_trace_renders_differently_and_replays_identically_without_m
                 .to_string()
                 .contains("value-based conditions are not yet available"))
     );
-    let outcome = Engine::new()
+    let outcome = super::testing::engine()
         .with_store(store.clone())
         .run_with_metadata(&def, BTreeMap::new())
         .await
@@ -240,18 +239,18 @@ criteria:
               connection: 'sqlite::memory:'
               sql: "select 'session:' || ?1 as session, upper(?1) as transformed"
               params: [$inputs.token]
-          - uses: db/observe
+          - uses: test/sql-judgment
             if: $steps.login.outputs.rows[0].session == 'not-the-session'
-            with: { connection: 'sqlite::memory:', sql: 'select 1', until: { row_count: 1 } }
-          - uses: db/observe
+            with: { connection: 'sqlite::memory:', sql: 'select 1' }
+          - uses: test/sql-judgment
             if: $steps.login.outputs.rows[0].transformed == 'not-the-session'
-            with: { connection: 'sqlite::memory:', sql: 'select 1', until: { row_count: 1 } }
+            with: { connection: 'sqlite::memory:', sql: 'select 1' }
         assertions: ["true"]
 "#,
     )
     .unwrap();
     let secret = "sensitive-condition-operand";
-    let outcome = Engine::new()
+    let outcome = super::testing::engine()
         .with_store(store.clone())
         .run_with_metadata(&def, BTreeMap::from([("token".into(), json!(secret))]))
         .await

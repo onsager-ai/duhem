@@ -38,7 +38,7 @@ pub struct ActionCtx<'a> {
     /// Browser page bound to this check, or `None` for a page-free
     /// step. The engine attaches a page only when the check contains a
     /// step that needs one (`uses_requires_page`); `api/call`,
-    /// `api/poll`, `api/stream`, `db/*`, and `cli/*` run with `None`.
+    /// `api/stream`, `db/*`, and `cli/*` run with `None`.
     pub page: Option<&'a Page>,
     /// Zero-based index of the currently-executing step within its
     /// check. Carried for evidence threading downstream.
@@ -134,7 +134,7 @@ impl ActionResult {
 /// Whether an action identified by its `Step.uses` string needs a
 /// Playwright `Page`. UI actions (`ui/*`) drive a page directly, and
 /// `api/observe` reads the page's network recorder. `api/call`,
-/// `api/poll`, `api/stream`, `db/*`, and `cli/*` never touch a page.
+/// `api/stream`, `db/*`, and `cli/*` never touch a page.
 /// Single source
 /// of truth for two consumers: the engine opens a per-check browser
 /// only when a step needs it, and the CLI skips launching the
@@ -298,10 +298,8 @@ mod tests {
             "ui/navigate",
             "ui/click",
             "ui/type",
-            "ui/select",
             "ui/assert-element",
             "ui/assert-url",
-            "ui/assert-state",
         ] {
             assert!(uses_requires_page(u), "{u} should need a page");
         }
@@ -311,10 +309,8 @@ mod tests {
         for u in [
             "ui/wait",
             "api/call",
-            "api/poll",
             "api/stream",
             "db/query",
-            "db/observe",
             "db/seed",
             "cli/invoke",
         ] {
@@ -334,7 +330,7 @@ mod layer_tests {
         assert_eq!(layer_for_uses("api/call"), Some("api"));
         assert_eq!(layer_for_uses("api/observe"), Some("api"));
         assert_eq!(layer_for_uses("db/query"), Some("data"));
-        assert_eq!(layer_for_uses("db/observe"), Some("data"));
+        assert_eq!(layer_for_uses("db/query"), Some("data"));
         assert_eq!(layer_for_uses("cli/invoke"), Some("runtime"));
         // Out-of-catalog: untagged, never guessed.
         assert_eq!(layer_for_uses("custom/thing"), None);

@@ -696,3 +696,13 @@ Select a name on each browser step, or put `session: <name>` on a `call:`:
 undeclared inner browser selectors inherit it; explicit inner selectors win.
 Call selectors require a named-sessions check. `defaults.max_sessions` caps
 simultaneously open contexts per check (default 4).
+
+
+### Retired actions
+
+After v0.6.0, `ui/select`, `ui/assert-state`, `api/poll`, and `db/observe`
+are removed. Query/call outputs can be judged with explicit assertions;
+`ui/assert-element` and `ui/assert-url` remain available for page judgments.
+There is no automatic replacement for select or polling semantics. Update
+those verifications against supported behavior before upgrading. `ui/wait`
+remains available.

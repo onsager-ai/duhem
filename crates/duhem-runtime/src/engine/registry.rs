@@ -27,9 +27,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use duhem_actions::Page;
 use duhem_actions::{
-    Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertState, AssertUrl, Call,
-    CaptureSession, Click, DbObserve, Extract, Invoke, Navigate, Observe, Poll, Query, Seed,
-    Select, Stream, Type, Wait,
+    Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertUrl, Call, CaptureSession,
+    Click, Extract, Invoke, Navigate, Observe, Query, Seed, Stream, Type, Wait,
 };
 use serde::Deserialize;
 use serde::de::Error as _;
@@ -217,8 +216,7 @@ fn inject_child_env(with: &mut serde_yml::Value, child_env: &BTreeMap<String, St
 pub(crate) type ActionRegistry = BTreeMap<&'static str, Box<dyn Dispatch>>;
 
 /// The v1 catalog: the full `ui/*` slice (`ui/navigate`, `ui/click`,
-/// `ui/assert-element`, `ui/type`, `ui/select`, `ui/assert-url`,
-/// `ui/assert-state`) and `api/call`.
+/// `ui/assert-element`, `ui/type`, `ui/assert-url`) and `api/call`.
 pub(crate) fn default_registry() -> ActionRegistry {
     let mut m: ActionRegistry = BTreeMap::new();
     insert(&mut m, ConcreteAction::new(Box::new(Navigate)));
@@ -226,18 +224,14 @@ pub(crate) fn default_registry() -> ActionRegistry {
     insert(&mut m, ConcreteAction::new(Box::new(Extract)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertElement)));
     insert(&mut m, ConcreteAction::new(Box::new(Type)));
-    insert(&mut m, ConcreteAction::new(Box::new(Select)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertUrl)));
-    insert(&mut m, ConcreteAction::new(Box::new(AssertState)));
     insert(&mut m, ConcreteAction::new(Box::new(CaptureSession)));
     insert(&mut m, ConcreteAction::new(Box::new(Wait)));
     insert(&mut m, ConcreteAction::new(Box::new(Call)));
     insert(&mut m, ConcreteAction::new(Box::new(Observe)));
-    insert(&mut m, ConcreteAction::new(Box::new(Poll)));
     insert(&mut m, ConcreteAction::new(Box::new(Stream)));
     insert(&mut m, ConcreteAction::new(Box::new(Invoke)));
     insert(&mut m, ConcreteAction::new(Box::new(Query)));
-    insert(&mut m, ConcreteAction::new(Box::new(DbObserve)));
     insert(&mut m, ConcreteAction::new(Box::new(Seed)));
     m
 }
@@ -260,20 +254,16 @@ mod tests {
             vec![
                 "api/call",
                 "api/observe",
-                "api/poll",
                 "api/stream",
                 "cli/invoke",
-                "db/observe",
                 "db/query",
                 "db/seed",
                 "ui/assert-element",
-                "ui/assert-state",
                 "ui/assert-url",
                 "ui/capture-session",
                 "ui/click",
                 "ui/extract",
                 "ui/navigate",
-                "ui/select",
                 "ui/type",
                 "ui/wait",
             ]

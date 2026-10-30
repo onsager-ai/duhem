@@ -1,11 +1,10 @@
 //! Tier 2 through real SQLite actions, validation, persisted evidence and replay.
 use duhem_evidence::{EventPayload, SqliteStore, Trace, replay};
 use duhem_judge::{InconclusiveCause, VerdictState};
-use duhem_runtime::Engine;
 
 use std::sync::Arc;
 
-const EXAMPLE: &str = include_str!("../../../verifications/for-each-rows-example/duhem.yml");
+const EXAMPLE: &str = include_str!("../../../../verifications/for-each-rows-example/duhem.yml");
 
 async fn run(yaml: &str) -> (VerdictState, Trace) {
     let dir = tempfile::tempdir().unwrap();
@@ -27,7 +26,12 @@ async fn run(yaml: &str) -> (VerdictState, Trace) {
         })
         .collect();
     duhem_schema::validate_with_action_catalog(&def, &|uses| {
-        duhem_actions::contract_for(uses).map(|c| c.outputs.iter().map(|o| o.to_string()).collect())
+        (if uses == "test/sql-judgment" {
+            Some(super::testing::contract())
+        } else {
+            duhem_actions::contract_for(uses)
+        })
+        .map(|c| c.outputs.iter().map(|o| o.to_string()).collect())
     })
     .unwrap();
     let store = Arc::new(
@@ -35,7 +39,7 @@ async fn run(yaml: &str) -> (VerdictState, Trace) {
             .await
             .unwrap(),
     );
-    let result = Engine::new()
+    let result = super::testing::engine()
         .with_store(store.clone())
         .run_with_metadata(&def, inputs)
         .await
@@ -180,7 +184,7 @@ criteria:
 #[tokio::test]
 async fn call_and_uses_bodies_keep_implicit_judgments_per_iteration() {
     for body in [
-        "uses: db/observe\n            with: {connection: 'sqlite::memory:', sql: 'select 1 as n where ? > 0', params: [$row], timeout: 20ms, until: {row_count: 1}}",
+        "uses: test/sql-judgment\n            with: {connection: 'sqlite::memory:', sql: 'select 1 as n where ? > 0', params: [$row]}",
         "call: observe\n            with: {row: $row}",
     ] {
         let yaml = format!(
@@ -192,8 +196,8 @@ flows:
   observe:
     params: {{row: {{type: integer}}}}
     steps:
-      - uses: db/observe
-        with: {{connection: 'sqlite::memory:', sql: 'select 1 as n where ? > 0', params: [$params.row], timeout: 20ms, until: {{row_count: 1}}}}
+      - uses: test/sql-judgment
+        with: {{connection: 'sqlite::memory:', sql: 'select 1 as n where ? > 0', params: [$params.row]}}
 criteria:
   - id: AC-1
     description: Each row is observed
@@ -299,12 +303,12 @@ criteria:
     checks:
       - id: AC-1.1
         steps:
-          - uses: db/observe
-            with: {connection: 'sqlite::memory:', sql: 'select 1', until: {row_count: 1}}
+          - uses: test/sql-judgment
+            with: {connection: 'sqlite::memory:', sql: 'select 1'}
           - for_each: $inputs.rows
             max: 3
-            uses: db/observe
-            with: {connection: 'sqlite::memory:', sql: 'select 1', until: {row_count: 1}}
+            uses: test/sql-judgment
+            with: {connection: 'sqlite::memory:', sql: 'select 1'}
 "#;
     assert_eq!(
         run(yaml).await.0,

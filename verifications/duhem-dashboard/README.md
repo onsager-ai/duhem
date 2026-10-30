@@ -116,7 +116,7 @@ AC-3 exercises the SSE endpoint with `api/call`: for a **finished** run
 the replay-then-follow contract replays the whole trace and closes, so a
 single read returns the full `text/event-stream` body, which the
 assertions match. The catalog has no action that consumes an
-*open-ended, incremental* SSE stream from an in-progress run (`api/poll`
+*open-ended, incremental* SSE stream from an in-progress run (a finished-response action
 is request/response polling, `api/observe` is Playwright network
 interception of a navigated request), so true incremental live-follow is
 not exercised here — only the replay-to-`run_finished` contract. That is

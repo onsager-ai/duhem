@@ -222,7 +222,7 @@ criteria:
   one action; failures are evidence only. `--keep-env` skips both cleanup
   layers and leaves the world as the run left it.
 - **`assertions`** are evaluated deterministically — no model in the
-  judging loop. They're also **optional**: a `ui/assert-*` (or `api/poll`)
+  judging loop. They're also **optional**: a `ui/assert-*`
   step *is* the judgment, so an all-assert check needs no `assertions:`
   block at all. Bind `satisfied` and assert it yourself only for manual
   control (e.g. a disjunction across steps).
@@ -554,3 +554,16 @@ which stays on your side (local or CI), never in the server.
   verdict; the `duhem/run` composite action wraps this.
 - **The full model.** [`docs/duhem-spec.md`](./duhem-spec.md) —
   especially §7 (Core Concepts) and §8 (Holistic Verification).
+
+
+### Removed action types after v0.6.0
+
+The next release removes `ui/select`, `ui/assert-state`, `api/poll`, and
+`db/observe`. `ui/wait` remains available. Use supported interactions and
+explicit assertions on `api/call` or `db/query` outputs where they express
+the same requirement. There is no equivalent native select or generic
+polling action: redesign those verifications against supported observable
+behavior before upgrading. `ui/assert-element` and `ui/assert-url` remain
+judging actions; data-returning actions require explicit assertions. In
+fixture `down:`, an HTTP status is still data and has no general assertion
+surface; check any required cleanup effect separately.

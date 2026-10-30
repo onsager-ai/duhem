@@ -12,10 +12,10 @@
 //! gap the dashboard regression VD (#152, #153) hit: today only the
 //! finished-replay body is assertable via `api/call`.
 //!
-//! Page-free (no Playwright) — registered like `api/call` / `api/poll`
+//! Page-free (no Playwright) — registered like `api/call`
 //! (`uses_requires_page` returns `false`).
 //!
-//! `with:` shape (mirrors `api/call` + `api/poll`):
+//! `with:` shape (mirrors `api/call`):
 //!
 //! - `url`: full URL of the stream.
 //! - `method`: HTTP method (default `GET`).

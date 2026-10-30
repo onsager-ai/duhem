@@ -67,7 +67,7 @@ fn check_judgment(c: &duhem_schema::Criterion, ch: &duhem_schema::Check, errs: &
             });
     if !any_judging {
         errs.push(format!(
-            "criterion `{}` / check `{}`: no `assertions:` and no judging step — add an assertion, or a step whose action emits `satisfied` (e.g. ui/assert-*, api/poll) without binding `satisfied` in `outputs:`",
+            "criterion `{}` / check `{}`: no `assertions:` and no judging step — add an assertion, or a step whose action emits `satisfied` (e.g. ui/assert-element, ui/assert-url) without binding `satisfied` in `outputs:`",
             c.id, ch.id
         ));
     }

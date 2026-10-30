@@ -1,8 +1,7 @@
 # Implicit judgment — worked example (spec #253)
 #
 # A *judging* action is one whose contract emits a boolean `satisfied`
-# output (`ui/assert-element`, `ui/assert-url`, `ui/assert-state`,
-# `api/poll`). Since #253 a judging step **implicitly asserts
+# output (`ui/assert-element`, `ui/assert-url`). Since #253 a judging step **implicitly asserts
 # `satisfied == true`** — you no longer write the id / `outputs:
 # { satisfied: satisfied }` / `$steps.<id>.outputs.satisfied == true`
 # plumbing triplet just to say "this observation must hold".

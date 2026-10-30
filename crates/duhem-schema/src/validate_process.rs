@@ -7,7 +7,7 @@ fn starts(steps: &[Step]) -> HashSet<&str> {
     steps
         .iter()
         .flat_map(Step::actions)
-        .filter(|step| step.uses_name() == "process/start")
+        .filter(|step| step.uses.as_deref() == Some("process/start"))
         .filter_map(|step| step.id.as_deref())
         .collect()
 }
@@ -20,7 +20,10 @@ fn check(
     errs: &mut Vec<ValidationError>,
 ) {
     for step in steps.iter().flat_map(Step::actions) {
-        if !matches!(step.uses_name(), "process/stop" | "process/restart") {
+        if !matches!(
+            step.uses.as_deref(),
+            Some("process/stop" | "process/restart")
+        ) {
             continue;
         }
         let known_outer = step

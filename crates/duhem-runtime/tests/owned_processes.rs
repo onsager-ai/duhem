@@ -20,6 +20,13 @@ fn definition(scenario: &str, dir: &std::path::Path) -> VerificationDefinition {
 }
 
 async fn run(scenario: &str) -> (RunOutcome, Trace, tempfile::TempDir) {
+    run_config(scenario, duhem_schema::ManifestDefaults::default()).await
+}
+
+async fn run_config(
+    scenario: &str,
+    defaults: duhem_schema::ManifestDefaults,
+) -> (RunOutcome, Trace, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let definition = definition(scenario, dir.path());
     let store = Arc::new(
@@ -27,7 +34,10 @@ async fn run(scenario: &str) -> (RunOutcome, Trace, tempfile::TempDir) {
             .await
             .unwrap(),
     );
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let result = Engine::new()
+        .with_defaults(&defaults)
+        .with_progress(tx)
         .with_store(store.clone())
         .run_with_metadata(
             &definition,
@@ -38,6 +48,19 @@ async fn run(scenario: &str) -> (RunOutcome, Trace, tempfile::TempDir) {
     let trace = Trace::from_store(store.as_ref(), &result.run_id)
         .await
         .unwrap();
+    let mut live = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        live.push(event);
+    }
+    assert_eq!(
+        serde_json::to_value(&live).unwrap(),
+        serde_json::to_value(trace.events()).unwrap()
+    );
+    assert!(
+        !serde_json::to_string(&live)
+            .unwrap()
+            .contains("split-process-credential-579")
+    );
     if !result.cleanup.is_empty() {
         eprintln!("cleanup findings: {:?}", result.cleanup);
     }
@@ -353,6 +376,260 @@ criteria:
         EventPayload::SetupStarted { cleanup_policy: Some(policy), fixture_name: Some(name), .. }
         if policy == "required" && name == "watcher")));
     assert_eq!(process_facts(&trace, "finalizer")[0]["state"], "stopped");
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[tokio::test]
+async fn retries_get_fresh_processes_after_previous_attempt_finalizes() {
+    let defaults = serde_yml::from_str("timeout: 5s\nretry: { max: 1, backoff: linear }").unwrap();
+    let (outcome, trace, _) = run_config(
+        r#"
+criteria:
+  - id: AC-1
+    description: Each attempt owns a fresh environment.
+    checks:
+      - id: AC-1.1
+        setup:
+          - id: child
+            uses: process/start
+            with: { command: python3, args: [-u, @FIXTURE@, idle] }
+        steps:
+          - uses: cli/invoke
+            with: { command: [sleep, "1"], timeout: 1ms }
+        assertions: ["true"]
+"#,
+        defaults,
+    )
+    .await;
+    assert_eq!(
+        outcome.verdict.state,
+        VerdictState::Inconclusive(InconclusiveCause::Timeout)
+    );
+    let mut handles = Vec::new();
+    let mut attempts = Vec::new();
+    let mut finalized = true;
+    for event in trace.events() {
+        if let EventPayload::ProcessObserved {
+            operation,
+            handle,
+            owner,
+            facts,
+            ..
+        } = &event.payload
+        {
+            if operation == "process/start" {
+                assert!(finalized, "attempt started before previous owned cleanup");
+                handles.push(handle.clone());
+                attempts.push(owner.attempt.clone());
+                finalized = false;
+            } else if operation == "finalizer" {
+                assert_eq!(facts["state"], "stopped");
+                finalized = true;
+            }
+        }
+    }
+    assert_eq!(handles.len(), 2);
+    assert_ne!(handles[0], handles[1]);
+    assert_ne!(attempts[0], attempts[1]);
+    assert!(finalized);
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[tokio::test]
+async fn required_finalizer_failure_preserves_body_and_prevents_restart() {
+    struct EscapedFixture(std::path::PathBuf);
+    impl Drop for EscapedFixture {
+        fn drop(&mut self) {
+            if let Ok(raw) = std::fs::read_to_string(&self.0)
+                && let Ok(pid) = raw.parse::<i32>()
+            {
+                // This PID was authored by our deliberately escaped fixture,
+                // never obtained from the user's process-action inputs.
+                unsafe {
+                    libc::kill(pid, libc::SIGKILL);
+                }
+            }
+        }
+    }
+    for restart in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let _escaped = EscapedFixture(dir.path().join("state"));
+        let body = if restart {
+            "steps:\n          - uses: process/restart\n            with: { handle: $fixture.watcher.child.outputs.handle }"
+        } else {
+            "steps: []"
+        };
+        let scenario = format!(
+            r#"
+fixtures:
+  watcher:
+    cleanup_policy: diagnostic_only
+    up:
+      - id: child
+        uses: process/start
+        with:
+          command: python3
+          args: [-u, @FIXTURE@, escaped-pipe, @STATE@]
+          kill_timeout: 100ms
+          ready: {{ log: {{ stream: stdout, pattern: READY }}, timeout: 5s }}
+    down: []
+criteria:
+  - id: AC-1
+    description: Incomplete owned cleanup independently blocks the gate.
+    checks:
+      - id: AC-1.1
+        needs: [watcher]
+        {body}
+        assertions: ["true"]
+"#
+        );
+        let definition = definition(&scenario, dir.path());
+        let store = Arc::new(
+            SqliteStore::open(dir.path().join("evidence.db"))
+                .await
+                .unwrap(),
+        );
+        let result = Engine::new()
+            .with_store(store.clone())
+            .run_with_metadata(
+                &definition,
+                BTreeMap::from([("secret".into(), json!("unused-secret-579"))]),
+            )
+            .await
+            .unwrap();
+        let trace = Trace::from_store(store.as_ref(), &result.run_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            result.verdict.state,
+            VerdictState::Fail,
+            "{:?}",
+            result.cleanup
+        );
+        assert_eq!(
+            result.body_verdict,
+            Some(if restart {
+                VerdictState::Inconclusive(InconclusiveCause::MissingObservation)
+            } else {
+                VerdictState::Pass
+            })
+        );
+        assert_eq!(result.cleanup.len(), 1);
+        assert!(result.cleanup[0].required);
+        assert!(
+            result.cleanup[0]
+                .detail
+                .as_ref()
+                .unwrap()
+                .contains("log pipes did not close")
+        );
+        assert_eq!(
+            process_facts(&trace, "process/start").len(),
+            1,
+            "failed stop spawned a replacement"
+        );
+        assert_eq!(replay(&trace).unwrap().run.state, VerdictState::Fail);
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[tokio::test(flavor = "multi_thread")]
+async fn cancellation_drains_authored_cleanup_and_records_required_finalizer() {
+    const CHILD: &str = "DUHEM_PROCESS_CANCELLATION_CHILD";
+    if let Ok(root) = std::env::var(CHILD) {
+        let root = std::path::PathBuf::from(root);
+        let yaml = r#"
+criteria:
+  - id: AC-1
+    description: Cancellation retains owned cleanup facts.
+    checks:
+      - id: AC-1.1
+        setup:
+          - uses: process/start
+            with:
+              command: python3
+              args: [-u, @FIXTURE@, idle]
+              ready: { log: { stream: stdout, pattern: READY }, timeout: 5s }
+        steps:
+          - uses: cli/invoke
+            with:
+              command: [python3, -c, "from pathlib import Path; import sys,time; Path(sys.argv[1]).write_text('ready'); time.sleep(30)", @READY@]
+              timeout: 35s
+        assertions: ["true"]
+        teardown:
+          - uses: cli/invoke
+            with:
+              command: [python3, -c, "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('cleaned')", @CLEANED@]
+"#.replace("@READY@", &serde_json::to_string(&root.join("ready")).unwrap())
+            .replace("@CLEANED@", &serde_json::to_string(&root.join("cleaned")).unwrap());
+        let definition = definition(&yaml, &root);
+        let store = Arc::new(SqliteStore::open(root.join("evidence.db")).await.unwrap());
+        let result = Engine::new()
+            .with_store(store)
+            .with_run_id("process-cancel")
+            .run_with_metadata(
+                &definition,
+                BTreeMap::from([("secret".into(), json!("unused-secret-579"))]),
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(duhem_runtime::EngineError::Aborted { .. })
+        ));
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "cancellation_drains_authored_cleanup_and_records_required_finalizer",
+            "--nocapture",
+        ])
+        .env(CHILD, dir.path())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !dir.path().join("ready").exists() {
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "child exited before ready"
+        );
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "child never reached body"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    unsafe {
+        assert_eq!(libc::kill(child.id().unwrap() as i32, libc::SIGTERM), 0);
+    }
+    let status = tokio::time::timeout(std::time::Duration::from_secs(10), child.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(status.success());
+    assert!(dir.path().join("cleaned").exists());
+    let store = SqliteStore::open(dir.path().join("evidence.db"))
+        .await
+        .unwrap();
+    let trace = Trace::from_store(&store, "process-cancel").await.unwrap();
+    assert!(matches!(
+        trace.events().last().unwrap().payload,
+        EventPayload::RunAborted { .. }
+    ));
+    assert_eq!(process_facts(&trace, "finalizer")[0]["state"], "stopped");
+    for event in trace.events() {
+        if let EventPayload::ProcessObserved { pid, operation, .. } = &event.payload
+            && operation == "process/start"
+        {
+            assert_eq!(
+                unsafe { libc::kill(*pid as i32, 0) },
+                -1,
+                "owned child survived cancellation"
+            );
+        }
+    }
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]

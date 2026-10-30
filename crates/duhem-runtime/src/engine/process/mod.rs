@@ -90,6 +90,7 @@ struct Entry {
     restarted: bool,
     stop_escalated: bool,
     was_exited: bool,
+    finalized: bool,
 }
 
 impl Processes {
@@ -230,6 +231,7 @@ impl Processes {
             restarted: false,
             stop_escalated: false,
             was_exited: false,
+            finalized: false,
         });
         // Register before the first await: cancellation/readiness failure still
         // leaves an owned generation for the always-required finalizer.

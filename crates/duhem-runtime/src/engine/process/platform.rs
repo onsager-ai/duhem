@@ -90,24 +90,22 @@ pub(super) fn group_live(group: u32) -> io::Result<bool> {
     use std::mem::{size_of, zeroed};
     use std::ptr::null_mut;
     // libproc reports group membership without reaping the pinned leader.
-    let bytes = unsafe { libc::proc_listpgrppids(group as i32, null_mut(), 0) };
-    if bytes < 0 {
+    // Unlike proc_listpids, this convenience function returns a PID count,
+    // while its buffer capacity is still expressed in bytes.
+    let count = unsafe { libc::proc_listpgrppids(group as i32, null_mut(), 0) };
+    if count < 0 {
         return Err(io::Error::last_os_error());
     }
-    let mut pids = vec![0i32; bytes as usize / size_of::<i32>() + 64];
+    let mut pids = vec![0i32; count as usize + 64];
     let capacity = (pids.len() * size_of::<i32>()) as i32;
     let used = unsafe { libc::proc_listpgrppids(group as i32, pids.as_mut_ptr().cast(), capacity) };
     if used < 0 {
         return Err(io::Error::last_os_error());
     }
-    if used >= capacity {
+    if used as usize >= pids.len() {
         return Err(io::Error::other("process group outgrew observation buffer"));
     }
-    for pid in pids
-        .into_iter()
-        .take(used as usize / size_of::<i32>())
-        .filter(|pid| *pid > 0)
-    {
+    for pid in pids.into_iter().take(used as usize).filter(|pid| *pid > 0) {
         let mut info: libc::proc_bsdinfo = unsafe { zeroed() };
         let size = size_of::<libc::proc_bsdinfo>() as i32;
         let count = unsafe {

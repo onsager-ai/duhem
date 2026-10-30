@@ -66,7 +66,7 @@ impl Processes {
                         && (owner.attempt.is_some() || owner.check.is_none()))
             })
         }) {
-            if entry.stopped && entry.stop_result.is_some() {
+            if entry.finalized || (entry.stopped && entry.stop_result.is_some()) {
                 continue;
             }
             let scope = entry.owner.clone();
@@ -134,6 +134,7 @@ impl Processes {
                 check_id: scope.check.clone(),
                 criterion_id: scope.criterion.clone(),
             });
+            entry.finalized = true;
             if detail.is_some() || evidence_error.is_some() {
                 failures.push(CleanupFailure {
                     required: true,

@@ -50,6 +50,20 @@ elif mode == "tree":
             sys.exit(3)
         time.sleep(0.01)
     print("READY", flush=True)
+elif mode == "escaped-pipe":
+    # Deliberately violates the supported group contract. The finalizer must
+    # report incomplete drain, never successful cleanup. The test harness
+    # explicitly kills this separately identified fixture afterward.
+    child = subprocess.Popen(
+        [sys.executable, "-u", __file__, "refuse", sys.argv[2]],
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + 5
+    while not Path(sys.argv[2]).exists():
+        if child.poll() is not None or time.monotonic() > deadline:
+            sys.exit(3)
+        time.sleep(0.01)
+    print("READY", flush=True)
 elif mode == "refuse":
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     Path(sys.argv[2]).write_text(str(os.getpid()))

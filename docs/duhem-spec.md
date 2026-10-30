@@ -187,7 +187,7 @@ assertion.
 - **Per-criterion verdict**: aggregated from its checks (any check `fail` → criterion `fail`; any `inconclusive` and no `fail` → criterion `inconclusive`; all `pass` → criterion `pass`).
 - **Per-run body verdict**: aggregated from all criteria, same rules. The effective run verdict applies the required fixture-cleanup gate after the body: any retained required fixture `down:` failure makes the run `fail`; otherwise the effective verdict is the body verdict. `CheckFinished` and `CriterionFinished` remain body judgments. The run outcome, persisted `RunFinished.verdict`, CLI exit status, reporters, and dashboard run state use the effective verdict. When the gate changes the run verdict, optional `body_verdict` preserves the body verdict on `RunOutcome`, persisted `RunFinished`, and `RunSummary`; it is omitted when the body and effective verdict match.
 
-The three-state model is non-negotiable. `inconclusive` exists because real systems have flakes, environment failures, and observability gaps. Forcing flaky outcomes into `pass` corrupts trust; forcing them into `fail` blocks delivery without cause. `inconclusive` triggers escalation to human review without false signals.
+The three-state model is non-negotiable. `inconclusive` exists because real systems have flakes, environment failures, and observability gaps. Forcing flaky outcomes into `pass` corrupts trust; forcing them into `fail` blocks delivery without cause. `inconclusive` triggers escalation to human review without false signals. An assertion operand type mismatch instead gates as `fail` (#259): applying an operator to an incompatible value is a determinate authoring defect, not a retryable observability gap. For example, matching a string pattern against a present JSON `null` fails with `type_mismatch(null, str)`, while an absent nested field is `inconclusive:missing_observation` with `missing_field(path)` evidence. Changing a producer from explicit null to an omitted key can therefore change the verdict without changing the VD.
 
 A `fail` verdict on a holistic check tells you the web is broken. It does not tell you which strand is wrong. That attribution is the human’s job, supported by evidence — exactly as Duhem-Quine predicts.
 
@@ -1449,7 +1449,7 @@ Assertions evaluate to `true`, `false`, or `inconclusive` (e.g., when timeouts h
 - **Existence**: `exists: $steps.X.outputs.Y`
 - **Cross-step consistency**: `equal: [$steps.A.outputs.X, $steps.B.outputs.X]`
 
-An `inconclusive` result always carries a cause, distinguishing "the check could not be evaluated" from a genuine `false`. The verdict-level catalog is closed at v1 and surfaces as `inconclusive:<cause>` (snake-case wire tokens): `timeout`, `missing_observation`, `environment_error`, `empty_aggregation`. The runtime evaluator tracks finer internal causes (missing input, missing env, type mismatch, invalid pattern, unknown runtime helper) that collapse into these when the judge aggregates the verdict (§7.6).
+An `inconclusive` result always carries a cause, distinguishing "the check could not be evaluated" from a genuine `false`. The verdict-level catalog is closed at v1 and surfaces as `inconclusive:<cause>` (snake-case wire tokens): `timeout`, `missing_observation`, `environment_error`, `empty_aggregation`. The runtime evaluator tracks finer internal causes (missing input, missing env, missing field, invalid pattern, unknown runtime helper) that coarsen into these verdict-level causes. Its `TypeMismatch` result is the exception: the runtime maps it directly to `fail`, retaining `type_mismatch(lhs, rhs)` in evidence, before inconclusive causes are coarsened (§7.6; #259).
 
 ### 10.7 Runtime expressions
 
@@ -1499,16 +1499,16 @@ Borrowed from Arazzo. References available in expressions:
   equal to `value` (scalar equality, same `Int`/`Float` promotion as
   `==`). The direct way to assert list membership —
   `$runtime.contains($steps.api.outputs.body.tokens, "t-1")` — instead
-  of a `len(...) >= 1` proxy. A non-array first argument is a type
-  mismatch (`inconclusive`); elements of an incomparable shape are simply
+  of a `len(...) >= 1` proxy. Incompatible operand shapes are a type
+  mismatch (`fail`); elements of an incomparable shape are simply
   not matches.
 - `$runtime.any(array, field, value)` — the object-array analogue:
   `true` if `array` has an *object* element whose `field` equals `value`
   (`$runtime.any($steps.api.outputs.body.data, "name", "ws-1")`). A
   non-array first argument or a non-string `field` is a type mismatch
-  (`inconclusive`); an element that is not an object, or an object
+  (`fail`); an element that is not an object, or an object
   missing `field`, is simply not a match (`false`), never an error.
-- `$runtime.matches(value, pattern)` — `true` when `pattern` finds a match **anywhere in** `value`. It is a search, not a full match, so anchor with `^` / `$` where you mean equality (`$runtime.matches($steps.api.outputs.body_text, "^ok$")`); an unanchored pattern standing in for an equality is the classic undiscriminating assertion. Both operands must be strings — anything else is a type mismatch (`inconclusive`), as with the comparison operators — and a `pattern` that fails to compile is `inconclusive` carrying the regex engine's message in evidence `detail`, never a silent `false`.
+- `$runtime.matches(value, pattern)` — `true` when `pattern` finds a match **anywhere in** `value`. It is a search, not a full match, so anchor with `^` / `$` where you mean equality (`$runtime.matches($steps.api.outputs.body_text, "^ok$")`); an unanchored pattern standing in for an equality is the classic undiscriminating assertion. Both operands must be strings — anything else is a type mismatch (`fail`), as with the comparison operators — and a `pattern` that fails to compile is `inconclusive` carrying the regex engine's message in evidence `detail`, never a silent `false`.
 - `$runtime.lower(s)` / `$runtime.upper(s)` / `$runtime.trim(s)` — case
   and whitespace normalization for robust string comparisons.
 - `$runtime.replace(s, from, to)` — literal substring replace.
@@ -1747,60 +1747,91 @@ The CLI binary is free to download and use across all tiers. It is open-source (
 
 ## 14. Roadmap
 
-The roadmap reflects a solo founder building with Claude Code as the primary development assistant, with Onsager as the first dogfooding customer (now paused — the active dogfood runs against Chreode and Crawlab; see Appendix D). It is not a typical funded startup roadmap; it is intentionally calibrated to a single-builder reality.
+The active roadmap is product-regression migration under [#575](https://github.com/onsager-ai/duhem/issues/575), driven by Semon's real workload and its [assertion map (#501)](https://github.com/onsager-ai/semon/issues/501). The [migration contract](product-regression-migration.md) defines ownership, the source-pinned capability inventory and qualification. Milestones below express dependencies and acceptance outcomes, not calendar promises or claims that a product has already migrated.
 
-### Phase 0 — Foundation (months 0–3)
+The foundation has shipped: schema, CLI, runtime, mechanical judge, browser/API/database/command actions, evidence, dashboard, composite GitHub Action and co-located product suites. The engine has been open-source under Apache-2.0 since v0.1.0 (§11.3); that is completed work. The released workspace/schema version is **0.6.0** ([tag v0.6.0](https://github.com/onsager-ai/duhem/releases/tag/v0.6.0), commit `c23b48b`), including #567's required-fixture-cleanup contract. `duhem_schema::SCHEMA_VERSION` and `CHANGELOG.md` remain authoritative for an exact revision; neither a version cut nor an open milestone proves qualification.
 
-**Goal**: stand up minimum viable Duhem; first real verification running against Onsager.
+Onsager daily-use (#54) and generation alpha (#52) are explicitly parked while that workload is paused. They are not prerequisites for the current migration. The retired consumer drift lane and old v0.2 product epics do not define the active roadmap.
 
-- Solo build the schema, CLI, runtime, and judge using Claude Code as primary development assistant. ✅ shipped (Cargo workspace landed via #7; ten crates `duhem-cli`, `duhem-runtime`, `duhem-judge`, `duhem-schema`, `duhem-actions`, `duhem-evidence`, `duhem-summary`, `duhem-dashboard`, `duhem-reporter-pretty`, `duhem-reporter-junit`; CLI verbs `init` / `run` / `validate` / `dashboard` / `--version` via #13, #16, #17, #18, #19, #24, #40, #42, #43, #58, #60).
-- Schema spec v0.1 → v0.5 (rapid iteration; expected breaking changes). ⏳ in progress (current: v0.1.0 via `duhem_schema::SCHEMA_VERSION`; per-landing ledger in `CHANGELOG.md`; v0.5 lockdown criteria tracked under #51 / shipped via #59).
-- Built-in action library: minimum useful subset (UI click/type/assert, API call/observe, basic assertions). ✅ shipped (`ui/*` slice via #14, #41; `api/observe` via #44; `api/call` v1 via #25; full catalog under `duhem-actions`).
-- First Onsager feature verified using Duhem (manually-authored checks, no AI generation yet). ✅ shipped (#46, #47; refreshed to the spec-plan flow via #79; co-located at `onsager-ai/onsager/.duhem/create-spec-plan/` since #225 P4; environment `up:` / `down:` hooks via #61).
-- Parallel: 5–10 customer interviews with AI-coding-agent power users (Cursor, Claude Code, Devin) to validate market hypothesis beyond Onsager. ⏳ outstanding.
-- **Open-source release (pulled forward from Phase 2/4):** relicense to Apache-2.0 and ship the engine — schema, CLI, runtime, judge, dashboard — as open source in the first public release (v0.1.0). ⏳ in progress (epic #143). Originally planned as a Phase 2 maturity gate; brought forward as a deliberate strategy change (see §11.3 Alignment note).
+### M1 — v0.6 trustworthy gate
 
-**Onsager dependency**: Onsager has at least one feature in active development to verify against. If Onsager is not at this stage yet, Phase 0 starts with a smaller toy app instead.
+**Goal:** a required result states what it actually verified and exposes why it passed or failed.
 
-### Phase 1 — MVP (months 3–6)
+[#531](https://github.com/onsager-ai/duhem/issues/531), [#544](https://github.com/onsager-ai/duhem/issues/544), [#574](https://github.com/onsager-ai/duhem/issues/574), [#546](https://github.com/onsager-ai/duhem/issues/546), [#519](https://github.com/onsager-ai/duhem/issues/519), [#537](https://github.com/onsager-ai/duhem/issues/537), [#538](https://github.com/onsager-ai/duhem/issues/538) and [#545](https://github.com/onsager-ai/duhem/issues/545) are tracked in [milestone M1](https://github.com/onsager-ai/duhem/milestone/1).
 
-**Goal**: Duhem reliably verifies Onsager’s outputs; first external alpha users.
+- Distinguish authored, selected, executed, gated and excluded claims. A filtered pass must not imply complete coverage, and a zero-selected required domain must not qualify.
+- Attribute results to leaf, check, parameter instance and attempt; preserve every retry and any first-attempt requirement. Report missing execution evidence as absence of a record in the specified store, without claiming an unseen invocation never happened.
+- Show assertion expressions, resolved values and evidence with registered-secret masking. Reuse the landed lifecycle ownership/reporting work (#524), rather than hiding cleanup or assertions behind green step rows.
+- Reuse the landed JSON leaf/manifest contracts (#535/#576) and required fixture cleanup (#567/#578). Required fixture cleanup failure blocks the effective gate while retaining the body verdict; other cleanup scopes retain their documented diagnostic semantics.
+- Correct verdict documentation and lifecycle validation gaps, and carry the public-artifact privacy discipline through the report/tooling work.
 
-- Schema v1.0 (still subject to change, but with deprecation policy).
-- Generation service alpha: AI translates criteria → checks for simple cases.
-- GitHub Action integration: Duhem runs on Onsager’s PRs.
-- Web dashboard for runs and evidence (minimum viable).
-- 3–5 friendly external alpha users from the customer-interview cohort.
+The milestone is complete only when the relevant gate-integrity contracts have CI evidence and the selected consumer domain can demonstrate positive and negative controls. Releasing v0.6.0 does not complete the remaining owner issues.
 
-**Onsager dependency**: Onsager has CI; Onsager-Duhem integration is daily-use during this phase.
+### M2 — First real-binary pilot
 
-### Phase 2 — Public alpha and schema OSS (months 6–12)
+**Goal:** qualify a complete product journey against actual supported binaries and services, including setup, readiness, evidence and cleanup.
+
+[Milestone M2](https://github.com/onsager-ai/duhem/milestone/2) carries the remaining [#543](https://github.com/onsager-ai/duhem/issues/543) nested-group/fixture-to-flow scope, [#440](https://github.com/onsager-ai/duhem/issues/440) Tier 2 conditions, and the [owned background-process draft (#579)](https://github.com/onsager-ai/duhem/issues/579). Reuse landed session cascade, teardown and flow work; do not rebuild it. The process action's exact start/readiness/log/stop contract is blocked on Semon #501's assertion map.
+
+Pilot the complete native-log → Push/Receive → publication and authorized reading → paging → append/restart/recovery/revocation journey described in the migration contract, split into independently runnable checks. Products own criteria, real fixtures, thresholds and CI policy. Helpers expose facts under explicit contracts; the VD keeps the acceptance rule visible. A whole acceptance runner hidden behind `cli/invoke` and `exit_code == 0` does not qualify the journey.
+
+### M3 — Interaction + visual
+
+**Goal:** cover mapped user interactions and deterministic visual acceptance with explicit evidence and reviewed expectations.
+
+[Milestone M3](https://github.com/onsager-ai/duhem/milestone/3) includes iframe scoping [#568](https://github.com/onsager-ai/duhem/issues/568) (the frames gap from #369), keyboard/pointer/scroll/focus operations [#580](https://github.com/onsager-ai/duhem/issues/580), and the visual comparator draft [#581](https://github.com/onsager-ai/duhem/issues/581). Pin exact contracts through representative consumer assertions before implementing each slice.
+
+Visual judgment needs full-frame/region observations, candidate/reference/diff artifacts, dimensions, declared thresholds, exact reviewed acceptance bindings and source/fixture/browser/font/viewport/theme provenance. Diagnostic screenshots alone are not visual assertions. [#573](https://github.com/onsager-ai/duhem/issues/573) is separate dashboard development tooling, not delivery of this product capability.
+
+### M4 — Performance + concurrency
+
+**Goal:** judge actual performance metrics and recovery behavior while preserving resource isolation.
+
+[Milestone M4](https://github.com/onsager-ai/duhem/milestone/4) includes the metric sampler/comparator draft [#582](https://github.com/onsager-ai/duhem/issues/582) and the lease/hermetic-port subset of [#410](https://github.com/onsager-ai/duhem/issues/410). Samples require declared measurement windows, units, cold/warm state and aggregation; runner-step duration is not a substitute for the product metric. The lease vocabulary decision remains with #410.
+
+Qualify isolated files, ports, databases, credentials and setup-through-cleanup ownership under concurrent recovery workloads. Existing isolated CI sharding can remain until native scheduling is qualified. Neither all of #410 nor broad native scheduling blocks the first real-binary pilot.
+
+### Qualification sequence
+
+Follow the [#575 migration contract's qualification sequence](product-regression-migration.md#qualification-sequence) for each domain:
+
+1. Complete the product-owned assertion map, including active/deferred/native/historical dispositions, evidence and CI owner.
+2. Qualify the selected domain's trustworthy-gate prerequisites (M1), including malformed/missing reports, filtering, skipped work, timeout and required cleanup failure.
+3. Pilot the complete real-binary path (M2) with explicit input, fixture, readiness and cleanup ownership.
+4. Migrate remaining active behavior by domain, retaining native unit/parser/state-machine/build checks at their appropriate layer.
+5. Add interaction and reviewed visual qualification (M3) as mapped assertions require it.
+6. Add measured performance and recovery claims (M4), then qualify parallel execution where needed.
+7. Before each product CI cutover, compare old/new checks on the same candidate and fixtures, exercise known-good and representative known-bad behavior, reconcile disagreements, and record stability, duration and resource cost. Pin the exact Duhem/schema/action/fixture/browser/measurement environment; remove only duplicate execution after qualification.
+
+Each capability-changing implementation updates the canonical spec, action reference/`describe`, public authoring guidance, executable examples and adoption template. New surface sketches in draft issues are not shipped syntax. Product gate changes remain owned by the product; this roadmap grants no merge, deploy, launch or baseline-acceptance authority.
+
+### Phase 2 — Public alpha and schema stability (long-range)
 
 **Goal**: schema stabilizes; broader external adoption begins.
 
 - Schema breaking-change rate drops; lock down v1.0 contract.
 - VS Code extension.
-- MCP server for AI coding agents.
+- Broader agent integration (the CLI already exposes an MCP server).
 - Public alpha: open signup, generous free tier.
 - ~~Schema specification opened under permissive OSS license. Reference judge implementation released.~~ ✅ pulled forward to v0.1.0 (Phase 0): the whole engine — schema, CLI, runtime, and judge — ships open-source under Apache-2.0 from the first public release (epic #143).
 - Hosted commercial tier launches (Team plan).
 
-**Onsager dependency**: Duhem is mature enough that Onsager development would be slower without it.
+Qualification and external adoption, rather than a paused workload's schedule, determine readiness.
 
-### Phase 3 — Expansion (months 12–24)
+### Phase 3 — Expansion (long-range)
 
 **Goal**: enterprise customers; production-grade reliability.
 
 - Custom action type SDK (community can write actions).
 - Action marketplace (alpha).
-- L3 visual baseline assertions.
+- Expand visual acceptance beyond the qualified M3 contract.
 - Multi-environment management.
-- Enterprise features (SSO, audit, self-hostable judge under enterprise license).
+- Enterprise service features (SSO, audit and hosted controls); the self-hostable engine remains Apache-2.0 (§11.3).
 - Adapter to Arazzo (export verifications as Arazzo workflows for interop).
 
-**Onsager dependency**: minimal at this point; Duhem’s growth becomes independent of Onsager’s pace.
+These remain directional goals, separate from M1–M4 acceptance.
 
-### Phase 4 — AI Factory layer (months 24+)
+### Phase 4 — AI Factory layer (long-range)
 
 **Goal**: when Onsager’s AI factory paradigm matures and begins producing other products at scale, Duhem becomes the verification infrastructure for that production line.
 
@@ -1809,16 +1840,7 @@ The roadmap reflects a solo founder building with Claude Code as the primary dev
 
 This phase is contingent on Onsager’s own roadmap. It is not blocking for Duhem’s market viability.
 
-### Onsager-Duhem milestones (interleaved)
-
-|Window     |Duhem milestone                                  |Onsager dependency                                                   |
-|-----------|-------------------------------------------------|---------------------------------------------------------------------|
-|Weeks 1–4  |Schema v0.1, CLI scaffold, basic runtime ✅ shipped (#7, #13, #17, #19) |None                                                                 |
-|Weeks 5–8  |Judge implementation, 5–10 action types ✅ shipped (#14, #16, #25, #41, #44) |Onsager has 1 active feature                                         |
-|Weeks 9–12 |First Onsager check shipped (manual authoring) ✅ shipped (#46, #47; refreshed to the spec-plan flow #79) — `onsager-ai/onsager/.duhem/create-spec-plan/` (moved #225 P4) |Onsager begins using Duhem on selected PRs                           |
-|Weeks 13–20|Generation service alpha; expanded action library|Onsager’s PRs require Duhem verdict                                  |
-|Weeks 21–28|External alpha; schema lock-down preparation     |Onsager continues daily-use dogfood                                  |
-|Months 7–12|Schema OSS; public alpha; commercial tier        |Duhem sufficiently mature that Onsager’s pace would suffer without it|
+**Alignment note (2026-10-30):** #575 replaces the old calendar-based Phase-0/1 and Onsager daily-use sequence as the active delivery plan. Phases 2–4 remain long-range direction. This changes sequencing and records shipped status; it does not weaken holistic verification, mechanical judgment, stable criteria or verifier independence.
 
 ## 15. Risks and Open Questions
 

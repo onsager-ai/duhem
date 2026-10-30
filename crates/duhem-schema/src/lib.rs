@@ -31,6 +31,7 @@ pub mod validate_error;
 mod validate_for_each;
 mod validate_lifecycle;
 mod validate_pages;
+mod validate_process;
 mod validate_runtime;
 mod validate_sessions;
 pub mod verification;

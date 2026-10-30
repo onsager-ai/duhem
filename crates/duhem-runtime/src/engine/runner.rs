@@ -152,6 +152,7 @@ mod builder;
 mod claim_scope;
 mod masking;
 mod missing_input;
+mod process_cleanup;
 mod signal;
 pub(crate) use signal::termination_signal;
 
@@ -392,6 +393,11 @@ impl Engine {
             }
 
             crate::engine::session_scope::SessionScope::enter(&mut run_state, &def.session, None);
+            run_state.register_process_cleanup(
+                run_state.process_owner.clone(),
+                &def.teardown,
+                duhem_schema::CleanupPolicy::DiagnosticOnly,
+            );
 
             // Run-level `setup:` runs once before any criterion. Skipped
             // entirely when empty so the wire shape stays byte-identical
@@ -435,7 +441,7 @@ impl Engine {
                     // `Error` (or any environmental precondition) as
                     // `Inconclusive(EnvironmentError)`. Conflating the
                     // two would lose useful telemetry on the trace.
-                    let verdict = RunVerdict {
+                    let mut verdict = RunVerdict {
                         state: VerdictState::Inconclusive(reason.cause()),
                         criteria: Vec::new(),
                     };
@@ -452,14 +458,21 @@ impl Engine {
                         )
                         .await?;
                     }
+                    let body_verdict = cleanup
+                        .iter()
+                        .any(|failure| failure.required)
+                        .then_some(verdict.state);
+                    if body_verdict.is_some() {
+                        verdict.state = VerdictState::Fail;
+                    }
                     writer
                         .append(EventPayload::RunFinished {
-                            body_verdict: None,
+                            body_verdict,
                             verdict: Some(verdict.state),
                         })
                         .await?;
                     return Ok(RunOutcome {
-                        body_verdict: None,
+                        body_verdict,
                         gated_checks: Default::default(),
                         verdict,
                         run_id,
@@ -480,6 +493,13 @@ impl Engine {
             let mut fixture_cleanup: Vec<CleanupFailure> = Vec::new();
             let criteria_result: Result<(), EngineError> = async {
                 for criterion in &def.criteria {
+                    let parent_owner = run_state.process_owner.clone();
+                    run_state.process_owner = parent_owner.criterion(&criterion.id);
+                    run_state.register_process_cleanup(
+                        run_state.process_owner.clone(),
+                        &criterion.teardown,
+                        duhem_schema::CleanupPolicy::DiagnosticOnly,
+                    );
                     let parent_session = run_state.session.clone();
                     let parent_outputs = run_state.setup_outputs.clone();
                     crate::engine::session_scope::SessionScope::enter(
@@ -500,6 +520,16 @@ impl Engine {
                             &mut gated_checks,
                         )
                         .await;
+                    fixture_cleanup.extend(
+                        run_state
+                            .processes
+                            .lock()
+                            .await
+                            .finalize(&mut writer, Some(&run_state.process_owner))
+                            .await,
+                    );
+                    run_state.begin_process_cleanup(&run_state.process_owner.clone());
+                    run_state.process_owner = parent_owner;
                     run_state.session = parent_session;
                     run_state.setup_outputs = parent_outputs;
                     let cv = cv?;
@@ -571,6 +601,12 @@ impl Engine {
         drop(execution);
         match completed {
             Ok(result) => {
+                // Error paths may leave a partially entered scope. They still
+                // own their process groups even when evidence cannot be sealed.
+                if result.is_err() {
+                    self.drain_interrupted_processes(&mut writer, &mut run_state)
+                        .await;
+                }
                 let result = result.map(|mut outcome| {
                     // Use the writer's live registry: it includes
                     // credentials acquired after Engine's input-only
@@ -582,6 +618,8 @@ impl Engine {
                 result
             }
             Err(signal) => {
+                self.drain_interrupted_processes(&mut writer, &mut run_state)
+                    .await;
                 writer
                     .append(EventPayload::RunAborted {
                         signal: signal.to_string(),
@@ -592,36 +630,6 @@ impl Engine {
                     signal: signal.to_string(),
                 })
             }
-        }
-    }
-
-    async fn drain_leaf_teardown(
-        &self,
-        writer: &mut EvidenceWriter,
-        run: &mut RunState,
-        def: &VerificationDefinition,
-        run_id: &str,
-    ) -> Vec<CleanupFailure> {
-        if self.keep_env || def.teardown.is_empty() {
-            return Vec::new();
-        }
-        match crate::engine::setup::run_teardown(
-            writer,
-            &self.registry,
-            self.browser.as_ref(),
-            run,
-            &def.teardown,
-            &self.child_process_env(run_id),
-        )
-        .await
-        {
-            Ok(failures) => failures,
-            Err(error) => vec![CleanupFailure {
-                required: false,
-                step: "teardown evidence".to_string(),
-                outcome: duhem_evidence::StepOutcome::Error,
-                detail: Some(writer.mask_text(&error.to_string())),
-            }],
         }
     }
 
@@ -787,6 +795,7 @@ impl Engine {
         // (#543/#547) — before leaf `teardown:`. Evidence-only: never
         // replaces the criterion's verdict.
         if !criterion.teardown.is_empty() {
+            run.begin_process_cleanup(&run.process_owner.clone());
             let mut teardown_failures = crate::engine::setup::run_criterion_teardown(
                 writer,
                 &self.registry,

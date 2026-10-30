@@ -23,6 +23,7 @@ pub mod lineage;
 pub mod outcome;
 #[cfg(test)]
 mod outcome_regression_tests;
+pub(crate) mod process;
 pub mod registry;
 pub mod runner;
 pub(crate) mod secret_output;

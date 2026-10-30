@@ -19,6 +19,7 @@ pub mod db;
 pub mod error;
 pub mod locator;
 pub mod playwright;
+pub mod process;
 pub mod ui;
 pub mod with;
 
@@ -45,7 +46,7 @@ pub use with::TimeoutSpec;
 /// Every built-in action's contract — the single source of truth for
 /// `duhem describe` / `duhem actions` and validate-time field checking.
 pub fn catalog() -> Vec<ActionContract> {
-    vec![
+    let mut contracts = vec![
         Navigate.contract(),
         Click.contract(),
         Extract.contract(),
@@ -63,7 +64,9 @@ pub fn catalog() -> Vec<ActionContract> {
         DbObserve.contract(),
         Seed.contract(),
         Invoke.contract(),
-    ]
+    ];
+    contracts.extend(process::contracts());
+    contracts
 }
 
 /// The contract for a single action by its `uses` string, if it exists.
@@ -78,11 +81,11 @@ mod catalog_tests {
     #[test]
     fn catalog_is_complete_with_unique_uses() {
         let cat = catalog();
-        assert_eq!(cat.len(), 17, "expected 17 action contracts");
+        assert_eq!(cat.len(), 21, "expected 21 action contracts");
         let mut uses: Vec<&str> = cat.iter().map(|c| c.uses).collect();
         uses.sort();
         uses.dedup();
-        assert_eq!(uses.len(), 17, "every `uses` is unique");
+        assert_eq!(uses.len(), 21, "every `uses` is unique");
     }
 
     #[test]

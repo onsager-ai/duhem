@@ -48,6 +48,7 @@ pub fn validate_with_contract_outputs(
 ) -> Result<(), Vec<ValidationError>> {
     let mut errs = Vec::new();
     crate::validate_sessions::validate(v, outputs_for, &mut errs);
+    crate::validate_process::validate(v, &mut errs);
 
     errs.extend(
         crate::flows::validate_authored(v)

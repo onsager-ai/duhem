@@ -180,11 +180,35 @@ pub struct FlowOrigin {
     pub iteration: Option<u32>,
 }
 
+/// Declaring resource scope, independent of a temporary browser context.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessOwner {
+    pub scope: String,
+    pub run_scope: String,
+    pub criterion_id: Option<String>,
+    pub check_id: Option<String>,
+    pub attempt: Option<String>,
+    pub fixture_name: Option<String>,
+}
+
 /// The closed set of event payloads. `#[serde(tag = "kind")]` puts the
 /// discriminant alongside `seq` and `ts` on the wire.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EventPayload {
+    /// Lifecycle facts for one runtime-owned process generation (#579).
+    /// Logs are bounded and masked before retention; these are observations,
+    /// never additional judgment inputs.
+    ProcessObserved {
+        owner: ProcessOwner,
+        handle: String,
+        generation: u64,
+        pid: u32,
+        operation: String,
+        facts: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
     RunStarted {
         verification_path: String,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -467,6 +491,7 @@ impl EventPayload {
     /// extraction.
     pub fn kind(&self) -> &'static str {
         match self {
+            EventPayload::ProcessObserved { .. } => "process_observed",
             EventPayload::RunStarted { .. } => "run_started",
             EventPayload::RunHeartbeat => "run_heartbeat",
             EventPayload::ClaimScopeDeclared { .. } => "claim_scope_declared",

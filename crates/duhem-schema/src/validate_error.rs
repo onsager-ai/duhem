@@ -430,6 +430,11 @@ pub enum ValidationError {
         location: Option<SourceLocation>,
     },
 
+    #[error(
+        "{site}: `{action}` may mutate only a current-check or fixture process; leaf/criterion handles are inspect-only"
+    )]
+    ProcessMutationScope { site: String, action: String },
+
     #[error("fixture `{fixture}` {phase} step `{step}` may not carry `needs:`")]
     FixtureStepNeeds {
         fixture: String,

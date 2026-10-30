@@ -77,7 +77,7 @@ struct SharedWriter {
     /// Run-scoped secret spellings. Centralizing this on the writer is
     /// the sink-level guarantee from spec #346: callers append ordinary
     /// evidence and cannot accidentally opt an action out of masking.
-    secrets: std::sync::RwLock<SecretRegistry>,
+    secrets: std::sync::Arc<std::sync::RwLock<SecretRegistry>>,
     /// Counts produced when a blob was written, keyed by its content
     /// address. A subsequent observation reference picks them up without
     /// requiring capture/action call sites to carry masking metadata.
@@ -203,7 +203,7 @@ impl EvidenceWriter {
                 run_id,
                 next_seq: tokio::sync::Mutex::new(0),
                 tee: std::sync::Mutex::new(None),
-                secrets: std::sync::RwLock::new(secrets),
+                secrets: std::sync::Arc::new(std::sync::RwLock::new(secrets)),
                 artifact_mask_counts: std::sync::Mutex::new(BTreeMap::new()),
             }),
             heartbeat_stop: None,
@@ -287,6 +287,12 @@ impl EvidenceWriter {
             .expect("secret registry lock poisoned")
             .mask(text)
             .text
+    }
+
+    /// Live masking registry for continuously drained process streams. It
+    /// includes credentials registered after the process was started.
+    pub fn stream_secrets(&self) -> std::sync::Arc<std::sync::RwLock<SecretRegistry>> {
+        self.shared.secrets.clone()
     }
 
     /// Append one event. The caller supplies the `payload`; `seq` and

@@ -34,6 +34,9 @@ use crate::eval::{EvalContext, Value};
 /// stays stable through every check.
 #[derive(Debug)]
 pub struct RunState {
+    pub(crate) processes: super::process::Shared,
+    pub(crate) process_owner: super::process::Owner,
+    pub(crate) process_cleanup: Vec<super::process::hooks::CleanupHook>,
     pub(crate) session: Option<std::sync::Arc<super::session_scope::SessionScope>>,
     pub(crate) context_budget: Option<std::sync::Arc<super::session_scope::ContextBudget>>,
     pub inputs: BTreeMap<String, Value>,
@@ -67,6 +70,9 @@ impl RunState {
 
     fn new_inner(inputs: BTreeMap<String, Value>, uuid: String) -> Self {
         Self {
+            processes: Default::default(),
+            process_owner: super::process::Owner::leaf(),
+            process_cleanup: Vec::new(),
             session: None,
             context_budget: None,
             inputs,
@@ -139,6 +145,10 @@ pub struct RunContext<'r> {
 }
 
 impl<'r> RunContext<'r> {
+    pub(crate) fn run_state(&self) -> &'r RunState {
+        self.run
+    }
+
     pub fn new(run: &'r RunState) -> Self {
         Self {
             run,

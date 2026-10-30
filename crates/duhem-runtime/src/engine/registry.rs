@@ -80,6 +80,53 @@ pub(crate) trait Dispatch: Send + Sync {
     ) -> Result<ActionResult, ActionError>;
 }
 
+/// Both engine dispatch sites share this boundary. Process actions need a
+/// declaring resource scope rather than a temporary browser page.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn invoke_scoped(
+    dispatcher: &dyn Dispatch,
+    page: Option<&Page>,
+    index: usize,
+    with: &serde_yml::Value,
+    child_env: &BTreeMap<String, String>,
+    run: &super::RunState,
+    owner: &super::process::Owner,
+    writer: &mut duhem_evidence::EvidenceWriter,
+) -> Result<ActionResult, ActionError> {
+    if dispatcher.uses().starts_with("process/") {
+        run.processes
+            .lock()
+            .await
+            .invoke(dispatcher.uses(), with, owner, child_env, writer)
+            .await
+    } else {
+        dispatcher.invoke(page, index, with, child_env).await
+    }
+}
+
+struct OwnedProcess(&'static str);
+
+#[async_trait]
+impl Dispatch for OwnedProcess {
+    fn uses(&self) -> &'static str {
+        self.0
+    }
+    fn requires_page(&self) -> bool {
+        false
+    }
+    async fn invoke(
+        &self,
+        _: Option<&Page>,
+        _: usize,
+        _: &serde_yml::Value,
+        _: &BTreeMap<String, String>,
+    ) -> Result<ActionResult, ActionError> {
+        Err(ActionError::Process(
+            "owned process dispatch requires a runtime scope".into(),
+        ))
+    }
+}
+
 /// Production wrapper around a `Box<dyn Action>` from `duhem-actions`.
 pub(crate) struct ConcreteAction {
     uses: &'static str,
@@ -238,6 +285,9 @@ pub(crate) fn default_registry() -> ActionRegistry {
     insert(&mut m, ConcreteAction::new(Box::new(Query)));
     insert(&mut m, ConcreteAction::new(Box::new(DbObserve)));
     insert(&mut m, ConcreteAction::new(Box::new(Seed)));
+    for contract in duhem_actions::process::contracts() {
+        m.insert(contract.uses, Box::new(OwnedProcess(contract.uses)));
+    }
     m
 }
 
@@ -265,6 +315,10 @@ mod tests {
                 "db/observe",
                 "db/query",
                 "db/seed",
+                "process/inspect",
+                "process/restart",
+                "process/start",
+                "process/stop",
                 "ui/assert-element",
                 "ui/assert-url",
                 "ui/capture-session",

@@ -166,23 +166,6 @@ Assert the page URL equals a string or matches a regex (exactly one of equals/ma
   with: { equals: https://example.com/ }
 ```
 
-### `ui/assert-state`
-
-Assert an app state (e.g. signed in/out, or a marker) via `state:`.
-
-| `with:` field | required | values |
-|---|:---:|---|
-| `state` | yes | — |
-| `marker` | no | — |
-| `timeout` | no | — |
-
-**outputs:** `satisfied`
-
-```yaml
-- uses: ui/assert-state
-  with: { state: signed_in }
-```
-
 ### `ui/capture-session`
 
 Capture the current browser context storage state for a later check.

@@ -501,7 +501,7 @@ fn collect_setup_outputs<'a>(
 ) -> HashMap<&'a str, HashSet<String>> {
     let mut seen: HashSet<&str> = HashSet::new();
     let mut outputs: HashMap<&str, HashSet<String>> = HashMap::new();
-    for (idx, s) in setup.iter().enumerate() {
+    for s in setup {
         if let Some(id) = &s.id {
             if !seen.insert(id.as_str()) {
                 errs.push(ValidationError::DuplicateSetupStepId { id: id.clone() });

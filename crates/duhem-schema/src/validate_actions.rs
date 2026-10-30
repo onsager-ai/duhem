@@ -2,107 +2,33 @@
 //! validator. The action implementation crate is injected by callers.
 
 use crate::source::SourcePathSegment;
-use crate::{Step, ValidationError, VerificationDefinition};
+use crate::{ValidationError, VerificationDefinition};
 
 pub(crate) fn unknown_actions(
     definition: &VerificationDefinition,
     action_for: &dyn Fn(&str) -> Option<Vec<String>>,
 ) -> Vec<ValidationError> {
     let mut errors = Vec::new();
-    check_steps(
-        definition,
-        &definition.setup,
-        "setup",
-        &[],
-        action_for,
-        &mut errors,
-    );
-    for (name, fixture) in &definition.fixtures {
-        check_steps(
-            definition,
-            &fixture.up,
-            &format!("fixtures.{name}.up"),
-            &[],
-            action_for,
-            &mut errors,
-        );
-        check_steps(
-            definition,
-            &fixture.down,
-            &format!("fixtures.{name}.down"),
-            &[],
-            action_for,
-            &mut errors,
-        );
-    }
-    check_steps(
-        definition,
-        &definition.teardown,
-        "teardown",
-        &[],
-        action_for,
-        &mut errors,
-    );
-    for (criterion_index, criterion) in definition.criteria.iter().enumerate() {
-        for (check_index, check) in criterion.checks.iter().enumerate() {
-            check_steps(
-                definition,
-                &check.steps,
-                "steps",
-                &[criterion_index, check_index],
-                action_for,
-                &mut errors,
-            );
+    for block in crate::step_walk::step_blocks(definition) {
+        for (index, step) in block.steps.iter().enumerate() {
+            let Some(uses) = step.uses.as_deref() else {
+                continue;
+            };
+            if action_for(uses).is_some() {
+                continue;
+            }
+            let mut path = block.path.clone();
+            path.extend([
+                SourcePathSegment::index(index),
+                SourcePathSegment::key("uses"),
+            ]);
+            errors.push(ValidationError::UnknownAction {
+                uses: uses.to_string(),
+                location: definition.source_map.scalar_location(&path, uses),
+            });
         }
     }
     errors
-}
-
-fn check_steps(
-    definition: &VerificationDefinition,
-    steps: &[Step],
-    collection: &str,
-    scope: &[usize],
-    action_for: &dyn Fn(&str) -> Option<Vec<String>>,
-    errors: &mut Vec<ValidationError>,
-) {
-    for (step_index, step) in steps.iter().enumerate() {
-        if step.for_each.is_some() {
-            check_steps(
-                definition,
-                &step.for_each_body,
-                collection,
-                scope,
-                action_for,
-                errors,
-            );
-        }
-        let Some(uses) = step.uses.as_deref() else {
-            continue;
-        };
-        if action_for(uses).is_some() {
-            continue;
-        }
-        let mut path = if scope.is_empty() {
-            collection.split('.').map(SourcePathSegment::key).collect()
-        } else {
-            vec![
-                SourcePathSegment::key("criteria"),
-                SourcePathSegment::index(scope[0]),
-                SourcePathSegment::key("checks"),
-                SourcePathSegment::index(scope[1]),
-                SourcePathSegment::key(collection),
-            ]
-        };
-        path.extend([
-            SourcePathSegment::index(step_index),
-            SourcePathSegment::key("uses"),
-        ]);
-        errors.push(ValidationError::UnknownAction {
-            uses: uses.to_string(),
-            location: definition.source_map.scalar_location(&path, uses),
-        });
-    }
 }
 
 #[cfg(test)]

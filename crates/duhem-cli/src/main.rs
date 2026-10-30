@@ -12,6 +12,7 @@
 
 mod browser_cmd;
 mod contract_check;
+mod coverage_cmd;
 mod dashboard;
 mod describe_cmd;
 mod env_file;
@@ -97,6 +98,9 @@ enum Cmd {
     },
     /// List the built-in action catalog (`uses` + one-line summary).
     Actions,
+    /// Report definitions with no recorded run in a supplied evidence store.
+    /// Reports only what that store contains; never infers gate coverage.
+    Coverage(coverage_cmd::CoverageArgs),
     /// Print one action's contract: its `with:` fields and `outputs`.
     ///
     /// Version-exact ground truth for authoring a check — e.g.
@@ -347,6 +351,13 @@ fn main() -> ExitCode {
             force,
         }) => init::run_init(path, &pattern, &kind, name, force),
         Some(Cmd::Actions) => describe_cmd::run_actions(),
+        Some(Cmd::Coverage(args)) => {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            rt.block_on(coverage_cmd::run(&args))
+        }
         Some(Cmd::Describe { uses }) => describe_cmd::run_describe(&uses),
         Some(Cmd::Mcp) => mcp_cmd::run(),
         Some(Cmd::Validate { path }) => match validate_cmd::run_validate(path.as_deref()) {

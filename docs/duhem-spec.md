@@ -1625,6 +1625,28 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
   handle
 - Portable via `duhem export` (self-contained per-run bundle)
 
+
+
+### Report definitions with no recorded run
+
+`duhem coverage verifications --db /path/to/existing/duhem.db` lists each
+declared definition and its latest recorded run start, run status, and
+verdict. `--format json` emits the same report as JSON. You can also supply
+a leaf file or manifest directly. A directory tree discovers conventional
+`duhem.yml`, `duhem.yaml`, `.duhem.yml`, or `.duhem.yaml` files; a found
+manifest supplies its declared leaves, including globs. Other directories
+are searched recursively, excluding `.git`, `node_modules`, and `target`,
+without following directory symlinks. An explicit leaf may have any filename.
+
+The supplied store opens read-only and must already exist. `no_recorded_run`
+means no matching canonical absolute source path has a run in this store.
+It does not claim an invocation never happened elsewhere. Relative recorded
+paths lack their original invocation directory and are not guessed; moved
+working copies or stores shipped from another machine may not match.
+A timestamp records the latest run start, including incomplete runs, and
+does not prove a check body completed. This command reports observations;
+missing runs do not fail a gate or change its successful exit code.
+
 **Run Summary & Reporters** (`duhem-summary`, `duhem-reporter-pretty`, `duhem-reporter-junit`)
 
 - `duhem-summary` defines the run-summary types the CLI emits. `RunSummary.totals` carries `total`, `passed`, `failed`, and `inconclusive` check counts; `RunSetSummary.totals` aggregates them across leaves. `total` means checks that executed and emitted a verdict, not checks authored in the Verification Definition, so `--filter` exclusions are absent. Both fields default to all-zero counts when an older summary is deserialized.

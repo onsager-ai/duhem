@@ -221,6 +221,15 @@ Authoring rules:
 
 #### Share locators instead of copying them
 
+For iframe contents, add `frame: { testid: report-shell-iframe }` to
+the inner locator, for example `{ frame: { testid: report-shell-iframe },
+role: heading, name: Weekly report }`. The frame is a structured locator;
+it may itself contain `frame:` for nested documents. `scope:` stays
+within the selected document. The same form works for named `$pages.*`
+entries and locator-taking UI actions, including cross-origin frames.
+The timeout includes frame readiness. An unavailable or ambiguous frame
+cannot establish that its contents are absent.
+
 When two leaves use the same locator, declare it once in an ordinary
 manifest include and reference it as `$pages.<group>.<name>`:
 

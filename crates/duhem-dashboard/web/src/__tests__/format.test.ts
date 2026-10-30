@@ -21,6 +21,14 @@ const ev = (kind: string, extra: Record<string, unknown> = {}, seq = 1): TraceEv
 });
 
 describe("formatEvent", () => {
+  it("keeps frame identity in nested and inline locator descriptions", () => {
+    for (const withFields of [
+      { locator: { frame: { testid: "report" }, role: "heading" } },
+      { frame: { testid: "report" }, role: "button" },
+    ]) {
+      expect(describeWith(withFields)).toContain('inside frame {testid "report"}');
+    }
+  });
   it("presents the recorded data layer as the db delivery-web tag", () => {
     const f = formatEvent(
       ev("step_started", { uses: "db/query", layer: "data", with: {} }),

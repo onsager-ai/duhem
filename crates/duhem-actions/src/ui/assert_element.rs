@@ -131,6 +131,7 @@ impl Action for AssertElement {
             })?;
         let timeout: Duration = with.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
         let selector = to_selector(&with.locator);
+        let page = page.for_locator(&with.locator);
 
         let satisfied = match &with.predicate {
             Predicate::State(expected) => match page

@@ -67,6 +67,11 @@ pub struct Locator {
     /// have a `scope`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<Box<Locator>>,
+
+    /// Iframe containing this locator. Recursive `frame` selects nested
+    /// documents; `scope` always selects a container within one document.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<Box<Locator>>,
 }
 
 /// Wire form of [`Locator`]: all fields optional, unknown fields
@@ -93,6 +98,8 @@ struct LocatorWire {
     text: Option<String>,
     #[serde(default)]
     scope: Option<Box<Locator>>,
+    #[serde(default)]
+    frame: Option<Box<Locator>>,
 }
 
 impl Locator {
@@ -130,7 +137,14 @@ impl Locator {
         if self.name.is_some() && self.role.is_none() {
             return Err("locator `name` refines `role` and requires a `role`".to_string());
         }
+        if self.scope.as_ref().is_some_and(|scope| scope.has_frame()) {
+            return Err("locator `scope` stays within one document; put `frame` on the containing locator instead".into());
+        }
         Ok(())
+    }
+
+    fn has_frame(&self) -> bool {
+        self.frame.is_some() || self.scope.as_ref().is_some_and(|scope| scope.has_frame())
     }
 
     /// A compact, human phrase for this locator — the legible
@@ -170,6 +184,9 @@ impl Locator {
         if let Some(scope) = &self.scope {
             parts.push(format!("in {{{}}}", scope.describe()));
         }
+        if let Some(frame) = &self.frame {
+            parts.push(format!("inside frame {{{}}}", frame.describe()));
+        }
         if parts.is_empty() {
             "element".to_string()
         } else {
@@ -192,6 +209,7 @@ impl TryFrom<LocatorWire> for Locator {
             name: w.name,
             text: w.text,
             scope: w.scope,
+            frame: w.frame,
         };
         loc.validate_primary()?;
         Ok(loc)
@@ -220,6 +238,37 @@ pub enum ExistenceState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_is_recursive_and_scope_stays_within_a_document() {
+        let locator: Locator = serde_yml::from_str(
+            "frame: {frame: {testid: outer}, testid: inner}\nrole: button\nscope: {role: dialog}",
+        )
+        .unwrap();
+        assert_eq!(
+            locator.frame.as_ref().unwrap().testid.as_deref(),
+            Some("inner")
+        );
+        assert!(
+            locator
+                .describe()
+                .contains("inside frame {testid \"inner\" inside frame {testid \"outer\"}}")
+        );
+        assert_eq!(
+            serde_yml::from_value::<Locator>(serde_yml::to_value(&locator).unwrap()).unwrap(),
+            locator
+        );
+        for invalid in [
+            "frame: {testid: outer}",
+            "frame: {testid: outer, css: iframe}\nrole: button",
+            "role: button\nscope: {frame: {testid: outer}, role: dialog}",
+        ] {
+            assert!(
+                serde_yml::from_str::<Locator>(invalid).is_err(),
+                "{invalid}"
+            );
+        }
+    }
 
     #[test]
     fn parses_minimal_locator() {

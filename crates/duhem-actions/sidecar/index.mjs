@@ -239,7 +239,54 @@ const performanceInit = `(() => {
 })()`
 
 /** @param {any} req */
+async function requireFrames(req) {
+  if (!req.frameSelectors?.length) return
+  const deadline = req.timeoutMs === undefined ? undefined : performance.now() + req.timeoutMs
+  const remaining = () => {
+    if (deadline === undefined) return undefined
+    const ms = deadline - performance.now()
+    if (ms <= 0) throw new Error(`Frame document deadline expired for ${req.selector}`)
+    return ms
+  }
+  for (const selector of req.frameSelectors) {
+    const target = page(req).locator(selector)
+    try {
+      // Snapshot operations must not turn an unavailable frame into zero
+      // inner matches. Timed operations share one frame + action deadline.
+      if (deadline === undefined && await target.count() !== 1) {
+        throw new Error('expected exactly one attached iframe')
+      }
+      const handle = await target.elementHandle({ timeout: remaining() })
+      try {
+        const frame = await handle.contentFrame()
+        if (!frame) throw new Error('selected element is not an iframe document')
+        if (deadline !== undefined) {
+          const source = await handle.evaluate(element => ({
+            src: element.getAttribute('src'), srcdoc: element.hasAttribute('srcdoc'),
+          }))
+          // An attached iframe can still expose its initial about:blank
+          // document while its declared source is loading. That document
+          // cannot prove the eventual report's heading/error is absent.
+          if (source.srcdoc || (source.src && source.src !== 'about:blank')) {
+            await frame.waitForURL(url => url.href !== 'about:blank', {
+              waitUntil: 'domcontentloaded', timeout: remaining(),
+            })
+          }
+          await frame.waitForLoadState('domcontentloaded', { timeout: remaining() })
+        }
+      } finally {
+        await handle.dispose()
+      }
+    } catch (error) {
+      throw new Error(`Frame ${selector} for inner locator ${req.selector}: ${errMsg(error)}`)
+    }
+  }
+  if (deadline !== undefined) req.timeoutMs = remaining()
+}
+
+/** @param {any} req */
 async function dispatch(req) {
+  await requireFrames(req)
   switch (req.op) {
     case 'launch': {
       // By default Playwright launches its own bundled Chromium. On a

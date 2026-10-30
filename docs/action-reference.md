@@ -65,6 +65,7 @@ Click an element (locator shorthand fields, or a `locator` object).
 | `name` | no | — |
 | `text` | no | — |
 | `scope` | no | — |
+| `frame` | no | — |
 | `locator` | no | — |
 | `timeout` | no | — |
 

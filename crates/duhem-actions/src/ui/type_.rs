@@ -70,6 +70,7 @@ impl Action for Type {
             })?;
         let timeout: Duration = with.timeout.map(Into::into).unwrap_or(DEFAULT_TIMEOUT);
         let selector = to_selector(&with.locator);
+        let page = page.for_locator(&with.locator);
         let timeout_ms = timeout.as_millis() as f64;
 
         let result = if with.clear {

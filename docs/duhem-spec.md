@@ -621,6 +621,29 @@ Definitions using neither session field retain their existing wire shape.
 
 **Locators.** UI actions (`ui/click`, `ui/type`, `ui/assert-element`, `ui/select`) address an element by exactly one *primary strategy*: `role` (paired with an optional `name`), `label` (associated label text — how to reach an input with no ARIA role, e.g. `type=password`), `testid` (the `data-testid` attribute), `placeholder`, `css` (a raw CSS selector escape hatch), `xpath` (a raw XPath selector escape hatch), or a standalone `text`. A `text` substring may additionally *filter* a non-text primary, and a recursive `scope:` narrows the search to inside a container. Prefer `role`, `testid`, or `scope:` + `text:`; use `css:` or `xpath:` only when those cannot reach the element, because markup-coupled selectors—especially absolute XPath paths—break readily as markup changes. `ui/click` takes these fields inline in its `with:`; the other actions nest them under `locator:`. Two primaries at once, or none, is rejected. Each named strategy maps to the corresponding Playwright selector engine.
 
+
+**Frames.** An optional `frame: <Locator>` selects the iframe containing
+the target for every locator-taking UI action, including `ui/extract`.
+For example, `{frame: {testid: report-shell-iframe}, role: heading, name:
+Weekly report}` addresses the heading inside that document. A frame
+locator can itself contain `frame:` for nested documents; same-origin
+and cross-origin frames use the same browser-driver path. Frame entry
+precedes the target's `scope:` and primary strategy. `scope:` always
+selects a container in the current document and cannot contain `frame:`.
+Inline and named `$pages.*` locators have identical semantics.
+
+Timed actions share their deadline between frame attachment/document
+readiness and the inner action. A frame must resolve to exactly one
+iframe document, including for `hidden` and `not_exists` assertions;
+an unavailable frame never proves that an inner element is absent.
+Missing inner elements retain each action's existing wait/failure
+semantics. Snapshot extraction and counts reject unavailable or ambiguous
+frames. Reports retain the authored frame locator and identify it in
+target descriptions. Screenshots remain of the parent page; target
+rectangles include frame offsets. The [executed iframe example](../verifications/iframe-example/duhem.yml)
+covers named locators, assertions and interactions against a two-origin
+browser fixture in CI.
+
 ```yaml
 # Any filename. Self-identifies by top-level fields.
 verification: Create workspace E2E

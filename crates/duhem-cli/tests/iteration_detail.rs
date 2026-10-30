@@ -19,9 +19,10 @@ criteria:
           - for_each: $inputs.rows
             as: row
             max: 3
-            id: query
-            uses: db/query
-            with: { connection: 'sqlite::memory:', sql: 'select 1 where ? > 0', params: [$row] }
+            steps:
+              - id: query
+                uses: db/query
+                with: { connection: 'sqlite::memory:', sql: 'select 1 where ? > 0', params: [$row] }
         assertions: ['$steps.query.outputs.row_count == 1']
 "#,
     )

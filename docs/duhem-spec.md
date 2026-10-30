@@ -1622,6 +1622,31 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
   handle
 - Portable via `duhem export` (self-contained per-run bundle)
 
+
+
+### Report definitions with no recorded run
+
+`duhem coverage verifications --db /path/to/existing/duhem.db --base .` lists each
+declared definition and its latest recorded run start, run status, and
+verdict. `--format json` emits the same report as JSON. You can also supply
+a leaf file or manifest directly. A directory tree discovers conventional
+`duhem.yml`, `duhem.yaml`, `.duhem.yml`, or `.duhem.yaml` files; a found
+manifest supplies its declared leaves, including globs. Other directories
+are searched recursively, excluding `.git`, `node_modules`, and `target`,
+without following directory symlinks. An explicit leaf may have any filename.
+
+The supplied store opens read-only and must already exist. `no_recorded_run`
+means no matching canonical absolute source path has a run in this store.
+It does not claim an invocation never happened elsewhere. For ordinary relative-path runs, pass `--base` with their original invocation
+directory (often the repository root). The store key is hashed and cannot
+recover that directory safely. The command never guesses the base from
+today's cwd. Without `--base`, relative records are counted as unmatched;
+both output formats report total and relative unmatched-run counts. Moved
+working copies or stores shipped from another machine may still not match.
+A timestamp records the latest run start, including incomplete runs, and
+does not prove a check body completed. This command reports observations;
+missing runs do not fail a gate or change its successful exit code.
+
 ### Assertion operand evidence
 
 Explicit `assertions:` record an `assertion_evaluated.operands` map from

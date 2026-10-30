@@ -10,7 +10,7 @@ use duhem_evidence::{RunRecord, RunStatus, SqliteStore, Store};
 use duhem_schema::Loaded;
 use serde::Serialize;
 
-const LIMIT: &str = "Only runs recorded in this supplied store are visible. No recorded run is not proof that an invocation never happened, a body executed, or a gate passed. Definitions match canonical absolute source paths; relative or relocated recorded paths are not guessed.";
+const LIMIT: &str = "Only runs recorded in this supplied store are visible. No recorded run is not proof that an invocation never happened, a body executed, or a gate passed. Definitions match canonical source paths. Supply --base with the original invocation directory to resolve relative records; original directories and relocated paths are not guessed.";
 const CANDIDATES: [&str; 4] = ["duhem.yml", "duhem.yaml", ".duhem.yml", ".duhem.yaml"];
 
 #[derive(Debug, Args)]
@@ -20,6 +20,10 @@ pub(crate) struct CoverageArgs {
     /// Existing evidence store to inspect read-only; no implicit store selection.
     #[arg(long, value_name = "PATH")]
     pub db: PathBuf,
+    /// Original invocation directory for relative source paths in this store.
+    /// Omit only when recorded paths are absolute; the store key is not reversible.
+    #[arg(long, value_name = "DIR")]
+    pub base: Option<PathBuf>,
     /// Output representation. Absence of runs never changes the exit code.
     #[arg(long, value_enum, default_value = "text")]
     pub format: Format,
@@ -36,7 +40,16 @@ struct CoverageReport {
     schema_version: &'static str,
     store: PathBuf,
     scope: &'static str,
+    base: Option<PathBuf>,
+    unmatched_runs: UnmatchedRuns,
     definitions: Vec<DefinitionRecord>,
+}
+
+#[derive(Default, Serialize)]
+struct UnmatchedRuns {
+    total: usize,
+    relative: usize,
+    without_base: usize,
 }
 
 #[derive(Serialize)]
@@ -65,6 +78,9 @@ pub(crate) async fn run(args: &CoverageArgs) -> ExitCode {
                 ),
                 Format::Text => {
                     println!("Store: {}\n{}", report.store.display(), report.scope);
+                    if let Some(base) = &report.base {
+                        println!("Relative-record base: {}", base.display());
+                    }
                     println!("\nDefinition\tLatest recorded run start\tRun status\tVerdict");
                     for definition in &report.definitions {
                         match &definition.last_recorded_run {
@@ -90,6 +106,12 @@ pub(crate) async fn run(args: &CoverageArgs) -> ExitCode {
                         "\n{absent} of {} definitions have no recorded run in this store.",
                         report.definitions.len()
                     );
+                    println!(
+                        "{} recorded runs could not be matched to a definition ({} relative; {} without --base).",
+                        report.unmatched_runs.total,
+                        report.unmatched_runs.relative,
+                        report.unmatched_runs.without_base
+                    );
                 }
             }
             ExitCode::SUCCESS
@@ -111,19 +133,41 @@ async fn report(args: &CoverageArgs) -> Result<CoverageReport, String> {
         .await
         .map_err(|error| error.to_string())?;
     let mut latest: BTreeMap<PathBuf, RunRecord> = BTreeMap::new();
+    let base = args
+        .base
+        .as_ref()
+        .map(|base| {
+            let base = base
+                .canonicalize()
+                .map_err(|error| format!("--base {}: {error}", base.display()))?;
+            if !base.is_dir() {
+                return Err(format!("--base is not a directory: {}", base.display()));
+            }
+            Ok(base)
+        })
+        .transpose()?;
+    let mut unmatched_runs = UnmatchedRuns::default();
     for run in store.list_runs().await.map_err(|error| error.to_string())? {
         let path = Path::new(&run.verification);
-        // Relative records lack their original invocation directory. Joining
-        // them against today's cwd would manufacture a source identity.
-        if !path.is_absolute() {
-            continue;
-        }
-        let Ok(path) = path.canonicalize() else {
+        let relative = path.is_relative();
+        let resolved = if relative {
+            base.as_ref().map(|base| base.join(path))
+        } else {
+            Some(path.to_path_buf())
+        };
+        let matched = resolved
+            .and_then(|path| path.canonicalize().ok())
+            .filter(|path| paths.contains(path));
+        let Some(path) = matched else {
+            unmatched_runs.total += 1;
+            if relative {
+                unmatched_runs.relative += 1;
+            }
+            if relative && base.is_none() {
+                unmatched_runs.without_base += 1;
+            }
             continue;
         };
-        if !paths.contains(&path) {
-            continue;
-        }
         if latest.get(&path).is_none_or(|previous| {
             (run.started_at, &run.run_id) > (previous.started_at, &previous.run_id)
         }) {
@@ -159,6 +203,8 @@ async fn report(args: &CoverageArgs) -> Result<CoverageReport, String> {
         schema_version: "1",
         store: args.db.clone(),
         scope: LIMIT,
+        base,
+        unmatched_runs,
         definitions,
     })
 }

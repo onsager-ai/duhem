@@ -704,6 +704,7 @@ Use `duhem coverage <leaf-or-manifest-or-directory> --db <existing-store>`
 to list definitions and their latest recorded run start. `--format json`
 provides structured output. Directory discovery recognizes conventional
 Duhem filenames and manifest-declared leaves. `no_recorded_run` is limited
-to the supplied store and canonical absolute source paths: relative records
-and paths from moved working copies are not guessed. Reporting never proves
+to the supplied store and canonical absolute source paths: supply `--base DIR` with the original invocation directory for relative
+records. Without a base they are explicitly counted as unmatched; paths
+from moved working copies are not guessed. Reporting never proves
 that an unseen invocation did not happen or that a check body completed.

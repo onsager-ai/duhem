@@ -115,3 +115,70 @@ async fn relative_records_are_not_guessed_and_unfinished_runs_still_count_as_rec
     );
     assert!(second["definitions"][0]["last_recorded_run"]["verdict"].is_null());
 }
+
+#[test]
+fn relative_invocation_from_a_repo_root_matches_with_an_explicit_original_base() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::create_dir_all(root.join("verifications/sample")).unwrap();
+    let relative = "./verifications/sample/duhem.yml";
+    std::fs::write(root.join(relative), LEAF).unwrap();
+    let db = root.join("runs.db");
+    let run = Command::new(env!("CARGO_BIN_EXE_duhem"))
+        .current_dir(root)
+        .args(["run", relative, "--no-live", "--reporter", "quiet", "--db"])
+        .arg(&db)
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let without_base = coverage(&root.join("verifications"), &db, true);
+    let report: Value = serde_json::from_slice(&without_base.stdout).unwrap();
+    assert_eq!(report["unmatched_runs"]["total"], 1);
+    assert_eq!(report["unmatched_runs"]["relative"], 1);
+    assert_eq!(report["unmatched_runs"]["without_base"], 1);
+    // The report is deliberately invoked from a different cwd: its source
+    // identity comes from the supplied base, never the reporter's cwd.
+    let output = Command::new(env!("CARGO_BIN_EXE_duhem"))
+        .current_dir(root.parent().unwrap())
+        .arg("coverage")
+        .arg(root.join("verifications"))
+        .arg("--db")
+        .arg(&db)
+        .arg("--base")
+        .arg(root)
+        .args(["--format", "json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["definitions"][0]["status"], "recorded_run");
+    assert_eq!(
+        report["definitions"][0]["last_recorded_run"]["verdict"],
+        "pass"
+    );
+    assert_eq!(report["unmatched_runs"]["total"], 0);
+    assert_eq!(report["unmatched_runs"]["relative"], 0);
+    let text = Command::new(env!("CARGO_BIN_EXE_duhem"))
+        .arg("coverage")
+        .arg(root.join("verifications"))
+        .arg("--db")
+        .arg(&db)
+        .arg("--base")
+        .arg(root)
+        .output()
+        .unwrap();
+    let text = String::from_utf8(text.stdout).unwrap();
+    assert!(
+        text.contains("0 recorded runs could not be matched"),
+        "{text}"
+    );
+    assert!(text.contains("Relative-record base:"), "{text}");
+}

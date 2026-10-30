@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] Assertion type mismatches gate as fail; the spec distinguishes present null operands from absent fields, which remain inconclusive missing observations. (#537)
+
 ## v0.6.0 — 2026-10-30
 
 - [breaking] Fixture down failures block the run gate by default while retaining body verdict and cleanup evidence; use cleanup_policy: diagnostic_only for intentional diagnostic cleanup. (#567)

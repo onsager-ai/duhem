@@ -187,7 +187,7 @@ assertion.
 - **Per-criterion verdict**: aggregated from its checks (any check `fail` → criterion `fail`; any `inconclusive` and no `fail` → criterion `inconclusive`; all `pass` → criterion `pass`).
 - **Per-run body verdict**: aggregated from all criteria, same rules. The effective run verdict applies the required fixture-cleanup gate after the body: any retained required fixture `down:` failure makes the run `fail`; otherwise the effective verdict is the body verdict. `CheckFinished` and `CriterionFinished` remain body judgments. The run outcome, persisted `RunFinished.verdict`, CLI exit status, reporters, and dashboard run state use the effective verdict. When the gate changes the run verdict, optional `body_verdict` preserves the body verdict on `RunOutcome`, persisted `RunFinished`, and `RunSummary`; it is omitted when the body and effective verdict match.
 
-The three-state model is non-negotiable. `inconclusive` exists because real systems have flakes, environment failures, and observability gaps. Forcing flaky outcomes into `pass` corrupts trust; forcing them into `fail` blocks delivery without cause. `inconclusive` triggers escalation to human review without false signals.
+The three-state model is non-negotiable. `inconclusive` exists because real systems have flakes, environment failures, and observability gaps. Forcing flaky outcomes into `pass` corrupts trust; forcing them into `fail` blocks delivery without cause. `inconclusive` triggers escalation to human review without false signals. An assertion operand type mismatch instead gates as `fail` (#259): applying an operator to an incompatible value is a determinate authoring defect, not a retryable observability gap. For example, matching a string pattern against a present JSON `null` fails with `type_mismatch(null, str)`, while an absent nested field is `inconclusive:missing_observation` with `missing_field(path)` evidence. Changing a producer from explicit null to an omitted key can therefore change the verdict without changing the VD.
 
 A `fail` verdict on a holistic check tells you the web is broken. It does not tell you which strand is wrong. That attribution is the human’s job, supported by evidence — exactly as Duhem-Quine predicts.
 
@@ -1449,7 +1449,7 @@ Assertions evaluate to `true`, `false`, or `inconclusive` (e.g., when timeouts h
 - **Existence**: `exists: $steps.X.outputs.Y`
 - **Cross-step consistency**: `equal: [$steps.A.outputs.X, $steps.B.outputs.X]`
 
-An `inconclusive` result always carries a cause, distinguishing "the check could not be evaluated" from a genuine `false`. The verdict-level catalog is closed at v1 and surfaces as `inconclusive:<cause>` (snake-case wire tokens): `timeout`, `missing_observation`, `environment_error`, `empty_aggregation`. The runtime evaluator tracks finer internal causes (missing input, missing env, type mismatch, invalid pattern, unknown runtime helper) that collapse into these when the judge aggregates the verdict (§7.6).
+An `inconclusive` result always carries a cause, distinguishing "the check could not be evaluated" from a genuine `false`. The verdict-level catalog is closed at v1 and surfaces as `inconclusive:<cause>` (snake-case wire tokens): `timeout`, `missing_observation`, `environment_error`, `empty_aggregation`. The runtime evaluator tracks finer internal causes (missing input, missing env, missing field, invalid pattern, unknown runtime helper) that coarsen into these verdict-level causes. Its `TypeMismatch` result is the exception: the runtime maps it directly to `fail`, retaining `type_mismatch(lhs, rhs)` in evidence, before inconclusive causes are coarsened (§7.6; #259).
 
 ### 10.7 Runtime expressions
 
@@ -1499,16 +1499,16 @@ Borrowed from Arazzo. References available in expressions:
   equal to `value` (scalar equality, same `Int`/`Float` promotion as
   `==`). The direct way to assert list membership —
   `$runtime.contains($steps.api.outputs.body.tokens, "t-1")` — instead
-  of a `len(...) >= 1` proxy. A non-array first argument is a type
-  mismatch (`inconclusive`); elements of an incomparable shape are simply
+  of a `len(...) >= 1` proxy. Incompatible operand shapes are a type
+  mismatch (`fail`); elements of an incomparable shape are simply
   not matches.
 - `$runtime.any(array, field, value)` — the object-array analogue:
   `true` if `array` has an *object* element whose `field` equals `value`
   (`$runtime.any($steps.api.outputs.body.data, "name", "ws-1")`). A
   non-array first argument or a non-string `field` is a type mismatch
-  (`inconclusive`); an element that is not an object, or an object
+  (`fail`); an element that is not an object, or an object
   missing `field`, is simply not a match (`false`), never an error.
-- `$runtime.matches(value, pattern)` — `true` when `pattern` finds a match **anywhere in** `value`. It is a search, not a full match, so anchor with `^` / `$` where you mean equality (`$runtime.matches($steps.api.outputs.body_text, "^ok$")`); an unanchored pattern standing in for an equality is the classic undiscriminating assertion. Both operands must be strings — anything else is a type mismatch (`inconclusive`), as with the comparison operators — and a `pattern` that fails to compile is `inconclusive` carrying the regex engine's message in evidence `detail`, never a silent `false`.
+- `$runtime.matches(value, pattern)` — `true` when `pattern` finds a match **anywhere in** `value`. It is a search, not a full match, so anchor with `^` / `$` where you mean equality (`$runtime.matches($steps.api.outputs.body_text, "^ok$")`); an unanchored pattern standing in for an equality is the classic undiscriminating assertion. Both operands must be strings — anything else is a type mismatch (`fail`), as with the comparison operators — and a `pattern` that fails to compile is `inconclusive` carrying the regex engine's message in evidence `detail`, never a silent `false`.
 - `$runtime.lower(s)` / `$runtime.upper(s)` / `$runtime.trim(s)` — case
   and whitespace normalization for robust string comparisons.
 - `$runtime.replace(s, from, to)` — literal substring replace.

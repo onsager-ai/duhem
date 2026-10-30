@@ -79,11 +79,8 @@ Duhem usage looks like — and, being Duhem-on-Duhem, it catches
 ## Where product VDs live
 
 These are *Duhem's own* VDs. A VD that verifies a **product** lives
-co-located in that product's repo under a `.duhem/` suite (epic #225) —
-e.g. `onsager-ai/chreode/.duhem/`, self-gated in its own CI. Chreode's
-suites are scheduled for deletion by chreode ADR 0016 pending a deploy-contract
-replacement, and the Duhem-side drift lane that watched them
-(`drift-chreode.yml`) is retired too (last on main at `be5a8b2`; #380).
+co-located in that product's repo under a `.duhem/` suite (epic #225),
+self-gated in its own CI.
 The drop-in skeleton for a new product repo is
 [`templates/product-repo/`](../templates/product-repo/); the shape is
 [`docs/duhem-spec.md`](../docs/duhem-spec.md) §10.1 Pattern D.

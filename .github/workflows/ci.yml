@@ -17,6 +17,8 @@ jobs:
   rust:
     name: rust
     runs-on: ubuntu-latest
+    env:
+      DUHEM_PRIVATE_NAMES: ${{ secrets.DUHEM_PRIVATE_NAMES }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -61,6 +63,9 @@ jobs:
       # enforces. (#248)
       - name: action-reference drift check
         run: cargo run -p xtask --quiet -- action-reference --check
+
+      - name: private names in tracked source (locations only)
+        run: cargo run -p xtask --quiet -- source-scrub
 
       # The user-facing authoring skill published under
       # templates/product-repo/.claude/skills/ is a sanitized sibling of

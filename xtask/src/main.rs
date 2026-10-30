@@ -7,8 +7,8 @@
 //!     cargo run -p xtask -- schema-json [--check]    # emit/verify JSON Schema
 //!     cargo run -p xtask -- skill-scrub              # published skills ↔ no internal vocab
 //!     cargo run -p xtask -- dx-drift [--mode=warn|fail]  # DX surfaces ↔ product currency
-//!     cargo run -p xtask -- consumer-pins --list  # repo<TAB>path per registry entry (#380)
-//!     cargo run -p xtask -- consumer-pins --consumer <repo>=<path> ...  # pin currency (#380)
+//!     cargo run -p xtask -- consumer-pins --pinned <version>  # consumer-owned pin currency
+//!     cargo run -p xtask -- source-scrub             # tracked source ↔ secret private names
 //!
 //! `check-file-budget` enforces a per-file token budget on every `.rs`
 //! file under `crates/` and `xtask/src/`. The vocab is `tiktoken`'s
@@ -30,6 +30,7 @@ mod schema_changelog_check;
 mod schema_drift;
 mod schema_json;
 mod skill_scrub;
+mod source_scrub;
 mod tracker_scrub;
 
 use std::process::ExitCode;
@@ -48,6 +49,7 @@ fn main() -> ExitCode {
         Some("schema-json") => schema_json::run(args.collect()),
         Some("action-reference") => action_reference::run(args.collect()),
         Some("skill-scrub") => skill_scrub::run(args.collect()),
+        Some("source-scrub") => source_scrub::run(args.collect()),
         Some("tracker-scrub") => tracker_scrub::run(args.collect()),
         Some("dx-drift") => dx_drift::run(args.collect()),
         Some("consumer-pins") => consumer_pins::run(args.collect()),

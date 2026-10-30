@@ -383,12 +383,12 @@ Same root manifest pattern as B, just different file layout.
 
 #### Pattern D: Co-located in the target repo (cross-repo verification)
 
-Suitable when Duhem verifies a *product it does not itself ship* — a regression suite for a separate codebase. The Verification Definition lives in the **target product's** repository, co-located with the code it exercises, and declares its target coordinate with `project:` (§10.4). The product's own CI runs `duhem/run` against itself, and Duhem's dogfood CI runs the suite from the target ref; either way the verifier/target relationship is recorded with provenance (§11.1). Duhem is used here as a *tool*, not a host: this is how it verifies products like Crawlab, Chreode, and Onsager without hoarding their checks. Only Duhem's own self-verification VDs stay in `onsager-ai/duhem`; the trust that matters is mechanical judgment plus a self-consistent Duhem contract, not VD location (§11.2). Optional per-repo CODEOWNERS on the VD path and hub-recorded verdicts remain available as lightweight review/evidence discipline.
+Suitable when Duhem verifies a *product it does not itself ship* — a regression suite for a separate codebase. The Verification Definition lives in the **target product's** repository, co-located with the code it exercises, and declares its target coordinate with `project:` (§10.4). The product's own CI runs `duhem/run` against itself, and Duhem's dogfood CI runs the suite from the target ref; either way the verifier/target relationship is recorded with provenance (§11.1). Duhem is used here as a *tool*, not a host: this is how it verifies separate products without hoarding their checks. Only Duhem's own self-verification VDs stay in `onsager-ai/duhem`; the trust that matters is mechanical judgment plus a self-consistent Duhem contract, not VD location (§11.2). Optional per-repo CODEOWNERS on the VD path and hub-recorded verdicts remain available as lightweight review/evidence discipline.
 
 The concrete layout is a **`.duhem/` directory** at the product repo root — hidden and tool-namespaced like `.github/` or `.vscode/`, so it reads as "this repo adopts the Duhem tool" and never collides with the product's own `verifications/` or test folders:
 
 ```
-onsager-ai/chreode/           # the target PRODUCT repo (not onsager-ai/duhem)
+product-repo/           # the target PRODUCT repo (not onsager-ai/duhem)
   .duhem/
     duhem.yml                 # root manifest (§10.4) — aggregates the suite
     factory-cli/
@@ -1747,7 +1747,7 @@ Because Duhem is open-source (Apache-2.0), this commitment is directly auditable
 
 #### Duhem is a tool: product Verification Definitions live with the product
 
-**Alignment note (2026-07-11, maintainer decision).** Duhem is a standalone, self-verified package — a tool you point at a codebase, not a repository that hoards every codebase's checks. Verification Definitions that verify a *product* Duhem does not itself ship (regression suites for Crawlab, Chreode, Onsager) therefore live **in that product's own repository**, co-located with the code they exercise. Only Duhem's self-verification VDs stay in `onsager-ai/duhem`. This reframes — and deliberately relaxes — the earlier posture that centralized every VD in Duhem and treated Onsager as a structural trust anchor. Tracked under epic #225.
+**Alignment note (2026-07-11, maintainer decision).** Duhem is a standalone, self-verified package — a tool you point at a codebase, not a repository that hoards every codebase's checks. Verification Definitions that verify a *product* Duhem does not itself ship (product regression suites) therefore live **in that product's own repository**, co-located with the code they exercise. Only Duhem's self-verification VDs stay in `onsager-ai/duhem`. This reframes — and deliberately relaxes — the earlier posture that centralized every VD in Duhem and treated Onsager as a structural trust anchor. Tracked under epic #225.
 
 What the platform must keep true is narrower than "all checks live in one repo":
 
@@ -1986,7 +1986,7 @@ This phase is contingent on Onsager’s own roadmap. It is not blocking for Duhe
 |UI testing scope (MVP)  |DOM-level + behavioral                    |Covers most user-visible failure modes; visual-baseline post-MVP           |
 |Source posture          |Open source (Apache-2.0), open-core       |Adoption via the open engine; commercial moat is the hosted cloud, not source|
 |Schema/engine OSS       |Open (Apache-2.0) from v0.1.0             |Pulled forward from the old Phase-2 gate; ecosystem adoption beats proprietary IP|
-|First customer          |Onsager (dogfood; paused) → Chreode, Crawlab|Real complexity, real urgency, continuous use, free testimonial            |
+|First customer          |Onsager (dogfood; paused)|Real complexity, real urgency, continuous use, free testimonial            |
 |Pricing anchor          |$30/seat/month                            |Validated by adjacent products (Qodo, CodeRabbit)                          |
 |Build approach          |Solo founder + Claude Code                |Realistic given Sydney migration and parallel Onsager work                 |
 
@@ -2002,7 +2002,7 @@ Duhem the platform is named in honor of the man whose thesis tells us why we are
 
 ## Appendix D — Why Onsager dogfoods Duhem
 
-Onsager was Duhem’s first dogfooding customer. **Onsager work is currently paused** (epic #225 P4), so the active dogfood now runs against Chreode and Crawlab, and Onsager re-homes when its work resumes. This appendix is retained because the *reasoning* below — why a real product makes a valuable dogfood — was never a placeholder relationship until “real customers” arrive, and it now applies directly to the active dogfood products. It is a strategically chosen arrangement that gives Duhem capabilities no other early-stage validation could provide.
+Onsager was Duhem’s first dogfooding customer. **Onsager work is currently paused** (epic #225 P4). The reasoning below explains why a real product makes a valuable dogfood workload.
 
 ### What Onsager provides Duhem
 
@@ -2012,7 +2012,7 @@ Onsager was Duhem’s first dogfooding customer. **Onsager work is currently pau
 
 **Continuous use.** Duhem is exercised every PR, every day. Design flaws surface fast because they cause friction in the builder’s own work. This is the strongest possible signal-to-noise ratio for early product iteration.
 
-> **Reframe (epic #225 — Duhem is a tool).** The dogfood relationship described in this appendix predates the co-location decision (§11.2 Alignment note). Product Verification Definitions now live **with the product** in a co-located `.duhem/` suite (§10.1 Pattern D), not in `onsager-ai/duhem`, and the dogfood is **drift monitoring** — running each product's real VDs with the current Duhem to catch a Duhem regression that would break a consumer. Chreode is the shipped example (`onsager-ai/chreode/.duhem/`): self-gated in its own CI (Mode A). Its Duhem-side drift lane (Mode B, `drift-chreode.yml`) is retired (last on main at `be5a8b2`): chreode ADR 0016 schedules for deletion the managed-app suites it targeted, and Mode B re-points at Chreode's deploy-contract replacement once it ships (#380). Onsager is the same pattern; its VD relocated to `onsager-ai/onsager/.duhem/create-spec-plan/` in epic #225 P4 (onsager#664), self-gated there behind a dormant lane while Onsager is paused. Everything below about *why* Onsager is a valuable dogfood still holds; only *where the checks live* and *why a `pass` is trustworthy* (mechanical judgment + a self-verified Duhem contract, not hoarded checks) changed.
+> **Reframe (epic #225 — Duhem is a tool).** Product Verification Definitions live **with the product** in a co-located `.duhem/` suite (§10.1 Pattern D). Product owners run verification and pin-currency checks in their own CI (#380). A `pass` is trustworthy through mechanical judgment and a self-verified Duhem contract (§11.2), independent of where the checks live.
 
 **Proof point for external sales.** When Duhem is ready for external customers, “we use it ourselves to verify a complex AI-orchestration platform” is a stronger claim than any synthetic case study. The product carries its own proof.
 
@@ -2028,4 +2028,4 @@ A naive reading might worry that Onsager and Duhem cannot both be early simultan
 
 What Onsager provides Duhem is not infrastructure but customer use. Onsager is the workload Duhem verifies, not the production line that builds Duhem.
 
-The factory paradigm — Onsager producing other products — is a future state (Phase 4+) where Duhem’s role becomes that of the production line’s quality gate. Onsager was Duhem’s most valuable early customer; with Onsager paused, that role is carried by the active dogfood products (Chreode, Crawlab) while Duhem is built the conventional way.
+The factory paradigm — Onsager producing other products — is a future state (Phase 4+) where Duhem’s role becomes that of the production line’s quality gate. Duhem is built the conventional way while Onsager work is paused.

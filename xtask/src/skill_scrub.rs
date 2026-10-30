@@ -22,15 +22,16 @@ use anyhow::{Context, Result, anyhow, bail};
 /// Root of the published-skill tree, relative to the workspace root.
 const PUBLISHED_SKILLS_DIR: &str = "templates/product-repo/.claude/skills";
 
-use crate::private_vocab::scan_line;
+use crate::private_vocab::{load_private_names, scan_line, scan_private_line};
 
 struct Violation {
     file: PathBuf,
     line: usize,
-    token: String,
 }
 
 pub fn run(_args: Vec<String>) -> Result<()> {
+    let names = load_private_names()?;
+    let rules = names.iter().map(String::as_str).collect::<Vec<_>>();
     let root = workspace_root()?;
     let base = root.join(PUBLISHED_SKILLS_DIR);
 
@@ -46,11 +47,10 @@ pub fn run(_args: Vec<String>) -> Result<()> {
             std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
         let rel = file.strip_prefix(&root).unwrap_or(file).to_path_buf();
         for (idx, line) in src.lines().enumerate() {
-            for token in scan_line(line) {
+            if !scan_line(line).is_empty() || !scan_private_line(line, &rules).is_empty() {
                 violations.push(Violation {
                     file: rel.clone(),
                     line: idx + 1,
-                    token,
                 });
             }
         }
@@ -59,7 +59,7 @@ pub fn run(_args: Vec<String>) -> Result<()> {
     if !violations.is_empty() {
         eprintln!("skill-scrub violations — internal vocabulary in a published skill:");
         for v in &violations {
-            eprintln!("  {}:{}: `{}`", v.file.display(), v.line, v.token);
+            eprintln!("  {}:{}", v.file.display(), v.line);
         }
         eprintln!(
             "\nPublished skills under {PUBLISHED_SKILLS_DIR} are user-facing and must not carry\ninternal dev context. Cut the token, or generalize it (e.g. \"your repo's CI\")."

@@ -20,11 +20,7 @@ runtime), and gates merge/deploy on the verdict.
 > `db/query` / `observe` / `seed`, `cli/invoke`); environment
 > provisioning (`up:` / `down:` hooks) is wired into the runtime;
 > product Verification Definitions are co-located with the products
-> they verify under a `.duhem/` suite (Chreode ships them in
-> `onsager-ai/chreode/.duhem/`, self-gated in its own CI; both
-> suites are scheduled for deletion by chreode ADR 0016 pending a deploy-contract
-> replacement, and the Duhem-side drift lane that watched them was
-> retired too (`be5a8b2`; #380); epic #225). The `duhem/run`
+> they verify under a `.duhem/` suite. The `duhem/run`
 > composite GitHub Action and `templates/product-repo/`
 > support that model. The project is open-source
 > under **Apache-2.0** (relicensed for the first public v0.1.0 release;
@@ -57,8 +53,7 @@ explicit rationale in the spec.
   judge has no LLM in the loop and the verdict is recorded by Duhem,
   not the product (§11.2), *not* because the checks are hoarded in one
   repo. Duhem is a standalone, self-verified tool: product
-  Verification Definitions live *with the product* (Crawlab, Chreode,
-  Onsager), and only Duhem's self-verification VDs live here. A
+  Verification Definitions live *with the product*, and only Duhem's self-verification VDs live here. A
   product PR still can't silently self-weaken its check (optional
   per-repo CODEOWNERS) or self-attest past a `fail` (hub-recorded
   verdict), but there is no special anchor repo. What Duhem must keep
@@ -98,10 +93,8 @@ Changes to those four bullets are spec-level changes to
 
 Duhem's first dogfood customer was
 [`onsager-ai/onsager`](https://github.com/onsager-ai/onsager).
-**Onsager work is currently paused** (epic #225 P4), so the active
-dogfood now runs against Chreode and Crawlab; Onsager re-homes when
-its work resumes. The two repos move together because the same
-person is building both, but they are **parallel, not shared**:
+**Onsager work is currently paused** (epic #225 P4). Product adoption
+uses independent repositories and co-located verification suites:
 
 - Each repo has its own `.claude/skills/` and its own SDD loop.
 - Duhem's schema, CLI, runtime, judge, dashboard, and integrations
@@ -109,23 +102,17 @@ person is building both, but they are **parallel, not shared**:
   self-verification VDs.
 - Product Verification Definitions live **with the product** they
   verify, in a co-located `.duhem/` suite — Duhem is used as a tool
-  (epic #225, migration complete). Chreode moved
-  (`onsager-ai/chreode/.duhem/`, self-gated in its own CI); both
-  suites are scheduled for deletion by chreode ADR 0016 (a page-free
-  deploy-contract lane replaces them), and the Duhem-side drift
-  lane that watched them is retired too (last on main at
-  `be5a8b2`; #380). Onsager's in-tree VD was retired (P4 of #225)
-  and re-homes when Onsager work resumes — no product VDs remain
-  in-tree, only Duhem's own self-verification suites.
+  (epic #225, migration complete). Only Duhem's own self-verification
+  suites remain in-tree. Onsager's in-tree VD was retired and can
+  re-home when Onsager work resumes.
 - Onsager's product surfaces (forge, stiglab, synodic, dashboard,
   events, migrations) live on `onsager-ai/onsager`.
 - Cross-repo work is two specs (one on each repo) with a contract in
   both, never one PR straddling both repos.
 
 Onsager is the **workload** Duhem verifies — the dogfood pair is how
-Duhem gets exercised at real complexity. With Onsager paused, that
-role is carried by the active dogfood products (Chreode, Crawlab)
-until Onsager work resumes. Onsager is not (yet) the production line
+Duhem gets exercised at real complexity. Product owners run their
+verification suites and pin-currency checks in their own CI (#380). Onsager is not (yet) the production line
 that builds Duhem either — that's a Phase 4+ future state in
 `docs/duhem-spec.md` §14.
 

@@ -1,310 +1,78 @@
-//! `consumer-pins` — warn when a drift-monitored consumer's pinned
-//! `duhem` version has fallen behind a `[breaking]` CHANGELOG entry
-//! (issue #380).
-//!
-//! This is a separate signal from a product's Mode B drift lane (e.g.
-//! the retired `drift-chreode.yml`, last on main at `be5a8b2`): that
-//! kind of job proves a consumer's Verification Definition still
-//! *passes* against a freshly-built `duhem`. This one only reads the
-//! consumer's pin and warns when it's stale — a consumer can be
-//! passing (or, like ostrom-hub, not drift-monitored at all) and
-//! still carry a pin that will bite on the next upgrade.
-//!
-//! ## Registry format
-//!
-//! Consumers are listed in `.github/drift-consumers.yml`, a YAML
-//! sequence of `{ repo, path, pin }` entries: `repo` is the consumer's
-//! GitHub repo, `path` is the workflow file (relative to that repo)
-//! that pins the `duhem` version, and `pin` is a regex with exactly
-//! one capture group extracting the pinned version.
-//!
-//! Parsed with `serde_yml::Value` — already an xtask dependency — kept
-//! deliberately untyped (no `#[derive(Deserialize)]`) so no new crate
-//! (`serde` with the `derive` feature isn't one of xtask's direct
-//! dependencies today) is needed for three string fields.
-//!
-//! ## Inputs
-//!
-//! This subcommand does no networking. The consumer *file contents*
-//! (fetched by the caller — see `.github/workflows/consumer-pins.yml`)
-//! are passed in with one repeatable flag:
-//!
-//!     cargo run -p xtask -- consumer-pins \
-//!         --consumer onsager-ai/chreode=path/to/duhem.yml \
-//!         --consumer onsager-ai/ostrom-hub=path/to/ci.yml
-//!
-//! A registry entry with no matching `--consumer` flag, a missing
-//! file, a non-compiling or non-matching pin regex, or an unparseable
-//! pin value is reported as a warning naming the reason — never a
-//! silent pass.
-//!
-//! `--list` prints `repo<TAB>path` per registry entry and exits —
-//! the caller uses this to discover which files to fetch, so
-//! `.github/drift-consumers.yml` has exactly one parser
-//! (`parse_registry`) instead of a second, format-coupled one in the
-//! workflow:
-//!
-//!     cargo run -p xtask -- consumer-pins --list
-//!
-//! ## Severity
-//!
-//! A pin behind current that crosses at least one `[breaking]` entry
-//! is a `::warning::` (and counts toward the exit summary's warning
-//! count). A pin merely behind current with no breaking entry crossed
-//! is a `::notice::` — real information (worth a line in the job
-//! summary), but not the "this will bite on upgrade" signal the
-//! warning is for.
-//!
-//! ## Current version
-//!
-//! Compared against `duhem_schema::SCHEMA_VERSION` — the same
-//! current-version source `schema-drift` already reads (`xtask/src/
-//! schema_drift.rs`) — rather than re-parsing the workspace
-//! `Cargo.toml`; the release process keeps the two in lockstep (a
-//! release commit bumps both).
-//!
-//! ## Output
-//!
-//! A GitHub annotation per consumer behind current or unreadable (see
-//! "Severity" above for `::warning::` vs `::notice::`), plus a
-//! Markdown table appended to `$GITHUB_STEP_SUMMARY` when that env var
-//! is set. Every consumer-derived value in an annotation (a raw pin,
-//! a regex, a path, an error string) is escaped per GitHub's
-//! workflow-command rules before printing, so one can't inject a
-//! newline and forge a second annotation line.
-//!
-//! A consumer problem (stale pin, missing file, bad regex, bad
-//! version) is warn-only — an annotation, never a non-zero exit; this
-//! is an advisory, scheduled signal, not a gate. A *structural*
-//! failure — the registry, the CHANGELOG, or the current version
-//! itself failing to read or parse — is a duhem-repo bug, not a
-//! consumer's problem, and does exit non-zero.
-
-use std::collections::{BTreeSet, HashMap};
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-
-use anyhow::{Context, Result, anyhow, bail};
+//! Consumer-owned pin currency: compare an explicit pin with Duhem's release ledger.
+//! No registry, consumer repository access, token or network requests.
+use anyhow::{Context, Result, bail};
 use regex::Regex;
-
-const REGISTRY_PATH: &str = ".github/drift-consumers.yml";
-const CHANGELOG_PATH: &str = "CHANGELOG.md";
+use std::{collections::BTreeSet, path::Path, sync::OnceLock};
 
 pub fn run(args: Vec<String>) -> Result<()> {
-    if args.iter().any(|arg| arg == "--list") {
-        return list_registry();
+    if args == ["--help"] {
+        println!(
+            "consumer-pins --pinned <version>\nAdvisory: reports released breaking changes crossed by your pin; does not execute verification definitions."
+        );
+        return Ok(());
     }
-
-    let root = workspace_root()?;
-    let consumer_files = parse_consumer_args(&args)?;
-
-    let registry_path = root.join(REGISTRY_PATH);
-    let registry_src = std::fs::read_to_string(&registry_path)
-        .with_context(|| format!("read {}", registry_path.display()))?;
-    let entries =
-        parse_registry(&registry_src).with_context(|| format!("parse {REGISTRY_PATH}"))?;
-
-    let changelog_path = root.join(CHANGELOG_PATH);
-    let changelog_src = std::fs::read_to_string(&changelog_path)
-        .with_context(|| format!("read {}", changelog_path.display()))?;
-    let sections = parse_release_sections(&changelog_src);
-
-    let current = parse_version(duhem_schema::SCHEMA_VERSION).ok_or_else(|| {
-        anyhow!(
-            "current SCHEMA_VERSION `{}` does not parse as a version",
-            duhem_schema::SCHEMA_VERSION
-        )
-    })?;
-
-    let mut stale_rows: Vec<StaleRow> = Vec::new();
-    let mut warning_count = 0usize;
-
-    for entry in &entries {
-        match evaluate_consumer(entry, &consumer_files, &sections, current) {
-            Ok(Outcome::Current(pin)) => {
-                eprintln!(
-                    "consumer-pins: {} pin v{pin} is current (v{current})",
-                    entry.repo
-                );
-            }
-            Ok(Outcome::Stale { pin, breaking }) => {
-                if !breaking.is_empty() {
-                    warning_count += 1;
-                }
-                println!("{}", stale_annotation(&entry.repo, pin, current, &breaking));
-                stale_rows.push(StaleRow {
-                    repo: entry.repo.clone(),
-                    pin,
-                    breaking,
-                });
-            }
-            Err(reason) => {
-                warning_count += 1;
-                println!(
-                    "{}",
-                    escape_annotation(&format!(
-                        "::warning::consumer-pins: {}: {reason}",
-                        entry.repo
-                    ))
-                );
-            }
-        }
+    let pin = parse_args(&args)?;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .context("workspace root")?;
+    let changelog =
+        std::fs::read_to_string(root.join("CHANGELOG.md")).context("read Duhem CHANGELOG")?;
+    let sections = parse_release_sections(&changelog);
+    if sections.is_empty() {
+        bail!("Duhem CHANGELOG has no release sections");
     }
-
-    write_job_summary(&entries, &stale_rows, current)?;
-
-    eprintln!(
-        "consumer-pins: {} consumer(s) checked, {warning_count} warning(s)",
-        entries.len()
-    );
-    Ok(())
-}
-
-enum Outcome {
-    Current(Version),
-    Stale {
-        pin: Version,
-        breaking: BTreeSet<u64>,
-    },
-}
-
-/// `repo<TAB>path` per registry entry, printed by `--list` and used
-/// directly by the workflow to discover which files to fetch — so the
-/// registry has one parser, not a workflow-side format contract too.
-fn list_registry() -> Result<()> {
-    let root = workspace_root()?;
-    let registry_path = root.join(REGISTRY_PATH);
-    let registry_src = std::fs::read_to_string(&registry_path)
-        .with_context(|| format!("read {}", registry_path.display()))?;
-    let entries =
-        parse_registry(&registry_src).with_context(|| format!("parse {REGISTRY_PATH}"))?;
-    for line in format_registry_list(&entries) {
-        println!("{line}");
+    let current =
+        parse_version(duhem_schema::SCHEMA_VERSION).context("parse current schema version")?;
+    let breaking = breaking_entries_in_range(&sections, pin, current);
+    if pin >= current {
+        println!("consumer-pins: pin v{pin} is current or newer (v{current})");
+    } else {
+        println!("{}", stale_annotation(pin, current, &breaking));
+    }
+    if let Ok(path) = std::env::var("GITHUB_STEP_SUMMARY")
+        && !path.is_empty()
+    {
+        use std::io::Write as _;
+        let mut summary = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .context("open GitHub job summary")?;
+        writeln!(summary, "## Consumer pin currency\n\nPin: v{pin}; current: v{current}; released breaking PRs crossed: {}.\n", breaking_display(&breaking))
+            .context("write GitHub job summary")?;
     }
     Ok(())
 }
 
-fn format_registry_list(entries: &[ConsumerEntry]) -> Vec<String> {
-    entries
-        .iter()
-        .map(|entry| format!("{}\t{}", entry.repo, entry.path))
-        .collect()
+fn parse_args(args: &[String]) -> Result<Version> {
+    let raw = match args {
+        [flag, value] if flag == "--pinned" => value.as_str(),
+        [inline] if inline.starts_with("--pinned=") => &inline["--pinned=".len()..],
+        _ => bail!("consumer-pins requires --pinned <version>"),
+    };
+    parse_version(raw.strip_prefix('v').unwrap_or(raw))
+        .context("--pinned must be a numeric major.minor[.patch] version")
 }
 
-/// The GitHub annotation for a pin behind `current`. `::warning::`
-/// when it crosses at least one `[breaking]` entry (the migration-cost
-/// signal), `::notice::` otherwise — real but lower-severity
-/// information, and not counted toward the run's warning count.
-/// `repo` is registry data (this repo's own file) but is escaped
-/// along with everything else — see `escape_annotation`.
-fn stale_annotation(
-    repo: &str,
-    pin: Version,
-    current: Version,
-    breaking: &BTreeSet<u64>,
-) -> String {
+fn stale_annotation(pin: Version, current: Version, breaking: &BTreeSet<u64>) -> String {
     let message = if breaking.is_empty() {
         format!(
-            "::notice::consumer-pins: {repo} pin v{pin} is behind current v{current}, no breaking change crossed"
+            "::notice::consumer-pins: pin v{pin} is behind current v{current}, no breaking change crossed"
         )
     } else {
         format!(
-            "::warning::consumer-pins: {repo} pin v{pin} is behind current v{current}; crosses breaking change(s) {}",
+            "::warning::consumer-pins: pin v{pin} is behind current v{current}; crosses breaking change(s) {}",
             format_pr_list(breaking)
         )
     };
     escape_annotation(&message)
 }
 
-/// Escapes a full `::warning::`/`::notice::` annotation line per
-/// GitHub's workflow-command data-escaping rules (`%` first, then
-/// `\r`, then `\n` — escaping `%` first keeps a literal `%0D`/`%0A`
-/// already present in consumer data from being mistaken for one of
-/// our own escape sequences). Applied to the whole rendered line
-/// rather than to each interpolated field individually: every
-/// consumer-derived value that can reach an annotation (a raw
-/// captured pin, a registry `pin` regex or `path`, an error string
-/// quoting any of those) flows through exactly one call, so a value
-/// containing a newline can't inject a second, forged annotation
-/// line (e.g. a fake `::error::`). The literal `::warning::`/
-/// `::notice::` prefix and `:` separators are untouched — none of the
-/// escaped characters is `:`.
 fn escape_annotation(message: &str) -> String {
     message
         .replace('%', "%25")
         .replace('\r', "%0D")
         .replace('\n', "%0A")
-}
-
-/// Breaking-PR display for the job-summary table: `format_pr_list`
-/// joined, or `none` when nothing was crossed.
-fn breaking_display(breaking: &BTreeSet<u64>) -> String {
-    if breaking.is_empty() {
-        "none".to_string()
-    } else {
-        format_pr_list(breaking)
-    }
-}
-
-struct StaleRow {
-    repo: String,
-    pin: Version,
-    breaking: BTreeSet<u64>,
-}
-
-#[derive(Debug)]
-struct ConsumerEntry {
-    repo: String,
-    path: String,
-    pin: String,
-}
-
-fn evaluate_consumer(
-    entry: &ConsumerEntry,
-    consumer_files: &HashMap<String, String>,
-    sections: &[ReleaseSection],
-    current: Version,
-) -> Result<Outcome, String> {
-    let path = consumer_files
-        .get(&entry.repo)
-        .ok_or_else(|| format!("no `--consumer {}=<path>` provided", entry.repo))?;
-
-    let contents = std::fs::read_to_string(path).map_err(|e| {
-        format!(
-            "cannot read consumer file `{path}` (registry path {}): {e}",
-            entry.path
-        )
-    })?;
-
-    let pin = extract_pin_version(&entry.pin, &contents, &entry.path)?;
-
-    if pin >= current {
-        return Ok(Outcome::Current(pin));
-    }
-    let breaking = breaking_entries_in_range(sections, pin, current);
-    Ok(Outcome::Stale { pin, breaking })
-}
-
-/// Apply `pin_regex` to `contents` and parse capture group 1 as a
-/// version. `file_label` is only used to make the error message
-/// actionable (it names the registry `path`, not the on-disk temp
-/// path the caller fetched it to).
-fn extract_pin_version(
-    pin_regex: &str,
-    contents: &str,
-    file_label: &str,
-) -> Result<Version, String> {
-    let regex = Regex::new(pin_regex)
-        .map_err(|e| format!("pin regex `{pin_regex}` does not compile: {e}"))?;
-    let captures = regex
-        .captures(contents)
-        .ok_or_else(|| format!("pin regex `{pin_regex}` found no match in {file_label}"))?;
-    let raw = captures
-        .get(1)
-        .ok_or_else(|| format!("pin regex `{pin_regex}` has no capture group 1"))?
-        .as_str();
-    parse_version(raw)
-        .ok_or_else(|| format!("pin value `{raw}` in {file_label} does not parse as a version"))
 }
 
 fn breaking_entries_in_range(
@@ -324,96 +92,6 @@ fn format_pr_list(prs: &BTreeSet<u64>) -> String {
         .map(|n| format!("#{n}"))
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-fn write_job_summary(
-    entries: &[ConsumerEntry],
-    stale: &[StaleRow],
-    current: Version,
-) -> Result<()> {
-    let Ok(path) = std::env::var("GITHUB_STEP_SUMMARY") else {
-        return Ok(());
-    };
-    if path.is_empty() {
-        return Ok(());
-    }
-
-    let mut body = String::from("## Consumer pin currency\n\n");
-    if stale.is_empty() {
-        body.push_str(&format!(
-            "All {} consumer pin(s) checked are current with v{current}.\n",
-            entries.len()
-        ));
-    } else {
-        body.push_str("| Consumer | Pin | Current | Breaking PRs crossed |\n");
-        body.push_str("|---|---|---|---|\n");
-        for row in stale {
-            body.push_str(&format!(
-                "| {} | v{} | v{current} | {} |\n",
-                row.repo,
-                row.pin,
-                breaking_display(&row.breaking)
-            ));
-        }
-    }
-
-    use std::io::Write as _;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .with_context(|| format!("open GITHUB_STEP_SUMMARY at {path}"))?;
-    file.write_all(body.as_bytes())
-        .context("write GITHUB_STEP_SUMMARY")
-}
-
-fn parse_consumer_args(args: &[String]) -> Result<HashMap<String, String>> {
-    let mut files = HashMap::new();
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        let value = if let Some(inline) = arg.strip_prefix("--consumer=") {
-            inline.to_string()
-        } else if arg == "--consumer" {
-            iter.next()
-                .ok_or_else(|| anyhow!("--consumer expects a `repo=path` value"))?
-                .clone()
-        } else {
-            bail!("unknown arg: {arg}");
-        };
-        let (repo, path) = value
-            .split_once('=')
-            .ok_or_else(|| anyhow!("--consumer value `{value}` must be `repo=path`"))?;
-        if repo.is_empty() || path.is_empty() {
-            bail!("--consumer value `{value}` must be `repo=path` with both non-empty");
-        }
-        files.insert(repo.to_string(), path.to_string());
-    }
-    Ok(files)
-}
-
-fn parse_registry(src: &str) -> Result<Vec<ConsumerEntry>> {
-    let doc: serde_yml::Value =
-        serde_yml::from_str(src).map_err(|e| anyhow!("invalid YAML: {e}"))?;
-    let items = doc
-        .as_sequence()
-        .ok_or_else(|| anyhow!("expected a top-level YAML sequence of consumer entries"))?;
-
-    let mut entries = Vec::with_capacity(items.len());
-    for (index, item) in items.iter().enumerate() {
-        entries.push(ConsumerEntry {
-            repo: registry_field(item, "repo", index)?,
-            path: registry_field(item, "path", index)?,
-            pin: registry_field(item, "pin", index)?,
-        });
-    }
-    Ok(entries)
-}
-
-fn registry_field(item: &serde_yml::Value, key: &str, index: usize) -> Result<String> {
-    item.get(key)
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .ok_or_else(|| anyhow!("entry {index}: missing or non-string field `{key}`"))
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -518,19 +196,9 @@ fn extract_pr_numbers(line: &str) -> Vec<u64> {
         .collect()
 }
 
-fn workspace_root() -> Result<PathBuf> {
-    let manifest = std::env::var("CARGO_MANIFEST_DIR")
-        .context("CARGO_MANIFEST_DIR not set; run via `cargo run -p xtask`")?;
-    Ok(Path::new(&manifest)
-        .parent()
-        .ok_or_else(|| anyhow!("xtask manifest has no parent"))?
-        .to_path_buf())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// A small fixture mirroring the real CHANGELOG's shape, covering
     /// the v0.2.1 → v0.5.1 span the spec issue itself uses as its
     /// worked example.
@@ -564,66 +232,6 @@ mod tests {
 ## v0.2.1 — 2026-08-04
 - [additive] duhem run <leaf-path> resolves $pages.*. (#384)
 ";
-
-    #[test]
-    fn pin_extraction_accepts_the_quoted_env_shape() {
-        let pin = extract_pin_version(
-            r"DUHEM_VERSION: '([0-9.]+)'",
-            "  DUHEM_VERSION: '0.2.1'\n",
-            "duhem.yml",
-        )
-        .expect("pin extracts");
-        assert_eq!(
-            pin,
-            Version {
-                major: 0,
-                minor: 2,
-                patch: 1
-            }
-        );
-    }
-
-    #[test]
-    fn pin_extraction_accepts_the_npx_at_shape() {
-        let pin = extract_pin_version(
-            r"npx duhem@([0-9.]+)",
-            "  run: npx duhem@0.4.0 run .duhem\n",
-            "ci.yml",
-        )
-        .expect("pin extracts");
-        assert_eq!(
-            pin,
-            Version {
-                major: 0,
-                minor: 4,
-                patch: 0
-            }
-        );
-    }
-
-    #[test]
-    fn unparseable_pin_is_reported_not_silently_passed() {
-        // The pin regex's character class ([0-9.]+) only ever captures
-        // digits and dots, so a genuinely non-numeric pin (`latest`)
-        // can't match at all — that's `unmatched_pin_regex_is_reported`
-        // below. This covers the shape that *does* match the regex but
-        // still isn't a version: a trailing dot leaves an empty
-        // component.
-        let err = extract_pin_version(
-            r"DUHEM_VERSION: '([0-9.]+)'",
-            "  DUHEM_VERSION: '1.'\n",
-            "duhem.yml",
-        )
-        .unwrap_err();
-        assert!(err.contains("does not parse as a version"), "{err}");
-    }
-
-    #[test]
-    fn unmatched_pin_regex_is_reported() {
-        let err = extract_pin_version(r"DUHEM_VERSION: '([0-9.]+)'", "no pin here\n", "duhem.yml")
-            .unwrap_err();
-        assert!(err.contains("found no match"), "{err}");
-    }
 
     #[test]
     fn pin_equal_to_current_has_no_breaking_entries() {
@@ -695,7 +303,7 @@ mod tests {
             minor: 5,
             patch: 1,
         };
-        let annotation = stale_annotation("onsager-ai/chreode", pin, current, &BTreeSet::new());
+        let annotation = stale_annotation(pin, current, &BTreeSet::new());
         assert!(annotation.starts_with("::notice::"), "{annotation}");
         assert!(
             annotation.contains("no breaking change crossed"),
@@ -716,7 +324,7 @@ mod tests {
             patch: 1,
         };
         let breaking = BTreeSet::from([547, 548]);
-        let annotation = stale_annotation("onsager-ai/chreode", pin, current, &breaking);
+        let annotation = stale_annotation(pin, current, &breaking);
         assert!(annotation.starts_with("::warning::"), "{annotation}");
         assert!(
             annotation.contains("crosses breaking change(s) #547, #548"),
@@ -756,66 +364,35 @@ mod tests {
     }
 
     #[test]
-    fn registry_parses_the_two_seeded_consumers() {
-        let src = "\
-- repo: onsager-ai/chreode
-  path: .github/workflows/duhem.yml
-  pin: \"DUHEM_VERSION: '([0-9.]+)'\"
-- repo: onsager-ai/ostrom-hub
-  path: .github/workflows/ci.yml
-  pin: \"npx duhem@([0-9.]+)\"
-";
-        let entries = parse_registry(src).expect("registry parses");
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].repo, "onsager-ai/chreode");
-        assert_eq!(entries[0].path, ".github/workflows/duhem.yml");
-        assert_eq!(entries[0].pin, "DUHEM_VERSION: '([0-9.]+)'");
-        assert_eq!(entries[1].repo, "onsager-ai/ostrom-hub");
-        assert_eq!(entries[1].pin, "npx duhem@([0-9.]+)");
+    fn explicit_pin_accepts_both_flag_shapes_and_rejects_missing_or_invalid_values() {
+        for args in [vec!["--pinned", "0.2.1"], vec!["--pinned=v0.2.1"]] {
+            assert_eq!(
+                parse_args(&args.into_iter().map(str::to_owned).collect::<Vec<_>>()).unwrap(),
+                parse_version("0.2.1").unwrap()
+            );
+        }
+        for args in [
+            vec![],
+            vec!["--pinned"],
+            vec!["--pinned", "latest"],
+            vec!["--pinned="],
+            vec!["--list"],
+            vec!["--pinned", "1."],
+        ] {
+            assert!(parse_args(&args.into_iter().map(str::to_owned).collect::<Vec<_>>()).is_err());
+        }
     }
 
     #[test]
-    fn registry_entry_missing_a_field_is_rejected() {
-        let src = "- repo: onsager-ai/chreode\n  path: x\n";
-        let err = parse_registry(src).unwrap_err();
-        assert!(format!("{err:#}").contains("missing or non-string field `pin`"));
-    }
-
-    #[test]
-    fn list_output_is_tab_separated_repo_and_path() {
-        let src = "\
-- repo: onsager-ai/chreode
-  path: .github/workflows/duhem.yml
-  pin: \"DUHEM_VERSION: '([0-9.]+)'\"
-- repo: onsager-ai/ostrom-hub
-  path: .github/workflows/ci.yml
-  pin: \"npx duhem@([0-9.]+)\"
-";
-        let entries = parse_registry(src).expect("registry parses");
+    fn breaking_range_excludes_unreleased_and_releases_above_current() {
+        let source = "## Unreleased\n- [breaking] future. (#999)\n## v0.6.0 — 2026-10-01\n- [breaking] later. (#600)\n## v0.5.0 — 2026-09-01\n- [breaking] included. (#500)\n";
         assert_eq!(
-            format_registry_list(&entries),
-            vec![
-                "onsager-ai/chreode\t.github/workflows/duhem.yml".to_string(),
-                "onsager-ai/ostrom-hub\t.github/workflows/ci.yml".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn consumer_args_parse_both_flag_shapes() {
-        let files = parse_consumer_args(&[
-            "--consumer".to_string(),
-            "onsager-ai/chreode=/tmp/a.yml".to_string(),
-            "--consumer=onsager-ai/ostrom-hub=/tmp/b.yml".to_string(),
-        ])
-        .expect("args parse");
-        assert_eq!(
-            files.get("onsager-ai/chreode").map(String::as_str),
-            Some("/tmp/a.yml")
-        );
-        assert_eq!(
-            files.get("onsager-ai/ostrom-hub").map(String::as_str),
-            Some("/tmp/b.yml")
+            breaking_entries_in_range(
+                &parse_release_sections(source),
+                parse_version("0.4.0").unwrap(),
+                parse_version("0.5.0").unwrap()
+            ),
+            BTreeSet::from([500])
         );
     }
 }

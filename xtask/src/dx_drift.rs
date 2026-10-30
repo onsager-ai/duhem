@@ -34,6 +34,7 @@
 //! base can't be resolved (e.g. a local `just check` with no fetched
 //! base), the currency check skips gracefully — only readme-framing runs.
 
+use crate::private_vocab::{load_private_names, scan_private_line};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -48,7 +49,6 @@ const ADOPTION_README: &str = "templates/product-repo/README.md";
 /// absent. `(needle, whole_word)`.
 const README_DENY: &[(&str, bool)] = &[
     ("dogfood", false),
-    ("chreode", false),
     ("crawlab", false),
     ("asymmetric", false),
     ("docs/duhem-spec.md", false),
@@ -86,17 +86,19 @@ enum Mode {
 }
 
 pub fn run(args: Vec<String>) -> Result<()> {
+    let names = load_private_names()?;
+    let rules = names.iter().map(String::as_str).collect::<Vec<_>>();
     let mode = parse_mode(args)?;
     let root = workspace_root()?;
 
     // (1) readme-framing — always, hard.
-    readme_framing(&root)?;
+    readme_framing(&root, &rules)?;
 
     // (2) currency — diff-based, warn-first, skips if base unresolved.
     currency(&root, mode)
 }
 
-fn readme_framing(root: &Path) -> Result<()> {
+fn readme_framing(root: &Path, rules: &[&str]) -> Result<()> {
     let path = root.join(ADOPTION_README);
     let src = match std::fs::read_to_string(&path) {
         Ok(s) => s,
@@ -105,8 +107,11 @@ fn readme_framing(root: &Path) -> Result<()> {
             return Ok(());
         }
     };
-    let mut hits: Vec<(usize, &str)> = Vec::new();
+    let mut hits = Vec::new();
     for (idx, line) in src.lines().enumerate() {
+        if !scan_private_line(line, rules).is_empty() {
+            hits.push(idx + 1);
+        }
         let low = line.to_lowercase();
         for (needle, whole_word) in README_DENY {
             let found = if *whole_word {
@@ -115,14 +120,14 @@ fn readme_framing(root: &Path) -> Result<()> {
                 low.contains(needle)
             };
             if found {
-                hits.push((idx + 1, needle));
+                hits.push(idx + 1);
             }
         }
     }
     if !hits.is_empty() {
         eprintln!("dx-drift readme-framing — internal framing in the adoption README:");
-        for (line, token) in &hits {
-            eprintln!("  {ADOPTION_README}:{line}: `{token}`");
+        for line in &hits {
+            eprintln!("  {ADOPTION_README}:{line}");
         }
         eprintln!(
             "\nThe adoption README is user-facing (a product repo copies it). Rewrite the\ninternal framing (dogfood/customer names, `seam`, `docs/duhem-spec.md` refs) into\nuser-facing language. `CODEOWNERS`/`hub`/`ship` are fine — they're real features."

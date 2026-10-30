@@ -1,6 +1,6 @@
 ---
 name: onsager-dogfood
-description: Dogfood Duhem against the products it verifies (Onsager, Chreode, Crawlab) — Duhem-as-tool with co-located `.duhem/` VDs. Use when authoring or maintaining a product's Verification Definitions, when wiring a product self-gate (Mode A) or Duhem's drift-monitoring lane (Mode B), when triaging a verdict that fired on a product PR, or when you're unsure which side of the Duhem/product seam owns a change. Covers the cross-repo discipline (which spec lives where, which PR opens where), the trust model (mechanical judgment + a self-verified Duhem contract + optional CODEOWNERS/hub — not hoarded checks), and `docs/duhem-spec.md` §10.1 Pattern D / Appendix D / §14. Triggers include "dogfood on Onsager", "dogfood on Chreode", "verify against a product", "product PR check", "drift monitoring", "co-locate VDs", "cross-repo spec", "which repo owns this", "Duhem/product boundary".
+description: Dogfood Duhem against the products it verifies (including Onsager) — Duhem-as-tool with co-located `.duhem/` VDs. Use when authoring or maintaining a product's Verification Definitions, when wiring a product self-gate (Mode A) or Duhem's drift-monitoring lane (Mode B), when triaging a verdict that fired on a product PR, or when you're unsure which side of the Duhem/product seam owns a change. Covers the cross-repo discipline (which spec lives where, which PR opens where), the trust model (mechanical judgment + a self-verified Duhem contract + optional CODEOWNERS/hub — not hoarded checks), and `docs/duhem-spec.md` §10.1 Pattern D / Appendix D / §14. Triggers include "dogfood on Onsager", "verify against a product", "product PR check", "drift monitoring", "co-locate VDs", "cross-repo spec", "which repo owns this", "Duhem/product boundary".
 ---
 
 # onsager-dogfood
@@ -23,18 +23,8 @@ why the relationship is structured the way it is.
 > product's real VDs with the current Duhem to catch a Duhem change
 > that would break a consumer. A `pass` is trustworthy because Duhem's
 > judge is mechanical (no LLM) and Duhem's own contract stays
-> self-verified — **not** because the checks are hoarded here. The
-> worked, shipped example is **Chreode**
-> (`onsager-ai/chreode/.duhem/`): self-gated in its own CI (**Mode
-> A**). Its Duhem-side drift lane (**Mode B**,
-> `drift-chreode.yml`) is retired (last on main at `be5a8b2`):
-> chreode ADR 0016 schedules for deletion the managed-app suites it targeted, and
-> Mode B re-points at Chreode's deploy-contract replacement once it
-> ships (#380). Onsager is the same pattern with its VD still in-tree
-> until P4 (Onsager is paused). Where this skill below says "the
-> dogfood VDs are Duhem artifacts in `onsager-ai/duhem`", read it
-> through this reframe — the cross-repo/two-specs/no-mocks discipline
-> still holds; only the VD's *home* and the trust *rationale* changed.
+> self-verified — **not** because the checks are hoarded here. Product
+> owners run verification and pin-currency checks in their own CI.
 
 ## The relationship in one paragraph
 
@@ -57,7 +47,7 @@ discipline. They are **parallel, not shared**.
 | Concern                                                       | Lives on                  | Skills involved                                                   |
 |---------------------------------------------------------------|---------------------------|-------------------------------------------------------------------|
 | Duhem schema, CLI, runtime, judge, dashboard, integrations    | `onsager-ai/duhem`        | All Duhem-side skills (`duhem-*`, `issue-spec`, `verification-authoring`) |
-| Verification Definitions that exercise a product (Onsager, Chreode, Crawlab) | The **product's** repo, co-located `.duhem/` (Chreode moved; Onsager P4-pending, still in-tree) | `verification-authoring` (Pattern D)      |
+| Verification Definitions that exercise a product | The **product's** repo, co-located `.duhem/` | `verification-authoring` (Pattern D)      |
 | Duhem's own self-verification VDs                             | `onsager-ai/duhem` (`verifications/`) | `verification-authoring`                              |
 | Onsager features themselves (forge, stiglab, synodic, dashboard, etc.) | `onsager-ai/onsager` | Onsager's `onsager-dev-process`, `issue-spec`, `dashboard-ui`, etc. |
 | The GitHub Action / webhook that surfaces Duhem verdicts on Onsager PRs | `onsager-ai/onsager` (consumer side) + `onsager-ai/duhem` (publisher side) | Both sides use the global `pr-lifecycle` skill (with each repo's overlay); Duhem-side also this skill. |
@@ -103,8 +93,7 @@ gate (review/evidence discipline, not a structural wall):
 
 - **CODEOWNERS on `/.duhem/`.** A product PR that edits its own VD to
   dodge a failure routes to a verifier reviewer. Optional and
-  per-repo; Chreode ships the stanza (inert until the verifier team +
-  branch protection exist).
+  per-repo; the verifier team and branch protection must exist to enforce it.
 - **Hub-recorded verdicts.** Duhem records each verdict with
   `(verifier_repo/sha, target_repo/sha)` provenance the product PR
   can't rewrite, so a product can't self-attest past a `fail`.
@@ -118,8 +107,7 @@ customer.
 ## Authoring a co-located Verification Definition
 
 When the trigger is "verify <product feature> with Duhem", the VD
-lives in the **product's** repo under `.duhem/` (Pattern D). Chreode
-is the worked example (`onsager-ai/chreode#288` / `#289`).
+lives in the **product's** repo under `.duhem/` (Pattern D).
 
 1. Confirm the product feature and its acceptance criteria (the
    product spec's `## Test` section — lean-spec criteria map straight
@@ -135,20 +123,15 @@ is the worked example (`onsager-ai/chreode#288` / `#289`).
    no mock (§8 / §11.2). `templates/product-repo/` is the drop-in
    skeleton.
 4. Wire it to run:
-   - **Mode A (product self-gate).** A `duhem` workflow in the product
-     repo runs `duhem run .duhem/…` on its PRs — via the release
-     binary (see chreode's `.github/workflows/duhem.yml`) or
-     `duhem/run` with `verification-source: workspace`.
-   - **Mode B (drift monitoring, this repo).** Duhem's CI runs the
-     product's suite from a checked-out ref with a freshly-built
-     `duhem`. Copy the pattern from the retired
-     `.github/workflows/drift-chreode.yml` (last on main at
-     `be5a8b2`, #380), swapping the target repo, env bring-up, and
-     VD path. A red here = a Duhem regression against that product.
-     No product currently runs Mode B — Chreode's lane retired with
-     chreode ADR 0016, pending its deploy-contract replacement.
+   - **Mode A (product self-gate).** The product's CI runs
+     `duhem run .duhem/…` via the release binary or `duhem/run` with
+     `verification-source: workspace`.
+   - **Drift monitoring.** Product owners may also run their suite
+     against current Duhem to detect verifier regressions.
 
-   Pin currency and passing are separate signals (issue #380). Mode B proves a consumer's VD still passes against the freshly-built `duhem` at HEAD; it says nothing about what version the consumer is actually pinned to in its own CI. A consumer can be green on Mode B (or not drift-monitored at all) while its pinned version sits several `[breaking]` CHANGELOG entries behind current — the migration cost is real even though nothing is failing today. `.github/workflows/consumer-pins.yml` (`cargo xtask consumer-pins`, registry at `.github/drift-consumers.yml`) is the scheduled, warn-only lane that surfaces that gap; it's gated the same way as Mode B and skipped until armed.
+   Pin currency and passing are separate signals (#380). Each consumer
+   runs `cargo run -p xtask -- consumer-pins --pinned <version>` from
+   a Duhem checkout in its own CI. See `docs/consumer-pins.md`.
 5. Open the product PR (`Closes #N` on the product spec). Any
    Duhem-side wiring (a new drift lane, a new action) is its own Duhem
    PR under the Duhem spec from step 2. Cross-repo: spell out

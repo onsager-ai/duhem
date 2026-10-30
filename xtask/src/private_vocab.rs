@@ -1,6 +1,8 @@
 //! Shared policy definitions. Published-skill process vocabulary and verified
 //! private names are distinct policies with one maintained source.
 
+use anyhow::{Context, Result, bail};
+
 /// Substrings stripped from each line *before* scanning, so a legitimate
 /// public reference to the open-source project isn't flagged by the
 /// bare-word `onsager` rule.
@@ -18,7 +20,6 @@ enum Match {
 /// Internal-only vocabulary that must never reach a published skill.
 const DENY: &[(&str, Match)] = &[
     ("dogfood", Match::Substr),
-    ("chreode", Match::Substr),
     ("crawlab", Match::Substr),
     ("asymmetric", Match::Substr),
     ("codeowners", Match::Substr),
@@ -79,20 +80,83 @@ fn is_word_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-/// Tracker policy: repository visibility verified PRIVATE on 2026-10-30.
-/// These terms already occur in public source. Remove a term when its repository
-/// becomes public; additions require a fresh visibility check.
-pub(crate) const PRIVATE_NAMES: &[&str] = &["chreode", "ostrom-hub"];
+/// Private policy is supplied at runtime, never embedded in public source.
+pub(crate) fn load_private_names() -> Result<Vec<String>> {
+    let raw = std::env::var("DUHEM_PRIVATE_NAMES").ok();
+    parse_private_names(raw.as_deref())
+}
 
-pub(crate) fn scan_private_line<'a>(line: &str, rules: &[&'a str]) -> Vec<&'a str> {
+fn parse_private_names(raw: Option<&str>) -> Result<Vec<String>> {
+    let raw =
+        raw.context("DUHEM_PRIVATE_NAMES must be set to a comma-separated private-name list")?;
+    let mut names = Vec::new();
+    for name in raw.split(',') {
+        let name = name.trim().to_lowercase();
+        if name.is_empty() {
+            bail!("DUHEM_PRIVATE_NAMES must contain only non-empty comma-separated names");
+        }
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    Ok(names)
+}
+
+/// Only rule positions leave the matcher; callers cannot accidentally log terms.
+pub(crate) fn scan_private_line(line: &str, rules: &[&str]) -> Vec<usize> {
     let hay = allowed_line(line);
     rules
         .iter()
-        .copied()
-        .filter(|rule| hay.contains(*rule))
+        .enumerate()
+        .filter_map(|(id, rule)| hay.contains(rule).then_some(id))
         .collect()
 }
 
 pub(crate) fn all_skill_terms() -> impl Iterator<Item = &'static str> {
     DENY.iter().map(|(term, _)| *term)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_or_empty_policy_fails_without_echoing_values() {
+        for input in [
+            None,
+            Some(""),
+            Some("  "),
+            Some("restricted-example,"),
+            Some(",restricted-example"),
+        ] {
+            let error = parse_private_names(input).unwrap_err().to_string();
+            assert!(error.contains("DUHEM_PRIVATE_NAMES"));
+            assert!(!error.contains("restricted-example"));
+        }
+    }
+
+    #[test]
+    fn normalizes_and_deduplicates_names_and_matches_without_text() {
+        let names = parse_private_names(Some(
+            " Restricted-Example , hidden-sample,RESTRICTED-EXAMPLE ",
+        ))
+        .unwrap();
+        assert_eq!(names, ["restricted-example", "hidden-sample"]);
+        let rules = names.iter().map(String::as_str).collect::<Vec<_>>();
+        assert_eq!(
+            scan_private_line("RESTRICTED-EXAMPLE and hidden-sample", &rules),
+            [0, 1]
+        );
+        assert!(scan_private_line("ordinary public content", &rules).is_empty());
+    }
+
+    #[test]
+    fn public_project_slugs_stay_allowed() {
+        assert!(scan_private_line("https://github.com/onsager-ai/duhem", &["onsager"]).is_empty());
+        assert!(scan_private_line("onsager-ai/duhem-docs", &["onsager"]).is_empty());
+        assert_eq!(
+            scan_private_line("onsager outside the slug", &["onsager"]),
+            [0]
+        );
+    }
 }

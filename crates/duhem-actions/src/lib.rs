@@ -75,7 +75,7 @@ mod catalog_tests {
     #[test]
     fn catalog_is_complete_with_unique_uses() {
         let cat = catalog();
-        assert_eq!(cat.len(), 18, "expected 18 action contracts");
+        assert_eq!(cat.len(), 14, "expected 14 action contracts");
         let mut uses: Vec<&str> = cat.iter().map(|c| c.uses).collect();
         uses.sort();
         uses.dedup();

@@ -26,19 +26,4 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
-      - name: Diagnose loopback reverse DNS (temporary)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          python3 -u -c "import socket,faulthandler; faulthandler.dump_traceback_later(3, exit=True); print('numeric loopback reverse DNS'); print(socket.getfqdn('127.0.0.1'))" || true
-      # Temporary diagnosis for the macOS HTTP readiness boundary.
-      - name: Direct loopback fixture probe (temporary)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          python3 -u crates/duhem-runtime/tests/fixtures/process.py server "$RUNNER_TEMP/direct-state" 18769 > "$RUNNER_TEMP/direct-http.log" 2>&1 &
-          fixture_pid=$!
-          trap 'cat "$RUNNER_TEMP/direct-http.log"; kill "$fixture_pid"; wait "$fixture_pid" || true' EXIT
-          curl --fail --silent --show-error --max-time 2 --retry 10 --retry-connrefused --retry-delay 1 -H 'X-Ready: yes' http://127.0.0.1:18769/health
-          cat "$RUNNER_TEMP/direct-http.log"
       - run: cargo test -p duhem-runtime --test owned_processes

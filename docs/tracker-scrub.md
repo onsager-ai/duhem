@@ -6,12 +6,13 @@ comments. The daily `tracker vocabulary scan` workflow runs outside PR CI;
 it is also available through workflow_dispatch.
 
 `.github/tracker-scrub.json` explicitly configures author logins and an
-`updated_on_or_after` UTC date, set to the merge date. The maintainer login
+`updated_on_or_after` UTC timestamp, set during final preparation on the
+merge date. Timestamp precision excludes earlier activity on that day. The maintainer login
 is included because agents post under that account; bot accounts are
 listed explicitly. GitHub cannot distinguish human and agent posts under
 a shared login. Non-configured authors stay outside the scan.
 
-Untouched artifacts older than the date baseline are ignored. An edit to
+Untouched artifacts older than the timestamp baseline are ignored. An edit to
 an older artifact brings it back into scope. Review bodies use GraphQL's
 `updatedAt` because REST's submission date would miss subsequent edits.
 The existing skill-template process-vocabulary policy stays unchanged.
@@ -27,7 +28,7 @@ not a secrecy guarantee for predictable identifiers.
 
 The normal scan reports only artifact URLs, field names and line numbers.
 It never logs matching text, edits or deletes artifacts, or posts comments.
-It states its limits on every run: detection after publication, the date
+It states its limits on every run: detection after publication, the timestamp
 baseline, configured authors only, and this tracker only.
 
 `--measure` examines both the unchanged skill policy and the private-name

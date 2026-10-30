@@ -3,7 +3,7 @@ use crate::private_vocab::{
     PRIVATE_NAMES, PrivateName, all_skill_rule_ids, scan_private_line, skill_rule_ids,
 };
 use anyhow::{Context, Result, bail};
-use chrono::{Datelike, NaiveDate};
+use chrono::{DateTime, Datelike, Utc};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -16,7 +16,7 @@ const BOUND: &str = "Excludes non-configured authors, untouched posts before the
 
 struct Config {
     authors: BTreeSet<String>,
-    since: NaiveDate,
+    since: DateTime<Utc>,
 }
 #[derive(Debug, PartialEq, Eq)]
 struct Hit {
@@ -114,7 +114,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
         println!(
             "{}",
             json!({"repository":REPO, "configured_artifacts":scan.inspected,
-            "in_date_scope_artifacts":scan.eligible, "updated_on_or_after":config.since.to_string(),
+            "in_date_scope_artifacts":scan.eligible, "updated_on_or_after":config.since.to_rfc3339(),
             "private_matching_locations_in_date_scope":scan.hits.len(),
             "year_basis":"updated_at UTC year; all history for configured authors; per-rule matching lines",
             "skill_vocabulary":counts.skill_vocabulary, "private_names":counts.private_names,
@@ -123,14 +123,14 @@ pub fn run(args: Vec<String>) -> Result<()> {
         return Ok(());
     }
     println!(
-        "tracker-scrub: repository {REPO}; authors: {}; updated on or after {} UTC",
+        "tracker-scrub: repository {REPO}; authors: {}; updated on or after {}",
         config
             .authors
             .iter()
             .cloned()
             .collect::<Vec<_>>()
             .join(", "),
-        config.since
+        config.since.to_rfc3339()
     );
     println!("{BOUND}");
     for hit in &scan.hits {
@@ -171,13 +171,13 @@ fn read_config(path: &Path) -> Result<Config> {
     if authors.is_empty() || authors.contains("") {
         bail!("configure at least one non-empty author login explicitly");
     }
-    let since = NaiveDate::parse_from_str(
+    let since = DateTime::parse_from_rfc3339(
         value["updated_on_or_after"]
             .as_str()
             .context("configure updated_on_or_after explicitly")?,
-        "%Y-%m-%d",
     )
-    .context("baseline must be YYYY-MM-DD")?;
+    .context("baseline must be an RFC3339 UTC timestamp")?
+    .with_timezone(&Utc);
     Ok(Config { authors, since })
 }
 
@@ -235,7 +235,7 @@ fn scan_records(
         )
         .context("invalid artifact updated_at")?
         .with_timezone(&chrono::Utc);
-        let eligible = updated.date_naive() >= config.since;
+        let eligible = updated >= config.since;
         if eligible {
             scan.eligible += 1;
         }
@@ -303,7 +303,9 @@ mod tests {
     fn config() -> Config {
         Config {
             authors: BTreeSet::from(["configured".into()]),
-            since: NaiveDate::from_ymd_opt(2026, 10, 30).unwrap(),
+            since: DateTime::parse_from_rfc3339("2026-10-30T00:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
         }
     }
     #[test]
@@ -352,6 +354,28 @@ mod tests {
         assert_eq!(counts.skill_vocabulary["S01"][&2025], 1);
         assert_eq!(counts.private_names["test"][&2025], 1);
     }
+    #[test]
+    fn exact_merge_day_timestamp_excludes_earlier_activity_on_the_same_day() {
+        let mut config = config();
+        config.since = DateTime::parse_from_rfc3339("2026-10-30T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let records = json!([
+            {"user":{"login":"configured"},"html_url":"earlier-today","updated_at":"2026-10-30T11:59:59Z","body":"restricted-example"},
+            {"user":{"login":"configured"},"html_url":"at-baseline","updated_at":"2026-10-30T12:00:00Z","body":"restricted-example"}
+        ]);
+        let mut scan = Scan::default();
+        let mut counts = Measurement::default();
+        scan_records(&records, &config, &policy(), false, &mut scan, &mut counts).unwrap();
+        assert_eq!(
+            scan.hits
+                .iter()
+                .map(|hit| hit.url.as_str())
+                .collect::<Vec<_>>(),
+            vec!["at-baseline"]
+        );
+    }
+
     #[test]
     fn malformed_payload_or_missing_update_time_is_not_a_clean_scan() {
         let mut scan = Scan::default();

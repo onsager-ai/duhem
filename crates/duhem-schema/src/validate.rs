@@ -63,7 +63,7 @@ pub fn validate_with_contract_outputs(
     // check's own `steps:` (#532). One walker enumerates every such
     // block so a block added later is covered without a new call site
     // to remember.
-    validate_reserved_output_prefixes(v, &mut errs);
+    validate_step_outputs(v, outputs_for, &mut errs);
 
     if v.criteria.is_empty() {
         errs.push(ValidationError::NoCriteria);
@@ -207,8 +207,6 @@ pub fn validate_with_contract_outputs(
         {
             errs.push(ValidationError::DuplicateTeardownStepId { id: id.to_string() });
         }
-        let contract_outputs = step.uses.as_deref().map(outputs_for).unwrap_or_default();
-        check_secret_paths(step, &contract_outputs, "teardown", &step_name, &mut errs);
         let mut source_path = vec![
             SourcePathSegment::key("teardown"),
             SourcePathSegment::index(idx),
@@ -463,58 +461,32 @@ pub(crate) fn effective_outputs(
     set
 }
 
-/// Enumerate every step-bearing block in the definition and reject any
-/// authored `outputs:` alias under the reserved `capture/` prefix
-/// (§7.7, spec #202) — runner-emitted failure evidence, never
-/// producible by an action, so an authored binding under it can only
-/// be an attempt to forge a capture.
-///
-/// This is the *one* walker: rather than threading the check through
-/// every existing per-block validation function (which is exactly how
-/// #532 happened — eight sites, one of which remembered), it owns its
-/// own traversal of the whole definition, independent of every other
-/// rule. A step-bearing block added later is covered by extending the
-/// enumeration here, not by finding and patching N call sites.
-fn validate_reserved_output_prefixes(v: &VerificationDefinition, errs: &mut Vec<ValidationError>) {
-    reject_reserved_output_prefix(&v.setup, "setup", errs);
-    reject_reserved_output_prefix(&v.teardown, "teardown", errs);
-    for (name, fixture) in &v.fixtures {
-        reject_reserved_output_prefix(&fixture.up, &format!("fixture `{name}` up"), errs);
-        reject_reserved_output_prefix(&fixture.down, &format!("fixture `{name}` down"), errs);
-    }
-    for c in &v.criteria {
-        reject_reserved_output_prefix(&c.setup, &format!("criterion `{}` setup", c.id), errs);
-        reject_reserved_output_prefix(&c.teardown, &format!("criterion `{}` teardown", c.id), errs);
-        for ch in &c.checks {
-            let label = format!("criterion `{}` / check `{}`", c.id, ch.id);
-            reject_reserved_output_prefix(&ch.setup, &format!("{label} setup"), errs);
-            reject_reserved_output_prefix(&ch.teardown, &format!("{label} teardown"), errs);
-            reject_reserved_output_prefix(&ch.steps, &label, errs);
-        }
-    }
-}
-
-/// Reject a reserved-prefix `outputs:` alias anywhere in `steps`,
-/// including inside a `for_each:` body template — the loop body is
-/// itself a step list and authors the same `outputs:` surface as its
-/// enclosing block.
-fn reject_reserved_output_prefix(steps: &[Step], site: &str, errs: &mut Vec<ValidationError>) {
-    for (idx, step) in steps.iter().enumerate() {
-        for name in step.outputs.keys() {
-            if name.starts_with("capture/") {
-                errs.push(ValidationError::ReservedOutputPrefix {
-                    site: site.to_string(),
-                    step: step_label(step, idx),
-                    name: name.clone(),
-                });
+/// Rules shared by every step-bearing block, including loop templates.
+fn validate_step_outputs(
+    v: &VerificationDefinition,
+    outputs_for: &dyn Fn(&str) -> Vec<String>,
+    errs: &mut Vec<ValidationError>,
+) {
+    for block in crate::step_walk::step_blocks(v) {
+        for (index, step) in block.steps.iter().enumerate() {
+            let contract_outputs = step.uses.as_deref().map(outputs_for).unwrap_or_default();
+            check_secret_paths(
+                step,
+                &contract_outputs,
+                &block.site,
+                &step_label(step, index),
+                errs,
+            );
+            for name in step.outputs.keys() {
+                if name.starts_with("capture/") {
+                    errs.push(ValidationError::ReservedOutputPrefix {
+                        site: block.site.clone(),
+                        step: step_label(step, index),
+                        name: name.clone(),
+                    });
+                }
             }
         }
-        let nested: &[Step] = if step.for_each_body.is_empty() {
-            step.steps.as_deref().unwrap_or(&[])
-        } else {
-            &step.for_each_body
-        };
-        reject_reserved_output_prefix(nested, site, errs);
     }
 }
 
@@ -530,8 +502,6 @@ fn collect_setup_outputs<'a>(
     let mut seen: HashSet<&str> = HashSet::new();
     let mut outputs: HashMap<&str, HashSet<String>> = HashMap::new();
     for (idx, s) in setup.iter().enumerate() {
-        let contract_outputs = s.uses.as_deref().map(outputs_for).unwrap_or_default();
-        check_secret_paths(s, &contract_outputs, "setup", &step_label(s, idx), errs);
         if let Some(id) = &s.id {
             if !seen.insert(id.as_str()) {
                 errs.push(ValidationError::DuplicateSetupStepId { id: id.clone() });

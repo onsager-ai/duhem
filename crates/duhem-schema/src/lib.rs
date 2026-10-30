@@ -24,6 +24,7 @@ pub mod project;
 pub mod provision;
 mod source;
 pub mod step;
+pub mod step_walk;
 pub mod validate;
 mod validate_actions;
 pub mod validate_error;

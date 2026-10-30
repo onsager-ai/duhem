@@ -59,6 +59,13 @@ jobs:
         working-directory: crates/duhem-dashboard/web
         run: npm run build
 
+      - name: Upload dashboard for browser review
+        uses: actions/upload-artifact@v7
+        with:
+          name: dashboard-spa
+          path: crates/duhem-dashboard/web/dist
+          retention-days: 7
+
       - name: crate tests (real bundle embedded)
         run: cargo test -p duhem-dashboard
 

@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Show explicit assertions in the dashboard rail and record their resolved operand values with existing secret masking. (#574)
+
 - [clarifying] Unknown-action, contract-field, redundancy-lint and secret-path validation cover criterion- and check-level setup/teardown through the same block walker as other steps. (#538)
 - [clarifying] Assertion type mismatches gate as fail; the spec distinguishes present null operands from absent fields, which remain inconclusive missing observations. (#537)
 

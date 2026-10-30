@@ -378,6 +378,11 @@ pub enum EventPayload {
     },
     AssertionEvaluated {
         check_id: String,
+        /// Values observed during the explicit assertion's actual evaluation.
+        /// An empty map still identifies an explicit assertion. Absent for
+        /// implicit judgments and legacy evidence; missing values are not null.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operands: Option<BTreeMap<String, serde_json::Value>>,
         assertion_index: u32,
         /// Zero-based loop ordinal; absent for ordinary assertions and older evidence.
         #[serde(default, skip_serializing_if = "Option::is_none")]

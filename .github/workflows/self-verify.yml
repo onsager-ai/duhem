@@ -141,6 +141,11 @@ jobs:
             --inputs state_file="${RUNNER_TEMP}/owned-process-example-state"
           test ! -e "${RUNNER_TEMP}/owned-process-example-state"
 
+      - name: Run check-conditions example against in-memory SQLite
+        run: |
+          ./target/release/duhem run verifications/check-conditions-example \
+            --db .duhem/duhem.db
+
       # Hub replication (#194's ship contract; hub per
       # onsager-ai/duhem-hub#6). `if: always()` ships red runs too —
       # failure evidence is the point — and never gates the verdict.

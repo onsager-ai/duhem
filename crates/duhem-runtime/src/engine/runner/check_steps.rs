@@ -27,11 +27,13 @@ impl Engine {
                 .storyboards
                 .entry(step.session.clone())
                 .or_default();
-            let (gate, condition_error) = match evaluate_gate(step, idx, failed_by.as_deref(), ctx)
-            {
-                Ok(gate) => (gate, None),
-                Err(error) => (None, Some(error)),
-            };
+            // An unresolvable condition makes this check inconclusive
+            // rather than aborting the run (#440 R2); see below.
+            let (gate, unresolved_condition) =
+                match evaluate_in_check(step, idx, failed_by.as_deref(), ctx) {
+                    Ok(gate) => (gate, None),
+                    Err(detail) => (None, Some(detail)),
+                };
             let cleanup_step = failed_by.is_some() && gate.is_none();
             if cleanup_step {
                 cleanup_steps.insert(idx);
@@ -40,9 +42,7 @@ impl Engine {
             // context available without bifurcating evidence.
             let mut resolved_with = step.with.clone();
             let catalog_reference = page_reference(&step.with);
-            let step_error = if condition_error.is_some() {
-                condition_error
-            } else if gate.is_none() {
+            let step_error = if gate.is_none() && unresolved_condition.is_none() {
                 substitute_with(&mut resolved_with, ctx).err().map(|u| {
                     EngineError::UnresolvedReference {
                         context: u.rendered_context(),
@@ -71,6 +71,7 @@ impl Engine {
             // anything, so recording its
             // locator would be misleading evidence.
             let will_run = gate.is_none()
+                && unresolved_condition.is_none()
                 && step_error.is_none()
                 && !environment_failed
                 && self.registry.contains_key(step.uses_name());
@@ -97,7 +98,12 @@ impl Engine {
             // invocation itself stays *after* `StepStarted` — see the
             // registration comment below.
             let dispatcher =
-                if gate.is_some() || step_error.is_some() || !known || environment_failed {
+                if gate.is_some()
+                    || unresolved_condition.is_some()
+                    || step_error.is_some()
+                    || !known
+                    || environment_failed
+                {
                     None
                 } else {
                     Some(
@@ -154,6 +160,32 @@ impl Engine {
                     })
                     .await?;
                 step_evidence[idx] = StepEvidence::skipped(reason);
+                continue;
+            }
+
+            if let Some(detail) = unresolved_condition {
+                // Same evidence shape as any errored step, so the implicit
+                // judgment reports `Inconclusive(MissingObservation)` with
+                // this detail; no engine error, so the run continues.
+                let detail = writer.mask_text(&detail);
+                writer
+                    .append(EventPayload::StepFinished {
+                        step_index: idx as u32,
+                        outcome: duhem_evidence::StepOutcome::Error,
+                        detail: Some(detail.clone()),
+                    })
+                    .await?;
+                step_evidence[idx] = StepEvidence {
+                    with: resolved_with.clone(),
+                    outputs: BTreeMap::new(),
+                    skip_reason: None,
+                    catalog_reference: catalog_reference.clone(),
+                    outcome: Some(Outcome::Error),
+                    detail: Some(detail),
+                };
+                if failed_by.is_none() {
+                    *failed_by = Some(display_step_label(step, idx));
+                }
                 continue;
             }
 

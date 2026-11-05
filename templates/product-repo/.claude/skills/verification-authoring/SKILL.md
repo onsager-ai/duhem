@@ -206,8 +206,14 @@ Authoring rules:
   should run only after failure. Both still run after a step-level
   engine error before the original error aborts the run. A retried
   check runs its cleanup once per attempt, so cleanup steps must be
-  idempotent. Do not invent expressions under `if:`; its closed
-  vocabulary is `success | always | failure`.
+  idempotent. `if:` also accepts a value expression on check steps
+  (`if: $steps.probe.outputs.row_count > 0`) that reads earlier steps in
+  the same check, `$inputs`, `$setup` or consumed fixture outputs; the
+  closed outcome vocabulary is `success | always | failure`, and
+  `success` stays the default. A false condition gates the step and the
+  report counts the gated judging step. A condition that cannot be
+  resolved makes the check `inconclusive`, never a silent skip, and so
+  does a later read of the gated step's outputs.
 - Use role-based locators (`{ role: "button", name: "…" }`) for `ui/*`
   rather than CSS or XPath — UI churn invalidates the latter while
   role-based selectors track the user-visible affordance.

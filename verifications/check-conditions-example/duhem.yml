@@ -1,0 +1,49 @@
+# Value-based `if:` on check steps — worked example (#440 Tier 2)
+#
+# Real SQLite actions, no mocks. AC-1: the condition holds, so the
+# guarded `db/observe` runs and judges. AC-2: the condition is false, so
+# that judging step is gated: the check still passes, and the run report
+# shows it as a check with one gated judging step (a smaller claim set
+# than an all-ran pass). A condition that cannot be resolved at run time
+# makes its check `inconclusive:missing_observation` instead; that case
+# cannot sit in a passing gate suite and is covered by
+# `crates/duhem-runtime/tests/check_conditions.rs`.
+
+verification: Check-step value conditions
+
+criteria:
+  - id: AC-1
+    description: A condition that holds runs the guarded step.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: probe
+            uses: db/query
+            with: { connection: 'sqlite::memory:', sql: 'select 1 as v' }
+          - id: guarded
+            uses: db/observe
+            if: $steps.probe.outputs.row_count > 0
+            with:
+              connection: 'sqlite::memory:'
+              sql: 'select 1'
+              until: { row_count: 1 }
+        assertions:
+          - $steps.probe.outputs.row_count == 1
+
+  - id: AC-2
+    description: A condition that does not hold gates the step, visibly.
+    checks:
+      - id: AC-2.1
+        steps:
+          - id: probe
+            uses: db/query
+            with: { connection: 'sqlite::memory:', sql: 'select 1 as v where 0' }
+          - id: guarded
+            uses: db/observe
+            if: $steps.probe.outputs.row_count > 0
+            with:
+              connection: 'sqlite::memory:'
+              sql: 'select 1'
+              until: { row_count: 1 }
+        assertions:
+          - $steps.probe.outputs.row_count == 0

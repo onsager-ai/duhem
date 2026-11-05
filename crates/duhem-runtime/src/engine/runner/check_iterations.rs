@@ -72,8 +72,9 @@ impl Engine {
                     // #440 R2: an unresolvable loop condition makes the
                     // check inconclusive; other checks keep running.
                     let detail = writer.mask_text(&detail);
-                    let state =
-                        VerdictState::Inconclusive(duhem_judge::InconclusiveCause::MissingObservation);
+                    let state = VerdictState::Inconclusive(
+                        duhem_judge::InconclusiveCause::MissingObservation,
+                    );
                     writer
                         .append(EventPayload::AssertionEvaluated {
                             operands: None,

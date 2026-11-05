@@ -97,21 +97,20 @@ impl Engine {
             // action's contract without a second registry lookup. The
             // invocation itself stays *after* `StepStarted` — see the
             // registration comment below.
-            let dispatcher =
-                if gate.is_some()
-                    || unresolved_condition.is_some()
-                    || step_error.is_some()
-                    || !known
-                    || environment_failed
-                {
-                    None
-                } else {
-                    Some(
-                        self.registry
-                            .get(step.uses_name())
-                            .expect("known checked above"),
-                    )
-                };
+            let dispatcher = if gate.is_some()
+                || unresolved_condition.is_some()
+                || step_error.is_some()
+                || !known
+                || environment_failed
+            {
+                None
+            } else {
+                Some(
+                    self.registry
+                        .get(step.uses_name())
+                        .expect("known checked above"),
+                )
+            };
 
             crate::engine::flow::register_secrets(writer, step, ctx);
 

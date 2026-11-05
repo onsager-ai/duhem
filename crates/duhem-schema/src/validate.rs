@@ -3025,7 +3025,8 @@ criteria:
         )
     }
 
-    const GATE_FIRST: &str = "          - id: first\n            uses: db/query\n            outputs: { rows: rows }\n";
+    const GATE_FIRST: &str =
+        "          - id: first\n            uses: db/query\n            outputs: { rows: rows }\n";
 
     #[test]
     fn check_step_value_condition_on_earlier_step_and_inputs_validates() {

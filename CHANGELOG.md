@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+## v0.7.1 — 2026-11-05
+
 - [additive] Owned process actions record readiness, bounded logs, stop/restart and required cleanup for long-lived local binaries; process outputs from criterion/check setup and consumed fixtures are addressable from the check; non-process visibility unchanged. (#579)
 - [additive] UI locators accept frame scoping, including nested and cross-origin iframes, for assertions and interactions. (#568)
 

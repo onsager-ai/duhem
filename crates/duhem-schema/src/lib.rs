@@ -78,7 +78,7 @@ pub const SCHEMA_VERSION: &str = schema_version!();
 #[macro_export]
 macro_rules! schema_version {
     () => {
-        "0.7.1"
+        "0.7.2"
     };
 }
 

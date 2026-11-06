@@ -264,6 +264,13 @@ Authoring rules:
   run after a step-level engine error before the original error aborts
   the run. A retried check runs its cleanup once per attempt, so cleanup
   steps must be idempotent.
+- `if:` also accepts a value expression (`if: $steps.probe.outputs.row_count > 0`)
+  on check steps. Paths resolve against earlier steps in the same check,
+  `$inputs`, `$setup` and consumed fixture outputs. A gated judging step
+  shrinks the claim set, which the report shows; an unresolvable
+  condition makes the check `inconclusive`, never a skip. Reading a
+  gated step's outputs later is also inconclusive. Worked example:
+  `verifications/check-conditions-example/`.
 - Use role-based locators (`{role: "button", name: "..."}`)
   rather than CSS or XPath — UI churn invalidates the latter
   while role-based selectors track the user-visible affordance.

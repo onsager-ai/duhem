@@ -33,7 +33,7 @@ pub(crate) use crate::engine::outcome::{
 
 use crate::engine::capture::{CapturePolicy, target_from_step};
 use crate::engine::context::{RunContext, RunState, json_to_value};
-use crate::engine::gating::{evaluate as evaluate_gate, step_failed};
+use crate::engine::gating::{evaluate_in_check, step_failed};
 use crate::engine::registry::{ActionRegistry, default_registry, enforce_wait_ceiling};
 use crate::engine::session::CheckContexts;
 

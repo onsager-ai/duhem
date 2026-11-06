@@ -66,7 +66,42 @@ impl Engine {
             offset = range.end;
             // Resolve once in the outer context. Bounds are enforced before
             // dispatch, so excess rows are never silently truncated.
-            let gate = evaluate_gate(step, range.start, failed_by.as_deref(), ctx)?;
+            let gate = match evaluate_in_check(step, range.start, failed_by.as_deref(), ctx) {
+                Ok(gate) => gate,
+                Err(detail) => {
+                    // #440 R2: an unresolvable loop condition makes the
+                    // check inconclusive; other checks keep running.
+                    let detail = writer.mask_text(&detail);
+                    let state = VerdictState::Inconclusive(
+                        duhem_judge::InconclusiveCause::MissingObservation,
+                    );
+                    writer
+                        .append(EventPayload::AssertionEvaluated {
+                            operands: None,
+                            check_id: check.id.clone(),
+                            assertion_index: control_index as u32,
+                            iteration: None,
+                            state,
+                            detail: Some(detail.clone()),
+                            expr: Some("for_each condition is resolvable".into()),
+                            step_index: None,
+                        })
+                        .await?;
+                    outcomes.push(AssertionOutcome {
+                        assertion_index: control_index,
+                        iteration: None,
+                        state,
+                        detail: Some(detail.clone()),
+                    });
+                    failed.push(FailedAssertion {
+                        expr: "for_each condition is resolvable".into(),
+                        state,
+                        detail: Some(detail),
+                    });
+                    failed_by = Some("for_each condition".into());
+                    continue;
+                }
+            };
             if gate.is_some() {
                 for idx in range {
                     evidence[idx] = StepEvidence::skipped("loop gate".into());

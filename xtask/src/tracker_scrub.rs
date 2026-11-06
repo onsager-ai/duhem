@@ -1,5 +1,5 @@
 //! Scheduled, read-only detection for configured authors after a date baseline.
-use crate::private_vocab::{all_skill_terms, load_private_names, scan_line, scan_private_line};
+use crate::private_vocab::{all_skill_terms, scan_line};
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Datelike, Utc};
 use serde_json::{Value, json};
@@ -30,9 +30,7 @@ struct Scan {
 }
 #[derive(Default)]
 struct Measurement {
-    skill_vocabulary: BTreeMap<usize, BTreeMap<i32, usize>>,
-    private_names: BTreeMap<usize, BTreeMap<i32, usize>>,
-    private_names_in_date_scope: BTreeMap<usize, BTreeMap<i32, usize>>,
+    skill_vocabulary: BTreeMap<String, BTreeMap<i32, usize>>,
 }
 
 pub fn run(args: Vec<String>) -> Result<()> {
@@ -60,19 +58,11 @@ pub fn run(args: Vec<String>) -> Result<()> {
     let config = read_config(&config_path)?;
     let mut scan = Scan::default();
     let mut counts = Measurement::default();
-    let names = load_private_names()?;
-    let rules = names.iter().map(String::as_str).collect::<Vec<_>>();
-    for id in 0..all_skill_terms().count() {
-        counts.skill_vocabulary.insert(id, BTreeMap::new());
-    }
-    for id in 0..rules.len() {
-        counts.private_names.insert(id, BTreeMap::new());
-        counts
-            .private_names_in_date_scope
-            .insert(id, BTreeMap::new());
+    for term in all_skill_terms() {
+        counts.skill_vocabulary.insert(term.into(), BTreeMap::new());
     }
     let mut inspect =
-        |records: &Value| scan_records(records, &config, &rules, measure, &mut scan, &mut counts);
+        |records: &Value| scan_records(records, &config, measure, &mut scan, &mut counts);
     if let Some(path) = fixture {
         let records = serde_json::from_str(&std::fs::read_to_string(path).context("read fixture")?)
             .context("parse fixture")?;
@@ -107,10 +97,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
             "{}",
             json!({"repository":REPO, "configured_artifacts":scan.inspected,
             "in_date_scope_artifacts":scan.eligible, "updated_on_or_after":config.since.to_rfc3339(),
-            "private_matching_locations_in_date_scope":scan.hits.len(),
+            "matching_locations_in_date_scope":scan.hits.len(),
             "year_basis":"updated_at UTC year; all history for configured authors; per-rule matching lines",
-            "skill_vocabulary":counts.skill_vocabulary, "private_names":counts.private_names,
-            "private_names_in_date_scope":counts.private_names_in_date_scope})
+            "skill_vocabulary":counts.skill_vocabulary})
         );
         return Ok(());
     }
@@ -234,7 +223,6 @@ fn review_records(page: &Value) -> Result<Value> {
 fn scan_records(
     records: &Value,
     config: &Config,
-    rules: &[&str],
     measure: bool,
     scan: &mut Scan,
     counts: &mut Measurement,
@@ -264,37 +252,18 @@ fn scan_records(
         for field in ["title", "body"] {
             if let Some(text) = record[field].as_str() {
                 for (line, text) in text.lines().enumerate() {
-                    let private = scan_private_line(text, rules);
+                    let terms = scan_line(text);
                     if measure {
-                        for term in scan_line(text) {
-                            let id = all_skill_terms()
-                                .position(|candidate| candidate == term)
-                                .expect("known skill rule");
+                        for term in &terms {
                             *counts
                                 .skill_vocabulary
-                                .entry(id)
+                                .entry(term.clone())
                                 .or_default()
                                 .entry(updated.year())
                                 .or_default() += 1;
-                        }
-                        for id in &private {
-                            *counts
-                                .private_names
-                                .entry(*id)
-                                .or_default()
-                                .entry(updated.year())
-                                .or_default() += 1;
-                            if eligible {
-                                *counts
-                                    .private_names_in_date_scope
-                                    .entry(*id)
-                                    .or_default()
-                                    .entry(updated.year())
-                                    .or_default() += 1;
-                            }
                         }
                     }
-                    if eligible && !private.is_empty() {
+                    if eligible && !terms.is_empty() {
                         let url = record["html_url"]
                             .as_str()
                             .context("artifact URL missing")?;
@@ -314,9 +283,6 @@ fn scan_records(
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn policy() -> Vec<&'static str> {
-        vec!["restricted-example"]
-    }
     fn config() -> Config {
         Config {
             authors: BTreeSet::from(["configured".into()]),
@@ -331,15 +297,7 @@ mod tests {
             serde_json::from_str(include_str!("../fixtures/tracker-scrub.json")).unwrap();
         let mut scan = Scan::default();
         let mut counts = Measurement::default();
-        scan_records(
-            &records,
-            &config(),
-            &policy(),
-            false,
-            &mut scan,
-            &mut counts,
-        )
-        .unwrap();
+        scan_records(&records, &config(), false, &mut scan, &mut counts).unwrap();
         assert_eq!(
             scan.hits
                 .iter()
@@ -348,33 +306,22 @@ mod tests {
             vec!["edited-old", "new"]
         );
         assert_eq!(scan.hits[0].line, 2);
-        assert!(!format!("{:?}", scan.hits).contains("restricted-example"));
+        assert!(!format!("{:?}", scan.hits).contains("dogfood"));
     }
     #[test]
-    fn public_names_and_process_words_are_not_private_names() {
-        assert!(
-            scan_private_line("Public Project dogfood CODEOWNERS pre-push", &policy()).is_empty()
-        );
-        assert!(
-            scan_private_line(
-                "https://github.com/onsager-ai/duhem on GitHub",
-                &["onsager"]
-            )
-            .is_empty()
-        );
-        assert_eq!(scan_private_line("RESTRICTED-EXAMPLE", &policy()), [0]);
+    fn public_slug_is_not_skill_vocabulary() {
+        assert!(scan_line("https://github.com/onsager-ai/duhem on GitHub").is_empty());
+        assert!(!scan_line("dogfood").is_empty());
     }
     #[test]
-    fn measurement_ignores_cutoff_and_counts_both_policies_without_locations() {
-        let records = json!([{"user":{"login":"configured"},"html_url":"do-not-output", "updated_at":"2025-01-01T00:00:00Z", "body":"dogfood restricted-example"}]);
+    fn measurement_ignores_cutoff_and_counts_without_locations() {
+        let records = json!([{"user":{"login":"configured"},"html_url":"do-not-output", "updated_at":"2025-01-01T00:00:00Z", "body":"dogfood"}]);
         let mut scan = Scan::default();
         let mut counts = Measurement::default();
-        scan_records(&records, &config(), &policy(), true, &mut scan, &mut counts).unwrap();
+        scan_records(&records, &config(), true, &mut scan, &mut counts).unwrap();
         assert!(scan.hits.is_empty());
-        assert_eq!(counts.skill_vocabulary[&0][&2025], 1);
-        assert_eq!(counts.private_names[&0][&2025], 1);
-        let output = serde_json::to_string(&counts.private_names).unwrap();
-        assert!(!output.contains("restricted-example"));
+        assert_eq!(counts.skill_vocabulary["dogfood"][&2025], 1);
+        let output = serde_json::to_string(&counts.skill_vocabulary).unwrap();
         assert!(!output.contains("do-not-output"));
     }
     #[test]
@@ -384,15 +331,7 @@ mod tests {
         let records = review_records(&page).unwrap();
         let mut scan = Scan::default();
         let mut counts = Measurement::default();
-        scan_records(
-            &records,
-            &config(),
-            &policy(),
-            false,
-            &mut scan,
-            &mut counts,
-        )
-        .unwrap();
+        scan_records(&records, &config(), false, &mut scan, &mut counts).unwrap();
         assert_eq!(
             scan.hits
                 .iter()
@@ -408,12 +347,12 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
         let records = json!([
-            {"user":{"login":"configured"},"html_url":"earlier-today","updated_at":"2026-10-30T11:59:59Z","body":"restricted-example"},
-            {"user":{"login":"configured"},"html_url":"at-baseline","updated_at":"2026-10-30T12:00:00Z","body":"restricted-example"}
+            {"user":{"login":"configured"},"html_url":"earlier-today","updated_at":"2026-10-30T11:59:59Z","body":"dogfood"},
+            {"user":{"login":"configured"},"html_url":"at-baseline","updated_at":"2026-10-30T12:00:00Z","body":"dogfood"}
         ]);
         let mut scan = Scan::default();
         let mut counts = Measurement::default();
-        scan_records(&records, &config, &policy(), false, &mut scan, &mut counts).unwrap();
+        scan_records(&records, &config, false, &mut scan, &mut counts).unwrap();
         assert_eq!(
             scan.hits
                 .iter()
@@ -427,20 +366,8 @@ mod tests {
     fn malformed_payload_or_missing_update_time_is_not_a_clean_scan() {
         let mut scan = Scan::default();
         let mut counts = Measurement::default();
-        assert!(
-            scan_records(
-                &Value::Null,
-                &config(),
-                &policy(),
-                false,
-                &mut scan,
-                &mut counts
-            )
-            .is_err()
-        );
-        let record = json!([{"user":{"login":"configured"},"body":"restricted-example"}]);
-        assert!(
-            scan_records(&record, &config(), &policy(), false, &mut scan, &mut counts).is_err()
-        );
+        assert!(scan_records(&Value::Null, &config(), false, &mut scan, &mut counts).is_err());
+        let record = json!([{"user":{"login":"configured"},"body":"dogfood"}]);
+        assert!(scan_records(&record, &config(), false, &mut scan, &mut counts).is_err());
     }
 }

@@ -7,14 +7,14 @@
             {
               "author": {"login": "configured"},
               "url": "untouched-old-review",
-              "body": "restricted-example",
+              "body": "dogfood",
               "createdAt": "2025-01-01T00:00:00Z",
               "updatedAt": "2025-01-01T00:00:00Z"
             },
             {
               "author": {"login": "configured"},
               "url": "edited-old-review",
-              "body": "restricted-example",
+              "body": "dogfood",
               "createdAt": "2025-01-01T00:00:00Z",
               "updatedAt": "2026-10-30T00:00:00Z"
             }

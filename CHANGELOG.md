@@ -29,7 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
-- [clarifying] Remove private consumer names from tracked source; consumers run `consumer-pins --pinned <version>` in their own CI, replacing the central registry and scheduled pin job. (#605)
+- [clarifying] Remove private consumer names from tracked source; consumers run `consumer-pins --pinned <version>` in their own CI, replacing the central registry and scheduled pin job; retire the tracker vocabulary scan. (#605)
 - [additive] `if: <expr>` accepted on check steps, resolved against earlier steps/`$inputs`/`$setup` with source-located validation; gated judging steps stay visible in reports, an unresolvable condition makes its check `inconclusive:missing_observation`, as does reading a gated step's outputs. (#440)
 
 ## v0.7.1 — 2026-11-05

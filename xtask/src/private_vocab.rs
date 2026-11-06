@@ -1,4 +1,4 @@
-//! Shared internal-vocabulary policy for the published-skill and tracker scans.
+//! Shared internal-vocabulary policy for the published-skill scan.
 
 /// Substrings stripped from each line *before* scanning, so a legitimate
 /// public reference to the open-source project isn't flagged by the
@@ -75,10 +75,6 @@ fn contains_word(hay: &str, needle: &str) -> bool {
 
 fn is_word_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
-}
-
-pub(crate) fn all_skill_terms() -> impl Iterator<Item = &'static str> {
-    DENY.iter().map(|(term, _)| *term)
 }
 
 #[cfg(test)]

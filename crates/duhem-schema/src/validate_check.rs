@@ -57,29 +57,7 @@ pub(super) fn validate_check(
     let mut step_outputs: HashMap<&str, HashSet<String>> = HashMap::new();
     let mut seen_step_ids: HashSet<&str> = HashSet::new();
 
-    for (idx, &(s, _)) in check_steps.iter().enumerate() {
-        if matches!(s.condition, StepCondition::Expr(_)) {
-            let path = [
-                SourcePathSegment::key("criteria"),
-                SourcePathSegment::index(criterion_index),
-                SourcePathSegment::key("checks"),
-                SourcePathSegment::index(check_index),
-                SourcePathSegment::key("steps"),
-                SourcePathSegment::index(idx),
-                SourcePathSegment::key("if"),
-            ];
-            let raw = match &s.condition {
-                StepCondition::Expr(e) => e.raw.as_str(),
-                _ => unreachable!(),
-            };
-            errs.push(ValidationError::CheckStepConditionUnavailable {
-                criterion: c.id.clone(),
-                check: ch.id.clone(),
-                location: source_context_matches
-                    .then(|| source_map.scalar_location(&path, raw))
-                    .flatten(),
-            });
-        }
+    for &(s, _) in &check_steps {
         if let Some(id) = &s.id {
             if !seen_step_ids.insert(id.as_str()) {
                 errs.push(ValidationError::DuplicateStepId {
@@ -160,6 +138,37 @@ pub(super) fn validate_check(
         inputs,
         pages,
     };
+
+    // Value-based `if:` (#440 Tier 2): a path may only read steps that
+    // precede the conditioned step, so a forward or self reference
+    // resolves like an undeclared step. Same resolver as assertions.
+    let mut earlier_outputs: HashMap<&str, HashSet<String>> = HashMap::new();
+    for (idx, &(s, active_loop)) in check_steps.iter().enumerate() {
+        if let StepCondition::Expr(expr) = &s.condition {
+            let mut path = crate::source::check_path(criterion_index, check_index, "steps");
+            path.push(SourcePathSegment::index(idx));
+            path.push(SourcePathSegment::key("if"));
+            let location = source_context_matches
+                .then(|| source_map.scalar_location(&path, &expr.raw))
+                .flatten();
+            let condition_scope = PathScope {
+                step_outputs: &earlier_outputs,
+                active_loop,
+                ..scope
+            };
+            let site = RefSite::StepCondition {
+                step: step_label(s, idx),
+            };
+            walk_checkable_paths(&expr.parsed, &mut |p, arity| {
+                check_path(&condition_scope, p, arity, &expr.raw, &site, location, errs);
+            });
+        }
+        if let Some(id) = s.id.as_deref()
+            && let Some(outputs) = step_outputs.get(id)
+        {
+            earlier_outputs.insert(id, outputs.clone());
+        }
+    }
 
     // A browser session is acquired state, not an inline fixture. Only
     // a whole-string path reference is accepted: literals and runtime

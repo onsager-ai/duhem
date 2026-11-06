@@ -27,15 +27,53 @@ pub(crate) fn step_failed(outcome: &Outcome, judgment: Option<VerdictState>) -> 
 }
 
 /// Apply the outcome gate first, then observe the value condition once.
-/// Check-step expression authoring remains blocked by schema validation
-/// until Tier 2; both runners use this evidence path so that boundary can
-/// open without making conditional absence invisible.
+/// Lifecycle and `for_each` steps treat an unresolvable condition as an
+/// engine error (the step fails and its dependents go inconclusive).
 pub(super) fn evaluate(
     step: &duhem_schema::Step,
     index: usize,
     failed_by: Option<&str>,
     ctx: &dyn crate::EvalContext,
 ) -> Result<Option<duhem_evidence::StepOutcome>, super::EngineError> {
+    gate(step, failed_by, ctx).map_err(|cause| super::EngineError::UnresolvedReference {
+        reference: condition_source(step),
+        context: format!(" (condition could not be evaluated: {cause:?})"),
+        step: super::outcome::step_label(step, index),
+    })
+}
+
+/// Check-step counterpart of [`evaluate`] (#440 R2): an unresolvable
+/// condition is not a run abort. The caller records the returned detail
+/// as an errored step, which the check's implicit judgment turns into
+/// `Inconclusive(MissingObservation)`.
+pub(super) fn evaluate_in_check(
+    step: &duhem_schema::Step,
+    index: usize,
+    failed_by: Option<&str>,
+    ctx: &dyn crate::EvalContext,
+) -> Result<Option<duhem_evidence::StepOutcome>, String> {
+    gate(step, failed_by, ctx).map_err(|cause| {
+        format!(
+            "step `{}`: condition `{}` could not be resolved: {}",
+            super::outcome::step_label(step, index),
+            condition_source(step),
+            super::translate::eval_cause_detail(&cause)
+        )
+    })
+}
+
+fn condition_source(step: &duhem_schema::Step) -> String {
+    match &step.condition {
+        StepCondition::Expr(expr) => expr.raw.clone(),
+        _ => String::new(),
+    }
+}
+
+fn gate(
+    step: &duhem_schema::Step,
+    failed_by: Option<&str>,
+    ctx: &dyn crate::EvalContext,
+) -> Result<Option<duhem_evidence::StepOutcome>, crate::InconclusiveCause> {
     use duhem_evidence::StepOutcome;
     if let Some(reason) = skip_reason(&step.condition, failed_by) {
         return Ok(Some(StepOutcome::Skipped {
@@ -55,10 +93,6 @@ pub(super) fn evaluate(
             condition: Some(expr.raw.clone()),
             operands: Some(operands),
         })),
-        crate::EvalResult::Inconclusive(cause) => Err(super::EngineError::UnresolvedReference {
-            reference: expr.raw.clone(),
-            context: format!(" (condition could not be evaluated: {cause:?})"),
-            step: super::outcome::step_label(step, index),
-        }),
+        crate::EvalResult::Inconclusive(cause) => Err(cause),
     }
 }

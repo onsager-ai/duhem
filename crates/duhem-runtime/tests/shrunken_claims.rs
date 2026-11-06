@@ -1,4 +1,4 @@
-//! Real SQLite actions exercise gating without opening Tier 2 authoring.
+//! Real SQLite actions exercise value-gated claims end to end.
 use std::{collections::BTreeMap, sync::Arc};
 
 use duhem_dashboard::EvidenceReader;
@@ -103,16 +103,6 @@ async fn value_gated_trace_renders_differently_and_replays_identically_without_m
     );
     let reader = EvidenceReader::new(store.clone());
     let def = definition("$setup.count_rows.outputs.row_count > 0");
-    // Exercise the internal evidence path; the public Tier 2 authoring
-    // boundary remains closed and is pinned here.
-    assert!(
-        duhem_schema::validate(&def)
-            .unwrap_err()
-            .iter()
-            .any(|error| error
-                .to_string()
-                .contains("value-based conditions are not yet available"))
-    );
     let outcome = Engine::new()
         .with_store(store.clone())
         .run_with_metadata(&def, BTreeMap::new())

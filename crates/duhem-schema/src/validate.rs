@@ -3019,22 +3019,62 @@ criteria:
         validate(&v).expect("should validate");
     }
 
+    fn check_condition_def(first: &str, second: &str) -> String {
+        format!(
+            "verification: x\ninputs:\n  run: {{ type: boolean }}\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        steps:\n{first}{second}        assertions: [\"true\"]\n"
+        )
+    }
+
+    const GATE_FIRST: &str =
+        "          - id: first\n            uses: db/query\n            outputs: { rows: rows }\n";
+
     #[test]
-    fn check_step_value_condition_is_rejected_with_a_location() {
-        let v = parse(
-            "verification: x\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        steps:\n          - uses: cli/invoke\n            if: $inputs.run == true\n        assertions: [\"true\"]\ninputs:\n  run: { type: boolean }\n",
-        );
-        let errs = validate(&v).unwrap_err();
-        assert!(
-            errs.iter().any(|e| matches!(
-                e,
-                ValidationError::CheckStepConditionUnavailable {
-                    location: Some(_),
-                    ..
-                }
-            ) && e.to_string().contains("not yet available on check steps")),
-            "{errs:?}"
-        );
+    fn check_step_value_condition_on_earlier_step_and_inputs_validates() {
+        let second = "          - uses: cli/invoke\n            if: $steps.first.outputs.rows == 0 && $inputs.run == true\n";
+        validate(&parse(&check_condition_def(GATE_FIRST, second)))
+            .expect("earlier-step and input references resolve");
+    }
+
+    #[test]
+    fn check_step_condition_rejects_undeclared_forward_and_self_references_with_locations() {
+        let cases = [
+            (
+                "          - uses: cli/invoke\n            if: $steps.first.outputs.nope == 0\n",
+                GATE_FIRST,
+                "undeclared output `nope`",
+            ),
+            (
+                "          - uses: cli/invoke\n            if: $steps.first.outputs.rows == 0\n",
+                "",
+                "undeclared step `first`",
+            ),
+            (
+                "          - id: me\n            uses: cli/invoke\n            outputs: { v: v }\n            if: $steps.me.outputs.v == 0\n",
+                "",
+                "undeclared step `me`",
+            ),
+            (
+                "          - uses: cli/invoke\n            if: $inputs.missing == 0\n",
+                "",
+                "undeclared input `missing`",
+            ),
+        ];
+        for (second, before, expected) in cases {
+            // `before` is a step placed ahead (declared) or empty; forward
+            // references put the declaration after the conditioned step.
+            let yaml = if expected.contains("`first`") {
+                check_condition_def("", &format!("{second}{GATE_FIRST}"))
+            } else {
+                check_condition_def(before, second)
+            };
+            let errs = validate(&parse(&yaml)).unwrap_err();
+            assert!(
+                errs.iter().any(|e| e.location().is_some()
+                    && e.to_string().contains(expected)
+                    && e.to_string().contains("if:")),
+                "{expected}: {errs:?}"
+            );
+        }
     }
 
     #[test]

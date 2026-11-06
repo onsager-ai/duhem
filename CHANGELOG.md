@@ -30,6 +30,10 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 
 - [clarifying] Remove private consumer names from source; scan tracked files and tracker content with runtime secret vocabulary; move pin currency checks into consumer CI. (#605)
+- [additive] `if: <expr>` accepted on check steps, resolved against earlier steps/`$inputs`/`$setup` with source-located validation; gated judging steps stay visible in reports, an unresolvable condition makes its check `inconclusive:missing_observation`, as does reading a gated step's outputs. (#440)
+
+## v0.7.1 — 2026-11-05
+
 - [additive] Owned process actions record readiness, bounded logs, stop/restart and required cleanup for long-lived local binaries; process outputs from criterion/check setup and consumed fixtures are addressable from the check; non-process visibility unchanged. (#579)
 - [additive] UI locators accept frame scoping, including nested and cross-origin iframes, for assertions and interactions. (#568)
 

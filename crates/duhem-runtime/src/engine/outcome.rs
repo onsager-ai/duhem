@@ -561,7 +561,9 @@ fn skipped_reference_reason(
     steps_referenced(expr, &mut refs);
     check.steps.iter().enumerate().find_map(|(index, step)| {
         let id = step.id.as_ref()?;
-        if !refs.contains(id) {
+        // A value-gated step's absent outputs must stay visible as a
+        // missing observation, not vanish with the assertion (#440 R4).
+        if !refs.contains(id) || matches!(step.condition, duhem_schema::StepCondition::Expr(_)) {
             return None;
         }
         evidence.get(index)?.skip_reason.clone()

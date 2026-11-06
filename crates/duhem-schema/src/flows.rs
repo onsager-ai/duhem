@@ -589,6 +589,10 @@ fn render_expr_value(value: &serde_yml::Value) -> Option<String> {
 fn rewrite_steps(steps: &mut [Step], projections: &BTreeMap<String, String>) {
     for step in steps {
         rewrite_value(&mut step.with, projections);
+        if let StepCondition::Expr(condition) = &mut step.condition {
+            *condition = crate::ExprStr::from_source(&rewrite_string(&condition.raw, projections))
+                .expect("rewriting a valid step reference preserves expression syntax");
+        }
         if let Some(source) = &mut step.for_each {
             *source = crate::ExprStr::from_source(&rewrite_string(&source.raw, projections))
                 .expect("rewriting a valid step reference preserves expression syntax");
@@ -940,6 +944,45 @@ criteria: []
              the real, namespaced setup-step id — not left pointing at `$steps.*`, which \
              lifecycle blocks never resolve"
         );
+    }
+
+    /// #440 Tier 2: a check-step `if:` reading a call's declared output is
+    /// rewritten onto the namespaced expanded step, so it validates.
+    #[test]
+    fn check_condition_reading_a_call_output_is_rewritten_and_validates() {
+        let mut definition = authored(
+            r#"
+verification: x
+flows:
+  make_token:
+    steps:
+      - id: produce
+        uses: cli/invoke
+        with: { command: [echo, made] }
+    outputs:
+      value: $steps.produce.outputs.stdout
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: make
+            call: make_token
+          - uses: cli/invoke
+            if: $steps.make.outputs.value == 'made'
+            with: { command: [echo, again] }
+        assertions: ["true"]
+"#,
+        );
+        validate_and_expand(&mut definition).expect("expand");
+        let steps = &definition.criteria[0].checks[0].steps;
+        assert!(matches!(
+            &steps[1].condition,
+            StepCondition::Expr(expr) if expr.raw == "$steps.make__produce.outputs.stdout == 'made'"
+        ));
+        crate::validate_with_contract_outputs(&definition, &|_| vec!["stdout".into()])
+            .expect("rewritten condition resolves against the expanded step");
     }
 
     /// #526: the same projection, but for a fixture `up:` call whose

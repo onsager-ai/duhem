@@ -182,8 +182,9 @@ with another true observation in a passing disjunction. The two coincide
 only when an unbound judging output is promoted into an implicit
 assertion.
 
-- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Every evaluated assertion carries the same three-state `VerdictState` as the final verdict. An assertion that is not evaluated because one of its operands comes from a skipped step is omitted; absence is not a fourth state. A step that terminates in `error` or `timeout` contributes an `inconclusive` judgment naming that step, whether or not its action judges. Execution failure of an actuator is an observability gap, not an absence: the steps it was meant to enable never ran, so the check's claims were never exercised. A check whose step sequence aborted therefore cannot aggregate to `pass`. Gated-out steps (`if:` did not match) and cleanup steps (`if: always` after a failure) are exempt — they contribute nothing, as above. An environment failure likewise contributes an `inconclusive` judgment for every non-exempt step, not only judging ones: when the environment never came up, no step observed anything. Aggregation applies fail → inconclusive → pass precedence directly, and an empty assertion set becomes `inconclusive:empty_aggregation`. A check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
+- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Every evaluated assertion carries the same three-state `VerdictState` as the final verdict. An assertion that is not evaluated because one of its operands comes from a step skipped by an outcome gate (`success`, `failure`, `always`) is omitted; absence is not a fourth state. An operand from a step skipped by a *value-based* `if:` is not omitted: see the unresolvable-condition and gated-output rules below. A step that terminates in `error` or `timeout` contributes an `inconclusive` judgment naming that step, whether or not its action judges. Execution failure of an actuator is an observability gap, not an absence: the steps it was meant to enable never ran, so the check's claims were never exercised. A check whose step sequence aborted therefore cannot aggregate to `pass`. Gated-out steps (`if:` did not match) and cleanup steps (`if: always` after a failure) are exempt — they contribute nothing, as above. An environment failure likewise contributes an `inconclusive` judgment for every non-exempt step, not only judging ones: when the environment never came up, no step observed anything. Aggregation applies fail → inconclusive → pass precedence directly, and an empty assertion set becomes `inconclusive:empty_aggregation`. A check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
 - **Conditional claim-set legibility:** absence is not a fourth state; gated steps still contribute nothing. A check records its non-zero count of **judging** steps gated by **value-based** conditions (static gates, upstream blocking, and lifecycle steps never count), and the run report, default/pretty reporters, and agent failure envelope expose that smaller claim set even when the verdict is `pass`. Value-based gating records the authored condition and the operand values actually evaluated in `StepOutcome::Skipped`; upstream failure blocking carries no condition evaluation. These optional fields are omitted, never null. A check with no value-gated judging steps gains no new output, and older traces render unchanged. This clarifies legibility only: verdict aggregation remains the same deterministic, LLM-free evaluation.
+- **Unresolvable conditions and gated outputs (value-based `if:` on check steps, #440):** a check-step condition that cannot be evaluated (an operand absent at run time) is never treated as `false` or `true`. The step records `error` with detail naming the step and the unresolvable reference, so the check is `inconclusive:missing_observation` through the ordinary execution-failure rule above; the run continues and other checks and criteria record their own verdicts. A later step `if:` or an `assertions:` entry that reads `$steps.<gated>.outputs.*` of a step gated by a value-based condition is likewise evaluated and finds no observation, so it is `inconclusive:missing_observation` rather than a silent pass or omission. Lifecycle steps keep their own rule (§10.3.3): the step fails and dependents are inconclusive. No new inconclusive cause is introduced.
 - **Per-criterion verdict**: aggregated from its checks (any check `fail` → criterion `fail`; any `inconclusive` and no `fail` → criterion `inconclusive`; all `pass` → criterion `pass`).
 - **Per-run body verdict**: aggregated from all criteria, same rules. The effective run verdict applies the required fixture-cleanup gate after the body: any retained required fixture `down:` failure makes the run `fail`; otherwise the effective verdict is the body verdict. `CheckFinished` and `CriterionFinished` remain body judgments. The run outcome, persisted `RunFinished.verdict`, CLI exit status, reporters, and dashboard run state use the effective verdict. When the gate changes the run verdict, optional `body_verdict` preserves the body verdict on `RunOutcome`, persisted `RunFinished`, and `RunSummary`; it is omitted when the body and effective verdict match.
 
@@ -850,16 +851,22 @@ control flow without making them Turing-complete. The existing
 commitment, not standalone guards.
 
 Value-based conditions reuse the existing `Expr` grammar verbatim and
-are available on non-judging `setup:` and `teardown:` steps (Tier 1).
-They are deliberately not yet available on check steps (Tier 2): a
-condition on a step that produces judgments could shrink the check's
-claim set and create a run-dependent false green unless the run report
-makes that reduced claim set visible. Setup and teardown produce no
-judgments by design, so that risk is structurally absent there. A
-condition that cannot be evaluated fails its lifecycle step; inability
-to decide is never silently treated as false. Condition references are
-validated against declared inputs and earlier lifecycle steps and their
-action-contract outputs; forward references are invalid.
+are available on non-judging `setup:` and `teardown:` steps (Tier 1) and
+on check steps (Tier 2). A condition on a step that produces judgments
+can shrink the check's claim set, which would create a run-dependent
+false green unless the report makes the reduced claim set visible; on
+check steps the count of gated judging steps is therefore recorded and
+rendered even when the check passes (§7.6). Setup and teardown produce
+no judgments by design, so that risk is structurally absent there.
+`success | always | failure` remain the default and are unchanged. A
+condition that cannot be evaluated fails its lifecycle step; on a check
+step it makes the check `inconclusive:missing_observation` with the step
+and reference named, and the run continues (§7.6). Inability to decide
+is never silently treated as false. Condition references are validated
+against declared inputs and earlier steps (lifecycle steps for lifecycle
+conditions; earlier steps in the same check, `$setup`, consumed fixture
+outputs and action-contract outputs for check conditions); forward and
+self references are invalid, with source locations.
 
 **Bounded iteration (`for_each:`)** is the other Tier 1 / Tier 2 split
 this totality boundary makes room for, alongside value-based `if:`
@@ -1853,7 +1860,7 @@ The milestone is complete only when the relevant gate-integrity contracts have C
 
 **Goal:** qualify a complete product journey against actual supported binaries and services, including setup, readiness, evidence and cleanup.
 
-[Milestone M2](https://github.com/onsager-ai/duhem/milestone/2) carries the remaining [#543](https://github.com/onsager-ai/duhem/issues/543) nested-group/fixture-to-flow scope, [#440](https://github.com/onsager-ai/duhem/issues/440) Tier 2 conditions, and the [owned local-process contract (#579)](https://github.com/onsager-ai/duhem/issues/579). Reuse landed session cascade, teardown and flow work; do not rebuild it. The Semon #516 map supplied the Receive/watch/restart cases for #579. Its start/inspect/stop/restart contract is implemented under Unreleased; qualify the real-binary consumer at a containing source pin, with product-owned readiness and assertions.
+[Milestone M2](https://github.com/onsager-ai/duhem/milestone/2) carries the remaining [#543](https://github.com/onsager-ai/duhem/issues/543) nested-group/fixture-to-flow scope and the [owned local-process contract (#579)](https://github.com/onsager-ai/duhem/issues/579). Reuse landed session cascade, teardown and flow work; do not rebuild it. The Semon #516 map supplied the Receive/watch/restart cases for #579. Its start/inspect/stop/restart contract is implemented under Unreleased; qualify the real-binary consumer at a containing source pin, with product-owned readiness and assertions.
 
 Pilot the complete native-log → Push/Receive → publication and authorized reading → paging → append/restart/recovery/revocation journey described in the migration contract, split into independently runnable checks. Products own criteria, real fixtures, thresholds and CI policy. Helpers expose facts under explicit contracts; the VD keeps the acceptance rule visible. A whole acceptance runner hidden behind `cli/invoke` and `exit_code == 0` does not qualify the journey.
 

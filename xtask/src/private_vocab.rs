@@ -1,5 +1,4 @@
-//! Shared policy definitions. Published-skill process vocabulary and verified
-//! private names are distinct policies with one maintained source.
+//! Shared internal-vocabulary policy for the published-skill scan.
 
 /// Substrings stripped from each line *before* scanning, so a legitimate
 /// public reference to the open-source project isn't flagged by the
@@ -18,7 +17,6 @@ enum Match {
 /// Internal-only vocabulary that must never reach a published skill.
 const DENY: &[(&str, Match)] = &[
     ("dogfood", Match::Substr),
-    ("chreode", Match::Substr),
     ("crawlab", Match::Substr),
     ("asymmetric", Match::Substr),
     ("codeowners", Match::Substr),
@@ -79,20 +77,14 @@ fn is_word_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-/// Tracker policy: repository visibility verified PRIVATE on 2026-10-30.
-/// These terms already occur in public source. Remove a term when its repository
-/// becomes public; additions require a fresh visibility check.
-pub(crate) const PRIVATE_NAMES: &[&str] = &["chreode", "ostrom-hub"];
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-pub(crate) fn scan_private_line<'a>(line: &str, rules: &[&'a str]) -> Vec<&'a str> {
-    let hay = allowed_line(line);
-    rules
-        .iter()
-        .copied()
-        .filter(|rule| hay.contains(*rule))
-        .collect()
-}
-
-pub(crate) fn all_skill_terms() -> impl Iterator<Item = &'static str> {
-    DENY.iter().map(|(term, _)| *term)
+    #[test]
+    fn public_project_slugs_stay_allowed() {
+        assert!(scan_line("https://github.com/onsager-ai/duhem").is_empty());
+        assert!(scan_line("onsager-ai/duhem-docs").is_empty());
+        assert_eq!(scan_line("onsager outside the slug"), ["onsager"]);
+    }
 }

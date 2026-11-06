@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] Remove private consumer names from tracked source; consumers run `consumer-pins --pinned <version>` in their own CI, replacing the central registry and scheduled pin job; retire the tracker vocabulary scan. (#605)
 - [additive] `if: <expr>` accepted on check steps, resolved against earlier steps/`$inputs`/`$setup` with source-located validation; gated judging steps stay visible in reports, an unresolvable condition makes its check `inconclusive:missing_observation`, as does reading a gated step's outputs. (#440)
 
 ## v0.7.1 — 2026-11-05
@@ -204,7 +205,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 - [additive] Mongo `db/query` coerces 24-hex string filters on ID fields to BSON ObjectIds. (#171)
 - [additive] `$runtime.contains` and `$runtime.any` provide deterministic array-membership assertions. (#173)
 - [additive] `api/call` accepts an optional mapping encoded as a deterministic query string. (#172)
-- [clarifying] Chreode verification definitions and supporting documentation replace the former Arbor product name and literals. (#163)
+- [clarifying] A private consumer’s verification definitions and supporting documentation adopt its updated product name. (#163)
 - [clarifying] Specification sections 10.2, 10.3, 10.5–10.7, and 11.1 now match the shipped implementation. (#90, #91, #92, #93, #94, #95)
 - [additive] `api/stream` follows SSE or chunked streams until a terminal event or timeout and exposes events, count, and stop reason for assertions. (#153)
 - [clarifying] `duhem validate` accepts manifests and directories through the same discovery and loading path as `duhem run`. (#150)

@@ -48,7 +48,6 @@ const ADOPTION_README: &str = "templates/product-repo/README.md";
 /// absent. `(needle, whole_word)`.
 const README_DENY: &[(&str, bool)] = &[
     ("dogfood", false),
-    ("chreode", false),
     ("crawlab", false),
     ("asymmetric", false),
     ("docs/duhem-spec.md", false),

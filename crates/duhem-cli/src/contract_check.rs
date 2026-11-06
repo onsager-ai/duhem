@@ -147,7 +147,7 @@ pub(crate) fn catalog_outputs(uses: &str) -> Option<Vec<String>> {
 
 /// Non-fatal authoring lints (spec #267) — the ceremony the terser
 /// forms made unnecessary. Warnings, never errors: every VD valid today
-/// stays valid, and existing consumer suites (crawlab-pro, chreode)
+/// stays valid, and existing consumer suites
 /// don't break; the author just sees where the plumbing can go. Empty =
 /// clean.
 ///

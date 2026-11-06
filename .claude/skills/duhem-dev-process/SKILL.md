@@ -23,7 +23,7 @@ action families (`ui/navigate` / `click` / `type` / `select` / `wait` /
 `db/query` / `observe` / `seed`, `cli/invoke`) and the
 `up:` / `down:` environment hooks are wired in; and product
 Verification Definitions are co-located with the products they verify
-(Chreode ships them in `onsager-ai/chreode/.duhem/`; epic #225). The
+under `.duhem/` (epic #225). The
 dev loop
 below is intentionally lean — it mirrors the discipline used on
 `onsager-ai/onsager`, but does not inherit Onsager's seam rule, area

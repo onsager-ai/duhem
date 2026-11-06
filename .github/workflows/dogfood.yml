@@ -7,14 +7,8 @@
 # values — the regression harness for the asymmetric-trust seam
 # (§11.2). No live product environment needed; required on every PR.
 #
-# The holistic onsager `verdict` run that used to live here moved out in
-# epic #225 P4: product VDs are co-located with their products now
-# (Chreode self-gates in `onsager-ai/chreode/.duhem/`; its Duhem-side
-# drift lane, `drift-chreode.yml`, is retired — chreode ADR 0016
-# schedules for deletion the managed-app suites it targeted, last on main at
-# `be5a8b2`, #380 — and Mode B re-points at Chreode's deploy-contract
-# replacement once it ships; Onsager the same once it resumes). See
-# `.github/actions/run/README.md`.
+# Product verification suites are co-located and self-gated in their own
+# repositories. See `.github/actions/run/README.md`.
 
 name: dogfood
 
@@ -122,11 +116,3 @@ jobs:
             exit 1
           fi
 
-  # The holistic onsager `verdict` job that used to live here was
-  # removed in epic #225 P4: the onsager `create-spec-plan` VD moved to
-  # onsager-ai/onsager/.duhem/, where Onsager self-gates it (Mode A). A
-  # `drift-onsager` lane (Mode B) can be added when Onsager resumes;
-  # copy the pattern from the retired `drift-chreode.yml` (last on
-  # main at `be5a8b2`, #380), swapping the target repo + env bring-up.
-  # This workflow now stays focused on the action-wiring worked
-  # example above.

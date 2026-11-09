@@ -945,6 +945,7 @@ export function LifecycleSections({ blocks }: { blocks: LifecycleBlock[] }) {
             <span className="font-mono">{lifecycleScopePath(block)}</span>{" "}
             <span className="text-muted-foreground">{block.phase}</span>
             <LifecycleStatusBadge status={block.status} />
+            {block.registered_by && <span className="text-sm">Cleanup of flow <span className="font-mono">{block.registered_by.flow}</span> (call <span className="font-mono">{block.registered_by.call}</span>) registered at <span className="font-mono">{lifecycleScopePath(block)}</span></span>}
             {block.phase === "teardown" && <span className="text-sm">{block.cleanup_policy === "required" ? "Required cleanup" : block.cleanup_policy === "diagnostic_only" ? "Diagnostic cleanup" : "Cleanup policy unknown"}</span>}
           </h3>
           {lifecycleFailure(block) && <p className="mb-2 whitespace-pre-wrap break-words text-sm text-fail">{lifecycleFailure(block)}</p>}

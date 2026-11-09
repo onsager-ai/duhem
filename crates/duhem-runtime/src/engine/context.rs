@@ -48,6 +48,11 @@ pub struct RunState {
     /// before any criterion runs; read-only from inside a check.
     pub setup_outputs: BTreeMap<(String, String), Value>,
     pub fixture_outputs: BTreeMap<(String, String, String), Value>,
+    /// Flow `cleanup:` registrations of the open lifecycle scopes (#615).
+    pub(crate) flow_cleanups: std::sync::Mutex<Vec<super::flow_cleanup::Registered>>,
+    /// Body outputs and loop binding a flow cleanup resolves against while
+    /// it is being drained (#615); `None` outside a flow-cleanup drain.
+    pub(crate) cleanup_view: Option<super::flow_cleanup::Snapshot>,
 }
 
 impl RunState {
@@ -81,6 +86,8 @@ impl RunState {
             uuid,
             setup_outputs: BTreeMap::new(),
             fixture_outputs: BTreeMap::new(),
+            flow_cleanups: std::sync::Mutex::new(Vec::new()),
+            cleanup_view: None,
         }
     }
 
@@ -150,10 +157,24 @@ impl<'r> RunContext<'r> {
     }
 
     pub fn new(run: &'r RunState) -> Self {
+        let (outputs, loop_binding) = run
+            .cleanup_view
+            .as_ref()
+            .map(|view| (view.outputs.clone(), view.binding.clone()))
+            .unwrap_or_default();
         Self {
             run,
-            outputs: BTreeMap::new(),
-            loop_binding: None,
+            outputs,
+            loop_binding,
+        }
+    }
+
+    /// Observed `$steps.*` outputs and the active loop binding, captured for
+    /// a flow cleanup registered while they were in scope (#615).
+    pub(crate) fn snapshot(&self) -> super::flow_cleanup::Snapshot {
+        super::flow_cleanup::Snapshot {
+            outputs: self.outputs.clone(),
+            binding: self.loop_binding.clone(),
         }
     }
 

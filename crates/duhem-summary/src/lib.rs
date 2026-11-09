@@ -34,7 +34,8 @@ mod lifecycle;
 pub use claim_scope::{ClaimCounts, ClaimScope, ExcludedClaim, ExcludedLeaf, ManifestSelection};
 pub use lifecycle::{
     LifecycleBlock, LifecycleEvent, LifecycleFlowOrigin, LifecycleFold, LifecycleLocation,
-    LifecyclePhase, LifecycleScopeSegment, LifecycleStatus, LifecycleStep, LifecycleStepOutcome,
+    LifecyclePhase, LifecycleRegistration, LifecycleScopeSegment, LifecycleStatus, LifecycleStep,
+    LifecycleStepOutcome,
 };
 
 /// One run's summary, serialized as one JSON line on the reporter

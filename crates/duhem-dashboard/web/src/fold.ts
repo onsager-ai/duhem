@@ -194,6 +194,7 @@ function foldLifecycle(events: TraceEvent[]): LifecycleBlock[] {
     if (evt.kind === "setup_started") {
       blocks.push({
         cleanup_policy: evt.cleanup_policy === "required" || evt.cleanup_policy === "diagnostic_only" ? evt.cleanup_policy : undefined,
+        registered_by: registrationOf(evt.registered_by),
         phase: evt.phase === "teardown" ? "teardown" : "setup",
         scope: scope(evt), status: "aborted", started_at: evt.ts,
         duration_ms: 0, steps: [], timeline: [evt],
@@ -242,4 +243,9 @@ function foldLifecycle(events: TraceEvent[]): LifecycleBlock[] {
     step_finished: _stepFinished,
     ...block
   }) => block);
+}
+
+function registrationOf(raw: unknown): { flow: string; call: string } | undefined {
+  const r = raw as { flow?: unknown; call?: unknown } | undefined;
+  return typeof r?.flow === "string" && typeof r.call === "string" ? { flow: r.flow, call: r.call } : undefined;
 }

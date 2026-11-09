@@ -10,7 +10,31 @@ impl Engine {
         run_id: &str,
     ) -> Vec<CleanupFailure> {
         run.begin_process_cleanup(&run.process_owner.clone());
-        let mut cleanup = if self.keep_env || def.teardown.is_empty() {
+        // Flow `cleanup:` registered by leaf `setup:` unwinds LIFO before
+        // `teardown:`; `--keep-env` leaves it, like `teardown:`, undrained.
+        let (mut cleanup, flow_error) = if self.keep_env {
+            run.take_flow_cleanups(0);
+            (Vec::new(), None)
+        } else {
+            crate::engine::flow_cleanup::drain(
+                writer,
+                &self.registry,
+                self.browser.as_ref(),
+                run,
+                0,
+                &self.child_process_env(run_id),
+            )
+            .await
+        };
+        if let Some(error) = flow_error {
+            cleanup.push(CleanupFailure {
+                required: false,
+                step: "flow cleanup evidence".to_string(),
+                outcome: duhem_evidence::StepOutcome::Error,
+                detail: Some(writer.mask_text(&error.to_string())),
+            });
+        }
+        cleanup.extend(if self.keep_env || def.teardown.is_empty() {
             Vec::new()
         } else {
             match crate::engine::setup::run_teardown(
@@ -31,7 +55,7 @@ impl Engine {
                     detail: Some(writer.mask_text(&error.to_string())),
                 }],
             }
-        };
+        });
         cleanup.extend(run.processes.lock().await.finalize(writer, None).await);
         cleanup
     }

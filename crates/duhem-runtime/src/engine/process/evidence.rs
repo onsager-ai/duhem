@@ -85,6 +85,7 @@ impl Processes {
                 fixture_name: scope.fixture.clone(),
                 check_id: scope.check.clone(),
                 criterion_id: scope.criterion.clone(),
+                registered_by: None,
             });
             append!(EventPayload::SetupStepStarted {
                 phase: StepPhase::Teardown,

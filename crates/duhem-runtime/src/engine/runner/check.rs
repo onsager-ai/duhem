@@ -29,6 +29,7 @@ impl Engine {
             // so only the final attempt's detail reaches the reporter.
             let failures_mark = failures.len();
             let setup_baseline = run.setup_outputs.clone();
+            let cleanup_mark = run.flow_cleanup_mark();
             let parent_owner = run.process_owner.clone();
             run.process_owner = parent_owner.check(&check.id);
             run.register_process_cleanup(
@@ -157,6 +158,21 @@ impl Engine {
                         }
                     }
                 };
+                // Flow `cleanup:` registered by this attempt's setup and steps
+                // unwinds LIFO before fixtures come down and `teardown:` runs.
+                let (mut flow_failures, flow_error) = crate::engine::flow_cleanup::drain(
+                    writer,
+                    &self.registry,
+                    self.browser.as_ref(),
+                    run,
+                    cleanup_mark,
+                    &self.child_process_env(writer.run_id()),
+                )
+                .await;
+                cleanup.append(&mut flow_failures);
+                if let Some(error) = flow_error {
+                    body_error.get_or_insert(error);
+                }
                 for name in active.into_iter().rev() {
                     let fixture = &fixtures[name];
                     run.begin_process_cleanup(&run.process_owner.fixture(name));
@@ -359,6 +375,9 @@ impl Engine {
             Ok((verdict, gated_judging_steps))
         }
         .await;
+        // The check body's cleanups read the outputs it produced; the caller
+        // drains them once the body is over.
+        run.snapshot_flow_cleanups(&ctx.snapshot());
         writer.set_session(None);
         contexts.finish(writer, false, check).await;
         result

@@ -312,6 +312,7 @@ export function LifecycleList({ blocks, runId }: { blocks: LifecycleBlock[]; run
             {runId ? <Link to={lifecycleHref(runId, block)} className="text-brand hover:underline"><span className="font-mono">{lifecycleScopePath(block)}</span> {block.phase}</Link>
               : <><span className="font-mono">{lifecycleScopePath(block)}</span> {block.phase}</>}{" "}
             <span data-status={block.status}>{block.status}</span>{" "}
+            {block.registered_by && <span>cleanup of flow <span className="font-mono">{block.registered_by.flow}</span> (call <span className="font-mono">{block.registered_by.call}</span>){" "}</span>}
             {block.phase === "teardown" && <span>{block.cleanup_policy === "required" ? "required" : block.cleanup_policy === "diagnostic_only" ? "diagnostic only" : "policy unknown"}{" "}</span>}
             <span className="text-muted-foreground">({formatDuration(block.duration_ms)})</span>
             {lifecycleFailure(block) && <p className="break-words text-xs text-fail">{lifecycleFailure(block)}</p>}

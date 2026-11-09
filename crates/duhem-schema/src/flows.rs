@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::assertion::Assertion;
 use crate::includes::MAX_INCLUDE_DEPTH;
 use crate::source::StepSourceOrigin;
-use crate::step::{ExpandedFlowOrigin, Step, StepCondition};
+use crate::step::{ExpandedFlowOrigin, FlowCleanup, Step, StepCondition};
 use crate::verification::{Flow, FlowCatalog, InputDecl, InputType, VerificationDefinition};
 
 #[path = "flows_validate.rs"]
@@ -248,6 +248,7 @@ fn blank_step() -> Step {
         for_each_body: Vec::new(),
         flow: None,
         flow_secrets: Vec::new(),
+        flow_cleanup: Vec::new(),
     }
 }
 
@@ -394,6 +395,7 @@ fn expand_sequence(
         for inner in flow
             .steps
             .iter()
+            .chain(&flow.cleanup)
             .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
         {
             if inner.call.is_none()
@@ -403,6 +405,25 @@ fn expand_sequence(
                     format!("$steps.{id}."),
                     format!("$steps.{invocation}__{id}."),
                 );
+            }
+        }
+        if !flow.cleanup.is_empty() {
+            let cleanup = expand_flow_cleanup(
+                flow_name,
+                flow,
+                &CleanupCall {
+                    invocation: &invocation,
+                    bindings: &bindings,
+                    secrets: &secrets,
+                    session: step.session.as_deref(),
+                },
+                &expanded.projections,
+                &direct_ids,
+                catalog,
+                counter,
+            );
+            if let Some(first) = expanded.steps.first_mut() {
+                first.flow_cleanup.insert(0, cleanup);
             }
         }
         for (output, raw) in &flow.outputs {
@@ -430,6 +451,76 @@ fn expand_sequence(
         result.origins.append(&mut expanded.origins);
     }
     result
+}
+
+struct CleanupCall<'a> {
+    invocation: &'a str,
+    bindings: &'a BTreeMap<String, serde_yml::Value>,
+    secrets: &'a [serde_yml::Value],
+    session: Option<&'a str>,
+}
+
+/// Expand one flow's `cleanup:` for a single call (#615). Body-output
+/// references are rewritten to the namespaced `$steps.<invocation>__<id>`
+/// ids *before* params are substituted, so a caller-supplied `$steps.*`
+/// argument is never mistaken for an inner reference. The runtime resolves
+/// that accessor from a snapshot of the body's outputs.
+fn expand_flow_cleanup(
+    flow_name: &str,
+    flow: &Flow,
+    call: &CleanupCall<'_>,
+    body_projections: &BTreeMap<String, String>,
+    direct_ids: &BTreeMap<String, String>,
+    catalog: &FlowCatalog,
+    counter: &mut usize,
+) -> FlowCleanup {
+    // Auto-named invocations carry a `#`, which an expression path cannot
+    // spell, so the cleanup refers to a sanitized alias of such ids.
+    let mut aliases = BTreeMap::new();
+    let references: BTreeMap<String, String> = body_projections
+        .iter()
+        .chain(direct_ids)
+        .map(|(from, to)| {
+            let Some(rest) = to.strip_prefix("$steps.") else {
+                return (from.clone(), to.clone());
+            };
+            let (id, tail) = rest.split_once('.').unwrap_or((rest, ""));
+            let alias: String = id
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect();
+            let target = format!("$steps.{alias}.{tail}");
+            if alias != id {
+                aliases.insert(id.to_string(), alias);
+            }
+            (from.clone(), target)
+        })
+        .collect();
+    let mut cleanup = flow.cleanup.clone();
+    rewrite_steps(&mut cleanup, &references);
+    for inner in &mut cleanup {
+        substitute_step_params(inner, call.bindings);
+        inherit_session(inner, call.session);
+    }
+    let expanded = expand_sequence(
+        cleanup,
+        catalog,
+        call.invocation,
+        Some(flow_name),
+        Some(call.invocation),
+        call.secrets,
+        "steps",
+        counter,
+    );
+    let mut steps = expanded.steps;
+    rewrite_steps(&mut steps, &expanded.projections);
+    FlowCleanup {
+        flow: flow_name.to_string(),
+        call: call.invocation.to_string(),
+        policy: flow.cleanup_policy,
+        steps,
+        aliases: aliases.into_iter().collect(),
+    }
 }
 
 fn substitute_step_params(step: &mut Step, bindings: &BTreeMap<String, serde_yml::Value>) {
@@ -598,6 +689,9 @@ fn rewrite_steps(steps: &mut [Step], projections: &BTreeMap<String, String>) {
                 .expect("rewriting a valid step reference preserves expression syntax");
         }
         rewrite_steps(&mut step.for_each_body, projections);
+        for cleanup in &mut step.flow_cleanup {
+            rewrite_steps(&mut cleanup.steps, projections);
+        }
     }
 }
 
@@ -668,6 +762,20 @@ fn param_reference_names(raw: &str) -> Vec<&str> {
         rest = &rest[name.len()..];
     }
     names
+}
+
+fn step_reference_ids(raw: &str) -> Vec<&str> {
+    let mut ids = Vec::new();
+    let mut rest = raw;
+    while let Some(offset) = rest.find("$steps.") {
+        rest = &rest[offset + "$steps.".len()..];
+        let Some(id) = reference_head(rest) else {
+            continue;
+        };
+        ids.push(id);
+        rest = &rest[id.len()..];
+    }
+    ids
 }
 
 fn step_output_reference(raw: &str) -> Option<(&str, &str)> {
@@ -1497,5 +1605,214 @@ criteria:
         }
         assert_eq!(teardown[0].flow.as_ref().unwrap().inner_index, 0);
         assert_eq!(teardown[1].flow.as_ref().unwrap().inner_index, 1);
+    }
+
+    const SCRATCH: &str = r#"
+flows:
+  scratch:
+    params: { prefix: { type: string } }
+    steps:
+      - id: create
+        uses: cli/invoke
+        with: { command: [mktemp, $params.prefix] }
+    outputs: { path: $steps.create.outputs.stdout }
+    cleanup:
+      - uses: cli/invoke
+        with: { command: [rm, -f, $steps.create.outputs.stdout, $params.prefix] }
+"#;
+
+    #[test]
+    fn cleanup_expands_with_namespaced_ids_params_and_a_registration_marker() {
+        let mut definition = authored(&format!(
+            r#"
+verification: flow cleanup
+{SCRATCH}
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - {{ id: tmp, call: scratch, with: {{ prefix: p1 }} }}
+          - {{ call: scratch, with: {{ prefix: p2 }} }}
+        assertions: ["true"]
+"#
+        ));
+        validate_and_expand(&mut definition).expect("expand");
+        let steps = &definition.criteria[0].checks[0].steps;
+        assert_eq!(steps.len(), 2, "cleanup is not part of the expanded body");
+        let first = &steps[0].flow_cleanup;
+        assert_eq!(first.len(), 1);
+        assert_eq!(
+            (first[0].flow.as_str(), first[0].call.as_str()),
+            ("scratch", "tmp")
+        );
+        assert_eq!(first[0].policy, crate::CleanupPolicy::Required);
+        assert_eq!(
+            first[0].steps[0].with["command"][2].as_str(),
+            Some("$steps.tmp__create.outputs.stdout")
+        );
+        assert_eq!(first[0].steps[0].with["command"][3].as_str(), Some("p1"));
+        assert_eq!(first[0].steps[0].flow.as_ref().unwrap().invocation, "tmp");
+        // An auto-named call spells its ids with a `#`, which an expression
+        // cannot, so the reference goes through an alias.
+        let second = &steps[1].flow_cleanup[0];
+        assert_eq!(
+            second.steps[0].with["command"][2].as_str(),
+            Some("$steps.scratch_1__create.outputs.stdout")
+        );
+        assert_eq!(
+            second.aliases,
+            vec![(
+                "scratch#1__create".to_string(),
+                "scratch_1__create".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn lifecycle_calls_register_cleanup_and_the_policy_round_trips() {
+        let mut definition = authored(&format!(
+            r#"
+verification: flow cleanup in setup
+{SCRATCH}
+setup: [{{ id: tmp, call: scratch, with: {{ prefix: p }} }}]
+criteria: []
+"#
+        ));
+        validate_and_expand(&mut definition).expect("expand");
+        assert_eq!(definition.setup[0].flow_cleanup.len(), 1);
+
+        let default: Flow =
+            serde_yml::from_str("steps: [{uses: a/b}]\ncleanup: [{uses: c/d}]\n").unwrap();
+        assert!(serde_yml::to_string(&default).unwrap().contains("cleanup:"));
+        assert!(
+            !serde_yml::to_string(&default)
+                .unwrap()
+                .contains("cleanup_policy")
+        );
+        let diagnostic: Flow = serde_yml::from_str(
+            "steps: [{uses: a/b}]\ncleanup: [{uses: c/d}]\ncleanup_policy: diagnostic_only\n",
+        )
+        .unwrap();
+        assert_eq!(
+            diagnostic.cleanup_policy,
+            crate::CleanupPolicy::DiagnosticOnly
+        );
+        assert!(
+            serde_yml::to_string(&diagnostic)
+                .unwrap()
+                .contains("cleanup_policy: diagnostic_only")
+        );
+    }
+
+    fn cleanup_errors(yaml: &str) -> String {
+        crate::validate(&authored(yaml))
+            .unwrap_err()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn cleanup_validation_rejects_misplaced_policy_references_and_calls() {
+        let policy_only = cleanup_errors(
+            r#"
+verification: x
+flows:
+  f:
+    steps: [{ uses: cli/invoke }]
+    cleanup_policy: diagnostic_only
+criteria: []
+"#,
+        );
+        assert!(
+            policy_only.contains("`cleanup_policy:` without `cleanup:`"),
+            "{policy_only}"
+        );
+
+        let reference = cleanup_errors(
+            r#"
+verification: x
+flows:
+  f:
+    steps: [{ id: make, uses: cli/invoke }]
+    cleanup:
+      - uses: cli/invoke
+        with: { command: [rm, $steps.elsewhere.outputs.stdout, $inputs.leaf] }
+criteria: []
+"#,
+        );
+        assert!(
+            reference.contains("`$steps.elsewhere`, which is not a step of flow `f`"),
+            "{reference}"
+        );
+        assert!(reference.contains("$inputs.leaf"), "{reference}");
+
+        let outside = cleanup_errors(&format!(
+            r#"
+verification: x
+{SCRATCH}
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps: [{{ id: tmp, call: scratch, with: {{ prefix: p }} }}]
+        assertions: ["$steps.tmp__create.outputs.stdout == 'x'"]
+"#
+        ));
+        assert!(outside.contains("tmp__create"), "{outside}");
+
+        let nested = cleanup_errors(&format!(
+            r#"
+verification: x
+{SCRATCH}
+  outer:
+    steps: [{{ uses: cli/invoke }}]
+    cleanup: [{{ call: scratch, with: {{ prefix: p }} }}]
+criteria: []
+"#
+        ));
+        assert!(
+            nested.contains("cannot be called from a flow's `cleanup:`"),
+            "{nested}"
+        );
+    }
+
+    #[test]
+    fn cleanup_flows_cannot_be_called_from_teardown_or_fixtures() {
+        for block in [
+            "teardown: [{ call: scratch, with: { prefix: p } }]",
+            "fixtures: { r: { up: [{ call: scratch, with: { prefix: p } }], down: [{ uses: cli/invoke }] } }",
+            "fixtures: { r: { up: [{ uses: cli/invoke }], down: [{ call: scratch, with: { prefix: p } }] } }",
+        ] {
+            let errors = cleanup_errors(&format!(
+                "verification: x\n{SCRATCH}\n{block}\ncriteria: []\n"
+            ));
+            assert!(
+                errors.contains("flow `scratch` declares `cleanup:` and cannot be called from"),
+                "{block}: {errors}"
+            );
+        }
+        let check_teardown = cleanup_errors(&format!(
+            r#"
+verification: x
+{SCRATCH}
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps: []
+        teardown: [{{ call: scratch, with: {{ prefix: p }} }}]
+        assertions: ["true"]
+"#
+        ));
+        assert!(
+            check_teardown.contains("cannot be called from"),
+            "{check_teardown}"
+        );
     }
 }

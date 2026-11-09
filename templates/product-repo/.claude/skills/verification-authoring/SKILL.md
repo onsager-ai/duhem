@@ -338,6 +338,47 @@ call's declared outputs through its own accessor —
 own `up:`/`down:`) — never `$steps.*`, which a lifecycle block does
 not resolve.
 
+#### Give a flow its own cleanup
+
+A flow that creates something can remove it too: declare `cleanup:` next
+to `steps:`. Whoever calls the flow gets the cleanup without writing it.
+
+```yaml
+flows:
+  scratch_file:
+    params: { prefix: { type: string } }
+    steps:
+      - id: create
+        uses: cli/invoke
+        with: { command: [sh, -c, 'f=$(mktemp "/tmp/$1.XXXX"); printf %s "$f"', --, $params.prefix] }
+    outputs: { path: $steps.create.outputs.stdout }
+    cleanup:
+      - uses: cli/invoke
+        with: { command: [rm, -f, $steps.create.outputs.stdout] }
+    # cleanup_policy: diagnostic_only   # optional; default is required
+```
+
+- The cleanup is registered when a `call:` to the flow starts running and
+  runs, last registered first, when the scope that made the call ends:
+  a check's `steps:` or `setup:` at the end of that check attempt (so
+  again on every retry), a criterion's `setup:` at the end of the
+  criterion, leaf `setup:` at the end of the run. It runs before that
+  scope's own `teardown:`. A call skipped by `if:` registers nothing; a
+  body that fails partway still runs its cleanup, so write cleanup
+  steps that tolerate a resource that was never created (`rm -f`).
+- A cleanup step reads `$params.*` and the same call's body outputs as
+  `$steps.<body-id>.outputs.*`; nothing else, and callers cannot read
+  cleanup steps. A flow with `cleanup:` cannot be called from
+  `teardown:`, a fixture, or another flow's `cleanup:`.
+- Every cleanup step is attempted even if one fails. By default a
+  failing cleanup makes the run gate `fail` while the check keeps its own
+  verdict; `cleanup_policy: diagnostic_only` keeps the failure visible
+  without failing the run. A failure is a step error, timeout or a
+  judging step that does not pass; a non-zero `exit_code` is data, so
+  judge it with a judging action when it matters.
+- The run report lists each registered cleanup with the flow, call and
+  the scope that registered it, so the implicit registration is visible.
+
 ### 4. The holistic-environment tax — no mocks of the web
 
 A Duhem check exercises real behavior end-to-end. **No mocking the web.**

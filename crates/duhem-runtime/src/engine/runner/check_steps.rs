@@ -112,6 +112,18 @@ impl Engine {
                 )
             };
 
+            // A dispatched call to a flow with `cleanup:` registers it on this
+            // check attempt (#615); one gated off by `if:` registers nothing.
+            if gate.is_none() {
+                ctx.run_state().register_flow_cleanups(
+                    step,
+                    &crate::engine::flow_cleanup::RegisteredAt::Check(
+                        criterion_id.to_string(),
+                        check.id.clone(),
+                    ),
+                );
+            }
+
             crate::engine::flow::register_secrets(writer, step, ctx);
 
             writer

@@ -1461,7 +1461,7 @@ later reuse and check-level assertions.
 
 - `cli/invoke` — run a subprocess command and capture its exit code, stdout, and stderr for assertion
 
-**Owned local processes** (Unreleased, after v0.7.0; #579)
+**Owned local processes** (since v0.7.1; #579)
 
 - `process/start` — executable `command`, string-array `args`, optional `cwd`/`env`, optional bounded HTTP/log `ready`; returns run/owner/generation-bound `handle`, `generation`, diagnostic `pid`, and `ready`. No readiness probe means spawned only (`ready: false`).
 - `process/inspect` — reads state, exit/signal and bounded masked stdout/stderr logs with cursor, generation and explicit truncation/drop facts.
@@ -1470,7 +1470,7 @@ later reuse and check-level assertions.
 
 All four are non-judging. Setup/fixture-up spawn/readiness failure makes dependent checks inconclusive with environment-error semantics; body errors retain masked detail and inconclusive missing observations. Ownership follows declaring leaf/criterion/check/fixture scope, independently of browser context. Only the current check or its fixtures may be stopped/restarted; enclosing handles are inspect-only, and sibling/retry handles are rejected. After authored cleanup, reverse-order process finalizers are always required, including diagnostic-only fixtures, retries and observed cancellation; failures block the effective gate while preserving body judgments. Ordinary teardown/provision diagnostics retain their semantics.
 
-Linux/macOS use owned process groups; unsupported platforms reject before spawn. Detached daemons, interactive protocols and port leases are outside the contract. See [exact lifecycle/log/timeout semantics](owned-processes.md) and the [executable HTTP/restart example](../verifications/owned-process-example/duhem.yml). These actions are not in the v0.7.0 tag.
+Linux/macOS use owned process groups; unsupported platforms reject before spawn. Detached daemons, interactive protocols and port leases are outside the contract. See [exact lifecycle/log/timeout semantics](owned-processes.md) and the [executable HTTP/restart example](../verifications/owned-process-example/duhem.yml). These actions first shipped in v0.7.1; they are not in v0.7.0 or earlier tags.
 
 #### Planned (Phase 2+ — §14)
 
@@ -1838,7 +1838,7 @@ The CLI binary is free to download and use across all tiers. It is open-source (
 
 The active roadmap is product-regression migration under [#575](https://github.com/onsager-ai/duhem/issues/575), driven by Semon's real workload and its [assertion map (#501)](https://github.com/onsager-ai/semon/issues/501). The [migration contract](product-regression-migration.md) defines ownership, the source-pinned capability inventory and qualification. Milestones below express dependencies and acceptance outcomes, not calendar promises or claims that a product has already migrated.
 
-The foundation has shipped: schema, CLI, runtime, mechanical judge, browser/API/database/command actions, evidence, dashboard, composite GitHub Action and co-located product suites. The engine has been open-source under Apache-2.0 since v0.1.0 (§11.3); that is completed work. The released workspace/schema version is **0.6.0** ([tag v0.6.0](https://github.com/onsager-ai/duhem/releases/tag/v0.6.0), commit `c23b48b`), including #567's required-fixture-cleanup contract. `duhem_schema::SCHEMA_VERSION` and `CHANGELOG.md` remain authoritative for an exact revision; neither a version cut nor an open milestone proves qualification.
+The foundation has shipped: schema, CLI, runtime, mechanical judge, browser/API/database/command actions, evidence, dashboard, composite GitHub Action and co-located product suites. The engine has been open-source under Apache-2.0 since v0.1.0 (§11.3); that is completed work. The released workspace/schema version is **0.7.2** ([tag v0.7.2](https://github.com/onsager-ai/duhem/releases/tag/v0.7.2), commit `0cfc5e4`). v0.6.0 added #567's required-fixture-cleanup contract; v0.7.0 shipped the M1 gate/report contracts; v0.7.1 added owned local processes (#579) and iframe-scoped locators (#568); v0.7.2 added value-based `if:` on check steps (#440). `duhem_schema::SCHEMA_VERSION` and `CHANGELOG.md` remain authoritative for an exact revision; neither a version cut nor an open milestone proves qualification.
 
 Onsager daily-use (#54) and generation alpha (#52) are explicitly parked while that workload is paused. They are not prerequisites for the current migration. The retired consumer drift lane and old v0.2 product epics do not define the active roadmap.
 
@@ -1846,7 +1846,7 @@ Onsager daily-use (#54) and generation alpha (#52) are explicitly parked while t
 
 **Goal:** a required result states what it actually verified and exposes why it passed or failed.
 
-[#531](https://github.com/onsager-ai/duhem/issues/531), [#544](https://github.com/onsager-ai/duhem/issues/544), [#574](https://github.com/onsager-ai/duhem/issues/574), [#546](https://github.com/onsager-ai/duhem/issues/546), [#519](https://github.com/onsager-ai/duhem/issues/519), [#537](https://github.com/onsager-ai/duhem/issues/537), [#538](https://github.com/onsager-ai/duhem/issues/538) and [#545](https://github.com/onsager-ai/duhem/issues/545) are tracked in [milestone M1](https://github.com/onsager-ai/duhem/milestone/1).
+[#531](https://github.com/onsager-ai/duhem/issues/531), [#544](https://github.com/onsager-ai/duhem/issues/544), [#574](https://github.com/onsager-ai/duhem/issues/574), [#546](https://github.com/onsager-ai/duhem/issues/546), [#519](https://github.com/onsager-ai/duhem/issues/519), [#537](https://github.com/onsager-ai/duhem/issues/537), [#538](https://github.com/onsager-ai/duhem/issues/538) and [#545](https://github.com/onsager-ai/duhem/issues/545) are tracked in [milestone M1](https://github.com/onsager-ai/duhem/milestone/1). All are closed, and their producer contracts shipped in v0.7.0. The milestone stays open on its consumer-qualification condition below.
 
 - Distinguish authored, selected, executed, gated and excluded claims. A filtered pass must not imply complete coverage, and a zero-selected required domain must not qualify.
 - Attribute results to leaf, check, parameter instance and attempt; preserve every retry and any first-attempt requirement. Report missing execution evidence as absence of a record in the specified store, without claiming an unseen invocation never happened.
@@ -1854,13 +1854,13 @@ Onsager daily-use (#54) and generation alpha (#52) are explicitly parked while t
 - Reuse the landed JSON leaf/manifest contracts (#535/#576) and required fixture cleanup (#567/#578). Required fixture cleanup failure blocks the effective gate while retaining the body verdict; other cleanup scopes retain their documented diagnostic semantics.
 - Correct verdict documentation and lifecycle validation gaps, and carry the public-artifact privacy discipline through the report/tooling work.
 
-The milestone is complete only when the relevant gate-integrity contracts have CI evidence and the selected consumer domain can demonstrate positive and negative controls. Releasing v0.6.0 does not complete the remaining owner issues.
+The milestone is complete only when the relevant gate-integrity contracts have CI evidence and the selected consumer domain can demonstrate positive and negative controls. Closing the owner issues and releasing v0.7.0 meets the first condition; no consumer domain has yet recorded qualifying positive/negative controls, so M1 is not complete.
 
 ### M2 — First real-binary pilot
 
 **Goal:** qualify a complete product journey against actual supported binaries and services, including setup, readiness, evidence and cleanup.
 
-[Milestone M2](https://github.com/onsager-ai/duhem/milestone/2) carries the remaining [#543](https://github.com/onsager-ai/duhem/issues/543) nested-group/fixture-to-flow scope and the [owned local-process contract (#579)](https://github.com/onsager-ai/duhem/issues/579). Reuse landed session cascade, teardown and flow work; do not rebuild it. The Semon #516 map supplied the Receive/watch/restart cases for #579. Its start/inspect/stop/restart contract is implemented under Unreleased; qualify the real-binary consumer at a containing source pin, with product-owned readiness and assertions.
+[Milestone M2](https://github.com/onsager-ai/duhem/milestone/2) carries the remaining [#543](https://github.com/onsager-ai/duhem/issues/543) nested-group/fixture-to-flow scope. The [owned local-process contract (#579)](https://github.com/onsager-ai/duhem/issues/579) shipped in v0.7.1 and value-based `if:` on check steps ([#440](https://github.com/onsager-ai/duhem/issues/440)) in v0.7.2. Reuse landed session cascade, teardown and flow work; do not rebuild it. The Semon #516 map supplied the Receive/watch/restart cases for #579. Qualify the real-binary consumer at v0.7.1 or later, with product-owned readiness and assertions.
 
 Pilot the complete native-log → Push/Receive → publication and authorized reading → paging → append/restart/recovery/revocation journey described in the migration contract, split into independently runnable checks. Products own criteria, real fixtures, thresholds and CI policy. Helpers expose facts under explicit contracts; the VD keeps the acceptance rule visible. A whole acceptance runner hidden behind `cli/invoke` and `exit_code == 0` does not qualify the journey.
 
@@ -1868,7 +1868,7 @@ Pilot the complete native-log → Push/Receive → publication and authorized re
 
 **Goal:** cover mapped user interactions and deterministic visual acceptance with explicit evidence and reviewed expectations.
 
-[Milestone M3](https://github.com/onsager-ai/duhem/milestone/3) includes iframe scoping [#568](https://github.com/onsager-ai/duhem/issues/568) (the frames gap from #369), keyboard/pointer/scroll/focus operations [#580](https://github.com/onsager-ai/duhem/issues/580), and the visual comparator draft [#581](https://github.com/onsager-ai/duhem/issues/581). Pin exact contracts through representative consumer assertions before implementing each slice.
+[Milestone M3](https://github.com/onsager-ai/duhem/milestone/3) includes iframe scoping [#568](https://github.com/onsager-ai/duhem/issues/568) (the frames gap from #369, shipped in v0.7.1), keyboard/pointer/scroll/focus operations [#580](https://github.com/onsager-ai/duhem/issues/580), request/console/HTTP-response observations [#603](https://github.com/onsager-ai/duhem/issues/603), and the visual comparator draft [#581](https://github.com/onsager-ai/duhem/issues/581). Pin exact contracts through representative consumer assertions before implementing each slice.
 
 Visual judgment needs full-frame/region observations, candidate/reference/diff artifacts, dimensions, declared thresholds, exact reviewed acceptance bindings and source/fixture/browser/font/viewport/theme provenance. Diagnostic screenshots alone are not visual assertions. [#573](https://github.com/onsager-ai/duhem/issues/573) is separate dashboard development tooling, not delivery of this product capability.
 

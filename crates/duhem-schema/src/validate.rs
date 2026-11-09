@@ -480,7 +480,7 @@ fn validate_step_outputs(
                 errs,
             );
             for name in step.outputs.keys() {
-                if name.starts_with("capture/") {
+                if block.check.is_some() && name.starts_with("capture/") {
                     errs.push(ValidationError::ReservedOutputPrefix {
                         site: block.site.clone(),
                         step: step_label(step, index),

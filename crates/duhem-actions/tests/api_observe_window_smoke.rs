@@ -433,6 +433,6 @@ async fn legacy_mode_without_window_keeps_first_match_outputs() {
     assert_eq!(r.outputs["status"], 200);
     assert_eq!(r.outputs["body_text"], "ok");
     for windowed in ["count", "requests", "window", "complete", "truncated"] {
-        assert!(r.outputs.get(windowed).is_none(), "{windowed} leaked");
+        assert!(!r.outputs.contains_key(windowed), "{windowed} leaked");
     }
 }

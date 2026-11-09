@@ -1455,6 +1455,7 @@ later reuse and check-level assertions.
 **Database actions**
 
 - `db/query` — execute a read query, capture rows
+- `db/observe` — poll a read query until a condition holds or a timeout elapses
 - `db/seed` — seed data for setup
 
 **CLI actions**
@@ -1609,7 +1610,7 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 
 **Action Catalog** (`duhem-actions`)
 
-- The built-in `ui/*`, `api/*`, `db/*`, and `cli/*` actions (§10.5) and the `Action` trait they implement
+- The built-in `ui/*`, `api/*`, `db/*`, `cli/*`, and `process/*` actions (§10.5) and the `Action` trait they implement
 - Closed at v1; the dispatch registry is internal (§10.8)
 
 **Generation Service** (roadmap)

@@ -111,10 +111,23 @@ impl EvalContext for RecordingContext<'_> {
 fn path_label(path: &Path) -> String {
     let (mut out, start) = match path.root {
         PathRoot::Loop => (path.segments[0].clone(), 1),
-        root => (root.as_str().to_string(), 0),
+        root => (
+            if path.segments.is_empty() {
+                format!("{}.", root.as_str())
+            } else {
+                root.as_str().to_string()
+            },
+            0,
+        ),
     };
     for index in start..path.segments.len() {
-        path.append_segment(&mut out, index);
+        let segment = &path.segments[index];
+        if !path.quoted_keys.contains(&index) && segment.bytes().all(|b| b.is_ascii_digit()) {
+            out.push('.');
+            out.push_str(segment);
+        } else {
+            path.append_segment(&mut out, index);
+        }
     }
     out
 }
@@ -187,6 +200,29 @@ mod tests {
         let (result, operands) = evaluate(&expr, &ctx);
         assert_eq!(result, EvalResult::True);
         assert_eq!(operands[r"$inputs.data['a\'b\\c']"], json!(7));
+    }
+
+    #[test]
+    fn evidence_preserves_dotted_array_indices_and_quoted_numeric_keys() {
+        let state = RunState::new(BTreeMap::from([(
+            "data".into(),
+            Value::Array(vec![Value::Object(BTreeMap::from([
+                ("session".into(), Value::Int(7)),
+                ("200".into(), Value::Int(8)),
+                ("a-b".into(), Value::Int(9)),
+            ]))]),
+        )]));
+        let ctx = RunContext::new(&state);
+        for (source, key) in [
+            ("$inputs.data[0].session == 7", "$inputs.data.0.session"),
+            ("$inputs.data[0]['200'] == 8", "$inputs.data.0['200']"),
+            ("$inputs.data[0]['a-b'] == 9", "$inputs.data.0['a-b']"),
+        ] {
+            let expr = ExprStr::from_source(source).unwrap();
+            let (result, operands) = evaluate(&expr, &ctx);
+            assert_eq!(result, EvalResult::True);
+            assert!(operands.contains_key(key), "{operands:?}");
+        }
     }
 
     #[test]

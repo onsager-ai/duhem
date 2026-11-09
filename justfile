@@ -145,8 +145,8 @@ test target="workspace":
             exec cargo test --workspace
             ;;
         browser-actions)
-            cargo test -p duhem-actions --test ui_smoke --test api_observe_smoke --test api_observe_window_smoke -- --ignored
-            exec cargo test -p duhem-runtime --test capture_smoke --test session_injection_smoke --test named_sessions_smoke --test frame_smoke --test observe_window_masking_smoke -- --ignored
+            cargo test -p duhem-actions --test ui_smoke --test api_observe_smoke --test api_observe_window_smoke --test console_observe_smoke -- --ignored
+            exec cargo test -p duhem-runtime --test capture_smoke --test session_injection_smoke --test named_sessions_smoke --test frame_smoke --test observe_window_masking_smoke --test console_observe_smoke -- --ignored
             ;;
         *)
             printf 'unknown test target: %s\n' "$1" >&2

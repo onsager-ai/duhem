@@ -188,6 +188,11 @@ Common shape (terse):
 
 Authoring rules:
 
+- Use `ui/observe-console` with a required same-session `window` to record
+  page errors and console messages separately. Assert `complete == true`
+  before interpreting `page_error_count` or `console_error_count` as absence;
+  console levels are facts and do not themselves determine a verdict.
+
 - For request counts or ordering, use `api/observe` with
   `window: { from_step: <earlier-id>, edge: start, duration: 1s }` on the
   same browser session. Assert `complete == true` before interpreting an

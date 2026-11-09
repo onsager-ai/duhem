@@ -15,7 +15,9 @@ criteria) lives in the spec issue that introduced
   Does not bump.
 
 `SCHEMA_VERSION` advances in a dedicated bump commit that inserts
-`## v0.x.y — YYYY-MM-DD` below `## Unreleased`, leaving `## Unreleased`
+`## v0.x.y — YYYY-MM-DD` below `## Unreleased
+
+- [additive] New `ui/observe-console` action returns windowed page errors and console records with counts and completeness. (#603)`, leaving `## Unreleased`
 empty. The release commit is tagged `v0.x.y`.
 
 **Entry style.** One bullet per landing — the tag, the

@@ -1414,6 +1414,7 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 **UI actions** (Playwright primitives)
 
 - `ui/navigate` — go to a URL
+- `ui/observe-console` — collect page errors and console messages in a step-anchored window
 - `ui/click` — click an element (role-based locators preferred)
 - `ui/type` — type into an input
 - `ui/select` — select an option
@@ -1444,6 +1445,13 @@ With `all: true`, `values` contains every scalar in DOM order and an empty match
 sensitive observation. `ui/assert-element` accepts this same source vocabulary inside
 `expect:` with `equals:` for direct implicit judgment; extraction remains the path for
 later reuse and check-level assertions.
+
+`ui/observe-console` requires `window: { from_step, edge, duration }` with
+the same inclusive session-clock window and anchor rules as `api/observe`.
+It returns separate ordered `page_errors` and `console` records, counts for
+each and `console_error_count`. Console levels are facts, not verdicts.
+Assert `complete == true` before treating zero counts as absence; overflow
+sets `truncated` and makes `complete` false. Registered secrets are masked.
 
 **API actions**
 

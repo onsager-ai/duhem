@@ -39,7 +39,7 @@ fn compare(name: &str, docs: BTreeSet<String>, code: BTreeSet<String>) -> Result
 }
 
 fn helpers(spec: &str) -> Result<()> {
-    let text = between(spec, "are exactly ", ". The evaluator")?;
+    let text = between(spec, "authored helpers\nare exactly ", ". The evaluator")?;
     compare(
         "authored runtime helpers",
         quoted(text)?,

@@ -869,7 +869,9 @@ criteria:
           - matches: {value: $steps.diagnostic.outputs.stdout, pattern: '"required":false'}
 
   - id: AC-18
-    description: A failure inside a step group gates later default steps and runs `if: failure` groups.
+    description: >-
+      A failure inside a step group gates later default steps, and an
+      `if: failure` group still runs.
     checks:
       - id: AC-18.1
         steps:
@@ -881,5 +883,9 @@ criteria:
               timeout: 120s
         assertions:
           - $steps.gate.outputs.exit_code != 0
-          - matches: {value: $steps.gate.outputs.stdout, pattern: 'steps\.after\.outputs\.stdout[^}]*"verdict":"inconclusive:missing_observation"'}
-          - matches: {value: $steps.gate.outputs.stdout, pattern: 'steps\.diag\.outputs\.stdout[^}]*"verdict":"fail"'}
+          - matches:
+              value: $steps.gate.outputs.stdout
+              pattern: 'steps\.after\.outputs\.stdout[^}]*"verdict":"inconclusive:missing_observation"'
+          - matches:
+              value: $steps.gate.outputs.stdout
+              pattern: 'steps\.diag\.outputs\.stdout[^}]*"verdict":"fail"'

@@ -213,8 +213,9 @@ criteria:
             outcome.verdict.state,
             VerdictState::Inconclusive(InconclusiveCause::Timeout)
         ),
-        "{:?}",
-        outcome.verdict
+        "{:?}; failures: {:?}",
+        outcome.verdict,
+        outcome.failures
     );
     let log = fx.log.lock().unwrap().clone();
     assert_eq!(

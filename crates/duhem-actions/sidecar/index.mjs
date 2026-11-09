@@ -128,6 +128,10 @@ const contexts = new Map()
 const pages = new Map()
 /** @type {Map<string, NetworkRecord[]>} */
 const networkBuffers = new Map()
+// Separate from the legacy response buffer: starts are recorded immediately,
+// including requests that never produce a response.
+const requestBuffers = new Map()
+const consoleBuffers = new Map()
 /** @type {Map<string, number>} */
 const sessionStarts = new Map()
 // Video recording (#215) is per-context and finalized only on
@@ -172,14 +176,41 @@ function page(req) {
  * @param {Page} p
  * @param {NetworkRecord[]} buf
  */
-function attachNetworkRecorder(p, buf, sessionStart) {
+function attachNetworkRecorder(p, buf, sessionStart, requests) {
   /** @type {WeakMap<import('playwright').Request, { mono: number, wall: string }>} */
   const starts = new WeakMap()
+  const records = new WeakMap()
+  let nextSequence = 1
   p.on('request', (request) => {
-    starts.set(request, { mono: performance.now(), wall: new Date().toISOString() })
+    const now = performance.now()
+    starts.set(request, { mono: now, wall: new Date().toISOString() })
+    const previous = request.redirectedFrom()
+    const rec = {
+      seq: nextSequence++, method: request.method(), url: request.url(),
+      started_ms: Math.max(0, now - sessionStart), outcome: 'pending',
+    }
+    if (previous && records.has(previous)) rec.redirected_from = records.get(previous).seq
+    try { rec.frame_url = request.frame().url() } catch {}
+    records.set(request, rec)
+    if (requests.events.length < requests.cap) requests.events.push(rec)
+    else requests.truncated = true
+  })
+  p.on('requestfinished', (request) => {
+    const rec = records.get(request)
+    if (rec) rec.outcome = 'completed'
+  })
+  p.on('requestfailed', (request) => {
+    const rec = records.get(request)
+    if (rec) {
+      rec.outcome = 'failed'
+      const failure = request.failure()
+      if (failure) rec.error = failure.errorText
+    }
   })
   p.on('response', async (response) => {
     const request = response.request()
+    const requestRecord = records.get(request)
+    if (requestRecord) requestRecord.status = response.status()
     const start = starts.get(request) || {
       mono: performance.now(),
       wall: new Date().toISOString(),
@@ -282,6 +313,68 @@ async function requireFrames(req) {
     }
   }
   if (deadline !== undefined) req.timeoutMs = remaining()
+}
+
+/**
+ * Identity of an element for `ui/press` `target`. Self-contained: it is
+ * serialized into the page (and interpolated into `ACTIVE_TARGET_EXPR`).
+ * `name` is an approximation of the accessible name (aria-label, then
+ * aria-labelledby text, then trimmed textContent capped at 200 chars).
+ * @param {Element} el
+ */
+function describeElement(el) {
+  const tag = el.tagName.toLowerCase()
+  const clean = (/** @type {string | null | undefined} */ s) => {
+    const t = (s || '').replace(/\s+/g, ' ').trim()
+    return t ? t.slice(0, 200) : null
+  }
+  let role = (el.getAttribute('role') || '').trim().split(/\s+/)[0] || null
+  if (!role) {
+    const type = (el.getAttribute('type') || 'text').toLowerCase()
+    if (tag === 'button') role = 'button'
+    else if (tag === 'a' && el.hasAttribute('href')) role = 'link'
+    else if (tag === 'input') {
+      if (type === 'checkbox') role = 'checkbox'
+      else if (type === 'radio') role = 'radio'
+      else if (['button', 'submit', 'reset', 'image'].includes(type)) role = 'button'
+      else role = 'textbox'
+    } else if (tag === 'select') role = 'combobox'
+    else if (tag === 'textarea') role = 'textbox'
+    else if (/^h[1-6]$/.test(tag)) role = 'heading'
+  }
+  let name = clean(el.getAttribute('aria-label'))
+  if (!name) {
+    const ids = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+    name = clean(
+      ids.map(id => el.ownerDocument.getElementById(id)?.textContent || '').join(' '),
+    )
+  }
+  if (!name) name = clean(el.textContent)
+  return { tag, id: el.id || null, role, name }
+}
+
+// Evaluated in every frame: the focused element when this document has
+// focus and its activeElement is not itself a frame container (so only
+// the deepest focused document reports).
+const ACTIVE_TARGET_EXPR = `(() => {
+  const describe = ${describeElement.toString()}
+  if (!document.hasFocus()) return null
+  const el = document.activeElement
+  if (!el || el.tagName === 'IFRAME' || el.tagName === 'FRAME') return null
+  return describe(el)
+})()`
+
+/** @param {Page} p */
+async function activeTarget(p) {
+  for (const frame of p.frames()) {
+    try {
+      const target = await frame.evaluate(ACTIVE_TARGET_EXPR)
+      if (target) return target
+    } catch {
+      // Detached or navigating frame: it cannot be the receiver.
+    }
+  }
+  return { tag: 'body', id: null, role: null, name: null }
 }
 
 /** @param {any} req */
@@ -397,13 +490,84 @@ async function dispatch(req) {
       networkBuffers.set(id, buf)
       const sessionStart = performance.now()
       sessionStarts.set(id, sessionStart)
-      attachNetworkRecorder(p, buf, sessionStart)
+      const requests = {
+        events: [], truncated: false, cap: 10000,
+        attached_ms: performance.now() - sessionStart,
+      }
+      requestBuffers.set(id, requests)
+      attachNetworkRecorder(p, buf, sessionStart, requests)
+      const observations = { events: [], truncated: false, cap: 10000,
+        attached_ms: performance.now() - sessionStart }
+      consoleBuffers.set(id, observations)
+      let sequence = 1
+      const record = (event) => {
+        event.seq = sequence++
+        event.at_ms = Math.max(0, performance.now() - sessionStart)
+        if (observations.events.length < observations.cap) observations.events.push(event)
+        else observations.truncated = true
+      }
+      p.on('pageerror', error => {
+        const event = { kind: 'page_error', message: error.message }
+        if (error.stack) event.stack = error.stack
+        record(event)
+      })
+      p.on('console', msg => {
+        const event = { kind: 'console', level: msg.type(), text: msg.text() }
+        const loc = msg.location()
+        if (loc && loc.url) event.location = { url: loc.url, line: loc.lineNumber, column: loc.columnNumber }
+        record(event)
+      })
       return { pageId: id }
     }
 
     case 'goto':
       await page(req).goto(req.url, { timeout: req.timeoutMs })
       return null
+
+    case 'history': {
+      // Back/Forward through real browser history (#580 S2).
+      //
+      // Whether an entry exists is read from Chromium's own navigation
+      // history (CDP Page.getNavigationHistory, which also lists
+      // cross-origin entries), never inferred from Playwright's
+      // goBack/goForward result: that returns null both for "no entry"
+      // and for same-document (hash/pushState) moves. The browser's
+      // initial `about:blank` entry (index 0) is the harness's starting
+      // state, not a page the check visited, so it does not count as an
+      // entry. With no entry the call is skipped: `navigated: false`,
+      // URL unchanged, nothing else happens.
+      //
+      // When an entry exists, `navigated` is true iff the main frame
+      // committed a navigation (`framenavigated`, which also fires for
+      // same-document moves) during the call.
+      const p = page(req)
+      const fromUrl = p.url()
+      const cdp = await p.context().newCDPSession(p)
+      let target
+      try {
+        const { currentIndex, entries } = await cdp.send('Page.getNavigationHistory')
+        const index = currentIndex + (req.direction === 'back' ? -1 : 1)
+        const entry = entries[index]
+        const initialBlank = index === 0 && entry && entry.url === 'about:blank'
+        target = entry && !initialBlank ? entry : undefined
+      } finally {
+        await cdp.detach()
+      }
+      if (!target) return { fromUrl, url: fromUrl, navigated: false }
+      let navigated = false
+      const onNavigated = frame => {
+        if (frame === p.mainFrame()) navigated = true
+      }
+      p.on('framenavigated', onNavigated)
+      try {
+        const opts = { timeout: req.timeoutMs, waitUntil: 'load' }
+        if (req.direction === 'back') await p.goBack(opts)
+        else await p.goForward(opts)
+      } finally {
+        p.off('framenavigated', onNavigated)
+      }
+      return { fromUrl, url: p.url(), navigated }
+    }
 
     case 'click':
       await page(req).click(req.selector, { timeout: req.timeoutMs })
@@ -421,6 +585,55 @@ async function dispatch(req) {
         .locator(req.selector)
         .pressSequentially(req.text, { timeout: req.timeoutMs })
       return null
+
+    case 'press': {
+      // Locator form: the located element is the target; Playwright
+      // focuses it and presses. Page form: the receiver is whatever is
+      // focused right now, sampled before dispatch.
+      if (req.selector) {
+        const started = performance.now()
+        const loc = page(req).locator(req.selector)
+        const target = await loc.evaluate(describeElement, undefined, {
+          timeout: req.timeoutMs,
+        })
+        await loc.press(req.key, {
+          timeout: Math.max(1, req.timeoutMs - (performance.now() - started)),
+        })
+        return target
+      }
+      const target = await activeTarget(page(req))
+      await page(req).keyboard.press(req.key)
+      return target
+    }
+
+    case 'focus':
+      await page(req).locator(req.selector).focus({ timeout: req.timeoutMs })
+      return null
+
+    case 'assertFocus': {
+      // Polls until the single match is (not) focused or the deadline
+      // passes. Focused = own root's activeElement and the document has
+      // focus. Returns { satisfied, matches }; Rust owns the wording of
+      // the ambiguity error.
+      const loc = page(req).locator(req.selector)
+      const deadline = performance.now() + req.timeoutMs
+      for (;;) {
+        const matches = await loc.count()
+        if (matches > 1) return { satisfied: false, matches }
+        if (matches === 1) {
+          const focused = await loc
+            .evaluate(
+              el => el.getRootNode().activeElement === el && el.ownerDocument.hasFocus(),
+              undefined,
+              { timeout: 1000 },
+            )
+            .catch(() => null)
+          if (focused !== null && focused === req.focused) return { satisfied: true, matches }
+        }
+        if (performance.now() >= deadline) return { satisfied: false, matches }
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+    }
 
     case 'selectOption': {
       const by = req.by
@@ -453,6 +666,19 @@ async function dispatch(req) {
             const value = element[spec.name]
             return value === undefined ? null : value
           }
+          if (spec.source === 'rect') {
+            const r = element.getBoundingClientRect()
+            const view = element.ownerDocument.defaultView
+            return {
+              x: r.x, y: r.y, width: r.width, height: r.height,
+              top: r.top, right: r.right, bottom: r.bottom, left: r.left,
+              scroll_x: view.scrollX, scroll_y: view.scrollY,
+            }
+          }
+          if (spec.source === 'style') {
+            return element.ownerDocument.defaultView
+              .getComputedStyle(element).getPropertyValue(spec.name)
+          }
           return element.innerText
         }), { source: req.source, name: req.name })
 
@@ -462,6 +688,22 @@ async function dispatch(req) {
     case 'eval':
       // `req.expr` is a JS expression string (e.g. `document.readyState`).
       return await page(req).evaluate(req.expr)
+
+    case 'emulate': {
+      // Apply, then read the effective settings back from the page
+      // itself: the outputs are observations, never echoed inputs (#580).
+      const p = page(req)
+      if (req.viewport) await p.setViewportSize(req.viewport)
+      if (req.colorScheme) await p.emulateMedia({ colorScheme: req.colorScheme })
+      return await p.evaluate(() => ({
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        colorScheme: matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'dark'
+          : matchMedia('(prefers-color-scheme: light)').matches
+            ? 'light'
+            : 'no-preference',
+      }))
+    }
 
     case 'cookies':
       return await page(req).context().cookies()
@@ -509,6 +751,33 @@ async function dispatch(req) {
       if (!buf) throw new Error(`unknown pageId: ${req.pageId}`)
       const from = req.cursor || 0
       return { events: buf.slice(from), cursor: buf.length }
+    }
+
+    case 'requestRecords': {
+      const requests = requestBuffers.get(req.pageId)
+      if (!requests) throw new Error(`unknown pageId: ${req.pageId}`)
+      return requests
+    }
+
+    // Test-only: lower the request-record cap so overflow is cheap to exercise.
+    case 'setRequestCap': {
+      const requests = requestBuffers.get(req.pageId)
+      if (!requests) throw new Error(`unknown pageId: ${req.pageId}`)
+      requests.cap = req.cap
+      return {}
+    }
+
+    case 'consoleRecords': {
+      const observations = consoleBuffers.get(req.pageId)
+      if (!observations) throw new Error(`unknown pageId: ${req.pageId}`)
+      return observations
+    }
+
+    case 'setConsoleCap': {
+      const observations = consoleBuffers.get(req.pageId)
+      if (!observations) throw new Error(`unknown pageId: ${req.pageId}`)
+      observations.cap = req.cap
+      return {}
     }
 
     case 'sessionTime': {

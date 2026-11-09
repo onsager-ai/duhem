@@ -85,6 +85,7 @@ pub async fn write_passing_run(
         fixture_name: None,
         check_id: None,
         criterion_id: None,
+        registered_by: None,
     })
     .await
     .unwrap();
@@ -98,6 +99,7 @@ pub async fn write_passing_run(
         check_id: None,
         criterion_id: None,
         flow: None,
+        group: None,
     })
     .await
     .unwrap();
@@ -144,6 +146,7 @@ pub async fn write_passing_run(
         layer: Some("ui".into()),
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();
@@ -173,6 +176,7 @@ pub async fn write_passing_run(
         layer: Some("ui".into()),
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();
@@ -254,6 +258,7 @@ pub async fn write_replay_run(store: Arc<SqliteStore>, run_id: &str) -> (String,
         layer: Some("ui".into()),
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();
@@ -389,6 +394,7 @@ pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition
         layer: Some("api".into()),
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();
@@ -453,6 +459,7 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
         fixture_name: None,
         check_id: None,
         criterion_id: None,
+        registered_by: None,
     })
     .await
     .unwrap();
@@ -466,6 +473,7 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
         check_id: None,
         criterion_id: None,
         flow: None,
+        group: None,
     })
     .await
     .unwrap();
@@ -517,6 +525,7 @@ pub async fn write_in_progress_run(store: Arc<SqliteStore>, run_id: &str, defini
         layer: None,
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();

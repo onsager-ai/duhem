@@ -358,6 +358,21 @@ mod tests {
     }
 
     #[test]
+    fn extract_style_must_name_a_property_and_rect_is_a_field() {
+        let empty =
+            vd("          - { uses: ui/extract, with: { locator: { css: h1 }, style: '' } }");
+        assert!(
+            field_errors(&empty)
+                .iter()
+                .any(|e| e.contains("CSS property"))
+        );
+        let ok = vd(
+            "          - { uses: ui/extract, with: { locator: { css: h1 }, style: color } }\n          - { uses: ui/extract, with: { locator: { css: h1 }, field: rect } }",
+        );
+        assert!(field_errors(&ok).is_empty(), "{:?}", field_errors(&ok));
+    }
+
+    #[test]
     fn unknown_action_has_no_contract_field_errors() {
         // Catalog-aware schema validation owns the unknown-action error.
         let d = vd("          - { uses: custom/thing, with: { anything: 1 } }");

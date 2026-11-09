@@ -170,6 +170,14 @@ genuinely need an action type the catalog doesn't have, that's a Duhem
 engine change, not something to invent locally; don't silently mint new
 `uses:` strings.
 
+`api/call` and `api/observe` declare their response outputs, so reference
+`status`, `body`, `body_text`, `headers` and `body_bytes` directly (`api/observe`
+also has `method`, `url`, `request_body`, `request_headers`). `body_bytes` is an
+integer count of the payload bytes after the client's content decoding, before
+text or JSON conversion: `é` is `2`, an empty body is `0`; it is not
+`Content-Length`. `headers` has lower-case names; use a dotted path such as
+`headers.location` for hyphen-free names.
+
 Common shape (terse):
 
 ```yaml
@@ -193,6 +201,17 @@ Authoring rules:
   backslashes as `\\`. Keys must be nonempty. `[0]` indexes an array;
   `['0']` addresses an object key. The same syntax works on flow params,
   including page-call arguments: `$params.items[0]['a-b']`.
+
+- Use `ui/observe-console` with a required same-session `window` to record
+  page errors and console messages separately. Assert `complete == true`
+  before interpreting `page_error_count` or `console_error_count` as absence;
+  console levels are facts and do not themselves determine a verdict.
+
+- For request counts or ordering, use `api/observe` with
+  `window: { from_step: <earlier-id>, edge: start, duration: 1s }` on the
+  same browser session. Assert `complete == true` before interpreting an
+  empty `requests` array or zero `count` as absence. `truncated` signals
+  dropped records; without `window`, observe returns the first matching response.
 
 - Reference outputs by their fully-qualified path,
   `$steps.<id>.outputs.<name>`; add `outputs:` only for a rename or a
@@ -231,6 +250,60 @@ Authoring rules:
   judge input; an authored output under `capture/` is rejected at
   validate time.
 
+#### Drive browser history
+
+`ui/back` / `ui/forward` take only an optional `timeout:` and move through the
+check's real browser history, so state the browser keeps for history entries
+is what the next step observes. Assert `$steps.<id>.outputs.navigated`
+(`true` when the browser moved, including same-document hash/`pushState`
+entries; `false` with `url == from_url` when no entry exists) and read
+`from_url` / `url` for the move. A missing entry is not an error and never
+becomes a direct navigation.
+
+#### Group steps under one label, condition or session
+
+Every step declares exactly one of `uses:`, `call:` or `steps:`;
+`for_each:` is a modifier that repeats it. A step with `steps:` is a
+group: a label and a scope, not a boundary in the sequence.
+
+```yaml
+steps:
+  - id: prepare
+    description: Prepare the workspace
+    steps:
+      - { id: mk, uses: cli/invoke, with: { command: [sh, -c, "printf ok"] } }
+      - { id: chk, uses: cli/invoke, with: { command: [sh, -c, "true"] } }
+  - id: diagnostics
+    if: failure
+    steps:
+      - { uses: cli/invoke, with: { command: [sh, -c, "echo diag"] } }
+```
+
+- A group may carry `id:` (a label only), `description:`, `if:` and
+  `session:`. It takes no `with:`, `outputs:`, `secret_outputs:`, `as:`
+  or `max:` unless it is also a `for_each:` step. Groups work wherever
+  steps do: check `steps:`, `setup:`/`teardown:`, flow bodies, fixture
+  `up:`/`down:`.
+- The group's `if:` (`success | always | failure`, or a value
+  expression) is evaluated once, when the group is entered. If false,
+  every step inside is recorded as skipped and names the group as the
+  cause. Steps inside keep their own `if:`; a group's `if: always` or
+  `if: failure` is also the default for inner steps that declare none.
+- Failure state is shared. A failure inside a group gates later default
+  steps both inside and after it, and `if: failure` / `if: always` inside
+  a group behave exactly as they do at the top level.
+- Step ids inside a group share the enclosing namespace and must stay
+  unique across the whole tree. `$steps.<id>` names an inner step; a
+  group's own `id:` has no outputs, so `$steps.<group-id>` is a
+  validation error.
+- In a check that declares `sessions:`, `session: <name>` on a group
+  fills every inner `ui/*` step that names none; a step's own `session:`
+  wins.
+- Loops stay one level deep: a `for_each:` body may contain groups, but
+  no step anywhere under a `for_each:` may itself carry `for_each:`.
+  `duhem resolve` reports the worst-case step count as the sum of the
+  steps in the tree.
+
 #### Share locators instead of copying them
 
 For iframe contents, add `frame: { testid: report-shell-iframe }` to
@@ -241,6 +314,22 @@ within the selected document. The same form works for named `$pages.*`
 entries and locator-taking UI actions, including cross-origin frames.
 The timeout includes frame readiness. An unavailable or ambiguous frame
 cannot establish that its contents are absent.
+
+For geometry and computed style, use `ui/extract` with `field: rect`
+(`{x, y, width, height, top, right, bottom, left, scroll_x, scroll_y}` in CSS
+px, relative to the element's own document viewport) or `style: <css-property>`
+(the computed string, e.g. `rgb(17, 17, 17)`); assert thresholds in `assertions:`.
+
+Keyboard and focus: `ui/press { key, locator?, timeout? }` takes a Playwright
+key name or `+` chord (`Enter`, `Tab`, `Shift+Tab`, `Control+a`). With a
+`locator` it focuses that element and presses; without one it presses on
+whatever is focused and records `outputs.target` (`{tag, id, role, name}`,
+sampled before the press; `name` approximates the accessible name). `ui/focus`
+is programmatic `element.focus()`, not a user gesture; to verify keyboard
+focus movement press `Tab`, then assert `expected: focused` (or
+`not_focused`) on `ui/assert-element`. Focused means the element is its own
+document's active element and that document has focus, including inside a
+`frame:` document.
 
 When two leaves use the same locator, declare it once in an ordinary
 manifest include and reference it as `$pages.<group>.<name>`:
@@ -343,6 +432,53 @@ call's declared outputs through its own accessor —
 `$fixture.<fixture-name>.<call-id>.outputs.<name>` in that fixture's
 own `up:`/`down:`) — never `$steps.*`, which a lifecycle block does
 not resolve.
+
+#### Give a flow its own cleanup
+
+A flow that creates something can remove it too: declare `cleanup:` next
+to `steps:`. Whoever calls the flow gets the cleanup without writing it.
+
+```yaml
+flows:
+  scratch_file:
+    params: { prefix: { type: string } }
+    steps:
+      - id: create
+        uses: cli/invoke
+        with: { command: [sh, -c, 'f=$(mktemp "/tmp/$1.XXXX"); printf %s "$f"', --, $params.prefix] }
+    outputs: { path: $steps.create.outputs.stdout }
+    cleanup:
+      - uses: cli/invoke
+        with: { command: [rm, -f, $steps.create.outputs.stdout] }
+    # cleanup_policy: diagnostic_only   # optional; default is required
+```
+
+- The cleanup is registered when a `call:` to the flow starts running and
+  runs, last registered first, when the scope that made the call ends:
+  a check's `steps:` or `setup:` at the end of that check attempt (so
+  again on every retry), a criterion's `setup:` at the end of the
+  criterion, leaf `setup:` at the end of the run. It runs before that
+  scope's own `teardown:`, in one last-registered-first order with the
+  check's fixtures coming down. It also runs if the run is interrupted.
+  A call skipped by `if:` registers nothing; a body that fails partway
+  still runs its cleanup, so write cleanup steps that tolerate a
+  resource that was never created (`rm -f`).
+- A flow may start with, or be, a `for_each:` step, and its `cleanup:`
+  may loop too (same `max:` rule as everywhere). The call counts as
+  started when its first body step actually runs, so a loop over an
+  empty list registers nothing.
+- A cleanup step reads `$params.*` and the same call's body outputs as
+  `$steps.<body-id>.outputs.*`; nothing else, and callers cannot read
+  cleanup steps. A flow with `cleanup:` cannot be called from
+  `teardown:`, a fixture, or another flow's `cleanup:`.
+- Every cleanup step is attempted even if one fails. By default a
+  failing cleanup makes the run gate `fail` while the check keeps its own
+  verdict; `cleanup_policy: diagnostic_only` keeps the failure visible
+  without failing the run. A failure is a step error, timeout or a
+  judging step that does not pass; a non-zero `exit_code` is data, so
+  judge it with a judging action when it matters.
+- The run report lists each registered cleanup with the flow, call and
+  the scope that registered it, so the implicit registration is visible.
 
 ### 4. The holistic-environment tax — no mocks of the web
 
@@ -609,6 +745,20 @@ seeded from that baseline, so mutations do not cross between checks.
 Use `session: ~` for a signed-out scope beneath an authenticated parent. `ui/capture-session` marks its
 structured `state` output secret by contract; do not add an authored
 `secret_outputs:` entry for it.
+
+## Viewport and color-scheme emulation
+
+`ui/emulate` sets the check's own viewport (`viewport: { width, height }`,
+positive integer CSS px) and/or `color_scheme: light | dark | no-preference`.
+At least one field is required. It applies to the check's page for later
+steps, so place it before the `ui/navigate` that should see it. Each check
+and each retry attempt starts from the run viewport and host-default color
+scheme again; emulation never leaks to siblings. Its `viewport` and
+`color_scheme` outputs are read back from the page (`innerWidth/innerHeight`
+and `prefers-color-scheme` media queries), not echoed from `with:`. Assert the
+effect with `ui/assert-element` on media-query-dependent elements. Chromium
+reports `no-preference` as `light`. In headed runs the window sizes the page
+and `viewport` is best effort, so rely on the read-back output.
 
 ## Worked example template
 

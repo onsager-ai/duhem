@@ -1,0 +1,23 @@
+# Executed against a real local HTTP fixture by runtime tests/frame_smoke.rs.
+verification: Browser requests are observed in their collection window
+inputs:
+  page_url: { type: string }
+criteria:
+  - id: AC-1
+    description: The browser's request is recorded completely and in order.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: load
+            uses: ui/navigate
+            with: { url: $inputs.page_url }
+          - id: reads
+            uses: api/observe
+            with:
+              method: GET
+              url_pattern: $inputs.page_url
+              window: { from_step: load, duration: 1s }
+        assertions:
+          - $steps.reads.outputs.complete == true
+          - $steps.reads.outputs.count == 1
+          - $steps.reads.outputs.requests[0].method == 'GET'

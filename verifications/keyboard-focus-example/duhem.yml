@@ -1,0 +1,67 @@
+# Executed against a local fixture by runtime tests/keyboard_focus_smoke.rs in CI.
+verification: Keyboard focus moves to and activates the Options menu
+inputs:
+  fixture_url: { type: string }
+criteria:
+  - id: AC-1
+    description: Keyboard focus moves to and activates the Options menu.
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.fixture_url }
+          - uses: ui/focus
+            with: { locator: { role: button, name: Options } }
+          - uses: ui/assert-element
+            with:
+              locator: { role: button, name: Options }
+              expected: focused
+              timeout: 2s
+          # Negative control: Search is visible but does not hold focus.
+          - uses: ui/assert-element
+            with: { locator: { role: textbox, name: Search }, expected: visible }
+          - uses: ui/assert-element
+            with:
+              locator: { role: textbox, name: Search }
+              expected: not_focused
+              timeout: 2s
+          - id: open
+            uses: ui/press
+            with: { key: Enter }
+          - uses: ui/assert-element
+            with: { locator: { role: menu }, expected: visible, timeout: 2s }
+          - uses: ui/press
+            with: { key: ArrowDown }
+          - uses: ui/assert-element
+            with:
+              locator: { role: menuitem, name: Copy }
+              expected: focused
+              timeout: 2s
+          - uses: ui/assert-element
+            with:
+              locator: { role: button, name: Options }
+              expected: not_focused
+              timeout: 2s
+        assertions:
+          - $steps.open.outputs.target.role == 'button'
+          - $steps.open.outputs.target.name == 'Options'
+      - id: AC-1.2
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.fixture_url }
+          - uses: ui/focus
+            with: { locator: { role: button, name: Options } }
+          - uses: ui/press
+            with: { key: Tab }
+          - uses: ui/assert-element
+            with:
+              locator: { role: textbox, name: Search }
+              expected: focused
+              timeout: 2s
+          - uses: ui/assert-element
+            with: { locator: { role: button, name: Options }, expected: visible }
+          - uses: ui/assert-element
+            with:
+              locator: { role: button, name: Options }
+              expected: not_focused
+              timeout: 2s

@@ -180,6 +180,13 @@ pub struct FlowOrigin {
     pub iteration: Option<u32>,
 }
 
+/// The flow call whose registered `cleanup:` a lifecycle block runs (#615).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CleanupRegistration {
+    pub flow: String,
+    pub call: String,
+}
+
 /// Declaring resource scope, independent of a temporary browser context.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessOwner {
@@ -296,6 +303,10 @@ pub enum EventPayload {
         /// and fixture events round-trip byte-identically.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         criterion_id: Option<String>,
+        /// Set when this teardown block is a flow `cleanup:` registered at
+        /// the scope named by the other fields (#615); absent otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        registered_by: Option<CleanupRegistration>,
     },
     SetupStepStarted {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
@@ -325,6 +336,11 @@ pub enum EventPayload {
         /// recorded before `for_each` existed.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         flow: Option<FlowOrigin>,
+        /// Enclosing step-group labels, outermost first (#614): the
+        /// group's `id:`, or its position when it has none. Absent for
+        /// an ungrouped step and for traces recorded before step groups.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<Vec<String>>,
     },
     SetupStepObservation {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
@@ -388,6 +404,11 @@ pub enum EventPayload {
         /// ordinary steps and on traces recorded before spec #367.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         flow: Option<FlowOrigin>,
+        /// Enclosing step-group labels, outermost first (#614): the
+        /// group's `id:`, or its position when it has none. Absent for
+        /// an ungrouped step and for traces recorded before step groups.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<Vec<String>>,
     },
     StepObservation {
         step_index: u32,
@@ -750,6 +771,7 @@ mod tests {
                 fixture_name: None,
                 check_id: None,
                 criterion_id: None,
+                registered_by: None,
             },
             EventPayload::SetupStepStarted {
                 phase: StepPhase::Setup,
@@ -761,6 +783,7 @@ mod tests {
                 check_id: None,
                 criterion_id: None,
                 flow: None,
+                group: None,
             },
             EventPayload::SetupStepObservation {
                 phase: StepPhase::Setup,
@@ -879,6 +902,7 @@ mod tests {
                 fixture_name: None,
                 check_id: None,
                 criterion_id: None,
+                registered_by: None,
             }
             .is_finished()
         );
@@ -1003,6 +1027,7 @@ mod tests {
                 inner_index: 2,
                 iteration: None,
             }),
+            group: None,
         };
         let json = serde_json::to_string(&payload).expect("serialize");
         assert_eq!(

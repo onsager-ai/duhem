@@ -22,6 +22,10 @@
 //! Shipped in #347 (authenticated-check adapter):
 //! - `ui/capture-session`
 //!
+//! Shipped in #580 S2 (history):
+//! - `ui/back`
+//! - `ui/forward`
+//!
 //! ## Waiter-action outcome shape
 //!
 //! The two "waiter" actions diverge on the verdict shape they
@@ -48,6 +52,7 @@ pub mod capture_session;
 pub mod click;
 pub mod extract;
 mod field;
+pub mod history;
 pub mod navigate;
 pub mod select;
 pub mod type_;
@@ -59,6 +64,7 @@ pub use capture_session::CaptureSession;
 pub use click::Click;
 pub use extract::Extract;
 pub use field::validate_field_source;
+pub use history::{Back, Forward};
 pub use navigate::Navigate;
 pub use select::Select;
 pub use type_::Type;

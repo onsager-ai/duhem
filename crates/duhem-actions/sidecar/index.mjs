@@ -405,6 +405,30 @@ async function dispatch(req) {
       await page(req).goto(req.url, { timeout: req.timeoutMs })
       return null
 
+    case 'history': {
+      // Back/Forward through real browser history (#580 S2). Playwright's
+      // goBack/goForward return null both when no entry exists AND for
+      // same-document (hash/pushState) navigations, so the response cannot
+      // tell them apart. A main-frame `framenavigated` event fires for
+      // every committed navigation, same-document included, and never
+      // fires when no entry exists, so it is the `navigated` signal.
+      const p = page(req)
+      const fromUrl = p.url()
+      let navigated = false
+      const onNavigated = frame => {
+        if (frame === p.mainFrame()) navigated = true
+      }
+      p.on('framenavigated', onNavigated)
+      try {
+        const opts = { timeout: req.timeoutMs, waitUntil: 'load' }
+        if (req.direction === 'back') await p.goBack(opts)
+        else await p.goForward(opts)
+      } finally {
+        p.off('framenavigated', onNavigated)
+      }
+      return { fromUrl, url: p.url(), navigated }
+    }
+
     case 'click':
       await page(req).click(req.selector, { timeout: req.timeoutMs })
       return null

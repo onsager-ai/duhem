@@ -66,6 +66,11 @@ inline frame locators, assertions and interactions. It is validated
 offline and executed against a two-origin browser fixture in
 `crates/duhem-runtime/tests/frame_smoke.rs` by browser CI. (#568)
 
+The [history example](history-example/duhem.yml) demonstrates `ui/back` and
+`ui/forward` over real browser history, including same-document entries and the
+no-entry case. It is validated offline and executed against a local fixture in
+`crates/duhem-runtime/tests/history_smoke.rs` by browser CI. (#580)
+
 Real VDs that gate this repo's CI. Bigger, multi-step, and pointed at a
 real system stood up by `provision:` hooks. This is what production
 Duhem usage looks like — and, being Duhem-on-Duhem, it catches

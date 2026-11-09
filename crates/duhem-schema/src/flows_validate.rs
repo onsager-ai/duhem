@@ -72,8 +72,8 @@ pub(crate) fn validate_authored(definition: &VerificationDefinition) -> Vec<Stri
                 .steps
                 .iter()
                 .flat_map(|step| {
-                    std::iter::once(step)
-                        .chain(step.steps.iter().flatten())
+                    crate::step_groups::tree(std::slice::from_ref(step))
+                        .into_iter()
                         .chain(step.for_each_body.iter())
                 })
                 .filter_map(|step| step.id.as_deref())
@@ -104,10 +104,8 @@ pub(crate) fn validate_authored(definition: &VerificationDefinition) -> Vec<Stri
                     }
                 });
             }
-            for (index, step) in check
-                .steps
-                .iter()
-                .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+            for (index, step) in crate::step_groups::tree(&check.steps)
+                .into_iter()
                 .enumerate()
             {
                 let site = format!(
@@ -152,9 +150,8 @@ fn validate_lifecycle_dispatch(
         let site = format!("{label} {index}");
         validate_dispatch(step, &site, errors);
         if !registers_allowed {
-            let nested = step.steps.iter().flatten();
-            for called in std::iter::once(step)
-                .chain(nested)
+            for called in crate::step_groups::tree(std::slice::from_ref(step))
+                .into_iter()
                 .filter_map(|s| s.call.as_deref())
             {
                 if registers_cleanup(called, &definition.flows, &mut BTreeSet::new()) {
@@ -175,29 +172,16 @@ fn validate_lifecycle_dispatch(
                 errors,
             );
         }
-        if step.for_each.is_some()
-            && let Some(body) = &step.steps
-        {
-            // The `steps:` body form (depth capped at 1 by
-            // `validate_for_each` — not re-checked here): each body
-            // step still needs the ordinary exactly-one-of-`uses:`/
-            // `call:` dispatch check, and a `call:` body step gets the
-            // same flow-param validation any other `call:` gets.
-            for (inner_index, inner) in body.iter().enumerate() {
-                let inner_site = format!("{site} body step {inner_index}");
-                validate_dispatch(inner, &inner_site, errors);
-                if let Some(name) = &inner.call {
-                    validate_call(
-                        name,
-                        inner,
-                        &definition.flows,
-                        &definition.inputs,
-                        None,
-                        &inner_site,
-                        errors,
-                    );
-                }
-            }
+        if let Some(body) = &step.steps {
+            // A `for_each:` body or a step group: each inner step still
+            // needs the ordinary dispatch check, and a `call:` inside gets
+            // the same flow-param validation any other `call:` gets.
+            let kind = if step.for_each.is_some() {
+                "body"
+            } else {
+                "group"
+            };
+            validate_lifecycle_dispatch(body, &format!("{site} {kind} step"), definition, errors);
         }
     }
 }
@@ -225,10 +209,8 @@ fn validate_dispatch(step: &Step, site: &str, errors: &mut Vec<String>) {
         }
         return;
     }
-    if step.steps.is_some() {
-        errors.push(format!(
-            "{site}: `steps:` is only valid on a step that also declares `for_each:`"
-        ));
+    if crate::step_groups::is_group(step) {
+        // Group shape is validated, with locations, by `step_groups`.
         return;
     }
     if step.max.is_some() {
@@ -277,10 +259,8 @@ fn validate_flow(name: &str, flow: &Flow, catalog: &FlowCatalog, errors: &mut Ve
     }
 
     let mut ids = BTreeSet::new();
-    for (index, step) in flow
-        .steps
-        .iter()
-        .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+    for (index, step) in crate::step_groups::tree(&flow.steps)
+        .into_iter()
         .enumerate()
     {
         let site = format!("flow `{name}` step {index}");
@@ -294,11 +274,9 @@ fn validate_flow(name: &str, flow: &Flow, catalog: &FlowCatalog, errors: &mut Ve
                     "{site}: a `for_each:` wrapper may not declare id, outputs, or secret_outputs"
                 ));
             }
-            if step
-                .steps
-                .iter()
-                .flatten()
-                .any(|inner| inner.for_each.is_some() || inner.steps.is_some())
+            if crate::step_groups::tree(step.steps.as_deref().unwrap_or(&[]))
+                .into_iter()
+                .any(|inner| inner.for_each.is_some())
             {
                 errors.push(format!("{site}: `for_each:` body exceeds depth 1"));
             }
@@ -376,10 +354,8 @@ fn registers_cleanup(name: &str, catalog: &FlowCatalog, seen: &mut BTreeSet<Stri
         return false;
     };
     !flow.cleanup.is_empty()
-        || flow
-            .steps
-            .iter()
-            .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+        || crate::step_groups::tree(&flow.steps)
+            .into_iter()
             .filter_map(|s| s.call.as_deref())
             .any(|called| registers_cleanup(called, catalog, seen))
 }
@@ -391,16 +367,12 @@ fn validate_flow_cleanup(name: &str, flow: &Flow, catalog: &FlowCatalog, errors:
     if flow.cleanup.is_empty() {
         return;
     }
-    let mut ids: BTreeSet<&str> = flow
-        .steps
-        .iter()
-        .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+    let mut ids: BTreeSet<&str> = crate::step_groups::tree(&flow.steps)
+        .into_iter()
         .filter_map(|step| step.id.as_deref())
         .collect();
-    for (index, step) in flow
-        .cleanup
-        .iter()
-        .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+    for (index, step) in crate::step_groups::tree(&flow.cleanup)
+        .into_iter()
         .enumerate()
     {
         let site = format!("flow `{name}` cleanup step {index}");
@@ -414,11 +386,9 @@ fn validate_flow_cleanup(name: &str, flow: &Flow, catalog: &FlowCatalog, errors:
                     "{site}: a `for_each:` wrapper may not declare id, outputs, or secret_outputs"
                 ));
             }
-            if step
-                .steps
+            if crate::step_groups::tree(step.steps.as_deref().unwrap_or(&[]))
                 .iter()
-                .flatten()
-                .any(|inner| inner.for_each.is_some() || inner.steps.is_some())
+                .any(|inner| inner.for_each.is_some())
             {
                 errors.push(format!("{site}: `for_each:` body exceeds depth 1"));
             }
@@ -596,11 +566,9 @@ fn validate_flow_graph(catalog: &FlowCatalog, errors: &mut Vec<String>) {
             return;
         };
         chain.push(name.to_string());
-        for called in flow
-            .steps
-            .iter()
-            .chain(&flow.cleanup)
-            .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+        for called in crate::step_groups::tree(&flow.steps)
+            .into_iter()
+            .chain(crate::step_groups::tree(&flow.cleanup))
             .filter_map(|step| step.call.as_deref())
         {
             visit(called, catalog, chain, depth + 1, errors);

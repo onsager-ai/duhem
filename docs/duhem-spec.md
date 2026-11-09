@@ -836,8 +836,9 @@ steps:
 and the maximum number of steps a check can execute is computable from
 the Verification Definition alone, before the run. Validation rejects a
 definition whenever that bound cannot be computed; `duhem resolve`
-reports the per-check worst-case step count. Today the bound is the flat
-step count after flow expansion.
+reports the per-check worst-case step count. The bound is computed by
+walking the step tree after flow expansion: the sum of its leaf steps,
+with each `for_each:` body multiplied by its `max:`.
 
 This boundary forbids `while` and every other condition-driven form of
 repetition, recursion of any kind, unbounded iteration, unbounded
@@ -881,9 +882,9 @@ report having verified less than the Verification Definition budgeted
 for, the false-green shape §7.6 exists to prevent. An empty array is
 zero iterations, not an error. The loop body is exactly one of a
 single `uses:` action, a `call:` to a named flow, or an inline
-multi-step `steps:` list — never more than one, never nested (a body
-step may not itself carry `for_each:` or `steps:`, capping nesting at
-depth 1). `as: <name>` binds the current element for the body's
+multi-step `steps:` list — never more than one. Loops do not nest: no
+step anywhere under a `for_each:`, groups included, may itself carry
+`for_each:`, capping loop nesting at depth 1. `as: <name>` binds the current element for the body's
 duration; `$<name>` is a validation error anywhere outside that body,
 and lifecycle body ids remain local to that body. In a check (#521),
 `assertions:` can reference its loop body's `$steps.<id>.outputs.*`:
@@ -896,6 +897,56 @@ An empty judging loop produces `Inconclusive(EmptyAggregation)`.
 The judge's existing fail-wins, then inconclusive, then pass fold is
 unchanged. Loops may also be declared in reusable flows; expansion
 retains the same mandatory bounds and depth-one limit.
+
+**Step groups (`steps:`)** make `steps:` a body form on any step (spec
+#614): every step declares exactly one of `uses:`, `call:` or `steps:`,
+and `for_each:` is a modifier that repeats it. A group is a scope and a
+label, not a sequence boundary. It may carry `id:` (a label),
+`description:`, `if:` and `session:`; it may not carry `with:`,
+`outputs:`, `secret_outputs:`, `as:` or `max:` unless it also carries
+`for_each:`, which keeps the loop-body semantics above. Groups are valid
+wherever steps are: check `steps:`, leaf/criterion/check `setup:` and
+`teardown:`, flow bodies, and fixture `up:`/`down:`.
+
+```yaml
+steps:
+  - id: prepare
+    description: Prepare the workspace
+    steps:
+      - { id: mk, uses: cli/invoke, with: { command: [sh, -c, "printf ok"] } }
+      - { id: chk, uses: cli/invoke, with: { command: [sh, -c, "true"] } }
+  - id: diagnostics
+    if: failure
+    steps:
+      - { uses: cli/invoke, with: { command: [sh, -c, "echo diag"] } }
+```
+
+A group's `if:` (status or value form) is evaluated once, at group entry,
+against the current gate state. If it is false, every step inside is
+recorded as skipped and names the group as the cause. Steps inside
+evaluate their own `if:` against the shared check gate state, so a
+failure inside a group gates later default steps both inside and after
+it, and `if: failure` / `if: always` inside a group behave as at top
+level. A group's `if: always` or `if: failure` is also the default for the
+steps inside that declare no `if:` of their own, as a call-site `if:` is for
+the steps its flow expands to; a diagnostics group therefore runs its steps
+on the failure it exists for. Value conditions follow the Tier 2 claim-set rule: judging steps
+gated off by a group-level value `if:` count as gated judging steps.
+Step ids inside a group share the enclosing namespace
+(`$steps.<id>`, `$setup.<id>`) and stay unique across the whole tree; a
+group `id:` is a label only, and `$steps.<group-id>` is a validation
+error. In a named-sessions check, `session: <name>` on a group fills
+inner `ui/*` steps that declare none and an inner declaration wins, so an
+enclosing group satisfies the every-`ui/*`-step-names-a-session rule.
+
+Groups nest, bounded by the same depth limit as flows
+(`MAX_FLOW_DEPTH`). The loader lowers each group into the enclosing
+sequence at the point flows are expanded, so the runtime executes one
+flat sequence and the worst-case step count is the sum of leaves. Each
+inner step's evidence carries its group path (labels, or sibling
+positions for an unlabelled group) as an optional field; traces without
+it still read. A worked example lives at
+`verifications/step-groups-example/duhem.yml`.
 
 ### Schema impact — bounded judging iteration (#521)
 
@@ -1464,7 +1515,7 @@ human-facing `description:`, typed `params:`, ordered `steps:`, and an
 `call: <flow-name>`, an optional `description:`, an `id:`, and a
 `with:` map matching the flow's typed `params:`. `call:` is distinct
 from `uses:` so a flow cannot shadow or masquerade as a closed-catalog
-action. Exactly one of the two keys is valid on a step. A lifecycle
+action. Exactly one of the two keys is valid on a step (or `steps:`, a group, §10.3.3). A lifecycle
 step — leaf/criterion/check `setup:`/`teardown:` or fixture
 `up:`/`down:` — accepts the same `call:` form directly, with the same
 `params:`/`with:` validation (§10.3.4/§10.3.5/§10.3.6); it is not

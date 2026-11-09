@@ -515,6 +515,7 @@ async fn run_lifecycle_steps(
         None
     };
     let mut failed_by = environment_failed.then(|| "setup environment".to_string());
+    let mut groups = crate::engine::gating::GroupGates::default();
     let mut stored_error = None;
     let mut cleanup = Vec::new();
     let execution: Result<(), EngineError> = async {
@@ -534,6 +535,7 @@ async fn run_lifecycle_steps(
                     contexts,
                     &mut aborted,
                     &mut failed_by,
+                    &mut groups,
                     &mut stored_error,
                     &mut cleanup,
                 )
@@ -555,6 +557,7 @@ async fn run_lifecycle_steps(
                 contexts,
                 &mut aborted,
                 &mut failed_by,
+                &mut groups,
                 &mut stored_error,
                 &mut cleanup,
             )
@@ -702,6 +705,7 @@ mod tests {
             for_each_body: Vec::new(),
             flow: None,
             flow_secrets: Vec::new(),
+            group: Vec::new(),
             flow_cleanup: Vec::new(),
         }
     }

@@ -48,6 +48,7 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
         layer: None,
         flow: None,
         with,
+        group: None,
     })
     .await
     .unwrap();
@@ -761,6 +762,7 @@ async fn write_scoped_run(
         layer: None,
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();
@@ -1091,6 +1093,7 @@ async fn step_pair(
         layer: layer.map(str::to_string),
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();
@@ -1233,6 +1236,7 @@ async fn setup_phase_spans_carry_no_check_id() {
         check_id: None,
         criterion_id: None,
         flow: None,
+        group: None,
     })
     .await
     .unwrap();
@@ -1366,6 +1370,7 @@ async fn secret_registry_masks_events_artifacts_and_bundle_exports() {
                 ("encoded".to_string(), serde_json::json!(encoded)),
                 ("percent".to_string(), serde_json::json!(percent)),
             ]),
+            group: None,
         })
         .await
         .unwrap();
@@ -1475,6 +1480,7 @@ async fn non_secret_text_is_recorded_verbatim() {
             layer: Some("data".into()),
             flow: None,
             with: BTreeMap::from([("connection".into(), serde_json::json!(visible))]),
+            group: None,
         })
         .await
         .unwrap();
@@ -1508,6 +1514,7 @@ async fn mid_run_secret_registration_is_not_retroactive() {
             layer: None,
             flow: None,
             with: BTreeMap::from([("note".into(), serde_json::json!(token))]),
+            group: None,
         })
         .await
         .unwrap();

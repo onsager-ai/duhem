@@ -1,7 +1,7 @@
 //! Bounded iteration validation (spec #443 / #521).
 //!
 //! Split out of `validate_lifecycle.rs` because `for_each` has its own
-//! rule set (mandatory `max:`, a depth-1 body cap, and the `as:`
+//! rule set (mandatory `max:`, a loop-nesting cap of 1, and the `as:`
 //! binding's scope) distinct from `if:`'s value-condition rules, even
 //! though both share the same lifecycle surface and the same
 //! `validate_nested_lifecycle_block_in_loop` walk for a step's own
@@ -195,7 +195,7 @@ fn validate_for_each_list(
         // Expanded flow bodies must obey the same depth cap as inline bodies;
         // otherwise a loop could acquire a second loop through a call.
         for inner in &step.for_each_body {
-            if inner.for_each.is_some() || inner.steps.is_some() {
+            if inner.for_each.is_some() {
                 errs.push(ValidationError::ForEachDepthExceeded {
                     site: site.clone(),
                     field: "for_each",
@@ -232,15 +232,6 @@ fn validate_for_each_list(
                         .scalar_location(&inner_for_each_path, &inner_for_each.raw),
                 });
             }
-            if inner.steps.is_some() {
-                let mut inner_steps_path = inner_path.clone();
-                inner_steps_path.push(SourcePathSegment::key("steps"));
-                errs.push(ValidationError::ForEachDepthExceeded {
-                    site: format!("{site} body step {inner_index}"),
-                    field: "steps",
-                    location: v.source_map.node_location(&inner_steps_path),
-                });
-            }
         }
 
         let mut body_path_prefix = step_path.clone();
@@ -248,10 +239,12 @@ fn validate_for_each_list(
         if phase == "steps" {
             continue;
         }
+        // Groups in the body are read as their leaves, frames attached.
+        let leaves = crate::step_groups::flatten(body);
         validate_nested_lifecycle_block_in_loop(
             v,
             outputs_for,
-            body,
+            &leaves,
             "for_each body",
             &body_path_prefix,
             &site,
@@ -345,17 +338,16 @@ mod tests {
             "{e:?}"
         );
 
-        let nested_steps = "verification: x\nsetup:\n  - for_each: $inputs.rows\n    max: 5\n    as: row\n    steps:\n      - steps: [{ uses: cli/invoke }]\n        uses: cli/invoke\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        assertions: [\"true\"]\n";
-        let e = errs(nested_steps);
+        let loop_through_group = "verification: x\nsetup:\n  - for_each: $inputs.rows\n    max: 5\n    as: row\n    steps:\n      - steps:\n          - for_each: $inputs.cols\n            max: 5\n            uses: cli/invoke\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        assertions: [\"true\"]\n";
+        let e = errs(loop_through_group);
         assert!(
             e.iter().any(|e| matches!(
                 e,
-                ValidationError::ForEachDepthExceeded {
-                    field: "steps",
+                ValidationError::InvalidStepGroup {
                     location: Some(_),
                     ..
                 }
-            )),
+            ) && e.to_string().contains("under another `for_each:`")),
             "{e:?}"
         );
     }

@@ -336,6 +336,11 @@ pub enum EventPayload {
         /// recorded before `for_each` existed.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         flow: Option<FlowOrigin>,
+        /// Enclosing step-group labels, outermost first (#614): the
+        /// group's `id:`, or its position when it has none. Absent for
+        /// an ungrouped step and for traces recorded before step groups.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<Vec<String>>,
     },
     SetupStepObservation {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
@@ -399,6 +404,11 @@ pub enum EventPayload {
         /// ordinary steps and on traces recorded before spec #367.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         flow: Option<FlowOrigin>,
+        /// Enclosing step-group labels, outermost first (#614): the
+        /// group's `id:`, or its position when it has none. Absent for
+        /// an ungrouped step and for traces recorded before step groups.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<Vec<String>>,
     },
     StepObservation {
         step_index: u32,
@@ -773,6 +783,7 @@ mod tests {
                 check_id: None,
                 criterion_id: None,
                 flow: None,
+                group: None,
             },
             EventPayload::SetupStepObservation {
                 phase: StepPhase::Setup,
@@ -1016,6 +1027,7 @@ mod tests {
                 inner_index: 2,
                 iteration: None,
             }),
+            group: None,
         };
         let json = serde_json::to_string(&payload).expect("serialize");
         assert_eq!(

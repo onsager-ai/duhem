@@ -43,6 +43,7 @@ fn step_started(idx: u32, uses: &str) -> EventPayload {
         layer: Some("ui".into()),
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     }
 }
 

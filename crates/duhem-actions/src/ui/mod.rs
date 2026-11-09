@@ -22,6 +22,10 @@
 //! Shipped in #347 (authenticated-check adapter):
 //! - `ui/capture-session`
 //!
+//! Shipped in #580 S2 (history):
+//! - `ui/back`
+//! - `ui/forward`
+//!
 //! Shipped in #580 (keyboard and focus):
 //! - `ui/press`
 //! - `ui/focus`
@@ -53,6 +57,7 @@ pub mod click;
 pub mod extract;
 mod field;
 pub mod focus;
+pub mod history;
 pub mod navigate;
 pub mod press;
 pub mod select;
@@ -66,6 +71,7 @@ pub use click::Click;
 pub use extract::Extract;
 pub use field::validate_field_source;
 pub use focus::Focus;
+pub use history::{Back, Forward};
 pub use navigate::Navigate;
 pub use press::Press;
 pub use select::Select;

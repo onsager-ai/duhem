@@ -328,6 +328,16 @@ carry optional `judgment: VerdictState`; lifecycle failure and its failing
 step account for either execution failure or failed judgment. Missing
 `judgment` or `cleanup_policy` in older evidence remains unknown.
 
+#### Drive browser history
+
+`ui/back` / `ui/forward` take only an optional `timeout:` and move through the
+check's real browser history, so state the browser keeps for history entries
+is what the next step observes. Assert `$steps.<id>.outputs.navigated`
+(`true` when the browser moved, including same-document hash/`pushState`
+entries; `false` with `url == from_url` when no entry exists) and read
+`from_url` / `url` for the move. A missing entry is not an error and never
+becomes a direct navigation.
+
 #### Share locators instead of copying them
 
 Use optional `frame: <Locator>` on any UI target to enter its containing

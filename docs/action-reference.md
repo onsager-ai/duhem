@@ -50,6 +50,36 @@ Navigate the browser to a URL.
   with: { url: https://example.com }
 ```
 
+### `ui/back`
+
+Go back one real browser history entry (same-document entries included); `navigated` is false, with the URL unchanged, when no entry exists.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `timeout` | no | — |
+
+**outputs:** `from_url`, `url`, `navigated`
+
+```yaml
+- id: back
+  uses: ui/back
+```
+
+### `ui/forward`
+
+Go forward one real browser history entry (same-document entries included); `navigated` is false, with the URL unchanged, when no entry exists.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `timeout` | no | — |
+
+**outputs:** `from_url`, `url`, `navigated`
+
+```yaml
+- id: forward
+  uses: ui/forward
+```
+
 ### `ui/click`
 
 Click an element (locator shorthand fields, or a `locator` object).

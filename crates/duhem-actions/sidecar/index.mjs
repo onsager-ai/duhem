@@ -467,6 +467,51 @@ async function dispatch(req) {
       await page(req).goto(req.url, { timeout: req.timeoutMs })
       return null
 
+    case 'history': {
+      // Back/Forward through real browser history (#580 S2).
+      //
+      // Whether an entry exists is read from Chromium's own navigation
+      // history (CDP Page.getNavigationHistory, which also lists
+      // cross-origin entries), never inferred from Playwright's
+      // goBack/goForward result: that returns null both for "no entry"
+      // and for same-document (hash/pushState) moves. The browser's
+      // initial `about:blank` entry (index 0) is the harness's starting
+      // state, not a page the check visited, so it does not count as an
+      // entry. With no entry the call is skipped: `navigated: false`,
+      // URL unchanged, nothing else happens.
+      //
+      // When an entry exists, `navigated` is true iff the main frame
+      // committed a navigation (`framenavigated`, which also fires for
+      // same-document moves) during the call.
+      const p = page(req)
+      const fromUrl = p.url()
+      const cdp = await p.context().newCDPSession(p)
+      let target
+      try {
+        const { currentIndex, entries } = await cdp.send('Page.getNavigationHistory')
+        const index = currentIndex + (req.direction === 'back' ? -1 : 1)
+        const entry = entries[index]
+        const initialBlank = index === 0 && entry && entry.url === 'about:blank'
+        target = entry && !initialBlank ? entry : undefined
+      } finally {
+        await cdp.detach()
+      }
+      if (!target) return { fromUrl, url: fromUrl, navigated: false }
+      let navigated = false
+      const onNavigated = frame => {
+        if (frame === p.mainFrame()) navigated = true
+      }
+      p.on('framenavigated', onNavigated)
+      try {
+        const opts = { timeout: req.timeoutMs, waitUntil: 'load' }
+        if (req.direction === 'back') await p.goBack(opts)
+        else await p.goForward(opts)
+      } finally {
+        p.off('framenavigated', onNavigated)
+      }
+      return { fromUrl, url: p.url(), navigated }
+    }
+
     case 'click':
       await page(req).click(req.selector, { timeout: req.timeoutMs })
       return null

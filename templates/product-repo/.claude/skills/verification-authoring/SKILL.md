@@ -233,6 +233,16 @@ Authoring rules:
   judge input; an authored output under `capture/` is rejected at
   validate time.
 
+#### Drive browser history
+
+`ui/back` / `ui/forward` take only an optional `timeout:` and move through the
+check's real browser history, so state the browser keeps for history entries
+is what the next step observes. Assert `$steps.<id>.outputs.navigated`
+(`true` when the browser moved, including same-document hash/`pushState`
+entries; `false` with `url == from_url` when no entry exists) and read
+`from_url` / `url` for the move. A missing entry is not an error and never
+becomes a direct navigation.
+
 #### Group steps under one label, condition or session
 
 Every step declares exactly one of `uses:`, `call:` or `steps:`;

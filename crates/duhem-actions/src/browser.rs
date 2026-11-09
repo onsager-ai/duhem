@@ -669,6 +669,28 @@ impl Page {
         self.conn.request("goto", req).await.map(|_| ())
     }
 
+    /// Move one entry through the page's real history. `direction` is
+    /// `"back"` or `"forward"`. Returns `(from_url, url, navigated)`;
+    /// `navigated` is false when no history entry exists in that
+    /// direction (the sidecar observes main-frame navigation events, since
+    /// Playwright's null response is ambiguous).
+    pub async fn history(
+        &self,
+        direction: &str,
+        timeout_ms: f64,
+    ) -> Result<(String, String, bool), PwError> {
+        let mut req = self.p();
+        req["direction"] = json!(direction);
+        req["timeoutMs"] = json!(timeout_ms);
+        let v = self.conn.request("history", req).await?;
+        let text = |key: &str| v[key].as_str().unwrap_or("").to_string();
+        Ok((
+            text("fromUrl"),
+            text("url"),
+            v["navigated"].as_bool().unwrap_or(false),
+        ))
+    }
+
     pub async fn click(&self, selector: &str, timeout_ms: f64) -> Result<(), PwError> {
         let mut req = self.p();
         req["selector"] = json!(selector);

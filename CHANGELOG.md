@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] New `ui/back` / `ui/forward` actions drive real browser history and report `from_url`, `url` and `navigated` (false when no entry exists). (#580)
 - [additive] New `ui/press` and `ui/focus` actions, and `ui/assert-element` `expected: focused | not_focused`, for keyboard activation and focus identity. (#580)
 - [additive] `api/call` and `api/observe` declare their response outputs (including `headers`) and add `body_bytes`, the response payload byte count (as received for `api/call`, browser-decoded for `api/observe`). (#603)
 - [additive] steps: is a body form on any step — nested step groups with one label, entry-time if:/session:, and shared failure-gate state. (#614)

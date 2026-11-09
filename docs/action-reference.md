@@ -50,6 +50,22 @@ Navigate the browser to a URL.
   with: { url: https://example.com }
 ```
 
+### `ui/observe-console`
+
+Observe page errors and console messages in a step-anchored window.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `window` | yes | — |
+
+**outputs:** `page_errors`, `page_error_count`, `console`, `console_count`, `console_error_count`, `window`, `complete`, `truncated`
+
+```yaml
+- uses: ui/observe-console
+  with:
+    window: { from_step: load, edge: start, duration: 1s }
+```
+
 ### `ui/back`
 
 Go back one real browser history entry (same-document entries included); `navigated` is false, with the URL unchanged, when no entry exists.

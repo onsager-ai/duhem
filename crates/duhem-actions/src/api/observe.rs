@@ -107,6 +107,7 @@ use tokio::time::{sleep, timeout};
 use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT, Observation};
 use crate::browser::NetworkEvent;
 use crate::error::ActionError;
+use crate::observe_window::Window;
 use crate::with::TimeoutSpec;
 
 /// How often to re-poll the sidecar's network buffer while waiting for
@@ -138,32 +139,6 @@ pub(crate) struct With {
     timeout: Option<TimeoutSpec>,
     #[serde(default)]
     window: Option<Window>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Window {
-    from_step: String,
-    #[serde(default)]
-    edge: Edge,
-    #[serde(deserialize_with = "positive_duration")]
-    duration: TimeoutSpec,
-}
-
-fn positive_duration<'de, D: serde::Deserializer<'de>>(d: D) -> Result<TimeoutSpec, D::Error> {
-    let duration = TimeoutSpec::deserialize(d)?;
-    if Duration::from(duration).is_zero() {
-        return Err(serde::de::Error::custom("window duration must be positive"));
-    }
-    Ok(duration)
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum Edge {
-    #[default]
-    Start,
-    Finish,
 }
 
 pub struct Observe;
@@ -224,33 +199,8 @@ impl Action for Observe {
         let method_filter = with.method.as_deref().map(str::to_ascii_uppercase);
 
         if let Some(window) = with.window {
-            let boundary = ctx.step_boundaries.get(&window.from_step).ok_or_else(|| {
-                ActionError::Playwright(format!(
-                    "api/observe: anchor step `{}` has not run or has no session clock",
-                    window.from_step
-                ))
-            })?;
-            if boundary.session.as_deref() != ctx.session {
-                return Err(ActionError::Playwright(format!(
-                    "api/observe: anchor step `{}` ran in a different browser session",
-                    window.from_step
-                )));
-            }
-            let duration: Duration = window.duration.into();
-            let (edge, start_ms) = match window.edge {
-                Edge::Start => ("start", boundary.start_ms),
-                Edge::Finish => ("finish", boundary.finish_ms),
-            };
-            let end_ms = start_ms + duration.as_secs_f64() * 1000.0;
-            loop {
-                let now = page.session_time_ms().await.map_err(|e| {
-                    ActionError::Playwright(format!("api/observe: session clock: {e}"))
-                })?;
-                if now > end_ms {
-                    break;
-                }
-                sleep(Duration::from_secs_f64(((end_ms - now) / 1000.0).min(0.05))).await;
-            }
+            let (edge, start_ms, end_ms) =
+                crate::observe_window::resolve(&window, ctx, page, "api/observe").await?;
             let batch = page.request_records().await.map_err(|e| {
                 ActionError::Playwright(format!("api/observe: request recorder: {e}"))
             })?;

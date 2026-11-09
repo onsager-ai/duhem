@@ -29,6 +29,9 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] New `ui/observe-console` action returns windowed page errors and console records with counts and completeness. (#603)
+
+- [additive] `api/observe` accepts `window: { from_step, edge, duration }` and returns ordered request records with `count`, `complete` and `truncated`; legacy first-match behavior is unchanged. (#603)
 - [additive] `api/observe` accepts `window: { from_step, edge, duration }` and returns ordered request records with `count`, `complete` and `truncated`; legacy first-match behavior is unchanged. (#603)
 - [additive] `ui/extract` accepts `field: rect` (CSS-px bounding rect plus scroll offsets) and `style: <property>` (computed CSS value). (#580)
 - [additive] New `ui/emulate` action sets the check's viewport and `prefers-color-scheme` and reports the effective settings; each check and retry starts from defaults. (#580)

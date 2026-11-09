@@ -29,6 +29,7 @@
 //! (overridable via `DUHEM_NODE`). [`RunBrowser::launch`] fails fast
 //! with a clear hint when either is missing.
 
+mod console;
 mod context;
 mod requests;
 

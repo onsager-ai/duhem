@@ -116,3 +116,5 @@ self-gated in its own CI.
 The drop-in skeleton for a new product repo is
 [`templates/product-repo/`](../templates/product-repo/); the shape is
 [`docs/duhem-spec.md`](../docs/duhem-spec.md) §10.1 Pattern D.
+
+The [console observation example](observe-console-example/duhem.yml) asserts complete page-error capture and a known console error against a real fixture.

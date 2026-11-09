@@ -29,7 +29,7 @@ use duhem_actions::Page;
 use duhem_actions::{
     Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertUrl, Back, Call,
     CaptureSession, Click, DbObserve, Emulate, Extract, Focus, Forward, Invoke, Navigate, Observe,
-    Poll, Press, Query, Seed, Select, Stream, Type, Wait,
+    ObserveConsole, Poll, Press, Query, Seed, Select, Stream, Type, Wait,
 };
 use serde::Deserialize;
 use serde::de::Error as _;
@@ -317,6 +317,7 @@ pub(crate) type ActionRegistry = BTreeMap<&'static str, Box<dyn Dispatch>>;
 pub(crate) fn default_registry() -> ActionRegistry {
     let mut m: ActionRegistry = BTreeMap::new();
     insert(&mut m, ConcreteAction::new(Box::new(Navigate)));
+    insert(&mut m, ConcreteAction::new(Box::new(ObserveConsole)));
     insert(&mut m, ConcreteAction::new(Box::new(Back)));
     insert(&mut m, ConcreteAction::new(Box::new(Forward)));
     insert(&mut m, ConcreteAction::new(Box::new(Click)));
@@ -391,6 +392,7 @@ mod tests {
                 "ui/focus",
                 "ui/forward",
                 "ui/navigate",
+                "ui/observe-console",
                 "ui/press",
                 "ui/select",
                 "ui/type",

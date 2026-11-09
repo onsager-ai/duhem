@@ -153,7 +153,7 @@ fn try_resolve(s: &str, ctx: &dyn EvalContext) -> Resolution {
     // strings (`"200"`) as Expr literals and substitute them into a
     // String slot. The author intent for `$inputs.X` / `$steps.X` /
     // `$runtime.X()` is unambiguous; everything else stays a string.
-    if !s.trim_start().starts_with('$') {
+    if !duhem_schema::expr::is_expression(s) {
         return Resolution::Passthrough;
     }
     let expr = match duhem_schema::expr::parse(s) {

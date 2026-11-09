@@ -1848,7 +1848,7 @@ verification: looped
 {LOOPED}
 setup:
   - {{ id: rows, uses: cli/invoke }}
-  - {{ id: dirs, call: looped, with: {{ names: $setup.rows.outputs.items }} }}
+  - {{ id: dirs, call: looped, with: {{ names: $setup.rows.outputs.stdout }} }}
 criteria: []
 "#
         ));

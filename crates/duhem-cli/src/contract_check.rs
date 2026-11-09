@@ -274,6 +274,37 @@ fn asserts_satisfied_true(a: &Assertion, step_id: &str) -> bool {
 mod tests {
     use super::*;
 
+    include!("../../duhem-schema/tests/fixtures/coverage_helper.rs");
+
+    /// Covers walker-backed contract fields and redundancy lint in every block;
+    /// validator semantics, scope/order-dependent fixture and lifecycle/reference
+    /// traversals, condition/loop/session/process/flow and check-judgment rules,
+    /// and future schema fields that are not step arrays are outside this gate.
+    #[test]
+    fn contract_rules_visit_every_step_block() {
+        for (site, id) in coverage_cases() {
+            let definition = coverage_definition(
+                &id,
+                "api/call",
+                &["with: { bogus: 1 }", "outputs: { status: status }"],
+            );
+            let errors = field_errors(&definition);
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| e.contains("no `with:` field `bogus`")),
+                "contract field at {site}: {errors:?}"
+            );
+            let warnings = lint_warnings(&definition);
+            assert!(
+                warnings
+                    .iter()
+                    .any(|w| w.contains("identity binding") && w.contains("status")),
+                "redundancy lint at {site}: {warnings:?}"
+            );
+        }
+    }
+
     fn vd(steps_yaml: &str) -> VerificationDefinition {
         let src = format!(
             "verification: t\ncriteria:\n  - id: AC-1\n    description: d\n    checks:\n      - id: AC-1.1\n        description: d\n        steps:\n{steps_yaml}\n        assertions: [\"1 == 1\"]\n"

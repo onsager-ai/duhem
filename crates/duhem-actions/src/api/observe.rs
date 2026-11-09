@@ -130,6 +130,25 @@ pub(crate) struct With {
     /// Max wait for a matching event. Defaults to [`DEFAULT_TIMEOUT`].
     #[serde(default)]
     timeout: Option<TimeoutSpec>,
+    #[serde(default)]
+    window: Option<Window>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Window {
+    from_step: String,
+    #[serde(default)]
+    edge: Edge,
+    duration: TimeoutSpec,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Edge {
+    #[default]
+    Start,
+    Finish,
 }
 
 pub struct Observe;
@@ -172,6 +191,69 @@ impl Action for Observe {
 
         let matcher = UrlMatcher::parse(&with.url_pattern)?;
         let method_filter = with.method.as_deref().map(str::to_ascii_uppercase);
+
+        if let Some(window) = with.window {
+            let boundary = ctx.step_boundaries.get(&window.from_step).ok_or_else(|| {
+                ActionError::Playwright(format!(
+                    "api/observe: anchor step `{}` has not run or has no session clock",
+                    window.from_step
+                ))
+            })?;
+            if boundary.session.as_deref() != ctx.session {
+                return Err(ActionError::Playwright(format!(
+                    "api/observe: anchor step `{}` ran in a different browser session",
+                    window.from_step
+                )));
+            }
+            let duration: Duration = window.duration.into();
+            if duration.is_zero() {
+                return Err(ActionError::Playwright(
+                    "api/observe: window duration must be positive".into(),
+                ));
+            }
+            let (edge, start_ms) = match window.edge {
+                Edge::Start => ("start", boundary.start_ms),
+                Edge::Finish => ("finish", boundary.finish_ms),
+            };
+            let end_ms = start_ms + duration.as_secs_f64() * 1000.0;
+            loop {
+                let now = page.session_time_ms().await.map_err(|e| {
+                    ActionError::Playwright(format!("api/observe: session clock: {e}"))
+                })?;
+                if now > end_ms {
+                    break;
+                }
+                sleep(Duration::from_secs_f64(((end_ms - now) / 1000.0).min(0.05))).await;
+            }
+            let batch = page.request_records().await.map_err(|e| {
+                ActionError::Playwright(format!("api/observe: request recorder: {e}"))
+            })?;
+            let requests: Vec<_> = batch
+                .events
+                .into_iter()
+                .filter(|record| {
+                    record.started_ms >= start_ms
+                        && record.started_ms <= end_ms
+                        && matcher.matches(&record.url)
+                        && method_filter
+                            .as_deref()
+                            .is_none_or(|m| record.method.eq_ignore_ascii_case(m))
+                })
+                .collect();
+            let complete = batch.attached_ms < start_ms && !batch.truncated;
+            return Ok(ActionResult::ok()
+                .with_output("count", serde_json::json!(requests.len()))
+                .with_output("requests", serde_json::json!(requests))
+                .with_output(
+                    "window",
+                    serde_json::json!({
+                        "from_step": window.from_step, "edge": edge,
+                        "start_ms": start_ms, "end_ms": end_ms,
+                    }),
+                )
+                .with_output("complete", serde_json::json!(complete))
+                .with_output("truncated", serde_json::json!(batch.truncated)));
+        }
 
         // Poll the sidecar's per-page recorder until a matching event
         // appears or `timeout:` elapses. `cursor` advances past events

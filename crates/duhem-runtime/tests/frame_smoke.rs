@@ -145,6 +145,8 @@ async fn frame_contents_are_distinct_from_page_and_negative_assertions_discrimin
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     navigate(&ctx, &fx.url).await;
     let inner = "{frame: {testid: report-shell-iframe}, role: heading, name: Weekly report}";
@@ -203,6 +205,8 @@ async fn unavailable_ambiguous_and_non_frame_targets_never_prove_inner_absence()
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     navigate(&ctx, &fx.url).await;
     for frame in [
@@ -232,6 +236,8 @@ async fn waits_for_late_frame_and_document_and_keeps_one_deadline() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     navigate(&ctx, &fx.url).await;
     Click

@@ -78,6 +78,18 @@ pub(crate) trait Dispatch: Send + Sync {
         with: &serde_yml::Value,
         child_env: &BTreeMap<String, String>,
     ) -> Result<ActionResult, ActionError>;
+
+    async fn invoke_with_boundaries(
+        &self,
+        page: Option<&Page>,
+        step_index: usize,
+        with: &serde_yml::Value,
+        child_env: &BTreeMap<String, String>,
+        _boundaries: &BTreeMap<String, duhem_actions::action::StepBoundary>,
+        _session: Option<&str>,
+    ) -> Result<ActionResult, ActionError> {
+        self.invoke(page, step_index, with, child_env).await
+    }
 }
 
 /// Both engine dispatch sites share this boundary. Process actions need a
@@ -92,6 +104,8 @@ pub(crate) async fn invoke_scoped(
     run: &super::RunState,
     owner: &super::process::Owner,
     writer: &mut duhem_evidence::EvidenceWriter,
+    boundaries: &BTreeMap<String, duhem_actions::action::StepBoundary>,
+    session: Option<&str>,
 ) -> Result<ActionResult, ActionError> {
     if dispatcher.uses().starts_with("process/") {
         run.processes
@@ -100,7 +114,9 @@ pub(crate) async fn invoke_scoped(
             .invoke(dispatcher.uses(), with, owner, child_env, writer)
             .await
     } else {
-        dispatcher.invoke(page, index, with, child_env).await
+        dispatcher
+            .invoke_with_boundaries(page, index, with, child_env, boundaries, session)
+            .await
     }
 }
 
@@ -168,6 +184,19 @@ impl Dispatch for ConcreteAction {
         with: &serde_yml::Value,
         child_env: &BTreeMap<String, String>,
     ) -> Result<ActionResult, ActionError> {
+        self.invoke_with_boundaries(page, step_index, with, child_env, &BTreeMap::new(), None)
+            .await
+    }
+
+    async fn invoke_with_boundaries(
+        &self,
+        page: Option<&Page>,
+        step_index: usize,
+        with: &serde_yml::Value,
+        child_env: &BTreeMap<String, String>,
+        boundaries: &BTreeMap<String, duhem_actions::action::StepBoundary>,
+        session: Option<&str>,
+    ) -> Result<ActionResult, ActionError> {
         // A page-requiring action without a page is a dispatch-layer
         // failure (the engine should have refused the check upstream).
         if self.action.requires_page() && page.is_none() {
@@ -176,7 +205,12 @@ impl Dispatch for ConcreteAction {
                 self.uses
             )));
         }
-        let ctx = ActionCtx { page, step_index };
+        let ctx = ActionCtx {
+            page,
+            step_index,
+            step_boundaries: boundaries,
+            session,
+        };
         // Only `cli/invoke` needs the runtime-owned env layered in, so
         // only it pays for the clone; every other action (the hot
         // UI/API path) invokes against the original `with` by

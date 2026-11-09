@@ -112,6 +112,8 @@ async fn observe_captures_fetch_triggered_by_click() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -182,6 +184,8 @@ async fn observe_json_parse_failure_emits_observation() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -228,6 +232,8 @@ async fn observe_times_out_when_no_event_matches() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))

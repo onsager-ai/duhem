@@ -210,6 +210,8 @@ async fn navigate_succeeds_against_fixture() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     let r = Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -227,6 +229,8 @@ async fn click_present_button_succeeds() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -248,6 +252,8 @@ async fn assert_element_visible_present_satisfies() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -286,6 +292,8 @@ async fn assert_element_not_exists_with_present_alert_returns_false() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -324,6 +332,8 @@ async fn assert_element_timeout_returns_satisfied_false_quickly() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -368,6 +378,8 @@ async fn type_fills_input_then_assert_element_reads_it_back() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -409,6 +421,8 @@ async fn locator_strategies_label_testid_css_xpath_placeholder_resolve() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -527,6 +541,8 @@ async fn extract_distinguishes_attribute_property_counts_and_direct_assertion() 
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", static_data_url())))
@@ -631,6 +647,8 @@ async fn select_by_value_label_index_dispatches_to_playwright() {
         let ctx = ActionCtx {
             page: Some(&check.page),
             step_index: 0,
+            step_boundaries: &std::collections::BTreeMap::new(),
+            session: None,
         };
         Navigate
             .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -658,6 +676,8 @@ async fn assert_url_passes_on_navigation_and_times_out_on_stale_url() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -728,6 +748,8 @@ async fn assert_element_observes_loaded_page_marker() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: http://{}/thanks", fx.addr)))

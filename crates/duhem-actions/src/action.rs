@@ -28,6 +28,14 @@ use crate::error::ActionError;
 /// schema omits an explicit timeout.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// An executed step's boundaries on the clock of its browser session.
+#[derive(Debug, Clone)]
+pub struct StepBoundary {
+    pub session: Option<String>,
+    pub start_ms: f64,
+    pub finish_ms: f64,
+}
+
 /// Per-check execution context handed to every `Action::invoke`.
 ///
 /// A new `ActionCtx` is created per check (one Playwright `Page` per
@@ -43,6 +51,10 @@ pub struct ActionCtx<'a> {
     /// Zero-based index of the currently-executing step within its
     /// check. Carried for evidence threading downstream.
     pub step_index: usize,
+    /// Earlier executed steps in this check attempt.
+    pub step_boundaries: &'a BTreeMap<String, StepBoundary>,
+    /// Session selected by the current step.
+    pub session: Option<&'a str>,
 }
 
 impl<'a> ActionCtx<'a> {
@@ -287,6 +299,8 @@ mod tests {
         let ctx = ActionCtx {
             page: None,
             step_index: 0,
+            step_boundaries: &std::collections::BTreeMap::new(),
+            session: None,
         };
         assert!(ctx.require_page().is_err());
     }

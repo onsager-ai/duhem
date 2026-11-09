@@ -64,7 +64,9 @@ async fn start_fixture() -> Fixture {
         .route(
             "/slow",
             get(|| async {
-                tokio::time::sleep(Duration::from_millis(300)).await;
+                // Long enough that the 1s "early" window below always
+                // closes before /slow answers, even on a slow CI click.
+                tokio::time::sleep(Duration::from_millis(1500)).await;
                 ok()
             }),
         )
@@ -199,7 +201,7 @@ async fn out_of_order_pending_and_duplicate_requests() {
         &check,
         &b,
         None,
-        r#"{ url_pattern: "re:/slow$", window: { from_step: ooo, duration: 100ms } }"#,
+        r#"{ url_pattern: "re:/slow$", window: { from_step: ooo, duration: 1s } }"#,
     )
     .await
     .unwrap();
@@ -212,7 +214,7 @@ async fn out_of_order_pending_and_duplicate_requests() {
         &check,
         &b,
         None,
-        r#"{ url_pattern: "re:/(slow|fast)$", window: { from_step: ooo, duration: 1s } }"#,
+        r#"{ url_pattern: "re:/(slow|fast)$", window: { from_step: ooo, duration: 4s } }"#,
     )
     .await
     .unwrap();

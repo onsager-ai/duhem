@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] `api/observe` accepts `window: { from_step, edge, duration }` and returns ordered request records with `count`, `complete` and `truncated`; legacy first-match behavior is unchanged. (#603)
+
 ## v0.7.2 — 2026-11-06
 
 - [clarifying] Remove private consumer names from tracked source; consumers run `consumer-pins --pinned <version>` in their own CI, replacing the central registry and scheduled pin job; retire the tracker vocabulary scan. (#605)

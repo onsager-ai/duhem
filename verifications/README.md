@@ -24,6 +24,9 @@ Two kinds of directory live here, for two kinds of reader:
 The [per-row validation example](for-each-rows-example/duhem.yml) applies
 the same assertions to every row with bounded `for_each:` (#521).
 
+The [request window example](observe-window-example/duhem.yml) asserts a
+complete browser request collection against a local fixture (#603).
+
 ## Feature examples — the learning ladder
 
 Read top to bottom: each leans on the mental model the previous one

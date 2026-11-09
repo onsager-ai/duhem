@@ -1452,6 +1452,16 @@ later reuse and check-level assertions.
 - `api/poll` — re-hit an endpoint until a response condition holds or a timeout elapses
 - `api/stream` — follow an open-ended SSE / `text/event-stream` from an in-progress source, collecting ordered events until a terminal condition (`until_event` / `max_events` / server close) or the `timeout:` budget; outputs `events` / `event_count` / `last_event` for mechanical assertion
 
+`api/observe` optionally accepts `window: { from_step, edge, duration }` to
+collect requests starting in the inclusive window anchored to an earlier step
+in the same browser session. `edge` defaults to `start`; `finish` selects its
+finish. The positive duration runs on the session clock. `count` and `requests`
+describe matching request starts in sequence order, including pending and failed
+requests and separate redirect hops. Assert `complete` before treating an empty
+result as absence: it is false if recording began too late or the bounded buffer
+was truncated. `truncated` reports buffer overflow. Without a window the legacy
+first matching response behavior remains unchanged.
+
 **Database actions**
 
 - `db/query` — execute a read query, capture rows

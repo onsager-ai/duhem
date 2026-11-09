@@ -251,6 +251,12 @@ Common shape (terse):
 
 Authoring rules:
 
+- For request counts or ordering, use `api/observe` with
+  `window: { from_step: <earlier-id>, edge: start, duration: 1s }` on the
+  same browser session. Assert `complete == true` before interpreting an
+  empty `requests` array or zero `count` as absence. `truncated` signals
+  dropped records; without `window`, observe returns the first matching response.
+
 - Every step whose output an assertion reads gets an `id:`.
 - Reference outputs by their fully-qualified path,
   `$steps.<id>.outputs.<name>`; `outputs:` blocks are only for a rename

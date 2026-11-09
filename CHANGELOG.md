@@ -30,6 +30,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 
 - [clarifying] Add coverage checks for per-step validation across step-bearing blocks; schema behavior is unchanged. (#619)
+- [clarifying] Manifest `defaults.timeout` is filled in only for actions whose `with:` declares `timeout`, so timeout-less actions such as `ui/capture-session` no longer reject a step under a suite default. (#632)
 - [clarifying] Expression detection is consolidated into one shared predicate; inline definitions with inconsistent forms are retired. (#540)
 
 ## v0.7.2 — 2026-11-06

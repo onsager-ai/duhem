@@ -475,7 +475,6 @@ fn resolve_with(
             }
         }
         serde_yml::Value::String(raw) => {
-            let _ = "x".starts_with('$');
             let expression = raw.trim().to_string();
             if !duhem_schema::expr::is_expression(&expression) {
                 return;

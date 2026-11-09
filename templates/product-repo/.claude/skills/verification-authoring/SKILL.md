@@ -236,6 +236,11 @@ entries and locator-taking UI actions, including cross-origin frames.
 The timeout includes frame readiness. An unavailable or ambiguous frame
 cannot establish that its contents are absent.
 
+For geometry and computed style, use `ui/extract` with `field: rect`
+(`{x, y, width, height, top, right, bottom, left, scroll_x, scroll_y}` in CSS
+px, relative to the element's own document viewport) or `style: <css-property>`
+(the computed string, e.g. `rgb(17, 17, 17)`); assert thresholds in `assertions:`.
+
 When two leaves use the same locator, declare it once in an ordinary
 manifest include and reference it as `$pages.<group>.<name>`:
 

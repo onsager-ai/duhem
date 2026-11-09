@@ -66,6 +66,11 @@ inline frame locators, assertions and interactions. It is validated
 offline and executed against a two-origin browser fixture in
 `crates/duhem-runtime/tests/frame_smoke.rs` by browser CI. (#568)
 
+The [geometry example](geometry-example/duhem.yml) reads `ui/extract`
+`field: rect` and `style:` with positive and negative controls, including a
+frame-relative rect. It is validated offline and executed against a local
+fixture in `crates/duhem-runtime/tests/geometry_smoke.rs` by browser CI. (#580)
+
 Real VDs that gate this repo's CI. Bigger, multi-step, and pointed at a
 real system stood up by `provision:` hooks. This is what production
 Duhem usage looks like — and, being Duhem-on-Duhem, it catches

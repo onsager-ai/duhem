@@ -78,7 +78,7 @@ Click an element (locator shorthand fields, or a `locator` object).
 
 ### `ui/extract`
 
-Extract an attribute, DOM property, or rendered text from matching elements.
+Extract an attribute, DOM property, rendered text, bounding rect, or computed style from matching elements.
 
 | `with:` field | required | values |
 |---|:---:|---|
@@ -87,6 +87,7 @@ Extract an attribute, DOM property, or rendered text from matching elements.
 | `attribute` | no | — |
 | `property` | no | — |
 | `text` | no | — |
+| `style` | no | — |
 | `all` | no | — |
 
 **outputs:** `value`, `found`, `count`, `values`

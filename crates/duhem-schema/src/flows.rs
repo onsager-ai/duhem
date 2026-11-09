@@ -499,9 +499,14 @@ fn mapping_to_bindings(value: &serde_yml::Value) -> BTreeMap<String, serde_yml::
 fn substitute_params(value: &mut serde_yml::Value, bindings: &BTreeMap<String, serde_yml::Value>) {
     match value {
         serde_yml::Value::String(raw) => {
-            if raw.strip_prefix("$params.").is_some() {
-                if let Ok(crate::Expr::Path(path)) = crate::expr::parse(raw)
-                    && let Some(resolved) = resolve_param_path(&path, bindings)
+            if let Some(reference) = raw.strip_prefix("$params.") {
+                let parsed = match crate::expr::parse(raw) {
+                    Ok(crate::Expr::Path(path)) => resolve_param_path(&path, bindings),
+                    _ => None,
+                };
+                // Dot-split walk kept so flows that relied on it before bracket
+                // keys (e.g. `$params.resp.content-type`) resolve unchanged.
+                if let Some(resolved) = parsed.or_else(|| resolve_dotted_param(reference, bindings))
                 {
                     *value = resolved.clone();
                 }
@@ -523,6 +528,20 @@ fn substitute_params(value: &mut serde_yml::Value, bindings: &BTreeMap<String, s
         }
         _ => {}
     }
+}
+
+fn resolve_dotted_param<'a>(
+    reference: &str,
+    bindings: &'a BTreeMap<String, serde_yml::Value>,
+) -> Option<&'a serde_yml::Value> {
+    let mut segments = reference.split('.');
+    let mut value = bindings.get(segments.next()?)?;
+    for segment in segments {
+        value = value
+            .as_mapping()?
+            .get(serde_yml::Value::String(segment.to_string()))?;
+    }
+    Some(value)
 }
 
 fn resolve_param_path<'a>(
@@ -1156,6 +1175,10 @@ items: [{ a-b: first }]
             substitute_params(&mut value, &bindings);
             assert_eq!(value.as_str(), Some(expected), "{reference}");
         }
+        // Pre-bracket dotted form over a hyphenated key still resolves.
+        let mut legacy = serde_yml::Value::String("$params.resp.content-type".into());
+        substitute_params(&mut legacy, &bindings);
+        assert_eq!(legacy.as_str(), Some("text/plain"));
         let mut numeric_key = serde_yml::Value::String("$params.items['0']".into());
         substitute_params(&mut numeric_key, &bindings);
         assert_eq!(numeric_key.as_str(), Some("$params.items['0']"));

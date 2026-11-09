@@ -61,6 +61,11 @@ The [session cascade example](session-cascade-example/) demonstrates inherited
 seeds, signed-out opt-out, and named flow selectors. It is validated offline;
 execution requires a browser and operator-provided application inputs. (#548)
 
+The [response outputs example](response-outputs-example/duhem.yml) asserts
+`api/call`'s declared `status`, `headers` and `body_bytes` (decoded payload
+bytes) against a local HTTP server in
+`crates/duhem-runtime/tests/response_outputs.rs`. (#603)
+
 ## Self-verification suites — Duhem's dogfood
 
 The [iframe example](iframe-example/duhem.yml) demonstrates named and

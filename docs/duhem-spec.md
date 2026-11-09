@@ -1599,10 +1599,12 @@ later reuse and check-level assertions.
 
 **API actions**
 
-- `api/call` — make an HTTP request actively
-- `api/observe` — passively observe an HTTP request the UI triggers (network sniffing)
+- `api/call` — make an HTTP request actively; outputs `status`, `body`, `body_text`, `body_bytes` and `headers`
+- `api/observe` — passively observe an HTTP request the UI triggers (network sniffing); outputs `method`, `url`, `status`, `body`, `body_text`, `body_bytes`, `headers`, `request_body` and `request_headers`
 - `api/poll` — re-hit an endpoint until a response condition holds or a timeout elapses
 - `api/stream` — follow an open-ended SSE / `text/event-stream` from an in-progress source, collecting ordered events until a terminal condition (`until_event` / `max_events` / server close) or the `timeout:` budget; outputs `events` / `event_count` / `last_event` for mechanical assertion
+
+Both response-side actions declare their outputs in the catalog, so `$steps.<id>.outputs.<name>` resolves without an `outputs:` block. `headers` is an object with lower-case names; reach a hyphen-free header by dotted path (`headers.location`). `body_bytes` is an integer: the payload bytes the client returned after content decoding, before UTF-8-lossy or JSON conversion, excluding headers. It is not the `body_text` character count, `Content-Length` or wire size; an empty body is `0`, and a failed body read is an error, never `0`. `api/call` uses `reqwest` with no decompression feature and sends no `Accept-Encoding`, so nothing decodes `Content-Encoding` there; `api/observe` reads Chromium's decoded `response.body()`. The [executed example](../verifications/response-outputs-example/duhem.yml) asserts `status`, `body_bytes` and a header. (#603)
 
 **Database actions**
 

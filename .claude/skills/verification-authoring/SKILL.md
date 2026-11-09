@@ -226,6 +226,14 @@ the minimal form:
   travel — into a later step, or into a check-level `assertions:` block
   alongside other evidence.
 
+`api/call` and `api/observe` declare their response outputs, so reference
+`status`, `body`, `body_text`, `headers` and `body_bytes` directly (`api/observe`
+also has `method`, `url`, `request_body`, `request_headers`). `body_bytes` is an
+integer count of the payload bytes after the client's content decoding, before
+text or JSON conversion: `é` is `2`, an empty body is `0`; it is not
+`Content-Length`. `headers` has lower-case names; use a dotted path such as
+`headers.location` for hyphen-free names.
+
 Common shape (terse):
 
 ```yaml

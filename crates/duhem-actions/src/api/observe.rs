@@ -527,6 +527,28 @@ use serde::de::Error as SerdeError;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn window_requires_positive_duration_and_known_edge() {
+        use super::With;
+        assert!(
+            serde_yml::from_str::<With>(
+                "url_pattern: x\nwindow: { from_step: load, duration: 0ms }"
+            )
+            .is_err()
+        );
+        assert!(
+            serde_yml::from_str::<With>(
+                "url_pattern: x\nwindow: { from_step: load, edge: middle, duration: 1s }"
+            )
+            .is_err()
+        );
+        assert!(
+            serde_yml::from_str::<With>(
+                "url_pattern: x\nwindow: { from_step: load, duration: 1s }"
+            )
+            .is_ok()
+        );
+    }
     use super::*;
 
     fn yaml(s: &str) -> serde_yml::Value {

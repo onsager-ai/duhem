@@ -29,7 +29,6 @@ impl Engine {
             // so only the final attempt's detail reaches the reporter.
             let failures_mark = failures.len();
             let setup_baseline = run.setup_outputs.clone();
-            let cleanup_mark = run.flow_cleanup_mark();
             let parent_owner = run.process_owner.clone();
             run.process_owner = parent_owner.check(&check.id);
             run.register_process_cleanup(
@@ -37,6 +36,8 @@ impl Engine {
                 &check.teardown,
                 duhem_schema::CleanupPolicy::DiagnosticOnly,
             );
+            // Everything pushed after the teardown hook unwinds before it.
+            let cleanup_mark = run.flow_cleanup_mark();
             let attempt_result: Result<(CheckVerdict, u32), EngineError> = async {
                 run.clear_fixture_outputs();
 
@@ -67,12 +68,10 @@ impl Engine {
                     }
                 }
 
-                let mut active = Vec::new();
                 let mut fixture_abort = None;
                 if check_setup_abort.is_none() {
                     for name in &check.needs {
                         let fixture = &fixtures[name];
-                        active.push(name.as_str());
                         run.register_process_cleanup(
                             run.process_owner.fixture(name),
                             &fixture.down,
@@ -159,8 +158,9 @@ impl Engine {
                     }
                 };
                 // Flow `cleanup:` registered by this attempt's setup and steps
-                // unwinds LIFO before fixtures come down and `teardown:` runs.
-                let (mut flow_failures, flow_error) = crate::engine::flow_cleanup::drain(
+                // and the fixtures' `down:` blocks unwind together, last
+                // registered first, before `teardown:` runs.
+                let (mut unwound, unwind_error) = crate::engine::flow_cleanup::drain(
                     writer,
                     &self.registry,
                     self.browser.as_ref(),
@@ -169,43 +169,9 @@ impl Engine {
                     &self.child_process_env(writer.run_id()),
                 )
                 .await;
-                cleanup.append(&mut flow_failures);
-                if let Some(error) = flow_error {
+                cleanup.append(&mut unwound);
+                if let Some(error) = unwind_error {
                     body_error.get_or_insert(error);
-                }
-                for name in active.into_iter().rev() {
-                    let fixture = &fixtures[name];
-                    run.begin_process_cleanup(&run.process_owner.fixture(name));
-                    let result = crate::engine::setup::run_fixture_down(
-                        writer,
-                        &self.registry,
-                        self.browser.as_ref(),
-                        run,
-                        name,
-                        &check.id,
-                        &fixture.down,
-                        fixture.cleanup_policy,
-                        &self.child_process_env(writer.run_id()),
-                    )
-                    .await;
-                    cleanup.extend(
-                        run.processes
-                            .lock()
-                            .await
-                            .finalize(writer, Some(&run.process_owner.fixture(name)))
-                            .await,
-                    );
-                    let mut failures = match result {
-                        Ok(failures) => failures,
-                        Err(error) => {
-                            body_error.get_or_insert(error);
-                            continue;
-                        }
-                    };
-                    for failure in &mut failures {
-                        failure.step = format!("fixture `{name}`: {}", failure.step);
-                    }
-                    cleanup.append(&mut failures);
                 }
 
                 // Check-level `teardown:` runs after this check's fixtures
@@ -377,7 +343,7 @@ impl Engine {
         .await;
         // The check body's cleanups read the outputs it produced; the caller
         // drains them once the body is over.
-        run.snapshot_flow_cleanups(&ctx.snapshot());
+        run.snapshot_flow_cleanups(&ctx.snapshot(), false);
         writer.set_session(None);
         contexts.finish(writer, false, check).await;
         result

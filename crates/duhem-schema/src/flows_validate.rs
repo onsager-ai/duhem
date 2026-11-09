@@ -391,32 +391,44 @@ fn validate_flow_cleanup(name: &str, flow: &Flow, catalog: &FlowCatalog, errors:
     if flow.cleanup.is_empty() {
         return;
     }
-    if flow
-        .steps
-        .first()
-        .is_some_and(|step| step.for_each.is_some())
-    {
-        errors.push(format!(
-            "flow `{name}` declares `cleanup:` so its first step may not be a `for_each:` wrapper"
-        ));
-    }
     let mut ids: BTreeSet<&str> = flow
         .steps
         .iter()
         .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
         .filter_map(|step| step.id.as_deref())
         .collect();
-    for (index, step) in flow.cleanup.iter().enumerate() {
+    for (index, step) in flow
+        .cleanup
+        .iter()
+        .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+        .enumerate()
+    {
         let site = format!("flow `{name}` cleanup step {index}");
         validate_dispatch(step, &site, errors);
         if step.for_each.is_some() {
-            errors.push(format!(
-                "{site}: `for_each:` is not supported in `cleanup:`"
-            ));
+            if step.max.is_none() {
+                errors.push(format!("{site}: `for_each:` requires `max:`"));
+            }
+            if step.id.is_some() || !step.outputs.is_empty() || !step.secret_outputs.is_empty() {
+                errors.push(format!(
+                    "{site}: a `for_each:` wrapper may not declare id, outputs, or secret_outputs"
+                ));
+            }
+            if step
+                .steps
+                .iter()
+                .flatten()
+                .any(|inner| inner.for_each.is_some() || inner.steps.is_some())
+            {
+                errors.push(format!("{site}: `for_each:` body exceeds depth 1"));
+            }
         }
         let mut references = vec![step.with.clone()];
         if let StepCondition::Expr(condition) = &step.condition {
             references.push(serde_yml::Value::String(condition.raw.clone()));
+        }
+        if let Some(expr) = &step.for_each {
+            references.push(serde_yml::Value::String(expr.raw.clone()));
         }
         for value in references {
             walk_strings(&value, &mut |raw| {

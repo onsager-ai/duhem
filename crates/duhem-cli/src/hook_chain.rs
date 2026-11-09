@@ -145,21 +145,25 @@ pub fn resolve(
         ));
     }
 
-    // Flow `cleanup:` unwinds LIFO at the exit of the scope that registered
-    // it, before that scope's own `teardown:` (#615).
-    let registered = |steps: &[&Step], site: String, c: Option<&str>, k: Option<&str>| {
+    // Flow `cleanup:` unwinds LIFO with fixture `down:` at the exit of the
+    // scope that registered it, before that scope's own `teardown:` (#615).
+    // Every expanded step of a call carries its cleanup; the call registers
+    // once, so each is listed once, in registration order.
+    let registered = |steps: &[Step], site: String, c: Option<&str>, k: Option<&str>| {
+        let mut seen = std::collections::BTreeSet::new();
         steps
             .iter()
             .flat_map(|s| s.actions())
             .flat_map(|s| s.flow_cleanup.iter())
+            .filter(|cleanup| seen.insert((cleanup.flow.clone(), cleanup.call.clone())))
             .map(|cleanup| HookEntry::registered(cleanup, site.clone(), c, k))
             .collect::<Vec<_>>()
     };
-    let check_steps: Vec<&Step> = check.setup.iter().chain(&check.steps).collect();
+    let check_site = format!("check `{}`", check.id);
     chain.after.extend(
         registered(
-            &check_steps,
-            format!("check `{}`", check.id),
+            &check.steps,
+            check_site.clone(),
             Some(&criterion.id),
             Some(&check.id),
         )
@@ -175,6 +179,16 @@ pub fn resolve(
             Some(name),
         ));
     }
+    chain.after.extend(
+        registered(
+            &check.setup,
+            check_site,
+            Some(&criterion.id),
+            Some(&check.id),
+        )
+        .into_iter()
+        .rev(),
+    );
     if !check.teardown.is_empty() {
         chain.after.push(HookEntry::new(
             format!("check `{}` teardown", check.id),
@@ -185,7 +199,7 @@ pub fn resolve(
     }
     chain.after.extend(
         registered(
-            &criterion.setup.iter().collect::<Vec<_>>(),
+            &criterion.setup,
             format!("criterion `{}` setup", criterion.id),
             Some(&criterion.id),
             None,
@@ -202,14 +216,9 @@ pub fn resolve(
         ));
     }
     chain.after.extend(
-        registered(
-            &def.setup.iter().collect::<Vec<_>>(),
-            "leaf setup".to_string(),
-            None,
-            None,
-        )
-        .into_iter()
-        .rev(),
+        registered(&def.setup, "leaf setup".to_string(), None, None)
+            .into_iter()
+            .rev(),
     );
     if !def.teardown.is_empty() {
         chain.after.push(HookEntry::new(
@@ -343,6 +352,8 @@ flows:
     params: { name: { type: string } }
     steps: [{ id: make, uses: cli/invoke }]
     cleanup: [{ uses: cli/invoke }]
+fixtures:
+  fx: { up: [{ uses: cli/invoke }], down: [{ uses: cli/invoke }] }
 setup: [{ id: leaf, call: res, with: { name: l } }]
 teardown: [{ uses: cli/invoke }]
 criteria:
@@ -351,6 +362,8 @@ criteria:
     setup: [{ id: crit, call: res, with: { name: c } }]
     checks:
       - id: AC-1.1
+        needs: [fx]
+        setup: [{ id: pre, call: res, with: { name: s } }]
         steps:
           - { id: one, call: res, with: { name: a } }
           - { id: two, call: res, with: { name: b } }
@@ -370,6 +383,8 @@ criteria:
             [
                 "flow `res` cleanup (call `two`, registered in check `AC-1.1`)",
                 "flow `res` cleanup (call `one`, registered in check `AC-1.1`)",
+                "fixture `fx` down",
+                "flow `res` cleanup (call `pre`, registered in check `AC-1.1`)",
                 "check `AC-1.1` teardown",
                 "flow `res` cleanup (call `crit`, registered in criterion `AC-1` setup)",
                 "flow `res` cleanup (call `leaf`, registered in leaf setup)",

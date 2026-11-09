@@ -548,10 +548,13 @@ pub(crate) async fn run_for_each_step(
             .await?;
         }
         // Each iteration's cleanups keep that iteration's outputs and element.
-        run.snapshot_flow_cleanups(&crate::engine::flow_cleanup::Snapshot {
-            outputs: run.setup_outputs.clone(),
-            binding: as_name.map(|name| (name.to_string(), element.clone())),
-        });
+        run.snapshot_flow_cleanups(
+            &crate::engine::flow_cleanup::Snapshot {
+                outputs: run.setup_outputs.clone(),
+                binding: as_name.map(|name| (name.to_string(), element.clone())),
+            },
+            true,
+        );
     }
     Ok(())
 }

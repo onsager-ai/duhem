@@ -36,7 +36,7 @@ use crate::eval::{EvalContext, Value};
 pub struct RunState {
     pub(crate) processes: super::process::Shared,
     pub(crate) process_owner: super::process::Owner,
-    pub(crate) process_cleanup: Vec<super::process::hooks::CleanupHook>,
+    pub(crate) process_cleanup: std::sync::Mutex<Vec<super::process::hooks::CleanupHook>>,
     pub(crate) session: Option<std::sync::Arc<super::session_scope::SessionScope>>,
     pub(crate) context_budget: Option<std::sync::Arc<super::session_scope::ContextBudget>>,
     pub inputs: BTreeMap<String, Value>,
@@ -48,8 +48,6 @@ pub struct RunState {
     /// before any criterion runs; read-only from inside a check.
     pub setup_outputs: BTreeMap<(String, String), Value>,
     pub fixture_outputs: BTreeMap<(String, String, String), Value>,
-    /// Flow `cleanup:` registrations of the open lifecycle scopes (#615).
-    pub(crate) flow_cleanups: std::sync::Mutex<Vec<super::flow_cleanup::Registered>>,
     /// Body outputs and loop binding a flow cleanup resolves against while
     /// it is being drained (#615); `None` outside a flow-cleanup drain.
     pub(crate) cleanup_view: Option<super::flow_cleanup::Snapshot>,
@@ -77,7 +75,7 @@ impl RunState {
         Self {
             processes: Default::default(),
             process_owner: super::process::Owner::leaf(),
-            process_cleanup: Vec::new(),
+            process_cleanup: std::sync::Mutex::new(Vec::new()),
             session: None,
             context_budget: None,
             inputs,
@@ -86,7 +84,6 @@ impl RunState {
             uuid,
             setup_outputs: BTreeMap::new(),
             fixture_outputs: BTreeMap::new(),
-            flow_cleanups: std::sync::Mutex::new(Vec::new()),
             cleanup_view: None,
         }
     }

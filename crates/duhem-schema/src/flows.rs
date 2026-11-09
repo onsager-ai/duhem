@@ -286,6 +286,7 @@ fn expand_for_each_in_list(steps: &mut [Step], catalog: &FlowCatalog, counter: &
         let mut body = expanded.steps;
         rewrite_steps(&mut body, &expanded.projections);
         step.for_each_body = body;
+        carry_cleanup_into_loop(step);
     }
 }
 
@@ -422,8 +423,8 @@ fn expand_sequence(
                 catalog,
                 counter,
             );
-            if let Some(first) = expanded.steps.first_mut() {
-                first.flow_cleanup.insert(0, cleanup);
+            for inner in &mut expanded.steps {
+                inner.flow_cleanup.insert(0, cleanup.clone());
             }
         }
         for (output, raw) in &flow.outputs {
@@ -497,7 +498,7 @@ fn expand_flow_cleanup(
         })
         .collect();
     let mut cleanup = flow.cleanup.clone();
-    rewrite_steps(&mut cleanup, &references);
+    rewrite_authored_bodies(&mut cleanup, &references);
     for inner in &mut cleanup {
         substitute_step_params(inner, call.bindings);
         inherit_session(inner, call.session);
@@ -514,12 +515,48 @@ fn expand_flow_cleanup(
     );
     let mut steps = expanded.steps;
     rewrite_steps(&mut steps, &expanded.projections);
+    // `for_each:` in a cleanup expands like one in a lifecycle block.
+    expand_for_each_in_list(&mut steps, catalog, counter);
     FlowCleanup {
         flow: flow_name.to_string(),
         call: call.invocation.to_string(),
         policy: flow.cleanup_policy,
         steps,
         aliases: aliases.into_iter().collect(),
+        per_iteration: false,
+    }
+}
+
+/// `rewrite_steps` for a list whose `for_each:` bodies are still authored
+/// (`steps:`), as a flow's `cleanup:` is before it is expanded.
+fn rewrite_authored_bodies(steps: &mut [Step], projections: &BTreeMap<String, String>) {
+    rewrite_steps(steps, projections);
+    for step in steps {
+        if let Some(body) = &mut step.steps {
+            rewrite_authored_bodies(body, projections);
+        }
+    }
+}
+
+/// A `for_each:` wrapper is never dispatched itself, so it hands the cleanups
+/// its flow call put on it to the steps of its expanded body: the first of
+/// those to dispatch registers them, once. A loop that dispatches nothing
+/// has not entered the call. Cleanups of calls inside the body repeat for
+/// every iteration.
+fn carry_cleanup_into_loop(step: &mut Step) {
+    for inner in &mut step.for_each_body {
+        for cleanup in &mut inner.flow_cleanup {
+            cleanup.per_iteration = true;
+        }
+    }
+    let carried = std::mem::take(&mut step.flow_cleanup);
+    if carried.is_empty() {
+        return;
+    }
+    for inner in &mut step.for_each_body {
+        let mut merged = carried.clone();
+        merged.append(&mut inner.flow_cleanup);
+        inner.flow_cleanup = merged;
     }
 }
 
@@ -575,6 +612,7 @@ fn expand_check_loops(
         rewrite_steps(&mut expanded.steps, &expanded.projections);
         projections.extend(expanded.projections);
         step.for_each_body = expanded.steps;
+        carry_cleanup_into_loop(step);
     }
 }
 
@@ -1779,6 +1817,100 @@ criteria: []
             nested.contains("cannot be called from a flow's `cleanup:`"),
             "{nested}"
         );
+    }
+
+    const LOOPED: &str = r#"
+flows:
+  looped:
+    params: { names: { type: string } }
+    steps:
+      - for_each: $params.names
+        as: n
+        max: 3
+        steps:
+          - { id: make, uses: cli/invoke, with: { command: [mkdir, $n] } }
+          - { uses: cli/invoke, with: { command: [true] } }
+      - uses: cli/invoke
+        with: { command: [true] }
+    cleanup:
+      - for_each: $params.names
+        as: n
+        max: 3
+        steps:
+          - { uses: cli/invoke, with: { command: [rmdir, $n] } }
+"#;
+
+    #[test]
+    fn a_flow_that_starts_with_a_loop_registers_from_its_body_leaves_once() {
+        let mut definition = authored(&format!(
+            r#"
+verification: looped
+{LOOPED}
+setup: [{{ id: dirs, call: looped, with: {{ names: $inputs.names }} }}]
+criteria: []
+inputs: {{ names: {{ type: array, default: [] }} }}
+"#
+        ));
+        validate_and_expand(&mut definition).expect("expand");
+        let wrapper = &definition.setup[0];
+        assert!(
+            wrapper.flow_cleanup.is_empty(),
+            "the wrapper never dispatches"
+        );
+        let leaves: Vec<_> = wrapper
+            .for_each_body
+            .iter()
+            .chain(&definition.setup[1..])
+            .collect();
+        assert_eq!(leaves.len(), 3);
+        for leaf in leaves {
+            assert_eq!(leaf.flow_cleanup.len(), 1);
+            assert!(!leaf.flow_cleanup[0].per_iteration);
+            assert_eq!(leaf.flow_cleanup[0].call, "dirs");
+        }
+        // The cleanup's own loop expands like a lifecycle `for_each:`.
+        let cleanup = &definition.setup[0].for_each_body[0].flow_cleanup[0];
+        assert_eq!(cleanup.steps[0].for_each_body.len(), 1);
+    }
+
+    #[test]
+    fn a_call_inside_a_loop_body_registers_per_iteration() {
+        let mut definition = authored(&format!(
+            r#"
+verification: loop of calls
+{SCRATCH}
+setup:
+  - for_each: $inputs.names
+    as: n
+    max: 2
+    call: scratch
+    with: {{ prefix: $n }}
+criteria: []
+inputs: {{ names: {{ type: array, default: [] }} }}
+"#
+        ));
+        validate_and_expand(&mut definition).expect("expand");
+        let body = &definition.setup[0].for_each_body;
+        assert_eq!(body[0].flow_cleanup.len(), 1);
+        assert!(body[0].flow_cleanup[0].per_iteration);
+    }
+
+    #[test]
+    fn cleanup_loops_are_validated_like_lifecycle_loops() {
+        let errors = cleanup_errors(
+            r#"
+verification: x
+flows:
+  f:
+    params: { names: { type: string } }
+    steps: [{ uses: cli/invoke }]
+    cleanup:
+      - for_each: $params.names
+        steps: [{ uses: cli/invoke }]
+criteria: []
+"#,
+        );
+        assert!(errors.contains("`for_each:` requires `max:`"), "{errors}");
     }
 
     #[test]

@@ -1146,27 +1146,53 @@ serialized at the default. Cleanup steps may read `$params.*` and the **same
 call's** body outputs as `$steps.<body-id>.outputs.*` (also earlier cleanup
 steps of that flow); a `$inputs.*` reference, a step the flow does not declare,
 or any reference to a cleanup step from outside the flow is a validation error
-with a location. A `for_each:` is not accepted inside `cleanup:`.
+with a location. `for_each:` steps are accepted inside `cleanup:` and validate
+and expand exactly as in a `teardown:` or fixture `down:` block (`max:` required,
+depth 1); a loop in `cleanup:` runs over the call's resolved arguments, `$params.*`
+or the call's outputs.
 
-**Registration.** When a `call:` to a flow with `cleanup:` is *entered* — its
-first body step was dispatched — the cleanup is registered on the enclosing
-lifecycle scope: check `steps:` and check `setup:` register on that check
-**attempt** (so a retry registers and unwinds again, as fixtures do), criterion
-`setup:` on the criterion, and leaf `setup:` on the leaf. A call gated off by
-`if:` registers nothing. A body that fails partway still registers its cleanup,
-matching "every activated fixture still runs `down:`". Each `for_each:`
-iteration that enters the call registers once with that iteration's element and
-outputs, so the total is bounded by `max:`. A flow with `cleanup:` that calls
-another such flow registers both. Such a flow may not be called from
-`teardown:`, a fixture, or another flow's `cleanup:`; validation rejects it.
+**Registration.** A `call:` to a flow with `cleanup:` is *entered* when its
+first leaf step is dispatched, including a step inside a `for_each:` body, so a
+flow whose body starts with (or is) a `for_each:` registers when the loop's first
+body step runs. A loop that dispatches nothing (an empty array, or every body
+step gated off by `if:`) has not entered the call and registers nothing. The
+cleanup is registered once per call, on the enclosing lifecycle scope: check
+`steps:` and check `setup:` register on that check **attempt** (so a retry
+registers and unwinds again, as fixtures do), criterion `setup:` on the
+criterion, and leaf `setup:` on the leaf. A call gated off by `if:` registers
+nothing. A body that fails partway still registers its cleanup, matching "every
+activated fixture still runs `down:`". A call that is itself inside a
+`for_each:` body registers once per iteration, with that iteration's element and
+outputs, so the total is bounded by `max:`; a flow that starts with a loop sees,
+in its cleanup, the outputs the call had recorded when its scope ended. A flow
+with `cleanup:` that calls another such flow registers both. Such a flow may not
+be called from `teardown:`, a fixture, or another flow's `cleanup:`; validation
+rejects it.
 
-**Unwind.** At scope exit the registered cleanups run **LIFO**, before that
-scope's own `teardown:` (and, for a check attempt, before its fixtures come
-down). Every step of every registered cleanup is attempted; a failure does not
-stop the drain. Each cleanup opens fresh browser contexts from the seed its call
-resolved (§10.3.4; a call-site `session:` carries over). `--keep-env` skips the
-leaf-scope drain together with leaf `teardown:`; check and criterion scopes
-drain as fixture `down:` does.
+**Unwind.** Registered cleanups share one LIFO stack with the check attempt's
+fixture `down:` blocks: at scope exit everything registered since the scope began
+runs last registered first, before that scope's own `teardown:`. A fixture whose
+`up:` ran sits on the stack where it was activated, so a flow called from
+check `setup:` unwinds after the fixtures, and a flow called from check `steps:`
+before them; a fixture written as a flow with `cleanup:` and a call at the end
+of check `setup:` therefore unwinds in the same order. Every step of every registered cleanup is attempted; a failure does
+not stop the drain. Each cleanup opens fresh browser contexts from the seed its
+call resolved (§10.3.4; a call-site `session:` carries over).
+
+**Interruption.** The cleanups sit on the same stack an interrupted run drains
+for fixture `down:` and `teardown:` (§10.3.5, process cleanup): on SIGINT/SIGTERM
+or an engine error each pending flow cleanup runs, last first, interleaved with
+the fixture downs, under the session and policy it was registered with. As with
+fixture downs, the drain applies to runs that own processes. A cleanup drained
+this way sees the run's `$setup` outputs but not the body outputs of the
+interrupted block, which were never recorded; a step that needs them fails and
+is reported like any cleanup failure.
+
+**`--keep-env`.** Alignment with fixture downs and teardown at each scope:
+check- and criterion-scope flow cleanups run, as fixture `down:` and those
+scopes' `teardown:` do; only cleanups registered by the **leaf** `setup:` are
+skipped, together with leaf `teardown:`, in both the normal and the interrupted
+drain. Nothing else is skipped.
 
 **Policy.** The failure definition, the required/diagnostic distinction and the
 retained cleanup-failure records are exactly those of §10.3.5. A `required`

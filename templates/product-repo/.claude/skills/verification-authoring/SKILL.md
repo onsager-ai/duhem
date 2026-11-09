@@ -363,9 +363,15 @@ flows:
   a check's `steps:` or `setup:` at the end of that check attempt (so
   again on every retry), a criterion's `setup:` at the end of the
   criterion, leaf `setup:` at the end of the run. It runs before that
-  scope's own `teardown:`. A call skipped by `if:` registers nothing; a
-  body that fails partway still runs its cleanup, so write cleanup
-  steps that tolerate a resource that was never created (`rm -f`).
+  scope's own `teardown:`, in one last-registered-first order with the
+  check's fixtures coming down. It also runs if the run is interrupted.
+  A call skipped by `if:` registers nothing; a body that fails partway
+  still runs its cleanup, so write cleanup steps that tolerate a
+  resource that was never created (`rm -f`).
+- A flow may start with, or be, a `for_each:` step, and its `cleanup:`
+  may loop too (same `max:` rule as everywhere). The call counts as
+  started when its first body step actually runs, so a loop over an
+  empty list registers nothing.
 - A cleanup step reads `$params.*` and the same call's body outputs as
   `$steps.<body-id>.outputs.*`; nothing else, and callers cannot read
   cleanup steps. A flow with `cleanup:` cannot be called from

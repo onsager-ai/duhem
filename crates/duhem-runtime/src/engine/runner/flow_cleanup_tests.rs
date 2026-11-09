@@ -431,3 +431,131 @@ criteria:
         ]
     );
 }
+
+#[tokio::test]
+async fn flow_cleanups_and_fixture_downs_unwind_in_one_lifo_order() {
+    let (mut engine, _tmp) = engine_for_test().await;
+    let log = tag_engine(
+        &mut engine,
+        &[
+            ("fake/body", false),
+            ("fake/clean", false),
+            ("fake/td", false),
+        ],
+    );
+    let definition = load_flows(&format!(
+        r#"
+verification: flow cleanup and fixtures
+{RES_FLOW}
+fixtures:
+  f:
+    up: [{{uses: fake/body, with: {{tag: fu}}}}]
+    down: [{{uses: fake/clean, with: {{tag: fd}}}}]
+criteria:
+  - id: AC
+    description: One stack orders flow cleanups and fixture downs
+    checks:
+      - id: c
+        needs: [f]
+        setup: [{{id: pre, call: res, with: {{name: s}}}}]
+        steps: [{{id: a, call: res, with: {{name: a}}}}]
+        teardown: [{{uses: fake/td, with: {{tag: t}}}}]
+        assertions: ["true"]
+"#
+    ));
+    let outcome = engine
+        .run_with_metadata(&definition, BTreeMap::new())
+        .await
+        .unwrap();
+    assert!(outcome.cleanup.is_empty(), "{:?}", outcome.cleanup);
+    assert_eq!(
+        *log.lock().unwrap(),
+        [
+            "body:s", "body:fu", "body:a", "clean:a", "clean:fd", "clean:s", "td:t"
+        ]
+    );
+}
+
+const FAN_FLOW: &str = r#"
+flows:
+  fan:
+    params: {items: {type: string}}
+    steps:
+      - {for_each: $params.items, max: 3, as: n, uses: fake/body, with: {tag: $n}}
+    cleanup:
+      - {for_each: $params.items, max: 3, as: n, uses: fake/clean, with: {tag: $n}}
+"#;
+
+#[tokio::test]
+async fn a_flow_that_is_a_loop_registers_once_and_its_cleanup_may_loop() {
+    let (mut engine, _tmp) = engine_for_test().await;
+    let log = tag_engine(&mut engine, &[("fake/body", false), ("fake/clean", false)]);
+    engine.register_test_action(Box::new(
+        StubAction::new("fake/rows", Outcome::Ok)
+            .with_output("items", serde_json::json!(["x", "y"])),
+    ));
+    let definition = load_flows(&format!(
+        r#"
+verification: loop flow
+{FAN_FLOW}
+setup:
+  - {{id: rows, uses: fake/rows}}
+  - {{id: fanout, call: fan, with: {{items: $setup.rows.outputs.items}}}}
+criteria:
+  - id: AC
+    description: Loops in the body and in the cleanup
+    checks:
+      - id: c
+        steps:
+          - {{id: rows, uses: fake/rows}}
+          - {{call: fan, with: {{items: $steps.rows.outputs.items}}}}
+        assertions: ["true"]
+"#
+    ));
+    let outcome = engine
+        .run_with_metadata(&definition, BTreeMap::new())
+        .await
+        .unwrap();
+    assert!(outcome.cleanup.is_empty(), "{:?}", outcome.cleanup);
+    // Once per call, not once per iteration: each cleanup loop runs once.
+    assert_eq!(
+        *log.lock().unwrap(),
+        [
+            "body:x", "body:y", "body:x", "body:y", "clean:x", "clean:y", "clean:x", "clean:y",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_flow_whose_loop_dispatches_nothing_was_not_entered() {
+    let (mut engine, _tmp) = engine_for_test().await;
+    let log = tag_engine(&mut engine, &[("fake/body", false), ("fake/clean", false)]);
+    engine.register_test_action(Box::new(
+        StubAction::new("fake/rows", Outcome::Ok).with_output("items", serde_json::json!([])),
+    ));
+    let definition = load_flows(&format!(
+        r#"
+verification: empty loop flow
+{FAN_FLOW}
+setup:
+  - {{id: rows, uses: fake/rows}}
+  - {{call: fan, with: {{items: $setup.rows.outputs.items}}}}
+criteria:
+  - id: AC
+    description: An empty loop registers no cleanup
+    checks:
+      - id: c
+        steps:
+          - {{id: rows, uses: fake/rows}}
+          - {{call: fan, with: {{items: $steps.rows.outputs.items}}}}
+        assertions: ["true"]
+"#
+    ));
+    let outcome = engine
+        .run_with_metadata(&definition, BTreeMap::new())
+        .await
+        .unwrap();
+    assert_eq!(outcome.verdict.state, VerdictState::Pass);
+    assert!(outcome.cleanup.is_empty(), "{:?}", outcome.cleanup);
+    assert!(log.lock().unwrap().is_empty());
+}

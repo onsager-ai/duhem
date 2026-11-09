@@ -197,7 +197,8 @@ impl Engine {
                 .await?;
                 // Cleanups registered by this iteration keep its outputs and
                 // element, which the next iteration starts over.
-                ctx.run_state().snapshot_flow_cleanups(&ctx.snapshot());
+                ctx.run_state()
+                    .snapshot_flow_cleanups(&ctx.snapshot(), true);
                 let first_failure = failed.len();
                 self.judge_iteration(
                     writer,

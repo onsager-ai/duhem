@@ -567,10 +567,13 @@ async fn run_lifecycle_steps(
     writer.set_session(None);
     owned_contexts.close().await;
     if phase == StepPhase::Setup {
-        run.snapshot_flow_cleanups(&crate::engine::flow_cleanup::Snapshot {
-            outputs: run.setup_outputs.clone(),
-            binding: None,
-        });
+        run.snapshot_flow_cleanups(
+            &crate::engine::flow_cleanup::Snapshot {
+                outputs: run.setup_outputs.clone(),
+                binding: None,
+            },
+            false,
+        );
     }
     execution?;
 

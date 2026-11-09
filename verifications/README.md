@@ -48,6 +48,7 @@ composition.
 | 14 | [`lifecycle-call-example`](lifecycle-call-example/) | A direct `call:` to a reusable flow in leaf `setup:`/`teardown:` and check `teardown:` — no `for_each:` wrapper — with the call's declared output read back via `$setup.<call-id>.outputs.<name>` | local DB (`db/query` → sqlite `:memory:`) | #526 |
 | 15 | [`lifecycle-report-example`](lifecycle-report-example/) | Recorded lifecycle reporting — a passing setup, a per-check fixture, and a deliberately failing teardown remain visible by scope without changing the passing verdict | SQLite in memory (`db/query`) | #524 |
 | 16 | [`check-conditions-example`](check-conditions-example/) | Value-based `if:` on check steps — a true condition runs the step, a false one gates it and the gated judging step is counted in the report | SQLite in memory (`db/query`, `db/observe`) | #440 |
+| 17 | [`step-groups-example`](step-groups-example/) | Group steps with `steps:` — one label, one entry-time `if:` and one shared failure gate | local process (`cli/invoke`); validated offline | #614 |
 
 The CLI self-verification suite also carries the leaf-scoped cleanup
 worked example at

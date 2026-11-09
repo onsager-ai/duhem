@@ -1,0 +1,50 @@
+# Nested step groups — worked example (spec #614)
+#
+# A step that declares `steps:` (and no `uses:`/`call:`) is a group: one
+# label, one `if:` and one failure gate for the steps inside it. The `if:`
+# is evaluated once, when the group is entered; inner steps keep their own
+# `if:` and read the same check-wide failure state as top-level steps.
+#
+# AC-1.1 passes: the `prepare` group runs, and the `if: failure`
+# `diagnostics` group is skipped, recorded with the group as the cause.
+#
+# AC-1.2 shows the shared gate. Its `break` step fails, so the later
+# default step outside the group is skipped while the `if: failure` group
+# runs. A failing step cannot sit in a passing gate suite, so this suite
+# is validated offline (`just validate-suites`) and that behaviour is
+# exercised by `crates/duhem-runtime/tests/check_step_groups.rs`.
+
+verification: Nested step groups
+
+criteria:
+  - id: AC-1
+    description: Grouped steps share one label, one condition and one failure gate.
+    checks:
+      - id: AC-1.1
+        description: A group runs its steps; a failure-only group is skipped on success.
+        steps:
+          - id: prepare
+            description: Prepare the workspace
+            steps:
+              - { id: mk, uses: cli/invoke, with: { command: [sh, -c, "printf ok"] } }
+              - { id: chk, uses: cli/invoke, with: { command: [sh, -c, "true"] } }
+          - id: diagnostics
+            if: failure
+            steps:
+              - { uses: cli/invoke, with: { command: [sh, -c, "echo diag"] } }
+        assertions:
+          - $steps.mk.outputs.stdout == "ok"
+
+      - id: AC-1.2
+        description: A failure inside a group gates later steps, and failure-only groups run.
+        steps:
+          - id: work
+            steps:
+              - { id: break, uses: cli/invoke, with: { command: [sh, -c, "exit 1"] } }
+          - { id: after, uses: cli/invoke, with: { command: [sh, -c, "printf after"] } }
+          - id: collect
+            if: failure
+            steps:
+              - { id: diag, uses: cli/invoke, with: { command: [sh, -c, "echo diag"] } }
+        assertions:
+          - $steps.diag.outputs.exit_code == 0

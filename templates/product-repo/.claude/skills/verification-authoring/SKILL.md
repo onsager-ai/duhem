@@ -225,6 +225,49 @@ Authoring rules:
   judge input; an authored output under `capture/` is rejected at
   validate time.
 
+#### Group steps under one label, condition or session
+
+Every step declares exactly one of `uses:`, `call:` or `steps:`;
+`for_each:` is a modifier that repeats it. A step with `steps:` is a
+group: a label and a scope, not a boundary in the sequence.
+
+```yaml
+steps:
+  - id: prepare
+    description: Prepare the workspace
+    steps:
+      - { id: mk, uses: cli/invoke, with: { command: [sh, -c, "printf ok"] } }
+      - { id: chk, uses: cli/invoke, with: { command: [sh, -c, "true"] } }
+  - id: diagnostics
+    if: failure
+    steps:
+      - { uses: cli/invoke, with: { command: [sh, -c, "echo diag"] } }
+```
+
+- A group may carry `id:` (a label only), `description:`, `if:` and
+  `session:`. It takes no `with:`, `outputs:`, `secret_outputs:`, `as:`
+  or `max:` unless it is also a `for_each:` step. Groups work wherever
+  steps do: check `steps:`, `setup:`/`teardown:`, flow bodies, fixture
+  `up:`/`down:`.
+- The group's `if:` (`success | always | failure`, or a value
+  expression) is evaluated once, when the group is entered. If false,
+  every step inside is recorded as skipped and names the group as the
+  cause. Steps inside keep their own `if:`.
+- Failure state is shared. A failure inside a group gates later default
+  steps both inside and after it, and `if: failure` / `if: always` inside
+  a group behave exactly as they do at the top level.
+- Step ids inside a group share the enclosing namespace and must stay
+  unique across the whole tree. `$steps.<id>` names an inner step; a
+  group's own `id:` has no outputs, so `$steps.<group-id>` is a
+  validation error.
+- In a check that declares `sessions:`, `session: <name>` on a group
+  fills every inner `ui/*` step that names none; a step's own `session:`
+  wins.
+- Loops stay one level deep: a `for_each:` body may contain groups, but
+  no step anywhere under a `for_each:` may itself carry `for_each:`.
+  `duhem resolve` reports the worst-case step count as the sum of the
+  steps in the tree.
+
 #### Share locators instead of copying them
 
 For iframe contents, add `frame: { testid: report-shell-iframe }` to

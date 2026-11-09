@@ -5,6 +5,8 @@
 //! expansion. These rules run on the authored tree, before lowering, because
 //! the lowered sequence no longer remembers the group structure.
 
+#[cfg(test)]
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 
 use crate::source::SourcePathSegment as Segment;
@@ -223,5 +225,178 @@ impl<'a> Walker<'a> {
         for (expr, at) in found {
             self.reject_group_refs(&expr, &at);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(steps: &str, extra: &str) -> VerificationDefinition {
+        VerificationDefinition::from_yaml_str(&format!(
+            "verification: groups\n{extra}criteria:\n  - id: AC-1\n    description: groups\n    checks:\n      - id: AC-1.1\n        steps:\n{steps}        assertions: [\"true\"]\n"
+        ))
+        .expect("parse")
+    }
+
+    fn rejected(steps: &str, extra: &str, needle: &str) {
+        let errors = crate::validate(&parse(steps, extra)).expect_err("must be rejected");
+        assert!(
+            errors.iter().any(|error| matches!(
+                error,
+                ValidationError::InvalidStepGroup { message, location: Some(_) }
+                    if message.contains(needle)
+            )),
+            "expected a located error containing `{needle}`: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn well_formed_nested_groups_validate_and_lower_to_leaves_with_frames() {
+        let mut definition = parse(
+            "          - id: outer\n            steps:\n              - { id: a, uses: cli/invoke }\n              - if: failure\n                steps:\n                  - { id: b, uses: cli/invoke }\n          - { id: c, uses: cli/invoke }\n",
+            "",
+        );
+        crate::validate(&definition).expect("groups validate");
+        crate::flows::validate_and_expand(&mut definition).expect("expands");
+        let steps = &definition.criteria[0].checks[0].steps;
+        let shape: Vec<_> = steps
+            .iter()
+            .map(|step| {
+                (
+                    step.id.clone().unwrap(),
+                    step.group
+                        .iter()
+                        .map(|g| g.label.clone())
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                ("a".to_string(), vec!["outer".to_string()]),
+                ("b".to_string(), vec!["outer".to_string(), "1".to_string()]),
+                ("c".to_string(), vec![]),
+            ]
+        );
+        assert_eq!(
+            steps[1].group[1].condition,
+            crate::StepCondition::Failure,
+            "the inner group's own condition travels with its frame"
+        );
+        assert!(steps.iter().all(|step| !is_group(step)));
+        assert_eq!(
+            definition.criteria[0].checks[0].worst_case_step_count(),
+            Ok(3)
+        );
+    }
+
+    #[test]
+    fn group_with_uses_is_rejected_with_a_location() {
+        rejected(
+            "          - uses: cli/invoke\n            steps:\n              - { uses: cli/invoke }\n",
+            "",
+            "no `uses:`",
+        );
+    }
+
+    #[test]
+    fn with_on_a_plain_group_is_rejected_with_a_location() {
+        rejected(
+            "          - with: { command: [echo] }\n            steps:\n              - { uses: cli/invoke }\n",
+            "",
+            "`with:` is not allowed on a step group",
+        );
+    }
+
+    #[test]
+    fn duplicate_ids_across_nesting_levels_are_rejected_with_a_location() {
+        rejected(
+            "          - id: g\n            steps:\n              - { id: dup, uses: cli/invoke }\n          - { id: dup, uses: cli/invoke }\n",
+            "",
+            "duplicate step id `dup`",
+        );
+        rejected(
+            "          - id: same\n            steps:\n              - { id: same, uses: cli/invoke }\n",
+            "",
+            "duplicate step id `same`",
+        );
+    }
+
+    #[test]
+    fn referencing_a_group_id_is_rejected_with_a_location() {
+        let definition = VerificationDefinition::from_yaml_str(
+            "verification: groups\ncriteria:\n  - id: AC-1\n    description: groups\n    checks:\n      - id: AC-1.1\n        steps:\n          - id: prepare\n            steps:\n              - { id: mk, uses: cli/invoke }\n        assertions:\n          - $steps.prepare.outputs.stdout == \"ok\"\n",
+        )
+        .expect("parse");
+        let errors = crate::validate(&definition).expect_err("a group has no outputs");
+        assert!(
+            errors.iter().any(|error| matches!(
+                error,
+                ValidationError::InvalidStepGroup { message, location: Some(_) }
+                    if message.contains("`$steps.prepare` names a step group")
+            )),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn for_each_anywhere_under_a_for_each_is_rejected_through_groups() {
+        rejected(
+            "          - for_each: $inputs.rows\n            max: 2\n            steps:\n              - steps:\n                  - for_each: $inputs.cols\n                    max: 2\n                    uses: cli/invoke\n",
+            "inputs:\n  rows: { type: array }\n  cols: { type: array }\n",
+            "under another `for_each:`",
+        );
+    }
+
+    #[test]
+    fn a_group_may_sit_inside_a_loop_body() {
+        let definition = parse(
+            "          - for_each: $inputs.rows\n            max: 2\n            steps:\n              - steps:\n                  - { uses: cli/invoke }\n                  - { uses: cli/invoke }\n",
+            "inputs:\n  rows: { type: array }\n",
+        );
+        crate::validate(&definition).expect("group inside a loop body validates");
+        let mut lowered = definition;
+        crate::flows::validate_and_expand(&mut lowered).expect("expands");
+        let wrapper = &lowered.criteria[0].checks[0].steps[0];
+        assert_eq!(wrapper.for_each_body.len(), 2);
+        assert_eq!(lowered.criteria[0].checks[0].worst_case_step_count(), Ok(4));
+    }
+
+    #[test]
+    fn group_session_fills_inner_ui_steps_and_an_inner_declaration_wins() {
+        let mut definition = VerificationDefinition::from_yaml_str(
+            "verification: sessions\ncriteria:\n  - id: AC-1\n    description: s\n    checks:\n      - id: AC-1.1\n        sessions: { a: ~, b: ~ }\n        steps:\n          - session: a\n            steps:\n              - { uses: ui/click, with: { role: button, name: Go } }\n              - { uses: ui/click, session: b, with: { role: button, name: Go } }\n        assertions: [\"true\"]\n",
+        )
+        .expect("parse");
+        crate::flows::validate_and_expand(&mut definition).expect("expands");
+        let steps = &definition.criteria[0].checks[0].steps;
+        assert_eq!(steps[0].session.as_deref(), Some("a"));
+        assert_eq!(steps[1].session.as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn a_group_around_a_call_expands_the_flow_inside_the_group() {
+        let mut definition = VerificationDefinition::from_yaml_str(
+            "verification: calls\nflows:\n  say:\n    steps:\n      - steps:\n          - { id: one, uses: cli/invoke }\n          - { id: two, uses: cli/invoke }\ncriteria:\n  - id: AC-1\n    description: c\n    checks:\n      - id: AC-1.1\n        steps:\n          - id: wrap\n            steps:\n              - { call: say }\n        assertions: [\"true\"]\n",
+        )
+        .expect("parse");
+        crate::flows::validate_and_expand(&mut definition).expect("expands");
+        let steps = &definition.criteria[0].checks[0].steps;
+        assert_eq!(steps.len(), 2);
+        for step in steps {
+            let labels: Vec<_> = step.group.iter().map(|g| g.label.as_str()).collect();
+            assert_eq!(
+                labels,
+                ["wrap", "0"],
+                "call-site group wraps the flow's own group"
+            );
+        }
+        let keys: BTreeSet<_> = steps
+            .iter()
+            .flat_map(|step| step.group.iter().map(|g| g.key))
+            .collect();
+        assert_eq!(keys.len(), 2, "both steps share both groups");
     }
 }

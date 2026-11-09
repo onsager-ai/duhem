@@ -435,7 +435,9 @@ mod tests {
             "verification: calls\nflows:\n  say:\n    steps:\n      - steps:\n          - { id: one, uses: cli/invoke }\n          - { id: two, uses: cli/invoke }\ncriteria:\n  - id: AC-1\n    description: c\n    checks:\n      - id: AC-1.1\n        steps:\n          - id: wrap\n            steps:\n              - { call: say }\n        assertions: [\"true\"]\n",
         )
         .expect("parse");
+        crate::validate(&definition).expect("authored flow groups validate without recursion");
         crate::flows::validate_and_expand(&mut definition).expect("expands");
+        crate::validate(&definition).expect("expanded flow groups validate without recursion");
         let steps = &definition.criteria[0].checks[0].steps;
         assert_eq!(steps.len(), 2);
         for step in steps {
@@ -459,7 +461,9 @@ mod tests {
             "verification: cleanup groups\nflows:\n  scratch:\n    steps:\n      - { id: make, uses: cli/invoke }\n    cleanup:\n      - id: tidy\n        if: always\n        steps:\n          - { id: rm, uses: cli/invoke }\n          - { id: rm2, uses: cli/invoke }\ncriteria:\n  - id: AC-1\n    description: c\n    checks:\n      - id: AC-1.1\n        steps:\n          - { id: tmp, call: scratch }\n        assertions: [\"true\"]\n",
         )
         .expect("parse");
+        crate::validate(&definition).expect("authored cleanup groups validate without recursion");
         crate::flows::validate_and_expand(&mut definition).expect("expands");
+        crate::validate(&definition).expect("expanded cleanup groups validate without recursion");
         let steps = &definition.criteria[0].checks[0].steps;
         assert_eq!(steps.len(), 1, "cleanup is not part of the body");
         let cleanup = &steps[0].flow_cleanup;

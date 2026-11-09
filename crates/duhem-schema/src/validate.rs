@@ -55,10 +55,19 @@ pub fn validate_with_contract_outputs(
     if crate::step_groups::has_groups(v) {
         let mut lowered = v.clone();
         return match crate::flows::validate_and_expand(&mut lowered) {
-            Ok(()) => validate_with_contract_outputs(&lowered, outputs_for),
+            Ok(()) => validate_lowered(&lowered, outputs_for),
             Err(message) => Err(vec![ValidationError::InvalidFlow { message }]),
         };
     }
+    validate_lowered(v, outputs_for)
+}
+
+// Expansion retains the authored flow catalog, including its groups. Validate
+// the lowered sequences directly rather than detecting those groups again.
+fn validate_lowered(
+    v: &VerificationDefinition,
+    outputs_for: &dyn Fn(&str) -> Vec<String>,
+) -> Result<(), Vec<ValidationError>> {
     let mut errs = Vec::new();
     crate::validate_sessions::validate(v, outputs_for, &mut errs);
     crate::validate_process::validate(v, &mut errs);

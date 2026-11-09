@@ -168,7 +168,7 @@ async fn focus_in_frame_is_distinct_from_parent_and_press_target_is_deepest() {
     assert!(satisfied(&ctx, SEARCH, "not_focused").await);
     let pressed = Press.invoke(&ctx, &yaml("key: Shift")).await.unwrap();
     assert_eq!(pressed.outputs["target"]["tag"], "input");
-    assert_eq!(pressed.outputs["target"]["name"], serde_json::Value::Null);
+    assert_eq!(pressed.outputs["target"]["name"], "Inner field");
     assert_eq!(pressed.outputs["target"]["role"], "textbox");
 
     // Moving focus to the parent leaves the frame's activeElement set,
@@ -239,7 +239,7 @@ async fn invalid_key_and_ambiguous_or_missing_targets_fail_usefully() {
     let error = AssertElement
         .invoke(
             &ctx,
-            &yaml("locator: {role: button}\nexpected: focused\ntimeout: 250ms"),
+            &yaml("locator: {css: button}\nexpected: focused\ntimeout: 250ms"),
         )
         .await
         .unwrap_err()

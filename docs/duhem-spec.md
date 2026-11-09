@@ -1603,6 +1603,7 @@ later reuse and check-level assertions.
 **Database actions**
 
 - `db/query` — execute a read query, capture rows
+- `db/observe` — poll a read query until a condition holds or a timeout elapses
 - `db/seed` — seed data for setup
 
 **CLI actions**
@@ -1757,7 +1758,7 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 
 **Action Catalog** (`duhem-actions`)
 
-- The built-in `ui/*`, `api/*`, `db/*`, and `cli/*` actions (§10.5) and the `Action` trait they implement
+- The built-in `ui/*`, `api/*`, `db/*`, `cli/*`, and `process/*` actions (§10.5) and the `Action` trait they implement
 - Closed at v1; the dispatch registry is internal (§10.8)
 
 **Generation Service** (roadmap)
@@ -2113,7 +2114,7 @@ This phase is contingent on Onsager’s own roadmap. It is not blocking for Duhe
 |Term                   |Definition                                                                                                                                                            |
 |-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 |Verification           |A complete cycle that produces a verdict for an artifact in a holistic environment                                                                                    |
-|Verification Definition|The structured YAML format containing criteria and their checks for a feature; identified by content (top-level `verification:` or `criteria:` field), not by filename|
+|Verification Definition|The structured YAML format containing criteria and their checks for a feature; identified by content, not by filename: a top-level `criteria:` field marks a leaf and `verifications:` marks a root manifest; `verification:` is a name, not a discriminator (§10.2)|
 |Root Manifest          |The canonical `duhem.yml` at project root that aggregates Verification Definitions and provides shared defaults; auto-discovered by the tool                          |
 |Criterion              |A human-authored natural-language commitment about a feature                                                                                                          |
 |Check                  |A structured executable verification unit derived from a criterion, exercising a slice of the delivery web                                                            |

@@ -85,11 +85,11 @@ mod catalog_tests {
     #[test]
     fn catalog_is_complete_with_unique_uses() {
         let cat = catalog();
-        assert_eq!(cat.len(), 23, "expected 23 action contracts");
+        assert_eq!(cat.len(), 25, "expected 25 action contracts");
         let mut uses: Vec<&str> = cat.iter().map(|c| c.uses).collect();
         uses.sort();
         uses.dedup();
-        assert_eq!(uses.len(), 23, "every `uses` is unique");
+        assert_eq!(uses.len(), 25, "every `uses` is unique");
     }
 
     #[test]

@@ -558,3 +558,68 @@ criteria:
     assert!(outcome.cleanup.is_empty(), "{:?}", outcome.cleanup);
     assert!(log.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn a_desugared_fixture_keeps_its_name_and_check_in_lifecycle_evidence() {
+    let (mut engine, _tmp) = engine_for_test().await;
+    let log = tag_engine(&mut engine, &[("fake/up", false), ("fake/down", false)]);
+    let definition = def(r#"
+verification: deprecated fixture evidence
+fixtures:
+  resource:
+    up: [{id: make, uses: fake/up, with: {tag: u}}]
+    down: [{uses: fake/down, with: {tag: "$fixture.resource.make.outputs.value"}}]
+criteria:
+  - id: AC
+    description: Evidence still names the fixture and its consuming check
+    checks:
+      - {id: c, needs: [resource], assertions: ["true"]}
+"#);
+    let outcome = engine
+        .run_with_metadata(&definition, BTreeMap::new())
+        .await
+        .unwrap();
+    assert!(outcome.cleanup.is_empty(), "{:?}", outcome.cleanup);
+    // The down block reads the up step's output through the rewritten reference.
+    assert_eq!(*log.lock().unwrap(), ["up:u", "down:u"]);
+    let trace = Trace::from_store(engine.store.as_ref().unwrap().as_ref(), &outcome.run_id)
+        .await
+        .unwrap();
+    let blocks: Vec<_> = trace
+        .into_events()
+        .into_iter()
+        .filter_map(|event| match event.payload {
+            EventPayload::SetupStarted {
+                phase,
+                fixture_name,
+                check_id,
+                criterion_id,
+                registered_by,
+                ..
+            } => Some((
+                phase,
+                fixture_name,
+                check_id,
+                criterion_id,
+                registered_by.is_some(),
+            )),
+            _ => None,
+        })
+        .collect();
+    let named = |phase| {
+        (
+            phase,
+            Some("resource".to_string()),
+            Some("c".to_string()),
+            None,
+            false,
+        )
+    };
+    assert_eq!(
+        blocks,
+        [
+            named(duhem_evidence::StepPhase::Setup),
+            named(duhem_evidence::StepPhase::Teardown)
+        ]
+    );
+}

@@ -313,6 +313,8 @@ mod tests {
             "ui/click",
             "ui/type",
             "ui/select",
+            "ui/press",
+            "ui/focus",
             "ui/assert-element",
             "ui/assert-url",
         ] {

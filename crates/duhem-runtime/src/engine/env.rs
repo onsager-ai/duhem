@@ -493,7 +493,7 @@ async fn poll_http_ready(probe: &HttpReadyProbe, run: &RunState) -> (bool, Durat
 /// the `Step.with` template path uses (`engine/template.rs`).
 fn resolve_url(raw: &str, run: &RunState) -> String {
     let trimmed = raw.trim();
-    if !trimmed.starts_with('$') {
+    if !duhem_schema::expr::is_expression(trimmed) {
         return raw.to_string();
     }
     let Some(rest) = trimmed.strip_prefix("$inputs.") else {

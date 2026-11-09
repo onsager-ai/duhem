@@ -623,6 +623,28 @@ Definitions using neither session field retain their existing wire shape.
 **Locators.** UI actions (`ui/click`, `ui/type`, `ui/assert-element`, `ui/select`) address an element by exactly one *primary strategy*: `role` (paired with an optional `name`), `label` (associated label text — how to reach an input with no ARIA role, e.g. `type=password`), `testid` (the `data-testid` attribute), `placeholder`, `css` (a raw CSS selector escape hatch), `xpath` (a raw XPath selector escape hatch), or a standalone `text`. A `text` substring may additionally *filter* a non-text primary, and a recursive `scope:` narrows the search to inside a container. Prefer `role`, `testid`, or `scope:` + `text:`; use `css:` or `xpath:` only when those cannot reach the element, because markup-coupled selectors—especially absolute XPath paths—break readily as markup changes. `ui/click` takes these fields inline in its `with:`; the other actions nest them under `locator:`. Two primaries at once, or none, is rejected. Each named strategy maps to the corresponding Playwright selector engine.
 
 
+**Keyboard and focus.** `ui/press { key, locator?, timeout? }` takes a Playwright
+key name, single character or `+`-joined chord (`Enter`, `Tab`, `Shift+Tab`,
+`Control+a`); an empty key is rejected when `with:` is parsed and an unknown key
+name fails the step with the driver's message. With a `locator` it uses
+`locator.press` (waits for actionability, focuses the element, presses). Without
+one it uses `page.keyboard.press` and dispatches to whatever is focused. The
+`target` output, `{tag, id, role, name}`, describes the receiving element sampled
+before dispatch: the located element, or the `activeElement` of the deepest
+focused document (`tag: body` when nothing is focused; absent fields are `null`).
+`role` is the explicit `role` attribute or the implicit role of common tags;
+`name` is an approximation of the accessible name (`aria-label`, then
+`aria-labelledby` text, then trimmed text content capped at 200 characters), not
+the full computation. `ui/focus { locator, timeout? }` is programmatic focus, not a
+user gesture; to verify keyboard focus movement, press `Tab` and assert
+`expected: focused`. `ui/assert-element` `expected: focused | not_focused` waits up
+to the deadline and reports `satisfied` like the other states. The locator must
+resolve to exactly one element (ambiguity is an error; an absent element is never
+`not_focused`). Focused means the element is the `activeElement` of its own
+document and that document has focus, including inside `frame:` documents. The
+[executed keyboard and focus example](../verifications/keyboard-focus-example/duhem.yml)
+runs against a local browser fixture in CI.
+
 **Frames.** An optional `frame: <Locator>` selects the iframe containing
 the target for every locator-taking UI action, including `ui/extract`.
 For example, `{frame: {testid: report-shell-iframe}, role: heading, name:
@@ -777,7 +799,7 @@ criteria:
           - $steps.health.outputs.status == 200
 ```
 
-Failure policy is **inconclusive, never false**: a non-zero `up:` exit (or an unrunnable script) yields a run verdict of `Inconclusive(environment_error)`; a `ready:` probe that exhausts its `timeout:` yields `Inconclusive(timeout)`. A failed `up:` skips teardown (nothing came up to tear down); `provision.down:` failures are recorded as diagnostic evidence and never alter the verdict. Only per-check fixture `down:` supports the required cleanup gate (§10.3.5). Relative script paths resolve against the Verification Definition's directory. `up:`/`down:` scripts run under the runtime's sanitized subprocess environment (§9 Stage 3, §11.1 Runtime). The `ready:` catalog is closed at `http:` for v1.
+Failure policy is **inconclusive, never false**: a non-zero `up:` exit (or an unrunnable script) yields a run verdict of `Inconclusive(environment_error)`; a `ready:` probe that exhausts its `timeout:` yields `Inconclusive(timeout)`. A failed `up:` skips teardown (nothing came up to tear down); `provision.down:` failures are recorded as diagnostic evidence and never alter the verdict. Only per-check fixture `down:` and flow `cleanup:` (§10.3.5.1) support the required cleanup gate (§10.3.5). Relative script paths resolve against the Verification Definition's directory. `up:`/`down:` scripts run under the runtime's sanitized subprocess environment (§9 Stage 3, §11.1 Runtime). The `ready:` catalog is closed at `http:` for v1.
 
 A manifest can also provision **one shared environment for the whole suite** rather than per-leaf — see the manifest `provision:` block in §10.4.
 
@@ -836,8 +858,9 @@ steps:
 and the maximum number of steps a check can execute is computable from
 the Verification Definition alone, before the run. Validation rejects a
 definition whenever that bound cannot be computed; `duhem resolve`
-reports the per-check worst-case step count. Today the bound is the flat
-step count after flow expansion.
+reports the per-check worst-case step count. The bound is computed by
+walking the step tree after flow expansion: the sum of its leaf steps,
+with each `for_each:` body multiplied by its `max:`.
 
 This boundary forbids `while` and every other condition-driven form of
 repetition, recursion of any kind, unbounded iteration, unbounded
@@ -881,9 +904,9 @@ report having verified less than the Verification Definition budgeted
 for, the false-green shape §7.6 exists to prevent. An empty array is
 zero iterations, not an error. The loop body is exactly one of a
 single `uses:` action, a `call:` to a named flow, or an inline
-multi-step `steps:` list — never more than one, never nested (a body
-step may not itself carry `for_each:` or `steps:`, capping nesting at
-depth 1). `as: <name>` binds the current element for the body's
+multi-step `steps:` list — never more than one. Loops do not nest: no
+step anywhere under a `for_each:`, groups included, may itself carry
+`for_each:`, capping loop nesting at depth 1. `as: <name>` binds the current element for the body's
 duration; `$<name>` is a validation error anywhere outside that body,
 and lifecycle body ids remain local to that body. In a check (#521),
 `assertions:` can reference its loop body's `$steps.<id>.outputs.*`:
@@ -896,6 +919,56 @@ An empty judging loop produces `Inconclusive(EmptyAggregation)`.
 The judge's existing fail-wins, then inconclusive, then pass fold is
 unchanged. Loops may also be declared in reusable flows; expansion
 retains the same mandatory bounds and depth-one limit.
+
+**Step groups (`steps:`)** make `steps:` a body form on any step (spec
+#614): every step declares exactly one of `uses:`, `call:` or `steps:`,
+and `for_each:` is a modifier that repeats it. A group is a scope and a
+label, not a sequence boundary. It may carry `id:` (a label),
+`description:`, `if:` and `session:`; it may not carry `with:`,
+`outputs:`, `secret_outputs:`, `as:` or `max:` unless it also carries
+`for_each:`, which keeps the loop-body semantics above. Groups are valid
+wherever steps are: check `steps:`, leaf/criterion/check `setup:` and
+`teardown:`, flow bodies, and fixture `up:`/`down:`.
+
+```yaml
+steps:
+  - id: prepare
+    description: Prepare the workspace
+    steps:
+      - { id: mk, uses: cli/invoke, with: { command: [sh, -c, "printf ok"] } }
+      - { id: chk, uses: cli/invoke, with: { command: [sh, -c, "true"] } }
+  - id: diagnostics
+    if: failure
+    steps:
+      - { uses: cli/invoke, with: { command: [sh, -c, "echo diag"] } }
+```
+
+A group's `if:` (status or value form) is evaluated once, at group entry,
+against the current gate state. If it is false, every step inside is
+recorded as skipped and names the group as the cause. Steps inside
+evaluate their own `if:` against the shared check gate state, so a
+failure inside a group gates later default steps both inside and after
+it, and `if: failure` / `if: always` inside a group behave as at top
+level. A group's `if: always` or `if: failure` is also the default for the
+steps inside that declare no `if:` of their own, as a call-site `if:` is for
+the steps its flow expands to; a diagnostics group therefore runs its steps
+on the failure it exists for. Value conditions follow the Tier 2 claim-set rule: judging steps
+gated off by a group-level value `if:` count as gated judging steps.
+Step ids inside a group share the enclosing namespace
+(`$steps.<id>`, `$setup.<id>`) and stay unique across the whole tree; a
+group `id:` is a label only, and `$steps.<group-id>` is a validation
+error. In a named-sessions check, `session: <name>` on a group fills
+inner `ui/*` steps that declare none and an inner declaration wins, so an
+enclosing group satisfies the every-`ui/*`-step-names-a-session rule.
+
+Groups nest, bounded by the same depth limit as flows
+(`MAX_FLOW_DEPTH`). The loader lowers each group into the enclosing
+sequence at the point flows are expanded, so the runtime executes one
+flat sequence and the worst-case step count is the sum of leaves. Each
+inner step's evidence carries its group path (labels, or sibling
+positions for an unlabelled group) as an optional field; traces without
+it still read. A worked example lives at
+`verifications/step-groups-example/duhem.yml`.
 
 ### Schema impact — bounded judging iteration (#521)
 
@@ -1119,6 +1192,104 @@ validation errors. The action contract must declare the referenced output.
 Fixture `up:`/`down:` steps may also declare a direct `call:` to a
 reusable flow, with the same validation and load-time expansion as
 `setup:`/`teardown:` (§10.3.4) and a check's own `call:` (§10.4).
+
+#### 10.3.5.1 Flow cleanup (`cleanup:` and `cleanup_policy:`)
+
+A flow may declare a `cleanup:` half next to its `steps:`, the flow-shaped
+counterpart of a fixture's `down:` with the flow's typed `params:`. Fixtures
+are not deprecated by this section and keep working unchanged.
+
+```yaml
+flows:
+  scratch_file:
+    params: { prefix: { type: string } }
+    steps:
+      - id: create
+        uses: cli/invoke
+        with: { command: [sh, -c, 'f=$(mktemp "/tmp/$1.XXXX"); printf %s "$f"', --, $params.prefix] }
+    outputs: { path: $steps.create.outputs.stdout }
+    cleanup:
+      - uses: cli/invoke
+        with: { command: [rm, -f, $steps.create.outputs.stdout] }
+```
+
+`cleanup:` is a list of steps; `cleanup_policy: required | diagnostic_only` is
+valid only together with it, defaults to `required`, and is omitted when
+serialized at the default. Cleanup steps may read `$params.*` and the **same
+call's** body outputs as `$steps.<body-id>.outputs.*` (also earlier cleanup
+steps of that flow); a `$inputs.*` reference, a step the flow does not declare,
+or any reference to a cleanup step from outside the flow is a validation error
+with a location. `for_each:` steps are accepted inside `cleanup:` and validate
+and expand exactly as in a `teardown:` or fixture `down:` block (`max:` required,
+depth 1); a loop in `cleanup:` runs over the call's resolved arguments, `$params.*`
+or the call's outputs.
+
+**Registration.** A `call:` to a flow with `cleanup:` is *entered* when its
+first leaf step is dispatched, including a step inside a `for_each:` body, so a
+flow whose body starts with (or is) a `for_each:` registers when the loop's first
+body step runs. A loop that dispatches nothing (an empty array, or every body
+step gated off by `if:`) has not entered the call and registers nothing. The
+cleanup is registered once per call, on the enclosing lifecycle scope: check
+`steps:` and check `setup:` register on that check **attempt** (so a retry
+registers and unwinds again, as fixtures do), criterion `setup:` on the
+criterion, and leaf `setup:` on the leaf. A call gated off by `if:` registers
+nothing. A body that fails partway still registers its cleanup, matching "every
+activated fixture still runs `down:`". A call that is itself inside a
+`for_each:` body registers once per iteration, with that iteration's element and
+outputs, so the total is bounded by `max:`; a flow that starts with a loop sees,
+in its cleanup, the outputs the call had recorded when its scope ended. A flow
+with `cleanup:` that calls another such flow registers both. Such a flow may not
+be called from `teardown:`, a fixture, or another flow's `cleanup:`; validation
+rejects it.
+
+**Unwind.** Registered cleanups share one LIFO stack with the check attempt's
+fixture `down:` blocks: at scope exit everything registered since the scope began
+runs last registered first, before that scope's own `teardown:`. A fixture whose
+`up:` ran sits on the stack where it was activated, so a flow called from
+check `setup:` unwinds after the fixtures, and a flow called from check `steps:`
+before them; a fixture written as a flow with `cleanup:` and a call at the end
+of check `setup:` therefore unwinds in the same order. Every step of every registered cleanup is attempted; a failure does
+not stop the drain. Each cleanup opens fresh browser contexts from the seed its
+call resolved (§10.3.4; a call-site `session:` carries over).
+
+**Interruption.** The cleanups sit on the same stack an interrupted run drains
+for fixture `down:` and `teardown:` (§10.3.5, process cleanup): on SIGINT/SIGTERM
+or an engine error each pending flow cleanup runs, last first, interleaved with
+the fixture downs, under the session and policy it was registered with. As with
+fixture downs, the drain applies to runs that own processes. A cleanup drained
+this way sees the run's `$setup` outputs but not the body outputs of the
+interrupted block, which were never recorded; a step that needs them fails and
+is reported like any cleanup failure.
+
+**`--keep-env`.** Alignment with fixture downs and teardown at each scope:
+check- and criterion-scope flow cleanups run, as fixture `down:` and those
+scopes' `teardown:` do; only cleanups registered by the **leaf** `setup:` are
+skipped, together with leaf `teardown:`, in both the normal and the interrupted
+drain. Nothing else is skipped.
+
+**Policy.** The failure definition, the required/diagnostic distinction and the
+retained cleanup-failure records are exactly those of §10.3.5. A `required`
+cleanup failure changes the effective run gate to `fail` at any scope while
+preserving the body verdicts; `diagnostic_only` failures remain evidence. As in
+§10.3.5, a returned observation such as a non-zero `exit_code` is data.
+
+**Evidence and report.** Each registered cleanup runs as its own teardown
+lifecycle block at the registering scope. Its `setup_started` evidence carries
+`registered_by` (flow name and call id) beside the scope and `cleanup_policy`;
+the folded `RunSummary.lifecycle` block carries the same `registered_by`. The
+resolved hook chain lists every registered cleanup at its scope's exit, naming
+the registration site (for example `flow scratch_file cleanup (call tmp,
+registered in check AC-1.1)`), and marks one that did not run. The pretty
+reporter and the dashboard lifecycle views show the registering flow and call, so the implicit
+registration is visible in the report.
+
+The failing controls mirror §10.3.5: a nonexistent cleanup command gives
+`body_verdict: pass`, an effective gate of `fail` and a nonzero CLI exit under
+the default policy; adding `cleanup_policy: diagnostic_only` to the flow leaves
+the gate `pass` with the failure visible. Worked example:
+`verifications/flow-cleanup-example/duhem.yml`; controls:
+`crates/duhem-cli/tests/fixtures/cleanup/flow_required.yml` and
+`flow_diagnostic.yml`.
 
 ### 10.3.6 Criterion and check lifecycle (`setup:`/`teardown:`)
 
@@ -1366,7 +1537,7 @@ human-facing `description:`, typed `params:`, ordered `steps:`, and an
 `call: <flow-name>`, an optional `description:`, an `id:`, and a
 `with:` map matching the flow's typed `params:`. `call:` is distinct
 from `uses:` so a flow cannot shadow or masquerade as a closed-catalog
-action. Exactly one of the two keys is valid on a step. A lifecycle
+action. Exactly one of the two keys is valid on a step (or `steps:`, a group, §10.3.3). A lifecycle
 step — leaf/criterion/check `setup:`/`teardown:` or fixture
 `up:`/`down:` — accepts the same `call:` form directly, with the same
 `params:`/`with:` validation (§10.3.4/§10.3.5/§10.3.6); it is not
@@ -1385,6 +1556,9 @@ joins the same evidence-masking boundary as a secret input, on the
 lifecycle path as well as the check path. Flows may call other flows;
 cycles and chains deeper than the include-depth limit are offline
 validation errors.
+
+A flow may also declare `cleanup:` (§10.3.5.1), registered on the enclosing
+scope when a call is entered and unwound LIFO at that scope's exit.
 
 Flow bodies are hygienic. Step `with:` values may reference only
 `$params.*` and `$pages.*`; a `$inputs.*` or `$steps.*` dependency in
@@ -1415,17 +1589,22 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 
 - `ui/navigate` — go to a URL
 - `ui/observe-console` — collect page errors and console messages in a step-anchored window
+- `ui/back` — move one entry back through the page's real browser history (`page.goBack`); same waiting, outputs and no-entry contract as `ui/forward`.
+- `ui/forward` — move one entry forward through the page's real browser history (`page.goForward`), waiting for `load` (optional `timeout:`). Outputs `from_url`, `url` and `navigated`: `navigated` is `true` when the browser moved to another entry, including same-document (hash/`pushState`) entries, and `false` with `url == from_url` when no entry exists in that direction (the browser's initial blank page is not an entry the check visited). A missing entry is not an error and never triggers a direct navigation; an in-flight navigation that exceeds the timeout is a `timeout` outcome.
 - `ui/click` — click an element (role-based locators preferred)
 - `ui/type` — type into an input
 - `ui/select` — select an option
-- `ui/assert-element` — judge existence/visibility with `expected:`, or directly judge an extracted field with `expect: { field: checked, equals: true }`
-- `ui/extract` — non-judging extraction of an attribute, live DOM property, or rendered `innerText`; exposes `value`, `found`, `count`, and (with `all: true`) DOM-ordered `values`
+- `ui/press` — press a key or `+` chord (Playwright key names), on a located element or on the focused element
+- `ui/focus` — programmatically focus an element (`element.focus()`, not a user gesture)
+- `ui/assert-element` — judge existence/visibility/focus with `expected:` (`exists`, `not_exists`, `visible`, `hidden`, `focused`, `not_focused`), or directly judge an extracted field with `expect: { field: checked, equals: true }`
+- `ui/extract` — non-judging extraction of an attribute, live DOM property, rendered `innerText`, bounding rect, or computed style; exposes `value`, `found`, `count`, and (with `all: true`) DOM-ordered `values`
 - `ui/assert-url` — observe URL state
 - `ui/capture-session` — capture cookies/local storage as a secret state value for later checks
+- `ui/emulate` — set the check's own viewport (`viewport: { width, height }`, positive integer CSS px, same rule as `defaults.viewport`) and/or `color_scheme: light | dark | no-preference`; at least one is required. It applies `page.setViewportSize` / `page.emulateMedia` to the check's page for later steps. Outputs `viewport` (`{ width, height }`) and `color_scheme` are read back from the page (`innerWidth/innerHeight`, `prefers-color-scheme` media queries), not echoed from `with:`, so Chromium reports `no-preference` as `light`. Every check and retry attempt opens a fresh context with the run viewport and host-default color scheme, so emulation never leaks into siblings or retries. Headed runs have no fixed viewport; rely on the read-back output there.
 - `ui/wait` — wait for a fixed `duration` (`TimeoutSpec`, e.g. `500ms` or `2s`) without requiring a browser page. Prefer `ui/assert-element` with `timeout:`; fixed waits are a debugging and transitional-authoring escape hatch with a 60-second default ceiling that root-manifest `defaults.max_wait` may raise or lower.
 
-`ui/extract` selects exactly one source from `field:`, `attribute:`, `property:`, or
-`text: true`. Attributes describe markup and return `null` when absent; properties
+`ui/extract` selects exactly one source from `field:`, `attribute:`, `property:`,
+`text: true`, or `style:`. Attributes describe markup and return `null` when absent; properties
 describe live state. Text uses `innerText`, so hidden content is omitted and rendered
 whitespace rules apply. `field:` is a closed lookup, never a heuristic:
 
@@ -1433,6 +1612,7 @@ whitespace rules apply. `field:` is a closed lookup, never a heuristic:
 | --- | --- |
 | `checked`, `value`, `disabled` | DOM property |
 | `text` | `innerText` |
+| `rect` | bounding rect object (see below) |
 | `href`, `class`, `id`, `title`, `alt` | HTML attribute |
 | `aria-*`, `data-*` | HTML attribute |
 
@@ -1453,10 +1633,23 @@ each and `console_error_count`. Console levels are facts, not verdicts.
 Assert `complete == true` before treating zero counts as absence; overflow
 sets `truncated` and makes `complete` false. Registered secrets are masked.
 
+**Geometry and computed style (#580).** `field: rect` returns
+`{ x, y, width, height, top, right, bottom, left, scroll_x, scroll_y }` in CSS px.
+The first eight are `getBoundingClientRect()` relative to the element's own document
+viewport (the frame viewport for `frame:` targets); `scroll_x` / `scroll_y` are that
+document's `scrollX` / `scrollY`, so document coordinates are `x + scroll_x`.
+`style: <css-property>` returns `getComputedStyle(el).getPropertyValue(<property>)` as a
+string with units, for example `rgb(17, 17, 17)` or `16px`; an empty property name is
+invalid, and `style` is exclusive with the other sources. Both sample once at step
+execution, with no waiting beyond locator resolution, and honor `all: true` and the
+single-match rule. Thresholds live in VD assertions, for example
+`$steps.card.outputs.value.width <= 390`. The executed example is
+`verifications/geometry-example/duhem.yml`.
+
 **API actions**
 
-- `api/call` — make an HTTP request actively
-- `api/observe` — passively observe an HTTP request the UI triggers (network sniffing)
+- `api/call` — make an HTTP request actively; outputs `status`, `body`, `body_text`, `body_bytes` and `headers`
+- `api/observe` — passively observe an HTTP request the UI triggers (network sniffing); outputs `method`, `url`, `status`, `body`, `body_text`, `body_bytes`, `headers`, `request_body` and `request_headers`
 - `api/poll` — re-hit an endpoint until a response condition holds or a timeout elapses
 - `api/stream` — follow an open-ended SSE / `text/event-stream` from an in-progress source, collecting ordered events until a terminal condition (`until_event` / `max_events` / server close) or the `timeout:` budget; outputs `events` / `event_count` / `last_event` for mechanical assertion
 
@@ -1472,9 +1665,12 @@ result as absence: it is false if recording began too late or the bounded buffer
 was truncated. `truncated` reports buffer overflow. Without a window the legacy
 first matching response behavior remains unchanged.
 
+Both response-side actions declare their outputs in the catalog, so `$steps.<id>.outputs.<name>` resolves without an `outputs:` block. `headers` is an object with lower-case names; reach a hyphen-free header by dotted path (`headers.location`). `body_bytes` is an integer: the payload bytes the client returned after content decoding, before UTF-8-lossy or JSON conversion, excluding headers. It is not the `body_text` character count, `Content-Length` or wire size; an empty body is `0`, and a failed body read is an error, never `0`. `api/call` uses `reqwest` with no decompression feature and sends no `Accept-Encoding`, so nothing decodes `Content-Encoding` there; `api/observe` reads Chromium's decoded `response.body()`. The [executed example](../verifications/response-outputs-example/duhem.yml) asserts `status`, `body_bytes` and a header. (#603)
+
 **Database actions**
 
 - `db/query` — execute a read query, capture rows
+- `db/observe` — poll a read query until a condition holds or a timeout elapses
 - `db/seed` — seed data for setup
 
 **CLI actions**
@@ -1629,7 +1825,7 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 
 **Action Catalog** (`duhem-actions`)
 
-- The built-in `ui/*`, `api/*`, `db/*`, and `cli/*` actions (§10.5) and the `Action` trait they implement
+- The built-in `ui/*`, `api/*`, `db/*`, `cli/*`, and `process/*` actions (§10.5) and the `Action` trait they implement
 - Closed at v1; the dispatch registry is internal (§10.8)
 
 **Generation Service** (roadmap)

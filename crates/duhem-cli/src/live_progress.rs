@@ -1118,6 +1118,7 @@ criteria:
                 layer: None,
                 flow: None,
                 with: Default::default(),
+                group: None,
             },
         )));
         let active = renderer.board.lines(120, 12).join("\n");
@@ -1344,6 +1345,7 @@ criteria:
                 layer: Some("ui".into()),
                 flow: None,
                 with,
+                group: None,
             },
         )));
         let out = renderer.board.lines(120, 12).join("\n");
@@ -1388,6 +1390,7 @@ criteria:
                 layer: None,
                 flow: None,
                 with: Default::default(),
+                group: None,
             },
         )));
         renderer.terminal.backend_mut().drawn_cells = 0;
@@ -1503,6 +1506,7 @@ criteria:
                 layer: None,
                 flow: None,
                 with: Default::default(),
+                group: None,
             },
         ))
         .unwrap();

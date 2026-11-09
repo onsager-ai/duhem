@@ -284,6 +284,68 @@ async function requireFrames(req) {
   if (deadline !== undefined) req.timeoutMs = remaining()
 }
 
+/**
+ * Identity of an element for `ui/press` `target`. Self-contained: it is
+ * serialized into the page (and interpolated into `ACTIVE_TARGET_EXPR`).
+ * `name` is an approximation of the accessible name (aria-label, then
+ * aria-labelledby text, then trimmed textContent capped at 200 chars).
+ * @param {Element} el
+ */
+function describeElement(el) {
+  const tag = el.tagName.toLowerCase()
+  const clean = (/** @type {string | null | undefined} */ s) => {
+    const t = (s || '').replace(/\s+/g, ' ').trim()
+    return t ? t.slice(0, 200) : null
+  }
+  let role = (el.getAttribute('role') || '').trim().split(/\s+/)[0] || null
+  if (!role) {
+    const type = (el.getAttribute('type') || 'text').toLowerCase()
+    if (tag === 'button') role = 'button'
+    else if (tag === 'a' && el.hasAttribute('href')) role = 'link'
+    else if (tag === 'input') {
+      if (type === 'checkbox') role = 'checkbox'
+      else if (type === 'radio') role = 'radio'
+      else if (['button', 'submit', 'reset', 'image'].includes(type)) role = 'button'
+      else role = 'textbox'
+    } else if (tag === 'select') role = 'combobox'
+    else if (tag === 'textarea') role = 'textbox'
+    else if (/^h[1-6]$/.test(tag)) role = 'heading'
+  }
+  let name = clean(el.getAttribute('aria-label'))
+  if (!name) {
+    const ids = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+    name = clean(
+      ids.map(id => el.ownerDocument.getElementById(id)?.textContent || '').join(' '),
+    )
+  }
+  if (!name) name = clean(el.textContent)
+  return { tag, id: el.id || null, role, name }
+}
+
+// Evaluated in every frame: the focused element when this document has
+// focus and its activeElement is not itself a frame container (so only
+// the deepest focused document reports).
+const ACTIVE_TARGET_EXPR = `(() => {
+  const describe = ${describeElement.toString()}
+  if (!document.hasFocus()) return null
+  const el = document.activeElement
+  if (!el || el.tagName === 'IFRAME' || el.tagName === 'FRAME') return null
+  return describe(el)
+})()`
+
+/** @param {Page} p */
+async function activeTarget(p) {
+  for (const frame of p.frames()) {
+    try {
+      const target = await frame.evaluate(ACTIVE_TARGET_EXPR)
+      if (target) return target
+    } catch {
+      // Detached or navigating frame: it cannot be the receiver.
+    }
+  }
+  return { tag: 'body', id: null, role: null, name: null }
+}
+
 /** @param {any} req */
 async function dispatch(req) {
   await requireFrames(req)
@@ -466,6 +528,55 @@ async function dispatch(req) {
         .locator(req.selector)
         .pressSequentially(req.text, { timeout: req.timeoutMs })
       return null
+
+    case 'press': {
+      // Locator form: the located element is the target; Playwright
+      // focuses it and presses. Page form: the receiver is whatever is
+      // focused right now, sampled before dispatch.
+      if (req.selector) {
+        const started = performance.now()
+        const loc = page(req).locator(req.selector)
+        const target = await loc.evaluate(describeElement, undefined, {
+          timeout: req.timeoutMs,
+        })
+        await loc.press(req.key, {
+          timeout: Math.max(1, req.timeoutMs - (performance.now() - started)),
+        })
+        return target
+      }
+      const target = await activeTarget(page(req))
+      await page(req).keyboard.press(req.key)
+      return target
+    }
+
+    case 'focus':
+      await page(req).locator(req.selector).focus({ timeout: req.timeoutMs })
+      return null
+
+    case 'assertFocus': {
+      // Polls until the single match is (not) focused or the deadline
+      // passes. Focused = own root's activeElement and the document has
+      // focus. Returns { satisfied, matches }; Rust owns the wording of
+      // the ambiguity error.
+      const loc = page(req).locator(req.selector)
+      const deadline = performance.now() + req.timeoutMs
+      for (;;) {
+        const matches = await loc.count()
+        if (matches > 1) return { satisfied: false, matches }
+        if (matches === 1) {
+          const focused = await loc
+            .evaluate(
+              el => el.getRootNode().activeElement === el && el.ownerDocument.hasFocus(),
+              undefined,
+              { timeout: 1000 },
+            )
+            .catch(() => null)
+          if (focused !== null && focused === req.focused) return { satisfied: true, matches }
+        }
+        if (performance.now() >= deadline) return { satisfied: false, matches }
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+    }
 
     case 'selectOption': {
       const by = req.by

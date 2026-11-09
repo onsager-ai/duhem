@@ -135,23 +135,30 @@ pub struct Check {
 impl Check {
     /// Compute the maximum number of actions this check can dispatch.
     ///
-    /// Loaders expand reusable flows before validation, so each current step
-    /// contributes one action, or max × expanded loop-body actions.
+    /// Loaders expand reusable flows before validation. Groups contribute
+    /// the sum of their leaves; loops multiply their body by their ceiling.
     pub fn worst_case_step_count(&self) -> Result<usize, StepCountError> {
-        self.steps.iter().try_fold(0usize, |bound, step| {
-            let count = if step.for_each.is_some() {
-                let max = step.max.ok_or(StepCountError::MissingMax)? as usize;
-                let body_len = if !step.for_each_body.is_empty() {
-                    step.for_each_body.len()
+        fn count(steps: &[crate::Step]) -> Result<usize, StepCountError> {
+            steps.iter().try_fold(0usize, |bound, step| {
+                let body = if !step.for_each_body.is_empty() {
+                    count(&step.for_each_body)?
+                } else if let Some(children) = &step.steps {
+                    count(children)?
                 } else {
-                    step.steps.as_ref().map_or(1, Vec::len)
+                    1
                 };
-                max.checked_mul(body_len).ok_or(StepCountError::Overflow)?
-            } else {
-                1
-            };
-            bound.checked_add(count).ok_or(StepCountError::Overflow)
-        })
+                let step_count = if step.for_each.is_some() {
+                    let max = step.max.ok_or(StepCountError::MissingMax)? as usize;
+                    max.checked_mul(body).ok_or(StepCountError::Overflow)?
+                } else {
+                    body
+                };
+                bound
+                    .checked_add(step_count)
+                    .ok_or(StepCountError::Overflow)
+            })
+        }
+        count(&self.steps)
     }
 }
 
@@ -210,6 +217,15 @@ assertions: ["true"]
         .expect("parse");
 
         assert_eq!(check.worst_case_step_count(), Ok(2));
+    }
+
+    #[test]
+    fn nested_groups_and_loops_count_leaves() {
+        let check: Check = serde_yml::from_str(
+            "id: AC-1.1\nsteps:\n  - steps:\n      - uses: cli/invoke\n      - steps:\n          - uses: cli/invoke\n          - uses: cli/invoke\n  - for_each: $inputs.rows\n    max: 4\n    steps:\n      - steps:\n          - uses: cli/invoke\n          - uses: cli/invoke\nassertions: [\"true\"]\n",
+        )
+        .expect("parse");
+        assert_eq!(check.worst_case_step_count(), Ok(11));
     }
 
     #[test]

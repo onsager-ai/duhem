@@ -17,7 +17,7 @@ use duhem_evidence::{EventPayload, EvidenceWriter, StepOutcome, StepPhase};
 use duhem_schema::Step;
 
 use crate::engine::context::RunState;
-use crate::engine::gating::{evaluate as evaluate_gate, step_failed};
+use crate::engine::gating::{GroupGates, evaluate as evaluate_gate, step_failed};
 use crate::engine::registry::{ActionRegistry, Dispatch};
 use crate::engine::runner::{
     CleanupFailure, EngineError, StepEvidence, display_step_label, implicit_judgment_for_step,
@@ -73,6 +73,7 @@ pub(crate) async fn process_lifecycle_step(
     contexts: Option<&super::session::CheckContexts>,
     aborted: &mut Option<AbortReason>,
     failed_by: &mut Option<String>,
+    groups: &mut GroupGates,
     stored_error: &mut Option<EngineError>,
     cleanup: &mut Vec<CleanupFailure>,
 ) -> Result<(), EngineError> {
@@ -89,10 +90,19 @@ pub(crate) async fn process_lifecycle_step(
     // `condition`/`operands` the same way any other gated step does
     // (#511's shrunken-claim-set reporting depends on this).
     let ctx = loop_run_context(run, loop_ctx);
-    let (gate, condition_error) = match evaluate_gate(step, idx, failed_by.as_deref(), &ctx) {
+    let (gate, condition_error) = match evaluate_gate(step, idx, failed_by.as_deref(), groups, &ctx)
+    {
         Ok(gate) => (gate, None),
         Err(error) => (None, Some(error)),
     };
+    // A dispatched call to a flow with `cleanup:` registers it on this scope
+    // (#615); one gated off by `if:` registers nothing.
+    if gate.is_none()
+        && phase == StepPhase::Setup
+        && let Some(at) = scope.registration_site()
+    {
+        run.register_flow_cleanups(step, &at);
+    }
     let cleanup_step = phase == StepPhase::Teardown || (failed_by.is_some() && gate.is_none());
     // Setup steps see the run state (inputs, env, uuid, plus any
     // outputs already published by earlier setup steps in this
@@ -289,6 +299,7 @@ pub(crate) async fn run_for_each_step(
     contexts: Option<&super::session::CheckContexts>,
     aborted: &mut Option<AbortReason>,
     failed_by: &mut Option<String>,
+    groups: &mut GroupGates,
     stored_error: &mut Option<EngineError>,
     cleanup: &mut Vec<CleanupFailure>,
 ) -> Result<(), EngineError> {
@@ -313,10 +324,11 @@ pub(crate) async fn run_for_each_step(
     // every other step gate goes through (see `process_lifecycle_step`),
     // not a second hand-rolled evaluation.
     let gate_ctx = crate::engine::context::RunContext::new(run);
-    let (gate, condition_error) = match evaluate_gate(step, idx, failed_by.as_deref(), &gate_ctx) {
-        Ok(gate) => (gate, None),
-        Err(error) => (None, Some(error)),
-    };
+    let (gate, condition_error) =
+        match evaluate_gate(step, idx, failed_by.as_deref(), groups, &gate_ctx) {
+            Ok(gate) => (gate, None),
+            Err(error) => (None, Some(error)),
+        };
     let cleanup_step = phase == StepPhase::Teardown || failed_by.is_some();
 
     writer
@@ -330,6 +342,7 @@ pub(crate) async fn run_for_each_step(
             check_id: check_id.clone(),
             criterion_id: criterion_id.clone(),
             flow: None,
+            group: crate::engine::flow::group_path(step),
         })
         .await?;
 
@@ -518,6 +531,8 @@ pub(crate) async fn run_for_each_step(
             element,
             iteration: iteration as u32,
         };
+        // Body groups are entered afresh in every iteration.
+        let mut iteration_groups = GroupGates::default();
         for body_step in &step.for_each_body {
             process_lifecycle_step(
                 writer,
@@ -534,11 +549,20 @@ pub(crate) async fn run_for_each_step(
                 contexts,
                 aborted,
                 failed_by,
+                &mut iteration_groups,
                 stored_error,
                 cleanup,
             )
             .await?;
         }
+        // Each iteration's cleanups keep that iteration's outputs and element.
+        run.snapshot_flow_cleanups(
+            &crate::engine::flow_cleanup::Snapshot {
+                outputs: run.setup_outputs.clone(),
+                binding: as_name.map(|name| (name.to_string(), element.clone())),
+            },
+            true,
+        );
     }
     Ok(())
 }
@@ -574,6 +598,7 @@ async fn append_setup_started(
             check_id,
             criterion_id,
             flow,
+            group: crate::engine::flow::group_path(step),
         })
         .await?;
     Ok(())
@@ -740,16 +765,15 @@ async fn invoke_and_record(
             )
         })
         .flatten();
-    let judgment_detail =
-        if matches!(scope, HookScope::FixtureDown(..)) && matches!(outcome, Outcome::Ok) {
-            judgment.as_ref().and_then(|outcome| outcome.detail.clone())
-        } else {
-            None
-        };
+    let judgment_detail = if scope.judges_cleanup() && matches!(outcome, Outcome::Ok) {
+        judgment.as_ref().and_then(|outcome| outcome.detail.clone())
+    } else {
+        None
+    };
     let action_detail = action_detail.or(judgment_detail);
     let judgment = judgment.map(|outcome| outcome.state);
     let failed = step_failed(&outcome, judgment)
-        || (matches!(scope, HookScope::FixtureDown(..))
+        || (scope.judges_cleanup()
             && judgment.is_some_and(|state| state != duhem_judge::VerdictState::Pass));
     Ok((outcome, failed, action_detail, judgment))
 }

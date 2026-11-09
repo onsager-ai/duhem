@@ -48,6 +48,8 @@ composition.
 | 14 | [`lifecycle-call-example`](lifecycle-call-example/) | A direct `call:` to a reusable flow in leaf `setup:`/`teardown:` and check `teardown:` — no `for_each:` wrapper — with the call's declared output read back via `$setup.<call-id>.outputs.<name>` | local DB (`db/query` → sqlite `:memory:`) | #526 |
 | 15 | [`lifecycle-report-example`](lifecycle-report-example/) | Recorded lifecycle reporting — a passing setup, a per-check fixture, and a deliberately failing teardown remain visible by scope without changing the passing verdict | SQLite in memory (`db/query`) | #524 |
 | 16 | [`check-conditions-example`](check-conditions-example/) | Value-based `if:` on check steps — a true condition runs the step, a false one gates it and the gated judging step is counted in the report | SQLite in memory (`db/query`, `db/observe`) | #440 |
+| 17 | [`flow-cleanup-example`](flow-cleanup-example/) | A flow's `cleanup:` half — registered when a check calls the flow and run LIFO when the check ends, so a temporary resource is removed without the caller remembering | local process (`cli/invoke`) | #615 |
+| 18 | [`step-groups-example`](step-groups-example/) | Group steps with `steps:` — one label, one entry-time `if:` and one shared failure gate | local process (`cli/invoke`) | #614 |
 
 The CLI self-verification suite also carries the leaf-scoped cleanup
 worked example at
@@ -59,7 +61,18 @@ The [session cascade example](session-cascade-example/) demonstrates inherited
 seeds, signed-out opt-out, and named flow selectors. It is validated offline;
 execution requires a browser and operator-provided application inputs. (#548)
 
+The [response outputs example](response-outputs-example/duhem.yml) asserts
+`api/call`'s declared `status`, `headers` and `body_bytes` (decoded payload
+bytes) against a local HTTP server in
+`crates/duhem-runtime/tests/response_outputs.rs`. (#603)
+
 ## Self-verification suites — Duhem's dogfood
+
+The [keyboard and focus example](keyboard-focus-example/duhem.yml)
+demonstrates `ui/focus`, `ui/press` and `expected: focused | not_focused`,
+including a visible-but-unfocused negative control. It is executed against
+a local browser fixture in
+`crates/duhem-runtime/tests/keyboard_focus_smoke.rs` by browser CI. (#580)
 
 The [iframe example](iframe-example/duhem.yml) demonstrates named and
 inline frame locators, assertions and interactions. It is validated

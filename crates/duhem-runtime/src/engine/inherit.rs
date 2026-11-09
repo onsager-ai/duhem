@@ -92,7 +92,7 @@ fn visit_input_refs<F: FnMut(&str)>(expr: &Expr, visit: &mut F) {
 fn walk_with_input_refs<F: FnMut(&str)>(with: &serde_yml::Value, visit: &mut F) {
     match with {
         serde_yml::Value::String(s) => {
-            if s.trim_start().starts_with('$')
+            if duhem_schema::expr::is_expression(s)
                 && let Ok(expr) = duhem_schema::expr::parse(s)
                 && matches!(expr, Expr::Path(_) | Expr::Call { .. })
             {

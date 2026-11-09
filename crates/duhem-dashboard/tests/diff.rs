@@ -58,6 +58,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, screenshot: boo
         layer: Some("ui".into()),
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();

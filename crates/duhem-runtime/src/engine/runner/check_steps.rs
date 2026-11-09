@@ -14,6 +14,7 @@ impl Engine {
         iteration: Option<u32>,
         environment_failed: bool,
         failed_by: &mut Option<String>,
+        groups: &mut GroupGates,
         stored_error: &mut Option<EngineError>,
         cleanup_steps: &mut BTreeSet<usize>,
         step_evidence: &mut [StepEvidence],
@@ -30,7 +31,7 @@ impl Engine {
             // An unresolvable condition makes this check inconclusive
             // rather than aborting the run (#440 R2); see below.
             let (gate, unresolved_condition) =
-                match evaluate_in_check(step, idx, failed_by.as_deref(), ctx) {
+                match evaluate_in_check(step, idx, failed_by.as_deref(), groups, ctx) {
                     Ok(gate) => (gate, None),
                     Err(detail) => (None, Some(detail)),
                 };
@@ -57,9 +58,14 @@ impl Engine {
             // `timeout:` when it doesn't declare its own. A per-step
             // `timeout:` already in the payload wins; this only fills the
             // gap. With no manifest default, the action's built-in
-            // `DEFAULT_TIMEOUT` (5s) remains the last resort.
+            // `DEFAULT_TIMEOUT` (5s) remains the last resort. Actions whose
+            // contract has no `timeout` field never receive one.
             if gate.is_none()
                 && !step.uses_name().starts_with("process/")
+                && self
+                    .registry
+                    .get(step.uses_name())
+                    .is_some_and(|action| action.accepts_timeout())
                 && let Some(default) = self.default_timeout
             {
                 apply_default_timeout(&mut resolved_with, default);
@@ -112,6 +118,18 @@ impl Engine {
                 )
             };
 
+            // A dispatched call to a flow with `cleanup:` registers it on this
+            // check attempt (#615); one gated off by `if:` registers nothing.
+            if gate.is_none() {
+                ctx.run_state().register_flow_cleanups(
+                    step,
+                    &crate::engine::flow_cleanup::RegisteredAt::Check(
+                        criterion_id.to_string(),
+                        check.id.clone(),
+                    ),
+                );
+            }
+
             crate::engine::flow::register_secrets(writer, step, ctx);
 
             writer
@@ -130,6 +148,7 @@ impl Engine {
                         }
                         flow
                     },
+                    group: crate::engine::flow::group_path(step),
                 })
                 .await?;
 

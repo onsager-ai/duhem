@@ -38,8 +38,8 @@ pub use error::ActionError;
 pub use locator::{ExistenceState, Locator};
 pub use playwright::to_selector;
 pub use ui::{
-    AssertElement, AssertUrl, Back, CaptureSession, Click, Extract, Forward, Navigate, Select,
-    Type, Wait, validate_field_source,
+    AssertElement, AssertUrl, Back, CaptureSession, Click, Extract, Focus, Forward, Navigate,
+    Press, Select, Type, Wait, validate_field_source,
 };
 pub use with::TimeoutSpec;
 
@@ -54,6 +54,8 @@ pub fn catalog() -> Vec<ActionContract> {
         Extract.contract(),
         Type.contract(),
         Select.contract(),
+        Press.contract(),
+        Focus.contract(),
         AssertElement.contract(),
         AssertUrl.contract(),
         CaptureSession.contract(),

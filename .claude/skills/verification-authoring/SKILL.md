@@ -280,8 +280,9 @@ Authoring rules:
 - Use role-based locators (`{role: "button", name: "..."}`)
   rather than CSS or XPath — UI churn invalidates the latter
   while role-based selectors track the user-visible affordance.
-- A check that has no `assertions:` is a script, not a check.
-  Reject it.
+- A check with no verdict — neither `assertions:` nor a judging
+  step (see "`assertions:` is optional for a judging step" above) —
+  is a script, not a check. Reject it.
 - The `capture/` output-name prefix is reserved for runner-emitted
   failure evidence (specs #202 / #204): a failing ui check
   automatically records `capture/screenshot` + `capture/dom` +

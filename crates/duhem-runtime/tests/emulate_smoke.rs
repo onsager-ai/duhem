@@ -182,7 +182,7 @@ async fn invalid_emulation_fails_usefully() {
 async fn every_retry_attempt_starts_from_default_viewport_and_color_scheme() {
     let fx = fixture().await;
     let tmp = tempfile::tempdir().unwrap();
-    let defaults = serde_yml::from_str("timeout: 5s\nretry: { max: 1, backoff: linear }").unwrap();
+    let defaults = serde_yml::from_str("retry: { max: 1, backoff: linear }").unwrap();
     let mut engine = engine(RunBrowser::launch(false).await.unwrap(), &tmp)
         .await
         .with_defaults(&defaults);

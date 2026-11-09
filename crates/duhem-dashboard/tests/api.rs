@@ -98,6 +98,7 @@ async fn check_artifact_surfaces_secret_mask_occurrence_counts() {
             layer: Some("api".into()),
             flow: None,
             with: BTreeMap::new(),
+            group: None,
         })
         .await
         .unwrap();
@@ -472,6 +473,7 @@ async fn run_detail_surfaces_teardown_evidence_without_changing_verdict() {
             check_id: None,
             criterion_id: None,
             flow: None,
+            group: None,
         })
         .await
         .unwrap();
@@ -628,6 +630,7 @@ async fn cleanup_step_finish_is_keyed_by_criterion_scope() {
                 check_id: None,
                 criterion_id: Some(criterion_id.into()),
                 flow: None,
+                group: None,
             })
             .await
             .unwrap();
@@ -1159,6 +1162,7 @@ async fn colliding_check_ids_attribute_to_the_first_owner() {
             layer: None,
             flow: None,
             with: BTreeMap::new(),
+            group: None,
         })
         .await
         .unwrap();

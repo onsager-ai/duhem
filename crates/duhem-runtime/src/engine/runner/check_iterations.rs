@@ -31,6 +31,7 @@ impl Engine {
         let mut evidence = vec![StepEvidence::empty(); check.steps.len()];
         let mut cleanup = BTreeSet::new();
         let mut failed_by = None;
+        let mut groups = GroupGates::default();
         let mut stored_error = None;
         let mut gated = 0;
         let mut outcomes = Vec::new();
@@ -53,6 +54,7 @@ impl Engine {
                     None,
                     environment_failed,
                     &mut failed_by,
+                    &mut groups,
                     &mut stored_error,
                     &mut cleanup,
                     &mut evidence,
@@ -66,7 +68,13 @@ impl Engine {
             offset = range.end;
             // Resolve once in the outer context. Bounds are enforced before
             // dispatch, so excess rows are never silently truncated.
-            let gate = match evaluate_in_check(step, range.start, failed_by.as_deref(), ctx) {
+            let gate = match evaluate_in_check(
+                step,
+                range.start,
+                failed_by.as_deref(),
+                &mut groups,
+                ctx,
+            ) {
                 Ok(gate) => gate,
                 Err(detail) => {
                     // #440 R2: an unresolvable loop condition makes the
@@ -167,6 +175,7 @@ impl Engine {
             }
             let outer = ctx.clone();
             let outer_failed = failed_by.clone();
+            let outer_groups = groups.clone();
             let outer_cleanup = cleanup.clone();
             let iteration_count = items.len();
             for (local_ordinal, element) in items.into_iter().enumerate() {
@@ -175,6 +184,7 @@ impl Engine {
                     *ctx = ctx.clone().with_loop_binding(name, element);
                 }
                 failed_by = outer_failed.clone();
+                groups = outer_groups.clone();
                 cleanup = outer_cleanup.clone();
                 for idx in range.clone() {
                     evidence[idx] = StepEvidence::empty();
@@ -189,6 +199,7 @@ impl Engine {
                     Some(ordinal),
                     environment_failed,
                     &mut failed_by,
+                    &mut groups,
                     &mut stored_error,
                     &mut cleanup,
                     &mut evidence,
@@ -232,6 +243,7 @@ impl Engine {
             }
             *ctx = outer;
             failed_by = outer_failed;
+            groups = outer_groups;
             cleanup = outer_cleanup;
         }
         writer.set_session(None);

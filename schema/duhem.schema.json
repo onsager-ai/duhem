@@ -718,7 +718,7 @@
           ]
         },
         "steps": {
-          "description": "Inline multi-step loop body — one of the three `for_each:` body forms alongside `uses:` and `call:` (exactly one required). Recursive in the type so `secret_outputs:`/`outputs:`/`if:` etc. are never duplicated onto a separate loop-body type, but capped at depth 1 by validation: a step inside this list may not itself carry `for_each:` or `steps:`. Also rejected without an enclosing `for_each:`.",
+          "description": "Inline multi-step body. With `for_each:` it is one of the three loop body forms alongside `uses:` and `call:`; without it the step is a group (#614), a scope and label over its children that the loader lowers into the enclosing sequence. Exactly one of `uses:`, `call:` or `steps:` is required. Recursive in the type so `secret_outputs:`/`outputs:`/`if:` etc. are never duplicated onto a separate body type; loop nesting is capped at 1 by validation, so no step anywhere under a `for_each:` may itself carry `for_each:`.",
           "items": {
             "$ref": "#/definitions/Step"
           },

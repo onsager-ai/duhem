@@ -14,6 +14,7 @@ impl Engine {
         iteration: Option<u32>,
         environment_failed: bool,
         failed_by: &mut Option<String>,
+        groups: &mut GroupGates,
         stored_error: &mut Option<EngineError>,
         cleanup_steps: &mut BTreeSet<usize>,
         step_evidence: &mut [StepEvidence],
@@ -30,7 +31,7 @@ impl Engine {
             // An unresolvable condition makes this check inconclusive
             // rather than aborting the run (#440 R2); see below.
             let (gate, unresolved_condition) =
-                match evaluate_in_check(step, idx, failed_by.as_deref(), ctx) {
+                match evaluate_in_check(step, idx, failed_by.as_deref(), groups, ctx) {
                     Ok(gate) => (gate, None),
                     Err(detail) => (None, Some(detail)),
                 };
@@ -130,6 +131,7 @@ impl Engine {
                         }
                         flow
                     },
+                    group: crate::engine::flow::group_path(step),
                 })
                 .await?;
 

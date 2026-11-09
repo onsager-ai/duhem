@@ -57,9 +57,14 @@ impl Engine {
             // `timeout:` when it doesn't declare its own. A per-step
             // `timeout:` already in the payload wins; this only fills the
             // gap. With no manifest default, the action's built-in
-            // `DEFAULT_TIMEOUT` (5s) remains the last resort.
+            // `DEFAULT_TIMEOUT` (5s) remains the last resort. Actions whose
+            // contract has no `timeout` field never receive one.
             if gate.is_none()
                 && !step.uses_name().starts_with("process/")
+                && self
+                    .registry
+                    .get(step.uses_name())
+                    .is_some_and(|action| action.accepts_timeout())
                 && let Some(default) = self.default_timeout
             {
                 apply_default_timeout(&mut resolved_with, default);

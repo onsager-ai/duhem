@@ -426,3 +426,46 @@ criteria:
 
 #[path = "session_injection_smoke/cascade.rs"]
 mod cascade;
+
+/// #632: a suite `defaults.timeout` must not be injected into an action
+/// whose `with:` has no `timeout` field.
+#[tokio::test]
+#[ignore = "requires Playwright Chromium; run with just test browser-actions"]
+async fn capture_session_runs_under_a_suite_default_timeout() {
+    let fixture = start_fixture().await;
+    let def = VerificationDefinition::from_yaml_str(
+        r#"
+verification: Session capture under a suite default timeout
+inputs:
+  login_url: { type: string }
+criteria:
+  - id: AC-1
+    description: Capturing the session does not reject the default timeout.
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.login_url }
+          - uses: ui/capture-session
+            with: {}
+          - uses: ui/assert-element
+            with: { locator: { role: heading, name: Login }, expected: visible }
+"#,
+    )
+    .expect("parse");
+    duhem_schema::validate(&def).expect("validate");
+    let defaults: duhem_schema::ManifestDefaults = serde_yml::from_str("timeout: 5s").unwrap();
+    let browser = RunBrowser::launch(false).await.expect("launch chromium");
+    let mut inputs = BTreeMap::new();
+    inputs.insert(
+        "login_url".to_string(),
+        serde_json::Value::String(format!("http://{}/login", fixture.addr)),
+    );
+    let verdict = Engine::new()
+        .with_browser(browser)
+        .with_defaults(&defaults)
+        .run(&def, inputs)
+        .await
+        .expect("engine.run");
+    assert_eq!(verdict.state, VerdictState::Pass, "verdict = {verdict:?}");
+}

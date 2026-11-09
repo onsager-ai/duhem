@@ -887,6 +887,7 @@ criteria:
             with:
               command: [$inputs.duhem_bin, run, verifications/duhem-cli/fixtures/step-groups-gate.yml, --reporter, json, --no-live, --db, "$runtime.format('{}/.duhem/step-groups-gate.db', $inputs.repo_dir)"]
               cwd: $inputs.repo_dir
+              env: { DUHEM_PARENT_RUN_ID: "" }
               timeout: 120s
           - id: evidence
             uses: db/query

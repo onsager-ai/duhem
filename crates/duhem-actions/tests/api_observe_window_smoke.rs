@@ -26,27 +26,27 @@ use tokio::task::JoinHandle;
 const PAGE: &str = r#"<!doctype html>
 <html><head><title>window-fixture</title></head>
 <body><main>
-<script>fetch('/pre')</script>
-<button onclick="fetch('/slow'); fetch('/fast')">ooo</button>
-<button onclick="fetch('/fast'); fetch('/fast')">dup</button>
-<button onclick="fetch('/hop1')">redirect</button>
+<script>
+const get = (u) => fetch(u).then((r) => r.text());
+get('/pre')
+</script>
+<button onclick="get('/slow'); get('/fast')">ooo</button>
+<button onclick="get('/fast'); get('/fast')">dup</button>
+<button onclick="get('/hop1')">redirect</button>
 <button onclick="
   const c = new AbortController();
   fetch('/hang', { signal: c.signal }).catch(() => {});
   setTimeout(() => c.abort(), 100)">abort</button>
-<button onclick="setTimeout(() => fetch('/late'), 800)">late</button>
-<button onclick="for (let i = 0; i < 10; i++) fetch('/many?i=' + i)">many</button>
+<button onclick="setTimeout(() => get('/late'), 800)">late</button>
+<button onclick="for (let i = 0; i < 10; i++) get('/many?i=' + i)">many</button>
 </main></body></html>"#;
 
 fn ok() -> impl IntoResponse {
-    (StatusCode::OK, [(header::CACHE_CONTROL, "no-store")], "ok")
+    (StatusCode::OK, "ok")
 }
 
 fn redirect(to: &'static str) -> impl IntoResponse {
-    (
-        StatusCode::FOUND,
-        [(header::LOCATION, to), (header::CACHE_CONTROL, "no-store")],
-    )
+    (StatusCode::FOUND, [(header::LOCATION, to)])
 }
 
 struct Fixture {
@@ -433,6 +433,6 @@ async fn legacy_mode_without_window_keeps_first_match_outputs() {
     assert_eq!(r.outputs["status"], 200);
     assert_eq!(r.outputs["body_text"], "ok");
     for windowed in ["count", "requests", "window", "complete", "truncated"] {
-        assert!(r.outputs.get(windowed).is_none(), "{windowed} leaked");
+        assert!(!r.outputs.contains_key(windowed), "{windowed} leaked");
     }
 }

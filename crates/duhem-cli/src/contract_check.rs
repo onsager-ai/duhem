@@ -25,9 +25,6 @@ use duhem_schema::{
 pub(crate) fn field_errors(def: &VerificationDefinition) -> Vec<String> {
     let mut errs = Vec::new();
     for block in duhem_schema::step_walk::step_blocks(def) {
-        if block.site.starts_with("criterion `") && block.check.is_none() {
-            continue;
-        }
         for (index, step) in block.steps.iter().enumerate() {
             let site = block.step_site(index);
             check_step(step, &site, &mut errs);

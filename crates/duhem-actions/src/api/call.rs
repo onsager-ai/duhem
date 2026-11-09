@@ -14,18 +14,25 @@
 //! - `body`: parsed JSON value when `Content-Type` starts with
 //!   `application/json`; `null` otherwise.
 //! - `body_text`: raw response bytes as UTF-8 (lossy).
-//! - `headers`: response headers as a JSON object (values rendered
-//!   via UTF-8 lossy from the raw header bytes so non-ASCII /
-//!   opaque values are still represented).
+//! - `body_bytes`: integer count of the payload bytes the client
+//!   returned: the length of `reqwest`'s `bytes()` result, before the
+//!   UTF-8-lossy/JSON conversion and excluding headers. It is not the
+//!   `body_text` character count, `Content-Length` or wire size. An
+//!   empty body is `0`; a failed body read is an error, never `0`.
+//!   Chunked transfer framing is removed by `reqwest`/`hyper`. The
+//!   workspace enables no `reqwest` decompression feature (`gzip`,
+//!   `brotli`, `deflate`) and the client sends no `Accept-Encoding`,
+//!   so no layer decodes `Content-Encoding` here: a server that
+//!   compresses anyway is counted as the bytes received.
+//! - `headers`: response headers as a JSON object with lower-case
+//!   names (values rendered via UTF-8 lossy from the raw header bytes
+//!   so non-ASCII / opaque values are still represented).
 //!
-//! The runtime evaluator (`duhem-runtime` issue #15) only records
-//! *scalar* outputs into the expression context — JSON object and
-//! array values, including `body` (when parsed as JSON) and
-//! `headers`, land in the evidence trace but are not yet reachable
-//! from `$steps.<id>.outputs.<name>` in an assertion. Plan for v1
-//! assertions over the scalar outputs (`status`, `body_text`);
-//! nested navigation into `body` requires an evaluator extension
-//! that is its own spec.
+//! All five are declared in the action contract, so
+//! `$steps.<id>.outputs.<name>` resolves without an `outputs:` block.
+//! Nested values are reachable by dotted path (`headers.location`,
+//! `body.data`); header names containing `-` need the bracket-key
+//! grammar, which is not implemented yet (#603 P2).
 //!
 //! Template substitution in `Step.with` resolves whole-string
 //! `$inputs.<name>` and `$runtime.<helper>()` references; it does
@@ -165,7 +172,7 @@ impl Action for Call {
                 FieldSpec::optional("body"),
                 FieldSpec::optional("timeout"),
             ],
-            outputs: vec!["status", "body", "body_text"],
+            outputs: vec!["status", "body", "body_text", "body_bytes", "headers"],
             secret_outputs: vec![],
             example: "- uses: api/call\n  with: { method: GET, url: https://example.com }\n# then assert directly: $steps.<id>.outputs.status == 200 (no outputs: block)",
         }
@@ -291,6 +298,7 @@ pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
         .with_output("status", serde_json::Value::from(status))
         .with_output("body", body_json)
         .with_output("body_text", serde_json::Value::String(body_text))
+        .with_output("body_bytes", serde_json::Value::from(bytes.len()))
         .with_output(
             "headers",
             serde_json::Value::Object(
@@ -776,5 +784,119 @@ timeout: 2s
         // status field is the spec-confirmed shape.
         assert_eq!(r.outcome, crate::action::Outcome::Ok);
         assert_eq!(r.outputs.get("status").and_then(|v| v.as_u64()), Some(500));
+    }
+
+    /// One-shot raw HTTP/1.1 server: reads the request head, writes
+    /// `response` verbatim, closes. Lets tests control framing
+    /// (chunked, pre-compressed payloads) that axum would normalize.
+    async fn start_raw(response: Vec<u8>) -> Fixture {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let mut head = Vec::new();
+            while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = sock.read(&mut buf).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                head.extend_from_slice(&buf[..n]);
+            }
+            sock.write_all(&response).await.unwrap();
+            let _ = sock.shutdown().await;
+        });
+        Fixture {
+            addr,
+            _server: server,
+        }
+    }
+
+    async fn body_bytes_of(fx: &Fixture) -> ActionResult {
+        execute(parse_with(&format!(
+            r#"{{ method: GET, url: "{}", timeout: 2s }}"#,
+            url(fx, "/")
+        )))
+        .await
+        .unwrap()
+    }
+
+    fn served(path_body: &'static [u8], content_type: &'static str) -> Router {
+        Router::new().route(
+            "/",
+            axum::routing::get(move || async move {
+                (
+                    StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, content_type)],
+                    axum::body::Bytes::from_static(path_body),
+                )
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn body_bytes_counts_utf8_bytes_not_characters() {
+        let fx = start(served("é".as_bytes(), "text/plain; charset=utf-8")).await;
+        let r = body_bytes_of(&fx).await;
+        assert_eq!(r.outputs["body_bytes"], serde_json::json!(2));
+        // Existing outputs keep their shapes.
+        assert_eq!(r.outputs["status"], serde_json::json!(200));
+        assert_eq!(r.outputs["body_text"], serde_json::json!("é"));
+        assert!(r.outputs["body"].is_null());
+        assert_eq!(
+            r.outputs["headers"]["content-type"],
+            serde_json::json!("text/plain; charset=utf-8")
+        );
+    }
+
+    #[tokio::test]
+    async fn body_bytes_of_empty_body_is_zero() {
+        let fx = start(served(b"", "text/plain")).await;
+        let r = body_bytes_of(&fx).await;
+        assert_eq!(r.outputs["body_bytes"], serde_json::json!(0));
+        assert_eq!(r.outputs["body_text"], serde_json::json!(""));
+    }
+
+    #[tokio::test]
+    async fn body_bytes_counts_binary_payload_before_lossy_conversion() {
+        let fx = start(served(&[0xff, 0x00, 0xfe, 0x80], "application/octet-stream")).await;
+        let r = body_bytes_of(&fx).await;
+        assert_eq!(r.outputs["body_bytes"], serde_json::json!(4));
+        // Lossy conversion changes the text length; the byte count does not.
+        assert_ne!(r.outputs["body_text"].as_str().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn body_bytes_excludes_chunked_framing() {
+        let mut resp = b"HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n".to_vec();
+        resp.extend_from_slice(b"transfer-encoding: chunked\r\nconnection: close\r\n\r\n");
+        resp.extend_from_slice(b"3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n");
+        let fx = start_raw(resp).await;
+        let r = body_bytes_of(&fx).await;
+        assert_eq!(r.outputs["body_bytes"], serde_json::json!(5));
+        assert_eq!(r.outputs["body_text"], serde_json::json!("abcde"));
+    }
+
+    #[tokio::test]
+    async fn body_bytes_counts_gzip_payload_as_received_without_decompression() {
+        // `gzip` of "hello hello hello hello" (23 bytes decoded, 28 gzipped).
+        // No reqwest decompression feature is enabled, so nothing decodes
+        // `Content-Encoding`: the count is the bytes the client returned.
+        const GZIP: [u8; 28] = [
+            0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0xcb, 0x48, 0xcd, 0xc9,
+            0xc9, 0x57, 0xc8, 0x40, 0x27, 0x01, 0xe3, 0x51, 0x3d, 0x8d, 0x17, 0x00, 0x00, 0x00,
+        ];
+        let mut resp = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-encoding: gzip\r\n\
+             content-length: {}\r\nconnection: close\r\n\r\n",
+            GZIP.len()
+        )
+        .into_bytes();
+        resp.extend_from_slice(&GZIP);
+        let fx = start_raw(resp).await;
+        let r = body_bytes_of(&fx).await;
+        assert_eq!(r.outputs["body_bytes"], serde_json::json!(28));
+        assert_eq!(r.outputs["headers"]["content-encoding"], serde_json::json!("gzip"));
     }
 }

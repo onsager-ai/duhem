@@ -57,3 +57,17 @@ accepted. A cleanup failure makes the effective run verdict fail, preserves
 the original body judgment, and retains the failure as required cleanup
 evidence. Explicitly diagnostic cleanup retains its failure evidence while
 leaving the body verdict in control of acceptance.
+
+## AC-18 — Flow cleanup gates acceptance by its policy
+
+A flow's `cleanup:` is registered when a call to it is entered and runs when
+the enclosing scope ends. A required cleanup failure makes the effective run
+verdict fail while preserving the body judgment and retaining the failure as
+required cleanup evidence. A flow declaring `cleanup_policy: diagnostic_only`
+keeps the failure visible without changing the run verdict.
+
+## AC-19 — Step groups share one failure gate
+
+A failure inside a step group gates later default steps outside it, while a
+group with `if: failure` still runs. The run fails, and its recorded evidence
+shows the later default step skipped and the diagnostics group's step executed.

@@ -233,6 +233,50 @@ Authoring rules:
   judge input; an authored output under `capture/` is rejected at
   validate time.
 
+#### Group steps under one label, condition or session
+
+Every step declares exactly one of `uses:`, `call:` or `steps:`;
+`for_each:` is a modifier that repeats it. A step with `steps:` is a
+group: a label and a scope, not a boundary in the sequence.
+
+```yaml
+steps:
+  - id: prepare
+    description: Prepare the workspace
+    steps:
+      - { id: mk, uses: cli/invoke, with: { command: [sh, -c, "printf ok"] } }
+      - { id: chk, uses: cli/invoke, with: { command: [sh, -c, "true"] } }
+  - id: diagnostics
+    if: failure
+    steps:
+      - { uses: cli/invoke, with: { command: [sh, -c, "echo diag"] } }
+```
+
+- A group may carry `id:` (a label only), `description:`, `if:` and
+  `session:`. It takes no `with:`, `outputs:`, `secret_outputs:`, `as:`
+  or `max:` unless it is also a `for_each:` step. Groups work wherever
+  steps do: check `steps:`, `setup:`/`teardown:`, flow bodies, fixture
+  `up:`/`down:`.
+- The group's `if:` (`success | always | failure`, or a value
+  expression) is evaluated once, when the group is entered. If false,
+  every step inside is recorded as skipped and names the group as the
+  cause. Steps inside keep their own `if:`; a group's `if: always` or
+  `if: failure` is also the default for inner steps that declare none.
+- Failure state is shared. A failure inside a group gates later default
+  steps both inside and after it, and `if: failure` / `if: always` inside
+  a group behave exactly as they do at the top level.
+- Step ids inside a group share the enclosing namespace and must stay
+  unique across the whole tree. `$steps.<id>` names an inner step; a
+  group's own `id:` has no outputs, so `$steps.<group-id>` is a
+  validation error.
+- In a check that declares `sessions:`, `session: <name>` on a group
+  fills every inner `ui/*` step that names none; a step's own `session:`
+  wins.
+- Loops stay one level deep: a `for_each:` body may contain groups, but
+  no step anywhere under a `for_each:` may itself carry `for_each:`.
+  `duhem resolve` reports the worst-case step count as the sum of the
+  steps in the tree.
+
 #### Share locators instead of copying them
 
 For iframe contents, add `frame: { testid: report-shell-iframe }` to
@@ -345,6 +389,53 @@ call's declared outputs through its own accessor —
 `$fixture.<fixture-name>.<call-id>.outputs.<name>` in that fixture's
 own `up:`/`down:`) — never `$steps.*`, which a lifecycle block does
 not resolve.
+
+#### Give a flow its own cleanup
+
+A flow that creates something can remove it too: declare `cleanup:` next
+to `steps:`. Whoever calls the flow gets the cleanup without writing it.
+
+```yaml
+flows:
+  scratch_file:
+    params: { prefix: { type: string } }
+    steps:
+      - id: create
+        uses: cli/invoke
+        with: { command: [sh, -c, 'f=$(mktemp "/tmp/$1.XXXX"); printf %s "$f"', --, $params.prefix] }
+    outputs: { path: $steps.create.outputs.stdout }
+    cleanup:
+      - uses: cli/invoke
+        with: { command: [rm, -f, $steps.create.outputs.stdout] }
+    # cleanup_policy: diagnostic_only   # optional; default is required
+```
+
+- The cleanup is registered when a `call:` to the flow starts running and
+  runs, last registered first, when the scope that made the call ends:
+  a check's `steps:` or `setup:` at the end of that check attempt (so
+  again on every retry), a criterion's `setup:` at the end of the
+  criterion, leaf `setup:` at the end of the run. It runs before that
+  scope's own `teardown:`, in one last-registered-first order with the
+  check's fixtures coming down. It also runs if the run is interrupted.
+  A call skipped by `if:` registers nothing; a body that fails partway
+  still runs its cleanup, so write cleanup steps that tolerate a
+  resource that was never created (`rm -f`).
+- A flow may start with, or be, a `for_each:` step, and its `cleanup:`
+  may loop too (same `max:` rule as everywhere). The call counts as
+  started when its first body step actually runs, so a loop over an
+  empty list registers nothing.
+- A cleanup step reads `$params.*` and the same call's body outputs as
+  `$steps.<body-id>.outputs.*`; nothing else, and callers cannot read
+  cleanup steps. A flow with `cleanup:` cannot be called from
+  `teardown:`, a fixture, or another flow's `cleanup:`.
+- Every cleanup step is attempted even if one fails. By default a
+  failing cleanup makes the run gate `fail` while the check keeps its own
+  verdict; `cleanup_policy: diagnostic_only` keeps the failure visible
+  without failing the run. A failure is a step error, timeout or a
+  judging step that does not pass; a non-zero `exit_code` is data, so
+  judge it with a judging action when it matters.
+- The run report lists each registered cleanup with the flow, call and
+  the scope that registered it, so the implicit registration is visible.
 
 ### 4. The holistic-environment tax — no mocks of the web
 

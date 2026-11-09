@@ -1,0 +1,24 @@
+verification: Diagnostic flow cleanup
+flows:
+  resource:
+    steps:
+      - id: create
+        uses: cli/invoke
+        with: {command: [sh, -c, "true"]}
+    cleanup:
+      - id: release
+        uses: cli/invoke
+        with: {command: [duhem-intentionally-nonexistent-cleanup-command]}
+    cleanup_policy: diagnostic_only
+criteria:
+  - id: CLEANUP
+    description: A failing flow cleanup is reported by its policy.
+    checks:
+      - id: CLEANUP.1
+        steps:
+          - {id: tmp, call: resource}
+          - id: body
+            uses: cli/invoke
+            with: {command: [sh, -c, "true"]}
+        assertions:
+          - $steps.body.outputs.exit_code == 0

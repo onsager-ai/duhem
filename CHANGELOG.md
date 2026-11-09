@@ -29,7 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
-- [additive] `api/call` and `api/observe` declare their response outputs (including `headers`) and add `body_bytes`, the decoded payload byte count. (#603)
+- [additive] `api/call` and `api/observe` declare their response outputs (including `headers`) and add `body_bytes`, the response payload byte count (as received for `api/call`, browser-decoded for `api/observe`). (#603)
 
 ## v0.7.2 — 2026-11-06
 

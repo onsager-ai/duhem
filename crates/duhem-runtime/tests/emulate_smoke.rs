@@ -34,7 +34,7 @@ body { background: #fff; color: #111; }
 <p class="light-only" data-testid="light-theme">Light theme</p>
 <p class="dark-only" data-testid="dark-theme">Dark theme</p>
 <script>new Image().src = '/log?w=' + innerWidth + '&dark=' +
-  matchMedia('(prefers-color-scheme: dark)').matches</script>
+  matchMedia('(prefers-color-scheme: dark)').matches + '&n=' + Math.random()</script>
 </body></html>"#;
 
 struct Fixture {
@@ -57,7 +57,10 @@ async fn fixture() -> Fixture {
             get(move |RawQuery(query): RawQuery| {
                 let sink = sink.clone();
                 async move {
-                    sink.lock().unwrap().push(query.unwrap_or_default());
+                    // Drop the cache-busting `&n=` nonce; keep the probe facts.
+                    let query = query.unwrap_or_default();
+                    let facts = query.split("&n=").next().unwrap_or_default();
+                    sink.lock().unwrap().push(facts.to_string());
                     StatusCode::NO_CONTENT
                 }
             }),
@@ -115,16 +118,29 @@ async fn reads_back_effective_settings_on_blank_page_and_next_context_is_default
         step_index: 0,
     };
     // No navigation yet: the page is still about:blank.
-    let dark = emulate(&ctx, "viewport: { width: 390, height: 844 }\ncolor_scheme: dark").await;
+    let dark = emulate(
+        &ctx,
+        "viewport: { width: 390, height: 844 }\ncolor_scheme: dark",
+    )
+    .await;
     assert!(matches!(dark.outcome, Outcome::Ok));
-    assert_eq!(dark.outputs["viewport"], json!({"width": 390, "height": 844}));
+    assert_eq!(
+        dark.outputs["viewport"],
+        json!({"width": 390, "height": 844})
+    );
     assert_eq!(dark.outputs["color_scheme"], json!("dark"));
     // Each field is independently optional; the other keeps its value.
     let light = emulate(&ctx, "color_scheme: light").await;
-    assert_eq!(light.outputs["viewport"], json!({"width": 390, "height": 844}));
+    assert_eq!(
+        light.outputs["viewport"],
+        json!({"width": 390, "height": 844})
+    );
     assert_eq!(light.outputs["color_scheme"], json!("light"));
     let resized = emulate(&ctx, "viewport: { width: 800, height: 600 }").await;
-    assert_eq!(resized.outputs["viewport"], json!({"width": 800, "height": 600}));
+    assert_eq!(
+        resized.outputs["viewport"],
+        json!({"width": 800, "height": 600})
+    );
     assert_eq!(resized.outputs["color_scheme"], json!("light"));
     // Dark again, so the next context has something to not inherit.
     emulate(&ctx, "color_scheme: dark").await;
@@ -151,7 +167,11 @@ async fn invalid_emulation_fails_usefully() {
         page: Some(&check.page),
         step_index: 0,
     };
-    for bad in ["{}", "viewport: { width: 0, height: 10 }", "color_scheme: sepia"] {
+    for bad in [
+        "{}",
+        "viewport: { width: 0, height: 10 }",
+        "color_scheme: sepia",
+    ] {
         let result = Emulate.invoke(&ctx, &yaml(bad)).await;
         assert!(result.is_err(), "{bad}");
     }
@@ -193,5 +213,10 @@ criteria:
         outcome.verdict
     );
     let log = fx.log.lock().unwrap().clone();
-    assert_eq!(log, vec!["w=1280&dark=false"; 2], "{log:?}");
+    assert_eq!(
+        log,
+        vec!["w=1280&dark=false"; 2],
+        "{log:?}; verdict: {:?}",
+        outcome.verdict
+    );
 }

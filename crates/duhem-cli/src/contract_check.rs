@@ -104,7 +104,7 @@ fn check_step(s: &Step, site: &str, errs: &mut Vec<String>) {
                     // validation (`duhem_schema::validate`).
                     if let Some(v) = val
                         .as_str()
-                        .filter(|v| !v.trim_start().starts_with('$'))
+                        .filter(|v| !duhem_schema::expr::is_expression(v))
                         .filter(|v| !f.enum_values.contains(v))
                     {
                         errs.push(format!(

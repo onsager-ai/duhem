@@ -418,9 +418,9 @@ criteria:
         assert!(!chain.after[0].matches(&block(Some(("res", "one")))));
         assert!(!chain.after[0].matches(&block(None)));
         assert!(
-            chain.after[2].matches(&block(None)),
+            chain.after[4].matches(&block(None)),
             "a teardown entry still matches a plain block"
         );
-        assert!(!chain.after[2].matches(&block(Some(("res", "two")))));
+        assert!(!chain.after[4].matches(&block(Some(("res", "two")))));
     }
 }

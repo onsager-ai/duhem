@@ -5,6 +5,10 @@ pub enum FieldSource {
     Attribute(String),
     Property(String),
     Text,
+    /// `getBoundingClientRect()` plus the document scroll offsets.
+    Rect,
+    /// `getComputedStyle(el).getPropertyValue(<property>)`.
+    Style(String),
 }
 
 #[derive(Debug, Deserialize)]
@@ -18,6 +22,8 @@ struct FieldSourceWire {
     property: Option<String>,
     #[serde(default)]
     text: Option<bool>,
+    #[serde(default)]
+    style: Option<String>,
 }
 
 impl<'de> Deserialize<'de> for FieldSource {
@@ -29,10 +35,11 @@ impl<'de> Deserialize<'de> for FieldSource {
         let count = usize::from(wire.field.is_some())
             + usize::from(wire.attribute.is_some())
             + usize::from(wire.property.is_some())
-            + usize::from(wire.text.is_some());
+            + usize::from(wire.text.is_some())
+            + usize::from(wire.style.is_some());
         if count != 1 {
             return Err(serde::de::Error::custom(
-                "field source requires exactly one of `field`, `attribute`, `property`, or `text`",
+                "field source requires exactly one of `field`, `attribute`, `property`, `text`, or `style`",
             ));
         }
         if let Some(name) = wire.field {
@@ -43,6 +50,12 @@ impl<'de> Deserialize<'de> for FieldSource {
         }
         if let Some(name) = wire.property {
             return Ok(Self::Property(name));
+        }
+        if let Some(name) = wire.style {
+            if name.trim().is_empty() {
+                return Err(serde::de::Error::custom("`style` must name a CSS property"));
+            }
+            return Ok(Self::Style(name));
         }
         match wire.text {
             Some(true) => Ok(Self::Text),
@@ -58,6 +71,7 @@ pub fn resolve_field(name: &str) -> Result<FieldSource, String> {
     match name {
         "checked" | "value" | "disabled" => Ok(FieldSource::Property(name.to_owned())),
         "text" => Ok(FieldSource::Text),
+        "rect" => Ok(FieldSource::Rect),
         "href" | "class" | "id" | "title" | "alt" => Ok(FieldSource::Attribute(name.to_owned())),
         name if name.starts_with("aria-") || name.starts_with("data-") => {
             Ok(FieldSource::Attribute(name.to_owned()))
@@ -74,13 +88,15 @@ impl FieldSource {
             Self::Attribute(_) => "attribute",
             Self::Property(_) => "property",
             Self::Text => "text",
+            Self::Rect => "rect",
+            Self::Style(_) => "style",
         }
     }
 
     pub fn name(&self) -> Option<&str> {
         match self {
-            Self::Attribute(name) | Self::Property(name) => Some(name),
-            Self::Text => None,
+            Self::Attribute(name) | Self::Property(name) | Self::Style(name) => Some(name),
+            Self::Text | Self::Rect => None,
         }
     }
 }
@@ -105,7 +121,7 @@ pub fn validate_field_source(uses: &str, with: &serde_yml::Value) -> Result<(), 
         .as_mapping()
         .ok_or_else(|| "field source must be a mapping".to_string())?;
     let mut only_source = serde_yml::Mapping::new();
-    for name in ["field", "attribute", "property", "text"] {
+    for name in ["field", "attribute", "property", "text", "style"] {
         let key = serde_yml::Value::String(name.into());
         if let Some(value) = source_mapping.get(&key) {
             only_source.insert(key, value.clone());
@@ -130,6 +146,7 @@ mod tests {
             resolve_field("aria-checked").unwrap(),
             FieldSource::Attribute("aria-checked".into())
         );
+        assert_eq!(resolve_field("rect").unwrap(), FieldSource::Rect);
         assert!(resolve_field("mystery").unwrap_err().contains("attribute:"));
     }
 
@@ -138,5 +155,17 @@ mod tests {
         assert!(serde_yml::from_str::<FieldSource>("{}").is_err());
         assert!(serde_yml::from_str::<FieldSource>("field: text\ntext: true").is_err());
         assert!(serde_yml::from_str::<FieldSource>("text: false").is_err());
+    }
+
+    #[test]
+    fn style_is_a_named_exclusive_source() {
+        assert_eq!(
+            serde_yml::from_str::<FieldSource>("style: background-color").unwrap(),
+            FieldSource::Style("background-color".into())
+        );
+        assert!(serde_yml::from_str::<FieldSource>("style: ''").is_err());
+        assert!(serde_yml::from_str::<FieldSource>("style: ' '").is_err());
+        assert!(serde_yml::from_str::<FieldSource>("style: width\nfield: rect").is_err());
+        assert!(serde_yml::from_str::<FieldSource>("style: width\ntext: true").is_err());
     }
 }

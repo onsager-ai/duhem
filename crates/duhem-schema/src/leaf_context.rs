@@ -196,7 +196,7 @@ fn collect_unresolved_page_refs(
     out: &mut BTreeSet<String>,
 ) {
     match value {
-        serde_yml::Value::String(raw) if raw.trim_start().starts_with('$') => {
+        serde_yml::Value::String(raw) if crate::expr::is_expression(raw) => {
             if let Ok(expr) = crate::expr::parse(raw) {
                 collect_unresolved_page_paths(&expr, catalog, out);
             }

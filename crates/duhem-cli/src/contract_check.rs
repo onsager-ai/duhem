@@ -104,7 +104,7 @@ fn check_step(s: &Step, site: &str, errs: &mut Vec<String>) {
                     // validation (`duhem_schema::validate`).
                     if let Some(v) = val
                         .as_str()
-                        .filter(|v| !v.trim_start().starts_with('$'))
+                        .filter(|v| !duhem_schema::expr::is_expression(v))
                         .filter(|v| !f.enum_values.contains(v))
                     {
                         errs.push(format!(
@@ -355,6 +355,21 @@ mod tests {
                 .iter()
                 .any(|e| e.contains("attribute:"))
         );
+    }
+
+    #[test]
+    fn extract_style_must_name_a_property_and_rect_is_a_field() {
+        let empty =
+            vd("          - { uses: ui/extract, with: { locator: { css: h1 }, style: '' } }");
+        assert!(
+            field_errors(&empty)
+                .iter()
+                .any(|e| e.contains("CSS property"))
+        );
+        let ok = vd(
+            "          - { uses: ui/extract, with: { locator: { css: h1 }, style: color } }\n          - { uses: ui/extract, with: { locator: { css: h1 }, field: rect } }",
+        );
+        assert!(field_errors(&ok).is_empty(), "{:?}", field_errors(&ok));
     }
 
     #[test]

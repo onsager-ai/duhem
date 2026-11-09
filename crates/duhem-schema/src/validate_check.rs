@@ -143,6 +143,7 @@ pub(super) fn validate_check(
     // precede the conditioned step, so a forward or self reference
     // resolves like an undeclared step. Same resolver as assertions.
     let mut earlier_outputs: HashMap<&str, HashSet<String>> = HashMap::new();
+    let mut seen_groups: HashSet<u32> = HashSet::new();
     for (idx, &(s, active_loop)) in check_steps.iter().enumerate() {
         if s.uses.as_deref() == Some("api/observe")
             && let Some(window) = s.with.get("window")
@@ -172,6 +173,25 @@ pub(super) fn validate_check(
             walk_checkable_paths(&expr.parsed, &mut |p, arity| {
                 check_path(&condition_scope, p, arity, &expr.raw, &site, location, errs);
             });
+        }
+        // A group's `if:` (#614) reads what precedes the group, so it is
+        // resolved at the first step inside the group, like entry time.
+        for frame in &s.group {
+            if let StepCondition::Expr(expr) = &frame.condition
+                && seen_groups.insert(frame.key)
+            {
+                let condition_scope = PathScope {
+                    step_outputs: &earlier_outputs,
+                    active_loop,
+                    ..scope
+                };
+                let site = RefSite::StepCondition {
+                    step: format!("group `{}`", frame.label),
+                };
+                walk_checkable_paths(&expr.parsed, &mut |p, arity| {
+                    check_path(&condition_scope, p, arity, &expr.raw, &site, None, errs);
+                });
+            }
         }
         if let Some(id) = s.id.as_deref()
             && let Some(outputs) = step_outputs.get(id)
@@ -314,7 +334,7 @@ pub(super) fn validate_check(
         source_path.push(SourcePathSegment::index(idx));
         source_path.push(SourcePathSegment::key("with"));
         crate::source::walk_with_strings(&s.with, &mut source_path, &mut |raw, path| {
-            if raw.trim_start().starts_with('$')
+            if crate::expr::is_expression(raw)
                 && let Err(error) = crate::expr::parse(raw)
             {
                 let location = source_context_matches

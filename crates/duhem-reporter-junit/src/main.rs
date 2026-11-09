@@ -281,6 +281,7 @@ mod tests {
             .collect();
         let passed = LifecycleBlock {
             cleanup_policy: None,
+            registered_by: None,
             phase: LifecyclePhase::Setup,
             scope,
             status: LifecycleStatus::Passed,
@@ -438,6 +439,7 @@ mod cleanup_gate_tests {
         for policy in ["diagnostic_only", "required"] {
             let block = LifecycleBlock {
                 cleanup_policy: Some(policy.into()),
+                registered_by: None,
                 phase: LifecyclePhase::Teardown,
                 scope: vec![],
                 status: LifecycleStatus::Failed,
@@ -449,6 +451,7 @@ mod cleanup_gate_tests {
                     id: None,
                     uses: "api/poll".into(),
                     flow: None,
+                    group: None,
                     outcome: LifecycleStepOutcome::Ok,
                     judgment: Some(VerdictState::Fail),
                     detail: Some("condition remained false".into()),

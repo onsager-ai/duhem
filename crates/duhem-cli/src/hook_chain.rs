@@ -16,7 +16,7 @@
 //! from?" A hook-free check (the common case) resolves to `None` so
 //! callers add no output for it.
 
-use duhem_schema::VerificationDefinition;
+use duhem_schema::{FlowCleanup, Step, VerificationDefinition};
 use duhem_summary::LifecycleBlock;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +25,8 @@ pub struct HookEntry {
     criterion_id: Option<String>,
     check_id: Option<String>,
     fixture_name: Option<String>,
+    /// `(flow, call)` for a flow `cleanup:` registered at this scope (#615).
+    registration: Option<(String, String)>,
 }
 
 impl HookEntry {
@@ -39,15 +41,41 @@ impl HookEntry {
             criterion_id: criterion_id.map(str::to_string),
             check_id: check_id.map(str::to_string),
             fixture_name: fixture_name.map(str::to_string),
+            registration: None,
+        }
+    }
+
+    fn registered(
+        cleanup: &FlowCleanup,
+        site: String,
+        criterion_id: Option<&str>,
+        check_id: Option<&str>,
+    ) -> Self {
+        Self {
+            registration: Some((cleanup.flow.clone(), cleanup.call.clone())),
+            ..Self::new(
+                format!(
+                    "flow `{}` cleanup (call `{}`, registered in {site})",
+                    cleanup.flow, cleanup.call
+                ),
+                criterion_id,
+                check_id,
+                None,
+            )
         }
     }
 
     pub fn matches(&self, block: &LifecycleBlock) -> bool {
-        block.matches_evidence_scope(
-            self.criterion_id.as_deref(),
-            self.check_id.as_deref(),
-            self.fixture_name.as_deref(),
-        )
+        let registered = block
+            .registered_by
+            .as_ref()
+            .map(|r| (r.flow.clone(), r.call.clone()));
+        registered == self.registration
+            && block.matches_evidence_scope(
+                self.criterion_id.as_deref(),
+                self.check_id.as_deref(),
+                self.fixture_name.as_deref(),
+            )
     }
 }
 
@@ -117,6 +145,32 @@ pub fn resolve(
         ));
     }
 
+    // Flow `cleanup:` unwinds LIFO with fixture `down:` at the exit of the
+    // scope that registered it, before that scope's own `teardown:` (#615).
+    // Every expanded step of a call carries its cleanup; the call registers
+    // once, so each is listed once, in registration order.
+    let registered = |steps: &[Step], site: String, c: Option<&str>, k: Option<&str>| {
+        let mut seen = std::collections::BTreeSet::new();
+        steps
+            .iter()
+            .flat_map(|s| s.actions())
+            .flat_map(|s| s.flow_cleanup.iter())
+            .filter(|cleanup| seen.insert((cleanup.flow.clone(), cleanup.call.clone())))
+            .map(|cleanup| HookEntry::registered(cleanup, site.clone(), c, k))
+            .collect::<Vec<_>>()
+    };
+    let check_site = format!("check `{}`", check.id);
+    chain.after.extend(
+        registered(
+            &check.steps,
+            check_site.clone(),
+            Some(&criterion.id),
+            Some(&check.id),
+        )
+        .into_iter()
+        .rev(),
+    );
+
     for name in check.needs.iter().rev() {
         chain.after.push(HookEntry::new(
             format!("fixture `{name}` down"),
@@ -125,6 +179,16 @@ pub fn resolve(
             Some(name),
         ));
     }
+    chain.after.extend(
+        registered(
+            &check.setup,
+            check_site,
+            Some(&criterion.id),
+            Some(&check.id),
+        )
+        .into_iter()
+        .rev(),
+    );
     if !check.teardown.is_empty() {
         chain.after.push(HookEntry::new(
             format!("check `{}` teardown", check.id),
@@ -133,6 +197,16 @@ pub fn resolve(
             None,
         ));
     }
+    chain.after.extend(
+        registered(
+            &criterion.setup,
+            format!("criterion `{}` setup", criterion.id),
+            Some(&criterion.id),
+            None,
+        )
+        .into_iter()
+        .rev(),
+    );
     if !criterion.teardown.is_empty() {
         chain.after.push(HookEntry::new(
             format!("criterion `{}` teardown", criterion.id),
@@ -141,6 +215,11 @@ pub fn resolve(
             None,
         ));
     }
+    chain.after.extend(
+        registered(&def.setup, "leaf setup".to_string(), None, None)
+            .into_iter()
+            .rev(),
+    );
     if !def.teardown.is_empty() {
         chain.after.push(HookEntry::new(
             "leaf teardown".to_string(),
@@ -258,5 +337,90 @@ criteria:
 "#);
         assert_eq!(resolve(&v, "AC-9", "AC-1.1"), None);
         assert_eq!(resolve(&v, "AC-1", "AC-9.9"), None);
+    }
+
+    #[test]
+    fn registered_flow_cleanups_are_listed_lifo_with_their_registration_site() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("leaf.yml");
+        std::fs::write(
+            &path,
+            r#"
+verification: x
+flows:
+  res:
+    params: { name: { type: string } }
+    steps: [{ id: make, uses: cli/invoke }]
+    cleanup: [{ uses: cli/invoke }]
+fixtures:
+  fx: { up: [{ uses: cli/invoke }], down: [{ uses: cli/invoke }] }
+setup: [{ id: leaf, call: res, with: { name: l } }]
+teardown: [{ uses: cli/invoke }]
+criteria:
+  - id: AC-1
+    description: x
+    setup: [{ id: crit, call: res, with: { name: c } }]
+    checks:
+      - id: AC-1.1
+        needs: [fx]
+        setup: [{ id: pre, call: res, with: { name: s } }]
+        steps:
+          - { id: one, call: res, with: { name: a } }
+          - { id: two, call: res, with: { name: b } }
+        teardown: [{ uses: cli/invoke }]
+        assertions: ["true"]
+"#,
+        )
+        .unwrap();
+        let duhem_schema::Loaded::Leaf { definition, .. } = duhem_schema::load(&path).unwrap()
+        else {
+            panic!("expected a leaf");
+        };
+        let chain = resolve(&definition, "AC-1", "AC-1.1").expect("has hooks");
+        let labels: Vec<_> = chain.after.iter().map(|e| e.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            [
+                "flow `res` cleanup (call `two`, registered in check `AC-1.1`)",
+                "flow `res` cleanup (call `one`, registered in check `AC-1.1`)",
+                "fixture `fx` down",
+                "flow `res` cleanup (call `pre`, registered in check `AC-1.1`)",
+                "check `AC-1.1` teardown",
+                "flow `res` cleanup (call `crit`, registered in criterion `AC-1` setup)",
+                "flow `res` cleanup (call `leaf`, registered in leaf setup)",
+                "leaf teardown",
+            ]
+        );
+        let block = |registered_by: Option<(&str, &str)>| LifecycleBlock {
+            cleanup_policy: Some("required".into()),
+            registered_by: registered_by.map(|(flow, call)| duhem_summary::LifecycleRegistration {
+                flow: flow.into(),
+                call: call.into(),
+            }),
+            phase: duhem_summary::LifecyclePhase::Teardown,
+            scope: vec![
+                duhem_summary::LifecycleScopeSegment {
+                    kind: "criterion".into(),
+                    id: "AC-1".into(),
+                },
+                duhem_summary::LifecycleScopeSegment {
+                    kind: "check".into(),
+                    id: "AC-1.1".into(),
+                },
+            ],
+            status: duhem_summary::LifecycleStatus::Passed,
+            started_at: "t".into(),
+            duration_ms: 0,
+            steps: vec![],
+            failing_step: None,
+        };
+        assert!(chain.after[0].matches(&block(Some(("res", "two")))));
+        assert!(!chain.after[0].matches(&block(Some(("res", "one")))));
+        assert!(!chain.after[0].matches(&block(None)));
+        assert!(
+            chain.after[4].matches(&block(None)),
+            "a teardown entry still matches a plain block"
+        );
+        assert!(!chain.after[4].matches(&block(Some(("res", "two")))));
     }
 }

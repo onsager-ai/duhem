@@ -899,6 +899,8 @@ criteria:
                 (select count(*) from events where kind = 'step_finished' and payload like '%skipped%collect%') as collect_skipped
         assertions:
           - $steps.gate.outputs.exit_code != 0
+          - $steps.gate.outputs.stdout == "DEBUG"
+          - $steps.gate.outputs.stderr == "DEBUG"
           - $steps.evidence.outputs.rows[0].skipped_blocked == 1
           - $steps.evidence.outputs.rows[0].ok_steps == 1
           - $steps.evidence.outputs.rows[0].collect_skipped == 0

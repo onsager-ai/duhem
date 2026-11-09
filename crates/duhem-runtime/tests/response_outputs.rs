@@ -49,7 +49,20 @@ async fn run(yaml: &str, base: &str) -> VerdictState {
             )
         })
         .collect();
-    Engine::new().run(&def, inputs).await.unwrap().state
+    // A private store per run: parallel tests must not share the
+    // working-copy evidence DB (SQLite "database is locked").
+    let tmp = tempfile::tempdir().unwrap();
+    let store = std::sync::Arc::new(
+        duhem_evidence::SqliteStore::open(tmp.path().join("duhem.db"))
+            .await
+            .unwrap(),
+    );
+    Engine::new()
+        .with_store(store)
+        .run(&def, inputs)
+        .await
+        .unwrap()
+        .state
 }
 
 #[tokio::test]

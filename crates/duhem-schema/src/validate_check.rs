@@ -324,7 +324,7 @@ pub(super) fn validate_check(
         source_path.push(SourcePathSegment::index(idx));
         source_path.push(SourcePathSegment::key("with"));
         crate::source::walk_with_strings(&s.with, &mut source_path, &mut |raw, path| {
-            if raw.trim_start().starts_with('$')
+            if crate::expr::is_expression(raw)
                 && let Err(error) = crate::expr::parse(raw)
             {
                 let location = source_context_matches

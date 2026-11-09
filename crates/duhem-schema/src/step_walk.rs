@@ -84,18 +84,23 @@ pub fn step_blocks(definition: &VerificationDefinition) -> Vec<StepBlock<'_>> {
         }
     }
     for (name, flow) in &definition.flows {
-        collect(
-            &flow.steps,
-            format!("flow `{name}`"),
-            vec![
-                Segment::key("flows"),
-                Segment::key(name),
-                Segment::key("steps"),
-            ],
-            None,
-            false,
-            &mut blocks,
-        );
+        for (field, steps, site) in [
+            ("steps", &flow.steps, format!("flow `{name}`")),
+            ("cleanup", &flow.cleanup, format!("flow `{name}` cleanup")),
+        ] {
+            collect(
+                steps,
+                site,
+                vec![
+                    Segment::key("flows"),
+                    Segment::key(name),
+                    Segment::key(field),
+                ],
+                None,
+                false,
+                &mut blocks,
+            );
+        }
     }
     for (ci, criterion) in definition.criteria.iter().enumerate() {
         let path = vec![Segment::key("criteria"), Segment::index(ci)];

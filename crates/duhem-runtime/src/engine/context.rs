@@ -36,7 +36,7 @@ use crate::eval::{EvalContext, Value};
 pub struct RunState {
     pub(crate) processes: super::process::Shared,
     pub(crate) process_owner: super::process::Owner,
-    pub(crate) process_cleanup: Vec<super::process::hooks::CleanupHook>,
+    pub(crate) process_cleanup: std::sync::Mutex<Vec<super::process::hooks::CleanupHook>>,
     pub(crate) session: Option<std::sync::Arc<super::session_scope::SessionScope>>,
     pub(crate) context_budget: Option<std::sync::Arc<super::session_scope::ContextBudget>>,
     pub inputs: BTreeMap<String, Value>,
@@ -48,6 +48,9 @@ pub struct RunState {
     /// before any criterion runs; read-only from inside a check.
     pub setup_outputs: BTreeMap<(String, String), Value>,
     pub fixture_outputs: BTreeMap<(String, String, String), Value>,
+    /// Body outputs and loop binding a flow cleanup resolves against while
+    /// it is being drained (#615); `None` outside a flow-cleanup drain.
+    pub(crate) cleanup_view: Option<super::flow_cleanup::Snapshot>,
 }
 
 impl RunState {
@@ -72,7 +75,7 @@ impl RunState {
         Self {
             processes: Default::default(),
             process_owner: super::process::Owner::leaf(),
-            process_cleanup: Vec::new(),
+            process_cleanup: std::sync::Mutex::new(Vec::new()),
             session: None,
             context_budget: None,
             inputs,
@@ -81,6 +84,7 @@ impl RunState {
             uuid,
             setup_outputs: BTreeMap::new(),
             fixture_outputs: BTreeMap::new(),
+            cleanup_view: None,
         }
     }
 
@@ -150,10 +154,24 @@ impl<'r> RunContext<'r> {
     }
 
     pub fn new(run: &'r RunState) -> Self {
+        let (outputs, loop_binding) = run
+            .cleanup_view
+            .as_ref()
+            .map(|view| (view.outputs.clone(), view.binding.clone()))
+            .unwrap_or_default();
         Self {
             run,
-            outputs: BTreeMap::new(),
-            loop_binding: None,
+            outputs,
+            loop_binding,
+        }
+    }
+
+    /// Observed `$steps.*` outputs and the active loop binding, captured for
+    /// a flow cleanup registered while they were in scope (#615).
+    pub(crate) fn snapshot(&self) -> super::flow_cleanup::Snapshot {
+        super::flow_cleanup::Snapshot {
+            outputs: self.outputs.clone(),
+            binding: self.loop_binding.clone(),
         }
     }
 

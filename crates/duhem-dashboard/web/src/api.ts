@@ -95,6 +95,7 @@ export interface LifecycleStep {
 
 export interface LifecycleBlock {
   cleanup_policy?: "required" | "diagnostic_only";
+  registered_by?: { flow: string; call: string };
   phase: "setup" | "teardown";
   scope: LifecycleScopeSegment[];
   status: "passed" | "failed" | "aborted";

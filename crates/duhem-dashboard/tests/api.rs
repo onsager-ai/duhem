@@ -299,6 +299,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
             fixture_name: None,
             check_id: None,
             criterion_id: Some("AC-1".into()),
+            registered_by: None,
         })
         .await
         .unwrap();
@@ -320,6 +321,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
             fixture_name: None,
             check_id: Some("AC-1.1".into()),
             criterion_id: Some("AC-1".into()),
+            registered_by: None,
         })
         .await
         .unwrap();
@@ -341,6 +343,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
             fixture_name: Some("db".into()),
             check_id: Some("AC-1.1".into()),
             criterion_id: None,
+            registered_by: None,
         })
         .await
         .unwrap();
@@ -402,6 +405,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
             fixture_name: Some("AC-2.1".into()),
             check_id: Some("AC-1.1".into()),
             criterion_id: None,
+            registered_by: None,
         })
         .await
         .unwrap();

@@ -511,6 +511,15 @@ fn write_lifecycle_block(
         status_label(block.status),
         block.duration_ms,
     )?;
+    if let Some(registration) = &block.registered_by {
+        writeln!(
+            out,
+            "{indent}  cleanup of flow `{}` (call `{}`) registered at {}",
+            registration.flow,
+            registration.call,
+            block.scope_path(),
+        )?;
+    }
     if let Some(position) = block.failing_step
         && let Some(step) = block.steps.get(position)
     {
@@ -619,9 +628,16 @@ fn fold_lifecycle(events: &[duhem_evidence::Event]) -> Vec<LifecycleBlock> {
                 fixture_name,
                 check_id,
                 criterion_id,
+                registered_by,
                 ..
             } => LifecycleEvent::Started {
                 cleanup_policy: cleanup_policy.as_deref(),
+                registered_by: registered_by.as_ref().map(|r| {
+                    duhem_summary::LifecycleRegistration {
+                        flow: r.flow.clone(),
+                        call: r.call.clone(),
+                    }
+                }),
                 phase: lifecycle_phase(*phase),
                 criterion_id: criterion_id.as_deref(),
                 check_id: check_id.as_deref(),
@@ -900,6 +916,7 @@ mod tests {
     fn built_in_lifecycle_snapshot_handles_unknown_scope_depth() {
         let block = LifecycleBlock {
             cleanup_policy: None,
+            registered_by: None,
             phase: LifecyclePhase::Teardown,
             scope: ["alpha", "beta", "gamma"]
                 .into_iter()

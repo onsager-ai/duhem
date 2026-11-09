@@ -651,6 +651,7 @@ impl Engine {
         // check's own `setup:`. Skipped entirely when empty so the
         // wire shape stays byte-identical for hook-free criteria.
         let mut criterion_setup_abort: Option<(crate::engine::setup::AbortReason, String)> = None;
+        let cleanup_mark = run.flow_cleanup_mark();
         if !criterion.setup.is_empty() {
             let result = crate::engine::setup::run_criterion_setup(
                 writer,
@@ -789,6 +790,19 @@ impl Engine {
             }
         }
 
+        // Flow `cleanup:` registered by this criterion's `setup:` unwinds
+        // LIFO before its `teardown:`.
+        let (mut flow_failures, flow_error) = crate::engine::flow_cleanup::drain(
+            writer,
+            &self.registry,
+            self.browser.as_ref(),
+            run,
+            cleanup_mark,
+            &self.child_process_env(writer.run_id()),
+        )
+        .await;
+        cleanup.append(&mut flow_failures);
+
         // Criterion-level `teardown:` runs once after every check in
         // this criterion — including after a criterion `setup:` abort,
         // and even when `setup:` is empty or dispatched nothing
@@ -810,6 +824,9 @@ impl Engine {
                 failure.step = format!("criterion `{}` teardown: {}", criterion.id, failure.step);
             }
             cleanup.append(&mut teardown_failures);
+        }
+        if let Some(error) = flow_error {
+            return Err(error);
         }
 
         // Criterion-level aggregation, then the manifest's
@@ -835,6 +852,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     include!("runner/cleanup_tests.rs");
+    include!("runner/flow_cleanup_tests.rs");
     use super::*;
     use crate::engine::registry::{ConcreteAction, Dispatch};
     use async_trait::async_trait;

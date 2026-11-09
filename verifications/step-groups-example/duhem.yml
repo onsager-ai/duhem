@@ -12,7 +12,7 @@
 # The failure path (a failing step inside a group skips later default
 # steps while an `if: failure` group runs) cannot sit in a passing suite;
 # the duhem-cli self-verification suite drives it through
-# `verifications/duhem-cli/fixtures/step-groups-gate.yml` (AC-18).
+# `verifications/duhem-cli/fixtures/step-groups-gate.yml` (AC-19).
 
 verification: Nested step groups
 

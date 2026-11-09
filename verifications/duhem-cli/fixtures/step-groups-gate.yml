@@ -1,4 +1,4 @@
-# Negative fixture for AC-18 in ../duhem.yml (spec #614): a step that fails
+# Negative fixture for AC-19 in ../duhem.yml (spec #614): a step that fails
 # inside a group gates the later default step outside it, while an
 # `if: failure` group still runs. Driven by `duhem run`, never gate-run.
 verification: Step-group shared gate

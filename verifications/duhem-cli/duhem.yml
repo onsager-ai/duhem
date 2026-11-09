@@ -869,13 +869,37 @@ criteria:
           - matches: {value: $steps.diagnostic.outputs.stdout, pattern: '"required":false'}
 
   - id: AC-18
+    description: A flow's registered cleanup gates acceptance by its cleanup policy while preserving body judgment.
+    checks:
+      - id: AC-18.1
+        steps:
+          - id: required
+            uses: cli/invoke
+            with:
+              command: [$inputs.duhem_bin, run, crates/duhem-cli/tests/fixtures/cleanup/flow_required.yml, --reporter, json, --no-live]
+              cwd: $inputs.repo_dir
+          - id: diagnostic
+            uses: cli/invoke
+            with:
+              command: [$inputs.duhem_bin, run, crates/duhem-cli/tests/fixtures/cleanup/flow_diagnostic.yml, --reporter, json, --no-live]
+              cwd: $inputs.repo_dir
+        assertions:
+          - $steps.required.outputs.exit_code != 0
+          - matches: {value: $steps.required.outputs.stdout, pattern: '"verdict":"fail"'}
+          - matches: {value: $steps.required.outputs.stdout, pattern: '"body_verdict":"pass"'}
+          - matches: {value: $steps.required.outputs.stdout, pattern: '"required":true'}
+          - $steps.diagnostic.outputs.exit_code == 0
+          - matches: {value: $steps.diagnostic.outputs.stdout, pattern: '"verdict":"pass"'}
+          - matches: {value: $steps.diagnostic.outputs.stdout, pattern: '"required":false'}
+
+  - id: AC-19
     description: >-
       A failure inside a step group gates later default steps, and an
       `if: failure` group still runs. The run fails, and its recorded
       evidence shows the later default step skipped and the diagnostics
       group's step executed.
     checks:
-      - id: AC-18.1
+      - id: AC-19.1
         steps:
           - id: reset
             uses: cli/invoke

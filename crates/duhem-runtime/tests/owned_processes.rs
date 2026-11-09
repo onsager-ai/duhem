@@ -732,6 +732,134 @@ criteria:
     }
 }
 
+/// Flow `cleanup:` shares the fixture-`down:` stack: an interrupted run drains
+/// both, last registered first (#615).
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[tokio::test(flavor = "multi_thread")]
+async fn cancellation_drains_flow_cleanup_and_fixture_down_in_one_lifo_order() {
+    const CHILD: &str = "DUHEM_FLOW_CLEANUP_CANCELLATION_CHILD";
+    const APPEND: &str = "import sys; open(sys.argv[1], 'a').write(sys.argv[2] + chr(10))";
+    if let Ok(root) = std::env::var(CHILD) {
+        let root = std::path::PathBuf::from(root);
+        let log = serde_json::to_string(&root.join("order")).unwrap();
+        let yaml = format!(
+            r#"verification: Interrupted flow cleanup
+inputs:
+  secret: {{ type: string, secret: true }}
+flows:
+  mark:
+    steps:
+      - uses: cli/invoke
+        with: {{ command: [python3, -c, "pass"] }}
+    cleanup:
+      - uses: cli/invoke
+        with: {{ command: [python3, -c, "{APPEND}", {log}, flow] }}
+fixtures:
+  watcher:
+    up:
+      - uses: cli/invoke
+        with: {{ command: [python3, -c, "pass"] }}
+    down:
+      - uses: cli/invoke
+        with: {{ command: [python3, -c, "{APPEND}", {log}, fixture] }}
+criteria:
+  - id: AC-1
+    description: Cancellation drains flow cleanup and fixture down together.
+    checks:
+      - id: AC-1.1
+        needs: [watcher]
+        setup:
+          - uses: process/start
+            with:
+              command: python3
+              args: [-u, @FIXTURE@, idle]
+              ready: {{ log: {{ stream: stdout, pattern: READY }}, timeout: 5s }}
+          - call: mark
+        steps:
+          - uses: cli/invoke
+            with:
+              command: [python3, -c, "from pathlib import Path; import sys,time; Path(sys.argv[1]).write_text('ready'); time.sleep(30)", {ready}]
+              timeout: 35s
+        assertions: ["true"]
+"#,
+            ready = serde_json::to_string(&root.join("ready")).unwrap()
+        )
+        .replace(
+            "@FIXTURE@",
+            &serde_json::to_string(
+                &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/process.py"),
+            )
+            .unwrap(),
+        );
+        std::fs::write(root.join("leaf.yml"), yaml).unwrap();
+        let duhem_schema::Loaded::Leaf { definition, .. } =
+            duhem_schema::load(&root.join("leaf.yml")).expect("load and expand")
+        else {
+            panic!("expected a leaf");
+        };
+        let store = Arc::new(SqliteStore::open(root.join("evidence.db")).await.unwrap());
+        let result = Engine::new()
+            .with_store(store)
+            .with_run_id("flow-cleanup-cancel")
+            .run_with_metadata(
+                &definition,
+                BTreeMap::from([("secret".into(), json!("unused-secret-615"))]),
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(duhem_runtime::EngineError::Aborted { .. })
+        ));
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "cancellation_drains_flow_cleanup_and_fixture_down_in_one_lifo_order",
+            "--nocapture",
+        ])
+        .env(CHILD, dir.path())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !dir.path().join("ready").exists() {
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "child exited before ready"
+        );
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "child never reached body"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    unsafe {
+        assert_eq!(libc::kill(child.id().unwrap() as i32, libc::SIGTERM), 0);
+    }
+    let status = tokio::time::timeout(std::time::Duration::from_secs(10), child.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(status.success());
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("order")).unwrap(),
+        "fixture\nflow\n"
+    );
+    let store = SqliteStore::open(dir.path().join("evidence.db"))
+        .await
+        .unwrap();
+    let trace = Trace::from_store(&store, "flow-cleanup-cancel")
+        .await
+        .unwrap();
+    assert!(trace.events().iter().any(|event| matches!(
+        &event.payload,
+        EventPayload::SetupStarted { registered_by: Some(registration), .. }
+            if registration.flow == "mark"
+    )));
+}
+
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 #[tokio::test]
 async fn unsupported_platform_rejects_before_spawn() {

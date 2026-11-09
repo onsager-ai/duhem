@@ -40,6 +40,16 @@ pub struct Flow {
     /// Caller-visible output name to an inner `$steps.*` output.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub outputs: BTreeMap<String, String>,
+
+    /// Steps registered on the enclosing lifecycle scope when a `call:` to
+    /// this flow is entered and unwound LIFO at that scope's exit (#615).
+    /// They may read `$params.*` and this call's own body outputs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cleanup: Vec<Step>,
+
+    // Applies to `cleanup:` only; valid only together with it.
+    #[serde(default, skip_serializing_if = "CleanupPolicy::is_required")]
+    pub cleanup_policy: CleanupPolicy,
 }
 
 pub type FlowCatalog = BTreeMap<String, Flow>;

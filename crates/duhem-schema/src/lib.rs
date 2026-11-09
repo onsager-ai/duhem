@@ -54,7 +54,7 @@ pub use manifest_filter::filter_loaded_to_directory;
 pub use project::{ProjectDecl, ProjectKind};
 pub use provision::{DurationSpec, HttpReadyProbe, Provision, ReadyProbe};
 pub use source::{SourceLocation, SourceMap};
-pub use step::{ExpandedFlowOrigin, Step, StepCondition, StepGroupFrame};
+pub use step::{ExpandedFlowOrigin, FlowCleanup, Step, StepCondition, StepGroupFrame};
 pub use validate::{
     ValidationError, validate, validate_with_action_catalog, validate_with_contract_outputs,
 };

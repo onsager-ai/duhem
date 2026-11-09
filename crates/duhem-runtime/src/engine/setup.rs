@@ -79,6 +79,15 @@ pub(crate) enum HookScope<'a> {
     /// Fixture `up:` / `down:` for a consuming check (#449 Part A).
     Fixture(&'a str, &'a str),
     FixtureDown(&'a str, &'a str, duhem_schema::CleanupPolicy),
+    /// A flow's registered `cleanup:` (#615), run at the exit of the scope
+    /// named by `criterion`/`check` (both absent for the leaf).
+    FlowCleanup {
+        criterion: Option<&'a str>,
+        check: Option<&'a str>,
+        policy: duhem_schema::CleanupPolicy,
+        flow: &'a str,
+        call: &'a str,
+    },
 }
 
 impl<'a> HookScope<'a> {
@@ -94,6 +103,49 @@ impl<'a> HookScope<'a> {
             HookScope::Fixture(fixture, check) | HookScope::FixtureDown(fixture, check, _) => {
                 (Some(fixture.to_string()), Some(check.to_string()), None)
             }
+            HookScope::FlowCleanup {
+                criterion, check, ..
+            } => (
+                None,
+                check.map(str::to_string),
+                criterion.map(str::to_string),
+            ),
+        }
+    }
+
+    /// Cleanup whose judging actions gate it (fixture `down:` and flow
+    /// `cleanup:`), as opposed to evidence-only teardown.
+    pub(crate) fn judges_cleanup(self) -> bool {
+        matches!(
+            self,
+            HookScope::FixtureDown(..) | HookScope::FlowCleanup { .. }
+        )
+    }
+
+    /// Where a flow `cleanup:` registered by a step dispatched in this block
+    /// belongs; `None` for fixtures, which do not register flow cleanups.
+    pub(crate) fn registration_site(self) -> Option<crate::engine::flow_cleanup::RegisteredAt> {
+        use crate::engine::flow_cleanup::RegisteredAt;
+        match self {
+            HookScope::Leaf => Some(RegisteredAt::Leaf),
+            HookScope::Criterion(criterion) => Some(RegisteredAt::Criterion(criterion.to_string())),
+            HookScope::Check(criterion, check) => Some(RegisteredAt::Check(
+                criterion.to_string(),
+                check.to_string(),
+            )),
+            _ => None,
+        }
+    }
+
+    fn registration(self) -> Option<duhem_evidence::CleanupRegistration> {
+        match self {
+            HookScope::FlowCleanup { flow, call, .. } => {
+                Some(duhem_evidence::CleanupRegistration {
+                    flow: flow.to_string(),
+                    call: call.to_string(),
+                })
+            }
+            _ => None,
         }
     }
 
@@ -103,7 +155,7 @@ impl<'a> HookScope<'a> {
 
     pub(crate) fn cleanup_policy(self) -> duhem_schema::CleanupPolicy {
         match self {
-            Self::FixtureDown(_, _, policy) => policy,
+            Self::FixtureDown(_, _, policy) | Self::FlowCleanup { policy, .. } => policy,
             _ => duhem_schema::CleanupPolicy::DiagnosticOnly,
         }
     }
@@ -291,6 +343,42 @@ pub(crate) async fn run_check_teardown(
     .cleanup)
 }
 
+/// Run one registered flow `cleanup:` as its own teardown block (#615).
+pub(crate) async fn run_flow_cleanup(
+    writer: &mut EvidenceWriter,
+    registry: &ActionRegistry,
+    browser: Option<&RunBrowser>,
+    run: &mut RunState,
+    at: &crate::engine::flow_cleanup::RegisteredAt,
+    cleanup: &duhem_schema::FlowCleanup,
+    child_env: &BTreeMap<String, String>,
+) -> Result<Vec<CleanupFailure>, EngineError> {
+    use crate::engine::flow_cleanup::RegisteredAt;
+    let (criterion, check) = match at {
+        RegisteredAt::Leaf => (None, None),
+        RegisteredAt::Criterion(criterion) => (Some(criterion.as_str()), None),
+        RegisteredAt::Check(criterion, check) => (Some(criterion.as_str()), Some(check.as_str())),
+    };
+    Ok(run_lifecycle_steps(
+        writer,
+        registry,
+        browser,
+        run,
+        &cleanup.steps,
+        child_env,
+        StepPhase::Teardown,
+        HookScope::FlowCleanup {
+            criterion,
+            check,
+            policy: cleanup.policy,
+            flow: &cleanup.flow,
+            call: &cleanup.call,
+        },
+    )
+    .await?
+    .cleanup)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_fixture_up(
     writer: &mut EvidenceWriter,
@@ -402,6 +490,7 @@ async fn run_lifecycle_steps(
         fixture_name: fixture_name.clone(),
         check_id: check_id.clone(),
         criterion_id: criterion_id.clone(),
+        registered_by: scope.registration(),
     };
     let recorded = if let Some(session) = &session
         && !owned_contexts.browsers.is_empty()
@@ -480,6 +569,15 @@ async fn run_lifecycle_steps(
     .await;
     writer.set_session(None);
     owned_contexts.close().await;
+    if phase == StepPhase::Setup {
+        run.snapshot_flow_cleanups(
+            &crate::engine::flow_cleanup::Snapshot {
+                outputs: run.setup_outputs.clone(),
+                binding: None,
+            },
+            false,
+        );
+    }
     execution?;
 
     writer
@@ -608,6 +706,7 @@ mod tests {
             flow: None,
             flow_secrets: Vec::new(),
             group: Vec::new(),
+            flow_cleanup: Vec::new(),
         }
     }
 

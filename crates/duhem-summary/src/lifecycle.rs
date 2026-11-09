@@ -68,10 +68,21 @@ pub struct LifecycleStep {
     pub duration_ms: u64,
 }
 
+/// The flow call whose registered `cleanup:` a teardown block ran (#615).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LifecycleRegistration {
+    pub flow: String,
+    pub call: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LifecycleBlock {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cleanup_policy: Option<String>,
+    /// Set for a block that ran a flow's registered `cleanup:`; its `scope`
+    /// is the scope the cleanup was registered at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registered_by: Option<LifecycleRegistration>,
     pub phase: LifecyclePhase,
     pub scope: Vec<LifecycleScopeSegment>,
     pub status: LifecycleStatus,
@@ -113,6 +124,7 @@ impl LifecycleBlock {
 pub enum LifecycleEvent<'a> {
     Started {
         cleanup_policy: Option<&'a str>,
+        registered_by: Option<LifecycleRegistration>,
         phase: LifecyclePhase,
         criterion_id: Option<&'a str>,
         check_id: Option<&'a str>,
@@ -183,6 +195,7 @@ impl LifecycleFold {
         match event {
             LifecycleEvent::Started {
                 cleanup_policy,
+                registered_by,
                 phase,
                 criterion_id,
                 check_id,
@@ -194,6 +207,7 @@ impl LifecycleFold {
                 self.blocks.push(FoldBlock {
                     block: LifecycleBlock {
                         cleanup_policy: cleanup_policy.map(str::to_string),
+                        registered_by,
                         phase,
                         scope,
                         status: LifecycleStatus::Aborted,
@@ -371,6 +385,7 @@ mod tests {
     fn scope_path_is_generic_for_display() {
         let block = LifecycleBlock {
             cleanup_policy: None,
+            registered_by: None,
             phase: LifecyclePhase::Setup,
             scope: vec![
                 LifecycleScopeSegment {
@@ -407,6 +422,7 @@ mod tests {
         for (ordinal, (criterion_id, check_id, fixture_name)) in scopes.into_iter().enumerate() {
             fold.push(LifecycleEvent::Started {
                 cleanup_policy: None,
+                registered_by: None,
                 phase: LifecyclePhase::Setup,
                 criterion_id,
                 check_id,
@@ -425,6 +441,7 @@ mod tests {
         }
         fold.push(LifecycleEvent::Started {
             cleanup_policy: None,
+            registered_by: None,
             phase: LifecyclePhase::Setup,
             criterion_id: None,
             check_id: None,

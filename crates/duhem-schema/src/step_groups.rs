@@ -452,4 +452,38 @@ mod tests {
             .collect();
         assert_eq!(keys.len(), 2, "both steps share both groups");
     }
+
+    #[test]
+    fn a_group_inside_a_flow_cleanup_lowers_with_its_frames() {
+        let mut definition = VerificationDefinition::from_yaml_str(
+            "verification: cleanup groups\nflows:\n  scratch:\n    steps:\n      - { id: make, uses: cli/invoke }\n    cleanup:\n      - id: tidy\n        if: always\n        steps:\n          - { id: rm, uses: cli/invoke }\n          - { id: rm2, uses: cli/invoke }\ncriteria:\n  - id: AC-1\n    description: c\n    checks:\n      - id: AC-1.1\n        steps:\n          - { id: tmp, call: scratch }\n        assertions: [\"true\"]\n",
+        )
+        .expect("parse");
+        crate::flows::validate_and_expand(&mut definition).expect("expands");
+        let steps = &definition.criteria[0].checks[0].steps;
+        assert_eq!(steps.len(), 1, "cleanup is not part of the body");
+        let cleanup = &steps[0].flow_cleanup;
+        assert_eq!(cleanup.len(), 1);
+        assert_eq!(cleanup[0].steps.len(), 2, "group lowered to its leaves");
+        for leaf in &cleanup[0].steps {
+            let labels: Vec<_> = leaf.group.iter().map(|g| g.label.as_str()).collect();
+            assert_eq!(labels, ["tidy"]);
+        }
+        assert_eq!(
+            cleanup[0].steps[0].group[0].key, cleanup[0].steps[1].group[0].key,
+            "both leaves share one group frame"
+        );
+    }
+
+    #[test]
+    fn step_walk_visits_group_children_and_flow_cleanup_groups() {
+        let definition = VerificationDefinition::from_yaml_str(
+            "verification: walk\nflows:\n  f:\n    steps:\n      - { id: a, uses: cli/invoke }\n    cleanup:\n      - steps:\n          - { id: z, uses: cli/invoke }\ncriteria: []\n",
+        )
+        .expect("parse");
+        let blocks = crate::step_walk::step_blocks(&definition);
+        let sites: Vec<_> = blocks.iter().map(|b| (b.site.as_str(), b.nested)).collect();
+        assert!(sites.contains(&("flow `f` cleanup", false)), "{sites:?}");
+        assert!(sites.contains(&("flow `f` cleanup", true)), "{sites:?}");
+    }
 }

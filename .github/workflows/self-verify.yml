@@ -146,6 +146,11 @@ jobs:
           ./target/release/duhem run verifications/check-conditions-example \
             --db .duhem/duhem.db
 
+      - name: Run flow-cleanup example against local processes
+        run: |
+          ./target/release/duhem run verifications/flow-cleanup-example \
+            --db .duhem/duhem.db
+
       - name: Run step-groups example (local processes)
         run: |
           ./target/release/duhem run verifications/step-groups-example \

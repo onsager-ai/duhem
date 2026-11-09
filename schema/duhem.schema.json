@@ -188,6 +188,16 @@
       "additionalProperties": false,
       "description": "A named, parameterized sequence of steps expanded by the loader.",
       "properties": {
+        "cleanup": {
+          "description": "Steps registered on the enclosing lifecycle scope when a `call:` to this flow is entered and unwound LIFO at that scope's exit (#615). They may read `$params.*` and this call's own body outputs.",
+          "items": {
+            "$ref": "#/definitions/Step"
+          },
+          "type": "array"
+        },
+        "cleanup_policy": {
+          "$ref": "#/definitions/CleanupPolicy"
+        },
         "description": {
           "description": "Optional prose explaining what this reusable sequence is for.",
           "type": [

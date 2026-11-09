@@ -56,6 +56,19 @@ fn tag_engine(
     log
 }
 
+/// Parse and flow-expand a leaf, as `duhem run` does before the engine sees it.
+fn load_flows(yaml: &str) -> VerificationDefinition {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("leaf.yml");
+    std::fs::write(&path, yaml).unwrap();
+    let duhem_schema::Loaded::Leaf { definition, .. } =
+        duhem_schema::load(&path).expect("load and expand")
+    else {
+        panic!("expected a leaf");
+    };
+    definition
+}
+
 const RES_FLOW: &str = r#"
 flows:
   res:
@@ -75,7 +88,7 @@ async fn check_step_calls_unwind_lifo_after_the_body_and_before_teardown() {
             ("fake/td", false),
         ],
     );
-    let definition = def(&format!(
+    let definition = load_flows(&format!(
         r#"
 verification: flow cleanup order
 {RES_FLOW}
@@ -115,7 +128,8 @@ async fn a_partial_body_still_cleans_up_and_a_gated_call_registers_nothing() {
             ("fake/fail", true),
         ],
     );
-    let definition = def(r#"
+    let definition = load_flows(
+        r#"
 verification: partial body
 flows:
   part:
@@ -138,7 +152,8 @@ criteria:
           - {id: gated, call: res, if: "$steps.probe.outputs.value == 'no'", with: {name: never}}
           - {id: broken, call: part}
         assertions: ["true"]
-"#);
+"#,
+    );
     engine
         .run_with_metadata(&definition, BTreeMap::new())
         .await
@@ -155,7 +170,7 @@ async fn required_cleanup_failure_gates_the_run_and_diagnostic_only_does_not() {
         let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(StubAction::new("fake/body", Outcome::Ok)));
         engine.register_test_action(Box::new(StubAction::new("fake/down", Outcome::Error)));
-        let definition = def(&format!(
+        let definition = load_flows(&format!(
             r#"
 verification: flow cleanup gate
 flows:
@@ -249,7 +264,8 @@ async fn cleanup_runs_every_attempt_and_an_earlier_required_failure_is_retained(
             calls: AtomicUsize::new(0),
         }));
     }
-    let definition = def(r#"
+    let definition = load_flows(
+        r#"
 verification: retry flow cleanup
 flows:
   res:
@@ -262,7 +278,8 @@ criteria:
       - id: c
         steps: [{id: tmp, call: res}]
         assertions: ["true"]
-"#);
+"#,
+    );
     let outcome = engine
         .run_with_metadata(&definition, BTreeMap::new())
         .await
@@ -305,7 +322,7 @@ async fn criterion_and_leaf_setup_calls_unwind_at_their_scope_exit() {
             ("fake/tdl", false),
         ],
     );
-    let definition = def(&format!(
+    let definition = load_flows(&format!(
         r#"
 verification: scoped flow cleanup
 {RES_FLOW}
@@ -352,7 +369,7 @@ async fn check_setup_calls_unwind_with_the_check_attempt() {
             ("fake/td", false),
         ],
     );
-    let definition = def(&format!(
+    let definition = load_flows(&format!(
         r#"
 verification: check setup flow cleanup
 {RES_FLOW}
@@ -385,7 +402,7 @@ async fn each_for_each_iteration_registers_its_own_cleanup_with_its_element() {
         StubAction::new("fake/rows", Outcome::Ok)
             .with_output("items", serde_json::json!(["x", "y"])),
     ));
-    let definition = def(&format!(
+    let definition = load_flows(&format!(
         r#"
 verification: loop flow cleanup
 {RES_FLOW}

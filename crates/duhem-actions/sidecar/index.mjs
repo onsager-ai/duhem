@@ -609,6 +609,19 @@ async function dispatch(req) {
             const value = element[spec.name]
             return value === undefined ? null : value
           }
+          if (spec.source === 'rect') {
+            const r = element.getBoundingClientRect()
+            const view = element.ownerDocument.defaultView
+            return {
+              x: r.x, y: r.y, width: r.width, height: r.height,
+              top: r.top, right: r.right, bottom: r.bottom, left: r.left,
+              scroll_x: view.scrollX, scroll_y: view.scrollY,
+            }
+          }
+          if (spec.source === 'style') {
+            return element.ownerDocument.defaultView
+              .getComputedStyle(element).getPropertyValue(spec.name)
+          }
           return element.innerText
         }), { source: req.source, name: req.name })
 

@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] `ui/extract` accepts `field: rect` (CSS-px bounding rect plus scroll offsets) and `style: <property>` (computed CSS value). (#580)
 - [additive] New `ui/emulate` action sets the check's viewport and `prefers-color-scheme` and reports the effective settings; each check and retry starts from defaults. (#580)
 - [additive] New `ui/back` / `ui/forward` actions drive real browser history and report `from_url`, `url` and `navigated` (false when no entry exists). (#580)
 - [additive] New `ui/press` and `ui/focus` actions, and `ui/assert-element` `expected: focused | not_focused`, for keyboard activation and focus identity. (#580)

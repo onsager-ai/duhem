@@ -1596,14 +1596,14 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 - `ui/press` — press a key or `+` chord (Playwright key names), on a located element or on the focused element
 - `ui/focus` — programmatically focus an element (`element.focus()`, not a user gesture)
 - `ui/assert-element` — judge existence/visibility/focus with `expected:` (`exists`, `not_exists`, `visible`, `hidden`, `focused`, `not_focused`), or directly judge an extracted field with `expect: { field: checked, equals: true }`
-- `ui/extract` — non-judging extraction of an attribute, live DOM property, or rendered `innerText`; exposes `value`, `found`, `count`, and (with `all: true`) DOM-ordered `values`
+- `ui/extract` — non-judging extraction of an attribute, live DOM property, rendered `innerText`, bounding rect, or computed style; exposes `value`, `found`, `count`, and (with `all: true`) DOM-ordered `values`
 - `ui/assert-url` — observe URL state
 - `ui/capture-session` — capture cookies/local storage as a secret state value for later checks
 - `ui/emulate` — set the check's own viewport (`viewport: { width, height }`, positive integer CSS px, same rule as `defaults.viewport`) and/or `color_scheme: light | dark | no-preference`; at least one is required. It applies `page.setViewportSize` / `page.emulateMedia` to the check's page for later steps. Outputs `viewport` (`{ width, height }`) and `color_scheme` are read back from the page (`innerWidth/innerHeight`, `prefers-color-scheme` media queries), not echoed from `with:`, so Chromium reports `no-preference` as `light`. Every check and retry attempt opens a fresh context with the run viewport and host-default color scheme, so emulation never leaks into siblings or retries. Headed runs have no fixed viewport; rely on the read-back output there.
 - `ui/wait` — wait for a fixed `duration` (`TimeoutSpec`, e.g. `500ms` or `2s`) without requiring a browser page. Prefer `ui/assert-element` with `timeout:`; fixed waits are a debugging and transitional-authoring escape hatch with a 60-second default ceiling that root-manifest `defaults.max_wait` may raise or lower.
 
-`ui/extract` selects exactly one source from `field:`, `attribute:`, `property:`, or
-`text: true`. Attributes describe markup and return `null` when absent; properties
+`ui/extract` selects exactly one source from `field:`, `attribute:`, `property:`,
+`text: true`, or `style:`. Attributes describe markup and return `null` when absent; properties
 describe live state. Text uses `innerText`, so hidden content is omitted and rendered
 whitespace rules apply. `field:` is a closed lookup, never a heuristic:
 
@@ -1611,6 +1611,7 @@ whitespace rules apply. `field:` is a closed lookup, never a heuristic:
 | --- | --- |
 | `checked`, `value`, `disabled` | DOM property |
 | `text` | `innerText` |
+| `rect` | bounding rect object (see below) |
 | `href`, `class`, `id`, `title`, `alt` | HTML attribute |
 | `aria-*`, `data-*` | HTML attribute |
 
@@ -1623,6 +1624,19 @@ With `all: true`, `values` contains every scalar in DOM order and an empty match
 sensitive observation. `ui/assert-element` accepts this same source vocabulary inside
 `expect:` with `equals:` for direct implicit judgment; extraction remains the path for
 later reuse and check-level assertions.
+
+**Geometry and computed style (#580).** `field: rect` returns
+`{ x, y, width, height, top, right, bottom, left, scroll_x, scroll_y }` in CSS px.
+The first eight are `getBoundingClientRect()` relative to the element's own document
+viewport (the frame viewport for `frame:` targets); `scroll_x` / `scroll_y` are that
+document's `scrollX` / `scrollY`, so document coordinates are `x + scroll_x`.
+`style: <css-property>` returns `getComputedStyle(el).getPropertyValue(<property>)` as a
+string with units, for example `rgb(17, 17, 17)` or `16px`; an empty property name is
+invalid, and `style` is exclusive with the other sources. Both sample once at step
+execution, with no waiting beyond locator resolution, and honor `all: true` and the
+single-match rule. Thresholds live in VD assertions, for example
+`$steps.card.outputs.value.width <= 390`. The executed example is
+`verifications/geometry-example/duhem.yml`.
 
 **API actions**
 

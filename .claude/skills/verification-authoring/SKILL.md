@@ -219,6 +219,13 @@ the minimal form:
   exact about which one you mean — they genuinely differ (a ticked
   checkbox has the `checked` *property* `true` while the *attribute* may
   be absent entirely).
+- **Geometry and computed style use `ui/extract`.** `field: rect` yields
+  `{x, y, width, height, top, right, bottom, left, scroll_x, scroll_y}`
+  in CSS px (relative to the element's own document viewport, so a
+  `frame:` target reports frame-relative coordinates); `style: <css-property>`
+  yields the computed string such as `rgb(17, 17, 17)` or `16px`. Sampled
+  once, no waiting; assert thresholds in `assertions:` and pair each with
+  a negative control (a second element or color).
 - **For a simple state check, prefer `ui/assert-element`'s `expect:`.**
   `expect: { field: checked, equals: true }` judges in one step and
   keeps `satisfied`, so you need no step id, no output binding, and no

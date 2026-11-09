@@ -79,6 +79,11 @@ inline frame locators, assertions and interactions. It is validated
 offline and executed against a two-origin browser fixture in
 `crates/duhem-runtime/tests/frame_smoke.rs` by browser CI. (#568)
 
+The [geometry example](geometry-example/duhem.yml) reads `ui/extract`
+`field: rect` and `style:` with positive and negative controls, including a
+frame-relative rect. It is validated offline and executed against a local
+fixture in `crates/duhem-runtime/tests/geometry_smoke.rs` by browser CI. (#580)
+
 The [emulate example](emulate-example/duhem.yml) demonstrates `ui/emulate`
 viewport and color-scheme emulation with a sibling check that proves defaults
 are restored. It is validated offline and executed against a media-query

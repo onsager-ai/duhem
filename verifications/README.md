@@ -66,6 +66,11 @@ inline frame locators, assertions and interactions. It is validated
 offline and executed against a two-origin browser fixture in
 `crates/duhem-runtime/tests/frame_smoke.rs` by browser CI. (#568)
 
+The [emulate example](emulate-example/duhem.yml) demonstrates `ui/emulate`
+viewport and color-scheme emulation with a sibling check that proves defaults
+are restored. It is validated offline and executed against a media-query
+fixture in `crates/duhem-runtime/tests/emulate_smoke.rs` by browser CI. (#580)
+
 Real VDs that gate this repo's CI. Bigger, multi-step, and pointed at a
 real system stood up by `provision:` hooks. This is what production
 Duhem usage looks like — and, being Duhem-on-Duhem, it catches

@@ -604,6 +604,20 @@ Use `session: ~` for a signed-out scope beneath an authenticated parent. `ui/cap
 structured `state` output secret by contract; do not add an authored
 `secret_outputs:` entry for it.
 
+## Viewport and color-scheme emulation
+
+`ui/emulate` sets the check's own viewport (`viewport: { width, height }`,
+positive integer CSS px) and/or `color_scheme: light | dark | no-preference`.
+At least one field is required. It applies to the check's page for later
+steps, so place it before the `ui/navigate` that should see it. Each check
+and each retry attempt starts from the run viewport and host-default color
+scheme again; emulation never leaks to siblings. Its `viewport` and
+`color_scheme` outputs are read back from the page (`innerWidth/innerHeight`
+and `prefers-color-scheme` media queries), not echoed from `with:`. Assert the
+effect with `ui/assert-element` on media-query-dependent elements. Chromium
+reports `no-preference` as `light`. In headed runs the window sizes the page
+and `viewport` is best effort, so rely on the read-back output.
+
 ## Worked example template
 
 ```yaml

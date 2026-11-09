@@ -131,6 +131,7 @@ const networkBuffers = new Map()
 // Separate from the legacy response buffer: starts are recorded immediately,
 // including requests that never produce a response.
 const requestBuffers = new Map()
+const consoleBuffers = new Map()
 /** @type {Map<string, number>} */
 const sessionStarts = new Map()
 // Video recording (#215) is per-context and finalized only on
@@ -433,6 +434,27 @@ async function dispatch(req) {
       }
       requestBuffers.set(id, requests)
       attachNetworkRecorder(p, buf, sessionStart, requests)
+      const observations = { events: [], truncated: false, cap: 10000,
+        attached_ms: performance.now() - sessionStart }
+      consoleBuffers.set(id, observations)
+      let sequence = 1
+      const record = (event) => {
+        event.seq = sequence++
+        event.at_ms = Math.max(0, performance.now() - sessionStart)
+        if (observations.events.length < observations.cap) observations.events.push(event)
+        else observations.truncated = true
+      }
+      p.on('pageerror', error => {
+        const event = { kind: 'page_error', message: error.message }
+        if (error.stack) event.stack = error.stack
+        record(event)
+      })
+      p.on('console', msg => {
+        const event = { kind: 'console', level: msg.type(), text: msg.text() }
+        const loc = msg.location()
+        if (loc && loc.url) event.location = { url: loc.url, line: loc.lineNumber, column: loc.columnNumber }
+        record(event)
+      })
       return { pageId: id }
     }
 
@@ -557,6 +579,19 @@ async function dispatch(req) {
       const requests = requestBuffers.get(req.pageId)
       if (!requests) throw new Error(`unknown pageId: ${req.pageId}`)
       requests.cap = req.cap
+      return {}
+    }
+
+    case 'consoleRecords': {
+      const observations = consoleBuffers.get(req.pageId)
+      if (!observations) throw new Error(`unknown pageId: ${req.pageId}`)
+      return observations
+    }
+
+    case 'setConsoleCap': {
+      const observations = consoleBuffers.get(req.pageId)
+      if (!observations) throw new Error(`unknown pageId: ${req.pageId}`)
+      observations.cap = req.cap
       return {}
     }
 

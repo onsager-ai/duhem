@@ -144,14 +144,20 @@ pub(super) fn validate_check(
     // resolves like an undeclared step. Same resolver as assertions.
     let mut earlier_outputs: HashMap<&str, HashSet<String>> = HashMap::new();
     for (idx, &(s, active_loop)) in check_steps.iter().enumerate() {
-        if s.uses.as_deref() == Some("api/observe")
-            && let Some(window) = s.with.get("window")
+        if matches!(
+            s.uses.as_deref(),
+            Some("api/observe" | "ui/observe-console")
+        ) && let Some(window) = s.with.get("window")
             && let Some(problem) = crate::validate_observe_window::problem(window, |id| {
                 earlier_outputs.contains_key(id)
             })
         {
             errs.push(ValidationError::InvalidFlow {
-                message: format!("check `{}`: api/observe {problem}", ch.id),
+                message: format!(
+                    "check `{}`: {} {problem}",
+                    ch.id,
+                    s.uses.as_deref().unwrap()
+                ),
             });
         }
         if let StepCondition::Expr(expr) = &s.condition {

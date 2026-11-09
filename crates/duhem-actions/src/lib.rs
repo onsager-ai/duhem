@@ -18,6 +18,7 @@ pub mod cli;
 pub mod db;
 pub mod error;
 pub mod locator;
+mod observe_window;
 pub mod playwright;
 pub mod process;
 pub mod ui;
@@ -38,8 +39,8 @@ pub use error::ActionError;
 pub use locator::{ExistenceState, Locator};
 pub use playwright::to_selector;
 pub use ui::{
-    AssertElement, AssertUrl, CaptureSession, Click, Extract, Navigate, Select, Type, Wait,
-    validate_field_source,
+    AssertElement, AssertUrl, CaptureSession, Click, Extract, Navigate, ObserveConsole, Select,
+    Type, Wait, validate_field_source,
 };
 pub use with::TimeoutSpec;
 
@@ -48,6 +49,7 @@ pub use with::TimeoutSpec;
 pub fn catalog() -> Vec<ActionContract> {
     let mut contracts = vec![
         Navigate.contract(),
+        ObserveConsole.contract(),
         Click.contract(),
         Extract.contract(),
         Type.contract(),
@@ -81,11 +83,11 @@ mod catalog_tests {
     #[test]
     fn catalog_is_complete_with_unique_uses() {
         let cat = catalog();
-        assert_eq!(cat.len(), 21, "expected 21 action contracts");
+        assert_eq!(cat.len(), 22, "expected 22 action contracts");
         let mut uses: Vec<&str> = cat.iter().map(|c| c.uses).collect();
         uses.sort();
         uses.dedup();
-        assert_eq!(uses.len(), 21, "every `uses` is unique");
+        assert_eq!(uses.len(), 22, "every `uses` is unique");
     }
 
     #[test]

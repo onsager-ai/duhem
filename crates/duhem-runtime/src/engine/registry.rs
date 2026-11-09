@@ -28,8 +28,8 @@ use async_trait::async_trait;
 use duhem_actions::Page;
 use duhem_actions::{
     Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertUrl, Call, CaptureSession,
-    Click, DbObserve, Extract, Invoke, Navigate, Observe, Poll, Query, Seed, Select, Stream, Type,
-    Wait,
+    Click, DbObserve, Extract, Invoke, Navigate, Observe, ObserveConsole, Poll, Query, Seed,
+    Select, Stream, Type, Wait,
 };
 use serde::Deserialize;
 use serde::de::Error as _;
@@ -303,6 +303,7 @@ pub(crate) type ActionRegistry = BTreeMap<&'static str, Box<dyn Dispatch>>;
 pub(crate) fn default_registry() -> ActionRegistry {
     let mut m: ActionRegistry = BTreeMap::new();
     insert(&mut m, ConcreteAction::new(Box::new(Navigate)));
+    insert(&mut m, ConcreteAction::new(Box::new(ObserveConsole)));
     insert(&mut m, ConcreteAction::new(Box::new(Click)));
     insert(&mut m, ConcreteAction::new(Box::new(Extract)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertElement)));
@@ -359,6 +360,7 @@ mod tests {
                 "ui/click",
                 "ui/extract",
                 "ui/navigate",
+                "ui/observe-console",
                 "ui/select",
                 "ui/type",
                 "ui/wait",

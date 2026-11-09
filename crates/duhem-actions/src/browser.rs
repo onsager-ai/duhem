@@ -876,6 +876,20 @@ impl Page {
         Ok(())
     }
 
+    /// Read the bounded page error and console recorder.
+    pub async fn console_records(&self) -> Result<serde_json::Value, PwError> {
+        self.conn.request("consoleRecords", self.p()).await
+    }
+
+    /// Lower the recorder cap for browser tests.
+    #[doc(hidden)]
+    pub async fn set_console_cap_for_tests(&self, cap: u64) -> Result<(), PwError> {
+        let mut params = self.p();
+        params["cap"] = json!(cap);
+        self.conn.request("setConsoleCap", params).await?;
+        Ok(())
+    }
+
     /// Current position on the per-check monotonic browser-session clock.
     pub async fn session_time_ms(&self) -> Result<f64, PwError> {
         let v = self.conn.request("sessionTime", self.p()).await?;

@@ -3,7 +3,9 @@
 //! conditions, loops, sessions, process checks, flows and check judgment are
 //! outside this gate, as are future schema fields that are not step arrays.
 
-include!("fixtures/coverage_helper.rs");
+use crate as duhem_schema;
+
+include!("../tests/fixtures/coverage_helper.rs");
 
 #[test]
 fn schema_rules_visit_every_step_block() {

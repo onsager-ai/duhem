@@ -432,20 +432,6 @@ fn value_type(
     }
 }
 
-#[cfg(test)]
-mod value_type_tests {
-    use super::*;
-
-    #[test]
-    fn leading_space_expression_is_a_string() {
-        let value = serde_yml::Value::String(" $inputs.x".into());
-        assert_eq!(
-            value_type(&value, &BTreeMap::new(), None),
-            Some(InputType::String)
-        );
-    }
-}
-
 fn validate_flow_graph(catalog: &FlowCatalog, errors: &mut Vec<String>) {
     fn visit(
         name: &str,
@@ -486,5 +472,19 @@ fn validate_flow_graph(catalog: &FlowCatalog, errors: &mut Vec<String>) {
 
     for name in catalog.keys() {
         visit(name, catalog, &mut Vec::new(), 0, errors);
+    }
+}
+
+#[cfg(test)]
+mod value_type_tests {
+    use super::*;
+
+    #[test]
+    fn leading_space_expression_is_a_string() {
+        let value = serde_yml::Value::String(" $inputs.x".into());
+        assert_eq!(
+            value_type(&value, &BTreeMap::new(), None),
+            Some(InputType::String)
+        );
     }
 }

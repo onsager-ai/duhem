@@ -328,6 +328,17 @@ cross-origin embeds work through Playwright. This applies to inline and
 named `$pages.*` locators. Never treat a missing iframe as proof that
 its contents are absent; frame readiness shares the action deadline.
 
+Keyboard and focus: `ui/press { key, locator?, timeout? }` takes a Playwright
+key name or `+` chord (`Enter`, `Tab`, `Shift+Tab`, `Control+a`). With a
+`locator` it focuses that element and presses; without one it presses on
+whatever is focused and records `outputs.target` (`{tag, id, role, name}`,
+sampled before the press; `name` approximates the accessible name). `ui/focus`
+is programmatic `element.focus()`, not a user gesture; to verify keyboard
+focus movement press `Tab`, then assert `expected: focused` (or
+`not_focused`) on `ui/assert-element`. Focused means the element is its own
+document's active element and that document has focus, including inside a
+`frame:` document.
+
 Put locators reused by multiple leaves in an ordinary manifest include:
 
 ```yaml

@@ -623,6 +623,28 @@ Definitions using neither session field retain their existing wire shape.
 **Locators.** UI actions (`ui/click`, `ui/type`, `ui/assert-element`, `ui/select`) address an element by exactly one *primary strategy*: `role` (paired with an optional `name`), `label` (associated label text — how to reach an input with no ARIA role, e.g. `type=password`), `testid` (the `data-testid` attribute), `placeholder`, `css` (a raw CSS selector escape hatch), `xpath` (a raw XPath selector escape hatch), or a standalone `text`. A `text` substring may additionally *filter* a non-text primary, and a recursive `scope:` narrows the search to inside a container. Prefer `role`, `testid`, or `scope:` + `text:`; use `css:` or `xpath:` only when those cannot reach the element, because markup-coupled selectors—especially absolute XPath paths—break readily as markup changes. `ui/click` takes these fields inline in its `with:`; the other actions nest them under `locator:`. Two primaries at once, or none, is rejected. Each named strategy maps to the corresponding Playwright selector engine.
 
 
+**Keyboard and focus.** `ui/press { key, locator?, timeout? }` takes a Playwright
+key name, single character or `+`-joined chord (`Enter`, `Tab`, `Shift+Tab`,
+`Control+a`); an empty key is rejected when `with:` is parsed and an unknown key
+name fails the step with the driver's message. With a `locator` it uses
+`locator.press` (waits for actionability, focuses the element, presses). Without
+one it uses `page.keyboard.press` and dispatches to whatever is focused. The
+`target` output, `{tag, id, role, name}`, describes the receiving element sampled
+before dispatch: the located element, or the `activeElement` of the deepest
+focused document (`tag: body` when nothing is focused; absent fields are `null`).
+`role` is the explicit `role` attribute or the implicit role of common tags;
+`name` is an approximation of the accessible name (`aria-label`, then
+`aria-labelledby` text, then trimmed text content capped at 200 characters), not
+the full computation. `ui/focus { locator, timeout? }` is programmatic focus, not a
+user gesture; to verify keyboard focus movement, press `Tab` and assert
+`expected: focused`. `ui/assert-element` `expected: focused | not_focused` waits up
+to the deadline and reports `satisfied` like the other states. The locator must
+resolve to exactly one element (ambiguity is an error; an absent element is never
+`not_focused`). Focused means the element is the `activeElement` of its own
+document and that document has focus, including inside `frame:` documents. The
+[executed keyboard and focus example](../verifications/keyboard-focus-example/duhem.yml)
+runs against a local browser fixture in CI.
+
 **Frames.** An optional `frame: <Locator>` selects the iframe containing
 the target for every locator-taking UI action, including `ui/extract`.
 For example, `{frame: {testid: report-shell-iframe}, role: heading, name:
@@ -1417,7 +1439,9 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 - `ui/click` — click an element (role-based locators preferred)
 - `ui/type` — type into an input
 - `ui/select` — select an option
-- `ui/assert-element` — judge existence/visibility with `expected:`, or directly judge an extracted field with `expect: { field: checked, equals: true }`
+- `ui/press` — press a key or `+` chord (Playwright key names), on a located element or on the focused element
+- `ui/focus` — programmatically focus an element (`element.focus()`, not a user gesture)
+- `ui/assert-element` — judge existence/visibility/focus with `expected:` (`exists`, `not_exists`, `visible`, `hidden`, `focused`, `not_focused`), or directly judge an extracted field with `expect: { field: checked, equals: true }`
 - `ui/extract` — non-judging extraction of an attribute, live DOM property, or rendered `innerText`; exposes `value`, `found`, `count`, and (with `all: true`) DOM-ordered `values`
 - `ui/assert-url` — observe URL state
 - `ui/capture-session` — capture cookies/local storage as a secret state value for later checks

@@ -22,6 +22,10 @@
 //! Shipped in #347 (authenticated-check adapter):
 //! - `ui/capture-session`
 //!
+//! Shipped in #580 (keyboard and focus):
+//! - `ui/press`
+//! - `ui/focus`
+//!
 //! ## Waiter-action outcome shape
 //!
 //! The two "waiter" actions diverge on the verdict shape they
@@ -48,7 +52,9 @@ pub mod capture_session;
 pub mod click;
 pub mod extract;
 mod field;
+pub mod focus;
 pub mod navigate;
+pub mod press;
 pub mod select;
 pub mod type_;
 pub mod wait;
@@ -59,7 +65,9 @@ pub use capture_session::CaptureSession;
 pub use click::Click;
 pub use extract::Extract;
 pub use field::validate_field_source;
+pub use focus::Focus;
 pub use navigate::Navigate;
+pub use press::Press;
 pub use select::Select;
 pub use type_::Type;
 pub use wait::Wait;

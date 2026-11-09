@@ -132,14 +132,48 @@ Select an option in a <select> by value, label, or index.
   with: { locator: { css: "#role" }, by: { label: "Admin" } }
 ```
 
-### `ui/assert-element`
+### `ui/press`
 
-Assert an element reaches an existence/visibility state within a deadline.
+Press a key or `+` chord (Playwright key names, e.g. Enter, Tab, Shift+Tab). With a locator the element is focused first; without one the key goes to the focused element. `target` records the receiver ({tag, id, role, name}, sampled before the press; `name` is an approximation of the accessible name).
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `key` | yes | — |
+| `locator` | no | — |
+| `timeout` | no | — |
+
+**outputs:** `target`
+
+```yaml
+- id: open
+  uses: ui/press
+  with: { key: Enter }
+```
+
+### `ui/focus`
+
+Focus an element programmatically (element.focus(), not a user gesture). To verify keyboard focus movement, use ui/press with Tab and then ui/assert-element with expected: focused.
 
 | `with:` field | required | values |
 |---|:---:|---|
 | `locator` | yes | — |
-| `expected` | no | `exists` \| `not_exists` \| `visible` \| `hidden` |
+| `timeout` | no | — |
+
+**outputs:** (none)
+
+```yaml
+- uses: ui/focus
+  with: { locator: { role: button, name: Options } }
+```
+
+### `ui/assert-element`
+
+Assert an element reaches an existence/visibility/focus state within a deadline. `focused` means the element is its own document's activeElement and that document has focus; `not_focused` requires exactly one present, unfocused match.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `locator` | yes | — |
+| `expected` | no | `exists` \| `not_exists` \| `visible` \| `hidden` \| `focused` \| `not_focused` |
 | `expect` | no | — |
 | `timeout` | no | — |
 

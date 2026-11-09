@@ -1599,6 +1599,7 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 - `ui/extract` — non-judging extraction of an attribute, live DOM property, or rendered `innerText`; exposes `value`, `found`, `count`, and (with `all: true`) DOM-ordered `values`
 - `ui/assert-url` — observe URL state
 - `ui/capture-session` — capture cookies/local storage as a secret state value for later checks
+- `ui/emulate` — set the check's own viewport (`viewport: { width, height }`, positive integer CSS px, same rule as `defaults.viewport`) and/or `color_scheme: light | dark | no-preference`; at least one is required. It applies `page.setViewportSize` / `page.emulateMedia` to the check's page for later steps. Outputs `viewport` (`{ width, height }`) and `color_scheme` are read back from the page (`innerWidth/innerHeight`, `prefers-color-scheme` media queries), not echoed from `with:`, so Chromium reports `no-preference` as `light`. Every check and retry attempt opens a fresh context with the run viewport and host-default color scheme, so emulation never leaks into siblings or retries. Headed runs have no fixed viewport; rely on the read-back output there.
 - `ui/wait` — wait for a fixed `duration` (`TimeoutSpec`, e.g. `500ms` or `2s`) without requiring a browser page. Prefer `ui/assert-element` with `timeout:`; fixed waits are a debugging and transitional-authoring escape hatch with a 60-second default ceiling that root-manifest `defaults.max_wait` may raise or lower.
 
 `ui/extract` selects exactly one source from `field:`, `attribute:`, `property:`, or

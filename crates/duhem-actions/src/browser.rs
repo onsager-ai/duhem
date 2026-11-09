@@ -30,6 +30,7 @@
 //! with a clear hint when either is missing.
 
 mod context;
+mod emulate;
 mod keyboard;
 
 use std::collections::BTreeMap;

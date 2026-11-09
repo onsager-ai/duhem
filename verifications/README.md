@@ -79,6 +79,11 @@ inline frame locators, assertions and interactions. It is validated
 offline and executed against a two-origin browser fixture in
 `crates/duhem-runtime/tests/frame_smoke.rs` by browser CI. (#568)
 
+The [emulate example](emulate-example/duhem.yml) demonstrates `ui/emulate`
+viewport and color-scheme emulation with a sibling check that proves defaults
+are restored. It is validated offline and executed against a media-query
+fixture in `crates/duhem-runtime/tests/emulate_smoke.rs` by browser CI. (#580)
+
 The [history example](history-example/duhem.yml) demonstrates `ui/back` and
 `ui/forward` over real browser history, including same-document entries and the
 no-entry case. It is validated offline and executed against a local fixture in

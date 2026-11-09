@@ -619,6 +619,22 @@ async function dispatch(req) {
       // `req.expr` is a JS expression string (e.g. `document.readyState`).
       return await page(req).evaluate(req.expr)
 
+    case 'emulate': {
+      // Apply, then read the effective settings back from the page
+      // itself: the outputs are observations, never echoed inputs (#580).
+      const p = page(req)
+      if (req.viewport) await p.setViewportSize(req.viewport)
+      if (req.colorScheme) await p.emulateMedia({ colorScheme: req.colorScheme })
+      return await p.evaluate(() => ({
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        colorScheme: matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'dark'
+          : matchMedia('(prefers-color-scheme: light)').matches
+            ? 'light'
+            : 'no-preference',
+      }))
+    }
+
     case 'cookies':
       return await page(req).context().cookies()
 

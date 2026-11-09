@@ -262,6 +262,23 @@ Wait for a fixed duration within the suite ceiling (debugging escape hatch; pref
   with: { duration: 500ms }
 ```
 
+### `ui/emulate`
+
+Set the check's viewport (CSS px) and/or prefers-color-scheme; outputs are the settings read back from the page.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `viewport` | no | — |
+| `color_scheme` | no | `light` \| `dark` \| `no-preference` |
+
+**outputs:** `viewport`, `color_scheme`
+
+```yaml
+- id: emu
+  uses: ui/emulate
+  with: { viewport: { width: 390, height: 844 }, color_scheme: dark }
+```
+
 ## `api/*`
 
 ### `api/call`

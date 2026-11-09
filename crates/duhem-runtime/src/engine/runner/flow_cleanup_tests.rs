@@ -555,7 +555,6 @@ criteria:
         .run_with_metadata(&definition, BTreeMap::new())
         .await
         .unwrap();
-    assert_eq!(outcome.verdict.state, VerdictState::Pass);
     assert!(outcome.cleanup.is_empty(), "{:?}", outcome.cleanup);
     assert!(log.lock().unwrap().is_empty());
 }

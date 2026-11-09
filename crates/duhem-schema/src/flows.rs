@@ -1846,13 +1846,14 @@ flows:
             r#"
 verification: looped
 {LOOPED}
-setup: [{{ id: dirs, call: looped, with: {{ names: $inputs.names }} }}]
+setup:
+  - {{ id: rows, uses: cli/invoke }}
+  - {{ id: dirs, call: looped, with: {{ names: $setup.rows.outputs.items }} }}
 criteria: []
-inputs: {{ names: {{ type: array, default: [] }} }}
 "#
         ));
         validate_and_expand(&mut definition).expect("expand");
-        let wrapper = &definition.setup[0];
+        let wrapper = &definition.setup[1];
         assert!(
             wrapper.flow_cleanup.is_empty(),
             "the wrapper never dispatches"
@@ -1860,7 +1861,7 @@ inputs: {{ names: {{ type: array, default: [] }} }}
         let leaves: Vec<_> = wrapper
             .for_each_body
             .iter()
-            .chain(&definition.setup[1..])
+            .chain(&definition.setup[2..])
             .collect();
         assert_eq!(leaves.len(), 3);
         for leaf in leaves {
@@ -1869,7 +1870,7 @@ inputs: {{ names: {{ type: array, default: [] }} }}
             assert_eq!(leaf.flow_cleanup[0].call, "dirs");
         }
         // The cleanup's own loop expands like a lifecycle `for_each:`.
-        let cleanup = &definition.setup[0].for_each_body[0].flow_cleanup[0];
+        let cleanup = &definition.setup[1].for_each_body[0].flow_cleanup[0];
         assert_eq!(cleanup.steps[0].for_each_body.len(), 1);
     }
 

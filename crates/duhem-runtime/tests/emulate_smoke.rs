@@ -8,7 +8,7 @@ use std::{
 use axum::{Router, extract::RawQuery, http::StatusCode, response::Html, routing::get};
 use duhem_actions::{Action, ActionCtx, ActionResult, Emulate, Outcome, RunBrowser};
 use duhem_evidence::SqliteStore;
-use duhem_judge::VerdictState;
+use duhem_judge::{InconclusiveCause, VerdictState};
 use duhem_runtime::Engine;
 use duhem_schema::VerificationDefinition;
 use serde_json::json;
@@ -203,12 +203,16 @@ criteria:
             with: { url: $inputs.fixture_url }
           - uses: ui/emulate
             with: { viewport: { width: 390, height: 844 }, color_scheme: dark }
-          - uses: ui/assert-url
-            with: { equals: "http://never.invalid/", timeout: 200ms }
+          - uses: cli/invoke
+            with: { command: [sleep, "1"], timeout: 1ms }
+        assertions: ["true"]
 "#;
     let outcome = run(&mut engine, vd, &fx.url).await;
     assert!(
-        matches!(outcome.verdict.state, VerdictState::Inconclusive(_)),
+        matches!(
+            outcome.verdict.state,
+            VerdictState::Inconclusive(InconclusiveCause::Timeout)
+        ),
         "{:?}",
         outcome.verdict
     );

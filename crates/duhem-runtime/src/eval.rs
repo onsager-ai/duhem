@@ -379,11 +379,9 @@ fn navigate(mut value: Value, head: &str, path: &Path, start: usize) -> EvalRes 
                     // miss at this position, not a type error.
                     InconclusiveCause::MissingField(nav_path(head, path, start, i))
                 })?;
-                arr.into_iter()
-                    .nth(idx)
-                    .ok_or_else(|| {
-                        InconclusiveCause::MissingField(nav_path(head, path, start, i))
-                    })?
+                arr.into_iter().nth(idx).ok_or_else(|| {
+                    InconclusiveCause::MissingField(nav_path(head, path, start, i))
+                })?
             }
             scalar => {
                 return Err(InconclusiveCause::NotNavigable {

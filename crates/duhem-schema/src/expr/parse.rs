@@ -333,7 +333,11 @@ mod tests {
 
     #[test]
     fn rejects_invalid_quoted_keys() {
-        for src in ["$inputs.x['']", "$inputs.x['missing]", r"$inputs.x['bad\q']"] {
+        for src in [
+            "$inputs.x['']",
+            "$inputs.x['missing]",
+            r"$inputs.x['bad\q']",
+        ] {
             let err = parse(src).unwrap_err();
             assert!(!err.message.is_empty(), "{src}");
         }

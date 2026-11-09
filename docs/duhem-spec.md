@@ -1011,7 +1011,7 @@ message and source location.
 | `fixtures.<name>.down:` | `flows.<name>.cleanup:` |
 | `fixtures.<name>.cleanup_policy:` | `flows.<name>.cleanup_policy:` (same values and default) |
 | `$fixture.<name>.<id>.outputs.*` in `down:` | `$steps.<id>.outputs.*` in `cleanup:` |
-| `$fixture.<name>.<id>.outputs.*` in a check body or check step | declare the value in the flow's `outputs:`, give the call an `id:`, read `$setup.<call-id>.outputs.<name>` |
+| `$fixture.<name>.<id>.outputs.*` for a process action output in a consuming check body | declare the value in the flow's `outputs:`, give the check-setup call an `id:`, read `$setup.<call-id>.outputs.<name>` |
 | `needs: [a, b]` on a check | `- id: a` + `call: a` and `- id: b` + `call: b`, in order, at the **end** of that check's `setup:` |
 
 ```yaml
@@ -1097,8 +1097,9 @@ for a flow:
 > `fixtures.<name>` is deprecated and will be removed in v0.9.0. Declare
 > `flows.<name>` with `steps:` (was `up:`), `cleanup:` (was `down:`) and the same
 > `cleanup_policy:`; inside `cleanup:` replace `$fixture.<name>.<id>.outputs.*`
-> with `$steps.<id>.outputs.*`, and elsewhere declare it in the flow's
-> `outputs:` and read `$setup.<call-id>.outputs.<name>`; replace
+> with `$steps.<id>.outputs.*`. A consuming check can read only a fixture's
+> process outputs; declare one in the flow's `outputs:` and read
+> `$setup.<call-id>.outputs.<name>`; replace
 > `needs: [<name>]` with `- id: <name>` + `call: <name>` at the end of the
 > check's `setup:`.
 
@@ -1355,14 +1356,18 @@ lifecycle step's `id` may not collide with an id already open in an outer
 scope — validation rejects it. The deprecated fixtures keep their own
 `$fixture.*` namespace and rules (§10.3.5) unchanged.
 
-**Setup-output visibility.** Check body `with:` and `assertions:` still read
-only leaf `$setup.*` outputs. Session declarations are resolved before their
-own setup runs and may additionally consume **enclosing** setup outputs:
-criterion sessions may read leaf setup, and check sessions may read leaf and
-criterion setup. Own-scope setup references are validation errors with a
-location. Lifecycle blocks retain the nested output visibility above; outputs
-are restored when leaving a scope and on retry, so siblings never supply a
-seed accidentally. Flow cleanups read their call's body outputs as `$steps.*`, and deprecated fixture outputs remain local to that fixture's down block.
+**Setup-output visibility.** Ordinary `$setup.*` references in a check body
+remain leaf-only. #579 additionally exposes process action outputs from
+criterion- and check-level setup through `$setup.*`; a consuming check may read
+its fixture's process outputs through `$fixture.*` (§10.3.5). Other own-scope
+setup references are validation errors with a location. Session declarations
+are resolved before their own setup runs and may additionally consume
+**enclosing** setup outputs: criterion sessions may read leaf setup, and check
+sessions may read leaf and criterion setup. Lifecycle blocks retain the nested
+output visibility above; outputs are restored when leaving a scope and on
+retry, so siblings never supply a seed accidentally. Flow cleanups read their
+call's body outputs as `$steps.*`, and deprecated non-process fixture outputs
+remain local to that fixture's down block.
 
 Check and criterion lifecycle contexts re-seed from their scope's nearest
 session. To preserve signed-out behavior under an authenticated parent,

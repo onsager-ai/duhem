@@ -142,13 +142,21 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
                     .expect("projection preserves expression syntax");
                 }
             }
-            expand_lifecycle_calls_in_list(
+            let setup_projections = expand_lifecycle_calls_in_list(
                 &mut check.setup,
                 &catalog,
                 "setup",
                 &mut lifecycle_counter,
             );
             expand_for_each_in_list(&mut check.setup, &catalog, &mut lifecycle_counter);
+            // Check-body consumers may read declared outputs from process
+            // actions in their own setup (#579). Keep ordinary setup outputs
+            // out of scope; validation enforces that distinction after these
+            // call-id references are rewritten to the expanded action ids.
+            rewrite_steps(&mut check.steps, &setup_projections);
+            for assertion in &mut check.assertions {
+                rewrite_assertion(assertion, &setup_projections);
+            }
             expand_lifecycle_calls_in_list(
                 &mut check.teardown,
                 &catalog,
@@ -156,6 +164,9 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
                 &mut lifecycle_counter,
             );
             expand_for_each_in_list(&mut check.teardown, &catalog, &mut lifecycle_counter);
+            // A check's teardown is inside the scope opened by its setup, so
+            // it can also consume that setup's declared flow outputs.
+            rewrite_steps(&mut check.teardown, &setup_projections);
         }
     }
     Ok(())

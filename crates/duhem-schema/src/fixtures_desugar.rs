@@ -8,6 +8,7 @@
 //! | `fixtures.<name>: { up, down, cleanup_policy }` | a flow with `steps: up`, `cleanup: down`, the same policy |
 //! | `needs: [a, b]` on a check | `call:` of `a`, `b`, in order, at the **end** of that check's `setup:` |
 //! | `$fixture.<name>.<id>.outputs.*` in `down:` | `$steps.<id>.outputs.*`, the body reference of the same call |
+//! | `$fixture.<name>.<id>.outputs.*` for a process output in a check body | declare it in the flow's `outputs:` and read `$setup.<call-id>.outputs.<name>` |
 //!
 //! The expansion mirrors the loader's flow expansion: the `up:` steps are
 //! appended to the check's `setup:`, each carrying the cleanup the call
@@ -152,7 +153,7 @@ pub fn fixture_deprecation_warnings(definition: &VerificationDefinition) -> Vec<
                 .map(|at| format!("{}:{}: ", at.line, at.column))
                 .unwrap_or_default();
             format!(
-                "{location}`fixtures.{name}` is deprecated and will be removed in v0.9.0. Declare `flows.{name}` with `steps:` (was `up:`), `cleanup:` (was `down:`) and the same `cleanup_policy:`; inside `cleanup:` replace `$fixture.{name}.<id>.outputs.*` with `$steps.<id>.outputs.*`, and elsewhere declare it in the flow's `outputs:` and read `$setup.<call-id>.outputs.<name>`; replace `needs: [{name}]` with `- id: {name}` + `call: {name}` at the end of the check's `setup:`."
+                "{location}`fixtures.{name}` is deprecated and will be removed in v0.9.0. Declare `flows.{name}` with `steps:` (was `up:`), `cleanup:` (was `down:`) and the same `cleanup_policy:`; inside `cleanup:` replace `$fixture.{name}.<id>.outputs.*` with `$steps.<id>.outputs.*`. For a process output read by the consuming check, declare it in the flow's `outputs:` and read `$setup.<call-id>.outputs.<name>`; replace `needs: [{name}]` with `- id: {name}` + `call: {name}` at the end of the check's `setup:`."
             )
         })
         .collect()
@@ -259,6 +260,7 @@ criteria:
             "{project}"
         );
         assert!(project.contains("`needs: [project]` with `- id: project` + `call: project`"));
+        assert!(project.contains("For a process output read by the consuming check"));
         assert!(project.contains("read `$setup.<call-id>.outputs.<name>`"));
         assert!(
             project.chars().next().is_some_and(|c| c.is_ascii_digit()),
@@ -275,11 +277,67 @@ criteria:
         assert!(fixture_deprecation_warnings(&definition).is_empty());
     }
 
-    // The migration the warning names for a check body that read a fixture's
-    // output: declare it in the flow's `outputs:`, give the call an `id:`.
+    // A consuming check may read a fixture's process outputs. The migration
+    // uses the flow's declared output and the check-setup call id.
     #[test]
-    fn a_migrated_check_body_reads_a_cleanup_flows_declared_output() {
-        let definition = VerificationDefinition::from_yaml_str(
+    fn a_migrated_check_body_reads_a_cleanup_flows_process_output() {
+        let mut definition = VerificationDefinition::from_yaml_str(
+            r#"
+verification: migrated
+flows:
+  project:
+    steps:
+      - id: launch
+        uses: process/start
+        with: { command: sleep, args: ["30"] }
+    outputs:
+      handle: $steps.launch.outputs.handle
+      ready: $steps.launch.outputs.ready
+    cleanup:
+      - uses: process/stop
+        with: { handle: $steps.launch.outputs.handle }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        setup: [{ id: project, call: project }]
+        steps:
+          - uses: process/inspect
+            with: { handle: "$setup.project.outputs.handle" }
+            if: "$setup.project.outputs.ready"
+        assertions: ["$setup.project.outputs.ready == true"]
+"#,
+        )
+        .expect("parse");
+        crate::flows::validate_and_expand(&mut definition).expect("loader flow expansion");
+        let check = &definition.criteria[0].checks[0];
+        assert_eq!(
+            check.steps[0].with["handle"].as_str(),
+            Some("$setup.project__launch.outputs.handle")
+        );
+        assert!(matches!(
+            &check.steps[0].condition,
+            crate::StepCondition::Expr(expr)
+                if expr.raw == "$setup.project__launch.outputs.ready"
+        ));
+        assert_eq!(
+            check.assertions[0].display(),
+            "$setup.project__launch.outputs.ready == true"
+        );
+        crate::validate_with_contract_outputs(&definition, &|uses| {
+            if uses == "process/start" {
+                vec!["handle".into(), "ready".into()]
+            } else {
+                Vec::new()
+            }
+        })
+        .expect("the declared process output is readable through the call id");
+    }
+
+    #[test]
+    fn a_migrated_check_body_cannot_read_an_ordinary_setup_output() {
+        let mut definition = VerificationDefinition::from_yaml_str(
             r#"
 verification: migrated
 flows:
@@ -302,11 +360,38 @@ criteria:
         steps:
           - uses: cli/invoke
             with: { command: [echo, "$setup.project.outputs.name"] }
+        teardown:
+          - uses: cli/invoke
+            with: { command: [echo, "$setup.project.outputs.name"] }
         assertions: ["true"]
 "#,
         )
         .expect("parse");
-        crate::validate_with_contract_outputs(&definition, &|_| vec!["stdout".into()])
-            .expect("the declared output is readable through the call id");
+        crate::flows::validate_and_expand(&mut definition).expect("loader flow expansion");
+        let check = &definition.criteria[0].checks[0];
+        assert_eq!(
+            check.teardown[0].with["command"][1].as_str(),
+            Some("$setup.project__create.outputs.stdout")
+        );
+        let errors = crate::validate_with_contract_outputs(&definition, &|_| vec!["stdout".into()])
+            .expect_err("ordinary check-setup outputs stay out of body scope");
+        let out_of_scope = errors
+            .iter()
+            .filter(|error| {
+                matches!(
+                    error,
+                    crate::ValidationError::SetupStepOutOfScope { step, .. }
+                        if step == "project__create"
+                )
+            })
+            .count();
+        assert_eq!(out_of_scope, 1, "{errors:?}");
+        assert!(
+            !errors.iter().any(|error| matches!(
+                error,
+                crate::ValidationError::UnresolvedSetupStepRef { step, .. } if step == "project"
+            )),
+            "the in-scope check teardown reference should resolve: {errors:?}"
+        );
     }
 }

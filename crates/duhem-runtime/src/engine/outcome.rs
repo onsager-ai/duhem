@@ -356,6 +356,12 @@ fn assert_element_fail_detail(ev: &StepEvidence) -> Option<String> {
         ExistenceState::Exists => {
             format!("expected {desc} to appear{timeout_clause}, but none was found")
         }
+        ExistenceState::Focused => {
+            format!("expected {desc} to be focused{timeout_clause}, but it never held focus")
+        }
+        ExistenceState::NotFocused => {
+            format!("expected {desc} to be not focused{timeout_clause}, but it stayed focused")
+        }
         ExistenceState::Visible => match count {
             Some(n) if n > 0 => {
                 format!(

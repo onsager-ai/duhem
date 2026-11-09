@@ -218,8 +218,9 @@ impl TryFrom<LocatorWire> for Locator {
 
 /// Existence/visibility expectation for `ui/assert-element`.
 ///
-/// Closed enum — the four states map directly onto Playwright's
-/// `WaitForSelectorState` plus DOM presence semantics, and adding
+/// Closed enum — the first four states map directly onto Playwright's
+/// `WaitForSelectorState` plus DOM presence semantics, the focus states
+/// are polled by the sidecar (#580), and adding
 /// new states is a schema change handled by a follow-up spec.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -233,6 +234,11 @@ pub enum ExistenceState {
     Visible,
     /// Element is present in the DOM but not visible.
     Hidden,
+    /// Element is its own document's `activeElement` and that document
+    /// has focus (including inside a `frame:` document).
+    Focused,
+    /// Element is present (exactly one match) and not focused.
+    NotFocused,
 }
 
 #[cfg(test)]

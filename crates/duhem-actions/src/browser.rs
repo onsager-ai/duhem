@@ -866,6 +866,16 @@ impl Page {
         serde_json::from_value(v).map_err(|e| PwError(format!("requestRecords decode: {e}")))
     }
 
+    /// Test-only: lower this page's request-record cap (default 10 000)
+    /// so overflow behavior can be exercised without thousands of requests.
+    #[doc(hidden)]
+    pub async fn set_request_cap_for_tests(&self, cap: u64) -> Result<(), PwError> {
+        let mut params = self.p();
+        params["cap"] = json!(cap);
+        self.conn.request("setRequestCap", params).await?;
+        Ok(())
+    }
+
     /// Current position on the per-check monotonic browser-session clock.
     pub async fn session_time_ms(&self) -> Result<f64, PwError> {
         let v = self.conn.request("sessionTime", self.p()).await?;

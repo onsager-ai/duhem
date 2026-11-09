@@ -191,7 +191,7 @@ function attachNetworkRecorder(p, buf, sessionStart, requests) {
     if (previous && records.has(previous)) rec.redirected_from = records.get(previous).seq
     try { rec.frame_url = request.frame().url() } catch {}
     records.set(request, rec)
-    if (requests.events.length < 10000) requests.events.push(rec)
+    if (requests.events.length < requests.cap) requests.events.push(rec)
     else requests.truncated = true
   })
   p.on('requestfinished', (request) => {
@@ -427,7 +427,10 @@ async function dispatch(req) {
       networkBuffers.set(id, buf)
       const sessionStart = performance.now()
       sessionStarts.set(id, sessionStart)
-      const requests = { events: [], truncated: false, attached_ms: performance.now() - sessionStart }
+      const requests = {
+        events: [], truncated: false, cap: 10000,
+        attached_ms: performance.now() - sessionStart,
+      }
       requestBuffers.set(id, requests)
       attachNetworkRecorder(p, buf, sessionStart, requests)
       return { pageId: id }
@@ -547,6 +550,14 @@ async function dispatch(req) {
       const requests = requestBuffers.get(req.pageId)
       if (!requests) throw new Error(`unknown pageId: ${req.pageId}`)
       return requests
+    }
+
+    // Test-only: lower the request-record cap so overflow is cheap to exercise.
+    case 'setRequestCap': {
+      const requests = requestBuffers.get(req.pageId)
+      if (!requests) throw new Error(`unknown pageId: ${req.pageId}`)
+      requests.cap = req.cap
+      return {}
     }
 
     case 'sessionTime': {

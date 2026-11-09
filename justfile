@@ -145,7 +145,7 @@ test target="workspace":
             exec cargo test --workspace
             ;;
         browser-actions)
-            cargo test -p duhem-actions --test ui_smoke --test api_observe_smoke -- --ignored
+            cargo test -p duhem-actions --test ui_smoke --test api_observe_smoke --test api_observe_window_smoke -- --ignored
             exec cargo test -p duhem-runtime --test capture_smoke --test session_injection_smoke --test named_sessions_smoke --test frame_smoke -- --ignored
             ;;
         *)

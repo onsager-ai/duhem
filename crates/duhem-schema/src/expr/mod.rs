@@ -18,6 +18,16 @@ mod runtime_helpers;
 pub use parse::{ParseError, parse};
 pub use runtime_helpers::{RuntimeHelper, RuntimeHelperArity, authored_runtime_helper_names};
 
+/// Detect a likely expression after trimming leading whitespace, without parsing it.
+pub fn is_expression(raw: &str) -> bool {
+    raw.trim_start().starts_with('$')
+}
+
+/// Detect an expression that parses completely.
+pub fn is_valid_expression(raw: &str) -> bool {
+    is_expression(raw) && parse(raw).is_ok()
+}
+
 /// A parsed expression, with the original authored source preserved
 /// alongside it. `raw` is what we re-emit on YAML round-trip;
 /// `parsed` is what the runtime evaluator and validator inspect.
@@ -248,5 +258,23 @@ impl Expr {
             }
         }
         go(self, &mut visit);
+    }
+}
+
+#[cfg(test)]
+mod predicate_tests {
+    use super::{is_expression, is_valid_expression};
+
+    #[test]
+    fn expression_detection_and_validity() {
+        for (raw, looks_like, valid) in [
+            (" $x", true, true),
+            ("$x", true, true),
+            ("$inputs.", true, false),
+            ("literal", false, false),
+        ] {
+            assert_eq!(is_expression(raw), looks_like, "{raw:?}");
+            assert_eq!(is_valid_expression(raw), valid, "{raw:?}");
+        }
     }
 }

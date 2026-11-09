@@ -331,7 +331,7 @@ pub(crate) fn check_with_expression_syntax(
     errs: &mut Vec<ValidationError>,
 ) {
     crate::source::walk_with_strings(with, source_path, &mut |raw, path| {
-        if raw.trim_start().starts_with('$')
+        if crate::expr::is_expression(raw)
             && let Err(error) = crate::expr::parse(raw)
         {
             errs.push(ValidationError::InvalidWithExpression {

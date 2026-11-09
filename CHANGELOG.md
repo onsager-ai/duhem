@@ -30,6 +30,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 
 - [additive] Reference and assertion paths accept quoted bracket keys such as `headers['content-type']` for keys that are not identifiers. (#603)
+- [clarifying] Expression detection is consolidated into one shared predicate; inline definitions with inconsistent forms are retired. (#540)
 
 ## v0.7.2 — 2026-11-06
 

@@ -5,14 +5,17 @@ inputs:
   url: { type: string }
 criteria:
   - id: AC-1
-    description: The response exposes its content type under the real header name.
+    description: A JSON response field whose name is not an identifier is addressable by its real name.
     checks:
       - id: AC-1.1
         steps:
           - id: response
             uses: api/call
-            with: { method: GET, url: $inputs.url }
-            # Explicit until the api/call output catalog includes headers (#603 P1).
-            outputs: { headers: headers }
+            with:
+              method: POST
+              url: $inputs.url
+              headers: { content-type: application/json }
+              body: { cache-control: no-store, items: [{ x-id: first }] }
         assertions:
-          - $steps.response.outputs.headers['content-type'] == 'text/plain'
+          - $steps.response.outputs.body['cache-control'] == 'no-store'
+          - $steps.response.outputs.body.items[0]['x-id'] == 'first'

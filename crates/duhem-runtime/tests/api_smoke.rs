@@ -134,7 +134,7 @@ async fn bracket_keys_example_passes_against_real_http() {
     let mut inputs = BTreeMap::new();
     inputs.insert(
         "url".to_string(),
-        serde_json::Value::String(format!("http://{}/uuid", fx.addr)),
+        serde_json::Value::String(format!("http://{}/echo", fx.addr)),
     );
     let verdict = Engine::new()
         .with_browser(browser)

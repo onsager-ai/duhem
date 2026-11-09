@@ -196,6 +196,12 @@ Common shape (terse):
 
 Authoring rules:
 
+- Use quoted bracket keys for object names such as
+  `$steps.r.outputs.headers['content-type']`; escape quotes as `\'` and
+  backslashes as `\\`. Keys must be nonempty. `[0]` indexes an array;
+  `['0']` addresses an object key. The same syntax works on flow params,
+  including page-call arguments: `$params.items[0]['a-b']`.
+
 - Use `ui/observe-console` with a required same-session `window` to record
   page errors and console messages separately. Assert `complete == true`
   before interpreting `page_error_count` or `console_error_count` as absence;

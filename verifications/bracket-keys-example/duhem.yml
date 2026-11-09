@@ -1,0 +1,21 @@
+# Run by api_smoke against a real local HTTP server (#603 P2).
+verification: Quoted keys in HTTP response paths
+spec_ref: https://github.com/onsager-ai/duhem/issues/603
+inputs:
+  url: { type: string }
+criteria:
+  - id: AC-1
+    description: A JSON response field whose name is not an identifier is addressable by its real name.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: response
+            uses: api/call
+            with:
+              method: POST
+              url: $inputs.url
+              headers: { content-type: application/json }
+              body: { cache-control: no-store, items: [{ x-id: first }] }
+        assertions:
+          - $steps.response.outputs.body['cache-control'] == 'no-store'
+          - $steps.response.outputs.body.items[0]['x-id'] == 'first'

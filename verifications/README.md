@@ -24,6 +24,10 @@ Two kinds of directory live here, for two kinds of reader:
 The [per-row validation example](for-each-rows-example/duhem.yml) applies
 the same assertions to every row with bounded `for_each:` (#521).
 
+The [bracket keys example](bracket-keys-example/duhem.yml) asserts
+hyphenated JSON response keys with `['…']` paths against a local fixture in
+the API smoke suite (#603).
+
 The [request window example](observe-window-example/duhem.yml) asserts a
 complete browser request collection against a local fixture (#603).
 

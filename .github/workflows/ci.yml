@@ -55,6 +55,9 @@ jobs:
       - name: spec/code drift check
         run: cargo run -p xtask --quiet -- schema-drift
 
+      - name: constraint catalog drift check
+        run: cargo run -p xtask --quiet -- constraint-catalog --mode=fail
+
       # The generated action reference (docs/action-reference.md) is built
       # from the action contracts; a contract change that isn't regenerated
       # drifts the authoring reference away from what `duhem validate`

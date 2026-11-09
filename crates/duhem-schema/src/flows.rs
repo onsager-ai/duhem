@@ -563,11 +563,7 @@ fn rewrite_page_param_args(
 
 fn render_expr_value(value: &serde_yml::Value) -> Option<String> {
     match value {
-        serde_yml::Value::String(raw)
-            if raw.trim_start().starts_with('$') && crate::expr::parse(raw).is_ok() =>
-        {
-            Some(raw.clone())
-        }
+        serde_yml::Value::String(raw) if crate::expr::is_valid_expression(raw) => Some(raw.clone()),
         serde_yml::Value::String(raw) if !raw.contains('\'') => Some(format!("'{raw}'")),
         serde_yml::Value::String(raw) if !raw.contains('"') => Some(format!("\"{raw}\"")),
         serde_yml::Value::String(raw) => {

@@ -1414,7 +1414,8 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 **UI actions** (Playwright primitives)
 
 - `ui/navigate` — go to a URL
-- `ui/back` / `ui/forward` — move one entry through the page's real browser history (`page.goBack` / `page.goForward`, waiting for `load`; optional `timeout:`). Outputs `from_url`, `url` and `navigated`: `navigated` is `true` when the browser moved to another entry, including same-document (hash/`pushState`) entries, and `false` with `url == from_url` when no entry exists in that direction (the browser's initial blank page is not an entry the check visited). A missing entry is not an error and never triggers a direct navigation; an in-flight navigation that exceeds the timeout is a `timeout` outcome.
+- `ui/back` — move one entry back through the page's real browser history (`page.goBack`); same waiting, outputs and no-entry contract as `ui/forward`.
+- `ui/forward` — move one entry forward through the page's real browser history (`page.goForward`), waiting for `load`; optional `timeout:`). Outputs `from_url`, `url` and `navigated`: `navigated` is `true` when the browser moved to another entry, including same-document (hash/`pushState`) entries, and `false` with `url == from_url` when no entry exists in that direction (the browser's initial blank page is not an entry the check visited). A missing entry is not an error and never triggers a direct navigation; an in-flight navigation that exceeds the timeout is a `timeout` outcome.
 - `ui/click` — click an element (role-based locators preferred)
 - `ui/type` — type into an input
 - `ui/select` — select an option

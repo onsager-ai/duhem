@@ -141,6 +141,8 @@ async fn observe_captures_fetch_triggered_by_click() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -212,6 +214,8 @@ async fn observe_after_click(button_name: &str, path: &str) -> duhem_actions::Ac
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -267,6 +271,8 @@ async fn observe_json_parse_failure_emits_observation() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -313,6 +319,8 @@ async fn observe_times_out_when_no_event_matches() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -336,4 +344,64 @@ async fn observe_times_out_when_no_event_matches() {
         elapsed < Duration::from_millis(2_000),
         "elapsed = {elapsed:?}"
     );
+}
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
+async fn window_includes_anchor_navigation_and_reports_complete_empty() {
+    let fx = start_fixture().await;
+    let run = fresh_browser().await;
+    let check = run.open_check().await.unwrap();
+    let start_ms = check.page.session_time_ms().await.unwrap();
+    let ctx = ActionCtx {
+        page: Some(&check.page),
+        step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
+    };
+    Navigate
+        .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
+        .await
+        .unwrap();
+    let finish_ms = check.page.session_time_ms().await.unwrap();
+    let boundaries = std::collections::BTreeMap::from([(
+        "load".to_string(),
+        duhem_actions::action::StepBoundary {
+            session: None,
+            start_ms,
+            finish_ms,
+        },
+    )]);
+    let ctx = ActionCtx {
+        page: Some(&check.page),
+        step_index: 1,
+        step_boundaries: &boundaries,
+        session: None,
+    };
+    let result = Observe
+        .invoke(
+            &ctx,
+            &yaml(&format!(
+                "url_pattern: '{}'\nwindow: {{ from_step: load, duration: 1s }}",
+                url(&fx)
+            )),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.outcome, Outcome::Ok);
+    assert_eq!(result.outputs["complete"], true);
+    assert_eq!(result.outputs["count"], 1);
+    assert_eq!(result.outputs["requests"][0]["method"], "GET");
+    let empty = Observe
+        .invoke(
+            &ctx,
+            &yaml(
+                "url_pattern: 'http://does.not/match'\nwindow: { from_step: load, duration: 1s }",
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(empty.outputs["complete"], true);
+    assert_eq!(empty.outputs["count"], 0);
+    assert_eq!(empty.outcome, Outcome::Ok);
 }

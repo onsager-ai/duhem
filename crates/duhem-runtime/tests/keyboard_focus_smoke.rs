@@ -104,6 +104,8 @@ async fn tab_moves_focus_and_focused_distinguishes_visible_controls() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     navigate(&ctx, &fx.url).await;
     Focus
@@ -135,6 +137,8 @@ async fn enter_activates_focused_button_and_locator_press_describes_element() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     navigate(&ctx, &fx.url).await;
     assert!(!satisfied(&ctx, "{role: menu}", "visible").await);
@@ -157,6 +161,8 @@ async fn focus_in_frame_is_distinct_from_parent_and_press_target_is_deepest() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     navigate(&ctx, &fx.url).await;
     Focus
@@ -190,6 +196,8 @@ async fn press_target_is_body_when_nothing_is_focused() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     navigate(&ctx, &fx.url).await;
     let pressed = Press.invoke(&ctx, &yaml("key: Shift")).await.unwrap();
@@ -207,6 +215,8 @@ async fn invalid_key_and_ambiguous_or_missing_targets_fail_usefully() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     navigate(&ctx, &fx.url).await;
     let error = Press

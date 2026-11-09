@@ -17,6 +17,8 @@ use serde_yml::Value;
 use tokio::{net::TcpListener, task::JoinHandle};
 
 const EXAMPLE: &str = include_str!("../../../verifications/iframe-example/duhem.yml");
+const WINDOW_EXAMPLE: &str =
+    include_str!("../../../verifications/observe-window-example/duhem.yml");
 const REPORT: &str = r#"<!doctype html><html><body>
 <main><h1>Weekly report</h1>
 <label>Title<input></label>
@@ -101,6 +103,30 @@ fn assertion(locator: &str, expected: &str) -> Value {
 
 #[tokio::test]
 #[ignore = "requires Chromium"]
+async fn worked_window_vd_executes() {
+    let fx = fixture().await;
+    let def = VerificationDefinition::from_yaml_str(WINDOW_EXAMPLE).unwrap();
+    let browser = RunBrowser::launch(false).await.unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(tmp.path().join("runs.db")).await.unwrap());
+    let mut engine = Engine::new().with_browser(browser).with_store(store);
+    let outcome = engine
+        .run_with_metadata(
+            &def,
+            BTreeMap::from([("page_url".into(), serde_json::json!(format!("{}/", fx.url)))]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome.verdict.state,
+        VerdictState::Pass,
+        "{:?}",
+        outcome.verdict
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium"]
 async fn worked_vd_executes_cross_origin_named_locators_all_actions_and_evidence() {
     let fx = fixture().await;
     let def = VerificationDefinition::from_yaml_str(EXAMPLE).unwrap();
@@ -145,6 +171,8 @@ async fn frame_contents_are_distinct_from_page_and_negative_assertions_discrimin
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     navigate(&ctx, &fx.url).await;
     let inner = "{frame: {testid: report-shell-iframe}, role: heading, name: Weekly report}";
@@ -203,6 +231,8 @@ async fn unavailable_ambiguous_and_non_frame_targets_never_prove_inner_absence()
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     navigate(&ctx, &fx.url).await;
     for frame in [
@@ -232,6 +262,8 @@ async fn waits_for_late_frame_and_document_and_keeps_one_deadline() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     navigate(&ctx, &fx.url).await;
     Click

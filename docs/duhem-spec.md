@@ -1645,6 +1645,18 @@ single-match rule. Thresholds live in VD assertions, for example
 - `api/poll` — re-hit an endpoint until a response condition holds or a timeout elapses
 - `api/stream` — follow an open-ended SSE / `text/event-stream` from an in-progress source, collecting ordered events until a terminal condition (`until_event` / `max_events` / server close) or the `timeout:` budget; outputs `events` / `event_count` / `last_event` for mechanical assertion
 
+`api/observe` optionally accepts `window: { from_step, edge, duration }` to
+collect requests starting in the inclusive window anchored to an earlier step
+in the same browser session. `edge` defaults to `start`; `finish` selects its
+finish. The positive duration runs on the session clock. `edge` and `duration` must
+be literals, and an unrunnable `from_step` (skipped, gated or from another
+session) fails the step with an action error. `count` and `requests`
+describe matching request starts in sequence order, including pending and failed
+requests and separate redirect hops. Assert `complete` before treating an empty
+result as absence: it is false if recording began too late or the bounded buffer
+was truncated. `truncated` reports buffer overflow. Without a window the legacy
+first matching response behavior remains unchanged.
+
 Both response-side actions declare their outputs in the catalog, so `$steps.<id>.outputs.<name>` resolves without an `outputs:` block. `headers` is an object with lower-case names; reach a hyphen-free header by dotted path (`headers.location`). `body_bytes` is an integer: the payload bytes the client returned after content decoding, before UTF-8-lossy or JSON conversion, excluding headers. It is not the `body_text` character count, `Content-Length` or wire size; an empty body is `0`, and a failed body read is an error, never `0`. `api/call` uses `reqwest` with no decompression feature and sends no `Accept-Encoding`, so nothing decodes `Content-Encoding` there; `api/observe` reads Chromium's decoded `response.body()`. The [executed example](../verifications/response-outputs-example/duhem.yml) asserts `status`, `body_bytes` and a header. (#603)
 
 **Database actions**

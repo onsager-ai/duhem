@@ -30,6 +30,9 @@
 //! with a clear hint when either is missing.
 
 mod context;
+mod requests;
+
+pub use requests::{RequestRecord, RequestRecords};
 mod emulate;
 mod keyboard;
 

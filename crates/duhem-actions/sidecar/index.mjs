@@ -128,6 +128,9 @@ const contexts = new Map()
 const pages = new Map()
 /** @type {Map<string, NetworkRecord[]>} */
 const networkBuffers = new Map()
+// Separate from the legacy response buffer: starts are recorded immediately,
+// including requests that never produce a response.
+const requestBuffers = new Map()
 /** @type {Map<string, number>} */
 const sessionStarts = new Map()
 // Video recording (#215) is per-context and finalized only on
@@ -172,14 +175,41 @@ function page(req) {
  * @param {Page} p
  * @param {NetworkRecord[]} buf
  */
-function attachNetworkRecorder(p, buf, sessionStart) {
+function attachNetworkRecorder(p, buf, sessionStart, requests) {
   /** @type {WeakMap<import('playwright').Request, { mono: number, wall: string }>} */
   const starts = new WeakMap()
+  const records = new WeakMap()
+  let nextSequence = 1
   p.on('request', (request) => {
-    starts.set(request, { mono: performance.now(), wall: new Date().toISOString() })
+    const now = performance.now()
+    starts.set(request, { mono: now, wall: new Date().toISOString() })
+    const previous = request.redirectedFrom()
+    const rec = {
+      seq: nextSequence++, method: request.method(), url: request.url(),
+      started_ms: Math.max(0, now - sessionStart), outcome: 'pending',
+    }
+    if (previous && records.has(previous)) rec.redirected_from = records.get(previous).seq
+    try { rec.frame_url = request.frame().url() } catch {}
+    records.set(request, rec)
+    if (requests.events.length < requests.cap) requests.events.push(rec)
+    else requests.truncated = true
+  })
+  p.on('requestfinished', (request) => {
+    const rec = records.get(request)
+    if (rec) rec.outcome = 'completed'
+  })
+  p.on('requestfailed', (request) => {
+    const rec = records.get(request)
+    if (rec) {
+      rec.outcome = 'failed'
+      const failure = request.failure()
+      if (failure) rec.error = failure.errorText
+    }
   })
   p.on('response', async (response) => {
     const request = response.request()
+    const requestRecord = records.get(request)
+    if (requestRecord) requestRecord.status = response.status()
     const start = starts.get(request) || {
       mono: performance.now(),
       wall: new Date().toISOString(),
@@ -459,7 +489,12 @@ async function dispatch(req) {
       networkBuffers.set(id, buf)
       const sessionStart = performance.now()
       sessionStarts.set(id, sessionStart)
-      attachNetworkRecorder(p, buf, sessionStart)
+      const requests = {
+        events: [], truncated: false, cap: 10000,
+        attached_ms: performance.now() - sessionStart,
+      }
+      requestBuffers.set(id, requests)
+      attachNetworkRecorder(p, buf, sessionStart, requests)
       return { pageId: id }
     }
 
@@ -694,6 +729,20 @@ async function dispatch(req) {
       if (!buf) throw new Error(`unknown pageId: ${req.pageId}`)
       const from = req.cursor || 0
       return { events: buf.slice(from), cursor: buf.length }
+    }
+
+    case 'requestRecords': {
+      const requests = requestBuffers.get(req.pageId)
+      if (!requests) throw new Error(`unknown pageId: ${req.pageId}`)
+      return requests
+    }
+
+    // Test-only: lower the request-record cap so overflow is cheap to exercise.
+    case 'setRequestCap': {
+      const requests = requestBuffers.get(req.pageId)
+      if (!requests) throw new Error(`unknown pageId: ${req.pageId}`)
+      requests.cap = req.cap
+      return {}
     }
 
     case 'sessionTime': {

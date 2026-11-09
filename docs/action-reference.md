@@ -313,8 +313,9 @@ Observe a network request the page made (matched by method + URL pattern).
 | `url_pattern` | yes | — |
 | `after` | no | — |
 | `timeout` | no | — |
+| `window` | no | — |
 
-**outputs:** `method`, `url`, `status`, `body`, `body_text`, `body_bytes`, `headers`, `request_body`, `request_headers`
+**outputs:** `method`, `url`, `status`, `body`, `body_text`, `body_bytes`, `headers`, `request_body`, `request_headers`, `count`, `requests`, `window`, `complete`, `truncated`
 
 ```yaml
 - uses: api/observe

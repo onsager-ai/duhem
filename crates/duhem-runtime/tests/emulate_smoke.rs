@@ -116,6 +116,8 @@ async fn reads_back_effective_settings_on_blank_page_and_next_context_is_default
     let ctx = ActionCtx {
         page: Some(&first.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     // No navigation yet: the page is still about:blank.
     let dark = emulate(
@@ -166,6 +168,8 @@ async fn invalid_emulation_fails_usefully() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     for bad in [
         "{}",

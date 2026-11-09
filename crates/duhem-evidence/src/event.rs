@@ -180,6 +180,13 @@ pub struct FlowOrigin {
     pub iteration: Option<u32>,
 }
 
+/// The flow call whose registered `cleanup:` a lifecycle block runs (#615).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CleanupRegistration {
+    pub flow: String,
+    pub call: String,
+}
+
 /// Declaring resource scope, independent of a temporary browser context.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessOwner {
@@ -296,6 +303,10 @@ pub enum EventPayload {
         /// and fixture events round-trip byte-identically.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         criterion_id: Option<String>,
+        /// Set when this teardown block is a flow `cleanup:` registered at
+        /// the scope named by the other fields (#615); absent otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        registered_by: Option<CleanupRegistration>,
     },
     SetupStepStarted {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
@@ -750,6 +761,7 @@ mod tests {
                 fixture_name: None,
                 check_id: None,
                 criterion_id: None,
+                registered_by: None,
             },
             EventPayload::SetupStepStarted {
                 phase: StepPhase::Setup,
@@ -879,6 +891,7 @@ mod tests {
                 fixture_name: None,
                 check_id: None,
                 criterion_id: None,
+                registered_by: None,
             }
             .is_finished()
         );

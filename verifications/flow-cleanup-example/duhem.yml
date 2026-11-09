@@ -1,0 +1,54 @@
+# Flow `cleanup:` — worked example (#615)
+#
+# Real processes, no mocks. A flow may declare a `cleanup:` half next to its
+# `steps:`. When a check calls the flow, the cleanup is registered on that check
+# and runs LIFO when the check ends, before the check's `teardown:`, so the
+# caller cannot forget it. The cleanup reads the flow's `$params.*` and the same
+# call's body outputs as `$steps.<body-id>.outputs.*`.
+#
+# AC-1 creates a temporary file through the flow and proves it exists while the
+# check runs. AC-2 runs after AC-1's check has ended and proves the cleanup
+# removed it. The failing-cleanup controls (required and `diagnostic_only`) live
+# in `crates/duhem-cli/tests/fixtures/cleanup/flow_*.yml` and are driven by the
+# duhem-cli self-verification suite.
+
+verification: Flow cleanup
+
+flows:
+  scratch_file:
+    params:
+      prefix: { type: string }
+    steps:
+      - id: create
+        uses: cli/invoke
+        with:
+          command: [sh, -c, 'f=$(mktemp "/tmp/$1.XXXX"); printf %s "$f"', --, $params.prefix]
+    outputs:
+      path: $steps.create.outputs.stdout
+    cleanup:
+      - uses: cli/invoke
+        with: { command: [rm, -f, $steps.create.outputs.stdout] }
+
+criteria:
+  - id: AC-1
+    description: A requested temporary resource exists during the check.
+    checks:
+      - id: AC-1.1
+        steps:
+          - { id: tmp, call: scratch_file, with: { prefix: duhem-flow-cleanup } }
+          - id: inspect
+            uses: cli/invoke
+            with: { command: [test, -f, $steps.tmp.outputs.path] }
+        assertions:
+          - $steps.inspect.outputs.exit_code == 0
+
+  - id: AC-2
+    description: The resource is removed once the check that requested it has ended.
+    checks:
+      - id: AC-2.1
+        steps:
+          - id: leftover
+            uses: cli/invoke
+            with: { command: [sh, -c, 'test -z "$(ls /tmp/duhem-flow-cleanup.* 2>/dev/null)"'] }
+        assertions:
+          - $steps.leftover.outputs.exit_code == 0

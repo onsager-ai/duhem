@@ -15,6 +15,27 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::ExprStr;
 
+/// Cleanup a `call:` to a flow with `cleanup:` registers on the enclosing
+/// lifecycle scope once the call is entered (#615). Loader-only metadata
+/// carried on every dispatchable step the call expands to; the first one
+/// dispatched registers it. The cleanup steps are already namespaced and
+/// parameter-substituted like the flow body.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlowCleanup {
+    pub flow: String,
+    /// Namespaced invocation id of the registering call.
+    pub call: String,
+    pub policy: crate::verification::CleanupPolicy,
+    pub steps: Vec<Step>,
+    /// `(recorded id, referenced id)` for body step ids that are not valid
+    /// expression identifiers (auto-named invocations contain `#`); the
+    /// cleanup references the second, the runtime records the first.
+    pub aliases: Vec<(String, String)>,
+    /// The call sits in a `for_each:` body, so each iteration registers its
+    /// own cleanup; otherwise the call registers once per scope.
+    pub per_iteration: bool,
+}
+
 /// Loader-only provenance attached to an action expanded from a
 /// reusable flow. It is deliberately skipped on the authored Step wire
 /// shape: the evidence crate owns the public event representation, and
@@ -236,6 +257,14 @@ pub struct Step {
     #[serde(skip)]
     #[schemars(skip)]
     pub flow_secrets: Vec<serde_yml::Value>,
+
+    /// Cleanups registered when this expanded step is the first of its call
+    /// to be dispatched: set on every expanded step of a flow call whose
+    /// flow declares `cleanup:` (outermost call first). Loader metadata,
+    /// off the wire.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub flow_cleanup: Vec<FlowCleanup>,
 }
 
 impl Step {

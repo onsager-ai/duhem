@@ -288,6 +288,17 @@ entries and locator-taking UI actions, including cross-origin frames.
 The timeout includes frame readiness. An unavailable or ambiguous frame
 cannot establish that its contents are absent.
 
+Keyboard and focus: `ui/press { key, locator?, timeout? }` takes a Playwright
+key name or `+` chord (`Enter`, `Tab`, `Shift+Tab`, `Control+a`). With a
+`locator` it focuses that element and presses; without one it presses on
+whatever is focused and records `outputs.target` (`{tag, id, role, name}`,
+sampled before the press; `name` approximates the accessible name). `ui/focus`
+is programmatic `element.focus()`, not a user gesture; to verify keyboard
+focus movement press `Tab`, then assert `expected: focused` (or
+`not_focused`) on `ui/assert-element`. Focused means the element is its own
+document's active element and that document has focus, including inside a
+`frame:` document.
+
 When two leaves use the same locator, declare it once in an ordinary
 manifest include and reference it as `$pages.<group>.<name>`:
 

@@ -28,8 +28,8 @@ use async_trait::async_trait;
 use duhem_actions::Page;
 use duhem_actions::{
     Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertUrl, Call, CaptureSession,
-    Click, DbObserve, Extract, Invoke, Navigate, Observe, Poll, Query, Seed, Select, Stream, Type,
-    Wait,
+    Click, DbObserve, Extract, Focus, Invoke, Navigate, Observe, Poll, Press, Query, Seed, Select,
+    Stream, Type, Wait,
 };
 use serde::Deserialize;
 use serde::de::Error as _;
@@ -288,6 +288,8 @@ pub(crate) fn default_registry() -> ActionRegistry {
     insert(&mut m, ConcreteAction::new(Box::new(AssertElement)));
     insert(&mut m, ConcreteAction::new(Box::new(Type)));
     insert(&mut m, ConcreteAction::new(Box::new(Select)));
+    insert(&mut m, ConcreteAction::new(Box::new(Press)));
+    insert(&mut m, ConcreteAction::new(Box::new(Focus)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertUrl)));
     insert(&mut m, ConcreteAction::new(Box::new(CaptureSession)));
     insert(&mut m, ConcreteAction::new(Box::new(Wait)));
@@ -347,7 +349,9 @@ mod tests {
                 "ui/capture-session",
                 "ui/click",
                 "ui/extract",
+                "ui/focus",
                 "ui/navigate",
+                "ui/press",
                 "ui/select",
                 "ui/type",
                 "ui/wait",

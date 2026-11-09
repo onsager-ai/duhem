@@ -68,6 +68,12 @@ bytes) against a local HTTP server in
 
 ## Self-verification suites — Duhem's dogfood
 
+The [keyboard and focus example](keyboard-focus-example/duhem.yml)
+demonstrates `ui/focus`, `ui/press` and `expected: focused | not_focused`,
+including a visible-but-unfocused negative control. It is executed against
+a local browser fixture in
+`crates/duhem-runtime/tests/keyboard_focus_smoke.rs` by browser CI. (#580)
+
 The [iframe example](iframe-example/duhem.yml) demonstrates named and
 inline frame locators, assertions and interactions. It is validated
 offline and executed against a two-origin browser fixture in

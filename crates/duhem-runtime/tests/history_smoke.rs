@@ -107,6 +107,9 @@ async fn history_outputs_report_urls_and_navigated_for_every_entry_kind() {
     Click.invoke(&ctx, &jump).await.unwrap();
     let hash_back = Back.invoke(&ctx, &none).await.unwrap();
     assert_eq!(hash_back.outputs["navigated"], json!(true));
-    assert_eq!(hash_back.outputs["from_url"], json!(format!("{list}#section")));
+    assert_eq!(
+        hash_back.outputs["from_url"],
+        json!(format!("{list}#section"))
+    );
     assert_eq!(hash_back.outputs["url"], json!(list));
 }

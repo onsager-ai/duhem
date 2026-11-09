@@ -98,8 +98,9 @@ pub struct Check {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sessions: Option<BTreeMap<String, Option<crate::ExprStr>>>,
 
-    /// Fixtures instantiated for this check, in bring-up order.
+    /// Deprecated (#618), removed in v0.9.0: call a flow with `cleanup:` at the end of `setup:` instead. Fixtures instantiated for this check, in bring-up order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(schema_with = "crate::verification::deprecated_needs_schema")]
     pub needs: Vec<String>,
 
     /// Optional setup steps run once before this check's own `steps:`,

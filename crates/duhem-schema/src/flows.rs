@@ -524,6 +524,7 @@ fn expand_flow_cleanup(
         steps,
         aliases: aliases.into_iter().collect(),
         per_iteration: false,
+        fixture: None,
     }
 }
 

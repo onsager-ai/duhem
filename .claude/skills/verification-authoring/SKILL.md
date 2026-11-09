@@ -264,7 +264,7 @@ Authoring rules:
   steps must be idempotent.
 - `if:` also accepts a value expression (`if: $steps.probe.outputs.row_count > 0`)
   on check steps. Paths resolve against earlier steps in the same check,
-  `$inputs`, `$setup` and consumed fixture outputs. A gated judging step
+  `$inputs` and `$setup`. A gated judging step
   shrinks the claim set, which the report shows; an unresolvable
   condition makes the check `inconclusive`, never a skip. Reading a
   gated step's outputs later is also inconclusive. Worked example:
@@ -289,11 +289,13 @@ Authoring rules:
   at the evidence boundary. Screenshots/video remain unmasked pixels,
   so keep credentials out of rendered UI (or use `--capture off`).
 
-#### Fixture cleanup judgment
+#### Cleanup judgment
 
-`fixtures.<name>.cleanup_policy` applies only to that fixture's `down:`.
+`flows.<name>.cleanup_policy` applies only to that flow's `cleanup:`. The
+deprecated `fixtures.<name>` form (#618, removed in v0.9.0) desugars to a
+flow with `cleanup:` and keeps the same policy.
 Omitting it means `required`; the default is omitted on serialization. A
-required fixture-down execution error, timeout, step-local runtime or
+required cleanup execution error, timeout, step-local runtime or
 dispatch error, or a non-passing implicit judgment from a catalog action
 (including a missing required judging output) makes the
 effective run gate `fail` after the body finishes. The check and criterion
@@ -307,9 +309,9 @@ An action's returned values remain observations unless its contract judges
 them. For example, a non-zero `cli/invoke` `exit_code` or an HTTP 500 returned
 by `api/call` is data, not an automatic cleanup failure. To judge an HTTP
 cleanup result, use `api/poll` with `method: GET` and `until: {status: 200}`.
-`fixture.up:` stays non-judging. Leaf/criterion/check `teardown:`,
+A fixture's `up:` stays non-judging. Leaf/criterion/check `teardown:`,
 `provision.down:`, and diagnostic capture remain diagnostic-only in this
-slice. Set `cleanup_policy: diagnostic_only` for a fixture whose `down:`
+slice. Set `cleanup_policy: diagnostic_only` for a flow whose `cleanup:`
 should keep its evidence without blocking the run.
 
 Lifecycle evidence separates execution from judgment. A successfully
@@ -574,7 +576,7 @@ criteria:
 
 Declare scalar `session: $inputs.operator_session` on a leaf, criterion, or
 check. Omission inherits the nearest declaration; `session: ~` stops it.
-Every setup, body, teardown, and fixture up/down block opens fresh contexts
+Every setup, body, teardown, and flow cleanup block opens fresh contexts
 from the seed. Cleanup must navigate again; body cookies and page state do
 not carry into cleanup. Browser-free blocks open no contexts.
 
@@ -598,7 +600,7 @@ an executable, `args` is a string array, and stdin is closed. Pass secrets
 through declared secret inputs. HTTP or stdout/stderr-regex readiness has
 an explicit timeout; without a probe `ready: false` means spawned only.
 
-Start in check `setup` or a fixture when the check must stop/restart it.
+Start in check `setup` or a flow with `cleanup:` when the check must stop/restart it.
 Enclosing leaf/criterion handles are inspect-only; sibling checks and
 retries cannot mutate each other's processes. Restart returns a fresh
 handle/generation, stops the old group before replacement, and preserves
@@ -609,8 +611,8 @@ none of the four actions implicitly judges the product.
 across reads, and carry cursors, generation, truncation and dropped-byte
 facts. A cursor belongs to its original handle. Always-required runtime
 cleanup follows authored cleanup at owner scope exit, even in a
-`diagnostic_only` fixture or with `--keep-env`. Failed finalization blocks
+`diagnostic_only` flow cleanup or with `--keep-env`. Failed finalization blocks
 the effective gate while preserving body judgment. Linux/macOS are
 supported first; other platforms reject before spawn. Do not daemonize or
-escape the owned group. Fixed ports and disposable state remain fixture
+escape the owned group. Fixed ports and disposable state remain flow
 responsibilities.

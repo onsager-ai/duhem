@@ -206,6 +206,8 @@ pub(crate) fn lint_warnings(def: &VerificationDefinition) -> Vec<String> {
             }
         }
     }
+    // `fixtures:` / `needs:` are deprecated in favour of flow `cleanup:` (#618).
+    warns.extend(duhem_schema::fixture_deprecation_warnings(def));
     warns
 }
 

@@ -34,6 +34,10 @@ pub struct FlowCleanup {
     /// The call sits in a `for_each:` body, so each iteration registers its
     /// own cleanup; otherwise the call registers once per scope.
     pub per_iteration: bool,
+    /// Set when this cleanup is a deprecated `fixtures.<name>` `down:`
+    /// desugared onto a check's `setup:` (#618): the fixture's name, so
+    /// evidence keeps its fixture scope fields.
+    pub fixture: Option<String>,
 }
 
 /// Loader-only provenance attached to an action expanded from a

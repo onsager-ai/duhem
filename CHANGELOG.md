@@ -30,6 +30,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 
 - [additive] flows: gain a cleanup: half (and cleanup_policy:) registered at the enclosing scope's exit and unwound LIFO with fixture down: blocks before teardown:, also on interruption, with required-cleanup gate semantics; for_each: is allowed in cleanup: and as a flow's first step. (#615)
+- [clarifying] fixtures:/needs:/$fixture.* are deprecated and desugar to flows with cleanup:; duhem validate warns with the rewrite. Removal in v0.9.0. (#618)
 
 ## v0.7.2 — 2026-11-06
 

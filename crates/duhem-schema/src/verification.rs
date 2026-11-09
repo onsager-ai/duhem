@@ -88,6 +88,24 @@ pub struct Fixture {
 
 pub type FixtureCatalog = BTreeMap<String, Fixture>;
 
+/// `fixtures:` schema, marked deprecated (#618).
+fn deprecated_fixtures_schema(
+    generator: &mut schemars::SchemaGenerator,
+) -> schemars::schema::Schema {
+    let mut schema = generator.subschema_for::<FixtureCatalog>().into_object();
+    schema.metadata().deprecated = true;
+    schemars::schema::Schema::Object(schema)
+}
+
+/// `needs:` schema, marked deprecated (#618).
+pub(crate) fn deprecated_needs_schema(
+    generator: &mut schemars::SchemaGenerator,
+) -> schemars::schema::Schema {
+    let mut schema = generator.subschema_for::<Vec<String>>().into_object();
+    schema.metadata().deprecated = true;
+    schemars::schema::Schema::Object(schema)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VerificationDefinition {
@@ -172,9 +190,9 @@ pub struct VerificationDefinition {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub teardown: Vec<Step>,
 
-    /// Named, per-check lifecycle resources. Each check gets a fresh
-    /// instance of every fixture named by its `needs:` list.
+    /// Deprecated (#618), removed in v0.9.0: declare a flow with `cleanup:` instead. Named, per-check lifecycle resources. Each check gets a fresh instance of every fixture named by its `needs:` list.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(schema_with = "deprecated_fixtures_schema")]
     pub fixtures: FixtureCatalog,
 
     /// At least one criterion is required (enforced by the validator,

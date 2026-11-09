@@ -58,19 +58,23 @@ generation. A PID is never an authored stop target.
 
 ## Ownership and restart
 
-A process belongs to the leaf, criterion, check attempt or fixture that
-declared its start, independently of temporary browser contexts. A check
-may inspect its enclosing leaf/criterion processes but may stop/restart
-only processes owned by that check attempt or its fixtures. Sibling checks
+A process belongs to the leaf, criterion or check attempt that declared its
+start (a flow called from check `setup:` included), independently of
+temporary browser contexts. A check may inspect its enclosing leaf/criterion
+processes but may stop/restart only processes owned by that check attempt.
+A deprecated `fixtures:` entry (#618) is desugared onto its consuming check's
+`setup:`, so it owns processes at check-attempt scope too. Sibling checks
 and later retries cannot use each other's handles. Validation rejects
 resolvable enclosing mutations; runtime ownership checks cover dynamically
 supplied handles.
 
 Process outputs from criterion/check setup are addressable as
-`$setup.<step>.outputs.<name>`; a consuming check reads its fixture's process
-outputs as `$fixture.<fixture>.<step>.outputs.<name>`. This is a narrow
-addition for the new process actions; existing non-process setup/fixture
-visibility is unchanged.
+`$setup.<step>.outputs.<name>`, which includes a flow called from check
+`setup:` (read through the call's declared `outputs:` as
+`$setup.<call-id>.outputs.<name>`); a consuming check reads a deprecated
+fixture's process outputs as `$fixture.<fixture>.<step>.outputs.<name>`.
+This is a narrow addition for the new process actions; existing non-process
+setup visibility is unchanged.
 
 `process/stop` takes `handle`, sends SIGTERM to its owned group, waits for
 the stop budget, then escalates to SIGKILL if needed. It waits for live
@@ -85,7 +89,7 @@ environment and readiness contract. A failed stop prevents replacement.
 The new handle and incremented generation replace the old handle for future
 restarts; the old handle remains inspectable. Each generation has separate
 logs, readiness and exit evidence. Product-owned files/state are preserved.
-Put the process in check-level `setup` or a fixture when a check must restart
+Put the process in check-level `setup` (directly or through a flow with `cleanup:`) when a check must restart
 it. Reusing a retired generation to fork another replacement is rejected.
 
 ## Bounded observations
@@ -130,10 +134,10 @@ reverse creation order at each owner scope exit. This includes setup/body
 failure, action timeout, retries and observed cancellation. Pending authored
 cleanup drains before process finalization when execution is interrupted.
 A teardown already in progress is not restarted. Each retry owns fresh
-check/fixture resources. `--keep-env` may skip ordinary leaf teardown but
+check resources. `--keep-env` may skip ordinary leaf teardown but
 does not disable owned-process finalization.
 
-The process finalizer is **always required**, even inside a fixture with
+The process finalizer is **always required**, even inside a flow with
 `cleanup_policy: diagnostic_only`. There is no per-process policy override.
 Its failure independently fails the effective run gate while preserving
 the body verdict and cleanup evidence. Existing ordinary teardown/provision
@@ -141,7 +145,7 @@ diagnostics keep their semantics. Signal-driven aborts retain cleanup
 findings and end as aborted; unobserved hard termination cannot claim
 successful cleanup.
 
-Spawn/readiness failure in setup or fixture up makes dependent checks
+Spawn/readiness failure in setup makes dependent checks
 `inconclusive:environment_error`. In a check body it is a step error with
 masked detail and an inconclusive missing observation. Neither is an
 implicit acceptance pass/fail.
@@ -154,7 +158,7 @@ reject start **before spawn**; Windows Job Objects are deferred. Programs
 must not daemonize, call `setsid` or escape the owned group. Detached services,
 remote managers, interactive stdin/JSON-RPC, port allocation and filesystem
 comparison are outside this action contract. Fixed-port conflicts remain
-the fixture's responsibility.
+the flow's responsibility.
 
 Run the [executable example](../verifications/owned-process-example/README.md)
 to exercise all four actions against a real local HTTP process.

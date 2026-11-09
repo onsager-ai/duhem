@@ -140,7 +140,16 @@ struct Window {
     from_step: String,
     #[serde(default)]
     edge: Edge,
+    #[serde(deserialize_with = "positive_duration")]
     duration: TimeoutSpec,
+}
+
+fn positive_duration<'de, D: serde::Deserializer<'de>>(d: D) -> Result<TimeoutSpec, D::Error> {
+    let duration = TimeoutSpec::deserialize(d)?;
+    if Duration::from(duration).is_zero() {
+        return Err(serde::de::Error::custom("window duration must be positive"));
+    }
+    Ok(duration)
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -169,8 +178,9 @@ impl Action for Observe {
                 FieldSpec::required("url_pattern"),
                 FieldSpec::optional("after"),
                 FieldSpec::optional("timeout"),
+                FieldSpec::optional("window"),
             ],
-            outputs: vec![],
+            outputs: vec!["count", "requests", "window", "complete", "truncated"],
             secret_outputs: vec![],
             example: "- uses: api/observe\n  with: { method: POST, url_pattern: \"**/api/login\" }",
         }
@@ -206,11 +216,6 @@ impl Action for Observe {
                 )));
             }
             let duration: Duration = window.duration.into();
-            if duration.is_zero() {
-                return Err(ActionError::Playwright(
-                    "api/observe: window duration must be positive".into(),
-                ));
-            }
             let (edge, start_ms) = match window.edge {
                 Edge::Start => ("start", boundary.start_ms),
                 Edge::Finish => ("finish", boundary.finish_ms),

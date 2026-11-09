@@ -359,7 +359,8 @@ mod tests {
 
     #[test]
     fn extract_style_must_name_a_property_and_rect_is_a_field() {
-        let empty = vd("          - { uses: ui/extract, with: { locator: { css: h1 }, style: '' } }");
+        let empty =
+            vd("          - { uses: ui/extract, with: { locator: { css: h1 }, style: '' } }");
         assert!(
             field_errors(&empty)
                 .iter()

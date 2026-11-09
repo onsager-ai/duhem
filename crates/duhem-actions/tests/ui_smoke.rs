@@ -701,7 +701,10 @@ async fn extract_rect_and_style_report_css_px_with_controls() {
         .invoke(&ctx, &yaml("locator: { css: '#big' }\nstyle: ''"))
         .await
         .unwrap_err();
-    assert!(matches!(empty, duhem_actions::ActionError::InvalidWith { .. }));
+    assert!(matches!(
+        empty,
+        duhem_actions::ActionError::InvalidWith { .. }
+    ));
 }
 
 #[tokio::test]

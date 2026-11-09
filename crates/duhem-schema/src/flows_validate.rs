@@ -99,7 +99,7 @@ pub(crate) fn validate_authored(definition: &VerificationDefinition) -> Vec<Stri
             }
             for step in &check.steps {
                 walk_strings(&step.with, &mut |raw| {
-                    if raw.trim_start().starts_with('$') {
+                    if crate::expr::is_expression(raw) {
                         check_reference(raw);
                     }
                 });
@@ -417,6 +417,7 @@ fn value_type(
             if raw.starts_with("$pages.") {
                 return Some(InputType::Object);
             }
+            // deliberately untrimmed: leading-space strings are literals here (#540)
             if raw.starts_with('$') {
                 return None;
             }
@@ -428,6 +429,20 @@ fn value_type(
         Value::Sequence(_) => Some(InputType::Array),
         Value::Mapping(_) => Some(InputType::Object),
         Value::Null | Value::Tagged(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod value_type_tests {
+    use super::*;
+
+    #[test]
+    fn leading_space_expression_is_a_string() {
+        let value = serde_yml::Value::String(" $inputs.x".into());
+        assert_eq!(
+            value_type(&value, &BTreeMap::new(), None),
+            Some(InputType::String)
+        );
     }
 }
 

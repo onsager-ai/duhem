@@ -11,7 +11,7 @@ use std::collections::HashSet;
 
 use crate::source::SourcePathSegment as Segment;
 use crate::step_walk::step_blocks;
-use crate::{PathRoot, Step, ValidationError, VerificationDefinition};
+use crate::{PathRoot, Step, StepGroupFrame, ValidationError, VerificationDefinition};
 
 /// A group declares `steps:` as its body and no loop.
 pub(crate) fn is_group(step: &Step) -> bool {
@@ -26,6 +26,34 @@ pub(crate) fn tree(steps: &[Step]) -> Vec<&Step> {
         all.extend(tree(step.steps.as_deref().unwrap_or(&[])));
     }
     all
+}
+
+/// The leaf steps of an authored body with their group frames attached, for
+/// rules that read a loop body's steps one by one.
+pub(crate) fn flatten(steps: &[Step]) -> Vec<Step> {
+    fn go(steps: &[Step], out: &mut Vec<Step>, key: &mut u32) {
+        for (index, step) in steps.iter().enumerate() {
+            if !is_group(step) {
+                out.push(step.clone());
+                continue;
+            }
+            let frame = StepGroupFrame {
+                key: *key,
+                label: step.id.clone().unwrap_or_else(|| index.to_string()),
+                condition: step.condition.clone(),
+            };
+            *key += 1;
+            let mut inner = Vec::new();
+            go(step.steps.as_deref().unwrap_or(&[]), &mut inner, key);
+            for mut leaf in inner {
+                leaf.group.insert(0, frame.clone());
+                out.push(leaf);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    go(steps, &mut out, &mut 0);
+    out
 }
 
 pub(crate) fn has_groups(definition: &VerificationDefinition) -> bool {
@@ -295,6 +323,25 @@ mod tests {
         assert_eq!(
             definition.criteria[0].checks[0].worst_case_step_count(),
             Ok(3)
+        );
+    }
+
+    #[test]
+    fn lifecycle_group_conditions_and_loop_body_leaves_are_reference_validated() {
+        let bad_condition = "verification: x\nsetup:\n  - if: $setup.nope.outputs.n > 0\n    steps:\n      - uses: cli/invoke\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        assertions: [\"true\"]\n";
+        let errors =
+            crate::validate(&VerificationDefinition::from_yaml_str(bad_condition).unwrap())
+                .expect_err("unknown setup reference in a group condition");
+        assert!(
+            errors.iter().any(|e| e.to_string().contains("nope")),
+            "{errors:?}"
+        );
+        let bad_leaf = "verification: x\ninputs:\n  rows: { type: array }\nsetup:\n  - for_each: $inputs.rows\n    max: 2\n    as: row\n    steps:\n      - steps:\n          - uses: cli/invoke\n            with: { command: [echo, $setup.nope.outputs.x] }\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        assertions: [\"true\"]\n";
+        let errors = crate::validate(&VerificationDefinition::from_yaml_str(bad_leaf).unwrap())
+            .expect_err("unknown setup reference in a grouped loop-body step");
+        assert!(
+            errors.iter().any(|e| e.to_string().contains("nope")),
+            "{errors:?}"
         );
     }
 

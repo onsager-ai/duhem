@@ -239,10 +239,12 @@ fn validate_for_each_list(
         if phase == "steps" {
             continue;
         }
+        // Groups in the body are read as their leaves, frames attached.
+        let leaves = crate::step_groups::flatten(body);
         validate_nested_lifecycle_block_in_loop(
             v,
             outputs_for,
-            body,
+            &leaves,
             "for_each body",
             &body_path_prefix,
             &site,

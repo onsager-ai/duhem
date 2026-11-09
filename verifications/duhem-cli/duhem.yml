@@ -867,3 +867,19 @@ criteria:
           - $steps.diagnostic.outputs.exit_code == 0
           - matches: {value: $steps.diagnostic.outputs.stdout, pattern: '"verdict":"pass"'}
           - matches: {value: $steps.diagnostic.outputs.stdout, pattern: '"required":false'}
+
+  - id: AC-18
+    description: A failure inside a step group gates later default steps and runs `if: failure` groups.
+    checks:
+      - id: AC-18.1
+        steps:
+          - id: gate
+            uses: cli/invoke
+            with:
+              command: [$inputs.duhem_bin, run, verifications/duhem-cli/fixtures/step-groups-gate.yml, --reporter, json, --no-live]
+              cwd: $inputs.repo_dir
+              timeout: 120s
+        assertions:
+          - $steps.gate.outputs.exit_code != 0
+          - matches: {value: $steps.gate.outputs.stdout, pattern: 'steps\.after\.outputs\.stdout[^}]*"verdict":"inconclusive:missing_observation"'}
+          - matches: {value: $steps.gate.outputs.stdout, pattern: 'steps\.diag\.outputs\.stdout[^}]*"verdict":"fail"'}

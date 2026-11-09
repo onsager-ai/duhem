@@ -214,7 +214,10 @@ async fn invalid_key_and_ambiguous_or_missing_targets_fail_usefully() {
         .await
         .unwrap_err()
         .to_string();
-    assert!(error.contains("ui/press") && error.contains("NotARealKey"), "{error}");
+    assert!(
+        error.contains("ui/press") && error.contains("NotARealKey"),
+        "{error}"
+    );
     let error = Press
         .invoke(&ctx, &yaml("key: ''"))
         .await

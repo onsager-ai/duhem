@@ -37,7 +37,10 @@ impl Action for Focus {
         ActionContract {
             uses: "ui/focus",
             summary: "Focus an element programmatically (element.focus(), not a user gesture). To verify keyboard focus movement, use ui/press with Tab and then ui/assert-element with expected: focused.",
-            with: vec![FieldSpec::required("locator"), FieldSpec::optional("timeout")],
+            with: vec![
+                FieldSpec::required("locator"),
+                FieldSpec::optional("timeout"),
+            ],
             outputs: vec![],
             secret_outputs: vec![],
             example: "- uses: ui/focus\n  with: { locator: { role: button, name: Options } }",

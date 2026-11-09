@@ -146,16 +146,13 @@ pub(super) fn validate_check(
     for (idx, &(s, active_loop)) in check_steps.iter().enumerate() {
         if s.uses.as_deref() == Some("api/observe")
             && let Some(window) = s.with.get("window")
+            && let Some(problem) = crate::validate_observe_window::problem(window, |id| {
+                earlier_outputs.contains_key(id)
+            })
         {
-            let anchor = window.get("from_step").and_then(serde_yml::Value::as_str);
-            if !anchor.is_some_and(|id| earlier_outputs.contains_key(id)) {
-                errs.push(ValidationError::InvalidFlow {
-                    message: format!(
-                        "check `{}`: api/observe window.from_step must name an earlier step in the same check",
-                        ch.id
-                    ),
-                });
-            }
+            errs.push(ValidationError::InvalidFlow {
+                message: format!("check `{}`: api/observe {problem}", ch.id),
+            });
         }
         if let StepCondition::Expr(expr) = &s.condition {
             let mut path = crate::source::check_path(criterion_index, check_index, "steps");

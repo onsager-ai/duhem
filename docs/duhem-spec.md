@@ -1455,7 +1455,9 @@ later reuse and check-level assertions.
 `api/observe` optionally accepts `window: { from_step, edge, duration }` to
 collect requests starting in the inclusive window anchored to an earlier step
 in the same browser session. `edge` defaults to `start`; `finish` selects its
-finish. The positive duration runs on the session clock. `count` and `requests`
+finish. The positive duration runs on the session clock. `edge` and `duration` must
+be literals, and an unrunnable `from_step` (skipped, gated or from another
+session) fails the step with an action error. `count` and `requests`
 describe matching request starts in sequence order, including pending and failed
 requests and separate redirect hops. Assert `complete` before treating an empty
 result as absence: it is false if recording began too late or the bounded buffer

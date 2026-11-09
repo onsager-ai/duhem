@@ -41,6 +41,7 @@ pub(crate) fn validate(
                     );
                 }
                 for name in sessions.keys() {
+                    // Session names must be bare names, not expression references.
                     if name.is_empty() || name.trim() != name || name.starts_with('$') {
                         error(
                             errors,
@@ -182,7 +183,7 @@ fn validate_step(
         v.source_map.node_location(&path)
     };
     if let Some(name) = &step.session {
-        let message = if name.trim_start().starts_with('$') {
+        let message = if crate::expr::is_expression(name) {
             Some("step-level `session:` is a bare context name, never an expression; declare acquired state in check `sessions:`".to_string())
         } else if !ui && step.call.is_none() {
             Some("`session:` is only valid on browser-driving `ui/*` steps".to_string())

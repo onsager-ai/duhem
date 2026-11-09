@@ -355,7 +355,18 @@ fn expand_sequence(
                 external_root,
                 counter,
             );
+            // `if: always` / `if: failure` is also the default for inner steps
+            // that declare no `if:` of their own, as a call-site `if:` is for
+            // the steps its flow expands to: a diagnostics group would
+            // otherwise gate its own default steps on the failure it exists for.
+            let inherited = matches!(
+                frame.condition,
+                StepCondition::Always | StepCondition::Failure
+            );
             for inner in &mut expanded.steps {
+                if inherited && inner.condition == StepCondition::Success {
+                    inner.condition = frame.condition.clone();
+                }
                 inner.group.insert(0, frame.clone());
             }
             result.steps.append(&mut expanded.steps);

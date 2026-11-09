@@ -252,7 +252,8 @@ steps:
 - The group's `if:` (`success | always | failure`, or a value
   expression) is evaluated once, when the group is entered. If false,
   every step inside is recorded as skipped and names the group as the
-  cause. Steps inside keep their own `if:`.
+  cause. Steps inside keep their own `if:`; a group's `if: always` or
+  `if: failure` is also the default for inner steps that declare none.
 - Failure state is shared. A failure inside a group gates later default
   steps both inside and after it, and `if: failure` / `if: always` inside
   a group behave exactly as they do at the top level.

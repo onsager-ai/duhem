@@ -285,6 +285,12 @@ mod tests {
             crate::StepCondition::Failure,
             "the inner group's own condition travels with its frame"
         );
+        assert_eq!(
+            steps[1].condition,
+            crate::StepCondition::Failure,
+            "a default step inherits its group's `if: failure`"
+        );
+        assert_eq!(steps[0].condition, crate::StepCondition::Success);
         assert!(steps.iter().all(|step| !is_group(step)));
         assert_eq!(
             definition.criteria[0].checks[0].worst_case_step_count(),

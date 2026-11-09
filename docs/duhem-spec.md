@@ -927,7 +927,10 @@ recorded as skipped and names the group as the cause. Steps inside
 evaluate their own `if:` against the shared check gate state, so a
 failure inside a group gates later default steps both inside and after
 it, and `if: failure` / `if: always` inside a group behave as at top
-level. Value conditions follow the Tier 2 claim-set rule: judging steps
+level. A group's `if: always` or `if: failure` is also the default for the
+steps inside that declare no `if:` of their own, as a call-site `if:` is for
+the steps its flow expands to; a diagnostics group therefore runs its steps
+on the failure it exists for. Value conditions follow the Tier 2 claim-set rule: judging steps
 gated off by a group-level value `if:` count as gated judging steps.
 Step ids inside a group share the enclosing namespace
 (`$steps.<id>`, `$setup.<id>`) and stay unique across the whole tree; a

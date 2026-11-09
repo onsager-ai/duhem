@@ -85,6 +85,7 @@ impl Processes {
                 fixture_name: scope.fixture.clone(),
                 check_id: scope.check.clone(),
                 criterion_id: scope.criterion.clone(),
+                registered_by: None,
             });
             append!(EventPayload::SetupStepStarted {
                 phase: StepPhase::Teardown,
@@ -99,6 +100,7 @@ impl Processes {
                 check_id: scope.check.clone(),
                 criterion_id: scope.criterion.clone(),
                 flow: None,
+                group: None,
             });
             let result = entry.stop().await;
             if let Err(err) = entry

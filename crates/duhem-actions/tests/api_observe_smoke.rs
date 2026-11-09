@@ -45,6 +45,8 @@ const STATIC_HTML: &str = r#"<!doctype html>
     ">Make Project</button>
 
     <button id="bad" onclick="fetch('/api/bad')">Bad JSON</button>
+    <button id="accent" onclick="fetch('/api/accent')">Accent</button>
+    <button id="gzip" onclick="fetch('/api/gzip')">Gzip</button>
   </main>
 </body></html>"#;
 
@@ -66,6 +68,31 @@ async fn bad_json() -> impl IntoResponse {
     )
 }
 
+async fn accent() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        "é",
+    )
+}
+
+/// `gzip` of "hello hello hello hello": 28 bytes on the wire, 23 decoded.
+const GZIP: [u8; 28] = [
+    0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0x57,
+    0xc8, 0x40, 0x27, 0x01, 0xe3, 0x51, 0x3d, 0x8d, 0x17, 0x00, 0x00, 0x00,
+];
+
+async fn gzipped() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "text/plain"),
+            (header::CONTENT_ENCODING, "gzip"),
+        ],
+        GZIP.to_vec(),
+    )
+}
+
 struct Fixture {
     addr: SocketAddr,
     _server: JoinHandle<()>,
@@ -75,7 +102,9 @@ async fn start_fixture() -> Fixture {
     let app = Router::new()
         .route("/", get(|| async { axum::response::Html(STATIC_HTML) }))
         .route("/api/projects", post(create_project))
-        .route("/api/bad", get(bad_json));
+        .route("/api/bad", get(bad_json))
+        .route("/api/accent", get(accent))
+        .route("/api/gzip", get(gzipped));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -170,7 +199,63 @@ timeout: 2s
             .map(|s| s.starts_with("application/json")),
         Some(true)
     );
+    // Decoded payload bytes of `{"id":"p1","name":"Demo"}`.
+    assert_eq!(r.outputs["body_bytes"], serde_json::json!(25));
     assert!(r.observations.is_empty());
+}
+
+/// Click `button_name`, then observe `GET /api/<path>`.
+async fn observe_after_click(button_name: &str, path: &str) -> duhem_actions::ActionResult {
+    let fx = start_fixture().await;
+    let run = fresh_browser().await;
+    let check = run.open_check().await.unwrap();
+    let ctx = ActionCtx {
+        page: Some(&check.page),
+        step_index: 0,
+    };
+    Navigate
+        .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
+        .await
+        .unwrap();
+    Click
+        .invoke(
+            &ctx,
+            &yaml(&format!("{{ role: button, name: \"{button_name}\" }}")),
+        )
+        .await
+        .unwrap();
+    Observe
+        .invoke(
+            &ctx,
+            &yaml(&format!(
+                "url_pattern: \"http://{}/api/{path}\"\ntimeout: 2s\n",
+                fx.addr
+            )),
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
+async fn observe_body_bytes_counts_utf8_bytes_not_characters() {
+    let r = observe_after_click("Accent", "accent").await;
+    assert_eq!(r.outcome, Outcome::Ok);
+    assert_eq!(r.outputs["body_bytes"], serde_json::json!(2));
+    assert_eq!(r.outputs["body_text"], serde_json::json!("é"));
+}
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
+async fn observe_body_bytes_counts_decoded_gzip_payload() {
+    let r = observe_after_click("Gzip", "gzip").await;
+    assert_eq!(r.outcome, Outcome::Ok);
+    // The browser decodes `Content-Encoding: gzip` before `response.body()`.
+    assert_eq!(r.outputs["body_bytes"], serde_json::json!(23));
+    assert_eq!(
+        r.outputs["body_text"],
+        serde_json::json!("hello hello hello hello")
+    );
 }
 
 #[tokio::test]

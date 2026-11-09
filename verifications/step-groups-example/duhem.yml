@@ -1,0 +1,39 @@
+# Nested step groups — worked example (spec #614)
+#
+# A step that declares `steps:` (and no `uses:`/`call:`) is a group: one
+# label, one `if:` and one failure gate for the steps inside it. The `if:`
+# is evaluated once, when the group is entered; inner steps keep their own
+# `if:` and read the same check-wide failure state as top-level steps.
+#
+# AC-1.1 passes: the `prepare` group runs (with a nested group), and the
+# `if: failure` `diagnostics` group is skipped, recorded with the group
+# as the cause.
+#
+# The failure path (a failing step inside a group skips later default
+# steps while an `if: failure` group runs) cannot sit in a passing suite;
+# the duhem-cli self-verification suite drives it through
+# `verifications/duhem-cli/fixtures/step-groups-gate.yml` (AC-19).
+
+verification: Nested step groups
+
+criteria:
+  - id: AC-1
+    description: Grouped steps share one label, one condition and one failure gate.
+    checks:
+      - id: AC-1.1
+        description: A group runs its steps; a failure-only group is skipped on success.
+        steps:
+          - id: prepare
+            description: Prepare the workspace
+            steps:
+              - { id: mk, uses: cli/invoke, with: { command: [sh, -c, "printf ok"] } }
+              - id: verify
+                steps:
+                  - { id: chk, uses: cli/invoke, with: { command: [sh, -c, "printf checked"] } }
+          - id: diagnostics
+            if: failure
+            steps:
+              - { uses: cli/invoke, with: { command: [sh, -c, "echo diag"] } }
+        assertions:
+          - $steps.mk.outputs.stdout == "ok"
+          - $steps.chk.outputs.stdout == "checked"

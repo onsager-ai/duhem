@@ -106,7 +106,7 @@ pub(crate) fn check_page_path(
 
 fn walk_strings<F: FnMut(&str)>(value: &serde_yml::Value, visit: &mut F) {
     match value {
-        serde_yml::Value::String(raw) if raw.trim_start().starts_with('$') => visit(raw),
+        serde_yml::Value::String(raw) if crate::expr::is_expression(raw) => visit(raw),
         serde_yml::Value::Sequence(values) => {
             for value in values {
                 walk_strings(value, visit);

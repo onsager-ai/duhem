@@ -233,6 +233,14 @@ the minimal form:
   travel — into a later step, or into a check-level `assertions:` block
   alongside other evidence.
 
+`api/call` and `api/observe` declare their response outputs, so reference
+`status`, `body`, `body_text`, `headers` and `body_bytes` directly (`api/observe`
+also has `method`, `url`, `request_body`, `request_headers`). `body_bytes` is an
+integer count of the payload bytes after the client's content decoding, before
+text or JSON conversion: `é` is `2`, an empty body is `0`; it is not
+`Content-Length`. `headers` has lower-case names; use a dotted path such as
+`headers.location` for hyphen-free names.
+
 Common shape (terse):
 
 ```yaml
@@ -279,8 +287,9 @@ Authoring rules:
 - Use role-based locators (`{role: "button", name: "..."}`)
   rather than CSS or XPath — UI churn invalidates the latter
   while role-based selectors track the user-visible affordance.
-- A check that has no `assertions:` is a script, not a check.
-  Reject it.
+- A check with no verdict — neither `assertions:` nor a judging
+  step (see "`assertions:` is optional for a judging step" above) —
+  is a script, not a check. Reject it.
 - The `capture/` output-name prefix is reserved for runner-emitted
   failure evidence (specs #202 / #204): a failing ui check
   automatically records `capture/screenshot` + `capture/dom` +
@@ -326,6 +335,16 @@ carry optional `judgment: VerdictState`; lifecycle failure and its failing
 step account for either execution failure or failed judgment. Missing
 `judgment` or `cleanup_policy` in older evidence remains unknown.
 
+#### Drive browser history
+
+`ui/back` / `ui/forward` take only an optional `timeout:` and move through the
+check's real browser history, so state the browser keeps for history entries
+is what the next step observes. Assert `$steps.<id>.outputs.navigated`
+(`true` when the browser moved, including same-document hash/`pushState`
+entries; `false` with `url == from_url` when no entry exists) and read
+`from_url` / `url` for the move. A missing entry is not an error and never
+becomes a direct navigation.
+
 #### Share locators instead of copying them
 
 Use optional `frame: <Locator>` on any UI target to enter its containing
@@ -334,6 +353,17 @@ Frame locators can themselves carry `frame:` for nested documents;
 cross-origin embeds work through Playwright. This applies to inline and
 named `$pages.*` locators. Never treat a missing iframe as proof that
 its contents are absent; frame readiness shares the action deadline.
+
+Keyboard and focus: `ui/press { key, locator?, timeout? }` takes a Playwright
+key name or `+` chord (`Enter`, `Tab`, `Shift+Tab`, `Control+a`). With a
+`locator` it focuses that element and presses; without one it presses on
+whatever is focused and records `outputs.target` (`{tag, id, role, name}`,
+sampled before the press; `name` approximates the accessible name). `ui/focus`
+is programmatic `element.focus()`, not a user gesture; to verify keyboard
+focus movement press `Tab`, then assert `expected: focused` (or
+`not_focused`) on `ui/assert-element`. Focused means the element is its own
+document's active element and that document has focus, including inside a
+`frame:` document.
 
 Put locators reused by multiple leaves in an ordinary manifest include:
 
@@ -488,6 +518,20 @@ the manifest lists are never loaded or executed — the run stays scoped
 to the requested leaf. A leaf with an unresolved `$pages.*`/`call:` name
 and no discoverable manifest fails naming exactly what's missing and
 where it would normally be defined (#384/#388).
+
+## Viewport and color-scheme emulation
+
+`ui/emulate` sets the check's own viewport (`viewport: { width, height }`,
+positive integer CSS px) and/or `color_scheme: light | dark | no-preference`.
+At least one field is required. It applies to the check's page for later
+steps, so place it before the `ui/navigate` that should see it. Each check
+and each retry attempt starts from the run viewport and host-default color
+scheme again; emulation never leaks to siblings. Its `viewport` and
+`color_scheme` outputs are read back from the page (`innerWidth/innerHeight`
+and `prefers-color-scheme` media queries), not echoed from `with:`. Assert the
+effect with `ui/assert-element` on media-query-dependent elements. Chromium
+reports `no-preference` as `light`. In headed runs the window sizes the page
+and `viewport` is best effort, so rely on the read-back output.
 
 ## Worked example template
 

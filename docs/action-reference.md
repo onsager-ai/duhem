@@ -50,6 +50,36 @@ Navigate the browser to a URL.
   with: { url: https://example.com }
 ```
 
+### `ui/back`
+
+Go back one real browser history entry (same-document entries included); `navigated` is false, with the URL unchanged, when no entry exists.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `timeout` | no | — |
+
+**outputs:** `from_url`, `url`, `navigated`
+
+```yaml
+- id: back
+  uses: ui/back
+```
+
+### `ui/forward`
+
+Go forward one real browser history entry (same-document entries included); `navigated` is false, with the URL unchanged, when no entry exists.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `timeout` | no | — |
+
+**outputs:** `from_url`, `url`, `navigated`
+
+```yaml
+- id: forward
+  uses: ui/forward
+```
+
 ### `ui/click`
 
 Click an element (locator shorthand fields, or a `locator` object).
@@ -133,14 +163,48 @@ Select an option in a <select> by value, label, or index.
   with: { locator: { css: "#role" }, by: { label: "Admin" } }
 ```
 
-### `ui/assert-element`
+### `ui/press`
 
-Assert an element reaches an existence/visibility state within a deadline.
+Press a key or `+` chord (Playwright key names, e.g. Enter, Tab, Shift+Tab). With a locator the element is focused first; without one the key goes to the focused element. `target` records the receiver ({tag, id, role, name}, sampled before the press; `name` is an approximation of the accessible name).
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `key` | yes | — |
+| `locator` | no | — |
+| `timeout` | no | — |
+
+**outputs:** `target`
+
+```yaml
+- id: open
+  uses: ui/press
+  with: { key: Enter }
+```
+
+### `ui/focus`
+
+Focus an element programmatically (element.focus(), not a user gesture). To verify keyboard focus movement, use ui/press with Tab and then ui/assert-element with expected: focused.
 
 | `with:` field | required | values |
 |---|:---:|---|
 | `locator` | yes | — |
-| `expected` | no | `exists` \| `not_exists` \| `visible` \| `hidden` |
+| `timeout` | no | — |
+
+**outputs:** (none)
+
+```yaml
+- uses: ui/focus
+  with: { locator: { role: button, name: Options } }
+```
+
+### `ui/assert-element`
+
+Assert an element reaches an existence/visibility/focus state within a deadline. `focused` means the element is its own document's activeElement and that document has focus; `not_focused` requires exactly one present, unfocused match.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `locator` | yes | — |
+| `expected` | no | `exists` \| `not_exists` \| `visible` \| `hidden` \| `focused` \| `not_focused` |
 | `expect` | no | — |
 | `timeout` | no | — |
 
@@ -199,6 +263,23 @@ Wait for a fixed duration within the suite ceiling (debugging escape hatch; pref
   with: { duration: 500ms }
 ```
 
+### `ui/emulate`
+
+Set the check's viewport (CSS px) and/or prefers-color-scheme; outputs are the settings read back from the page.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `viewport` | no | — |
+| `color_scheme` | no | `light` \| `dark` \| `no-preference` |
+
+**outputs:** `viewport`, `color_scheme`
+
+```yaml
+- id: emu
+  uses: ui/emulate
+  with: { viewport: { width: 390, height: 844 }, color_scheme: dark }
+```
+
 ## `api/*`
 
 ### `api/call`
@@ -214,7 +295,7 @@ Make an HTTP request and observe the response.
 | `body` | no | — |
 | `timeout` | no | — |
 
-**outputs:** `status`, `body`, `body_text`
+**outputs:** `status`, `body`, `body_text`, `body_bytes`, `headers`
 
 ```yaml
 - uses: api/call
@@ -233,7 +314,7 @@ Observe a network request the page made (matched by method + URL pattern).
 | `after` | no | — |
 | `timeout` | no | — |
 
-**outputs:** (none)
+**outputs:** `method`, `url`, `status`, `body`, `body_text`, `body_bytes`, `headers`, `request_body`, `request_headers`
 
 ```yaml
 - uses: api/observe

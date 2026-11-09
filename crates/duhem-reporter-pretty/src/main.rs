@@ -135,15 +135,27 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
                     status_label(block.status),
                     block.duration_ms,
                 )?;
+                if let Some(registration) = &block.registered_by {
+                    writeln!(
+                        out,
+                        "      registered by flow `{}` (call `{}`) at {path}",
+                        registration.flow, registration.call
+                    )?;
+                }
                 if let Some(policy) = &block.cleanup_policy {
                     writeln!(out, "      cleanup policy: {policy}")?;
                 }
                 if let Some(position) = block.failing_step
                     && let Some(step) = block.steps.get(position)
                 {
+                    let group = step
+                        .group
+                        .as_ref()
+                        .map(|labels| format!(" in group {}", labels.join(" > ")))
+                        .unwrap_or_default();
                     writeln!(
                         out,
-                        "      failing step {position}: {} #{} ({})",
+                        "      failing step {position}: {} #{} ({}){group}",
                         step.uses,
                         step.index,
                         outcome_label(&step.outcome),
@@ -225,6 +237,7 @@ mod tests {
     fn lifecycle_snapshot_renders_unknown_three_segment_scope() {
         let block = LifecycleBlock {
             cleanup_policy: None,
+            registered_by: None,
             phase: LifecyclePhase::Setup,
             scope: ["alpha", "beta", "gamma"]
                 .into_iter()
@@ -247,6 +260,44 @@ mod tests {
         let rendered = String::from_utf8(out).unwrap();
         assert!(
             rendered.contains("LIFECYCLE\n  alpha:1 / beta:2 / gamma:3\n    setup  passed  12 ms"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn registered_flow_cleanup_names_its_flow_call_and_registration_site() {
+        let block = LifecycleBlock {
+            cleanup_policy: Some("required".into()),
+            registered_by: Some(duhem_summary::LifecycleRegistration {
+                flow: "scratch_file".into(),
+                call: "tmp".into(),
+            }),
+            phase: LifecyclePhase::Teardown,
+            scope: vec![
+                LifecycleScopeSegment {
+                    kind: "criterion".into(),
+                    id: "AC-1".into(),
+                },
+                LifecycleScopeSegment {
+                    kind: "check".into(),
+                    id: "AC-1.1".into(),
+                },
+            ],
+            status: LifecycleStatus::Passed,
+            started_at: "2026-01-01T00:00:00.000Z".into(),
+            duration_ms: 3,
+            steps: vec![],
+            failing_step: None,
+        };
+        let summary = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from("."))
+            .with_lifecycle(vec![block]);
+        let mut out = Vec::new();
+        render(&summary, &mut out).unwrap();
+        let rendered = String::from_utf8(out).unwrap();
+        assert!(
+            rendered.contains(
+                "registered by flow `scratch_file` (call `tmp`) at criterion:AC-1 / check:AC-1.1"
+            ),
             "{rendered}"
         );
     }

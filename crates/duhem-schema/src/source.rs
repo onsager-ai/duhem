@@ -380,7 +380,7 @@ pub(crate) fn walk_with_refs<F: FnMut(&Expr, &str, &[SourcePathSegment])>(
 ) {
     match with {
         serde_yml::Value::String(raw) => {
-            if raw.trim_start().starts_with('$')
+            if crate::expr::is_expression(raw)
                 && let Ok(expression) = crate::expr::parse(raw)
                 && matches!(expression, Expr::Path(_) | Expr::Call { .. })
             {

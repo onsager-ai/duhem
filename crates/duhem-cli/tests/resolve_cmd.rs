@@ -325,3 +325,24 @@ fn input_file_override_reports_file_and_line_provenance() {
         "{provenance}"
     );
 }
+
+#[test]
+fn resolve_reports_the_sum_of_leaves_for_a_nested_group_tree() {
+    let temp = tempfile::tempdir().unwrap();
+    write(
+        temp.path(),
+        "duhem.yml",
+        "verification: groups\ncriteria:\n  - id: AC-1\n    description: nested\n    checks:\n      - id: AC-1.1\n        steps:\n          - id: outer\n            steps:\n              - { id: a, uses: cli/invoke, with: { command: [true] } }\n              - steps:\n                  - { id: b, uses: cli/invoke, with: { command: [true] } }\n                  - { id: c, uses: cli/invoke, with: { command: [true] } }\n          - { id: d, uses: cli/invoke, with: { command: [true] } }\n        assertions: [\"$steps.a.outputs.exit_code == 0\"]\n",
+    );
+    let output = run(temp.path(), &["resolve", "duhem.yml", "--format", "json"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        value["verifications"][0]["worst_case_step_counts"]["AC-1.1"],
+        4
+    );
+}

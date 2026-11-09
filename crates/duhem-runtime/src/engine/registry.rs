@@ -27,9 +27,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use duhem_actions::Page;
 use duhem_actions::{
-    Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertUrl, Call, CaptureSession,
-    Click, DbObserve, Extract, Invoke, Navigate, Observe, Poll, Query, Seed, Select, Stream, Type,
-    Wait,
+    Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertUrl, Back, Call,
+    CaptureSession, Click, DbObserve, Emulate, Extract, Focus, Forward, Invoke, Navigate, Observe,
+    Poll, Press, Query, Seed, Select, Stream, Type, Wait,
 };
 use serde::Deserialize;
 use serde::de::Error as _;
@@ -69,6 +69,12 @@ pub(crate) trait Dispatch: Send + Sync {
     /// contract-declared path.
     fn secret_outputs(&self) -> Vec<&'static str> {
         Vec::new()
+    }
+
+    /// Whether the action's `with:` accepts `timeout:`, so the manifest
+    /// `defaults.timeout` may be filled in (spec #66). Test stubs accept it.
+    fn accepts_timeout(&self) -> bool {
+        true
     }
 
     async fn invoke(
@@ -159,6 +165,14 @@ impl Dispatch for ConcreteAction {
 
     fn secret_outputs(&self) -> Vec<&'static str> {
         self.action.contract().secret_outputs
+    }
+
+    fn accepts_timeout(&self) -> bool {
+        self.action
+            .contract()
+            .with
+            .iter()
+            .any(|field| field.name == "timeout")
     }
 
     async fn invoke(
@@ -269,14 +283,19 @@ pub(crate) type ActionRegistry = BTreeMap<&'static str, Box<dyn Dispatch>>;
 pub(crate) fn default_registry() -> ActionRegistry {
     let mut m: ActionRegistry = BTreeMap::new();
     insert(&mut m, ConcreteAction::new(Box::new(Navigate)));
+    insert(&mut m, ConcreteAction::new(Box::new(Back)));
+    insert(&mut m, ConcreteAction::new(Box::new(Forward)));
     insert(&mut m, ConcreteAction::new(Box::new(Click)));
     insert(&mut m, ConcreteAction::new(Box::new(Extract)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertElement)));
     insert(&mut m, ConcreteAction::new(Box::new(Type)));
     insert(&mut m, ConcreteAction::new(Box::new(Select)));
+    insert(&mut m, ConcreteAction::new(Box::new(Press)));
+    insert(&mut m, ConcreteAction::new(Box::new(Focus)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertUrl)));
     insert(&mut m, ConcreteAction::new(Box::new(CaptureSession)));
     insert(&mut m, ConcreteAction::new(Box::new(Wait)));
+    insert(&mut m, ConcreteAction::new(Box::new(Emulate)));
     insert(&mut m, ConcreteAction::new(Box::new(Call)));
     insert(&mut m, ConcreteAction::new(Box::new(Observe)));
     insert(&mut m, ConcreteAction::new(Box::new(Poll)));
@@ -300,6 +319,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn default_timeout_targets_only_actions_that_declare_it() {
+        let registry = default_registry();
+        assert!(registry["ui/click"].accepts_timeout());
+        assert!(registry["api/call"].accepts_timeout());
+        assert!(!registry["ui/capture-session"].accepts_timeout());
+        assert!(!registry["ui/extract"].accepts_timeout());
+    }
+
+    #[test]
     fn default_catalog_lists_the_v1_actions() {
         let m = default_registry();
         let mut keys: Vec<&str> = m.keys().copied().collect();
@@ -321,10 +349,15 @@ mod tests {
                 "process/stop",
                 "ui/assert-element",
                 "ui/assert-url",
+                "ui/back",
                 "ui/capture-session",
                 "ui/click",
+                "ui/emulate",
                 "ui/extract",
+                "ui/focus",
+                "ui/forward",
                 "ui/navigate",
+                "ui/press",
                 "ui/select",
                 "ui/type",
                 "ui/wait",

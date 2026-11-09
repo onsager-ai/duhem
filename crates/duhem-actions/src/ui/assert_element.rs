@@ -101,13 +101,20 @@ impl Action for AssertElement {
         use crate::action::{ActionContract, FieldSpec};
         ActionContract {
             uses: "ui/assert-element",
-            summary: "Assert an element reaches an existence/visibility state within a deadline.",
+            summary: "Assert an element reaches an existence/visibility/focus state within a deadline. `focused` means the element is its own document's activeElement and that document has focus; `not_focused` requires exactly one present, unfocused match.",
             with: vec![
                 FieldSpec::required("locator"),
                 FieldSpec::enum_of(
                     "expected",
                     false,
-                    &["exists", "not_exists", "visible", "hidden"],
+                    &[
+                        "exists",
+                        "not_exists",
+                        "visible",
+                        "hidden",
+                        "focused",
+                        "not_focused",
+                    ],
                 ),
                 FieldSpec::optional("expect"),
                 FieldSpec::optional("timeout"),
@@ -134,6 +141,20 @@ impl Action for AssertElement {
         let page = page.for_locator(&with.locator);
 
         let satisfied = match &with.predicate {
+            Predicate::State(state @ (ExistenceState::Focused | ExistenceState::NotFocused)) => {
+                let want_focused = matches!(state, ExistenceState::Focused);
+                let (satisfied, matches) = page
+                    .assert_focus(&selector, want_focused, timeout.as_millis() as f64)
+                    .await
+                    .map_err(|e| ActionError::Playwright(format!("ui/assert-element: {e}")))?;
+                if matches > 1 {
+                    return Err(ActionError::Playwright(format!(
+                        "ui/assert-element: locator {} matched {matches} elements; expected exactly one",
+                        with.locator.describe(),
+                    )));
+                }
+                satisfied
+            }
             Predicate::State(expected) => match page
                 .wait_for_selector(&selector, map_state(*expected), timeout.as_millis() as f64)
                 .await
@@ -181,6 +202,9 @@ fn map_state(s: ExistenceState) -> ElementState {
         ExistenceState::NotExists => ElementState::Detached,
         ExistenceState::Visible => ElementState::Visible,
         ExistenceState::Hidden => ElementState::Hidden,
+        ExistenceState::Focused | ExistenceState::NotFocused => {
+            unreachable!("focus states are handled by Page::assert_focus")
+        }
     }
 }
 
@@ -203,6 +227,18 @@ timeout: 2s
         let d: Duration = v.timeout.unwrap().into();
         assert_eq!(d, Duration::from_secs(2));
         assert_eq!(v.locator.text.as_deref(), Some("Created"));
+    }
+
+    #[test]
+    fn parses_focus_states() {
+        for (raw, want) in [
+            ("focused", ExistenceState::Focused),
+            ("not_focused", ExistenceState::NotFocused),
+        ] {
+            let yaml = format!("{{ locator: {{ role: button }}, expected: {raw} }}");
+            let v: With = serde_yml::from_str(&yaml).unwrap();
+            assert!(matches!(v.predicate, Predicate::State(s) if s == want));
+        }
     }
 
     #[test]

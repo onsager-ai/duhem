@@ -638,6 +638,7 @@ async fn a_finished_run_is_sealed_against_further_events() {
             fixture_name: None,
             check_id: None,
             criterion_id: None,
+            registered_by: None,
         })
         .await
         .expect_err("appending after run_finished must fail");
@@ -701,6 +702,7 @@ async fn events_after_supports_live_tailing() {
         fixture_name: None,
         check_id: None,
         criterion_id: None,
+        registered_by: None,
     })
     .await
     .unwrap();

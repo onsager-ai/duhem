@@ -777,7 +777,7 @@ criteria:
           - $steps.health.outputs.status == 200
 ```
 
-Failure policy is **inconclusive, never false**: a non-zero `up:` exit (or an unrunnable script) yields a run verdict of `Inconclusive(environment_error)`; a `ready:` probe that exhausts its `timeout:` yields `Inconclusive(timeout)`. A failed `up:` skips teardown (nothing came up to tear down); `provision.down:` failures are recorded as diagnostic evidence and never alter the verdict. Only per-check fixture `down:` supports the required cleanup gate (§10.3.5). Relative script paths resolve against the Verification Definition's directory. `up:`/`down:` scripts run under the runtime's sanitized subprocess environment (§9 Stage 3, §11.1 Runtime). The `ready:` catalog is closed at `http:` for v1.
+Failure policy is **inconclusive, never false**: a non-zero `up:` exit (or an unrunnable script) yields a run verdict of `Inconclusive(environment_error)`; a `ready:` probe that exhausts its `timeout:` yields `Inconclusive(timeout)`. A failed `up:` skips teardown (nothing came up to tear down); `provision.down:` failures are recorded as diagnostic evidence and never alter the verdict. Only per-check fixture `down:` and flow `cleanup:` (§10.3.5.1) support the required cleanup gate (§10.3.5). Relative script paths resolve against the Verification Definition's directory. `up:`/`down:` scripts run under the runtime's sanitized subprocess environment (§9 Stage 3, §11.1 Runtime). The `ready:` catalog is closed at `http:` for v1.
 
 A manifest can also provision **one shared environment for the whole suite** rather than per-leaf — see the manifest `provision:` block in §10.4.
 
@@ -1120,6 +1120,104 @@ Fixture `up:`/`down:` steps may also declare a direct `call:` to a
 reusable flow, with the same validation and load-time expansion as
 `setup:`/`teardown:` (§10.3.4) and a check's own `call:` (§10.4).
 
+#### 10.3.5.1 Flow cleanup (`cleanup:` and `cleanup_policy:`)
+
+A flow may declare a `cleanup:` half next to its `steps:`, the flow-shaped
+counterpart of a fixture's `down:` with the flow's typed `params:`. Fixtures
+are not deprecated by this section and keep working unchanged.
+
+```yaml
+flows:
+  scratch_file:
+    params: { prefix: { type: string } }
+    steps:
+      - id: create
+        uses: cli/invoke
+        with: { command: [sh, -c, 'f=$(mktemp "/tmp/$1.XXXX"); printf %s "$f"', --, $params.prefix] }
+    outputs: { path: $steps.create.outputs.stdout }
+    cleanup:
+      - uses: cli/invoke
+        with: { command: [rm, -f, $steps.create.outputs.stdout] }
+```
+
+`cleanup:` is a list of steps; `cleanup_policy: required | diagnostic_only` is
+valid only together with it, defaults to `required`, and is omitted when
+serialized at the default. Cleanup steps may read `$params.*` and the **same
+call's** body outputs as `$steps.<body-id>.outputs.*` (also earlier cleanup
+steps of that flow); a `$inputs.*` reference, a step the flow does not declare,
+or any reference to a cleanup step from outside the flow is a validation error
+with a location. `for_each:` steps are accepted inside `cleanup:` and validate
+and expand exactly as in a `teardown:` or fixture `down:` block (`max:` required,
+depth 1); a loop in `cleanup:` runs over the call's resolved arguments, `$params.*`
+or the call's outputs.
+
+**Registration.** A `call:` to a flow with `cleanup:` is *entered* when its
+first leaf step is dispatched, including a step inside a `for_each:` body, so a
+flow whose body starts with (or is) a `for_each:` registers when the loop's first
+body step runs. A loop that dispatches nothing (an empty array, or every body
+step gated off by `if:`) has not entered the call and registers nothing. The
+cleanup is registered once per call, on the enclosing lifecycle scope: check
+`steps:` and check `setup:` register on that check **attempt** (so a retry
+registers and unwinds again, as fixtures do), criterion `setup:` on the
+criterion, and leaf `setup:` on the leaf. A call gated off by `if:` registers
+nothing. A body that fails partway still registers its cleanup, matching "every
+activated fixture still runs `down:`". A call that is itself inside a
+`for_each:` body registers once per iteration, with that iteration's element and
+outputs, so the total is bounded by `max:`; a flow that starts with a loop sees,
+in its cleanup, the outputs the call had recorded when its scope ended. A flow
+with `cleanup:` that calls another such flow registers both. Such a flow may not
+be called from `teardown:`, a fixture, or another flow's `cleanup:`; validation
+rejects it.
+
+**Unwind.** Registered cleanups share one LIFO stack with the check attempt's
+fixture `down:` blocks: at scope exit everything registered since the scope began
+runs last registered first, before that scope's own `teardown:`. A fixture whose
+`up:` ran sits on the stack where it was activated, so a flow called from
+check `setup:` unwinds after the fixtures, and a flow called from check `steps:`
+before them; a fixture written as a flow with `cleanup:` and a call at the end
+of check `setup:` therefore unwinds in the same order. Every step of every registered cleanup is attempted; a failure does
+not stop the drain. Each cleanup opens fresh browser contexts from the seed its
+call resolved (§10.3.4; a call-site `session:` carries over).
+
+**Interruption.** The cleanups sit on the same stack an interrupted run drains
+for fixture `down:` and `teardown:` (§10.3.5, process cleanup): on SIGINT/SIGTERM
+or an engine error each pending flow cleanup runs, last first, interleaved with
+the fixture downs, under the session and policy it was registered with. As with
+fixture downs, the drain applies to runs that own processes. A cleanup drained
+this way sees the run's `$setup` outputs but not the body outputs of the
+interrupted block, which were never recorded; a step that needs them fails and
+is reported like any cleanup failure.
+
+**`--keep-env`.** Alignment with fixture downs and teardown at each scope:
+check- and criterion-scope flow cleanups run, as fixture `down:` and those
+scopes' `teardown:` do; only cleanups registered by the **leaf** `setup:` are
+skipped, together with leaf `teardown:`, in both the normal and the interrupted
+drain. Nothing else is skipped.
+
+**Policy.** The failure definition, the required/diagnostic distinction and the
+retained cleanup-failure records are exactly those of §10.3.5. A `required`
+cleanup failure changes the effective run gate to `fail` at any scope while
+preserving the body verdicts; `diagnostic_only` failures remain evidence. As in
+§10.3.5, a returned observation such as a non-zero `exit_code` is data.
+
+**Evidence and report.** Each registered cleanup runs as its own teardown
+lifecycle block at the registering scope. Its `setup_started` evidence carries
+`registered_by` (flow name and call id) beside the scope and `cleanup_policy`;
+the folded `RunSummary.lifecycle` block carries the same `registered_by`. The
+resolved hook chain lists every registered cleanup at its scope's exit, naming
+the registration site (for example `flow scratch_file cleanup (call tmp,
+registered in check AC-1.1)`), and marks one that did not run. The pretty
+reporter and the dashboard lifecycle views show the registering flow and call, so the implicit
+registration is visible in the report.
+
+The failing controls mirror §10.3.5: a nonexistent cleanup command gives
+`body_verdict: pass`, an effective gate of `fail` and a nonzero CLI exit under
+the default policy; adding `cleanup_policy: diagnostic_only` to the flow leaves
+the gate `pass` with the failure visible. Worked example:
+`verifications/flow-cleanup-example/duhem.yml`; controls:
+`crates/duhem-cli/tests/fixtures/cleanup/flow_required.yml` and
+`flow_diagnostic.yml`.
+
 ### 10.3.6 Criterion and check lifecycle (`setup:`/`teardown:`)
 
 A `Criterion` and a `Check` may each carry their own `setup:`/`teardown:`
@@ -1385,6 +1483,9 @@ joins the same evidence-masking boundary as a secret input, on the
 lifecycle path as well as the check path. Flows may call other flows;
 cycles and chains deeper than the include-depth limit are offline
 validation errors.
+
+A flow may also declare `cleanup:` (§10.3.5.1), registered on the enclosing
+scope when a call is entered and unwound LIFO at that scope's exit.
 
 Flow bodies are hygienic. Step `with:` values may reference only
 `$params.*` and `$pages.*`; a `$inputs.*` or `$steps.*` dependency in

@@ -145,9 +145,25 @@ fn validate_lifecycle_dispatch(
     definition: &VerificationDefinition,
     errors: &mut Vec<String>,
 ) {
+    // A flow with `cleanup:` registers it on the enclosing scope, so it is
+    // only callable from blocks that run before that scope's exit (#615).
+    let registers_allowed = label.ends_with("setup step");
     for (index, step) in steps.iter().enumerate() {
         let site = format!("{label} {index}");
         validate_dispatch(step, &site, errors);
+        if !registers_allowed {
+            let nested = step.steps.iter().flatten();
+            for called in std::iter::once(step)
+                .chain(nested)
+                .filter_map(|s| s.call.as_deref())
+            {
+                if registers_cleanup(called, &definition.flows, &mut BTreeSet::new()) {
+                    errors.push(format!(
+                        "{site}: flow `{called}` declares `cleanup:` and cannot be called from `teardown:` or a fixture; flows with `cleanup:` may only be called from `setup:` or check `steps:`"
+                    ));
+                }
+            }
+        }
         if let Some(name) = &step.call {
             validate_call(
                 name,
@@ -254,6 +270,12 @@ fn validate_flow(name: &str, flow: &Flow, catalog: &FlowCatalog, errors: &mut Ve
         }
     }
 
+    if !flow.cleanup_policy.is_required() && flow.cleanup.is_empty() {
+        errors.push(format!(
+            "flow `{name}` declares `cleanup_policy:` without `cleanup:`"
+        ));
+    }
+
     let mut ids = BTreeSet::new();
     for (index, step) in flow
         .steps
@@ -322,6 +344,8 @@ fn validate_flow(name: &str, flow: &Flow, catalog: &FlowCatalog, errors: &mut Ve
         }
     }
 
+    validate_flow_cleanup(name, flow, catalog, errors);
+
     for (output, raw) in &flow.outputs {
         let Some((step_id, _)) = step_output_reference(raw) else {
             errors.push(format!(
@@ -337,6 +361,119 @@ fn validate_flow(name: &str, flow: &Flow, catalog: &FlowCatalog, errors: &mut Ve
         {
             errors.push(format!(
                 "flow `{name}` output `{output}` references unknown inner step `{step_id}`"
+            ));
+        }
+    }
+}
+
+/// Whether a `call:` to `name` registers a cleanup, directly or through the
+/// flows it calls (#615).
+fn registers_cleanup(name: &str, catalog: &FlowCatalog, seen: &mut BTreeSet<String>) -> bool {
+    if !seen.insert(name.to_string()) {
+        return false;
+    }
+    let Some(flow) = catalog.get(name) else {
+        return false;
+    };
+    !flow.cleanup.is_empty()
+        || flow
+            .steps
+            .iter()
+            .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+            .filter_map(|s| s.call.as_deref())
+            .any(|called| registers_cleanup(called, catalog, seen))
+}
+
+/// A flow's `cleanup:` reads `$params.*` and its own body (or earlier
+/// cleanup) step outputs; nothing else, and nothing outside the flow can
+/// read it (#615).
+fn validate_flow_cleanup(name: &str, flow: &Flow, catalog: &FlowCatalog, errors: &mut Vec<String>) {
+    if flow.cleanup.is_empty() {
+        return;
+    }
+    let mut ids: BTreeSet<&str> = flow
+        .steps
+        .iter()
+        .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+        .filter_map(|step| step.id.as_deref())
+        .collect();
+    for (index, step) in flow
+        .cleanup
+        .iter()
+        .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+        .enumerate()
+    {
+        let site = format!("flow `{name}` cleanup step {index}");
+        validate_dispatch(step, &site, errors);
+        if step.for_each.is_some() {
+            if step.max.is_none() {
+                errors.push(format!("{site}: `for_each:` requires `max:`"));
+            }
+            if step.id.is_some() || !step.outputs.is_empty() || !step.secret_outputs.is_empty() {
+                errors.push(format!(
+                    "{site}: a `for_each:` wrapper may not declare id, outputs, or secret_outputs"
+                ));
+            }
+            if step
+                .steps
+                .iter()
+                .flatten()
+                .any(|inner| inner.for_each.is_some() || inner.steps.is_some())
+            {
+                errors.push(format!("{site}: `for_each:` body exceeds depth 1"));
+            }
+        }
+        let mut references = vec![step.with.clone()];
+        if let StepCondition::Expr(condition) = &step.condition {
+            references.push(serde_yml::Value::String(condition.raw.clone()));
+        }
+        if let Some(expr) = &step.for_each {
+            references.push(serde_yml::Value::String(expr.raw.clone()));
+        }
+        for value in references {
+            walk_strings(&value, &mut |raw| {
+                if raw.contains("$inputs.") {
+                    errors.push(format!(
+                        "{site}: `{raw}` may reference only `$params.*`, `$pages.*` and step outputs of flow `{name}`"
+                    ));
+                }
+                for param in param_reference_names(raw) {
+                    if !flow.params.contains_key(param) {
+                        errors.push(format!(
+                            "{site}: references unknown param `{param}` in `{raw}`"
+                        ));
+                    }
+                }
+                for id in step_reference_ids(raw) {
+                    if !ids.contains(id) {
+                        errors.push(format!(
+                            "{site}: `{raw}` references `$steps.{id}`, which is not a step of flow `{name}`"
+                        ));
+                    }
+                }
+            });
+        }
+        if let Some(called) = &step.call {
+            validate_call(
+                called,
+                step,
+                catalog,
+                &BTreeMap::new(),
+                Some(&flow.params),
+                &site,
+                errors,
+            );
+            if registers_cleanup(called, catalog, &mut BTreeSet::new()) {
+                errors.push(format!(
+                    "{site}: flow `{called}` declares `cleanup:` and cannot be called from a flow's `cleanup:`"
+                ));
+            }
+        }
+        if let Some(id) = &step.id
+            && !ids.insert(id.as_str())
+        {
+            errors.push(format!(
+                "flow `{name}` has duplicate step id `{id}` across `steps:` and `cleanup:`"
             ));
         }
     }
@@ -462,6 +599,7 @@ fn validate_flow_graph(catalog: &FlowCatalog, errors: &mut Vec<String>) {
         for called in flow
             .steps
             .iter()
+            .chain(&flow.cleanup)
             .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
             .filter_map(|step| step.call.as_deref())
         {

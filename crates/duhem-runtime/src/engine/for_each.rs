@@ -93,6 +93,14 @@ pub(crate) async fn process_lifecycle_step(
         Ok(gate) => (gate, None),
         Err(error) => (None, Some(error)),
     };
+    // A dispatched call to a flow with `cleanup:` registers it on this scope
+    // (#615); one gated off by `if:` registers nothing.
+    if gate.is_none()
+        && phase == StepPhase::Setup
+        && let Some(at) = scope.registration_site()
+    {
+        run.register_flow_cleanups(step, &at);
+    }
     let cleanup_step = phase == StepPhase::Teardown || (failed_by.is_some() && gate.is_none());
     // Setup steps see the run state (inputs, env, uuid, plus any
     // outputs already published by earlier setup steps in this
@@ -539,6 +547,14 @@ pub(crate) async fn run_for_each_step(
             )
             .await?;
         }
+        // Each iteration's cleanups keep that iteration's outputs and element.
+        run.snapshot_flow_cleanups(
+            &crate::engine::flow_cleanup::Snapshot {
+                outputs: run.setup_outputs.clone(),
+                binding: as_name.map(|name| (name.to_string(), element.clone())),
+            },
+            true,
+        );
     }
     Ok(())
 }
@@ -740,16 +756,15 @@ async fn invoke_and_record(
             )
         })
         .flatten();
-    let judgment_detail =
-        if matches!(scope, HookScope::FixtureDown(..)) && matches!(outcome, Outcome::Ok) {
-            judgment.as_ref().and_then(|outcome| outcome.detail.clone())
-        } else {
-            None
-        };
+    let judgment_detail = if scope.judges_cleanup() && matches!(outcome, Outcome::Ok) {
+        judgment.as_ref().and_then(|outcome| outcome.detail.clone())
+    } else {
+        None
+    };
     let action_detail = action_detail.or(judgment_detail);
     let judgment = judgment.map(|outcome| outcome.state);
     let failed = step_failed(&outcome, judgment)
-        || (matches!(scope, HookScope::FixtureDown(..))
+        || (scope.judges_cleanup()
             && judgment.is_some_and(|state| state != duhem_judge::VerdictState::Pass));
     Ok((outcome, failed, action_detail, judgment))
 }

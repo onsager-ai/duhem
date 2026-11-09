@@ -15,9 +15,7 @@ criteria) lives in the spec issue that introduced
   Does not bump.
 
 `SCHEMA_VERSION` advances in a dedicated bump commit that inserts
-`## v0.x.y — YYYY-MM-DD` below `## Unreleased
-
-- [additive] New `ui/observe-console` action returns windowed page errors and console records with counts and completeness. (#603)`, leaving `## Unreleased`
+`## v0.x.y — YYYY-MM-DD` below `## Unreleased`, leaving `## Unreleased`
 empty. The release commit is tagged `v0.x.y`.
 
 **Entry style.** One bullet per landing — the tag, the
@@ -30,6 +28,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 [`docs/changelog-archive.md`](docs/changelog-archive.md).
 
 ## Unreleased
+
+- [additive] New `ui/observe-console` action returns windowed page errors and console records with counts and completeness. (#603)
 
 - [additive] `api/observe` accepts `window: { from_step, edge, duration }` and returns ordered request records with `count`, `complete` and `truncated`; legacy first-match behavior is unchanged. (#603)
 

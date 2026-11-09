@@ -160,6 +160,11 @@ pub(super) fn validate_check(
                 ),
             });
         }
+        if s.uses.as_deref() == Some("ui/observe-console") && s.with.get("window").is_none() {
+            errs.push(ValidationError::InvalidFlow {
+                message: format!("check `{}`: ui/observe-console window is required", ch.id),
+            });
+        }
         if let StepCondition::Expr(expr) = &s.condition {
             let mut path = crate::source::check_path(criterion_index, check_index, "steps");
             path.push(SourcePathSegment::index(idx));

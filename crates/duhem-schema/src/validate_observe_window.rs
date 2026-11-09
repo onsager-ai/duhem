@@ -125,6 +125,36 @@ criteria:
     }
 
     #[test]
+    fn console_observer_validates_required_window_and_earlier_anchor() {
+        let yaml = |with: &str| {
+            format!(
+                r#"
+verification: x
+criteria:
+  - id: AC-1
+    description: a
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: load
+            uses: ui/navigate
+            with: {{ url: "http://x/" }}
+          - id: observed
+            uses: ui/observe-console
+            with: {with}
+        assertions: ["true"]
+"#
+            )
+        };
+        let check =
+            |with: &str| validate(&VerificationDefinition::from_yaml_str(&yaml(with)).unwrap());
+        assert!(check("{ window: { from_step: load, duration: 1s } }").is_ok());
+        for with in ["{}", "{ window: { from_step: later, duration: 1s } }"] {
+            assert!(check(with).is_err(), "{with}");
+        }
+    }
+
+    #[test]
     fn anchor_must_precede_inside_for_each_bodies() {
         let yaml = |anchor: &str| {
             format!(

@@ -252,6 +252,10 @@ Common shape (terse):
 Authoring rules:
 
 - Every step whose output an assertion reads gets an `id:`.
+- Use quoted bracket keys for object names such as
+  `$steps.r.outputs.headers['content-type']`; escape quotes as `\'` and
+  backslashes as `\\`. Keys must be nonempty. `[0]` indexes an array;
+  `['0']` addresses an object key.
 - Reference outputs by their fully-qualified path,
   `$steps.<id>.outputs.<name>`; `outputs:` blocks are only for a rename
   or a deep-extraction alias, not for re-declaring native fields.

@@ -100,27 +100,41 @@ fn expr_parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
                 other => (PathRoot::Loop, Some(other.to_string())),
             });
 
-        // A path segment is either a dotted key (`.name`) or a bracketed
-        // array index (`[N]`). The index is lowered to its decimal-string
-        // form and stored alongside keys in `segments`; the runtime
-        // evaluator disambiguates key-vs-index by the value's shape. This
-        // is what lets assertions reach into a structured output, e.g.
-        // `$steps.api.outputs.body.items[0].id`.
-        let key_seg = just('.').ignore_then(ident);
+        // Keep quoted-key positions so even a numeric key cannot index an array.
+        let key_seg = just('.').ignore_then(ident).map(|s| (s, false));
         let index_seg = text::int(10)
             .to_slice()
-            .map(|s: &str| s.to_string())
+            .map(|s: &str| (s.to_string(), false))
             .delimited_by(just('['), just(']'));
-        let segments = choice((key_seg, index_seg))
+        let escaped = just('\\').ignore_then(choice((just('\\'), just('\''))));
+        let quoted_key = choice((escaped, none_of("\\'")))
+            .repeated()
+            .at_least(1)
+            .collect::<String>()
+            .delimited_by(just("['"), just("']"))
+            .labelled("non-empty quoted key (only \\' and \\\\ escapes are allowed)")
+            .map(|s| (s, true));
+        let segments = choice((key_seg, quoted_key, index_seg))
             .repeated()
             .collect::<Vec<_>>();
 
         let path = root.then(segments).map(|((root, loop_name), segments)| {
-            let segments = match loop_name {
-                Some(name) => std::iter::once(name).chain(segments).collect(),
-                None => segments,
-            };
-            Path { root, segments }
+            let mut names = Vec::new();
+            let mut quoted_keys = Vec::new();
+            if let Some(name) = loop_name {
+                names.push(name);
+            }
+            for (name, quoted) in segments {
+                if quoted && name.bytes().all(|b| b.is_ascii_digit()) {
+                    quoted_keys.push(names.len());
+                }
+                names.push(name);
+            }
+            Path {
+                root,
+                segments: names,
+                quoted_keys,
+            }
         });
 
         let call_args = expr
@@ -256,6 +270,7 @@ mod tests {
             p("$steps.api.outputs.status"),
             Expr::Path(Path {
                 root: PathRoot::Steps,
+                quoted_keys: vec![],
                 segments: vec!["api".into(), "outputs".into(), "status".into()],
             })
         );
@@ -263,6 +278,7 @@ mod tests {
             p("$inputs.workspace_name"),
             Expr::Path(Path {
                 root: PathRoot::Inputs,
+                quoted_keys: vec![],
                 segments: vec!["workspace_name".into()],
             })
         );
@@ -274,6 +290,7 @@ mod tests {
             p("$steps.api.outputs.body.app.id"),
             Expr::Path(Path {
                 root: PathRoot::Steps,
+                quoted_keys: vec![],
                 segments: vec![
                     "api".into(),
                     "outputs".into(),
@@ -288,6 +305,7 @@ mod tests {
             p("$steps.api.outputs.body.items[0].id"),
             Expr::Path(Path {
                 root: PathRoot::Steps,
+                quoted_keys: vec![],
                 segments: vec![
                     "api".into(),
                     "outputs".into(),
@@ -301,6 +319,27 @@ mod tests {
     }
 
     #[test]
+    fn parses_quoted_keys_and_escapes() {
+        let Expr::Path(path) = p(r"$steps.r.outputs.items[0]['a-b']['it\'s\\ok']['200']") else {
+            panic!("expected path");
+        };
+        assert_eq!(
+            path.segments,
+            ["r", "outputs", "items", "0", "a-b", "it's\\ok", "200"]
+        );
+        assert_eq!(path.quoted_keys, [6]);
+        assert_eq!(p("$inputs.x['name']"), p("$inputs.x.name"));
+    }
+
+    #[test]
+    fn rejects_invalid_quoted_keys() {
+        for src in ["$inputs.x['']", "$inputs.x['missing]", r"$inputs.x['bad\q']"] {
+            let err = parse(src).unwrap_err();
+            assert!(!err.message.is_empty(), "{src}");
+        }
+    }
+
+    #[test]
     fn unrecognized_root_parses_as_a_loop_reference() {
         // Not one of the six fixed keywords, so it's provisionally a
         // `for_each` loop-variable reference (#443 Tier 1): `$nope`
@@ -311,6 +350,7 @@ mod tests {
             p("$nope.x"),
             Expr::Path(Path {
                 root: PathRoot::Loop,
+                quoted_keys: vec![],
                 segments: vec!["nope".into(), "x".into()],
             })
         );
@@ -318,6 +358,7 @@ mod tests {
             p("$row"),
             Expr::Path(Path {
                 root: PathRoot::Loop,
+                quoted_keys: vec![],
                 segments: vec!["row".into()],
             })
         );
@@ -335,6 +376,7 @@ mod tests {
             p("$env.DATABASE_URL"),
             Expr::Path(Path {
                 root: PathRoot::Env,
+                quoted_keys: vec![],
                 segments: vec!["DATABASE_URL".into()],
             })
         );
@@ -361,6 +403,7 @@ mod tests {
             Expr::Call {
                 path: Path {
                     root: PathRoot::Runtime,
+                    quoted_keys: vec![],
                     segments: vec!["uuid".into()],
                 },
                 args: vec![],
@@ -374,6 +417,7 @@ mod tests {
             p("$pages.login.submit"),
             Expr::Path(Path {
                 root: PathRoot::Pages,
+                quoted_keys: vec![],
                 segments: vec!["login".into(), "submit".into()],
             })
         );
@@ -386,11 +430,13 @@ mod tests {
             Expr::Call {
                 path: Path {
                     root: PathRoot::Pages,
+                    quoted_keys: vec![],
                     segments: vec!["chat".into(), "history_item".into()],
                 },
                 args: vec![
                     Expr::Path(Path {
                         root: PathRoot::Inputs,
+                        quoted_keys: vec![],
                         segments: vec!["index".into()],
                     }),
                     Expr::Lit(Literal::Int(2)),
@@ -406,6 +452,7 @@ mod tests {
             Expr::Call {
                 path: Path {
                     root: PathRoot::Runtime,
+                    quoted_keys: vec![],
                     segments: vec!["format".into()],
                 },
                 args: vec![
@@ -431,6 +478,7 @@ mod tests {
             Expr::Call {
                 path: Path {
                     root: PathRoot::Runtime,
+                    quoted_keys: vec![],
                     segments: vec!["format".into()],
                 },
                 args: vec![
@@ -444,6 +492,7 @@ mod tests {
             Expr::Call {
                 path: Path {
                     root: PathRoot::Runtime,
+                    quoted_keys: vec![],
                     segments: vec!["format".into()],
                 },
                 args: vec![

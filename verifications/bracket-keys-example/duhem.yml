@@ -1,0 +1,18 @@
+# Run by api_smoke against a real local HTTP server (#603 P2).
+verification: Quoted keys in HTTP response paths
+spec_ref: https://github.com/onsager-ai/duhem/issues/603
+inputs:
+  url: { type: string }
+criteria:
+  - id: AC-1
+    description: The response exposes its content type under the real header name.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: response
+            uses: api/call
+            with: { method: GET, url: $inputs.url }
+            # Explicit until the api/call output catalog includes headers (#603 P1).
+            outputs: { headers: headers }
+        assertions:
+          - $steps.response.outputs.headers['content-type'] == 'text/plain'

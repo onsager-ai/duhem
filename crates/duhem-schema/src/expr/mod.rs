@@ -6,9 +6,7 @@
 //! before the runtime is ever invoked. Evaluation is the runtime's job
 //! (`spec(runtime): expression evaluator v1`).
 //!
-//! Scope of v0.1: comparison + boolean logic + paths + literals. No
-//! arithmetic, no string concatenation, no array indexing — those land
-//! when a Verification Definition needs them.
+//! Scope: comparison, boolean logic, paths, literals and runtime helpers.
 
 use std::fmt;
 
@@ -97,7 +95,7 @@ pub enum Literal {
     Str(String),
 }
 
-/// `$<root>.<segments...>` — the only path form at v0.1. Six of the
+/// `$<root>.<segments...>` or bracket navigation. Six of the
 /// seven `PathRoot` variants are a closed, fixed-keyword set; the
 /// seventh (`Loop`, spec #443) accepts any identifier that isn't one
 /// of those six. So a stray `$foo.bar` no longer fails at *parse*
@@ -110,6 +108,8 @@ pub enum Literal {
 pub struct Path {
     pub root: PathRoot,
     pub segments: Vec<String>,
+    /// Positions of numeric segments authored as quoted object keys.
+    pub quoted_keys: Vec<usize>,
 }
 
 impl Path {
@@ -117,6 +117,35 @@ impl Path {
     pub fn segments(&self) -> &[String] {
         &self.segments
     }
+
+    /// Append one segment in a form that can be parsed again.
+    pub fn append_segment(&self, out: &mut String, index: usize) {
+        let segment = &self.segments[index];
+        let quoted = self.quoted_keys.contains(&index);
+        if !quoted && segment.bytes().all(|b| b.is_ascii_digit()) {
+            out.push('[');
+            out.push_str(segment);
+            out.push(']');
+        } else if is_identifier(segment) {
+            out.push('.');
+            out.push_str(segment);
+        } else {
+            out.push_str("['");
+            for c in segment.chars() {
+                if c == '\\' || c == '\'' {
+                    out.push('\\');
+                }
+                out.push(c);
+            }
+            out.push_str("']");
+        }
+    }
+}
+
+fn is_identifier(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(chars.next(), Some(c) if c == '_' || c.is_alphabetic())
+        && chars.all(|c| c == '_' || c.is_alphanumeric())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

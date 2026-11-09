@@ -109,10 +109,14 @@ impl EvalContext for RecordingContext<'_> {
 /// `PathRoot::Loop`'s doc comment) — so it renders as `$row.field`,
 /// the surface an author actually wrote, not `$loop.row.field`.
 fn path_label(path: &Path) -> String {
-    match path.root {
-        PathRoot::Loop => path.segments.join("."),
-        root => format!("{}.{}", root.as_str(), path.segments.join(".")),
+    let (mut out, start) = match path.root {
+        PathRoot::Loop => (path.segments[0].clone(), 1),
+        root => (root.as_str().to_string(), 0),
+    };
+    for index in start..path.segments.len() {
+        path.append_segment(&mut out, index);
     }
+    out
 }
 
 fn label(expr: &Expr) -> String {
@@ -170,6 +174,19 @@ mod tests {
             operands,
             BTreeMap::from([("$inputs.data.count".into(), json!(0))])
         );
+    }
+
+    #[test]
+    fn evidence_renders_quoted_keys_as_parseable_paths() {
+        let state = RunState::new(BTreeMap::from([(
+            "data".into(),
+            Value::Object(BTreeMap::from([("a'b\\c".into(), Value::Int(7))])),
+        )]));
+        let ctx = RunContext::new(&state);
+        let expr = ExprStr::from_source(r"$inputs.data['a\'b\\c'] == 7").unwrap();
+        let (result, operands) = evaluate(&expr, &ctx);
+        assert_eq!(result, EvalResult::True);
+        assert_eq!(operands[r"$inputs.data['a\'b\\c']"], json!(7));
     }
 
     #[test]

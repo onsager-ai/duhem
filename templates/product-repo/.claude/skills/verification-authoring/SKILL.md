@@ -188,6 +188,11 @@ Common shape (terse):
 
 Authoring rules:
 
+- Use quoted bracket keys for object names such as
+  `$steps.r.outputs.headers['content-type']`; escape quotes as `\'` and
+  backslashes as `\\`. Keys must be nonempty. `[0]` indexes an array;
+  `['0']` addresses an object key.
+
 - Reference outputs by their fully-qualified path,
   `$steps.<id>.outputs.<name>`; add `outputs:` only for a rename or a
   deep-extraction alias.

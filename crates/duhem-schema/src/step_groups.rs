@@ -336,11 +336,11 @@ mod tests {
             errors.iter().any(|e| e.to_string().contains("nope")),
             "{errors:?}"
         );
-        let bad_leaf = "verification: x\ninputs:\n  rows: { type: array }\nsetup:\n  - for_each: $inputs.rows\n    max: 2\n    as: row\n    steps:\n      - steps:\n          - uses: cli/invoke\n            with: { command: [echo, $setup.nope.outputs.x] }\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        assertions: [\"true\"]\n";
+        let bad_leaf = "verification: x\ninputs:\n  rows: { type: array }\nsetup:\n  - for_each: $inputs.rows\n    max: 2\n    as: row\n    steps:\n      - steps:\n          - uses: cli/invoke\n            with: { command: [echo, $ghost] }\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        assertions: [\"true\"]\n";
         let errors = crate::validate(&VerificationDefinition::from_yaml_str(bad_leaf).unwrap())
-            .expect_err("unknown setup reference in a grouped loop-body step");
+            .expect_err("out-of-scope loop variable in a grouped loop-body step");
         assert!(
-            errors.iter().any(|e| e.to_string().contains("nope")),
+            errors.iter().any(|e| e.to_string().contains("ghost")),
             "{errors:?}"
         );
     }

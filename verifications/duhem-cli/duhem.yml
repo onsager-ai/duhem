@@ -871,21 +871,34 @@ criteria:
   - id: AC-18
     description: >-
       A failure inside a step group gates later default steps, and an
-      `if: failure` group still runs.
+      `if: failure` group still runs. The run fails, and its recorded
+      evidence shows the later default step skipped and the diagnostics
+      group's step executed.
     checks:
       - id: AC-18.1
         steps:
+          - id: reset
+            uses: cli/invoke
+            with:
+              command: [sh, -c, "mkdir -p .duhem && rm -f .duhem/step-groups-gate.db"]
+              cwd: $inputs.repo_dir
           - id: gate
             uses: cli/invoke
             with:
-              command: [$inputs.duhem_bin, run, verifications/duhem-cli/fixtures/step-groups-gate.yml, --reporter, json, --no-live]
+              command: [$inputs.duhem_bin, run, verifications/duhem-cli/fixtures/step-groups-gate.yml, --reporter, json, --no-live, --db, .duhem/step-groups-gate.db]
               cwd: $inputs.repo_dir
               timeout: 120s
+          - id: evidence
+            uses: db/query
+            with:
+              connection: "$runtime.format('sqlite://{}/.duhem/step-groups-gate.db?mode=rwc', $inputs.repo_dir)"
+              sql: >-
+                select
+                (select count(*) from events where kind = 'step_finished' and payload like '%skipped%blocked by failed step%') as skipped_blocked,
+                (select count(*) from events where kind = 'step_finished' and payload like '%"outcome":"ok"%') as ok_steps,
+                (select count(*) from events where kind = 'step_finished' and payload like '%skipped%collect%') as collect_skipped
         assertions:
           - $steps.gate.outputs.exit_code != 0
-          - matches:
-              value: $steps.gate.outputs.stdout
-              pattern: 'steps\.after\.outputs\.stdout[^}]*"verdict":"inconclusive:missing_observation"'
-          - matches:
-              value: $steps.gate.outputs.stdout
-              pattern: 'steps\.diag\.outputs\.stdout[^}]*"verdict":"fail"'
+          - $steps.evidence.outputs.rows[0].skipped_blocked == 1
+          - $steps.evidence.outputs.rows[0].ok_steps == 1
+          - $steps.evidence.outputs.rows[0].collect_skipped == 0

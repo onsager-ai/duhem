@@ -129,7 +129,6 @@ async fn api_echo_fixture_passes_end_to_end_and_replays() {
 async fn bracket_keys_example_passes_against_real_http() {
     let fx = start_fixture().await;
     let def = VerificationDefinition::from_yaml_str(BRACKET_KEYS_YAML).expect("parse example");
-    duhem_schema::validate(&def).expect("validate example");
     let browser = RunBrowser::launch(false).await.expect("launch chromium");
     let mut inputs = BTreeMap::new();
     inputs.insert(

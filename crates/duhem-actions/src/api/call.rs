@@ -860,7 +860,11 @@ timeout: 2s
 
     #[tokio::test]
     async fn body_bytes_counts_binary_payload_before_lossy_conversion() {
-        let fx = start(served(&[0xff, 0x00, 0xfe, 0x80], "application/octet-stream")).await;
+        let fx = start(served(
+            &[0xff, 0x00, 0xfe, 0x80],
+            "application/octet-stream",
+        ))
+        .await;
         let r = body_bytes_of(&fx).await;
         assert_eq!(r.outputs["body_bytes"], serde_json::json!(4));
         // Lossy conversion changes the text length; the byte count does not.
@@ -897,6 +901,9 @@ timeout: 2s
         let fx = start_raw(resp).await;
         let r = body_bytes_of(&fx).await;
         assert_eq!(r.outputs["body_bytes"], serde_json::json!(28));
-        assert_eq!(r.outputs["headers"]["content-encoding"], serde_json::json!("gzip"));
+        assert_eq!(
+            r.outputs["headers"]["content-encoding"],
+            serde_json::json!("gzip")
+        );
     }
 }

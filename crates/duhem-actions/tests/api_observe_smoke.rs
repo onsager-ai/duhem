@@ -252,7 +252,10 @@ async fn observe_body_bytes_counts_decoded_gzip_payload() {
     assert_eq!(r.outcome, Outcome::Ok);
     // The browser decodes `Content-Encoding: gzip` before `response.body()`.
     assert_eq!(r.outputs["body_bytes"], serde_json::json!(23));
-    assert_eq!(r.outputs["body_text"], serde_json::json!("hello hello hello hello"));
+    assert_eq!(
+        r.outputs["body_text"],
+        serde_json::json!("hello hello hello hello")
+    );
 }
 
 #[tokio::test]

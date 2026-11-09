@@ -191,7 +191,8 @@ Authoring rules:
 - Use quoted bracket keys for object names such as
   `$steps.r.outputs.headers['content-type']`; escape quotes as `\'` and
   backslashes as `\\`. Keys must be nonempty. `[0]` indexes an array;
-  `['0']` addresses an object key.
+  `['0']` addresses an object key. The same syntax works on flow params,
+  including page-call arguments: `$params.items[0]['a-b']`.
 
 - Reference outputs by their fully-qualified path,
   `$steps.<id>.outputs.<name>`; add `outputs:` only for a rename or a

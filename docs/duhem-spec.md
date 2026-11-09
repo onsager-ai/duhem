@@ -1511,6 +1511,9 @@ unterminated keys are invalid. For example,
 `$steps.r.outputs.headers['content-type']` and
 `$steps.r.outputs.items[0]['a-b']` access the named keys. A quoted numeric
 key such as `['200']` addresses an object key, never an array index.
+The same navigation works on flow parameters during static substitution,
+including page-call arguments: `$params.resp['content-type']` and
+`$params.items[0]['a-b']`.
 
 Borrowed from Arazzo. References available in expressions:
 

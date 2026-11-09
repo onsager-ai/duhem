@@ -32,6 +32,77 @@ pub fn parse(src: &str) -> Result<Expr, ParseError> {
 
 type Err<'src> = extra::Err<Rich<'src, char>>;
 
+/// Parse a path at the start of a string and return the unconsumed suffix.
+pub(crate) fn parse_path_prefix(src: &str) -> Option<(Path, &str)> {
+    path_parser()
+        .then(any().repeated().to_slice())
+        .parse(src)
+        .into_result()
+        .ok()
+}
+
+fn path_parser<'src>() -> impl Parser<'src, &'src str, Path, Err<'src>> {
+    let ident = text::ident().to_slice().map(|s: &str| s.to_string());
+
+    // The six fixed roots are a closed keyword set. Any other
+    // identifier is not a parse error: it is provisionally a
+    // `for_each` loop-variable reference (`as: row` → `$row`),
+    // carried as the first path segment rather than the root
+    // itself (see `PathRoot::Loop`'s doc comment for why). Whether
+    // that identifier is actually a declared, in-scope binding is
+    // resolved by the validator, not here — same deferral the
+    // parser already gives an undeclared `$steps.<id>`.
+    let root = just('$')
+        .ignore_then(text::ident().to_slice())
+        .map(|s: &str| match s {
+            "steps" => (PathRoot::Steps, None),
+            "setup" => (PathRoot::Setup, None),
+            "fixture" => (PathRoot::Fixture, None),
+            "inputs" => (PathRoot::Inputs, None),
+            "pages" => (PathRoot::Pages, None),
+            "env" => (PathRoot::Env, None),
+            "runtime" => (PathRoot::Runtime, None),
+            other => (PathRoot::Loop, Some(other.to_string())),
+        });
+
+    // Keep quoted-key positions so even a numeric key cannot index an array.
+    let key_seg = just('.').ignore_then(ident).map(|s| (s, false));
+    let index_seg = text::int(10)
+        .to_slice()
+        .map(|s: &str| (s.to_string(), false))
+        .delimited_by(just('['), just(']'));
+    let escaped = just('\\').ignore_then(choice((just('\\'), just('\''))));
+    let quoted_key = choice((escaped, none_of("\\'")))
+        .repeated()
+        .at_least(1)
+        .collect::<String>()
+        .delimited_by(just("['"), just("']"))
+        .labelled("non-empty quoted key (only \\' and \\\\ escapes are allowed)")
+        .map(|s| (s, true));
+    let segments = choice((key_seg, quoted_key, index_seg))
+        .repeated()
+        .collect::<Vec<_>>();
+
+    root.then(segments).map(|((root, loop_name), segments)| {
+        let mut names = Vec::new();
+        let mut quoted_keys = Vec::new();
+        if let Some(name) = loop_name {
+            names.push(name);
+        }
+        for (name, quoted) in segments {
+            if quoted && name.bytes().all(|b| b.is_ascii_digit()) {
+                quoted_keys.push(names.len());
+            }
+            names.push(name);
+        }
+        Path {
+            root,
+            segments: names,
+            quoted_keys,
+        }
+    })
+}
+
 fn expr_parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
     recursive(|expr| {
         // ---- literals ----
@@ -77,65 +148,7 @@ fn expr_parser<'src>() -> impl Parser<'src, &'src str, Expr, Err<'src>> {
         let literal = choice((bool_lit, float_lit, int_lit, string_lit)).map(Expr::Lit);
 
         // ---- path / call ----
-        let ident = text::ident().to_slice().map(|s: &str| s.to_string());
-
-        // The six fixed roots are a closed keyword set. Any other
-        // identifier is not a parse error: it is provisionally a
-        // `for_each` loop-variable reference (`as: row` → `$row`),
-        // carried as the first path segment rather than the root
-        // itself (see `PathRoot::Loop`'s doc comment for why). Whether
-        // that identifier is actually a declared, in-scope binding is
-        // resolved by the validator, not here — same deferral the
-        // parser already gives an undeclared `$steps.<id>`.
-        let root = just('$')
-            .ignore_then(text::ident().to_slice())
-            .map(|s: &str| match s {
-                "steps" => (PathRoot::Steps, None),
-                "setup" => (PathRoot::Setup, None),
-                "fixture" => (PathRoot::Fixture, None),
-                "inputs" => (PathRoot::Inputs, None),
-                "pages" => (PathRoot::Pages, None),
-                "env" => (PathRoot::Env, None),
-                "runtime" => (PathRoot::Runtime, None),
-                other => (PathRoot::Loop, Some(other.to_string())),
-            });
-
-        // Keep quoted-key positions so even a numeric key cannot index an array.
-        let key_seg = just('.').ignore_then(ident).map(|s| (s, false));
-        let index_seg = text::int(10)
-            .to_slice()
-            .map(|s: &str| (s.to_string(), false))
-            .delimited_by(just('['), just(']'));
-        let escaped = just('\\').ignore_then(choice((just('\\'), just('\''))));
-        let quoted_key = choice((escaped, none_of("\\'")))
-            .repeated()
-            .at_least(1)
-            .collect::<String>()
-            .delimited_by(just("['"), just("']"))
-            .labelled("non-empty quoted key (only \\' and \\\\ escapes are allowed)")
-            .map(|s| (s, true));
-        let segments = choice((key_seg, quoted_key, index_seg))
-            .repeated()
-            .collect::<Vec<_>>();
-
-        let path = root.then(segments).map(|((root, loop_name), segments)| {
-            let mut names = Vec::new();
-            let mut quoted_keys = Vec::new();
-            if let Some(name) = loop_name {
-                names.push(name);
-            }
-            for (name, quoted) in segments {
-                if quoted && name.bytes().all(|b| b.is_ascii_digit()) {
-                    quoted_keys.push(names.len());
-                }
-                names.push(name);
-            }
-            Path {
-                root,
-                segments: names,
-                quoted_keys,
-            }
-        });
+        let path = path_parser();
 
         let call_args = expr
             .clone()

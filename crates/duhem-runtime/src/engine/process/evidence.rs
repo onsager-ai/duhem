@@ -100,6 +100,7 @@ impl Processes {
                 check_id: scope.check.clone(),
                 criterion_id: scope.criterion.clone(),
                 flow: None,
+                group: None,
             });
             let result = entry.stop().await;
             if let Err(err) = entry

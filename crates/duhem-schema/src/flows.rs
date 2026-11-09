@@ -9,7 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::assertion::Assertion;
 use crate::includes::MAX_INCLUDE_DEPTH;
 use crate::source::StepSourceOrigin;
-use crate::step::{ExpandedFlowOrigin, FlowCleanup, Step, StepCondition};
+use crate::step::{ExpandedFlowOrigin, FlowCleanup, Step, StepCondition, StepGroupFrame};
+use crate::step_groups;
 use crate::verification::{Flow, FlowCatalog, InputDecl, InputType, VerificationDefinition};
 
 #[path = "flows_validate.rs"]
@@ -20,6 +21,18 @@ pub(crate) const MAX_FLOW_DEPTH: usize = MAX_INCLUDE_DEPTH;
 
 /// Validate every flow-facing rule and expand all check invocations.
 pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Result<(), String> {
+    let group_errors = step_groups::validate(definition);
+    if !group_errors.is_empty() {
+        return Err(group_errors
+            .iter()
+            .map(|error| match error.location() {
+                Some(at) => format!("line {}, column {}: {error}", at.line, at.column),
+                None => error.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("; "));
+    }
+
     let errors = validate_authored(definition);
     if !errors.is_empty() {
         return Err(errors.join("; "));
@@ -259,6 +272,7 @@ fn blank_step() -> Step {
         for_each_body: Vec::new(),
         flow: None,
         flow_secrets: Vec::new(),
+        group: Vec::new(),
         flow_cleanup: Vec::new(),
     }
 }
@@ -330,6 +344,49 @@ fn expand_sequence(
     let mut result = Expansion::default();
     for (inner_index, mut step) in steps.into_iter().enumerate() {
         rewrite_value(&mut step.with, &result.projections);
+        if step_groups::is_group(&step) {
+            // Lower the group into this sequence (#614). Its children keep
+            // this namespace; each carries the group frame so the runtime
+            // evaluates the group's `if:` once, at entry.
+            let frame = StepGroupFrame {
+                key: *counter as u32,
+                label: step.id.clone().unwrap_or_else(|| inner_index.to_string()),
+                condition: step.condition.clone(),
+            };
+            *counter += 1;
+            let mut body = step.steps.take().unwrap_or_default();
+            for inner in &mut body {
+                inherit_session(inner, step.session.as_deref());
+            }
+            let mut expanded = expand_sequence(
+                body,
+                catalog,
+                namespace,
+                current_flow,
+                current_invocation,
+                inherited_secrets,
+                external_root,
+                counter,
+            );
+            // `if: always` / `if: failure` is also the default for inner steps
+            // that declare no `if:` of their own, as a call-site `if:` is for
+            // the steps its flow expands to: a diagnostics group would
+            // otherwise gate its own default steps on the failure it exists for.
+            let inherited = matches!(
+                frame.condition,
+                StepCondition::Always | StepCondition::Failure
+            );
+            for inner in &mut expanded.steps {
+                if inherited && inner.condition == StepCondition::Success {
+                    inner.condition = frame.condition.clone();
+                }
+                inner.group.insert(0, frame.clone());
+            }
+            result.steps.append(&mut expanded.steps);
+            result.origins.append(&mut expanded.origins);
+            result.projections.append(&mut expanded.projections);
+            continue;
+        }
         if step.call.is_none() || step.for_each.is_some() {
             if !namespace.is_empty()
                 && let Some(id) = &mut step.id
@@ -404,13 +461,12 @@ fn expand_sequence(
         }
 
         let mut direct_ids = BTreeMap::new();
-        for inner in flow
-            .steps
-            .iter()
-            .chain(&flow.cleanup)
-            .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+        for inner in step_groups::tree(&flow.steps)
+            .into_iter()
+            .chain(step_groups::tree(&flow.cleanup))
         {
             if inner.call.is_none()
+                && !step_groups::is_group(inner)
                 && let Some(id) = &inner.id
             {
                 direct_ids.insert(
@@ -733,6 +789,13 @@ fn rewrite_steps(steps: &mut [Step], projections: &BTreeMap<String, String>) {
         if let Some(source) = &mut step.for_each {
             *source = crate::ExprStr::from_source(&rewrite_string(&source.raw, projections))
                 .expect("rewriting a valid step reference preserves expression syntax");
+        }
+        for frame in &mut step.group {
+            if let StepCondition::Expr(condition) = &mut frame.condition {
+                *condition =
+                    crate::ExprStr::from_source(&rewrite_string(&condition.raw, projections))
+                        .expect("rewriting a valid step reference preserves expression syntax");
+            }
         }
         rewrite_steps(&mut step.for_each_body, projections);
         for cleanup in &mut step.flow_cleanup {

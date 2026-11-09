@@ -623,3 +623,49 @@ criteria:
         ]
     );
 }
+
+#[tokio::test]
+async fn a_call_inside_a_group_registers_at_the_check_and_a_gated_group_registers_nothing() {
+    let (mut engine, _tmp) = engine_for_test().await;
+    let log = tag_engine(
+        &mut engine,
+        &[
+            ("fake/body", false),
+            ("fake/clean", false),
+            ("fake/td", false),
+        ],
+    );
+    let definition = load_flows(&format!(
+        r#"
+verification: flow cleanup in groups
+{RES_FLOW}
+criteria:
+  - id: AC
+    description: Group scope is not a cleanup scope
+    checks:
+      - id: c
+        steps:
+          - id: gated
+            if: failure
+            steps:
+              - {{id: skipped, call: res, with: {{name: x}}}}
+          - id: live
+            steps:
+              - {{id: kept, call: res, with: {{name: y}}}}
+          - {{id: last, uses: fake/body, with: {{tag: z}}}}
+        teardown: [{{uses: fake/td, with: {{tag: t}}}}]
+        assertions: ["true"]
+"#
+    ));
+    let outcome = engine
+        .run_with_metadata(&definition, BTreeMap::new())
+        .await
+        .unwrap();
+    assert_eq!(outcome.verdict.state, VerdictState::Pass);
+    // The group's call is cleaned up when the check ends (after `last`, before
+    // teardown), not when the group ends; the gated group registered nothing.
+    assert_eq!(
+        *log.lock().unwrap(),
+        ["body:y", "body:z", "clean:y", "td:t"]
+    );
+}

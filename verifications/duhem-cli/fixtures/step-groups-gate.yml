@@ -1,0 +1,24 @@
+# Negative fixture for AC-19 in ../duhem.yml (spec #614): a step that fails
+# inside a group gates the later default step outside it, while an
+# `if: failure` group still runs. Driven by `duhem run`, never gate-run.
+verification: Step-group shared gate
+
+criteria:
+  - id: AC-1
+    description: A failure inside a group gates later default steps.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: work
+            steps:
+              - { id: break, uses: cli/invoke, with: { command: [/nonexistent/duhem-step-groups-fixture] } }
+          - { id: after, uses: cli/invoke, with: { command: [printf, after] } }
+          - id: collect
+            if: failure
+            steps:
+              - { id: diag, uses: cli/invoke, with: { command: [printf, diag] } }
+        assertions:
+          # `after` was skipped, so this has no observation.
+          - $steps.after.outputs.stdout == "after"
+          # `diag` ran, so this observation is real and the claim is false.
+          - $steps.diag.outputs.stdout == "never"

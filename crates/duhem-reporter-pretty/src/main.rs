@@ -141,9 +141,14 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
                 if let Some(position) = block.failing_step
                     && let Some(step) = block.steps.get(position)
                 {
+                    let group = step
+                        .group
+                        .as_ref()
+                        .map(|labels| format!(" in group {}", labels.join(" > ")))
+                        .unwrap_or_default();
                     writeln!(
                         out,
-                        "      failing step {position}: {} #{} ({})",
+                        "      failing step {position}: {} #{} ({}){group}",
                         step.uses,
                         step.index,
                         outcome_label(&step.outcome),

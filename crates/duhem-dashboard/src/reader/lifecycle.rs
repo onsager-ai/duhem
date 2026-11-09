@@ -89,6 +89,7 @@ fn normalize(event: &Event) -> Option<LifecycleEvent<'_>> {
             check_id,
             criterion_id,
             flow,
+            group,
             ..
         } => LifecycleEvent::StepStarted {
             phase: phase_of(*phase),
@@ -98,6 +99,7 @@ fn normalize(event: &Event) -> Option<LifecycleEvent<'_>> {
             index: *step_index,
             uses,
             flow: flow.as_ref().map(flow_of),
+            group: group.clone(),
             timestamp_ms,
         },
         EventPayload::SetupStepObservation {

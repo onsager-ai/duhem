@@ -17,6 +17,8 @@ use serde_yml::Value;
 use tokio::{net::TcpListener, task::JoinHandle};
 
 const EXAMPLE: &str = include_str!("../../../verifications/iframe-example/duhem.yml");
+const WINDOW_EXAMPLE: &str =
+    include_str!("../../../verifications/observe-window-example/duhem.yml");
 const REPORT: &str = r#"<!doctype html><html><body>
 <main><h1>Weekly report</h1>
 <label>Title<input></label>
@@ -97,6 +99,30 @@ fn assertion(locator: &str, expected: &str) -> Value {
     yaml(&format!(
         "locator: {locator}\nexpected: {expected}\ntimeout: 400ms"
     ))
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium"]
+async fn worked_window_vd_executes() {
+    let fx = fixture().await;
+    let def = VerificationDefinition::from_yaml_str(WINDOW_EXAMPLE).unwrap();
+    let browser = RunBrowser::launch(false).await.unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(tmp.path().join("runs.db")).await.unwrap());
+    let mut engine = Engine::new().with_browser(browser).with_store(store);
+    let outcome = engine
+        .run_with_metadata(
+            &def,
+            BTreeMap::from([("page_url".into(), serde_json::json!(format!("{}/", fx.url)))]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome.verdict.state,
+        VerdictState::Pass,
+        "{:?}",
+        outcome.verdict
+    );
 }
 
 #[tokio::test]

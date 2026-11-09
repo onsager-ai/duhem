@@ -68,7 +68,7 @@ fn assert_deprecation_warning(stderr: &str) {
         .unwrap_or_else(|| panic!("no deprecation warning: {stderr}"));
     assert!(line.starts_with("warning: "), "{line}");
     assert!(
-        line.contains("`needs: [thing]` with `- call: thing` at the end of the check's `setup:`"),
+        line.contains("`needs: [thing]` with `- id: thing` + `call: thing` at the end of the check's `setup:`"),
         "{line}"
     );
     // A source location, as `line:column:`, right before the warning text.

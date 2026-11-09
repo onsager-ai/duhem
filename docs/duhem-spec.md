@@ -1011,7 +1011,8 @@ message and source location.
 | `fixtures.<name>.down:` | `flows.<name>.cleanup:` |
 | `fixtures.<name>.cleanup_policy:` | `flows.<name>.cleanup_policy:` (same values and default) |
 | `$fixture.<name>.<id>.outputs.*` in `down:` | `$steps.<id>.outputs.*` in `cleanup:` |
-| `needs: [a, b]` on a check | `- call: a` and `- call: b`, in order, at the **end** of that check's `setup:` |
+| `$fixture.<name>.<id>.outputs.*` in a check body or check step | declare the value in the flow's `outputs:`, give the call an `id:`, read `$setup.<call-id>.outputs.<name>` |
+| `needs: [a, b]` on a check | `- id: a` + `call: a` and `- id: b` + `call: b`, in order, at the **end** of that check's `setup:` |
 
 ```yaml
 verification: Per-check fixture (deprecated form)
@@ -1095,9 +1096,11 @@ for a flow:
 
 > `fixtures.<name>` is deprecated and will be removed in v0.9.0. Declare
 > `flows.<name>` with `steps:` (was `up:`), `cleanup:` (was `down:`) and the same
-> `cleanup_policy:`; replace `$fixture.<name>.<id>.outputs.*` with
-> `$steps.<id>.outputs.*`; replace `needs: [<name>]` with `- call: <name>` at the
-> end of the check's `setup:`.
+> `cleanup_policy:`; inside `cleanup:` replace `$fixture.<name>.<id>.outputs.*`
+> with `$steps.<id>.outputs.*`, and elsewhere declare it in the flow's
+> `outputs:` and read `$setup.<call-id>.outputs.<name>`; replace
+> `needs: [<name>]` with `- id: <name>` + `call: <name>` at the end of the
+> check's `setup:`.
 
 #### 10.3.5.1 Flow cleanup (`cleanup:` and `cleanup_policy:`)
 

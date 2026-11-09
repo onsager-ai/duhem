@@ -490,8 +490,9 @@ declared fixture. Rewrite each one as a flow with `cleanup:`:
 | `fixtures.<name>.up:` | `flows.<name>.steps:` |
 | `fixtures.<name>.down:` | `flows.<name>.cleanup:` |
 | `fixtures.<name>.cleanup_policy:` | `flows.<name>.cleanup_policy:` |
-| `$fixture.<name>.<id>.outputs.*` | `$steps.<id>.outputs.*` |
-| `needs: [<name>]` on a check | `- call: <name>` at the end of the check's `setup:` |
+| `$fixture.<name>.<id>.outputs.*` in `down:` | `$steps.<id>.outputs.*` in `cleanup:` |
+| `$fixture.<name>.<id>.outputs.*` in a check body or step | declare it in the flow's `outputs:`, give the call an `id:`, read `$setup.<call-id>.outputs.<name>` |
+| `needs: [<name>]` on a check | `- id: <name>` + `call: <name>` at the end of the check's `setup:` |
 
 ### 5. Mechanical judgment — no LLM in the verdict
 

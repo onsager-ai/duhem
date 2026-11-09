@@ -152,7 +152,7 @@ pub fn fixture_deprecation_warnings(definition: &VerificationDefinition) -> Vec<
                 .map(|at| format!("{}:{}: ", at.line, at.column))
                 .unwrap_or_default();
             format!(
-                "{location}`fixtures.{name}` is deprecated and will be removed in v0.9.0. Declare `flows.{name}` with `steps:` (was `up:`), `cleanup:` (was `down:`) and the same `cleanup_policy:`; replace `$fixture.{name}.<id>.outputs.*` with `$steps.<id>.outputs.*`; replace `needs: [{name}]` with `- call: {name}` at the end of the check's `setup:`."
+                "{location}`fixtures.{name}` is deprecated and will be removed in v0.9.0. Declare `flows.{name}` with `steps:` (was `up:`), `cleanup:` (was `down:`) and the same `cleanup_policy:`; inside `cleanup:` replace `$fixture.{name}.<id>.outputs.*` with `$steps.<id>.outputs.*`, and elsewhere declare it in the flow's `outputs:` and read `$setup.<call-id>.outputs.<name>`; replace `needs: [{name}]` with `- id: {name}` + `call: {name}` at the end of the check's `setup:`."
             )
         })
         .collect()
@@ -258,7 +258,8 @@ criteria:
             project.contains("is deprecated and will be removed in v0.9.0"),
             "{project}"
         );
-        assert!(project.contains("`needs: [project]` with `- call: project`"));
+        assert!(project.contains("`needs: [project]` with `- id: project` + `call: project`"));
+        assert!(project.contains("read `$setup.<call-id>.outputs.<name>`"));
         assert!(
             project.chars().next().is_some_and(|c| c.is_ascii_digit()),
             "starts with line:column: {project}"
@@ -272,5 +273,40 @@ criteria:
         )
         .expect("parse");
         assert!(fixture_deprecation_warnings(&definition).is_empty());
+    }
+
+    // The migration the warning names for a check body that read a fixture's
+    // output: declare it in the flow's `outputs:`, give the call an `id:`.
+    #[test]
+    fn a_migrated_check_body_reads_a_cleanup_flows_declared_output() {
+        let definition = VerificationDefinition::from_yaml_str(
+            r#"
+verification: migrated
+flows:
+  project:
+    steps:
+      - id: create
+        uses: cli/invoke
+        with: { command: [echo, made] }
+    outputs:
+      name: $steps.create.outputs.stdout
+    cleanup:
+      - uses: cli/invoke
+        with: { command: [echo, "$steps.create.outputs.stdout"] }
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        setup: [{ id: project, call: project }]
+        steps:
+          - uses: cli/invoke
+            with: { command: [echo, "$setup.project.outputs.name"] }
+        assertions: ["true"]
+"#,
+        )
+        .expect("parse");
+        crate::validate_with_contract_outputs(&definition, &|_| vec!["stdout".into()])
+            .expect("the declared output is readable through the call id");
     }
 }

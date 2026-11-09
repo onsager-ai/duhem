@@ -41,7 +41,7 @@ pub(crate) fn parse_path_prefix(src: &str) -> Option<(Path, &str)> {
         .ok()
 }
 
-fn path_parser<'src>() -> impl Parser<'src, &'src str, Path, Err<'src>> {
+fn path_parser<'src>() -> impl Parser<'src, &'src str, Path, Err<'src>> + Clone {
     let ident = text::ident().to_slice().map(|s: &str| s.to_string());
 
     // The six fixed roots are a closed keyword set. Any other

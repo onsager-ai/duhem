@@ -98,6 +98,7 @@ async fn check_artifact_surfaces_secret_mask_occurrence_counts() {
             layer: Some("api".into()),
             flow: None,
             with: BTreeMap::new(),
+            group: None,
         })
         .await
         .unwrap();
@@ -298,6 +299,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
             fixture_name: None,
             check_id: None,
             criterion_id: Some("AC-1".into()),
+            registered_by: None,
         })
         .await
         .unwrap();
@@ -319,6 +321,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
             fixture_name: None,
             check_id: Some("AC-1.1".into()),
             criterion_id: Some("AC-1".into()),
+            registered_by: None,
         })
         .await
         .unwrap();
@@ -340,6 +343,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
             fixture_name: Some("db".into()),
             check_id: Some("AC-1.1".into()),
             criterion_id: None,
+            registered_by: None,
         })
         .await
         .unwrap();
@@ -401,6 +405,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
             fixture_name: Some("AC-2.1".into()),
             check_id: Some("AC-1.1".into()),
             criterion_id: None,
+            registered_by: None,
         })
         .await
         .unwrap();
@@ -472,6 +477,7 @@ async fn run_detail_surfaces_teardown_evidence_without_changing_verdict() {
             check_id: None,
             criterion_id: None,
             flow: None,
+            group: None,
         })
         .await
         .unwrap();
@@ -628,6 +634,7 @@ async fn cleanup_step_finish_is_keyed_by_criterion_scope() {
                 check_id: None,
                 criterion_id: Some(criterion_id.into()),
                 flow: None,
+                group: None,
             })
             .await
             .unwrap();
@@ -1159,6 +1166,7 @@ async fn colliding_check_ids_attribute_to_the_first_owner() {
             layer: None,
             flow: None,
             with: BTreeMap::new(),
+            group: None,
         })
         .await
         .unwrap();

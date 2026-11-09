@@ -223,6 +223,8 @@ _preflight_stages: lint test self-verify validate-suites
     # spec example could break CI while `preflight` stayed green — which
     # is exactly what happened on #453.
     cargo run -p xtask --quiet -- schema-drift
+    # Closed spec catalogs match their code counterparts.
+    cargo run -p xtask --quiet -- constraint-catalog --mode=fail
     # The generated action reference matches the action contracts.
     cargo run -p xtask --quiet -- action-reference --check
 

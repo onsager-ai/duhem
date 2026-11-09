@@ -71,6 +71,12 @@ pub(crate) trait Dispatch: Send + Sync {
         Vec::new()
     }
 
+    /// Whether the action's `with:` accepts `timeout:`, so the manifest
+    /// `defaults.timeout` may be filled in (spec #66). Test stubs accept it.
+    fn accepts_timeout(&self) -> bool {
+        true
+    }
+
     async fn invoke(
         &self,
         page: Option<&Page>,
@@ -159,6 +165,14 @@ impl Dispatch for ConcreteAction {
 
     fn secret_outputs(&self) -> Vec<&'static str> {
         self.action.contract().secret_outputs
+    }
+
+    fn accepts_timeout(&self) -> bool {
+        self.action
+            .contract()
+            .with
+            .iter()
+            .any(|field| field.name == "timeout")
     }
 
     async fn invoke(
@@ -300,6 +314,15 @@ fn insert(m: &mut ActionRegistry, d: ConcreteAction) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_timeout_targets_only_actions_that_declare_it() {
+        let registry = default_registry();
+        assert!(registry["ui/click"].accepts_timeout());
+        assert!(registry["api/call"].accepts_timeout());
+        assert!(!registry["ui/capture-session"].accepts_timeout());
+        assert!(!registry["ui/extract"].accepts_timeout());
+    }
 
     #[test]
     fn default_catalog_lists_the_v1_actions() {

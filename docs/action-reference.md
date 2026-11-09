@@ -247,7 +247,7 @@ Make an HTTP request and observe the response.
 | `body` | no | — |
 | `timeout` | no | — |
 
-**outputs:** `status`, `body`, `body_text`
+**outputs:** `status`, `body`, `body_text`, `body_bytes`, `headers`
 
 ```yaml
 - uses: api/call
@@ -266,7 +266,7 @@ Observe a network request the page made (matched by method + URL pattern).
 | `after` | no | — |
 | `timeout` | no | — |
 
-**outputs:** (none)
+**outputs:** `method`, `url`, `status`, `body`, `body_text`, `body_bytes`, `headers`, `request_body`, `request_headers`
 
 ```yaml
 - uses: api/observe

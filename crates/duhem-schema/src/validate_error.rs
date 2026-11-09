@@ -302,6 +302,12 @@ pub enum ValidationError {
     },
 
     #[error("{message}")]
+    InvalidStepGroup {
+        message: String,
+        location: Option<SourceLocation>,
+    },
+
+    #[error("{message}")]
     InvalidNamedSession {
         message: String,
         location: Option<SourceLocation>,
@@ -467,6 +473,7 @@ impl ValidationError {
             | Self::MalformedSetupRef { location, .. }
             | Self::InvalidSessionReference { location, .. }
             | Self::InvalidNamedSession { location, .. }
+            | Self::InvalidStepGroup { location, .. }
             | Self::UnknownAction { location, .. }
             | Self::InvalidStepCondition { location, .. }
             | Self::LoopVariableOutOfScope { location, .. }

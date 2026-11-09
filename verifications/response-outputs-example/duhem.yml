@@ -1,0 +1,31 @@
+# Executed against a local HTTP fixture by runtime tests/response_outputs.rs in CI.
+# `api/call` declares `status`, `body`, `body_text`, `body_bytes` and `headers`
+# (#603 P1), so each is referenced directly with no `outputs:` block.
+verification: HTTP response facts are explicit
+inputs:
+  resource_url: { type: string }
+  empty_url: { type: string }
+criteria:
+  - id: AC-1
+    description: The response reports its status, header and exact payload byte count.
+    checks:
+      - id: AC-1.1
+        description: A UTF-8 body counts bytes, not characters.
+        steps:
+          - id: reply
+            uses: api/call
+            with: { method: GET, url: $inputs.resource_url }
+        assertions:
+          - $steps.reply.outputs.status == 200
+          - $steps.reply.outputs.body_text == 'é'
+          - $steps.reply.outputs.body_bytes == 2
+          - $steps.reply.outputs.headers.location == 'received'
+      - id: AC-1.2
+        description: An empty body is zero bytes.
+        steps:
+          - id: empty
+            uses: api/call
+            with: { method: GET, url: $inputs.empty_url }
+        assertions:
+          - $steps.empty.outputs.status == 200
+          - $steps.empty.outputs.body_bytes == 0

@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "manifest_sha256": "e313f728441758992f48a7cec5bb8ef96d186a09d9543c303bac7dc60cb11486",
-  "block_sha256": "d82af45ae885ad256346fded453e61418f0eeaec3b417920fb1092b688ad7695",
+  "manifest_sha256": "4261c9c146467db620ee10820e391a42874d766d86f817429ed0d72a11c3727f",
+  "block_sha256": "1439c3ccca8e357299cad3e45d87db923b7ac76fc0ebb671d72984001bd6ab85",
   "resolved_skills": [
     "ci-triage",
     "docs-drift-guard",

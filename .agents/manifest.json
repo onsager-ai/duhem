@@ -17,6 +17,7 @@
     "discovery",
     "ownership",
     "workflow-policy",
+    "human-decisions",
     "git-hooks"
   ],
   "local_skills": [

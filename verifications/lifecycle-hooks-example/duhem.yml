@@ -1,7 +1,7 @@
 # Criterion- and check-level setup:/teardown: — worked example (#441 Part B).
 #
 # Symmetric with leaf `setup:`/`teardown:` (#20/#409) and per-check
-# fixtures (#449): a criterion may declare its own `setup:`/`teardown:`,
+# flow cleanups (#615): a criterion may declare its own `setup:`/`teardown:`,
 # run once before/after all of its checks, and a check may declare its
 # own `setup:`/`teardown:`, run before/after that check's `steps:`.
 #
@@ -22,11 +22,11 @@
 # check genuinely needs to *read* a value a precondition produced, that
 # value has to come from *leaf*-level `setup:` instead —
 # `$setup.<id>.outputs.<name>` is addressable from any check body,
-# unchanged from before this feature (§10.3). `fixtures:` + `needs:`
-# (#449; see verifications/fixtures-needs-example/) is a third,
-# different tool: guaranteed per-check cleanup that can address what it
-# created, through `$fixture.<name>.<step_id>.outputs.<output>` — but
-# only from that fixture's own `down:`, never from a check body either.
+# unchanged from before this feature (§10.3). A flow with `cleanup:`
+# (#615; see verifications/flow-cleanup-example/) is a third, different
+# tool: guaranteed per-check cleanup that can address what it created,
+# through `$steps.<body-id>.outputs.<output>` — but only from the flow's
+# own `cleanup:`, never from a check body either.
 
 verification: Criterion and check lifecycle hooks
 spec_ref: https://github.com/onsager-ai/duhem/issues/441

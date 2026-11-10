@@ -37,7 +37,17 @@ for suite in "$verifications_dir"/*/; do
     name="$(basename "$suite")"
     total=$((total + 1))
     printf '==> duhem validate %s\n' "$name"
-    if ! "$duhem_bin" validate "$suite"; then
+    # Suites in this repo must not use deprecated forms (#618): any
+    # deprecation warning fails the suite.
+    errlog="$(mktemp)"
+    ok=1
+    "$duhem_bin" validate "$suite" 2>"$errlog" || ok=0
+    cat "$errlog" >&2
+    if grep -q 'is deprecated and will be removed' "$errlog"; then
+        ok=0
+    fi
+    rm -f "$errlog"
+    if (( ! ok )); then
         failed=$((failed + 1))
         failed_suites+=("$name")
     fi

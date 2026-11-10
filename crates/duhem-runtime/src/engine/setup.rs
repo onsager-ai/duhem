@@ -123,7 +123,7 @@ impl<'a> HookScope<'a> {
     }
 
     /// Where a flow `cleanup:` registered by a step dispatched in this block
-    /// belongs; `None` for fixtures, which do not register flow cleanups.
+    /// belongs; `None` for the blocks that never register one.
     pub(crate) fn registration_site(self) -> Option<crate::engine::flow_cleanup::RegisteredAt> {
         use crate::engine::flow_cleanup::RegisteredAt;
         match self {
@@ -131,6 +131,10 @@ impl<'a> HookScope<'a> {
             HookScope::Criterion(criterion) => Some(RegisteredAt::Criterion(criterion.to_string())),
             HookScope::Check(criterion, check) => Some(RegisteredAt::Check(
                 criterion.to_string(),
+                check.to_string(),
+            )),
+            HookScope::Fixture(fixture, check) => Some(RegisteredAt::Fixture(
+                fixture.to_string(),
                 check.to_string(),
             )),
             _ => None,
@@ -358,6 +362,21 @@ pub(crate) async fn run_flow_cleanup(
         RegisteredAt::Leaf => (None, None),
         RegisteredAt::Criterion(criterion) => (Some(criterion.as_str()), None),
         RegisteredAt::Check(criterion, check) => (Some(criterion.as_str()), Some(check.as_str())),
+        // A deprecated fixture's cleanup is its `down:` block (#618).
+        RegisteredAt::Fixture(fixture, check) => {
+            return Ok(run_lifecycle_steps(
+                writer,
+                registry,
+                browser,
+                run,
+                &cleanup.steps,
+                child_env,
+                StepPhase::Teardown,
+                HookScope::FixtureDown(fixture, check, cleanup.policy),
+            )
+            .await?
+            .cleanup);
+        }
     };
     Ok(run_lifecycle_steps(
         writer,
@@ -405,32 +424,6 @@ pub(crate) async fn run_fixture_up(
         aborted: result.aborted,
         failed_step: result.failed_step,
     })
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn run_fixture_down(
-    writer: &mut EvidenceWriter,
-    registry: &ActionRegistry,
-    browser: Option<&RunBrowser>,
-    run: &mut RunState,
-    fixture: &str,
-    check_id: &str,
-    steps: &[Step],
-    cleanup_policy: duhem_schema::CleanupPolicy,
-    child_env: &BTreeMap<String, String>,
-) -> Result<Vec<CleanupFailure>, EngineError> {
-    Ok(run_lifecycle_steps(
-        writer,
-        registry,
-        browser,
-        run,
-        steps,
-        child_env,
-        StepPhase::Teardown,
-        HookScope::FixtureDown(fixture, check_id, cleanup_policy),
-    )
-    .await?
-    .cleanup)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -570,9 +563,15 @@ async fn run_lifecycle_steps(
     writer.set_session(None);
     owned_contexts.close().await;
     if phase == StepPhase::Setup {
+        // A deprecated fixture's `up:` records into its own namespace, which
+        // its cleanup reads as the call's `$steps.*` outputs (#618).
+        let outputs = match scope {
+            HookScope::Fixture(fixture, _) => run.fixture_step_outputs(fixture),
+            _ => run.setup_outputs.clone(),
+        };
         run.snapshot_flow_cleanups(
             &crate::engine::flow_cleanup::Snapshot {
-                outputs: run.setup_outputs.clone(),
+                outputs,
                 binding: None,
             },
             false,

@@ -33,7 +33,8 @@
           "type": "string"
         },
         "needs": {
-          "description": "Fixtures instantiated for this check, in bring-up order.",
+          "deprecated": true,
+          "description": "Deprecated (#618), removed in v0.9.0: call a flow with `cleanup:` at the end of `setup:` instead. Fixtures instantiated for this check, in bring-up order.",
           "items": {
             "type": "string"
           },
@@ -767,7 +768,8 @@
           "additionalProperties": {
             "$ref": "#/definitions/Fixture"
           },
-          "description": "Named, per-check lifecycle resources. Each check gets a fresh instance of every fixture named by its `needs:` list.",
+          "deprecated": true,
+          "description": "Deprecated (#618), removed in v0.9.0: declare a flow with `cleanup:` instead. Named, per-check lifecycle resources. Each check gets a fresh instance of every fixture named by its `needs:` list.",
           "type": "object"
         },
         "flows": {

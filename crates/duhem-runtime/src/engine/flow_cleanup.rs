@@ -3,11 +3,12 @@
 //! A `call:` to a flow with `cleanup:` is expanded by the loader into plain
 //! steps, each carrying the cleanup. The first of them to be dispatched
 //! registers it on the run's cleanup-hook stack (`process_cleanup`), the same
-//! stack that holds fixture `down:` and block `teardown:` hooks, so one LIFO
-//! order covers all of them and an interrupted run drains them alike. The
-//! enclosing scope unwinds what was registered since its mark, last first.
-//! Each cleanup runs as an ordinary teardown lifecycle block, so it reuses
-//! the fixture-`down:` failure and gate semantics.
+//! stack that holds block `teardown:` hooks, so one LIFO order covers all of
+//! them and an interrupted run drains them alike. The enclosing scope unwinds
+//! what was registered since its mark, last first. Each cleanup runs as an
+//! ordinary teardown lifecycle block with required/`diagnostic_only` gate
+//! semantics. A deprecated fixture is such a flow, desugared onto its check's
+//! `setup:` (#618); its cleanup runs as the fixture's `down:` block.
 
 use std::collections::BTreeMap;
 
@@ -27,6 +28,8 @@ pub(crate) enum RegisteredAt {
     Leaf,
     Criterion(String),
     Check(String, String),
+    /// The `up:` block of a deprecated fixture: `(fixture, check)`.
+    Fixture(String, String),
 }
 
 /// What a cleanup reads from its call: the body's `$steps.*` outputs and, for
@@ -55,10 +58,13 @@ impl RunState {
             if entered {
                 continue;
             }
+            let owner = match &cleanup.fixture {
+                Some(fixture) => self.process_owner.fixture(fixture),
+                None => self.process_owner.clone(),
+            };
             hooks.push(CleanupHook {
-                owner: self.process_owner.clone(),
+                owner,
                 steps: Vec::new(),
-                policy: cleanup.policy,
                 session: self.session.clone(),
                 budget: self.context_budget.clone(),
                 flow: Some(FlowHook {
@@ -68,6 +74,16 @@ impl RunState {
                 }),
             });
         }
+    }
+
+    /// The step outputs a deprecated fixture's `up:` has recorded so far, as
+    /// the `$steps.*` outputs of its desugared call (#618).
+    pub(crate) fn fixture_step_outputs(&self, fixture: &str) -> BTreeMap<(String, String), Value> {
+        self.fixture_outputs
+            .iter()
+            .filter(|((owner, _, _), _)| owner == fixture)
+            .map(|((_, step, name), value)| ((step.clone(), name.clone()), value.clone()))
+            .collect()
     }
 
     /// Start of a scope: everything pushed from here on belongs to it.
@@ -94,7 +110,7 @@ impl RunState {
 
 /// Run one registered flow cleanup against the values its call recorded.
 /// With no recorded snapshot (an interrupted block) it sees the run's
-/// `$setup` outputs only.
+/// `$setup` outputs only, or a fixture's own `up:` outputs.
 pub(crate) async fn run_flow_hook(
     writer: &mut EvidenceWriter,
     registry: &ActionRegistry,
@@ -104,7 +120,10 @@ pub(crate) async fn run_flow_hook(
     child_env: &BTreeMap<String, String>,
 ) -> Result<Vec<CleanupFailure>, EngineError> {
     let mut view = hook.snapshot.clone().unwrap_or_else(|| Snapshot {
-        outputs: run.setup_outputs.clone(),
+        outputs: match &hook.cleanup.fixture {
+            Some(fixture) => run.fixture_step_outputs(fixture),
+            None => run.setup_outputs.clone(),
+        },
         binding: None,
     });
     for (recorded, alias) in &hook.cleanup.aliases {
@@ -128,20 +147,37 @@ pub(crate) async fn run_flow_hook(
     )
     .await;
     run.cleanup_view = None;
-    let mut failures = result?;
-    for failure in &mut failures {
-        failure.step = format!(
-            "flow `{}` cleanup (call `{}`): {}",
-            hook.cleanup.flow, hook.cleanup.call, failure.step
-        );
+    // A fixture owns the processes its steps started: release them once its
+    // `down:` has run, whatever it did.
+    let released = match &hook.cleanup.fixture {
+        Some(fixture) => {
+            let owner = run.process_owner.fixture(fixture);
+            run.processes
+                .lock()
+                .await
+                .finalize(writer, Some(&owner))
+                .await
+        }
+        None => Vec::new(),
+    };
+    let mut ran = result?;
+    for failure in &mut ran {
+        failure.step = match &hook.cleanup.fixture {
+            Some(fixture) => format!("fixture `{fixture}`: {}", failure.step),
+            None => format!(
+                "flow `{}` cleanup (call `{}`): {}",
+                hook.cleanup.flow, hook.cleanup.call, failure.step
+            ),
+        };
     }
+    let mut failures = released;
+    failures.append(&mut ran);
     Ok(failures)
 }
 
-/// Unwind the hooks pushed since `mark`, last first: flow cleanups and
-/// fixture `down:` blocks in one order. Every hook is attempted whatever an
-/// earlier one did; the first step-local engine error is returned for the
-/// caller to report once its own cleanup has run.
+/// Unwind the hooks pushed since `mark`, last first. Every hook is attempted
+/// whatever an earlier one did; the first step-local engine error is returned
+/// for the caller to report once its own cleanup has run.
 pub(crate) async fn drain(
     writer: &mut EvidenceWriter,
     registry: &ActionRegistry,
@@ -164,37 +200,6 @@ pub(crate) async fn drain(
         if let Some(flow) = &hook.flow {
             match run_flow_hook(writer, registry, browser, run, flow, child_env).await {
                 Ok(mut ran) => failures.append(&mut ran),
-                Err(step_error) => {
-                    error.get_or_insert(step_error);
-                }
-            }
-        } else if let (Some(fixture), Some(check)) = (&hook.owner.fixture, &hook.owner.check) {
-            let result = crate::engine::setup::run_fixture_down(
-                writer,
-                registry,
-                browser,
-                run,
-                fixture,
-                check,
-                &hook.steps,
-                hook.policy,
-                child_env,
-            )
-            .await;
-            failures.extend(
-                run.processes
-                    .lock()
-                    .await
-                    .finalize(writer, Some(&hook.owner))
-                    .await,
-            );
-            match result {
-                Ok(mut ran) => {
-                    for failure in &mut ran {
-                        failure.step = format!("fixture `{fixture}`: {}", failure.step);
-                    }
-                    failures.append(&mut ran);
-                }
                 Err(step_error) => {
                     error.get_or_insert(step_error);
                 }

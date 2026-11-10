@@ -226,6 +226,9 @@ impl Engine {
         def: &VerificationDefinition,
         inputs: BTreeMap<String, serde_json::Value>,
     ) -> Result<RunOutcome, EngineError> {
+        // Deprecated `needs:` fixtures run as flows with cleanup (#618).
+        let desugared = duhem_schema::desugar_fixtures(def);
+        let def = &*desugared;
         if self.secrets.is_empty() {
             for (name, decl) in &def.inputs {
                 if decl.secret
@@ -393,11 +396,7 @@ impl Engine {
             }
 
             crate::engine::session_scope::SessionScope::enter(&mut run_state, &def.session, None);
-            run_state.register_process_cleanup(
-                run_state.process_owner.clone(),
-                &def.teardown,
-                duhem_schema::CleanupPolicy::DiagnosticOnly,
-            );
+            run_state.register_process_cleanup(run_state.process_owner.clone(), &def.teardown);
 
             // Run-level `setup:` runs once before any criterion. Skipped
             // entirely when empty so the wire shape stays byte-identical
@@ -505,13 +504,11 @@ impl Engine {
                     run_state.register_process_cleanup(
                         run_state.process_owner.clone(),
                         &criterion.teardown,
-                        duhem_schema::CleanupPolicy::DiagnosticOnly,
                     );
                     let cv = self
                         .run_criterion(
                             &mut writer,
                             &mut run_state,
-                            &def.fixtures,
                             def.max_sessions.unwrap_or(4),
                             criterion,
                             &mut failures,
@@ -638,7 +635,6 @@ impl Engine {
         &mut self,
         writer: &mut EvidenceWriter,
         run: &mut RunState,
-        fixtures: &duhem_schema::FixtureCatalog,
         max_sessions: usize,
         criterion: &Criterion,
         failures: &mut Vec<CheckFailure>,
@@ -742,24 +738,16 @@ impl Engine {
                     .iter()
                     .chain(&check.setup)
                     .chain(&check.teardown)
-                    .chain(
-                        check
-                            .needs
+                    .chain(check.setup.iter().flat_map(|step| {
+                        step.flow_cleanup
                             .iter()
-                            .flat_map(|name| fixtures[name].up.iter().chain(&fixtures[name].down)),
-                    )
+                            .filter(|cleanup| cleanup.fixture.is_some())
+                            .flat_map(|cleanup| &cleanup.steps)
+                    }))
                     .flat_map(duhem_schema::Step::actions)
                     .any(|step| step.uses_name().starts_with("ui/"));
                 let result = self
-                    .run_check_with_retry(
-                        writer,
-                        run,
-                        fixtures,
-                        &criterion.id,
-                        check,
-                        failures,
-                        cleanup,
-                    )
+                    .run_check_with_retry(writer, run, &criterion.id, check, failures, cleanup)
                     .await;
                 let session = if consumes {
                     crate::engine::session_scope::SessionScope::observed(run)

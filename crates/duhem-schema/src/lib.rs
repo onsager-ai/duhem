@@ -9,6 +9,7 @@
 pub mod assertion;
 pub mod criterion;
 pub mod expr;
+mod fixtures_desugar;
 mod flows;
 pub mod includes;
 pub mod jsonschema;
@@ -47,6 +48,7 @@ pub use expr::{
     BinOp, Expr, ExprStr, Literal, ParseError, Path, PathRoot, RuntimeHelper, RuntimeHelperArity,
     UnaryOp, authored_runtime_helper_names,
 };
+pub use fixtures_desugar::{desugar_fixtures, fixture_deprecation_warnings, is_empty_up};
 pub use includes::PartialRootManifest;
 pub use jsonschema::json_schema;
 pub use manifest::{

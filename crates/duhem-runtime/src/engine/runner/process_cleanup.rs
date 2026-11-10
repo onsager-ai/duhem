@@ -97,58 +97,44 @@ impl Engine {
                 }
                 continue;
             }
-            let result =
-                if let (Some(fixture), Some(check)) = (&hook.owner.fixture, &hook.owner.check) {
-                    crate::engine::setup::run_fixture_down(
-                        writer,
-                        &self.registry,
-                        self.browser.as_ref(),
-                        run,
-                        fixture,
-                        check,
-                        &hook.steps,
-                        hook.policy,
-                        &env,
-                    )
-                    .await
-                } else if let (Some(criterion), Some(check)) =
-                    (&hook.owner.criterion, &hook.owner.check)
-                {
-                    crate::engine::setup::run_check_teardown(
-                        writer,
-                        &self.registry,
-                        self.browser.as_ref(),
-                        run,
-                        criterion,
-                        check,
-                        &hook.steps,
-                        &env,
-                    )
-                    .await
-                } else if let Some(criterion) = &hook.owner.criterion {
-                    crate::engine::setup::run_criterion_teardown(
-                        writer,
-                        &self.registry,
-                        self.browser.as_ref(),
-                        run,
-                        criterion,
-                        &hook.steps,
-                        &env,
-                    )
-                    .await
-                } else if !self.keep_env {
-                    crate::engine::setup::run_teardown(
-                        writer,
-                        &self.registry,
-                        self.browser.as_ref(),
-                        run,
-                        &hook.steps,
-                        &env,
-                    )
-                    .await
-                } else {
-                    Ok(Vec::new())
-                };
+            let result = if let (Some(criterion), Some(check)) =
+                (&hook.owner.criterion, &hook.owner.check)
+            {
+                crate::engine::setup::run_check_teardown(
+                    writer,
+                    &self.registry,
+                    self.browser.as_ref(),
+                    run,
+                    criterion,
+                    check,
+                    &hook.steps,
+                    &env,
+                )
+                .await
+            } else if let Some(criterion) = &hook.owner.criterion {
+                crate::engine::setup::run_criterion_teardown(
+                    writer,
+                    &self.registry,
+                    self.browser.as_ref(),
+                    run,
+                    criterion,
+                    &hook.steps,
+                    &env,
+                )
+                .await
+            } else if !self.keep_env {
+                crate::engine::setup::run_teardown(
+                    writer,
+                    &self.registry,
+                    self.browser.as_ref(),
+                    run,
+                    &hook.steps,
+                    &env,
+                )
+                .await
+            } else {
+                Ok(Vec::new())
+            };
             if let Ok(mut cleanup) = result {
                 failures.append(&mut cleanup);
             }

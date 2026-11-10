@@ -1,7 +1,7 @@
 # Lifecycle report worked example (#524). Run with:
 #   duhem run verifications/lifecycle-report-example --reporter json
 # The check passes while the deliberately invalid leaf teardown query is
-# recorded as a lifecycle failure. The fixture supplies check-scoped blocks.
+# recorded as a lifecycle failure. A flow with `cleanup:` supplies check-scoped blocks.
 verification: Lifecycle execution remains inspectable
 spec_ref: https://github.com/onsager-ai/duhem/issues/524
 
@@ -17,14 +17,14 @@ teardown:
       connection: 'sqlite::memory:'
       sql: 'this is deliberately invalid SQL'
 
-fixtures:
+flows:
   database_session:
-    up:
+    steps:
       - uses: db/query
         with:
           connection: 'sqlite::memory:'
           sql: 'select 1 as opened'
-    down:
+    cleanup:
       - uses: db/query
         with:
           connection: 'sqlite::memory:'
@@ -49,12 +49,12 @@ criteria:
           sql: 'select 1 as criterion_closed'
     checks:
       - id: AC-1.1
-        needs: [database_session]
         setup:
           - uses: db/query
             with:
               connection: 'sqlite::memory:'
               sql: 'select 1 as check_ready'
+          - call: database_session
         steps:
           - id: inspect
             uses: db/query

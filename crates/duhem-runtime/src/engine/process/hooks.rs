@@ -1,6 +1,6 @@
 //! Pending authored cleanup, unwound LIFO on the normal path and drained
 //! before finalization when a run is interrupted.
-use duhem_schema::{CleanupPolicy, FlowCleanup, Step};
+use duhem_schema::{FlowCleanup, Step};
 
 use super::Owner;
 use crate::engine::RunState;
@@ -19,7 +19,6 @@ pub(crate) struct FlowHook {
 pub(crate) struct CleanupHook {
     pub(crate) owner: Owner,
     pub(crate) steps: Vec<Step>,
-    pub(crate) policy: CleanupPolicy,
     pub(crate) session: Option<std::sync::Arc<crate::engine::session_scope::SessionScope>>,
     pub(crate) budget: Option<std::sync::Arc<crate::engine::session_scope::ContextBudget>>,
     /// Set for a flow `cleanup:`; `steps` is then unused.
@@ -27,16 +26,10 @@ pub(crate) struct CleanupHook {
 }
 
 impl RunState {
-    pub(crate) fn register_process_cleanup(
-        &mut self,
-        owner: Owner,
-        steps: &[Step],
-        policy: CleanupPolicy,
-    ) {
+    pub(crate) fn register_process_cleanup(&mut self, owner: Owner, steps: &[Step]) {
         let hook = CleanupHook {
             owner,
             steps: steps.to_vec(),
-            policy,
             session: self.session.clone(),
             budget: self.context_budget.clone(),
             flow: None,

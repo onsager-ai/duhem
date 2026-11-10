@@ -451,6 +451,7 @@ mod cleanup_gate_tests {
                     id: None,
                     uses: "api/poll".into(),
                     flow: None,
+                    group: None,
                     outcome: LifecycleStepOutcome::Ok,
                     judgment: Some(VerdictState::Fail),
                     detail: Some("condition remained false".into()),

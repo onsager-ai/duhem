@@ -9,7 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::assertion::Assertion;
 use crate::includes::MAX_INCLUDE_DEPTH;
 use crate::source::StepSourceOrigin;
-use crate::step::{ExpandedFlowOrigin, FlowCleanup, Step, StepCondition};
+use crate::step::{ExpandedFlowOrigin, FlowCleanup, Step, StepCondition, StepGroupFrame};
+use crate::step_groups;
 use crate::verification::{Flow, FlowCatalog, InputDecl, InputType, VerificationDefinition};
 
 #[path = "flows_validate.rs"]
@@ -20,6 +21,18 @@ pub(crate) const MAX_FLOW_DEPTH: usize = MAX_INCLUDE_DEPTH;
 
 /// Validate every flow-facing rule and expand all check invocations.
 pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Result<(), String> {
+    let group_errors = step_groups::validate(definition);
+    if !group_errors.is_empty() {
+        return Err(group_errors
+            .iter()
+            .map(|error| match error.location() {
+                Some(at) => format!("line {}, column {}: {error}", at.line, at.column),
+                None => error.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("; "));
+    }
+
     let errors = validate_authored(definition);
     if !errors.is_empty() {
         return Err(errors.join("; "));
@@ -248,6 +261,7 @@ fn blank_step() -> Step {
         for_each_body: Vec::new(),
         flow: None,
         flow_secrets: Vec::new(),
+        group: Vec::new(),
         flow_cleanup: Vec::new(),
     }
 }
@@ -319,6 +333,49 @@ fn expand_sequence(
     let mut result = Expansion::default();
     for (inner_index, mut step) in steps.into_iter().enumerate() {
         rewrite_value(&mut step.with, &result.projections);
+        if step_groups::is_group(&step) {
+            // Lower the group into this sequence (#614). Its children keep
+            // this namespace; each carries the group frame so the runtime
+            // evaluates the group's `if:` once, at entry.
+            let frame = StepGroupFrame {
+                key: *counter as u32,
+                label: step.id.clone().unwrap_or_else(|| inner_index.to_string()),
+                condition: step.condition.clone(),
+            };
+            *counter += 1;
+            let mut body = step.steps.take().unwrap_or_default();
+            for inner in &mut body {
+                inherit_session(inner, step.session.as_deref());
+            }
+            let mut expanded = expand_sequence(
+                body,
+                catalog,
+                namespace,
+                current_flow,
+                current_invocation,
+                inherited_secrets,
+                external_root,
+                counter,
+            );
+            // `if: always` / `if: failure` is also the default for inner steps
+            // that declare no `if:` of their own, as a call-site `if:` is for
+            // the steps its flow expands to: a diagnostics group would
+            // otherwise gate its own default steps on the failure it exists for.
+            let inherited = matches!(
+                frame.condition,
+                StepCondition::Always | StepCondition::Failure
+            );
+            for inner in &mut expanded.steps {
+                if inherited && inner.condition == StepCondition::Success {
+                    inner.condition = frame.condition.clone();
+                }
+                inner.group.insert(0, frame.clone());
+            }
+            result.steps.append(&mut expanded.steps);
+            result.origins.append(&mut expanded.origins);
+            result.projections.append(&mut expanded.projections);
+            continue;
+        }
         if step.call.is_none() || step.for_each.is_some() {
             if !namespace.is_empty()
                 && let Some(id) = &mut step.id
@@ -393,13 +450,12 @@ fn expand_sequence(
         }
 
         let mut direct_ids = BTreeMap::new();
-        for inner in flow
-            .steps
-            .iter()
-            .chain(&flow.cleanup)
-            .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+        for inner in step_groups::tree(&flow.steps)
+            .into_iter()
+            .chain(step_groups::tree(&flow.cleanup))
         {
             if inner.call.is_none()
+                && !step_groups::is_group(inner)
                 && let Some(id) = &inner.id
             {
                 direct_ids.insert(
@@ -629,24 +685,16 @@ fn substitute_params(value: &mut serde_yml::Value, bindings: &BTreeMap<String, s
     match value {
         serde_yml::Value::String(raw) => {
             if let Some(reference) = raw.strip_prefix("$params.") {
-                let mut segments = reference.split('.');
-                let Some(name) = segments.next() else {
-                    return;
+                let parsed = match crate::expr::parse(raw) {
+                    Ok(crate::Expr::Path(path)) => resolve_param_path(&path, bindings),
+                    _ => None,
                 };
-                let Some(mut resolved) = bindings.get(name).cloned() else {
-                    return;
-                };
-                for segment in segments {
-                    let Some(next) = resolved
-                        .as_mapping()
-                        .and_then(|map| map.get(serde_yml::Value::String(segment.to_string())))
-                        .cloned()
-                    else {
-                        return;
-                    };
-                    resolved = next;
+                // Dot-split walk kept so flows that relied on it before bracket
+                // keys (e.g. `$params.resp.content-type`) resolve unchanged.
+                if let Some(resolved) = parsed.or_else(|| resolve_dotted_param(reference, bindings))
+                {
+                    *value = resolved.clone();
                 }
-                *value = resolved;
             } else if raw.trim_start().starts_with("$pages.")
                 && let Some(rewritten) = rewrite_page_param_args(raw, bindings)
             {
@@ -667,6 +715,40 @@ fn substitute_params(value: &mut serde_yml::Value, bindings: &BTreeMap<String, s
     }
 }
 
+fn resolve_dotted_param<'a>(
+    reference: &str,
+    bindings: &'a BTreeMap<String, serde_yml::Value>,
+) -> Option<&'a serde_yml::Value> {
+    let mut segments = reference.split('.');
+    let mut value = bindings.get(segments.next()?)?;
+    for segment in segments {
+        value = value
+            .as_mapping()?
+            .get(serde_yml::Value::String(segment.to_string()))?;
+    }
+    Some(value)
+}
+
+fn resolve_param_path<'a>(
+    path: &crate::Path,
+    bindings: &'a BTreeMap<String, serde_yml::Value>,
+) -> Option<&'a serde_yml::Value> {
+    if path.root != crate::PathRoot::Loop || path.segments.first()?.as_str() != "params" {
+        return None;
+    }
+    let mut value = bindings.get(path.segments.get(1)?)?;
+    for (index, segment) in path.segments.iter().enumerate().skip(2) {
+        value = match value {
+            serde_yml::Value::Mapping(map) => map.get(serde_yml::Value::String(segment.clone()))?,
+            serde_yml::Value::Sequence(items) if !path.quoted_keys.contains(&index) => {
+                items.get(segment.parse::<usize>().ok()?)?
+            }
+            _ => return None,
+        };
+    }
+    Some(value)
+}
+
 /// Substitute flow params embedded as page-call arguments before the
 /// expanded step reaches the ordinary expression parser (spec #495).
 fn rewrite_page_param_args(
@@ -679,11 +761,29 @@ fn rewrite_page_param_args(
     let mut changed = false;
     while let Some(offset) = rest.find(marker) {
         out.push_str(&rest[..offset]);
-        let reference = &rest[offset + marker.len()..];
-        let name = reference_head(reference)?;
-        let replacement = bindings.get(name).and_then(render_expr_value)?;
+        let reference = &rest[offset..];
+        let (path, suffix) = crate::expr::parse::parse_path_prefix(reference)?;
+        let replacement = if let Some(value) = resolve_param_path(&path, bindings) {
+            render_expr_value(value)?
+        } else {
+            // Preserve navigation on an expression passed as a parameter.
+            let name = path.segments.get(1)?;
+            let value = bindings.get(name)?;
+            let serde_yml::Value::String(expression) = value else {
+                return None;
+            };
+            if !matches!(crate::expr::parse(expression), Ok(crate::Expr::Path(_))) {
+                return None;
+            }
+            let end = reference.len() - suffix.len();
+            format!(
+                "{}{}",
+                expression,
+                &reference[marker.len() + name.len()..end]
+            )
+        };
         out.push_str(&replacement);
-        rest = &reference[name.len()..];
+        rest = suffix;
         changed = true;
     }
     out.push_str(rest);
@@ -721,6 +821,13 @@ fn rewrite_steps(steps: &mut [Step], projections: &BTreeMap<String, String>) {
         if let Some(source) = &mut step.for_each {
             *source = crate::ExprStr::from_source(&rewrite_string(&source.raw, projections))
                 .expect("rewriting a valid step reference preserves expression syntax");
+        }
+        for frame in &mut step.group {
+            if let StepCondition::Expr(condition) = &mut frame.condition {
+                *condition =
+                    crate::ExprStr::from_source(&rewrite_string(&condition.raw, projections))
+                        .expect("rewriting a valid step reference preserves expression syntax");
+            }
         }
         rewrite_steps(&mut step.for_each_body, projections);
         for cleanup in &mut step.flow_cleanup {
@@ -1252,6 +1359,102 @@ criteria:
             Some("$pages.chat.history_item($inputs.index)")
         );
         crate::validate(&definition).expect("expanded page call validates");
+    }
+
+    #[test]
+    fn substitutes_nested_flow_params_with_bracket_keys() {
+        let bindings: BTreeMap<String, serde_yml::Value> = serde_yml::from_str(
+            r#"
+resp: { content-type: text/plain, nested: { name: dotted }, '200': numeric }
+items: [{ a-b: first }]
+"#,
+        )
+        .unwrap();
+        for (reference, expected) in [
+            ("$params.resp['content-type']", "text/plain"),
+            ("$params.resp.nested.name", "dotted"),
+            ("$params.resp['200']", "numeric"),
+            ("$params.items[0]['a-b']", "first"),
+        ] {
+            let mut value = serde_yml::Value::String(reference.into());
+            substitute_params(&mut value, &bindings);
+            assert_eq!(value.as_str(), Some(expected), "{reference}");
+        }
+        // Pre-bracket dotted form over a hyphenated key still resolves.
+        let mut legacy = serde_yml::Value::String("$params.resp.content-type".into());
+        substitute_params(&mut legacy, &bindings);
+        assert_eq!(legacy.as_str(), Some("text/plain"));
+        let mut numeric_key = serde_yml::Value::String("$params.items['0']".into());
+        substitute_params(&mut numeric_key, &bindings);
+        assert_eq!(numeric_key.as_str(), Some("$params.items['0']"));
+    }
+
+    #[test]
+    fn expands_bracket_keys_in_page_call_arguments() {
+        let bindings: BTreeMap<String, serde_yml::Value> = serde_yml::from_str(
+            "resp: { content-type: text/plain }\nitems: [{ a-b: 7 }]\nouter: $inputs.data\n",
+        )
+        .unwrap();
+        let raw = "$pages.chat.item($params.resp['content-type'], $params.items[0]['a-b'])";
+        assert_eq!(
+            rewrite_page_param_args(raw, &bindings).as_deref(),
+            Some("$pages.chat.item('text/plain', 7)")
+        );
+        assert_eq!(
+            rewrite_page_param_args("$pages.chat.item($params.outer.name)", &bindings).as_deref(),
+            Some("$pages.chat.item($inputs.data.name)")
+        );
+    }
+
+    #[test]
+    fn expands_bracket_keys_through_a_flow_call() {
+        let mut definition = authored(
+            r#"
+verification: flow bracket keys
+flows:
+  print_values:
+    params:
+      resp: { type: object }
+      items: { type: array }
+    steps:
+      - uses: cli/invoke
+        with:
+          command: echo
+          args:
+            - "$params.resp['content-type']"
+            - "$params.items[0]['a-b']"
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - call: print_values
+            with:
+              resp: { content-type: text/plain }
+              items: [{ a-b: first }]
+        assertions: ["true"]
+"#,
+        );
+        validate_and_expand(&mut definition).expect("flow expands");
+        let args = &definition.criteria[0].checks[0].steps[0].with["args"];
+        assert_eq!(args[0].as_str(), Some("text/plain"));
+        assert_eq!(args[1].as_str(), Some("first"));
+    }
+
+    #[test]
+    fn flow_output_projection_keeps_bracket_suffix() {
+        let projections = BTreeMap::from([(
+            "$steps.fetch.outputs.response".to_string(),
+            "$steps.fetch__request.outputs.body".to_string(),
+        )]);
+        assert_eq!(
+            rewrite_string(
+                "$steps.fetch.outputs.response['content-type']",
+                &projections
+            ),
+            "$steps.fetch__request.outputs.body['content-type']"
+        );
     }
 
     #[test]

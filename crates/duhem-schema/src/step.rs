@@ -54,6 +54,19 @@ pub struct ExpandedFlowOrigin {
     pub iteration: Option<u32>,
 }
 
+/// One enclosing step group of an executable step, after the loader has
+/// lowered groups (#614). The runtime evaluates `condition` once, when the
+/// first step of the group is reached; `key` identifies that group within one
+/// step sequence, so later steps reuse the decision.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StepGroupFrame {
+    pub key: u32,
+    /// The group's `id:` when present, otherwise its zero-based position
+    /// among its siblings.
+    pub label: String,
+    pub condition: StepCondition,
+}
+
 /// Dispatch condition for a step. The three outcome gates retain their
 /// original wire form; value expressions reuse the assertion grammar.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -222,13 +235,7 @@ pub struct Step {
     #[serde(rename = "as", default, skip_serializing_if = "Option::is_none")]
     pub as_binding: Option<String>,
 
-    /// Inline multi-step loop body — one of the three `for_each:` body
-    /// forms alongside `uses:` and `call:` (exactly one required).
-    /// Recursive in the type so `secret_outputs:`/`outputs:`/`if:`
-    /// etc. are never duplicated onto a separate loop-body type, but
-    /// capped at depth 1 by validation: a step inside this list may
-    /// not itself carry `for_each:` or `steps:`. Also rejected without
-    /// an enclosing `for_each:`.
+    /// Inline multi-step body. With `for_each:` it is one of the three loop body forms alongside `uses:` and `call:`; without it the step is a group (#614), a scope and label over its children that the loader lowers into the enclosing sequence. Exactly one of `uses:`, `call:` or `steps:` is required. Recursive in the type so `secret_outputs:`/`outputs:`/`if:` etc. are never duplicated onto a separate body type; loop nesting is capped at 1 by validation, so no step anywhere under a `for_each:` may itself carry `for_each:`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub steps: Option<Vec<Step>>,
 
@@ -243,6 +250,12 @@ pub struct Step {
     #[serde(skip)]
     #[schemars(skip)]
     pub for_each_body: Vec<Step>,
+
+    /// Enclosing step groups, outermost first, set by the loader when it
+    /// lowers a group (#614). Not part of the authored VD schema.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub group: Vec<StepGroupFrame>,
 
     /// Origin of an expanded action step. Not part of the authored VD
     /// schema; the runtime copies it into `StepStarted.flow`.

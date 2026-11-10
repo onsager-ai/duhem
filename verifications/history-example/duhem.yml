@@ -1,0 +1,69 @@
+# Executed against a local fixture by runtime tests/history_smoke.rs in CI.
+verification: Back and Forward drive real browser history
+inputs:
+  fixture_url: { type: string }
+criteria:
+  - id: AC-1
+    description: Back restores the list page, and its in-page state, after opening a detail page.
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.fixture_url }
+          - uses: ui/type
+            with: { locator: { label: Draft }, text: kept }
+          - uses: ui/click
+            with: { role: link, name: Detail }
+          - uses: ui/assert-element
+            with: { locator: { role: heading, name: Detail }, expected: visible, timeout: 2s }
+          - id: back
+            uses: ui/back
+          - uses: ui/assert-element
+            with: { locator: { role: heading, name: List }, expected: visible, timeout: 2s }
+          - id: draft
+            uses: ui/extract
+            with: { locator: { label: Draft }, field: value }
+        assertions:
+          - $steps.back.outputs.navigated == true
+          - $steps.draft.outputs.value == 'kept'
+      - id: AC-1.2
+        description: Forward returns to the detail page.
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.fixture_url }
+          - uses: ui/click
+            with: { role: link, name: Detail }
+          - uses: ui/back
+          - id: forward
+            uses: ui/forward
+          - uses: ui/assert-element
+            with: { locator: { role: heading, name: Detail }, expected: visible, timeout: 2s }
+        assertions:
+          - $steps.forward.outputs.navigated == true
+      - id: AC-1.3
+        description: A same-document hash entry counts as a history move.
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.fixture_url }
+          - uses: ui/click
+            with: { role: link, name: Jump }
+          - id: back
+            uses: ui/back
+        assertions:
+          - $steps.back.outputs.navigated == true
+  - id: AC-2
+    description: With no history entry in a direction nothing happens and nothing is an error.
+    checks:
+      - id: AC-2.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.fixture_url }
+          - id: back
+            uses: ui/back
+          - id: forward
+            uses: ui/forward
+          - uses: ui/assert-element
+            with: { locator: { role: heading, name: List }, expected: visible, timeout: 2s }
+        assertions:
+          - $steps.back.outputs.navigated == false
+          - $steps.forward.outputs.navigated == false

@@ -102,6 +102,7 @@ fn chain(op: BinOp, items: Vec<Expr>) -> Option<Expr> {
 fn runtime_path(name: &str) -> Path {
     Path {
         root: PathRoot::Runtime,
+        quoted_keys: vec![],
         segments: vec![name.to_string()],
     }
 }

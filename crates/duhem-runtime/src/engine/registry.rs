@@ -27,9 +27,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use duhem_actions::Page;
 use duhem_actions::{
-    Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertUrl, Call, CaptureSession,
-    Click, DbObserve, Extract, Invoke, Navigate, Observe, Poll, Query, Seed, Select, Stream, Type,
-    Wait,
+    Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertUrl, Back, Call,
+    CaptureSession, Click, DbObserve, Emulate, Extract, Focus, Forward, Invoke, Navigate, Observe,
+    ObserveConsole, Poll, Press, Query, Seed, Select, Stream, Type, Wait,
 };
 use serde::Deserialize;
 use serde::de::Error as _;
@@ -84,6 +84,18 @@ pub(crate) trait Dispatch: Send + Sync {
         with: &serde_yml::Value,
         child_env: &BTreeMap<String, String>,
     ) -> Result<ActionResult, ActionError>;
+
+    async fn invoke_with_boundaries(
+        &self,
+        page: Option<&Page>,
+        step_index: usize,
+        with: &serde_yml::Value,
+        child_env: &BTreeMap<String, String>,
+        _boundaries: &BTreeMap<String, duhem_actions::action::StepBoundary>,
+        _session: Option<&str>,
+    ) -> Result<ActionResult, ActionError> {
+        self.invoke(page, step_index, with, child_env).await
+    }
 }
 
 /// Both engine dispatch sites share this boundary. Process actions need a
@@ -98,6 +110,8 @@ pub(crate) async fn invoke_scoped(
     run: &super::RunState,
     owner: &super::process::Owner,
     writer: &mut duhem_evidence::EvidenceWriter,
+    boundaries: &BTreeMap<String, duhem_actions::action::StepBoundary>,
+    session: Option<&str>,
 ) -> Result<ActionResult, ActionError> {
     if dispatcher.uses().starts_with("process/") {
         run.processes
@@ -106,7 +120,9 @@ pub(crate) async fn invoke_scoped(
             .invoke(dispatcher.uses(), with, owner, child_env, writer)
             .await
     } else {
-        dispatcher.invoke(page, index, with, child_env).await
+        dispatcher
+            .invoke_with_boundaries(page, index, with, child_env, boundaries, session)
+            .await
     }
 }
 
@@ -182,6 +198,19 @@ impl Dispatch for ConcreteAction {
         with: &serde_yml::Value,
         child_env: &BTreeMap<String, String>,
     ) -> Result<ActionResult, ActionError> {
+        self.invoke_with_boundaries(page, step_index, with, child_env, &BTreeMap::new(), None)
+            .await
+    }
+
+    async fn invoke_with_boundaries(
+        &self,
+        page: Option<&Page>,
+        step_index: usize,
+        with: &serde_yml::Value,
+        child_env: &BTreeMap<String, String>,
+        boundaries: &BTreeMap<String, duhem_actions::action::StepBoundary>,
+        session: Option<&str>,
+    ) -> Result<ActionResult, ActionError> {
         // A page-requiring action without a page is a dispatch-layer
         // failure (the engine should have refused the check upstream).
         if self.action.requires_page() && page.is_none() {
@@ -190,7 +219,12 @@ impl Dispatch for ConcreteAction {
                 self.uses
             )));
         }
-        let ctx = ActionCtx { page, step_index };
+        let ctx = ActionCtx {
+            page,
+            step_index,
+            step_boundaries: boundaries,
+            session,
+        };
         // Only `cli/invoke` needs the runtime-owned env layered in, so
         // only it pays for the clone; every other action (the hot
         // UI/API path) invokes against the original `with` by
@@ -283,14 +317,20 @@ pub(crate) type ActionRegistry = BTreeMap<&'static str, Box<dyn Dispatch>>;
 pub(crate) fn default_registry() -> ActionRegistry {
     let mut m: ActionRegistry = BTreeMap::new();
     insert(&mut m, ConcreteAction::new(Box::new(Navigate)));
+    insert(&mut m, ConcreteAction::new(Box::new(ObserveConsole)));
+    insert(&mut m, ConcreteAction::new(Box::new(Back)));
+    insert(&mut m, ConcreteAction::new(Box::new(Forward)));
     insert(&mut m, ConcreteAction::new(Box::new(Click)));
     insert(&mut m, ConcreteAction::new(Box::new(Extract)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertElement)));
     insert(&mut m, ConcreteAction::new(Box::new(Type)));
     insert(&mut m, ConcreteAction::new(Box::new(Select)));
+    insert(&mut m, ConcreteAction::new(Box::new(Press)));
+    insert(&mut m, ConcreteAction::new(Box::new(Focus)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertUrl)));
     insert(&mut m, ConcreteAction::new(Box::new(CaptureSession)));
     insert(&mut m, ConcreteAction::new(Box::new(Wait)));
+    insert(&mut m, ConcreteAction::new(Box::new(Emulate)));
     insert(&mut m, ConcreteAction::new(Box::new(Call)));
     insert(&mut m, ConcreteAction::new(Box::new(Observe)));
     insert(&mut m, ConcreteAction::new(Box::new(Poll)));
@@ -344,10 +384,16 @@ mod tests {
                 "process/stop",
                 "ui/assert-element",
                 "ui/assert-url",
+                "ui/back",
                 "ui/capture-session",
                 "ui/click",
+                "ui/emulate",
                 "ui/extract",
+                "ui/focus",
+                "ui/forward",
                 "ui/navigate",
+                "ui/observe-console",
+                "ui/press",
                 "ui/select",
                 "ui/type",
                 "ui/wait",

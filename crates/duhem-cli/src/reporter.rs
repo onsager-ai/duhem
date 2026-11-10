@@ -653,6 +653,7 @@ fn fold_lifecycle(events: &[duhem_evidence::Event]) -> Vec<LifecycleBlock> {
                 check_id,
                 criterion_id,
                 flow,
+                group,
                 ..
             } => LifecycleEvent::StepStarted {
                 phase: lifecycle_phase(*phase),
@@ -662,6 +663,7 @@ fn fold_lifecycle(events: &[duhem_evidence::Event]) -> Vec<LifecycleBlock> {
                 index: *step_index,
                 uses,
                 flow: flow.as_ref().map(lifecycle_flow),
+                group: group.clone(),
                 timestamp_ms,
             },
             EventPayload::SetupStepObservation {

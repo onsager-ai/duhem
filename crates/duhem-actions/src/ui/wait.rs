@@ -67,6 +67,8 @@ mod tests {
         let ctx = ActionCtx {
             page: None,
             step_index: 0,
+            step_boundaries: &std::collections::BTreeMap::new(),
+            session: None,
         };
         for raw in ["2s", "500ms"] {
             let with = serde_yml::from_str(&format!("duration: {raw}")).unwrap();

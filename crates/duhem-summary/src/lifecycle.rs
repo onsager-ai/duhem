@@ -59,6 +59,9 @@ pub struct LifecycleStep {
     pub uses: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow: Option<LifecycleFlowOrigin>,
+    /// Enclosing step-group labels, outermost first (#614).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<Vec<String>>,
     pub outcome: LifecycleStepOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
@@ -137,6 +140,7 @@ pub enum LifecycleEvent<'a> {
         index: u32,
         uses: &'a str,
         flow: Option<LifecycleFlowOrigin>,
+        group: Option<Vec<String>>,
         timestamp_ms: i64,
     },
     Observation {
@@ -230,6 +234,7 @@ impl LifecycleFold {
                 index,
                 uses,
                 flow,
+                group,
                 timestamp_ms,
             } => {
                 let block = self.active_block(phase, criterion_id, check_id, fixture_name)?;
@@ -240,6 +245,7 @@ impl LifecycleFold {
                     id: None,
                     uses: uses.to_string(),
                     flow,
+                    group,
                     outcome: LifecycleStepOutcome::Ok,
                     detail: None,
                     duration_ms: 0,
@@ -456,6 +462,7 @@ mod tests {
                 inner_index: 2,
                 iteration: Some(3),
             }),
+            group: None,
             timestamp_ms: 101,
         });
         fold.push(LifecycleEvent::StepFinished {

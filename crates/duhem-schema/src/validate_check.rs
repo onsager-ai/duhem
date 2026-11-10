@@ -143,7 +143,29 @@ pub(super) fn validate_check(
     // precede the conditioned step, so a forward or self reference
     // resolves like an undeclared step. Same resolver as assertions.
     let mut earlier_outputs: HashMap<&str, HashSet<String>> = HashMap::new();
+    let mut seen_groups: HashSet<u32> = HashSet::new();
     for (idx, &(s, active_loop)) in check_steps.iter().enumerate() {
+        if matches!(
+            s.uses.as_deref(),
+            Some("api/observe" | "ui/observe-console")
+        ) && let Some(window) = s.with.get("window")
+            && let Some(problem) = crate::validate_observe_window::problem(window, |id| {
+                earlier_outputs.contains_key(id)
+            })
+        {
+            errs.push(ValidationError::InvalidFlow {
+                message: format!(
+                    "check `{}`: {} {problem}",
+                    ch.id,
+                    s.uses.as_deref().unwrap()
+                ),
+            });
+        }
+        if s.uses.as_deref() == Some("ui/observe-console") && s.with.get("window").is_none() {
+            errs.push(ValidationError::InvalidFlow {
+                message: format!("check `{}`: ui/observe-console window is required", ch.id),
+            });
+        }
         if let StepCondition::Expr(expr) = &s.condition {
             let mut path = crate::source::check_path(criterion_index, check_index, "steps");
             path.push(SourcePathSegment::index(idx));
@@ -162,6 +184,25 @@ pub(super) fn validate_check(
             walk_checkable_paths(&expr.parsed, &mut |p, arity| {
                 check_path(&condition_scope, p, arity, &expr.raw, &site, location, errs);
             });
+        }
+        // A group's `if:` (#614) reads what precedes the group, so it is
+        // resolved at the first step inside the group, like entry time.
+        for frame in &s.group {
+            if let StepCondition::Expr(expr) = &frame.condition
+                && seen_groups.insert(frame.key)
+            {
+                let condition_scope = PathScope {
+                    step_outputs: &earlier_outputs,
+                    active_loop,
+                    ..scope
+                };
+                let site = RefSite::StepCondition {
+                    step: format!("group `{}`", frame.label),
+                };
+                walk_checkable_paths(&expr.parsed, &mut |p, arity| {
+                    check_path(&condition_scope, p, arity, &expr.raw, &site, None, errs);
+                });
+            }
         }
         if let Some(id) = s.id.as_deref()
             && let Some(outputs) = step_outputs.get(id)

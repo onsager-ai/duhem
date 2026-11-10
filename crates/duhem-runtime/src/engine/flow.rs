@@ -24,6 +24,11 @@ pub(crate) fn register_secrets(writer: &mut EvidenceWriter, step: &Step, context
     }
 }
 
+/// Enclosing step-group labels for evidence (#614); `None` outside any group.
+pub(crate) fn group_path(step: &Step) -> Option<Vec<String>> {
+    (!step.group.is_empty()).then(|| step.group.iter().map(|frame| frame.label.clone()).collect())
+}
+
 pub(crate) fn origin(step: &Step) -> Option<FlowOrigin> {
     step.flow.as_ref().map(|flow| FlowOrigin {
         name: flow.name.clone(),

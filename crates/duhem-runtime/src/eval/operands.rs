@@ -109,10 +109,27 @@ impl EvalContext for RecordingContext<'_> {
 /// `PathRoot::Loop`'s doc comment) — so it renders as `$row.field`,
 /// the surface an author actually wrote, not `$loop.row.field`.
 fn path_label(path: &Path) -> String {
-    match path.root {
-        PathRoot::Loop => path.segments.join("."),
-        root => format!("{}.{}", root.as_str(), path.segments.join(".")),
+    let (mut out, start) = match path.root {
+        PathRoot::Loop => (path.segments[0].clone(), 1),
+        root => (
+            if path.segments.is_empty() {
+                format!("{}.", root.as_str())
+            } else {
+                root.as_str().to_string()
+            },
+            0,
+        ),
+    };
+    for index in start..path.segments.len() {
+        let segment = &path.segments[index];
+        if !path.quoted_keys.contains(&index) && segment.bytes().all(|b| b.is_ascii_digit()) {
+            out.push('.');
+            out.push_str(segment);
+        } else {
+            path.append_segment(&mut out, index);
+        }
     }
+    out
 }
 
 fn label(expr: &Expr) -> String {
@@ -170,6 +187,42 @@ mod tests {
             operands,
             BTreeMap::from([("$inputs.data.count".into(), json!(0))])
         );
+    }
+
+    #[test]
+    fn evidence_renders_quoted_keys_as_parseable_paths() {
+        let state = RunState::new(BTreeMap::from([(
+            "data".into(),
+            Value::Object(BTreeMap::from([("a'b\\c".into(), Value::Int(7))])),
+        )]));
+        let ctx = RunContext::new(&state);
+        let expr = ExprStr::from_source(r"$inputs.data['a\'b\\c'] == 7").unwrap();
+        let (result, operands) = evaluate(&expr, &ctx);
+        assert_eq!(result, EvalResult::True);
+        assert_eq!(operands[r"$inputs.data['a\'b\\c']"], json!(7));
+    }
+
+    #[test]
+    fn evidence_preserves_dotted_array_indices_and_quoted_numeric_keys() {
+        let state = RunState::new(BTreeMap::from([(
+            "data".into(),
+            Value::Array(vec![Value::Object(BTreeMap::from([
+                ("session".into(), Value::Int(7)),
+                ("200".into(), Value::Int(8)),
+                ("a-b".into(), Value::Int(9)),
+            ]))]),
+        )]));
+        let ctx = RunContext::new(&state);
+        for (source, key) in [
+            ("$inputs.data[0].session == 7", "$inputs.data.0.session"),
+            ("$inputs.data[0]['200'] == 8", "$inputs.data.0['200']"),
+            ("$inputs.data[0]['a-b'] == 9", "$inputs.data.0['a-b']"),
+        ] {
+            let expr = ExprStr::from_source(source).unwrap();
+            let (result, operands) = evaluate(&expr, &ctx);
+            assert_eq!(result, EvalResult::True);
+            assert!(operands.contains_key(key), "{operands:?}");
+        }
     }
 
     #[test]

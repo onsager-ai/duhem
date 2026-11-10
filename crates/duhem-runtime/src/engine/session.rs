@@ -97,6 +97,7 @@ pub(crate) struct CheckContexts {
     pub browsers: BTreeMap<Option<String>, duhem_actions::CheckBrowser>,
     pub targets: BTreeMap<Option<String>, Vec<super::capture::TargetLocator>>,
     pub storyboards: BTreeMap<Option<String>, super::capture::Storyboard>,
+    pub boundaries: BTreeMap<String, duhem_actions::action::StepBoundary>,
     pub failed: bool,
     permits: Vec<super::session_scope::ContextPermit>,
 }

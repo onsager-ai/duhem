@@ -14,6 +14,7 @@ impl Engine {
         iteration: Option<u32>,
         environment_failed: bool,
         failed_by: &mut Option<String>,
+        groups: &mut GroupGates,
         stored_error: &mut Option<EngineError>,
         cleanup_steps: &mut BTreeSet<usize>,
         step_evidence: &mut [StepEvidence],
@@ -21,6 +22,9 @@ impl Engine {
     ) -> Result<(), EngineError> {
         for idx in indices {
             let step = &check.steps[idx];
+            if let Some(id) = &step.id {
+                contexts.boundaries.remove(id);
+            }
             writer.set_session(step.session.as_deref());
             let check_browser = contexts.browsers.get(&step.session);
             let storyboard = contexts
@@ -30,7 +34,7 @@ impl Engine {
             // An unresolvable condition makes this check inconclusive
             // rather than aborting the run (#440 R2); see below.
             let (gate, unresolved_condition) =
-                match evaluate_in_check(step, idx, failed_by.as_deref(), ctx) {
+                match evaluate_in_check(step, idx, failed_by.as_deref(), groups, ctx) {
                     Ok(gate) => (gate, None),
                     Err(detail) => (None, Some(detail)),
                 };
@@ -147,6 +151,7 @@ impl Engine {
                         }
                         flow
                     },
+                    group: crate::engine::flow::group_path(step),
                 })
                 .await?;
 
@@ -250,6 +255,10 @@ impl Engine {
                         Some(Err(error))
                     } else {
                         let page_ref: Option<&Page> = check_browser.as_ref().map(|cb| &cb.page);
+                        let start = match page_ref {
+                            Some(page) => page.session_time_ms().await.ok(),
+                            None => None,
+                        };
                         let result = crate::engine::registry::invoke_scoped(
                             dispatcher.as_ref(),
                             page_ref,
@@ -259,8 +268,22 @@ impl Engine {
                             ctx.run_state(),
                             &ctx.run_state().process_owner,
                             writer,
+                            &contexts.boundaries,
+                            step.session.as_deref(),
                         )
                         .await;
+                        if let (Some(page), Some(start_ms), Some(id)) = (page_ref, start, &step.id)
+                            && let Ok(finish_ms) = page.session_time_ms().await
+                        {
+                            contexts.boundaries.insert(
+                                id.clone(),
+                                duhem_actions::action::StepBoundary {
+                                    session: step.session.clone(),
+                                    start_ms,
+                                    finish_ms,
+                                },
+                            );
+                        }
                         if let Ok(r) = &result {
                             crate::engine::secret_output::register(
                                 writer,

@@ -210,6 +210,8 @@ async fn navigate_succeeds_against_fixture() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     let r = Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -227,6 +229,8 @@ async fn click_present_button_succeeds() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -248,6 +252,8 @@ async fn assert_element_visible_present_satisfies() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -286,6 +292,8 @@ async fn assert_element_not_exists_with_present_alert_returns_false() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -324,6 +332,8 @@ async fn assert_element_timeout_returns_satisfied_false_quickly() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -368,6 +378,8 @@ async fn type_fills_input_then_assert_element_reads_it_back() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -409,6 +421,8 @@ async fn locator_strategies_label_testid_css_xpath_placeholder_resolve() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -527,6 +541,8 @@ async fn extract_distinguishes_attribute_property_counts_and_direct_assertion() 
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", static_data_url())))
@@ -615,6 +631,100 @@ async fn extract_distinguishes_attribute_property_counts_and_direct_assertion() 
     );
 }
 
+const GEOMETRY_HTML: &str = r#"<!doctype html>
+<html><body style="margin:0">
+<div class="panel" id="big" style="display:block;width:200px;height:50px;margin-left:10px;background:#111;font-size:16px"></div>
+<div class="panel" id="small" style="display:block;width:80px;height:30px;background:#f00;font-size:12px"></div>
+</body></html>"#;
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
+async fn extract_rect_and_style_report_css_px_with_controls() {
+    let run = fresh_browser().await;
+    let check = run.open_check().await.unwrap();
+    let ctx = ActionCtx {
+        page: Some(&check.page),
+        step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
+    };
+    let data_url = format!(
+        "data:text/html;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(GEOMETRY_HTML)
+    );
+    Navigate
+        .invoke(&ctx, &yaml(&format!("url: {data_url}")))
+        .await
+        .unwrap();
+
+    let big = Extract
+        .invoke(&ctx, &yaml("locator: { css: '#big' }\nfield: rect"))
+        .await
+        .unwrap();
+    let rect = big.outputs.get("value").unwrap();
+    assert_eq!(rect["width"], serde_json::json!(200));
+    assert_eq!(rect["height"], serde_json::json!(50));
+    assert_eq!(rect["x"], serde_json::json!(10));
+    assert_eq!(rect["right"], serde_json::json!(210));
+    assert_eq!(rect["bottom"], serde_json::json!(50));
+    assert_eq!(rect["scroll_x"], serde_json::json!(0));
+    assert_eq!(rect["scroll_y"], serde_json::json!(0));
+    let small = Extract
+        .invoke(&ctx, &yaml("locator: { css: '#small' }\nfield: rect"))
+        .await
+        .unwrap();
+    let rect = small.outputs.get("value").unwrap();
+    assert_eq!(rect["width"], serde_json::json!(80));
+    assert_eq!(rect["height"], serde_json::json!(30));
+    assert_eq!(rect["y"], serde_json::json!(50));
+
+    for (selector, color) in [("#big", "rgb(17, 17, 17)"), ("#small", "rgb(255, 0, 0)")] {
+        let style = Extract
+            .invoke(
+                &ctx,
+                &yaml(&format!(
+                    "locator: {{ css: '{selector}' }}\nstyle: background-color"
+                )),
+            )
+            .await
+            .unwrap();
+        assert_eq!(style.outputs.get("value"), Some(&serde_json::json!(color)));
+    }
+
+    let sizes = Extract
+        .invoke(
+            &ctx,
+            &yaml("locator: { css: '.panel' }\nstyle: font-size\nall: true"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        sizes.outputs.get("values"),
+        Some(&serde_json::json!(["16px", "12px"]))
+    );
+    let rects = Extract
+        .invoke(
+            &ctx,
+            &yaml("locator: { css: '.panel' }\nfield: rect\nall: true"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rects.outputs.get("count"), Some(&serde_json::json!(2)));
+    let ambiguous = Extract
+        .invoke(&ctx, &yaml("locator: { css: '.panel' }\nfield: rect"))
+        .await
+        .unwrap_err();
+    assert!(ambiguous.to_string().contains("matched 2 elements"));
+    let empty = Extract
+        .invoke(&ctx, &yaml("locator: { css: '#big' }\nstyle: ''"))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        empty,
+        duhem_actions::ActionError::InvalidWith { .. }
+    ));
+}
+
 #[tokio::test]
 #[ignore = "requires `npx playwright install chromium`"]
 async fn select_by_value_label_index_dispatches_to_playwright() {
@@ -631,6 +741,8 @@ async fn select_by_value_label_index_dispatches_to_playwright() {
         let ctx = ActionCtx {
             page: Some(&check.page),
             step_index: 0,
+            step_boundaries: &std::collections::BTreeMap::new(),
+            session: None,
         };
         Navigate
             .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -658,6 +770,8 @@ async fn assert_url_passes_on_navigation_and_times_out_on_stale_url() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -728,6 +842,8 @@ async fn assert_element_observes_loaded_page_marker() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        step_boundaries: &std::collections::BTreeMap::new(),
+        session: None,
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: http://{}/thanks", fx.addr)))

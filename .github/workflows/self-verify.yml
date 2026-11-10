@@ -151,6 +151,11 @@ jobs:
           ./target/release/duhem run verifications/flow-cleanup-example \
             --db .duhem/duhem.db
 
+      - name: Run step-groups example (local processes)
+        run: |
+          ./target/release/duhem run verifications/step-groups-example \
+            --db .duhem/duhem.db
+
       # Hub replication (#194's ship contract; hub per
       # onsager-ai/duhem-hub#6). `if: always()` ships red runs too —
       # failure evidence is the point — and never gates the verdict.

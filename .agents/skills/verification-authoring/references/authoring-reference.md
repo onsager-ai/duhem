@@ -1,8 +1,49 @@
-# Duhem authoring detail
 
-Repository paths below are relative to the repository root. This reference owns
-the detailed criteria/check, action/assertion, example and refusal-test guidance.
-Read relevant sections during authoring; current schema/CLI remain authoritative.
+# Verification authoring reference
+
+Author Verification Definitions for Duhem — the structured YAML
+artifact containing a feature's acceptance criteria and the checks
+that mechanically verify them. This is the central authoring
+discipline that any Duhem-shaped customer (including Duhem itself,
+when it dogfoods on Onsager) eventually internalizes.
+
+The canonical product spec is in `docs/duhem-spec.md`, especially:
+
+- §7 — Core Concepts (verification, criterion, check, assertion,
+  step, verdict, evidence, artifact, run)
+- §8 — Holistic Verification Principle
+- §10 — Verification Definition (file org, structure, action types,
+  assertions, runtime expressions, extensibility)
+- §11.2 — Trust Boundary (what AI may and may not do at run time)
+
+This skill is the *authoring* counterpart to those sections.
+
+> This reference carries the current Duhem action and authoring details, including recent browser, observation, geometry, lifecycle, and emulation surfaces. The local [verification-authoring skill](../../SKILL.md) owns this checkout's scope, prerequisites, and policy overlay. Where older examples here imply another session scope or product ownership model, follow the local skill and current product contract.
+
+## When to use this skill
+
+Use when:
+
+- A Duhem product-surface spec needs a worked Verification
+  Definition example (the requirement is enforced in `issue-spec`'s
+  Philosophy #4).
+- You're writing a Verification Definition for the Duhem repo
+  itself (for example, a verification of `duhem run`'s CLI
+  behavior).
+- You're writing a Verification Definition that targets the
+  Onsager repo as Duhem's first dogfood customer (see also
+  `onsager-dogfood` for the cross-repo wiring).
+- A user asks to "write criteria" or "translate criteria to
+  checks" or similar.
+
+Skip when:
+
+- The change is purely internal scaffolding (build config, repo
+  hygiene, doc rewording with no schema implication).
+- The user asked for an *Onsager* spec — that uses Onsager's own
+  testing patterns; Duhem Verification Definitions for Onsager
+  features live on the Duhem side of the seam (in
+  `area:dogfood`).
 
 ## The two-layer structure
 
@@ -28,15 +69,13 @@ section), don't re-author it — copy verbatim and translate
 mechanically.
 
 **Where the VD lives (Pattern D).** A VD that verifies a *product*
-(Onsager, Chreode, Crawlab) lives **in the product's repo** under a
+lives **in the product's repo** under a
 co-located `.duhem/` suite — Duhem is used as a tool, not a host
 (`docs/duhem-spec.md` §10.1 Pattern D; epic #225). Only Duhem's own
-**self-verification** VDs live here in `verifications/`. Chreode is the
-worked example (`onsager-ai/chreode/.duhem/`); `templates/product-repo/`
-is the drop-in `.duhem/` skeleton (manifest + example leaf + CODEOWNERS)
-to copy into a product repo. Author the VD there, self-gate it in the
-product's own CI (Mode A), and let Duhem's drift lane monitor it (Mode
-B) — see `onsager-dogfood`.
+**self-verification** VDs live here in `verifications/`.
+`templates/product-repo/` is the drop-in `.duhem/` skeleton (manifest +
+example leaf + CODEOWNERS). Copy it into the product repo and self-gate
+it in that product's CI — see `onsager-dogfood`.
 
 ## Authoring loop
 
@@ -178,12 +217,27 @@ the minimal form:
   exact about which one you mean — they genuinely differ (a ticked
   checkbox has the `checked` *property* `true` while the *attribute* may
   be absent entirely).
+- **Geometry and computed style use `ui/extract`.** `field: rect` yields
+  `{x, y, width, height, top, right, bottom, left, scroll_x, scroll_y}`
+  in CSS px (relative to the element's own document viewport, so a
+  `frame:` target reports frame-relative coordinates); `style: <css-property>`
+  yields the computed string such as `rgb(17, 17, 17)` or `16px`. Sampled
+  once, no waiting; assert thresholds in `assertions:` and pair each with
+  a negative control (a second element or color).
 - **For a simple state check, prefer `ui/assert-element`'s `expect:`.**
   `expect: { field: checked, equals: true }` judges in one step and
   keeps `satisfied`, so you need no step id, no output binding, and no
   check-level assertion. Reach for `ui/extract` when the value has to
   travel — into a later step, or into a check-level `assertions:` block
   alongside other evidence.
+
+`api/call` and `api/observe` declare their response outputs, so reference
+`status`, `body`, `body_text`, `headers` and `body_bytes` directly (`api/observe`
+also has `method`, `url`, `request_body`, `request_headers`). `body_bytes` is an
+integer count of the payload bytes after the client's content decoding, before
+text or JSON conversion: `é` is `2`, an empty body is `0`; it is not
+`Content-Length`. `headers` has lower-case names; use a dotted path such as
+`headers.location` for hyphen-free names.
 
 Common shape (terse):
 
@@ -210,7 +264,23 @@ Common shape (terse):
 
 Authoring rules:
 
+- Use `ui/observe-console` with a required same-session `window` to record
+  page errors and console messages separately. Assert `complete == true`
+  before interpreting `page_error_count` or `console_error_count` as absence;
+  console levels are facts and do not themselves determine a verdict.
+
+- For request counts or ordering, use `api/observe` with
+  `window: { from_step: <earlier-id>, edge: start, duration: 1s }` on the
+  same browser session. Assert `complete == true` before interpreting an
+  empty `requests` array or zero `count` as absence. `truncated` signals
+  dropped records; without `window`, observe returns the first matching response.
+
 - Every step whose output an assertion reads gets an `id:`.
+- Use quoted bracket keys for object names such as
+  `$steps.r.outputs.headers['content-type']`; escape quotes as `\'` and
+  backslashes as `\\`. Keys must be nonempty. `[0]` indexes an array;
+  `['0']` addresses an object key. The same syntax works on flow params,
+  including page-call arguments: `$params.items[0]['a-b']`.
 - Reference outputs by their fully-qualified path,
   `$steps.<id>.outputs.<name>`; `outputs:` blocks are only for a rename
   or a deep-extraction alias, not for re-declaring native fields.
@@ -221,11 +291,19 @@ Authoring rules:
   run after a step-level engine error before the original error aborts
   the run. A retried check runs its cleanup once per attempt, so cleanup
   steps must be idempotent.
+- `if:` also accepts a value expression (`if: $steps.probe.outputs.row_count > 0`)
+  on check steps. Paths resolve against earlier steps in the same check,
+  `$inputs` and `$setup`. A gated judging step
+  shrinks the claim set, which the report shows; an unresolvable
+  condition makes the check `inconclusive`, never a skip. Reading a
+  gated step's outputs later is also inconclusive. Worked example:
+  `verifications/check-conditions-example/`.
 - Use role-based locators (`{role: "button", name: "..."}`)
   rather than CSS or XPath — UI churn invalidates the latter
   while role-based selectors track the user-visible affordance.
-- A check that has no `assertions:` is a script, not a check.
-  Reject it.
+- A check with no verdict — neither `assertions:` nor a judging
+  step (see "`assertions:` is optional for a judging step" above) —
+  is a script, not a check. Reject it.
 - The `capture/` output-name prefix is reserved for runner-emitted
   failure evidence (specs #202 / #204): a failing ui check
   automatically records `capture/screenshot` + `capture/dom` +
@@ -241,7 +319,67 @@ Authoring rules:
   at the evidence boundary. Screenshots/video remain unmasked pixels,
   so keep credentials out of rendered UI (or use `--capture off`).
 
+#### Cleanup judgment
+
+`flows.<name>.cleanup_policy` applies only to that flow's `cleanup:`. The
+deprecated `fixtures.<name>` form (#618, removed in v0.9.0) desugars to a
+flow with `cleanup:` and keeps the same policy.
+Omitting it means `required`; the default is omitted on serialization. A
+required cleanup execution error, timeout, step-local runtime or
+dispatch error, or a non-passing implicit judgment from a catalog action
+(including a missing required judging output) makes the
+effective run gate `fail` after the body finishes. The check and criterion
+verdicts remain the body judgments; optional `body_verdict` on the run
+outcome, `RunFinished`, and `RunSummary` preserves the body result only when
+it differs from the gate. A required failure from any retry attempt is
+retained, even if a later body attempt passes, without changing retry
+eligibility.
+
+An action's returned values remain observations unless its contract judges
+them. For example, a non-zero `cli/invoke` `exit_code` or an HTTP 500 returned
+by `api/call` is data, not an automatic cleanup failure. To judge an HTTP
+cleanup result, use `api/poll` with `method: GET` and `until: {status: 200}`.
+A fixture's `up:` stays non-judging. Leaf/criterion/check `teardown:`,
+`provision.down:`, and diagnostic capture remain diagnostic-only in this
+slice. Set `cleanup_policy: diagnostic_only` for a flow whose `cleanup:`
+should keep its evidence without blocking the run.
+
+Lifecycle evidence separates execution from judgment. A successfully
+executed cleanup judging step with `satisfied: false` has execution `ok` and
+`judgment: fail`. `SetupStepFinished` and folded `LifecycleStep` evidence
+carry optional `judgment: VerdictState`; lifecycle failure and its failing
+step account for either execution failure or failed judgment. Missing
+`judgment` or `cleanup_policy` in older evidence remains unknown.
+
+#### Drive browser history
+
+`ui/back` / `ui/forward` take only an optional `timeout:` and move through the
+check's real browser history, so state the browser keeps for history entries
+is what the next step observes. Assert `$steps.<id>.outputs.navigated`
+(`true` when the browser moved, including same-document hash/`pushState`
+entries; `false` with `url == from_url` when no entry exists) and read
+`from_url` / `url` for the move. A missing entry is not an error and never
+becomes a direct navigation.
+
 #### Share locators instead of copying them
+
+Use optional `frame: <Locator>` on any UI target to enter its containing
+iframe before applying same-document `scope:` and primary strategy.
+Frame locators can themselves carry `frame:` for nested documents;
+cross-origin embeds work through Playwright. This applies to inline and
+named `$pages.*` locators. Never treat a missing iframe as proof that
+its contents are absent; frame readiness shares the action deadline.
+
+Keyboard and focus: `ui/press { key, locator?, timeout? }` takes a Playwright
+key name or `+` chord (`Enter`, `Tab`, `Shift+Tab`, `Control+a`). With a
+`locator` it focuses that element and presses; without one it presses on
+whatever is focused and records `outputs.target` (`{tag, id, role, name}`,
+sampled before the press; `name` approximates the accessible name). `ui/focus`
+is programmatic `element.focus()`, not a user gesture; to verify keyboard
+focus movement press `Tab`, then assert `expected: focused` (or
+`not_focused`) on `ui/assert-element`. Focused means the element is its own
+document's active element and that document has focus, including inside a
+`frame:` document.
 
 Put locators reused by multiple leaves in an ordinary manifest include:
 
@@ -397,6 +535,20 @@ to the requested leaf. A leaf with an unresolved `$pages.*`/`call:` name
 and no discoverable manifest fails naming exactly what's missing and
 where it would normally be defined (#384/#388).
 
+## Viewport and color-scheme emulation
+
+`ui/emulate` sets the check's own viewport (`viewport: { width, height }`,
+positive integer CSS px) and/or `color_scheme: light | dark | no-preference`.
+At least one field is required. It applies to the check's page for later
+steps, so place it before the `ui/navigate` that should see it. Each check
+and each retry attempt starts from the run viewport and host-default color
+scheme again; emulation never leaks to siblings. Its `viewport` and
+`color_scheme` outputs are read back from the page (`innerWidth/innerHeight`
+and `prefers-color-scheme` media queries), not echoed from `with:`. Assert the
+effect with `ui/assert-element` on media-query-dependent elements. Chromium
+reports `no-preference` as `light`. In headed runs the window sizes the page
+and `viewport` is best effort, so rely on the read-back output.
+
 ## Worked example template
 
 Use this as the skeleton for any spec that needs a worked example:
@@ -442,8 +594,9 @@ criteria:
 - **Criteria with implementation details.** "Click the button at
   `#create-workspace`" is a check pretending to be a criterion.
   Rewrite as "User can create a workspace from the dashboard."
-- **A check with no assertions.** It's a recording, not a check.
-  Add the assertion or delete the check.
+- **A check with neither assertions nor a judging step.** It's a
+  recording, not a check. Add a deterministic assertion or a supported
+  judging action, or delete the check.
 - **Redundant identity bindings.** `outputs: { foo: foo }` does nothing
   now that `outputs:` is optional (#267) — reference
   `$steps.<id>.outputs.foo` directly. Reserve `outputs:` for a *rename*
@@ -465,3 +618,67 @@ criteria:
   unit test in a Verification Definition's clothing. Either expand
   its scope to a real web slice or remove it.
 
+## Relationship to other skills
+
+| Related surface                                              | Role                                                              |
+|--------------------------------------------------------------|-------------------------------------------------------------------|
+| [`issue-spec`](https://github.com/onsager-ai/dev-skills/blob/main/skills/issue-spec/SKILL.md) | Specs that introduce product surface link a worked example here. Installed globally from `onsager-ai/dev-skills`. |
+| [`duhem-dev-process`](../../duhem-dev-process/SKILL.md)         | Top-level SDD loop — the dogfood discipline that requires worked examples. |
+| [`onsager-dogfood`](../../onsager-dogfood/SKILL.md)             | Verifications that target `onsager-ai/onsager`; this skill writes them. |
+| [`pr-lifecycle`](https://github.com/onsager-ai/dev-skills/blob/main/skills/pr-lifecycle/SKILL.md) (global) | Verifies the worked-example check on schema-impacting PRs.        |
+
+## References
+
+- `docs/duhem-spec.md` — canonical product spec
+  - §7 Core Concepts
+  - §8 Holistic Verification Principle
+  - §10 Verification Definition (full schema)
+  - §11.2 Trust Boundary
+- `docs/duhem-brand.md` — design discipline; rarely directly
+  relevant to Verification Definitions, but worth reading for the
+  Duhem-Quine grounding (§2 Design rationale)
+
+### Session inheritance and cleanup
+
+Declare scalar `session: $inputs.operator_session` on a leaf, criterion, or
+check. Omission inherits the nearest declaration; `session: ~` stops it.
+Every setup, body, teardown, and flow cleanup block opens fresh contexts
+from the seed. Cleanup must navigate again; body cookies and page state do
+not carry into cleanup. Browser-free blocks open no contexts.
+
+Seeds resolve at the first context opening and stay fixed across retries.
+Leaf seeds reference inputs only, criterion seeds may also reference leaf
+setup outputs, and check seeds may also reference criterion setup outputs.
+A scope cannot seed itself from its own setup outputs.
+
+With check `sessions:`, each block opens fresh contexts for the named entries.
+Select a name on each browser step, or put `session: <name>` on a `call:`:
+undeclared inner browser selectors inherit it; explicit inner selectors win.
+Call selectors require a named-sessions check. `defaults.max_sessions` caps
+simultaneously open contexts per check (default 4).
+
+### Own long-lived local services
+
+For a server or watcher that must remain alive across steps, retrieve
+`duhem describe process/start` / `inspect` / `stop` / `restart` from the
+installed version. These actions are available after v0.7.0. `command` is
+an executable, `args` is a string array, and stdin is closed. Pass secrets
+through declared secret inputs. HTTP or stdout/stderr-regex readiness has
+an explicit timeout; without a probe `ready: false` means spawned only.
+
+Start in check `setup` or a flow with `cleanup:` when the check must stop/restart it.
+Enclosing leaf/criterion handles are inspect-only; sibling checks and
+retries cannot mutate each other's processes. Restart returns a fresh
+handle/generation, stops the old group before replacement, and preserves
+product-owned state. Assert actual response/publication/recovery facts;
+none of the four actions implicitly judges the product.
+
+`inspect` logs are bounded (64 KiB and 1024 records per stream), masked
+across reads, and carry cursors, generation, truncation and dropped-byte
+facts. A cursor belongs to its original handle. Always-required runtime
+cleanup follows authored cleanup at owner scope exit, even in a
+`diagnostic_only` flow cleanup or with `--keep-env`. Failed finalization blocks
+the effective gate while preserving body judgment. Linux/macOS are
+supported first; other platforms reject before spawn. Do not daemonize or
+escape the owned group. Fixed ports and disposable state remain flow
+responsibilities.

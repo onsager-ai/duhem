@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "manifest_sha256": "5655dde099ef3f27be556002f1aa71f32ee0cf671f8626e99caad9c9c7e90105",
-  "block_sha256": "aa73270c6b78d4a83770cdcee14ed2c7d280c8378796c57f442351092112ce1b",
+  "manifest_sha256": "e313f728441758992f48a7cec5bb8ef96d186a09d9543c303bac7dc60cb11486",
+  "block_sha256": "d82af45ae885ad256346fded453e61418f0eeaec3b417920fb1092b688ad7695",
   "resolved_skills": [
     "ci-triage",
     "docs-drift-guard",
@@ -17,32 +17,37 @@
       "mode": "100644"
     },
     ".agents/skills/ci-triage/SKILL.md": {
-      "sha256": "bea5ab26de21e414f7da94576d96bbfff79db27ad0f8a26f72550d41eaaf51a2",
+      "sha256": "a61e1f9c08c5305c5c1fbaeccee806e13c505939c1436b78ec34d17f4e47b59f",
       "owner": "shared",
       "mode": "100644"
     },
     ".agents/skills/docs-drift-guard/SKILL.md": {
-      "sha256": "055577de81943f8b09f0515b5306592a768686eeaace9739285555cba0213277",
+      "sha256": "158e9c8c2d68b598a5609b181f97081c784dfe2b85a1b00a26a9b3e26d322d3f",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/harness-operations/references/chatgpt-work.md": {
+      "sha256": "c6130e726c55d009b6c6938c6eeab85afe4372c3d86d2f0018e7dec970e8b17b",
       "owner": "shared",
       "mode": "100644"
     },
     ".agents/skills/harness-operations/references/claude-code.md": {
-      "sha256": "d7cb59b15930bcc9ef9abf3d993e100cb167cb9868b87396f2ea828335fc5fab",
+      "sha256": "0917258bb67a0a121120cb419e6a272dc047ea881205033f7e3dbb12b3844632",
       "owner": "shared",
       "mode": "100644"
     },
     ".agents/skills/harness-operations/references/codex.md": {
-      "sha256": "6a1d913e5b3c822c3c0553252c36630d9b6b1bf945e9a433dc0988d615fda303",
+      "sha256": "cba947b5fafd6b7a82422fbfb45f1073db7bc1f2b68c4dba3b98b864ff8c0a31",
       "owner": "shared",
       "mode": "100644"
     },
     ".agents/skills/harness-operations/SKILL.md": {
-      "sha256": "9f5956be686ea9ea01a61377179fca4699ccb137d5b60eb9684d18afa8c338c7",
+      "sha256": "63a72db7b2893148463b8861322a52489fd24992ec88af5be6ff7a4e146d193e",
       "owner": "shared",
       "mode": "100644"
     },
     ".agents/skills/issue-spec/references/spec-format.md": {
-      "sha256": "b9285cb3819d707566976e103905e308354d0c26c65eeb3b10f526e8e2ad36b7",
+      "sha256": "2ac20e0d70887fdc6a0393a7261a4408038480d188e0603941c497b1592ae97a",
       "owner": "shared",
       "mode": "100644"
     },
@@ -57,62 +62,82 @@
       "mode": "100755"
     },
     ".agents/skills/issue-spec/SKILL.md": {
-      "sha256": "77300da34a1871f9097285150b5baf8cc037a82d41a55ecb6fde6fe8fa7ce0ea",
+      "sha256": "4faa4cc41a4091cf623497dc6b1f84dd36895115da01550e99050e63659ceb1b",
       "owner": "shared",
       "mode": "100644"
     },
     ".agents/skills/issue-spec/templates/issue-spec-template.md": {
-      "sha256": "34d9d61056cbeddaeb1b4e2df62fb446545bce18bc1a0990389a412582ca17f2",
+      "sha256": "ce3c1a044c6eb25aea7e8bd7f7cd2d939f353e3e84351683143100b0b0092875",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/pr-lifecycle/references/pr-ci-trigger.md": {
+      "sha256": "a1ce7225b8649ef178a7be1a66a5303685c656c777ba4807770aac8f66eb4b52",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/pr-lifecycle/references/review-and-cleanup.md": {
+      "sha256": "b06c3b88b4a8461a84a13032f9843da900c90134e5331bb9509c6a9d18ff1acc",
       "owner": "shared",
       "mode": "100644"
     },
     ".agents/skills/pr-lifecycle/SKILL.md": {
-      "sha256": "96eb01ca0051b6c5d79b324225aaa739b5cc59fcfa15bdba6bf0dbff403d9f31",
+      "sha256": "b1afb127bf10fbf6736349b3d2da7b5a5b8755b56fd25f36ff67a53ad2b74b8e",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/pre-push/references/commits.md": {
+      "sha256": "4cd62dde32a894944805648f15012d219460a942f376ced5f74402bc6288b7c9",
       "owner": "shared",
       "mode": "100644"
     },
     ".agents/skills/pre-push/SKILL.md": {
-      "sha256": "4621cb413dedacec154b3bfebcf6e34cf2ef208cd500fa87525b07f8baf4f377",
+      "sha256": "42392e9937b1401745b253780dd7816c6509ea8ab171a5a6c8efa16f1a821eb8",
       "owner": "shared",
       "mode": "100644"
     },
     ".agents/sync.mjs": {
-      "sha256": "68ab4378c640a8f89e6718c30b0903d853defcab2a8723436d082005b34099c2",
+      "sha256": "d982b940cb47c31b1246ada6890f3035f6249b4d796c465a65725719b7270844",
       "owner": "tooling",
       "mode": "100644"
     },
     ".claude/skills/ci-triage/SKILL.md": {
-      "sha256": "bea5ab26de21e414f7da94576d96bbfff79db27ad0f8a26f72550d41eaaf51a2",
+      "sha256": "a61e1f9c08c5305c5c1fbaeccee806e13c505939c1436b78ec34d17f4e47b59f",
       "owner": "shared",
       "mode": "100644"
     },
     ".claude/skills/docs-drift-guard/SKILL.md": {
-      "sha256": "055577de81943f8b09f0515b5306592a768686eeaace9739285555cba0213277",
+      "sha256": "158e9c8c2d68b598a5609b181f97081c784dfe2b85a1b00a26a9b3e26d322d3f",
       "owner": "shared",
       "mode": "100644"
     },
     ".claude/skills/duhem-dev-process/SKILL.md": {
-      "sha256": "a74aa3a4d84a98a93f74e1b865064b68b3ca1e7e5bd6f884ad59b7fb5dc95ed3",
+      "sha256": "33ce965d257a4684d0e5548f91eb05fcdf5181bc95553fd37ffad2e95d299db6",
       "owner": "local-projection",
       "mode": "100644"
     },
+    ".claude/skills/harness-operations/references/chatgpt-work.md": {
+      "sha256": "c6130e726c55d009b6c6938c6eeab85afe4372c3d86d2f0018e7dec970e8b17b",
+      "owner": "shared",
+      "mode": "100644"
+    },
     ".claude/skills/harness-operations/references/claude-code.md": {
-      "sha256": "d7cb59b15930bcc9ef9abf3d993e100cb167cb9868b87396f2ea828335fc5fab",
+      "sha256": "0917258bb67a0a121120cb419e6a272dc047ea881205033f7e3dbb12b3844632",
       "owner": "shared",
       "mode": "100644"
     },
     ".claude/skills/harness-operations/references/codex.md": {
-      "sha256": "6a1d913e5b3c822c3c0553252c36630d9b6b1bf945e9a433dc0988d615fda303",
+      "sha256": "cba947b5fafd6b7a82422fbfb45f1073db7bc1f2b68c4dba3b98b864ff8c0a31",
       "owner": "shared",
       "mode": "100644"
     },
     ".claude/skills/harness-operations/SKILL.md": {
-      "sha256": "9f5956be686ea9ea01a61377179fca4699ccb137d5b60eb9684d18afa8c338c7",
+      "sha256": "63a72db7b2893148463b8861322a52489fd24992ec88af5be6ff7a4e146d193e",
       "owner": "shared",
       "mode": "100644"
     },
     ".claude/skills/issue-spec/references/spec-format.md": {
-      "sha256": "b9285cb3819d707566976e103905e308354d0c26c65eeb3b10f526e8e2ad36b7",
+      "sha256": "2ac20e0d70887fdc6a0393a7261a4408038480d188e0603941c497b1592ae97a",
       "owner": "shared",
       "mode": "100644"
     },
@@ -127,12 +152,12 @@
       "mode": "100755"
     },
     ".claude/skills/issue-spec/SKILL.md": {
-      "sha256": "77300da34a1871f9097285150b5baf8cc037a82d41a55ecb6fde6fe8fa7ce0ea",
+      "sha256": "4faa4cc41a4091cf623497dc6b1f84dd36895115da01550e99050e63659ceb1b",
       "owner": "shared",
       "mode": "100644"
     },
     ".claude/skills/issue-spec/templates/issue-spec-template.md": {
-      "sha256": "34d9d61056cbeddaeb1b4e2df62fb446545bce18bc1a0990389a412582ca17f2",
+      "sha256": "ce3c1a044c6eb25aea7e8bd7f7cd2d939f353e3e84351683143100b0b0092875",
       "owner": "shared",
       "mode": "100644"
     },
@@ -141,24 +166,54 @@
       "owner": "local-projection",
       "mode": "100644"
     },
+    ".claude/skills/pr-lifecycle/references/pr-ci-trigger.md": {
+      "sha256": "a1ce7225b8649ef178a7be1a66a5303685c656c777ba4807770aac8f66eb4b52",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/pr-lifecycle/references/review-and-cleanup.md": {
+      "sha256": "b06c3b88b4a8461a84a13032f9843da900c90134e5331bb9509c6a9d18ff1acc",
+      "owner": "shared",
+      "mode": "100644"
+    },
     ".claude/skills/pr-lifecycle/SKILL.md": {
-      "sha256": "96eb01ca0051b6c5d79b324225aaa739b5cc59fcfa15bdba6bf0dbff403d9f31",
+      "sha256": "b1afb127bf10fbf6736349b3d2da7b5a5b8755b56fd25f36ff67a53ad2b74b8e",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/pre-push/references/commits.md": {
+      "sha256": "4cd62dde32a894944805648f15012d219460a942f376ced5f74402bc6288b7c9",
       "owner": "shared",
       "mode": "100644"
     },
     ".claude/skills/pre-push/SKILL.md": {
-      "sha256": "4621cb413dedacec154b3bfebcf6e34cf2ef208cd500fa87525b07f8baf4f377",
+      "sha256": "42392e9937b1401745b253780dd7816c6509ea8ab171a5a6c8efa16f1a821eb8",
       "owner": "shared",
       "mode": "100644"
     },
     ".claude/skills/verification-authoring/references/authoring-reference.md": {
-      "sha256": "2094ad6db8226ba21221db5a314a009228e946a9ee0c8fa16bb03654983a72af",
+      "sha256": "4dd9d17889218772ad16409be498e1f058aaf7f1475f26dbb4537176c144b2bc",
       "owner": "local-projection",
       "mode": "100644"
     },
     ".claude/skills/verification-authoring/SKILL.md": {
-      "sha256": "b59a9577b7efdccb68451120aeee52bca02329e77ff339a9df7a88c69e76d0f2",
+      "sha256": "d639079302392a59b8768e0e88d01406421733ae5ab7bdfebb44cb558c4fbcee",
       "owner": "local-projection",
+      "mode": "100644"
+    },
+    ".githooks/checks/rustfmt": {
+      "sha256": "04454c6ef15548648df5c36c9a51de67c0ed33764951ef904ca2cbfe3ccff0fe",
+      "owner": "hooks",
+      "mode": "100755"
+    },
+    ".githooks/pre-commit": {
+      "sha256": "a78dff69220f18fa5a914fd41b45319c00823d52897058d62154c501274e65d5",
+      "owner": "hooks",
+      "mode": "100755"
+    },
+    ".githooks/README.md": {
+      "sha256": "c4fdadeee8d6079b7442da1ca1757f3986fad0f141ea43bc8f4f1f3c6b2d7a5b",
+      "owner": "hooks",
       "mode": "100644"
     },
     ".github/workflows/agent-config.yml": {

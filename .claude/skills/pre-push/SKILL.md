@@ -1,6 +1,6 @@
 ---
 name: pre-push
-description: Prepare an authorized branch for publication by inspecting the intended base, resolving conflicts, running repository-owned gates on the relevant tree, and checking the declared contribution process. Use before push, PR preparation or merge-conflict recovery.
+description: Prepare authorized commits and branches for publication, including staging, messages, base integration and repository gates. Use before committing or pushing, or when resolving merge conflicts.
 ---
 
 # Pre-push
@@ -21,6 +21,8 @@ and base branch, which may differ from main. Load
 
 ## Procedure
 
+Read [commit preparation](references/commits.md) when staging changes or writing a commit message.
+
 1. Inspect the current diff and intended base. Refresh that base through the
    configured remote and record its SHA. If fetching is blocked, report that the
    base/merge gate could not be verified; do not claim offline integration success.
@@ -38,6 +40,10 @@ and base branch, which may differ from main. Load
    required tree. Respect its distinction between advisory and blocking warnings.
    Missing tooling, origin access or environment setup is blocked validation, not
    a pass. Do not suppress failures, weaken assertions or bypass hooks.
+   Report the real exit code for formatter and gate commands; hooks are not evidence.
+   Once the required checks pass, repeat them only for changed inputs, a new
+   failure or an unresolved concern. Missing optional tooling does not block
+   independent work or reviewable PR preparation; describe its validation limit.
 5. Apply the declared contribution process. Where SDD is required, verify a spec
    exists, its blocking decisions are resolved, and the proposed PR links the right
    delivery slice. Use [issue-spec](../issue-spec/SKILL.md) for missing specs.
@@ -52,6 +58,12 @@ and base branch, which may differ from main. Load
    errors; authorization errors require capability diagnosis, not repeated retries.
 7. Hand PR creation/update and its check sweep to
    [pr-lifecycle](../pr-lifecycle/SKILL.md).
+
+Request any unresolved human decision through the structured question capability
+in [harness-operations](../harness-operations/SKILL.md), with the affected scope
+and options. Wait before dependent publication; continue independent authorized
+checks. A final-response blocker list alone is insufficient when the tool is
+available. If unavailable, state the limitation and use the established handoff.
 
 ## Completion
 

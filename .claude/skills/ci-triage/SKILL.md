@@ -1,6 +1,6 @@
 ---
 name: ci-triage
-description: Investigate a failed GitHub Actions run or PR check, distinguish regression, flake, infrastructure and insufficient evidence, and reproduce with repository-owned gates and fixtures. Use for failed runs, red main or red PR checks.
+description: Investigate failed GitHub Actions runs and PR checks, classify evidence and reproduce using repository gates. Use for failed checks, red main, red PRs or uncertain CI failures.
 ---
 
 # CI triage
@@ -19,6 +19,10 @@ head from the tested merge preview. Use
 [harness-operations](../harness-operations/SKILL.md) when retrieving checks/logs
 requires a capability mapping. Authentication and log availability must be
 observed; do not assume all connectors expose the same fields or limitations.
+
+If expected PR runs are missing or a "no checks reported" alert arrives, follow
+[PR CI trigger recovery](../pr-lifecycle/references/pr-ci-trigger.md) before
+failure classification. Passing manual dispatches do not establish PR checks.
 
 ## Procedure
 
@@ -51,7 +55,14 @@ observed; do not assume all connectors expose the same fields or limitations.
 | regression | Deterministic failure tied to the tested change or its merged interaction | Reproduce and repair the demonstrated defect |
 | flake | Same comparable inputs alternate outcomes, with evidence of a nondeterministic cause | Record/retry and address the cause |
 | infra | Runner, service, network or dependency provisioning failed independently of product assertions | Repair/retry the environment |
-| needs-human | Evidence or authority is insufficient for a reliable diagnosis | State the missing observation or decision |
+| needs-human | Evidence or authority is insufficient for a reliable diagnosis | Gather available evidence; request any pending human decision through the structured question capability in harness-operations |
+
+If a human must choose the next action or supply missing context, use the
+structured question capability in
+[harness-operations](../harness-operations/SKILL.md), then wait before dependent
+work. A plain-text needs-human report alone does not request that decision when
+the tool is available. If unavailable, state the limitation and use the established
+handoff channel. Missing infrastructure alone does not require a human choice.
 
 ## Completion
 

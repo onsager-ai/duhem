@@ -24,8 +24,11 @@ Identify the criteria source, owning suite and pinned Duhem/schema version. Read
 relevant spec sections and the [authoring reference](references/authoring-reference.md)
 for criteria/check structure, actions/assertions, examples and refusal tests.
 Check the actual CLI/action catalog; do not assume an example's action exists at
-another pin. Product-surface changes here require a worked VD through the local
-overlay, not through a hardcoded rule in a shared spec skill.
+another pin. The detailed reference includes current browser history, frame and
+keyboard behavior; viewport/color-scheme emulation; geometry extraction;
+observation completeness and bracket-key paths; and cleanup/lifecycle judgment.
+Product-surface changes here require a worked VD through the local overlay, not
+through a hardcoded rule in a shared spec skill.
 
 ## Procedure
 

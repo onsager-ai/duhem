@@ -1,6 +1,6 @@
 ---
 name: pr-lifecycle
-description: Create or update an authorized pull request, reconcile its delivery links, handle review and CI, and report exact check state. Use for PR preparation, review comments, red checks, conflicts or post-push verification.
+description: Manage an authorized pull request after it exists; update its description and links, handle review, check its status and reconcile delivery. Use for PR review or post-push verification; use ci-triage for failed checks.
 ---
 
 # Pull-request lifecycle
@@ -20,6 +20,8 @@ Know the exact repo, base/head and delivery scope. Follow
 [harness-operations](../harness-operations/SKILL.md) for capability mapping only
 when needed; subscriptions and a specific GitHub tool are not prerequisites.
 
+Read [review and cleanup](references/review-and-cleanup.md) when writing a reviewable PR description or cleaning up a backlog.
+
 ## Procedure
 
 1. Create or update the existing PR rather than duplicating it. Describe the final
@@ -31,13 +33,20 @@ when needed; subscriptions and a specific GitHub tool are not prerequisites.
 2. List exact delivered Plan items when the PR is a spec slice. Keep the spec's
    own Plan unchecked until the slice lands. Do not imply that passing checks or
    creating a draft completes adoption tests that remain unrun.
-3. Read both commit-status and check/workflow surfaces for the exact head SHA.
-   Subscriptions may help when supported, but do not replace this explicit sweep.
-   Distinguish passed, failed, pending, cancelled, skipped and unavailable checks.
-   A skipped required gate or an absent result is not a pass.
-4. Delegate failure classification to [ci-triage](../ci-triage/SKILL.md). Reproduce
+3. After opening or pushing, follow the
+   [PR CI trigger procedure](references/pr-ci-trigger.md): verify within about
+   three minutes that expected `pull_request` runs exist for the exact head SHA.
+   Apply it immediately on a "no checks reported" notification too. Read both
+   commit-status and check/workflow surfaces; subscriptions do not replace this
+   sweep. Distinguish passed, failed, pending, cancelled, skipped and unavailable
+   checks. A skipped required gate or an absent result is not a pass.
+4. Use [ci-triage](../ci-triage/SKILL.md) to classify failures. Reproduce
    using repo-owned gates/fixtures. Fix defects within scope; report blocked logs,
-   setup or human decisions. For conflicts use pre-push's local reconciliation
+   setup. Request pending human decisions through the structured question
+   capability in [harness-operations](../harness-operations/SKILL.md), with context
+   and options, and wait before dependent work; reporting them in the final reply
+   alone is insufficient when that tool is available. If unavailable, state the
+   limitation and use the established handoff channel. For conflicts use pre-push's local reconciliation
    and rerun checks on the resulting tree; do not use the web conflict editor as
    a substitute for local validation.
 5. Address review findings in coherent commits. Reply where explaining a decision,

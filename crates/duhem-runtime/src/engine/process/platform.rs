@@ -64,7 +64,7 @@ pub(super) fn group_live(group: u32) -> io::Result<bool> {
         }
         let stat = match std::fs::read_to_string(entry.path().join("stat")) {
             Ok(stat) => stat,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) if proc_entry_disappeared(&error) => continue,
             Err(error) => return Err(error),
         };
         // comm is parenthesized and may itself contain spaces or ')'.
@@ -83,6 +83,37 @@ pub(super) fn group_live(group: u32) -> io::Result<bool> {
         }
     }
     Ok(false)
+}
+
+#[cfg(target_os = "linux")]
+fn proc_entry_disappeared(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ESRCH)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::proc_entry_disappeared;
+    use std::io;
+
+    #[test]
+    fn proc_entry_disappearance_errors_are_ignored() {
+        assert!(proc_entry_disappeared(&io::Error::from(
+            io::ErrorKind::NotFound
+        )));
+        assert!(proc_entry_disappeared(&io::Error::from_raw_os_error(
+            libc::ESRCH
+        )));
+    }
+
+    #[test]
+    fn other_proc_entry_errors_are_preserved() {
+        assert!(!proc_entry_disappeared(&io::Error::from_raw_os_error(
+            libc::EACCES
+        )));
+        assert!(!proc_entry_disappeared(&io::Error::other(
+            "unexpected read error"
+        )));
+    }
 }
 
 #[cfg(target_os = "macos")]

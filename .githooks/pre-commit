@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+hooks_dir=$(cd "$(dirname "$0")" && pwd)
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+  "$hooks_dir/checks/rustfmt"
+
+if [ -x "$hooks_dir/pre-commit.local" ]; then
+  exec "$hooks_dir/pre-commit.local" "$@"
+fi

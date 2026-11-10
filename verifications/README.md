@@ -24,6 +24,13 @@ Two kinds of directory live here, for two kinds of reader:
 The [per-row validation example](for-each-rows-example/duhem.yml) applies
 the same assertions to every row with bounded `for_each:` (#521).
 
+The [bracket keys example](bracket-keys-example/duhem.yml) asserts
+hyphenated JSON response keys with `['…']` paths against a local fixture in
+the API smoke suite (#603).
+
+The [request window example](observe-window-example/duhem.yml) asserts a
+complete browser request collection against a local fixture (#603).
+
 ## Feature examples — the learning ladder
 
 Read top to bottom: each leans on the mental model the previous one
@@ -61,12 +68,38 @@ The [session cascade example](session-cascade-example/) demonstrates inherited
 seeds, signed-out opt-out, and named flow selectors. It is validated offline;
 execution requires a browser and operator-provided application inputs. (#548)
 
+The [response outputs example](response-outputs-example/duhem.yml) asserts
+`api/call`'s declared `status`, `headers` and `body_bytes` (decoded payload
+bytes) against a local HTTP server in
+`crates/duhem-runtime/tests/response_outputs.rs`. (#603)
+
 ## Self-verification suites — Duhem's dogfood
+
+The [keyboard and focus example](keyboard-focus-example/duhem.yml)
+demonstrates `ui/focus`, `ui/press` and `expected: focused | not_focused`,
+including a visible-but-unfocused negative control. It is executed against
+a local browser fixture in
+`crates/duhem-runtime/tests/keyboard_focus_smoke.rs` by browser CI. (#580)
 
 The [iframe example](iframe-example/duhem.yml) demonstrates named and
 inline frame locators, assertions and interactions. It is validated
 offline and executed against a two-origin browser fixture in
 `crates/duhem-runtime/tests/frame_smoke.rs` by browser CI. (#568)
+
+The [geometry example](geometry-example/duhem.yml) reads `ui/extract`
+`field: rect` and `style:` with positive and negative controls, including a
+frame-relative rect. It is validated offline and executed against a local
+fixture in `crates/duhem-runtime/tests/geometry_smoke.rs` by browser CI. (#580)
+
+The [emulate example](emulate-example/duhem.yml) demonstrates `ui/emulate`
+viewport and color-scheme emulation with a sibling check that proves defaults
+are restored. It is validated offline and executed against a media-query
+fixture in `crates/duhem-runtime/tests/emulate_smoke.rs` by browser CI. (#580)
+
+The [history example](history-example/duhem.yml) demonstrates `ui/back` and
+`ui/forward` over real browser history, including same-document entries and the
+no-entry case. It is validated offline and executed against a local fixture in
+`crates/duhem-runtime/tests/history_smoke.rs` by browser CI. (#580)
 
 Real VDs that gate this repo's CI. Bigger, multi-step, and pointed at a
 real system stood up by `provision:` hooks. This is what production
@@ -87,3 +120,5 @@ self-gated in its own CI.
 The drop-in skeleton for a new product repo is
 [`templates/product-repo/`](../templates/product-repo/); the shape is
 [`docs/duhem-spec.md`](../docs/duhem-spec.md) §10.1 Pattern D.
+
+The [console observation example](observe-console-example/duhem.yml) asserts complete page-error capture and a known console error against a real fixture.

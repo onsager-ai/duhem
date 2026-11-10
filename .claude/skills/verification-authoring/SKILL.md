@@ -219,12 +219,27 @@ the minimal form:
   exact about which one you mean — they genuinely differ (a ticked
   checkbox has the `checked` *property* `true` while the *attribute* may
   be absent entirely).
+- **Geometry and computed style use `ui/extract`.** `field: rect` yields
+  `{x, y, width, height, top, right, bottom, left, scroll_x, scroll_y}`
+  in CSS px (relative to the element's own document viewport, so a
+  `frame:` target reports frame-relative coordinates); `style: <css-property>`
+  yields the computed string such as `rgb(17, 17, 17)` or `16px`. Sampled
+  once, no waiting; assert thresholds in `assertions:` and pair each with
+  a negative control (a second element or color).
 - **For a simple state check, prefer `ui/assert-element`'s `expect:`.**
   `expect: { field: checked, equals: true }` judges in one step and
   keeps `satisfied`, so you need no step id, no output binding, and no
   check-level assertion. Reach for `ui/extract` when the value has to
   travel — into a later step, or into a check-level `assertions:` block
   alongside other evidence.
+
+`api/call` and `api/observe` declare their response outputs, so reference
+`status`, `body`, `body_text`, `headers` and `body_bytes` directly (`api/observe`
+also has `method`, `url`, `request_body`, `request_headers`). `body_bytes` is an
+integer count of the payload bytes after the client's content decoding, before
+text or JSON conversion: `é` is `2`, an empty body is `0`; it is not
+`Content-Length`. `headers` has lower-case names; use a dotted path such as
+`headers.location` for hyphen-free names.
 
 Common shape (terse):
 
@@ -251,7 +266,23 @@ Common shape (terse):
 
 Authoring rules:
 
+- Use `ui/observe-console` with a required same-session `window` to record
+  page errors and console messages separately. Assert `complete == true`
+  before interpreting `page_error_count` or `console_error_count` as absence;
+  console levels are facts and do not themselves determine a verdict.
+
+- For request counts or ordering, use `api/observe` with
+  `window: { from_step: <earlier-id>, edge: start, duration: 1s }` on the
+  same browser session. Assert `complete == true` before interpreting an
+  empty `requests` array or zero `count` as absence. `truncated` signals
+  dropped records; without `window`, observe returns the first matching response.
+
 - Every step whose output an assertion reads gets an `id:`.
+- Use quoted bracket keys for object names such as
+  `$steps.r.outputs.headers['content-type']`; escape quotes as `\'` and
+  backslashes as `\\`. Keys must be nonempty. `[0]` indexes an array;
+  `['0']` addresses an object key. The same syntax works on flow params,
+  including page-call arguments: `$params.items[0]['a-b']`.
 - Reference outputs by their fully-qualified path,
   `$steps.<id>.outputs.<name>`; `outputs:` blocks are only for a rename
   or a deep-extraction alias, not for re-declaring native fields.
@@ -322,6 +353,16 @@ carry optional `judgment: VerdictState`; lifecycle failure and its failing
 step account for either execution failure or failed judgment. Missing
 `judgment` or `cleanup_policy` in older evidence remains unknown.
 
+#### Drive browser history
+
+`ui/back` / `ui/forward` take only an optional `timeout:` and move through the
+check's real browser history, so state the browser keeps for history entries
+is what the next step observes. Assert `$steps.<id>.outputs.navigated`
+(`true` when the browser moved, including same-document hash/`pushState`
+entries; `false` with `url == from_url` when no entry exists) and read
+`from_url` / `url` for the move. A missing entry is not an error and never
+becomes a direct navigation.
+
 #### Share locators instead of copying them
 
 Use optional `frame: <Locator>` on any UI target to enter its containing
@@ -330,6 +371,17 @@ Frame locators can themselves carry `frame:` for nested documents;
 cross-origin embeds work through Playwright. This applies to inline and
 named `$pages.*` locators. Never treat a missing iframe as proof that
 its contents are absent; frame readiness shares the action deadline.
+
+Keyboard and focus: `ui/press { key, locator?, timeout? }` takes a Playwright
+key name or `+` chord (`Enter`, `Tab`, `Shift+Tab`, `Control+a`). With a
+`locator` it focuses that element and presses; without one it presses on
+whatever is focused and records `outputs.target` (`{tag, id, role, name}`,
+sampled before the press; `name` approximates the accessible name). `ui/focus`
+is programmatic `element.focus()`, not a user gesture; to verify keyboard
+focus movement press `Tab`, then assert `expected: focused` (or
+`not_focused`) on `ui/assert-element`. Focused means the element is its own
+document's active element and that document has focus, including inside a
+`frame:` document.
 
 Put locators reused by multiple leaves in an ordinary manifest include:
 
@@ -484,6 +536,20 @@ the manifest lists are never loaded or executed — the run stays scoped
 to the requested leaf. A leaf with an unresolved `$pages.*`/`call:` name
 and no discoverable manifest fails naming exactly what's missing and
 where it would normally be defined (#384/#388).
+
+## Viewport and color-scheme emulation
+
+`ui/emulate` sets the check's own viewport (`viewport: { width, height }`,
+positive integer CSS px) and/or `color_scheme: light | dark | no-preference`.
+At least one field is required. It applies to the check's page for later
+steps, so place it before the `ui/navigate` that should see it. Each check
+and each retry attempt starts from the run viewport and host-default color
+scheme again; emulation never leaks to siblings. Its `viewport` and
+`color_scheme` outputs are read back from the page (`innerWidth/innerHeight`
+and `prefers-color-scheme` media queries), not echoed from `with:`. Assert the
+effect with `ui/assert-element` on media-query-dependent elements. Chromium
+reports `no-preference` as `light`. In headed runs the window sizes the page
+and `viewport` is best effort, so rely on the read-back output.
 
 ## Worked example template
 

@@ -697,24 +697,16 @@ fn substitute_params(value: &mut serde_yml::Value, bindings: &BTreeMap<String, s
     match value {
         serde_yml::Value::String(raw) => {
             if let Some(reference) = raw.strip_prefix("$params.") {
-                let mut segments = reference.split('.');
-                let Some(name) = segments.next() else {
-                    return;
+                let parsed = match crate::expr::parse(raw) {
+                    Ok(crate::Expr::Path(path)) => resolve_param_path(&path, bindings),
+                    _ => None,
                 };
-                let Some(mut resolved) = bindings.get(name).cloned() else {
-                    return;
-                };
-                for segment in segments {
-                    let Some(next) = resolved
-                        .as_mapping()
-                        .and_then(|map| map.get(serde_yml::Value::String(segment.to_string())))
-                        .cloned()
-                    else {
-                        return;
-                    };
-                    resolved = next;
+                // Dot-split walk kept so flows that relied on it before bracket
+                // keys (e.g. `$params.resp.content-type`) resolve unchanged.
+                if let Some(resolved) = parsed.or_else(|| resolve_dotted_param(reference, bindings))
+                {
+                    *value = resolved.clone();
                 }
-                *value = resolved;
             } else if raw.trim_start().starts_with("$pages.")
                 && let Some(rewritten) = rewrite_page_param_args(raw, bindings)
             {
@@ -735,6 +727,40 @@ fn substitute_params(value: &mut serde_yml::Value, bindings: &BTreeMap<String, s
     }
 }
 
+fn resolve_dotted_param<'a>(
+    reference: &str,
+    bindings: &'a BTreeMap<String, serde_yml::Value>,
+) -> Option<&'a serde_yml::Value> {
+    let mut segments = reference.split('.');
+    let mut value = bindings.get(segments.next()?)?;
+    for segment in segments {
+        value = value
+            .as_mapping()?
+            .get(serde_yml::Value::String(segment.to_string()))?;
+    }
+    Some(value)
+}
+
+fn resolve_param_path<'a>(
+    path: &crate::Path,
+    bindings: &'a BTreeMap<String, serde_yml::Value>,
+) -> Option<&'a serde_yml::Value> {
+    if path.root != crate::PathRoot::Loop || path.segments.first()?.as_str() != "params" {
+        return None;
+    }
+    let mut value = bindings.get(path.segments.get(1)?)?;
+    for (index, segment) in path.segments.iter().enumerate().skip(2) {
+        value = match value {
+            serde_yml::Value::Mapping(map) => map.get(serde_yml::Value::String(segment.clone()))?,
+            serde_yml::Value::Sequence(items) if !path.quoted_keys.contains(&index) => {
+                items.get(segment.parse::<usize>().ok()?)?
+            }
+            _ => return None,
+        };
+    }
+    Some(value)
+}
+
 /// Substitute flow params embedded as page-call arguments before the
 /// expanded step reaches the ordinary expression parser (spec #495).
 fn rewrite_page_param_args(
@@ -747,11 +773,29 @@ fn rewrite_page_param_args(
     let mut changed = false;
     while let Some(offset) = rest.find(marker) {
         out.push_str(&rest[..offset]);
-        let reference = &rest[offset + marker.len()..];
-        let name = reference_head(reference)?;
-        let replacement = bindings.get(name).and_then(render_expr_value)?;
+        let reference = &rest[offset..];
+        let (path, suffix) = crate::expr::parse::parse_path_prefix(reference)?;
+        let replacement = if let Some(value) = resolve_param_path(&path, bindings) {
+            render_expr_value(value)?
+        } else {
+            // Preserve navigation on an expression passed as a parameter.
+            let name = path.segments.get(1)?;
+            let value = bindings.get(name)?;
+            let serde_yml::Value::String(expression) = value else {
+                return None;
+            };
+            if !matches!(crate::expr::parse(expression), Ok(crate::Expr::Path(_))) {
+                return None;
+            }
+            let end = reference.len() - suffix.len();
+            format!(
+                "{}{}",
+                expression,
+                &reference[marker.len() + name.len()..end]
+            )
+        };
         out.push_str(&replacement);
-        rest = &reference[name.len()..];
+        rest = suffix;
         changed = true;
     }
     out.push_str(rest);
@@ -1327,6 +1371,102 @@ criteria:
             Some("$pages.chat.history_item($inputs.index)")
         );
         crate::validate(&definition).expect("expanded page call validates");
+    }
+
+    #[test]
+    fn substitutes_nested_flow_params_with_bracket_keys() {
+        let bindings: BTreeMap<String, serde_yml::Value> = serde_yml::from_str(
+            r#"
+resp: { content-type: text/plain, nested: { name: dotted }, '200': numeric }
+items: [{ a-b: first }]
+"#,
+        )
+        .unwrap();
+        for (reference, expected) in [
+            ("$params.resp['content-type']", "text/plain"),
+            ("$params.resp.nested.name", "dotted"),
+            ("$params.resp['200']", "numeric"),
+            ("$params.items[0]['a-b']", "first"),
+        ] {
+            let mut value = serde_yml::Value::String(reference.into());
+            substitute_params(&mut value, &bindings);
+            assert_eq!(value.as_str(), Some(expected), "{reference}");
+        }
+        // Pre-bracket dotted form over a hyphenated key still resolves.
+        let mut legacy = serde_yml::Value::String("$params.resp.content-type".into());
+        substitute_params(&mut legacy, &bindings);
+        assert_eq!(legacy.as_str(), Some("text/plain"));
+        let mut numeric_key = serde_yml::Value::String("$params.items['0']".into());
+        substitute_params(&mut numeric_key, &bindings);
+        assert_eq!(numeric_key.as_str(), Some("$params.items['0']"));
+    }
+
+    #[test]
+    fn expands_bracket_keys_in_page_call_arguments() {
+        let bindings: BTreeMap<String, serde_yml::Value> = serde_yml::from_str(
+            "resp: { content-type: text/plain }\nitems: [{ a-b: 7 }]\nouter: $inputs.data\n",
+        )
+        .unwrap();
+        let raw = "$pages.chat.item($params.resp['content-type'], $params.items[0]['a-b'])";
+        assert_eq!(
+            rewrite_page_param_args(raw, &bindings).as_deref(),
+            Some("$pages.chat.item('text/plain', 7)")
+        );
+        assert_eq!(
+            rewrite_page_param_args("$pages.chat.item($params.outer.name)", &bindings).as_deref(),
+            Some("$pages.chat.item($inputs.data.name)")
+        );
+    }
+
+    #[test]
+    fn expands_bracket_keys_through_a_flow_call() {
+        let mut definition = authored(
+            r#"
+verification: flow bracket keys
+flows:
+  print_values:
+    params:
+      resp: { type: object }
+      items: { type: array }
+    steps:
+      - uses: cli/invoke
+        with:
+          command: echo
+          args:
+            - "$params.resp['content-type']"
+            - "$params.items[0]['a-b']"
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - call: print_values
+            with:
+              resp: { content-type: text/plain }
+              items: [{ a-b: first }]
+        assertions: ["true"]
+"#,
+        );
+        validate_and_expand(&mut definition).expect("flow expands");
+        let args = &definition.criteria[0].checks[0].steps[0].with["args"];
+        assert_eq!(args[0].as_str(), Some("text/plain"));
+        assert_eq!(args[1].as_str(), Some("first"));
+    }
+
+    #[test]
+    fn flow_output_projection_keeps_bracket_suffix() {
+        let projections = BTreeMap::from([(
+            "$steps.fetch.outputs.response".to_string(),
+            "$steps.fetch__request.outputs.body".to_string(),
+        )]);
+        assert_eq!(
+            rewrite_string(
+                "$steps.fetch.outputs.response['content-type']",
+                &projections
+            ),
+            "$steps.fetch__request.outputs.body['content-type']"
+        );
     }
 
     #[test]

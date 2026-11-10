@@ -656,6 +656,8 @@ async fn invoke_and_record(
         run,
         &owner,
         writer,
+        &BTreeMap::new(),
+        None,
     )
     .await;
     let outcome = match &result {

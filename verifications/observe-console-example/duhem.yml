@@ -1,0 +1,31 @@
+# Executed against local HTTP fixtures by console_observe_smoke.rs.
+verification: Console observations are explicit
+inputs:
+  clean_url: { type: string }
+  error_url: { type: string }
+criteria:
+  - id: AC-1
+    description: A clean page has no uncaught errors and a known console error is counted.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: load
+            uses: ui/navigate
+            with: { url: $inputs.clean_url }
+          - id: observed
+            uses: ui/observe-console
+            with: { window: { from_step: load, duration: 1s } }
+        assertions:
+          - $steps.observed.outputs.complete == true
+          - $steps.observed.outputs.page_error_count == 0
+      - id: AC-1.2
+        steps:
+          - id: load
+            uses: ui/navigate
+            with: { url: $inputs.error_url }
+          - id: observed
+            uses: ui/observe-console
+            with: { window: { from_step: load, duration: 1s } }
+        assertions:
+          - $steps.observed.outputs.complete == true
+          - $steps.observed.outputs.console_error_count == 1

@@ -623,6 +623,28 @@ Definitions using neither session field retain their existing wire shape.
 **Locators.** UI actions (`ui/click`, `ui/type`, `ui/assert-element`, `ui/select`) address an element by exactly one *primary strategy*: `role` (paired with an optional `name`), `label` (associated label text — how to reach an input with no ARIA role, e.g. `type=password`), `testid` (the `data-testid` attribute), `placeholder`, `css` (a raw CSS selector escape hatch), `xpath` (a raw XPath selector escape hatch), or a standalone `text`. A `text` substring may additionally *filter* a non-text primary, and a recursive `scope:` narrows the search to inside a container. Prefer `role`, `testid`, or `scope:` + `text:`; use `css:` or `xpath:` only when those cannot reach the element, because markup-coupled selectors—especially absolute XPath paths—break readily as markup changes. `ui/click` takes these fields inline in its `with:`; the other actions nest them under `locator:`. Two primaries at once, or none, is rejected. Each named strategy maps to the corresponding Playwright selector engine.
 
 
+**Keyboard and focus.** `ui/press { key, locator?, timeout? }` takes a Playwright
+key name, single character or `+`-joined chord (`Enter`, `Tab`, `Shift+Tab`,
+`Control+a`); an empty key is rejected when `with:` is parsed and an unknown key
+name fails the step with the driver's message. With a `locator` it uses
+`locator.press` (waits for actionability, focuses the element, presses). Without
+one it uses `page.keyboard.press` and dispatches to whatever is focused. The
+`target` output, `{tag, id, role, name}`, describes the receiving element sampled
+before dispatch: the located element, or the `activeElement` of the deepest
+focused document (`tag: body` when nothing is focused; absent fields are `null`).
+`role` is the explicit `role` attribute or the implicit role of common tags;
+`name` is an approximation of the accessible name (`aria-label`, then
+`aria-labelledby` text, then trimmed text content capped at 200 characters), not
+the full computation. `ui/focus { locator, timeout? }` is programmatic focus, not a
+user gesture; to verify keyboard focus movement, press `Tab` and assert
+`expected: focused`. `ui/assert-element` `expected: focused | not_focused` waits up
+to the deadline and reports `satisfied` like the other states. The locator must
+resolve to exactly one element (ambiguity is an error; an absent element is never
+`not_focused`). Focused means the element is the `activeElement` of its own
+document and that document has focus, including inside `frame:` documents. The
+[executed keyboard and focus example](../verifications/keyboard-focus-example/duhem.yml)
+runs against a local browser fixture in CI.
+
 **Frames.** An optional `frame: <Locator>` selects the iframe containing
 the target for every locator-taking UI action, including `ui/extract`.
 For example, `{frame: {testid: report-shell-iframe}, role: heading, name:
@@ -1619,17 +1641,23 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 **UI actions** (Playwright primitives)
 
 - `ui/navigate` — go to a URL
+- `ui/observe-console` — collect page errors and console messages in a step-anchored window
+- `ui/back` — move one entry back through the page's real browser history (`page.goBack`); same waiting, outputs and no-entry contract as `ui/forward`.
+- `ui/forward` — move one entry forward through the page's real browser history (`page.goForward`), waiting for `load` (optional `timeout:`). Outputs `from_url`, `url` and `navigated`: `navigated` is `true` when the browser moved to another entry, including same-document (hash/`pushState`) entries, and `false` with `url == from_url` when no entry exists in that direction (the browser's initial blank page is not an entry the check visited). A missing entry is not an error and never triggers a direct navigation; an in-flight navigation that exceeds the timeout is a `timeout` outcome.
 - `ui/click` — click an element (role-based locators preferred)
 - `ui/type` — type into an input
 - `ui/select` — select an option
-- `ui/assert-element` — judge existence/visibility with `expected:`, or directly judge an extracted field with `expect: { field: checked, equals: true }`
-- `ui/extract` — non-judging extraction of an attribute, live DOM property, or rendered `innerText`; exposes `value`, `found`, `count`, and (with `all: true`) DOM-ordered `values`
+- `ui/press` — press a key or `+` chord (Playwright key names), on a located element or on the focused element
+- `ui/focus` — programmatically focus an element (`element.focus()`, not a user gesture)
+- `ui/assert-element` — judge existence/visibility/focus with `expected:` (`exists`, `not_exists`, `visible`, `hidden`, `focused`, `not_focused`), or directly judge an extracted field with `expect: { field: checked, equals: true }`
+- `ui/extract` — non-judging extraction of an attribute, live DOM property, rendered `innerText`, bounding rect, or computed style; exposes `value`, `found`, `count`, and (with `all: true`) DOM-ordered `values`
 - `ui/assert-url` — observe URL state
 - `ui/capture-session` — capture cookies/local storage as a secret state value for later checks
+- `ui/emulate` — set the check's own viewport (`viewport: { width, height }`, positive integer CSS px, same rule as `defaults.viewport`) and/or `color_scheme: light | dark | no-preference`; at least one is required. It applies `page.setViewportSize` / `page.emulateMedia` to the check's page for later steps. Outputs `viewport` (`{ width, height }`) and `color_scheme` are read back from the page (`innerWidth/innerHeight`, `prefers-color-scheme` media queries), not echoed from `with:`, so Chromium reports `no-preference` as `light`. Every check and retry attempt opens a fresh context with the run viewport and host-default color scheme, so emulation never leaks into siblings or retries. Headed runs have no fixed viewport; rely on the read-back output there.
 - `ui/wait` — wait for a fixed `duration` (`TimeoutSpec`, e.g. `500ms` or `2s`) without requiring a browser page. Prefer `ui/assert-element` with `timeout:`; fixed waits are a debugging and transitional-authoring escape hatch with a 60-second default ceiling that root-manifest `defaults.max_wait` may raise or lower.
 
-`ui/extract` selects exactly one source from `field:`, `attribute:`, `property:`, or
-`text: true`. Attributes describe markup and return `null` when absent; properties
+`ui/extract` selects exactly one source from `field:`, `attribute:`, `property:`,
+`text: true`, or `style:`. Attributes describe markup and return `null` when absent; properties
 describe live state. Text uses `innerText`, so hidden content is omitted and rendered
 whitespace rules apply. `field:` is a closed lookup, never a heuristic:
 
@@ -1637,6 +1665,7 @@ whitespace rules apply. `field:` is a closed lookup, never a heuristic:
 | --- | --- |
 | `checked`, `value`, `disabled` | DOM property |
 | `text` | `innerText` |
+| `rect` | bounding rect object (see below) |
 | `href`, `class`, `id`, `title`, `alt` | HTML attribute |
 | `aria-*`, `data-*` | HTML attribute |
 
@@ -1650,12 +1679,46 @@ sensitive observation. `ui/assert-element` accepts this same source vocabulary i
 `expect:` with `equals:` for direct implicit judgment; extraction remains the path for
 later reuse and check-level assertions.
 
+`ui/observe-console` requires `window: { from_step, edge, duration }` with
+the same inclusive session-clock window and anchor rules as `api/observe`.
+It returns separate ordered `page_errors` and `console` records, counts for
+each and `console_error_count`. Console levels are facts, not verdicts.
+Assert `complete == true` before treating zero counts as absence; overflow
+sets `truncated` and makes `complete` false. Registered secrets are masked.
+
+**Geometry and computed style (#580).** `field: rect` returns
+`{ x, y, width, height, top, right, bottom, left, scroll_x, scroll_y }` in CSS px.
+The first eight are `getBoundingClientRect()` relative to the element's own document
+viewport (the frame viewport for `frame:` targets); `scroll_x` / `scroll_y` are that
+document's `scrollX` / `scrollY`, so document coordinates are `x + scroll_x`.
+`style: <css-property>` returns `getComputedStyle(el).getPropertyValue(<property>)` as a
+string with units, for example `rgb(17, 17, 17)` or `16px`; an empty property name is
+invalid, and `style` is exclusive with the other sources. Both sample once at step
+execution, with no waiting beyond locator resolution, and honor `all: true` and the
+single-match rule. Thresholds live in VD assertions, for example
+`$steps.card.outputs.value.width <= 390`. The executed example is
+`verifications/geometry-example/duhem.yml`.
+
 **API actions**
 
-- `api/call` — make an HTTP request actively
-- `api/observe` — passively observe an HTTP request the UI triggers (network sniffing)
+- `api/call` — make an HTTP request actively; outputs `status`, `body`, `body_text`, `body_bytes` and `headers`
+- `api/observe` — passively observe an HTTP request the UI triggers (network sniffing); outputs `method`, `url`, `status`, `body`, `body_text`, `body_bytes`, `headers`, `request_body` and `request_headers`
 - `api/poll` — re-hit an endpoint until a response condition holds or a timeout elapses
 - `api/stream` — follow an open-ended SSE / `text/event-stream` from an in-progress source, collecting ordered events until a terminal condition (`until_event` / `max_events` / server close) or the `timeout:` budget; outputs `events` / `event_count` / `last_event` for mechanical assertion
+
+`api/observe` optionally accepts `window: { from_step, edge, duration }` to
+collect requests starting in the inclusive window anchored to an earlier step
+in the same browser session. `edge` defaults to `start`; `finish` selects its
+finish. The positive duration runs on the session clock. `edge` and `duration` must
+be literals, and an unrunnable `from_step` (skipped, gated or from another
+session) fails the step with an action error. `count` and `requests`
+describe matching request starts in sequence order, including pending and failed
+requests and separate redirect hops. Assert `complete` before treating an empty
+result as absence: it is false if recording began too late or the bounded buffer
+was truncated. `truncated` reports buffer overflow. Without a window the legacy
+first matching response behavior remains unchanged.
+
+Both response-side actions declare their outputs in the catalog, so `$steps.<id>.outputs.<name>` resolves without an `outputs:` block. `headers` is an object with lower-case names; reach a hyphen-free header by dotted path (`headers.location`). `body_bytes` is an integer: the payload bytes the client returned after content decoding, before UTF-8-lossy or JSON conversion, excluding headers. It is not the `body_text` character count, `Content-Length` or wire size; an empty body is `0`, and a failed body read is an error, never `0`. `api/call` uses `reqwest` with no decompression feature and sends no `Accept-Encoding`, so nothing decodes `Content-Encoding` there; `api/observe` reads Chromium's decoded `response.body()`. The [executed example](../verifications/response-outputs-example/duhem.yml) asserts `status`, `body_bytes` and a header. (#603)
 
 **Database actions**
 
@@ -1709,6 +1772,17 @@ literal string. Literal strings beginning with `$` are unsupported in v1.
 String literals inside expressions may use either single (`'…'`) or double
 (`"…"`) quotes. Neither form supports escape sequences; use the other quote
 form when the string must contain a quote character.
+
+Reference and assertion paths can navigate object keys with `.name` or
+`['key']`, and arrays with `[N]`. Bracket keys use single quotes; escape a
+quote as `\'` and a backslash as `\\`. Empty keys, other escapes, and
+unterminated keys are invalid. For example,
+`$steps.r.outputs.headers['content-type']` and
+`$steps.r.outputs.items[0]['a-b']` access the named keys. A quoted numeric
+key such as `['200']` addresses an object key, never an array index.
+The same navigation works on flow parameters during static substitution,
+including page-call arguments: `$params.resp['content-type']` and
+`$params.items[0]['a-b']`.
 
 Borrowed from Arazzo. References available in expressions:
 

@@ -36,6 +36,8 @@ export interface CriterionDetail {
 }
 
 export interface RunDetail {
+  claim_scope?: ClaimScope;
+  body_verdict?: Verdict;
   run_id: string;
   verification: string;
   started_at: string | null;
@@ -53,12 +55,35 @@ export interface RunDetail {
   criteria: CriterionDetail[];
 }
 
+export interface ClaimCounts {
+  authored: number;
+  selected: number;
+  executed: number;
+}
+
+export interface ManifestSelection {
+  authored: number;
+  selected: number;
+  directory?: string;
+  filters?: string[];
+  excluded?: { verification: string; reason: string }[];
+}
+
+export interface ClaimScope {
+  criteria: ClaimCounts;
+  checks: ClaimCounts;
+  filters?: string[];
+  excluded?: { criterion_id: string; check_id: string; reason: string }[];
+  manifest?: ManifestSelection;
+}
+
 export interface LifecycleScopeSegment {
   kind: string;
   id: string;
 }
 
 export interface LifecycleStep {
+  judgment?: Verdict;
   index: number;
   id?: string;
   uses: string;
@@ -69,6 +94,8 @@ export interface LifecycleStep {
 }
 
 export interface LifecycleBlock {
+  cleanup_policy?: "required" | "diagnostic_only";
+  registered_by?: { flow: string; call: string };
   phase: "setup" | "teardown";
   scope: LifecycleScopeSegment[];
   status: "passed" | "failed" | "aborted";

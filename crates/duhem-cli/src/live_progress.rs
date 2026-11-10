@@ -954,6 +954,7 @@ criteria:
                     1,
                     100,
                     EventPayload::AssertionEvaluated {
+                        operands: None,
                         check_id: "AC-1.1".into(),
                         iteration: None,
                         assertion_index: 0,
@@ -975,6 +976,7 @@ criteria:
                     3,
                     1700,
                     EventPayload::AssertionEvaluated {
+                        operands: None,
                         check_id: "AC-2.1".into(),
                         iteration: None,
                         assertion_index: 0,
@@ -996,6 +998,7 @@ criteria:
                     5,
                     2000,
                     EventPayload::RunFinished {
+                        body_verdict: None,
                         verdict: Some(VerdictState::Fail),
                     },
                 ),
@@ -1067,6 +1070,7 @@ criteria:
                     6,
                     3100,
                     EventPayload::RunFinished {
+                        body_verdict: None,
                         verdict: Some(VerdictState::Pass),
                     },
                 ),
@@ -1088,6 +1092,7 @@ criteria:
             0,
             0,
             EventPayload::RunFinished {
+                body_verdict: None,
                 verdict: Some(VerdictState::Pass),
             },
         ))
@@ -1113,6 +1118,7 @@ criteria:
                 layer: None,
                 flow: None,
                 with: Default::default(),
+                group: None,
             },
         )));
         let active = renderer.board.lines(120, 12).join("\n");
@@ -1149,6 +1155,7 @@ criteria:
                 3,
                 300,
                 EventPayload::AssertionEvaluated {
+                    operands: None,
                     check_id: "AC-1.1".into(),
                     iteration: None,
                     assertion_index: 0,
@@ -1338,6 +1345,7 @@ criteria:
                 layer: Some("ui".into()),
                 flow: None,
                 with,
+                group: None,
             },
         )));
         let out = renderer.board.lines(120, 12).join("\n");
@@ -1382,6 +1390,7 @@ criteria:
                 layer: None,
                 flow: None,
                 with: Default::default(),
+                group: None,
             },
         )));
         renderer.terminal.backend_mut().drawn_cells = 0;
@@ -1497,6 +1506,7 @@ criteria:
                 layer: None,
                 flow: None,
                 with: Default::default(),
+                group: None,
             },
         ))
         .unwrap();
@@ -1527,6 +1537,7 @@ criteria:
             3,
             5200,
             EventPayload::RunFinished {
+                body_verdict: None,
                 verdict: Some(VerdictState::Pass),
             },
         ))

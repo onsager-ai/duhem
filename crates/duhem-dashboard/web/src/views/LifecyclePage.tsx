@@ -14,6 +14,8 @@ export function LifecycleEvidence({ block }: { block: LifecycleBlock }) {
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="font-mono text-base font-semibold break-all">{lifecycleScopePath(block)} / {block.phase}</h2>
         <LifecycleStatusBadge status={block.status} />
+        {block.registered_by && <span className="text-sm">Cleanup of flow <span className="font-mono">{block.registered_by.flow}</span> (call <span className="font-mono">{block.registered_by.call}</span>) registered at <span className="font-mono">{lifecycleScopePath(block)}</span></span>}
+        {block.phase === "teardown" && <span className="text-sm">{block.cleanup_policy === "required" ? "Required cleanup" : block.cleanup_policy === "diagnostic_only" ? "Diagnostic cleanup" : "Cleanup policy unknown"}</span>}
       </div>
       <dl className="grid gap-3 text-sm sm:grid-cols-2">
         <div><dt className="text-muted-foreground">Scope</dt><dd className="font-mono break-all">{lifecycleScopePath(block)}</dd></div>

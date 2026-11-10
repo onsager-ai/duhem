@@ -15,6 +15,31 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::ExprStr;
 
+/// Cleanup a `call:` to a flow with `cleanup:` registers on the enclosing
+/// lifecycle scope once the call is entered (#615). Loader-only metadata
+/// carried on every dispatchable step the call expands to; the first one
+/// dispatched registers it. The cleanup steps are already namespaced and
+/// parameter-substituted like the flow body.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlowCleanup {
+    pub flow: String,
+    /// Namespaced invocation id of the registering call.
+    pub call: String,
+    pub policy: crate::verification::CleanupPolicy,
+    pub steps: Vec<Step>,
+    /// `(recorded id, referenced id)` for body step ids that are not valid
+    /// expression identifiers (auto-named invocations contain `#`); the
+    /// cleanup references the second, the runtime records the first.
+    pub aliases: Vec<(String, String)>,
+    /// The call sits in a `for_each:` body, so each iteration registers its
+    /// own cleanup; otherwise the call registers once per scope.
+    pub per_iteration: bool,
+    /// Set when this cleanup is a deprecated `fixtures.<name>` `down:`
+    /// desugared onto a check's `setup:` (#618): the fixture's name, so
+    /// evidence keeps its fixture scope fields.
+    pub fixture: Option<String>,
+}
+
 /// Loader-only provenance attached to an action expanded from a
 /// reusable flow. It is deliberately skipped on the authored Step wire
 /// shape: the evidence crate owns the public event representation, and
@@ -31,6 +56,19 @@ pub struct ExpandedFlowOrigin {
     /// iteration's body) so a report can group by iteration without
     /// conflating the two axes.
     pub iteration: Option<u32>,
+}
+
+/// One enclosing step group of an executable step, after the loader has
+/// lowered groups (#614). The runtime evaluates `condition` once, when the
+/// first step of the group is reached; `key` identifies that group within one
+/// step sequence, so later steps reuse the decision.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StepGroupFrame {
+    pub key: u32,
+    /// The group's `id:` when present, otherwise its zero-based position
+    /// among its siblings.
+    pub label: String,
+    pub condition: StepCondition,
 }
 
 /// Dispatch condition for a step. The three outcome gates retain their
@@ -201,13 +239,7 @@ pub struct Step {
     #[serde(rename = "as", default, skip_serializing_if = "Option::is_none")]
     pub as_binding: Option<String>,
 
-    /// Inline multi-step loop body — one of the three `for_each:` body
-    /// forms alongside `uses:` and `call:` (exactly one required).
-    /// Recursive in the type so `secret_outputs:`/`outputs:`/`if:`
-    /// etc. are never duplicated onto a separate loop-body type, but
-    /// capped at depth 1 by validation: a step inside this list may
-    /// not itself carry `for_each:` or `steps:`. Also rejected without
-    /// an enclosing `for_each:`.
+    /// Inline multi-step body. With `for_each:` it is one of the three loop body forms alongside `uses:` and `call:`; without it the step is a group (#614), a scope and label over its children that the loader lowers into the enclosing sequence. Exactly one of `uses:`, `call:` or `steps:` is required. Recursive in the type so `secret_outputs:`/`outputs:`/`if:` etc. are never duplicated onto a separate body type; loop nesting is capped at 1 by validation, so no step anywhere under a `for_each:` may itself carry `for_each:`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub steps: Option<Vec<Step>>,
 
@@ -223,6 +255,12 @@ pub struct Step {
     #[schemars(skip)]
     pub for_each_body: Vec<Step>,
 
+    /// Enclosing step groups, outermost first, set by the loader when it
+    /// lowers a group (#614). Not part of the authored VD schema.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub group: Vec<StepGroupFrame>,
+
     /// Origin of an expanded action step. Not part of the authored VD
     /// schema; the runtime copies it into `StepStarted.flow`.
     #[serde(skip)]
@@ -236,6 +274,14 @@ pub struct Step {
     #[serde(skip)]
     #[schemars(skip)]
     pub flow_secrets: Vec<serde_yml::Value>,
+
+    /// Cleanups registered when this expanded step is the first of its call
+    /// to be dispatched: set on every expanded step of a flow call whose
+    /// flow declares `cleanup:` (outermost call first). Loader metadata,
+    /// off the wire.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub flow_cleanup: Vec<FlowCleanup>,
 }
 
 impl Step {

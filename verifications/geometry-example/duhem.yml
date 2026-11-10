@@ -1,0 +1,63 @@
+# Executed against a local fixture by runtime tests/geometry_smoke.rs in CI.
+verification: Layout geometry and computed style are observable
+inputs:
+  fixture_url: { type: string }
+criteria:
+  - id: AC-1
+    description: The two panels have their designed sizes and colors.
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.fixture_url }
+          - id: wide
+            uses: ui/extract
+            with: { locator: { testid: wide }, field: rect }
+          - id: narrow
+            uses: ui/extract
+            with: { locator: { testid: narrow }, field: rect }
+          - id: wide_bg
+            uses: ui/extract
+            with: { locator: { testid: wide }, style: background-color }
+          - id: narrow_bg
+            uses: ui/extract
+            with: { locator: { testid: narrow }, style: background-color }
+          - id: wide_width
+            uses: ui/extract
+            with: { locator: { testid: wide }, style: width }
+        assertions:
+          - $steps.wide.outputs.value.width == 200
+          - $steps.wide.outputs.value.height == 50
+          - $steps.wide.outputs.value.x == 10
+          - $steps.wide.outputs.value.right == 210
+          - $steps.wide.outputs.value.scroll_y == 0
+          - $steps.narrow.outputs.value.width == 80
+          - $steps.narrow.outputs.value.height == 30
+          - $steps.narrow.outputs.value.width != 200
+          - $steps.wide_bg.outputs.value == 'rgb(17, 17, 17)'
+          - $steps.narrow_bg.outputs.value == 'rgb(255, 0, 0)'
+          - $steps.narrow_bg.outputs.value != 'rgb(17, 17, 17)'
+          - $steps.wide_width.outputs.value == '200px'
+  - id: AC-2
+    description: Geometry inside an iframe is relative to the frame viewport.
+    checks:
+      - id: AC-2.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.fixture_url }
+          - id: box
+            uses: ui/extract
+            with:
+              locator: { frame: { testid: report-frame }, testid: box }
+              field: rect
+          - id: box_bg
+            uses: ui/extract
+            with:
+              locator: { frame: { testid: report-frame }, testid: box }
+              style: background-color
+        assertions:
+          - $steps.box.outputs.value.x == 30
+          - $steps.box.outputs.value.y == 20
+          - $steps.box.outputs.value.width == 50
+          - $steps.box.outputs.value.height == 40
+          - $steps.box_bg.outputs.value == 'rgb(0, 128, 0)'

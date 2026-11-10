@@ -62,6 +62,7 @@ impl RunBrowser {
             page: Page {
                 conn: self.conn.clone(),
                 id: page_id,
+                frame_selectors: Vec::new(),
             },
         })
     }

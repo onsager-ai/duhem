@@ -1,4 +1,5 @@
 import { GatedJudgingNotice } from "../components/GatedJudgingNotice";
+import { ClaimScopeNotice } from "../components/ClaimScopeNotice";
 // Run report (#86): the run summary panel — a check-verdict roll-up,
 // run metadata, and inputs — rendered inside the shared RunScaffold
 // tree (criteria → checks in the rail, this summary in the panel).
@@ -186,20 +187,21 @@ export function RunSummary({ run }: { run: RunDetail }) {
   const inputs = Object.entries(run.inputs);
   return (
     <div className="min-w-0 max-w-full space-y-5" data-testid="run-summary">
+      {run.body_verdict && <p className="border-l-2 border-fail px-4 py-3 text-sm">Gate: {run.verdict}. Body: {run.body_verdict}. Required fixture cleanup failed.</p>}
       {run.setup_aborted && (
         <div className="border-l-2 border-fail bg-fail/5 px-4 py-3 text-sm text-fail">
           Setup aborted — no checks ran. The verdict reflects the abort, not the
           artifact.
         </div>
       )}
-      {(run.cleanup ?? []).some((step) => step.outcome !== "ok") && (
+      {(run.lifecycle ?? []).some((block) => block.phase === "teardown" && block.status !== "passed") && (
         <div className="border-l-2 border-muted-foreground/50 bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
-          Teardown recorded cleanup failures. They are evidence only and did
-          not change this run&apos;s verdict.
+          Cleanup failures are retained below with each block&apos;s policy.
         </div>
       )}
 
       <LifecycleList runId={run.run_id} blocks={(run.lifecycle ?? []).filter((block) => block.scope.length <= 1)} />
+      <ClaimScopeNotice scope={run.claim_scope} />
 
       {run.criteria.flatMap((criterion) => criterion.checks
         .filter((check) => (check.gated_judging_steps ?? 0) > 0)
@@ -310,6 +312,8 @@ export function LifecycleList({ blocks, runId }: { blocks: LifecycleBlock[]; run
             {runId ? <Link to={lifecycleHref(runId, block)} className="text-brand hover:underline"><span className="font-mono">{lifecycleScopePath(block)}</span> {block.phase}</Link>
               : <><span className="font-mono">{lifecycleScopePath(block)}</span> {block.phase}</>}{" "}
             <span data-status={block.status}>{block.status}</span>{" "}
+            {block.registered_by && <span>cleanup of flow <span className="font-mono">{block.registered_by.flow}</span> (call <span className="font-mono">{block.registered_by.call}</span>){" "}</span>}
+            {block.phase === "teardown" && <span>{block.cleanup_policy === "required" ? "required" : block.cleanup_policy === "diagnostic_only" ? "diagnostic only" : "policy unknown"}{" "}</span>}
             <span className="text-muted-foreground">({formatDuration(block.duration_ms)})</span>
             {lifecycleFailure(block) && <p className="break-words text-xs text-fail">{lifecycleFailure(block)}</p>}
           </li>

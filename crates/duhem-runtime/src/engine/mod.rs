@@ -7,11 +7,14 @@
 //! belong to `duhem-schema`, `duhem-judge`, `duhem-actions`, and
 //! `duhem-evidence` respectively; the engine is purely compositional.
 
+#[cfg(test)]
+mod assertion_evidence_tests;
 pub mod capture;
 pub mod context;
 pub mod env;
 pub(crate) mod extract;
 pub(crate) mod flow;
+pub(crate) mod flow_cleanup;
 pub(crate) mod for_each;
 pub(crate) mod gating;
 pub mod har;
@@ -21,6 +24,7 @@ pub mod lineage;
 pub mod outcome;
 #[cfg(test)]
 mod outcome_regression_tests;
+pub(crate) mod process;
 pub mod registry;
 pub mod runner;
 pub(crate) mod secret_output;

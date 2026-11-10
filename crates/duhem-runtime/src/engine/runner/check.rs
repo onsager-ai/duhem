@@ -12,7 +12,6 @@ impl Engine {
         &mut self,
         writer: &mut EvidenceWriter,
         run: &mut RunState,
-        fixtures: &duhem_schema::FixtureCatalog,
         criterion_id: &str,
         check: &Check,
         failures: &mut Vec<CheckFailure>,
@@ -29,65 +28,92 @@ impl Engine {
             // so only the final attempt's detail reaches the reporter.
             let failures_mark = failures.len();
             let setup_baseline = run.setup_outputs.clone();
+            let parent_owner = run.process_owner.clone();
+            run.process_owner = parent_owner.check(&check.id);
+            run.register_process_cleanup(run.process_owner.clone(), &check.teardown);
+            // Everything pushed after the teardown hook unwinds before it.
+            let cleanup_mark = run.flow_cleanup_mark();
             let attempt_result: Result<(CheckVerdict, u32), EngineError> = async {
                 run.clear_fixture_outputs();
 
-                // Check-level `setup:` (#441 Part B) runs before this
-                // check's `needs:` fixtures, after criterion `setup:`.
-                // Re-run every retry attempt, like fixtures.
+                // Check-level `setup:` (#441 Part B), after criterion
+                // `setup:`. Re-run every retry attempt. The deprecated
+                // `needs:` fixtures were desugared onto its end (#618): each
+                // runs as its own `up:` block, after the authored steps and
+                // in `needs:` order, and the first block to abort stops the
+                // rest.
                 let mut check_setup_abort: Option<(crate::engine::setup::AbortReason, String)> =
                     None;
-                if !check.setup.is_empty() {
-                    let result = crate::engine::setup::run_check_setup(
-                        writer,
-                        &self.registry,
-                        self.browser.as_ref(),
-                        run,
-                        criterion_id,
-                        &check.id,
-                        &check.setup,
-                        &self.child_process_env(writer.run_id()),
-                    )
-                    .await?;
-                    if let Some(reason) = result.aborted {
-                        check_setup_abort = Some((
-                            reason,
-                            result
-                                .failed_step
-                                .unwrap_or_else(|| "check setup environment".to_string()),
-                        ));
-                    }
-                }
-
-                let mut active = Vec::new();
                 let mut fixture_abort = None;
-                if check_setup_abort.is_none() {
-                    for name in &check.needs {
-                        let fixture = &fixtures[name];
-                        active.push(name.as_str());
-                        let result = crate::engine::setup::run_fixture_up(
-                            writer,
-                            &self.registry,
-                            self.browser.as_ref(),
-                            run,
-                            name,
-                            &check.id,
-                            &fixture.up,
-                            &self.child_process_env(writer.run_id()),
-                        )
-                        .await?;
-                        if let Some(reason) = result.aborted {
-                            fixture_abort = Some((
-                                name.clone(),
-                                reason,
-                                result
-                                    .failed_step
-                                    .unwrap_or_else(|| "fixture environment".to_string()),
-                            ));
-                            break;
+                for (fixture, steps) in setup_blocks(&check.setup) {
+                    let env = self.child_process_env(writer.run_id());
+                    let result = match fixture {
+                        None => {
+                            crate::engine::setup::run_check_setup(
+                                writer,
+                                &self.registry,
+                                self.browser.as_ref(),
+                                run,
+                                criterion_id,
+                                &check.id,
+                                steps,
+                                &env,
+                            )
+                            .await?
                         }
+                        Some(call) => {
+                            let name = call.fixture.as_deref().unwrap_or_default();
+                            // Registered before `up:` runs, so a partial or
+                            // aborted `up:` is still torn down.
+                            run.register_flow_cleanups(
+                                &steps[0],
+                                &crate::engine::flow_cleanup::RegisteredAt::Fixture(
+                                    name.to_string(),
+                                    check.id.clone(),
+                                ),
+                            );
+                            let up: Vec<_> = steps
+                                .iter()
+                                .filter(|step| !duhem_schema::is_empty_up(step))
+                                .cloned()
+                                .collect();
+                            crate::engine::setup::run_fixture_up(
+                                writer,
+                                &self.registry,
+                                self.browser.as_ref(),
+                                run,
+                                name,
+                                &check.id,
+                                &up,
+                                &env,
+                            )
+                            .await?
+                        }
+                    };
+                    if let Some(reason) = result.aborted {
+                        match fixture {
+                            None => {
+                                check_setup_abort = Some((
+                                    reason,
+                                    result
+                                        .failed_step
+                                        .unwrap_or_else(|| "check setup environment".to_string()),
+                                ));
+                            }
+                            Some(call) => {
+                                fixture_abort = Some((
+                                    call.fixture.clone().unwrap_or_default(),
+                                    reason,
+                                    result
+                                        .failed_step
+                                        .unwrap_or_else(|| "fixture environment".to_string()),
+                                ));
+                            }
+                        }
+                        break;
                     }
                 }
+                let mut body_error = None;
                 let (cv, gated_judging_steps) = if let Some((reason, step)) = &check_setup_abort {
                     failures.push(CheckFailure {
                         criterion_id: criterion_id.to_string(),
@@ -125,26 +151,40 @@ impl Engine {
                         0,
                     )
                 } else {
-                    self.run_check(writer, run, (criterion_id, check), failures)
-                        .await?
-                };
-                for name in active.into_iter().rev() {
-                    let fixture = &fixtures[name];
-                    let mut failures = crate::engine::setup::run_fixture_down(
-                        writer,
-                        &self.registry,
-                        self.browser.as_ref(),
-                        run,
-                        name,
-                        &check.id,
-                        &fixture.down,
-                        &self.child_process_env(writer.run_id()),
-                    )
-                    .await?;
-                    for failure in &mut failures {
-                        failure.step = format!("fixture `{name}`: {}", failure.step);
+                    match self
+                        .run_check(writer, run, (criterion_id, check), failures)
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(error) => {
+                            body_error = Some(error);
+                            (
+                                CheckVerdict {
+                                    check_id: check.id.clone(),
+                                    state: VerdictState::Inconclusive(
+                                        duhem_judge::InconclusiveCause::EnvironmentError,
+                                    ),
+                                },
+                                0,
+                            )
+                        }
                     }
-                    cleanup.append(&mut failures);
+                };
+                // Flow `cleanup:` registered by this attempt's setup and steps,
+                // including the fixtures' `down:` blocks, unwinds last
+                // registered first, before `teardown:` runs.
+                let (mut unwound, unwind_error) = crate::engine::flow_cleanup::drain(
+                    writer,
+                    &self.registry,
+                    self.browser.as_ref(),
+                    run,
+                    cleanup_mark,
+                    &self.child_process_env(writer.run_id()),
+                )
+                .await;
+                cleanup.append(&mut unwound);
+                if let Some(error) = unwind_error {
+                    body_error.get_or_insert(error);
                 }
 
                 // Check-level `teardown:` runs after this check's fixtures
@@ -153,7 +193,8 @@ impl Engine {
                 // (#543/#547). Evidence-only: never replaces the check's
                 // verdict. Re-run every retry attempt.
                 if !check.teardown.is_empty() {
-                    let mut teardown_failures = crate::engine::setup::run_check_teardown(
+                    run.begin_process_cleanup(&run.process_owner.clone());
+                    let result = crate::engine::setup::run_check_teardown(
                         writer,
                         &self.registry,
                         self.browser.as_ref(),
@@ -163,16 +204,34 @@ impl Engine {
                         &check.teardown,
                         &self.child_process_env(writer.run_id()),
                     )
-                    .await?;
+                    .await;
+                    let mut teardown_failures = match result {
+                        Ok(failures) => failures,
+                        Err(error) => {
+                            return Err(body_error.unwrap_or(error));
+                        }
+                    };
                     for failure in &mut teardown_failures {
                         failure.step = format!("check `{}` teardown: {}", check.id, failure.step);
                     }
                     cleanup.append(&mut teardown_failures);
                 }
 
-                Ok((cv, gated_judging_steps))
+                match body_error {
+                    Some(error) => Err(error),
+                    None => Ok((cv, gated_judging_steps)),
+                }
             }
             .await;
+            cleanup.extend(
+                run.processes
+                    .lock()
+                    .await
+                    .finalize(writer, Some(&run.process_owner))
+                    .await,
+            );
+            run.begin_process_cleanup(&run.process_owner.clone());
+            run.process_owner = parent_owner;
             writer.set_session(None);
             run.setup_outputs = setup_baseline;
             let (cv, gated_judging_steps) = attempt_result?;
@@ -295,8 +354,36 @@ impl Engine {
             Ok((verdict, gated_judging_steps))
         }
         .await;
+        // The check body's cleanups read the outputs it produced; the caller
+        // drains them once the body is over.
+        run.snapshot_flow_cleanups(&ctx.snapshot(), false);
         writer.set_session(None);
         contexts.finish(writer, false, check).await;
         result
     }
+}
+
+/// The deprecated-fixture call (#618) a setup step belongs to, if any.
+fn fixture_call(step: &duhem_schema::Step) -> Option<&duhem_schema::FlowCleanup> {
+    step.flow_cleanup.iter().find(|c| c.fixture.is_some())
+}
+
+/// A check's `setup:` as the blocks it runs as: the authored steps (`None`),
+/// then one block per desugared `needs:` fixture, in order. The steps of one
+/// fixture call carry the same cleanup, so they form one block.
+fn setup_blocks(
+    steps: &[duhem_schema::Step],
+) -> Vec<(Option<&duhem_schema::FlowCleanup>, &[duhem_schema::Step])> {
+    let mut blocks = Vec::new();
+    let mut start = 0;
+    while start < steps.len() {
+        let call = fixture_call(&steps[start]);
+        let len = steps[start..]
+            .iter()
+            .take_while(|step| fixture_call(step).map(|c| &c.call) == call.map(|c| &c.call))
+            .count();
+        blocks.push((call, &steps[start..start + len]));
+        start += len;
+    }
+    blocks
 }

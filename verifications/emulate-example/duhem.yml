@@ -1,0 +1,42 @@
+# Executed against a local media-query fixture by runtime tests/emulate_smoke.rs in CI.
+verification: Layout and theme follow the emulated browser context
+inputs:
+  fixture_url: { type: string }
+criteria:
+  - id: AC-1
+    description: A narrow dark context switches the page to its mobile layout and dark theme.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: emu
+            uses: ui/emulate
+            with: { viewport: { width: 390, height: 844 }, color_scheme: dark }
+          - uses: ui/navigate
+            with: { url: $inputs.fixture_url }
+          - uses: ui/assert-element
+            with: { locator: { testid: narrow-layout }, expected: visible }
+          - uses: ui/assert-element
+            with: { locator: { testid: wide-layout }, expected: hidden }
+          - uses: ui/assert-element
+            with: { locator: { testid: dark-theme }, expected: visible }
+          - uses: ui/assert-element
+            with: { locator: { testid: light-theme }, expected: hidden }
+        assertions:
+          - $steps.emu.outputs.color_scheme == 'dark'
+          - $steps.emu.outputs.viewport.width == 390
+          - $steps.emu.outputs.viewport.height == 844
+  - id: AC-2
+    description: A sibling check starts from the default viewport and color scheme again.
+    checks:
+      - id: AC-2.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.fixture_url }
+          - uses: ui/assert-element
+            with: { locator: { testid: wide-layout }, expected: visible }
+          - uses: ui/assert-element
+            with: { locator: { testid: narrow-layout }, expected: hidden }
+          - uses: ui/assert-element
+            with: { locator: { testid: light-theme }, expected: visible }
+          - uses: ui/assert-element
+            with: { locator: { testid: dark-theme }, expected: hidden }

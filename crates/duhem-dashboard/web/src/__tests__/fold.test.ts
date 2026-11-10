@@ -185,3 +185,20 @@ describe("carryFetched", () => {
     expect(merged.has_definition).toBe(false);
   });
 });
+
+it("retains the effective gate, body state and required false cleanup judgment", () => {
+  const done = foldRun("cleanup", [
+    { seq: 0, ts: "2026-06-10T10:00:00.000Z", kind: "setup_started", phase: "teardown", fixture_name: "resource", check_id: "body", cleanup_policy: "required" },
+    { seq: 1, ts: "2026-06-10T10:00:00.001Z", kind: "setup_step_started", phase: "teardown", fixture_name: "resource", check_id: "body", step_index: 0, uses: "api/poll" },
+    { seq: 2, ts: "2026-06-10T10:00:00.002Z", kind: "setup_step_finished", phase: "teardown", fixture_name: "resource", check_id: "body", step_index: 0, outcome: "ok", judgment: "fail" },
+    { seq: 3, ts: "2026-06-10T10:00:00.003Z", kind: "setup_finished", phase: "teardown", fixture_name: "resource", check_id: "body", aborted: true },
+    { seq: 4, ts: "2026-06-10T10:00:00.004Z", kind: "run_finished", verdict: "fail", body_verdict: "pass" },
+  ]);
+  expect(done.verdict).toBe("fail");
+  expect(done.body_verdict).toBe("pass");
+  expect(done.lifecycle?.[0].cleanup_policy).toBe("required");
+  expect(done.lifecycle?.[0].status).toBe("failed");
+  expect(done.lifecycle?.[0].failing_step).toBe(0);
+  expect(done.lifecycle?.[0].steps[0].outcome).toBe("ok");
+  expect(done.lifecycle?.[0].steps[0].judgment).toBe("fail");
+});

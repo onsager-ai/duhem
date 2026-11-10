@@ -14,6 +14,7 @@ impl Engine {
         iteration: Option<u32>,
         environment_failed: bool,
         failed_by: &mut Option<String>,
+        groups: &mut GroupGates,
         stored_error: &mut Option<EngineError>,
         cleanup_steps: &mut BTreeSet<usize>,
         step_evidence: &mut [StepEvidence],
@@ -21,17 +22,22 @@ impl Engine {
     ) -> Result<(), EngineError> {
         for idx in indices {
             let step = &check.steps[idx];
+            if let Some(id) = &step.id {
+                contexts.boundaries.remove(id);
+            }
             writer.set_session(step.session.as_deref());
             let check_browser = contexts.browsers.get(&step.session);
             let storyboard = contexts
                 .storyboards
                 .entry(step.session.clone())
                 .or_default();
-            let (gate, condition_error) = match evaluate_gate(step, idx, failed_by.as_deref(), ctx)
-            {
-                Ok(gate) => (gate, None),
-                Err(error) => (None, Some(error)),
-            };
+            // An unresolvable condition makes this check inconclusive
+            // rather than aborting the run (#440 R2); see below.
+            let (gate, unresolved_condition) =
+                match evaluate_in_check(step, idx, failed_by.as_deref(), groups, ctx) {
+                    Ok(gate) => (gate, None),
+                    Err(detail) => (None, Some(detail)),
+                };
             let cleanup_step = failed_by.is_some() && gate.is_none();
             if cleanup_step {
                 cleanup_steps.insert(idx);
@@ -40,9 +46,7 @@ impl Engine {
             // context available without bifurcating evidence.
             let mut resolved_with = step.with.clone();
             let catalog_reference = page_reference(&step.with);
-            let step_error = if condition_error.is_some() {
-                condition_error
-            } else if gate.is_none() {
+            let step_error = if gate.is_none() && unresolved_condition.is_none() {
                 substitute_with(&mut resolved_with, ctx).err().map(|u| {
                     EngineError::UnresolvedReference {
                         context: u.rendered_context(),
@@ -57,8 +61,14 @@ impl Engine {
             // `timeout:` when it doesn't declare its own. A per-step
             // `timeout:` already in the payload wins; this only fills the
             // gap. With no manifest default, the action's built-in
-            // `DEFAULT_TIMEOUT` (5s) remains the last resort.
+            // `DEFAULT_TIMEOUT` (5s) remains the last resort. Actions whose
+            // contract has no `timeout` field never receive one.
             if gate.is_none()
+                && !step.uses_name().starts_with("process/")
+                && self
+                    .registry
+                    .get(step.uses_name())
+                    .is_some_and(|action| action.accepts_timeout())
                 && let Some(default) = self.default_timeout
             {
                 apply_default_timeout(&mut resolved_with, default);
@@ -70,6 +80,7 @@ impl Engine {
             // anything, so recording its
             // locator would be misleading evidence.
             let will_run = gate.is_none()
+                && unresolved_condition.is_none()
                 && step_error.is_none()
                 && !environment_failed
                 && self.registry.contains_key(step.uses_name());
@@ -95,16 +106,32 @@ impl Engine {
             // action's contract without a second registry lookup. The
             // invocation itself stays *after* `StepStarted` — see the
             // registration comment below.
-            let dispatcher =
-                if gate.is_some() || step_error.is_some() || !known || environment_failed {
-                    None
-                } else {
-                    Some(
-                        self.registry
-                            .get(step.uses_name())
-                            .expect("known checked above"),
-                    )
-                };
+            let dispatcher = if gate.is_some()
+                || unresolved_condition.is_some()
+                || step_error.is_some()
+                || !known
+                || environment_failed
+            {
+                None
+            } else {
+                Some(
+                    self.registry
+                        .get(step.uses_name())
+                        .expect("known checked above"),
+                )
+            };
+
+            // A dispatched call to a flow with `cleanup:` registers it on this
+            // check attempt (#615); one gated off by `if:` registers nothing.
+            if gate.is_none() {
+                ctx.run_state().register_flow_cleanups(
+                    step,
+                    &crate::engine::flow_cleanup::RegisteredAt::Check(
+                        criterion_id.to_string(),
+                        check.id.clone(),
+                    ),
+                );
+            }
 
             crate::engine::flow::register_secrets(writer, step, ctx);
 
@@ -124,6 +151,7 @@ impl Engine {
                         }
                         flow
                     },
+                    group: crate::engine::flow::group_path(step),
                 })
                 .await?;
 
@@ -153,6 +181,32 @@ impl Engine {
                     })
                     .await?;
                 step_evidence[idx] = StepEvidence::skipped(reason);
+                continue;
+            }
+
+            if let Some(detail) = unresolved_condition {
+                // Same evidence shape as any errored step, so the implicit
+                // judgment reports `Inconclusive(MissingObservation)` with
+                // this detail; no engine error, so the run continues.
+                let detail = writer.mask_text(&detail);
+                writer
+                    .append(EventPayload::StepFinished {
+                        step_index: idx as u32,
+                        outcome: duhem_evidence::StepOutcome::Error,
+                        detail: Some(detail.clone()),
+                    })
+                    .await?;
+                step_evidence[idx] = StepEvidence {
+                    with: resolved_with.clone(),
+                    outputs: BTreeMap::new(),
+                    skip_reason: None,
+                    catalog_reference: catalog_reference.clone(),
+                    outcome: Some(Outcome::Error),
+                    detail: Some(detail),
+                };
+                if failed_by.is_none() {
+                    *failed_by = Some(display_step_label(step, idx));
+                }
                 continue;
             }
 
@@ -201,14 +255,35 @@ impl Engine {
                         Some(Err(error))
                     } else {
                         let page_ref: Option<&Page> = check_browser.as_ref().map(|cb| &cb.page);
-                        let result = dispatcher
-                            .invoke(
-                                page_ref,
-                                idx,
-                                &resolved_with,
-                                &self.child_process_env(writer.run_id()),
-                            )
-                            .await;
+                        let start = match page_ref {
+                            Some(page) => page.session_time_ms().await.ok(),
+                            None => None,
+                        };
+                        let result = crate::engine::registry::invoke_scoped(
+                            dispatcher.as_ref(),
+                            page_ref,
+                            idx,
+                            &resolved_with,
+                            &self.child_process_env(writer.run_id()),
+                            ctx.run_state(),
+                            &ctx.run_state().process_owner,
+                            writer,
+                            &contexts.boundaries,
+                            step.session.as_deref(),
+                        )
+                        .await;
+                        if let (Some(page), Some(start_ms), Some(id)) = (page_ref, start, &step.id)
+                            && let Ok(finish_ms) = page.session_time_ms().await
+                        {
+                            contexts.boundaries.insert(
+                                id.clone(),
+                                duhem_actions::action::StepBoundary {
+                                    session: step.session.clone(),
+                                    start_ms,
+                                    finish_ms,
+                                },
+                            );
+                        }
                         if let Ok(r) = &result {
                             crate::engine::secret_output::register(
                                 writer,

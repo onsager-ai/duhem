@@ -141,6 +141,7 @@ async fn export_refuses_traversal_shaped_ids() {
         layer: None,
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();
@@ -168,6 +169,7 @@ async fn export_refuses_traversal_shaped_ids() {
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await

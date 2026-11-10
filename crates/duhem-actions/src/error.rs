@@ -43,6 +43,10 @@ pub enum ActionError {
     #[error("cli process error: {0}")]
     Process(String),
 
+    /// Failure to launch, inspect or finalize a runtime-owned process (#579).
+    #[error("owned process error: {0}")]
+    OwnedProcess(String),
+
     /// `db/*` failure: bad connection URL, connect failure, or a SQL
     /// error. As with `api/call`'s status, the *result rows* are data —
     /// only a failure to run the query lands here. The engine maps it to

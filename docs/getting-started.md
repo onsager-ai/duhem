@@ -110,6 +110,23 @@ up) and deliberately refuses to call that a pass. The final line counts
 checks that actually executed. A check excluded by `--filter` is not
 included in `Total`; it emits no verdict for the run to count.
 
+Every new run also reports authored, selected and recorded-outcome counts.
+For example, selecting one of two checks prints `1 of 2 checks recorded`
+and names the excluded pair; a passing subset does not claim full coverage.
+Recorded inconclusive outcomes do not prove a body passed. Manifest directory
+or verification-name selection likewise states how many authored leaves were
+selected and why the others were excluded. JSON carries these facts under
+`claim_scope` on leaf summaries and `selection` on the manifest envelope;
+older reports without them have unknown authored scope.
+
+For machine consumption, add `--reporter json`. A leaf target with a
+top-level `criteria:` key emits a `RunSummary` v2; a manifest with
+`verifications:` emits a `RunSetSummary` v1 containing its leaf summaries
+in `runs[]`. The target's content selects the shape, not its filename.
+The two schema versions are independent, and the run-set totals sum the
+leaf totals. See [the reporter contract](./duhem-spec.md#11-architecture)
+for one-line examples of both shapes.
+
 When a step itself cannot complete, the failure includes the recorded
 engine/action cause rather than stopping at a bare `error`. For example:
 
@@ -152,6 +169,31 @@ happens, and the runs list refreshes itself, so an in-flight run shows
 up (marked `● live`) without a reload. Or skip the copy-paste: `duhem
 run --watch` opens that page in your browser automatically (once per
 invocation; `DUHEM_OPENER` overrides the platform opener).
+
+
+
+### Report definitions with no recorded run
+
+`duhem coverage verifications --db /path/to/existing/duhem.db --base .` lists each
+declared definition and its latest recorded run start, run status, and
+verdict. `--format json` emits the same report as JSON. You can also supply
+a leaf file or manifest directly. A directory tree discovers conventional
+`duhem.yml`, `duhem.yaml`, `.duhem.yml`, or `.duhem.yaml` files; a found
+manifest supplies its declared leaves, including globs. Other directories
+are searched recursively, excluding `.git`, `node_modules`, and `target`,
+without following directory symlinks. An explicit leaf may have any filename.
+
+The supplied store opens read-only and must already exist. `no_recorded_run`
+means no matching canonical absolute source path has a run in this store.
+It does not claim an invocation never happened elsewhere. For ordinary relative-path runs, pass `--base` with their original invocation
+directory (often the repository root). The store key is hashed and cannot
+recover that directory safely. The command never guesses the base from
+today's cwd. Without `--base`, relative records are counted as unmatched;
+both output formats report total and relative unmatched-run counts. Moved
+working copies or stores shipped from another machine may still not match.
+A timestamp records the latest run start, including incomplete runs, and
+does not prove a check body completed. This command reports observations;
+missing runs do not fail a gate or change its successful exit code.
 
 ## 4. The anatomy of a VD
 
@@ -537,3 +579,67 @@ which stays on your side (local or CI), never in the server.
   verdict; the `duhem/run` composite action wraps this.
 - **The full model.** [`docs/duhem-spec.md`](./duhem-spec.md) —
   especially §7 (Core Concepts) and §8 (Holistic Verification).
+
+
+### Locate a failing loop iteration
+
+Current runs prefix a failing `for_each` assertion's existing report detail
+with its authored loop step and one-based iteration, for example
+`for_each step 1, iteration 2 of 3: actual 0, expected 1`. The count is the
+resolved source array's full length; step and ordinal distinguish multiple
+loops in one check. Default, pretty and JUnit reporters consume that same
+failure detail. The RunSummary contract adds no iteration fields, and older
+reports retain their existing text rather than inventing an unknown count.
+
+
+### Profile selection spelling
+
+Use `--profile NAME` with `duhem run` or `duhem resolve` to select a
+manifest profile. The former `--environment NAME` alias is removed in
+the next release after v0.6.0; replace that spelling in scripts and CI.
+
+### Migrate page-state assertions
+
+In the next release after v0.6.0, replace `ui/assert-state` steps with
+`ui/assert-element` on the application's state marker. For example, a
+product that exposes `data-testid="signed-in-user"` when signed in can
+assert that marker directly:
+
+```yaml
+- uses: ui/assert-element
+  with:
+    locator: { testid: signed-in-user }
+    expected: visible
+    timeout: 20s
+```
+
+For a loaded page, assert its ready heading or other stable ready marker;
+for signed-out state, assert the sign-in affordance. Choose the marker
+that establishes the product's intended claim. `ui/assert-element` emits
+`satisfied` and retains implicit judgment; any explicit bindings to
+`satisfied` can remain. `api/poll`, `db/observe` and `ui/select` remain
+supported native actions.
+
+### Assert or interact inside an iframe
+
+Add `frame:` to a locator to address the iframe's contents rather than
+the iframe element. The same form works for `ui/assert-element`,
+`ui/click`, `ui/type`, `ui/select`, `ui/extract` and named `$pages.*` entries:
+
+```yaml
+- uses: ui/assert-element
+  with:
+    locator:
+      frame: { testid: report-shell-iframe }
+      role: heading
+      name: Weekly report
+    expected: visible
+    timeout: 30s
+```
+
+For nested frames, place `frame:` on the inner iframe's locator too:
+`frame: { frame: { testid: shell }, testid: report }`. `scope:` narrows
+within the selected document. Cross-origin frames work through the
+browser driver. Missing/ambiguous frames cannot establish inner absence,
+even for `not_exists`; the action deadline includes frame readiness.
+See the [executed example](../verifications/iframe-example/duhem.yml).

@@ -16,7 +16,7 @@ by deterministic evaluation of structured assertions. No LLM is in the
 verdict loop.
 
 **Retrieve, don't recall.** Duhem's action catalog is versioned and
-evolves; don't guess `with:` keys or output names from memory. Ask the
+evolves; don't guess `with:` keys or output names from memory. Use the available structured question tool to ask the
 CLI for the version-exact contract as you author:
 
 ```bash
@@ -170,6 +170,14 @@ genuinely need an action type the catalog doesn't have, that's a Duhem
 engine change, not something to invent locally; don't silently mint new
 `uses:` strings.
 
+`api/call` and `api/observe` declare their response outputs, so reference
+`status`, `body`, `body_text`, `headers` and `body_bytes` directly (`api/observe`
+also has `method`, `url`, `request_body`, `request_headers`). `body_bytes` is an
+integer count of the payload bytes after the client's content decoding, before
+text or JSON conversion: `é` is `2`, an empty body is `0`; it is not
+`Content-Length`. `headers` has lower-case names; use a dotted path such as
+`headers.location` for hyphen-free names.
+
 Common shape (terse):
 
 ```yaml
@@ -187,6 +195,23 @@ Common shape (terse):
 ```
 
 Authoring rules:
+
+- Use quoted bracket keys for object names such as
+  `$steps.r.outputs.headers['content-type']`; escape quotes as `\'` and
+  backslashes as `\\`. Keys must be nonempty. `[0]` indexes an array;
+  `['0']` addresses an object key. The same syntax works on flow params,
+  including page-call arguments: `$params.items[0]['a-b']`.
+
+- Use `ui/observe-console` with a required same-session `window` to record
+  page errors and console messages separately. Assert `complete == true`
+  before interpreting `page_error_count` or `console_error_count` as absence;
+  console levels are facts and do not themselves determine a verdict.
+
+- For request counts or ordering, use `api/observe` with
+  `window: { from_step: <earlier-id>, edge: start, duration: 1s }` on the
+  same browser session. Assert `complete == true` before interpreting an
+  empty `requests` array or zero `count` as absence. `truncated` signals
+  dropped records; without `window`, observe returns the first matching response.
 
 - Reference outputs by their fully-qualified path,
   `$steps.<id>.outputs.<name>`; add `outputs:` only for a rename or a
@@ -206,8 +231,14 @@ Authoring rules:
   should run only after failure. Both still run after a step-level
   engine error before the original error aborts the run. A retried
   check runs its cleanup once per attempt, so cleanup steps must be
-  idempotent. Do not invent expressions under `if:`; its closed
-  vocabulary is `success | always | failure`.
+  idempotent. `if:` also accepts a value expression on check steps
+  (`if: $steps.probe.outputs.row_count > 0`) that reads earlier steps in
+  the same check, `$inputs` or `$setup`; the
+  closed outcome vocabulary is `success | always | failure`, and
+  `success` stays the default. A false condition gates the step and the
+  report counts the gated judging step. A condition that cannot be
+  resolved makes the check `inconclusive`, never a silent skip, and so
+  does a later read of the gated step's outputs.
 - Use role-based locators (`{ role: "button", name: "…" }`) for `ui/*`
   rather than CSS or XPath — UI churn invalidates the latter while
   role-based selectors track the user-visible affordance.
@@ -219,7 +250,86 @@ Authoring rules:
   judge input; an authored output under `capture/` is rejected at
   validate time.
 
+#### Drive browser history
+
+`ui/back` / `ui/forward` take only an optional `timeout:` and move through the
+check's real browser history, so state the browser keeps for history entries
+is what the next step observes. Assert `$steps.<id>.outputs.navigated`
+(`true` when the browser moved, including same-document hash/`pushState`
+entries; `false` with `url == from_url` when no entry exists) and read
+`from_url` / `url` for the move. A missing entry is not an error and never
+becomes a direct navigation.
+
+#### Group steps under one label, condition or session
+
+Every step declares exactly one of `uses:`, `call:` or `steps:`;
+`for_each:` is a modifier that repeats it. A step with `steps:` is a
+group: a label and a scope, not a boundary in the sequence.
+
+```yaml
+steps:
+  - id: prepare
+    description: Prepare the workspace
+    steps:
+      - { id: mk, uses: cli/invoke, with: { command: [sh, -c, "printf ok"] } }
+      - { id: chk, uses: cli/invoke, with: { command: [sh, -c, "true"] } }
+  - id: diagnostics
+    if: failure
+    steps:
+      - { uses: cli/invoke, with: { command: [sh, -c, "echo diag"] } }
+```
+
+- A group may carry `id:` (a label only), `description:`, `if:` and
+  `session:`. It takes no `with:`, `outputs:`, `secret_outputs:`, `as:`
+  or `max:` unless it is also a `for_each:` step. Groups work wherever
+  steps do: check `steps:`, `setup:`/`teardown:`, flow bodies, fixture
+  `up:`/`down:`.
+- The group's `if:` (`success | always | failure`, or a value
+  expression) is evaluated once, when the group is entered. If false,
+  every step inside is recorded as skipped and names the group as the
+  cause. Steps inside keep their own `if:`; a group's `if: always` or
+  `if: failure` is also the default for inner steps that declare none.
+- Failure state is shared. A failure inside a group gates later default
+  steps both inside and after it, and `if: failure` / `if: always` inside
+  a group behave exactly as they do at the top level.
+- Step ids inside a group share the enclosing namespace and must stay
+  unique across the whole tree. `$steps.<id>` names an inner step; a
+  group's own `id:` has no outputs, so `$steps.<group-id>` is a
+  validation error.
+- In a check that declares `sessions:`, `session: <name>` on a group
+  fills every inner `ui/*` step that names none; a step's own `session:`
+  wins.
+- Loops stay one level deep: a `for_each:` body may contain groups, but
+  no step anywhere under a `for_each:` may itself carry `for_each:`.
+  `duhem resolve` reports the worst-case step count as the sum of the
+  steps in the tree.
+
 #### Share locators instead of copying them
+
+For iframe contents, add `frame: { testid: report-shell-iframe }` to
+the inner locator, for example `{ frame: { testid: report-shell-iframe },
+role: heading, name: Weekly report }`. The frame is a structured locator;
+it may itself contain `frame:` for nested documents. `scope:` stays
+within the selected document. The same form works for named `$pages.*`
+entries and locator-taking UI actions, including cross-origin frames.
+The timeout includes frame readiness. An unavailable or ambiguous frame
+cannot establish that its contents are absent.
+
+For geometry and computed style, use `ui/extract` with `field: rect`
+(`{x, y, width, height, top, right, bottom, left, scroll_x, scroll_y}` in CSS
+px, relative to the element's own document viewport) or `style: <css-property>`
+(the computed string, e.g. `rgb(17, 17, 17)`); assert thresholds in `assertions:`.
+
+Keyboard and focus: `ui/press { key, locator?, timeout? }` takes a Playwright
+key name or `+` chord (`Enter`, `Tab`, `Shift+Tab`, `Control+a`). With a
+`locator` it focuses that element and presses; without one it presses on
+whatever is focused and records `outputs.target` (`{tag, id, role, name}`,
+sampled before the press; `name` approximates the accessible name). `ui/focus`
+is programmatic `element.focus()`, not a user gesture; to verify keyboard
+focus movement press `Tab`, then assert `expected: focused` (or
+`not_focused`) on `ui/assert-element`. Focused means the element is its own
+document's active element and that document has focus, including inside a
+`frame:` document.
 
 When two leaves use the same locator, declare it once in an ordinary
 manifest include and reference it as `$pages.<group>.<name>`:
@@ -296,9 +406,9 @@ entire caller-visible interface. Callers read only
 inputs. Use `duhem resolve --provenance` to inspect the expanded action
 sequence and its flow origins.
 
-A `setup:`/`teardown:` block (leaf, criterion, or check) and a
-fixture's `up:`/`down:` accept `call:` too, with the same `with:`
-binding and the same masking for `secret: true` params:
+A `setup:`/`teardown:` block (leaf, criterion, or check) accepts
+`call:` too, with the same `with:` binding and the same masking for
+`secret: true` params:
 
 ```yaml
 flows:
@@ -317,11 +427,56 @@ teardown:
 ```
 
 The one difference from a check's `call:`: a lifecycle block reads the
-call's declared outputs through its own accessor —
-`$setup.<call-id>.outputs.<name>` in `setup:`/`teardown:` (or
-`$fixture.<fixture-name>.<call-id>.outputs.<name>` in that fixture's
-own `up:`/`down:`) — never `$steps.*`, which a lifecycle block does
-not resolve.
+call's declared outputs through its own accessor,
+`$setup.<call-id>.outputs.<name>` in `setup:`/`teardown:`, never
+`$steps.*`, which a lifecycle block does not resolve.
+
+#### Give a flow its own cleanup
+
+A flow that creates something can remove it too: declare `cleanup:` next
+to `steps:`. Whoever calls the flow gets the cleanup without writing it.
+
+```yaml
+flows:
+  scratch_file:
+    params: { prefix: { type: string } }
+    steps:
+      - id: create
+        uses: cli/invoke
+        with: { command: [sh, -c, 'f=$(mktemp "/tmp/$1.XXXX"); printf %s "$f"', --, $params.prefix] }
+    outputs: { path: $steps.create.outputs.stdout }
+    cleanup:
+      - uses: cli/invoke
+        with: { command: [rm, -f, $steps.create.outputs.stdout] }
+    # cleanup_policy: diagnostic_only   # optional; default is required
+```
+
+- The cleanup is registered when a `call:` to the flow starts running and
+  runs, last registered first, when the scope that made the call ends:
+  a check's `steps:` or `setup:` at the end of that check attempt (so
+  again on every retry), a criterion's `setup:` at the end of the
+  criterion, leaf `setup:` at the end of the run. It runs before that
+  scope's own `teardown:`, in one last-registered-first order. It also
+  runs if the run is interrupted.
+  A call skipped by `if:` registers nothing; a body that fails partway
+  still runs its cleanup, so write cleanup steps that tolerate a
+  resource that was never created (`rm -f`).
+- A flow may start with, or be, a `for_each:` step, and its `cleanup:`
+  may loop too (same `max:` rule as everywhere). The call counts as
+  started when its first body step actually runs, so a loop over an
+  empty list registers nothing.
+- A cleanup step reads `$params.*` and the same call's body outputs as
+  `$steps.<body-id>.outputs.*`; nothing else, and callers cannot read
+  cleanup steps. A flow with `cleanup:` cannot be called from
+  `teardown:` or another flow's `cleanup:`.
+- Every cleanup step is attempted even if one fails. By default a
+  failing cleanup makes the run gate `fail` while the check keeps its own
+  verdict; `cleanup_policy: diagnostic_only` keeps the failure visible
+  without failing the run. A failure is a step error, timeout or a
+  judging step that does not pass; a non-zero `exit_code` is data, so
+  judge it with a judging action when it matters.
+- The run report lists each registered cleanup with the flow, call and
+  the scope that registered it, so the implicit registration is visible.
 
 ### 4. The holistic-environment tax — no mocks of the web
 
@@ -360,8 +515,79 @@ provision:
 Duhem forks `up:` once before `setup:`, polls the optional `ready:`
 probe, runs every check against the now-real environment, then forks
 `down:` after the criteria loop completes. If the environment never
-comes up, the run is `inconclusive` — never a false `pass`. Teardown
-failures are recorded as evidence and don't flip the verdict.
+comes up, the run is `inconclusive` — never a false `pass`.
+Provisioning `down:` failures are recorded as evidence and don't flip the
+verdict; a flow's `cleanup:` uses the policy below.
+
+#### Cleanup judgment
+
+A flow's `cleanup:` is required by default. Set
+`cleanup_policy: diagnostic_only` on that flow when its cleanup should
+remain visible without blocking the run. The policy applies only to that
+flow's `cleanup:`; `setup:` steps, leaf/criterion/check `teardown:`,
+`provision.down:`, and diagnostic capture keep their existing behavior.
+
+A required cleanup execution error, timeout, step-local runtime or dispatch
+error, or a non-passing implicit judgment from an action that reports
+`satisfied` (including a missing required judging output)
+makes the effective run gate `fail` after the body. The check and criterion
+results keep their body judgments. When the gate changes the run verdict, the
+run record retains `body_verdict`; required failures from earlier retry
+attempts remain gate-blocking even if a later body passes.
+
+Returned values are observations unless the action judges them. A non-zero
+`exit_code` from `cli/invoke` or an HTTP 500 response from `api/call` does not
+by itself fail cleanup. To judge an HTTP cleanup result, use `api/poll` with
+`method: GET` and `until: {status: 200}`.
+
+This page-free example deliberately names a nonexistent executable, which
+produces an execution error rather than a non-zero exit-code observation.
+The body passes, the run gate fails, and `body_verdict` is `pass`:
+
+```yaml
+verification: Required flow cleanup
+flows:
+  resource:
+    steps:
+      - uses: cli/invoke
+        with: {command: [sh, -c, "true"]}
+    cleanup:
+      - id: release
+        uses: cli/invoke
+        with: {command: [duhem-intentionally-nonexistent-cleanup-command]}
+criteria:
+  - id: CLEANUP
+    description: Required resource cleanup must succeed before acceptance.
+    checks:
+      - id: CLEANUP.1
+        setup:
+          - call: resource
+        steps:
+          - id: body
+            uses: cli/invoke
+            with: {command: [sh, -c, "true"]}
+        assertions:
+          - $steps.body.outputs.exit_code == 0
+```
+
+For the diagnostic control, add `cleanup_policy: diagnostic_only` under
+`flows.resource`. The cleanup failure is still reported, but the passing
+body leaves the run gate `pass`.
+
+#### Deprecated: `fixtures:` and `needs:`
+
+`fixtures:`, `needs:` and `$fixture.*` still work but are deprecated and
+will be removed in v0.9.0; `duhem validate` and `duhem run` warn once per
+declared fixture. Rewrite each one as a flow with `cleanup:`:
+
+| Deprecated | Use |
+|---|---|
+| `fixtures.<name>.up:` | `flows.<name>.steps:` |
+| `fixtures.<name>.down:` | `flows.<name>.cleanup:` |
+| `fixtures.<name>.cleanup_policy:` | `flows.<name>.cleanup_policy:` |
+| `$fixture.<name>.<id>.outputs.*` in `down:` | `$steps.<id>.outputs.*` in `cleanup:` |
+| `$fixture.<name>.<id>.outputs.*` in a check body or step | declare it in the flow's `outputs:`, give the call an `id:`, read `$setup.<call-id>.outputs.<name>` |
+| `needs: [<name>]` on a check | `- id: <name>` + `call: <name>` at the end of the check's `setup:` |
 
 ### 5. Mechanical judgment — no LLM in the verdict
 
@@ -534,6 +760,20 @@ Use `session: ~` for a signed-out scope beneath an authenticated parent. `ui/cap
 structured `state` output secret by contract; do not add an authored
 `secret_outputs:` entry for it.
 
+## Viewport and color-scheme emulation
+
+`ui/emulate` sets the check's own viewport (`viewport: { width, height }`,
+positive integer CSS px) and/or `color_scheme: light | dark | no-preference`.
+At least one field is required. It applies to the check's page for later
+steps, so place it before the `ui/navigate` that should see it. Each check
+and each retry attempt starts from the run viewport and host-default color
+scheme again; emulation never leaks to siblings. Its `viewport` and
+`color_scheme` outputs are read back from the page (`innerWidth/innerHeight`
+and `prefers-color-scheme` media queries), not echoed from `with:`. Assert the
+effect with `ui/assert-element` on media-query-dependent elements. Chromium
+reports `no-preference` as `light`. In headed runs the window sizes the page
+and `viewport` is best effort, so rely on the read-back output.
+
 ## Worked example template
 
 ```yaml
@@ -610,8 +850,13 @@ criteria:
   output. The command has no browser, provisioning, evidence-write, or
   network side effects.
 - `duhem run <dir>` — runs the suite (exit 0 == pass). Add
-  `--reporter json` for a per-criterion verdict breakdown; the default
-  reporter prints only the overall pass/fail.
+  `--reporter json` for structured verdicts and recorded claim scope;
+  the default reporter prints the verdict, totals and scope. A filtered
+  pass covers only selected claims: inspect authored, selected and recorded
+  counts plus exclusions. Manifest directory/name selection also records
+  authored versus selected leaves. Reports written before these fields
+  existed have unknown authored scope; recorded counts alone cannot prove
+  complete coverage. Keep required CI claim scope explicit.
 - `duhem mcp` — exposes describe/actions/validate to your coding agent
   over MCP for AI-assisted authoring.
 - The Duhem documentation for the Holistic Verification Principle, the
@@ -622,7 +867,7 @@ criteria:
 
 Declare scalar `session: $inputs.operator_session` on a leaf, criterion, or
 check. Omission inherits the nearest declaration; `session: ~` stops it.
-Every setup, body, teardown, and fixture up/down block opens fresh contexts
+Every setup, body, teardown, and flow cleanup block opens fresh contexts
 from the seed. Cleanup must navigate again; body cookies and page state do
 not carry into cleanup. Browser-free blocks open no contexts.
 
@@ -636,3 +881,41 @@ Select a name on each browser step, or put `session: <name>` on a `call:`:
 undeclared inner browser selectors inherit it; explicit inner selectors win.
 Call selectors require a named-sessions check. `defaults.max_sessions` caps
 simultaneously open contexts per check (default 4).
+
+
+### Check recorded invocation coverage
+
+Use `duhem coverage <leaf-or-manifest-or-directory> --db <existing-store>`
+to list definitions and their latest recorded run start. `--format json`
+provides structured output. Directory discovery recognizes conventional
+Duhem filenames and manifest-declared leaves. `no_recorded_run` is limited
+to the supplied store and canonical absolute source paths: supply `--base DIR` with the original invocation directory for relative
+records. Without a base they are explicitly counted as unmatched; paths
+from moved working copies are not guessed. Reporting never proves
+that an unseen invocation did not happen or that a check body completed.
+
+### Own long-lived local services
+
+For a server or watcher that must remain alive across steps, retrieve
+`duhem describe process/start` / `inspect` / `stop` / `restart` from the
+installed version. These actions are available after v0.7.0. `command` is
+an executable, `args` is a string array, and stdin is closed. Pass secrets
+through declared secret inputs. HTTP or stdout/stderr-regex readiness has
+an explicit timeout; without a probe `ready: false` means spawned only.
+
+Start in check `setup` or a flow with `cleanup:` when the check must stop/restart it.
+Enclosing leaf/criterion handles are inspect-only; sibling checks and
+retries cannot mutate each other's processes. Restart returns a fresh
+handle/generation, stops the old group before replacement, and preserves
+product-owned state. Assert actual response/publication/recovery facts;
+none of the four actions implicitly judges the product.
+
+`inspect` logs are bounded (64 KiB and 1024 records per stream), masked
+across reads, and carry cursors, generation, truncation and dropped-byte
+facts. A cursor belongs to its original handle. Always-required runtime
+cleanup follows authored cleanup at owner scope exit, even in a
+`diagnostic_only` flow cleanup or with `--keep-env`. Failed finalization blocks
+the effective gate while preserving body judgment. Linux/macOS are
+supported first; other platforms reject before spawn. Do not daemonize or
+escape the owned group. Fixed ports and disposable state remain flow
+responsibilities.

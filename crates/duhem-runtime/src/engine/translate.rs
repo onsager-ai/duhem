@@ -233,6 +233,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn matches_distinguishes_null_from_an_absent_observed_field() {
+        use crate::engine::{RunContext, RunState};
+        use crate::eval::{Value, eval};
+
+        let expression = duhem_schema::ExprStr::from_source(
+            "$runtime.matches($steps.probe.outputs.body.value, '^[0-9]')",
+        )
+        .unwrap();
+        let run = RunState::new(BTreeMap::new());
+        for (fields, expected, detail) in [
+            (
+                BTreeMap::from([("value".into(), Value::Null)]),
+                VerdictState::Fail,
+                "type_mismatch(null, str)",
+            ),
+            (
+                BTreeMap::new(),
+                VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+                "missing_field(body.value)",
+            ),
+        ] {
+            let mut context = RunContext::new(&run);
+            context.record_output("probe", "body", Value::Object(fields));
+            let result = eval(&expression.parsed, &context);
+            assert_eq!(eval_to_state(&result), expected);
+            let EvalResult::Inconclusive(cause) = result else {
+                panic!("expected an evaluator cause");
+            };
+            assert_eq!(eval_cause_detail(&cause), detail);
+        }
+    }
+
+    #[test]
     fn type_mismatch_gates_as_fail_not_environment_error() {
         // A type mismatch is a defect in the VD, not flaky infra: it must
         // gate as `fail`, never a retry-eligible

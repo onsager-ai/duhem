@@ -3,7 +3,7 @@
 // serves. The browser never computes a verdict: every verdict below
 // is lifted verbatim from the judge's `*_finished` events.
 
-import type { CriterionDetail, LifecycleBlock, RunDetail, TraceEvent } from "./api";
+import type { ClaimScope, CriterionDetail, LifecycleBlock, RunDetail, TraceEvent } from "./api";
 
 /** Fields `foldRun` cannot derive from the event stream. `useRun` carries
  *  them over from the authoritative `GET /api/runs/:id` so a live run shows
@@ -79,6 +79,9 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
         detail.verification = String(evt.verification_path ?? runId);
         detail.inputs = (evt.inputs as Record<string, unknown>) ?? {};
         break;
+      case "claim_scope_declared":
+        detail.claim_scope = structuredClone(evt.scope as ClaimScope);
+        break;
       case "setup_finished":
         if (evt.phase !== "teardown" && evt.criterion_id == null &&
             evt.check_id == null && evt.fixture_name == null) {
@@ -149,6 +152,7 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
         break;
       }
       case "run_finished":
+        detail.body_verdict = typeof evt.body_verdict === "string" ? evt.body_verdict : undefined;
         detail.verdict =
           typeof evt.verdict === "string" ? String(evt.verdict) : null;
         detail.status = "finished";
@@ -159,6 +163,11 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
     }
   }
   detail.lifecycle = foldLifecycle(events);
+  if (detail.claim_scope) {
+    const completed = detail.criteria.map((criterion) => criterion.checks.filter((check) => check.verdict !== null));
+    detail.claim_scope.criteria.executed = completed.filter((checks) => checks.length > 0).length;
+    detail.claim_scope.checks.executed = completed.reduce((total, checks) => total + checks.length, 0);
+  }
   return detail;
 }
 
@@ -184,6 +193,8 @@ function foldLifecycle(events: TraceEvent[]): LifecycleBlock[] {
   for (const evt of events) {
     if (evt.kind === "setup_started") {
       blocks.push({
+        cleanup_policy: evt.cleanup_policy === "required" || evt.cleanup_policy === "diagnostic_only" ? evt.cleanup_policy : undefined,
+        registered_by: registrationOf(evt.registered_by),
         phase: evt.phase === "teardown" ? "teardown" : "setup",
         scope: scope(evt), status: "aborted", started_at: evt.ts,
         duration_ms: 0, steps: [], timeline: [evt],
@@ -209,10 +220,11 @@ function foldLifecycle(events: TraceEvent[]): LifecycleBlock[] {
       if (position !== undefined) {
         const step = block.steps[position];
         step.outcome = evt.outcome as typeof step.outcome;
+        step.judgment = typeof evt.judgment === "string" ? evt.judgment : undefined;
         step.detail = typeof evt.detail === "string" ? evt.detail : undefined;
         step.duration_ms = Math.max(0, Date.parse(evt.ts) - block.step_started[position]);
         block.step_finished[position] = true;
-        if ((evt.outcome === "error" || evt.outcome === "timeout") && block.failing_step === undefined) {
+        if ((evt.outcome === "error" || evt.outcome === "timeout" || (step.judgment !== undefined && step.judgment !== "pass")) && block.failing_step === undefined) {
           block.failing_step = position;
         }
       }
@@ -231,4 +243,9 @@ function foldLifecycle(events: TraceEvent[]): LifecycleBlock[] {
     step_finished: _stepFinished,
     ...block
   }) => block);
+}
+
+function registrationOf(raw: unknown): { flow: string; call: string } | undefined {
+  const r = raw as { flow?: unknown; call?: unknown } | undefined;
+  return typeof r?.flow === "string" && typeof r.call === "string" ? { flow: r.flow, call: r.call } : undefined;
 }

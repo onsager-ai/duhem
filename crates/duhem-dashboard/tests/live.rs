@@ -73,6 +73,7 @@ async fn connect_mid_flight_streams_incrementally_and_ends_on_run_finished() {
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await

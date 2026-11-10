@@ -60,8 +60,21 @@ fn main() {
 fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
     let title = format!("run {} — {}", s.run_id, verdict_label(&s.verdict));
     writeln!(out, "{title}")?;
+    if let Some(scope) = &s.claim_scope {
+        writeln!(out, "Scope: {scope}")?;
+        for excluded in &scope.excluded {
+            writeln!(
+                out,
+                "  excluded {}::{} ({})",
+                excluded.criterion_id, excluded.check_id, excluded.reason
+            )?;
+        }
+    }
     // Column width: long enough for `AC-99.99` style ids; verdict
     // column shares a single space-padded gap. Plain text only at
+    if let Some(body) = s.body_verdict {
+        writeln!(out, "body: {body}")?;
+    }
     // v1 — see the module docstring for the rationale.
     let id_w = s
         .criteria
@@ -122,12 +135,27 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
                     status_label(block.status),
                     block.duration_ms,
                 )?;
+                if let Some(registration) = &block.registered_by {
+                    writeln!(
+                        out,
+                        "      registered by flow `{}` (call `{}`) at {path}",
+                        registration.flow, registration.call
+                    )?;
+                }
+                if let Some(policy) = &block.cleanup_policy {
+                    writeln!(out, "      cleanup policy: {policy}")?;
+                }
                 if let Some(position) = block.failing_step
                     && let Some(step) = block.steps.get(position)
                 {
+                    let group = step
+                        .group
+                        .as_ref()
+                        .map(|labels| format!(" in group {}", labels.join(" > ")))
+                        .unwrap_or_default();
                     writeln!(
                         out,
-                        "      failing step {position}: {} #{} ({})",
+                        "      failing step {position}: {} #{} ({}){group}",
                         step.uses,
                         step.index,
                         outcome_label(&step.outcome),
@@ -146,9 +174,14 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
     }
     if !s.cleanup.is_empty() {
         writeln!(out)?;
-        writeln!(out, "CLEANUP (evidence only)")?;
+        writeln!(out, "CLEANUP")?;
         for failure in &s.cleanup {
-            writeln!(out, "  {}  {}", failure.outcome, failure.step)?;
+            let policy = if failure.required {
+                "required"
+            } else {
+                "diagnostic_only"
+            };
+            writeln!(out, "  {}  {} [{policy}]", failure.outcome, failure.step)?;
             if let Some(detail) = &failure.detail {
                 writeln!(out, "      ({detail})")?;
             }
@@ -203,6 +236,8 @@ mod tests {
     #[test]
     fn lifecycle_snapshot_renders_unknown_three_segment_scope() {
         let block = LifecycleBlock {
+            cleanup_policy: None,
+            registered_by: None,
             phase: LifecyclePhase::Setup,
             scope: ["alpha", "beta", "gamma"]
                 .into_iter()
@@ -225,6 +260,44 @@ mod tests {
         let rendered = String::from_utf8(out).unwrap();
         assert!(
             rendered.contains("LIFECYCLE\n  alpha:1 / beta:2 / gamma:3\n    setup  passed  12 ms"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn registered_flow_cleanup_names_its_flow_call_and_registration_site() {
+        let block = LifecycleBlock {
+            cleanup_policy: Some("required".into()),
+            registered_by: Some(duhem_summary::LifecycleRegistration {
+                flow: "scratch_file".into(),
+                call: "tmp".into(),
+            }),
+            phase: LifecyclePhase::Teardown,
+            scope: vec![
+                LifecycleScopeSegment {
+                    kind: "criterion".into(),
+                    id: "AC-1".into(),
+                },
+                LifecycleScopeSegment {
+                    kind: "check".into(),
+                    id: "AC-1.1".into(),
+                },
+            ],
+            status: LifecycleStatus::Passed,
+            started_at: "2026-01-01T00:00:00.000Z".into(),
+            duration_ms: 3,
+            steps: vec![],
+            failing_step: None,
+        };
+        let summary = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from("."))
+            .with_lifecycle(vec![block]);
+        let mut out = Vec::new();
+        render(&summary, &mut out).unwrap();
+        let rendered = String::from_utf8(out).unwrap();
+        assert!(
+            rendered.contains(
+                "registered by flow `scratch_file` (call `tmp`) at criterion:AC-1 / check:AC-1.1"
+            ),
             "{rendered}"
         );
     }
@@ -378,6 +451,7 @@ mod tests {
     fn renders_cleanup_as_evidence_without_changing_verdict() {
         let s = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from(".")).with_cleanup(
             vec![CleanupFailureSummary {
+                required: false,
                 step: "delete-record".into(),
                 outcome: "error".into(),
                 detail: Some("synthetic cleanup error".into()),
@@ -389,5 +463,28 @@ mod tests {
         assert!(out.contains("run r — pass"), "got: {out}");
         assert!(out.contains("CLEANUP"), "got: {out}");
         assert!(out.contains("delete-record"), "got: {out}");
+    }
+}
+
+#[cfg(test)]
+mod cleanup_gate_tests {
+    use super::*;
+
+    #[test]
+    fn renders_required_cleanup_and_preserved_body_state() {
+        let summary = RunSummary::new("r", VerdictState::Fail, vec![], ".".into())
+            .with_body_verdict(Some(VerdictState::Pass))
+            .with_cleanup(vec![duhem_summary::CleanupFailureSummary {
+                required: true,
+                step: "release".into(),
+                outcome: "error".into(),
+                detail: None,
+            }]);
+        let mut output = Vec::new();
+        render(&summary, &mut output).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("run r — fail"), "{output}");
+        assert!(output.contains("body: pass"), "{output}");
+        assert!(output.contains("release [required]"), "{output}");
     }
 }

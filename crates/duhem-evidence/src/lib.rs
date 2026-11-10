@@ -20,9 +20,11 @@
 //!   run header, event stream, and artifacts.
 
 pub mod bundle;
+pub mod claim_scope;
 pub mod event;
 pub mod reader;
 pub mod replay;
+mod replay_process;
 pub mod secret;
 pub mod session;
 pub mod store;
@@ -30,9 +32,9 @@ pub mod writer;
 
 pub use bundle::{BUNDLE_VERSION, BundleArtifact, BundleRun, RunBundle};
 pub use event::{
-    BLOB_INLINE_THRESHOLD_BYTES, Event, EventPayload, FlowOrigin, HEARTBEAT_PERIOD,
-    ORPHAN_THRESHOLD, ObservationValue, RunOrigin, RunStatus, SCHEMA_VERSION, StepOutcome,
-    StepPhase, VerdictState,
+    BLOB_INLINE_THRESHOLD_BYTES, CleanupRegistration, Event, EventPayload, FlowOrigin,
+    HEARTBEAT_PERIOD, ORPHAN_THRESHOLD, ObservationValue, RunOrigin, RunStatus, SCHEMA_VERSION,
+    StepOutcome, StepPhase, VerdictState,
 };
 pub use reader::{ReadError, Trace};
 pub use replay::{ReplayDivergence, ReplayError, ReplayedRun, replay};

@@ -24,6 +24,13 @@ Two kinds of directory live here, for two kinds of reader:
 The [per-row validation example](for-each-rows-example/duhem.yml) applies
 the same assertions to every row with bounded `for_each:` (#521).
 
+The [bracket keys example](bracket-keys-example/duhem.yml) asserts
+hyphenated JSON response keys with `['…']` paths against a local fixture in
+the API smoke suite (#603).
+
+The [request window example](observe-window-example/duhem.yml) asserts a
+complete browser request collection against a local fixture (#603).
+
 ## Feature examples — the learning ladder
 
 Read top to bottom: each leans on the mental model the previous one
@@ -44,9 +51,12 @@ composition.
 | 10 | [`pages-example`](pages-example/) | Share a two-level `pages:` locator catalog through `includes:` and consume the same entry from sibling leaves | browser + inline fixture pages | #366 |
 | 11 | [`flows-example`](flows-example/) | Reuse a parameterized `flows:` sign-in sequence from sibling leaves while preserving expanded-step evidence | browser + inline fixture pages | #367 |
 | 12 | [`stepless-check-example`](stepless-check-example/) | Judge inputs and pure runtime expressions with `steps: []` while retaining check ownership in evidence | nothing — fully offline | #490 |
-| 13 | [`lifecycle-hooks-example`](lifecycle-hooks-example/) | Criterion- and check-level `setup:`/`teardown:`, symmetric with leaf `setup:`/`teardown:` and per-check fixtures — the run report's resolved hook chain names each level and where it was declared | local process (`cli/invoke`) | #441 |
+| 13 | [`lifecycle-hooks-example`](lifecycle-hooks-example/) | Criterion- and check-level `setup:`/`teardown:`, symmetric with leaf `setup:`/`teardown:` — the run report's resolved hook chain names each level and where it was declared | local process (`cli/invoke`) | #441 |
 | 14 | [`lifecycle-call-example`](lifecycle-call-example/) | A direct `call:` to a reusable flow in leaf `setup:`/`teardown:` and check `teardown:` — no `for_each:` wrapper — with the call's declared output read back via `$setup.<call-id>.outputs.<name>` | local DB (`db/query` → sqlite `:memory:`) | #526 |
-| 15 | [`lifecycle-report-example`](lifecycle-report-example/) | Recorded lifecycle reporting — a passing setup, a per-check fixture, and a deliberately failing teardown remain visible by scope without changing the passing verdict | SQLite in memory (`db/query`) | #524 |
+| 15 | [`lifecycle-report-example`](lifecycle-report-example/) | Recorded lifecycle reporting — a passing setup, a per-check flow `cleanup:`, and a deliberately failing teardown remain visible by scope without changing the passing verdict | SQLite in memory (`db/query`) | #524 |
+| 16 | [`check-conditions-example`](check-conditions-example/) | Value-based `if:` on check steps — a true condition runs the step, a false one gates it and the gated judging step is counted in the report | SQLite in memory (`db/query`, `db/observe`) | #440 |
+| 17 | [`flow-cleanup-example`](flow-cleanup-example/) | A flow's `cleanup:` half — registered when a check calls the flow and run LIFO when the check ends, so a temporary resource is removed without the caller remembering | local process (`cli/invoke`) | #615 |
+| 18 | [`step-groups-example`](step-groups-example/) | Group steps with `steps:` — one label, one entry-time `if:` and one shared failure gate | local process (`cli/invoke`) | #614 |
 
 The CLI self-verification suite also carries the leaf-scoped cleanup
 worked example at
@@ -58,7 +68,38 @@ The [session cascade example](session-cascade-example/) demonstrates inherited
 seeds, signed-out opt-out, and named flow selectors. It is validated offline;
 execution requires a browser and operator-provided application inputs. (#548)
 
+The [response outputs example](response-outputs-example/duhem.yml) asserts
+`api/call`'s declared `status`, `headers` and `body_bytes` (decoded payload
+bytes) against a local HTTP server in
+`crates/duhem-runtime/tests/response_outputs.rs`. (#603)
+
 ## Self-verification suites — Duhem's dogfood
+
+The [keyboard and focus example](keyboard-focus-example/duhem.yml)
+demonstrates `ui/focus`, `ui/press` and `expected: focused | not_focused`,
+including a visible-but-unfocused negative control. It is executed against
+a local browser fixture in
+`crates/duhem-runtime/tests/keyboard_focus_smoke.rs` by browser CI. (#580)
+
+The [iframe example](iframe-example/duhem.yml) demonstrates named and
+inline frame locators, assertions and interactions. It is validated
+offline and executed against a two-origin browser fixture in
+`crates/duhem-runtime/tests/frame_smoke.rs` by browser CI. (#568)
+
+The [geometry example](geometry-example/duhem.yml) reads `ui/extract`
+`field: rect` and `style:` with positive and negative controls, including a
+frame-relative rect. It is validated offline and executed against a local
+fixture in `crates/duhem-runtime/tests/geometry_smoke.rs` by browser CI. (#580)
+
+The [emulate example](emulate-example/duhem.yml) demonstrates `ui/emulate`
+viewport and color-scheme emulation with a sibling check that proves defaults
+are restored. It is validated offline and executed against a media-query
+fixture in `crates/duhem-runtime/tests/emulate_smoke.rs` by browser CI. (#580)
+
+The [history example](history-example/duhem.yml) demonstrates `ui/back` and
+`ui/forward` over real browser history, including same-document entries and the
+no-entry case. It is validated offline and executed against a local fixture in
+`crates/duhem-runtime/tests/history_smoke.rs` by browser CI. (#580)
 
 Real VDs that gate this repo's CI. Bigger, multi-step, and pointed at a
 real system stood up by `provision:` hooks. This is what production
@@ -74,11 +115,10 @@ Duhem usage looks like — and, being Duhem-on-Duhem, it catches
 ## Where product VDs live
 
 These are *Duhem's own* VDs. A VD that verifies a **product** lives
-co-located in that product's repo under a `.duhem/` suite (epic #225) —
-e.g. `onsager-ai/chreode/.duhem/`, self-gated in its own CI. Chreode's
-suites are scheduled for deletion by chreode ADR 0016 pending a deploy-contract
-replacement, and the Duhem-side drift lane that watched them
-(`drift-chreode.yml`) is retired too (last on main at `be5a8b2`; #380).
+co-located in that product's repo under a `.duhem/` suite (epic #225),
+self-gated in its own CI.
 The drop-in skeleton for a new product repo is
 [`templates/product-repo/`](../templates/product-repo/); the shape is
 [`docs/duhem-spec.md`](../docs/duhem-spec.md) §10.1 Pattern D.
+
+The [console observation example](observe-console-example/duhem.yml) asserts complete page-error capture and a known console error against a real fixture.

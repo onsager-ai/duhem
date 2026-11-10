@@ -44,6 +44,16 @@ duhem validate .duhem/duhem.yml    # schema-check the suite
 duhem run .duhem/duhem.yml         # run it; exit 0 == pass
 ```
 
+Fixture `down:` cleanup is required by default: a cleanup execution or
+judgment failure makes the run gate fail while preserving the check and
+criterion results. When the run gate differs, `body_verdict` retains the
+body result. Set `cleanup_policy: diagnostic_only` on a fixture when
+its cleanup should remain visible without blocking the run. This policy
+applies only to that fixture's `down:`; provisioning and leaf/criterion/check
+teardowns remain diagnostic. The authoring guide in
+`.claude/skills/verification-authoring/` explains the cleanup result and
+shows both policy choices.
+
 ## Author with an AI agent
 
 `.claude/skills/verification-authoring/` is a Claude Code skill that

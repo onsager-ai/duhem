@@ -9,6 +9,7 @@
 pub mod assertion;
 pub mod criterion;
 pub mod expr;
+mod fixtures_desugar;
 mod flows;
 pub mod includes;
 pub mod jsonschema;
@@ -24,12 +25,18 @@ pub mod project;
 pub mod provision;
 mod source;
 pub mod step;
+mod step_groups;
+#[cfg(test)]
+mod step_rule_coverage;
+pub mod step_walk;
 pub mod validate;
 mod validate_actions;
 pub mod validate_error;
 mod validate_for_each;
 mod validate_lifecycle;
+mod validate_observe_window;
 mod validate_pages;
+mod validate_process;
 mod validate_runtime;
 mod validate_sessions;
 pub mod verification;
@@ -41,6 +48,7 @@ pub use expr::{
     BinOp, Expr, ExprStr, Literal, ParseError, Path, PathRoot, RuntimeHelper, RuntimeHelperArity,
     UnaryOp, authored_runtime_helper_names,
 };
+pub use fixtures_desugar::{desugar_fixtures, fixture_deprecation_warnings, is_empty_up};
 pub use includes::PartialRootManifest;
 pub use jsonschema::json_schema;
 pub use manifest::{
@@ -51,13 +59,13 @@ pub use manifest_filter::filter_loaded_to_directory;
 pub use project::{ProjectDecl, ProjectKind};
 pub use provision::{DurationSpec, HttpReadyProbe, Provision, ReadyProbe};
 pub use source::{SourceLocation, SourceMap};
-pub use step::{ExpandedFlowOrigin, Step, StepCondition};
+pub use step::{ExpandedFlowOrigin, FlowCleanup, Step, StepCondition, StepGroupFrame};
 pub use validate::{
     ValidationError, validate, validate_with_action_catalog, validate_with_contract_outputs,
 };
 pub use verification::{
-    Fixture, FixtureCatalog, Flow, FlowCatalog, InputDecl, InputType, PageCatalog, SchemaError,
-    VerificationDefinition,
+    CleanupPolicy, Fixture, FixtureCatalog, Flow, FlowCatalog, InputDecl, InputType, PageCatalog,
+    SchemaError, VerificationDefinition,
 };
 pub use viewport::Viewport;
 
@@ -76,7 +84,7 @@ pub const SCHEMA_VERSION: &str = schema_version!();
 #[macro_export]
 macro_rules! schema_version {
     () => {
-        "0.5.1"
+        "0.7.2"
     };
 }
 

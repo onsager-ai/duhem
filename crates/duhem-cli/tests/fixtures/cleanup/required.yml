@@ -1,0 +1,22 @@
+verification: Required fixture cleanup
+fixtures:
+  resource:
+    up:
+      - uses: cli/invoke
+        with: {command: [sh, -c, "true"]}
+    down:
+      - id: release
+        uses: cli/invoke
+        with: {command: [duhem-intentionally-nonexistent-cleanup-command]}
+criteria:
+  - id: CLEANUP
+    description: Required resource cleanup must succeed before acceptance.
+    checks:
+      - id: CLEANUP.1
+        needs: [resource]
+        steps:
+          - id: body
+            uses: cli/invoke
+            with: {command: [sh, -c, "true"]}
+        assertions:
+          - $steps.body.outputs.exit_code == 0

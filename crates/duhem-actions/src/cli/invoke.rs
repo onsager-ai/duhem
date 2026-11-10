@@ -1,9 +1,7 @@
 //! `cli/invoke` — run a command in the SUT environment and capture
 //! its result for mechanical assertion.
 //!
-//! Both new dogfood targets expose first-class CLIs (Chreode's
-//! `pnpm factory "<description>"`, Crawlab's Go binary), and the
-//! catalog had no way to drive a command and judge its result. This
+//! Exercise a product's first-class CLI and judge its result. This
 //! action runs the **real** binary — no shimmed shell, no fake exit
 //! code — consistent with the Holistic Verification Principle
 //! (`docs/duhem-spec.md` §8).

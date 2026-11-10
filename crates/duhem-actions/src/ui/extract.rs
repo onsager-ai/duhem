@@ -33,13 +33,14 @@ impl Action for Extract {
         use crate::action::{ActionContract, FieldSpec};
         ActionContract {
             uses: "ui/extract",
-            summary: "Extract an attribute, DOM property, or rendered text from matching elements.",
+            summary: "Extract an attribute, DOM property, rendered text, bounding rect, or computed style from matching elements.",
             with: vec![
                 FieldSpec::required("locator"),
                 FieldSpec::optional("field"),
                 FieldSpec::optional("attribute"),
                 FieldSpec::optional("property"),
                 FieldSpec::optional("text"),
+                FieldSpec::optional("style"),
                 FieldSpec::optional("all"),
             ],
             outputs: vec!["value", "found", "count", "values"],
@@ -60,6 +61,7 @@ impl Action for Extract {
                 source,
             })?;
         let selector = to_selector(&with.locator);
+        let page = page.for_locator(&with.locator);
         let values = page
             .extract(&selector, with.source.kind(), with.source.name())
             .await
@@ -89,6 +91,19 @@ impl Action for Extract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rect_and_style_sources_parse_and_exclude_others() {
+        let rect = serde_yml::from_str::<With>("locator: { css: h1 }\nfield: rect").unwrap();
+        assert_eq!(rect.source, FieldSource::Rect);
+        let style = serde_yml::from_str::<With>("locator: { css: h1 }\nstyle: width").unwrap();
+        assert_eq!(style.source, FieldSource::Style("width".into()));
+        assert!(serde_yml::from_str::<With>("locator: { css: h1 }\nstyle: ''").is_err());
+        assert!(
+            serde_yml::from_str::<With>("locator: { css: h1 }\nstyle: width\nattribute: id")
+                .is_err()
+        );
+    }
+
     #[test]
     fn contract_is_non_judging_and_source_validation_is_shared() {
         assert!(!Extract.contract().judges());

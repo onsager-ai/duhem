@@ -180,11 +180,42 @@ pub struct FlowOrigin {
     pub iteration: Option<u32>,
 }
 
+/// The flow call whose registered `cleanup:` a lifecycle block runs (#615).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CleanupRegistration {
+    pub flow: String,
+    pub call: String,
+}
+
+/// Declaring resource scope, independent of a temporary browser context.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessOwner {
+    pub scope: String,
+    pub run_scope: String,
+    pub criterion_id: Option<String>,
+    pub check_id: Option<String>,
+    pub attempt: Option<String>,
+    pub fixture_name: Option<String>,
+}
+
 /// The closed set of event payloads. `#[serde(tag = "kind")]` puts the
 /// discriminant alongside `seq` and `ts` on the wire.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EventPayload {
+    /// Lifecycle facts for one runtime-owned process generation (#579).
+    /// Logs are bounded and masked before retention; these are observations,
+    /// never additional judgment inputs.
+    ProcessObserved {
+        owner: ProcessOwner,
+        handle: String,
+        generation: u64,
+        pid: u32,
+        operation: String,
+        facts: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
     RunStarted {
         verification_path: String,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -215,6 +246,10 @@ pub enum EventPayload {
     },
     /// Periodic proof that the runtime still owns this unterminated run.
     RunHeartbeat,
+    /// The immutable authored selection, before lifecycle or checks execute.
+    ClaimScopeDeclared {
+        scope: duhem_summary::ClaimScope,
+    },
     EnvUpStarted {
         command: String,
     },
@@ -252,6 +287,8 @@ pub enum EventPayload {
         stderr_blob_sha256: Option<String>,
     },
     SetupStarted {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cleanup_policy: Option<String>,
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
         phase: StepPhase,
         step_count: u32,
@@ -266,6 +303,10 @@ pub enum EventPayload {
         /// and fixture events round-trip byte-identically.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         criterion_id: Option<String>,
+        /// Set when this teardown block is a flow `cleanup:` registered at
+        /// the scope named by the other fields (#615); absent otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        registered_by: Option<CleanupRegistration>,
     },
     SetupStepStarted {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
@@ -295,6 +336,11 @@ pub enum EventPayload {
         /// recorded before `for_each` existed.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         flow: Option<FlowOrigin>,
+        /// Enclosing step-group labels, outermost first (#614): the
+        /// group's `id:`, or its position when it has none. Absent for
+        /// an ungrouped step and for traces recorded before step groups.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<Vec<String>>,
     },
     SetupStepObservation {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
@@ -312,6 +358,8 @@ pub enum EventPayload {
         criterion_id: Option<String>,
     },
     SetupStepFinished {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        judgment: Option<VerdictState>,
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
         phase: StepPhase,
         step_index: u32,
@@ -356,6 +404,11 @@ pub enum EventPayload {
         /// ordinary steps and on traces recorded before spec #367.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         flow: Option<FlowOrigin>,
+        /// Enclosing step-group labels, outermost first (#614): the
+        /// group's `id:`, or its position when it has none. Absent for
+        /// an ungrouped step and for traces recorded before step groups.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<Vec<String>>,
     },
     StepObservation {
         step_index: u32,
@@ -374,6 +427,11 @@ pub enum EventPayload {
     },
     AssertionEvaluated {
         check_id: String,
+        /// Values observed during the explicit assertion's actual evaluation.
+        /// An empty map still identifies an explicit assertion. Absent for
+        /// implicit judgments and legacy evidence; missing values are not null.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operands: Option<BTreeMap<String, serde_json::Value>>,
         assertion_index: u32,
         /// Zero-based loop ordinal; absent for ordinary assertions and older evidence.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -433,6 +491,8 @@ pub enum EventPayload {
         verdict: VerdictState,
     },
     RunFinished {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body_verdict: Option<VerdictState>,
         /// A run can complete without being judged. The suite-level
         /// environment container is the canonical example.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -452,8 +512,10 @@ impl EventPayload {
     /// extraction.
     pub fn kind(&self) -> &'static str {
         match self {
+            EventPayload::ProcessObserved { .. } => "process_observed",
             EventPayload::RunStarted { .. } => "run_started",
             EventPayload::RunHeartbeat => "run_heartbeat",
+            EventPayload::ClaimScopeDeclared { .. } => "claim_scope_declared",
             EventPayload::EnvUpStarted { .. } => "env_up_started",
             EventPayload::EnvUpFinished { .. } => "env_up_finished",
             EventPayload::EnvReady { .. } => "env_ready",
@@ -663,6 +725,7 @@ mod tests {
         assert_eq!(
             event.payload,
             EventPayload::RunFinished {
+                body_verdict: None,
                 verdict: Some(VerdictState::Pass)
             }
         );
@@ -702,11 +765,13 @@ mod tests {
     fn setup_variants_round_trip() {
         let cases: Vec<EventPayload> = vec![
             EventPayload::SetupStarted {
+                cleanup_policy: None,
                 phase: StepPhase::Setup,
                 step_count: 2,
                 fixture_name: None,
                 check_id: None,
                 criterion_id: None,
+                registered_by: None,
             },
             EventPayload::SetupStepStarted {
                 phase: StepPhase::Setup,
@@ -718,6 +783,7 @@ mod tests {
                 check_id: None,
                 criterion_id: None,
                 flow: None,
+                group: None,
             },
             EventPayload::SetupStepObservation {
                 phase: StepPhase::Setup,
@@ -731,6 +797,7 @@ mod tests {
                 criterion_id: None,
             },
             EventPayload::SetupStepFinished {
+                judgment: None,
                 phase: StepPhase::Setup,
                 step_index: 0,
                 outcome: StepOutcome::Ok,
@@ -772,6 +839,7 @@ mod tests {
             seq: 1,
             ts: ts(),
             payload: EventPayload::SetupStepFinished {
+                judgment: None,
                 phase: StepPhase::Teardown,
                 step_index: 0,
                 outcome: StepOutcome::Error,
@@ -813,6 +881,7 @@ mod tests {
         );
         assert!(
             EventPayload::SetupStepFinished {
+                judgment: None,
                 phase: StepPhase::Setup,
                 step_index: 0,
                 outcome: StepOutcome::Ok,
@@ -827,11 +896,13 @@ mod tests {
         // same as their per-check counterparts.
         assert!(
             !EventPayload::SetupStarted {
+                cleanup_policy: None,
                 phase: StepPhase::Setup,
                 step_count: 1,
                 fixture_name: None,
                 check_id: None,
                 criterion_id: None,
+                registered_by: None,
             }
             .is_finished()
         );
@@ -906,6 +977,7 @@ mod tests {
     fn is_finished_flags_the_right_variants() {
         assert!(
             EventPayload::RunFinished {
+                body_verdict: None,
                 verdict: Some(VerdictState::Pass)
             }
             .is_finished()
@@ -955,6 +1027,7 @@ mod tests {
                 inner_index: 2,
                 iteration: None,
             }),
+            group: None,
         };
         let json = serde_json::to_string(&payload).expect("serialize");
         assert_eq!(

@@ -68,9 +68,14 @@ fn render(s: &RunSummary) -> String {
     let lifecycle_failures = s
         .lifecycle
         .iter()
-        .filter(|block| block.status != LifecycleStatus::Passed)
+        .filter(|block| lifecycle_blocks_gate(block))
         .count();
-    let total = s.criteria.len() + lifecycle_failures;
+    let exclusions = s
+        .claim_scope
+        .as_ref()
+        .map(|scope| scope.excluded.as_slice())
+        .unwrap_or(&[]);
+    let total = s.criteria.len() + lifecycle_failures + exclusions.len();
     let failures = s
         .criteria
         .iter()
@@ -81,7 +86,8 @@ fn render(s: &RunSummary) -> String {
         .criteria
         .iter()
         .filter(|c| matches!(c.verdict, VerdictState::Inconclusive(_)))
-        .count();
+        .count()
+        + exclusions.len();
 
     let mut out = String::new();
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
@@ -89,6 +95,12 @@ fn render(s: &RunSummary) -> String {
         "<testsuite name=\"{}\" tests=\"{total}\" failures=\"{failures}\" skipped=\"{skipped}\">\n",
         xml_escape(&s.run_id),
     ));
+    if let Some(body) = s.body_verdict {
+        out.push_str(&format!(
+            "  <properties><property name=\"body_verdict\" value=\"{}\"/></properties>\n",
+            xml_escape(&body.to_string())
+        ));
+    }
     for c in &s.criteria {
         match &c.verdict {
             VerdictState::Pass => {
@@ -116,10 +128,16 @@ fn render(s: &RunSummary) -> String {
             }
         }
     }
+    for excluded in exclusions {
+        out.push_str(&format!(
+            "  <testcase name=\"excluded:{}::{}\"><skipped type=\"selection\">{}</skipped></testcase>\n",
+            xml_escape(&excluded.criterion_id), xml_escape(&excluded.check_id), xml_escape(&excluded.reason),
+        ));
+    }
     for block in s
         .lifecycle
         .iter()
-        .filter(|block| block.status != LifecycleStatus::Passed)
+        .filter(|block| lifecycle_blocks_gate(block))
     {
         let name = format!("{} {}", block.scope_path(), phase_label(block.phase));
         let detail = block
@@ -165,7 +183,17 @@ fn render(s: &RunSummary) -> String {
                     .as_deref()
                     .map(|detail| format!(": {detail}"))
                     .unwrap_or_default();
-                format!("{} {}{}", failure.outcome, failure.step, suffix)
+                format!(
+                    "{} {} [{}]{}",
+                    failure.outcome,
+                    failure.step,
+                    if failure.required {
+                        "required"
+                    } else {
+                        "diagnostic_only"
+                    },
+                    suffix
+                )
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -176,6 +204,12 @@ fn render(s: &RunSummary) -> String {
     }
     out.push_str("</testsuite>\n");
     out
+}
+
+fn lifecycle_blocks_gate(block: &duhem_summary::LifecycleBlock) -> bool {
+    block.status != LifecycleStatus::Passed
+        && (block.phase == LifecyclePhase::Setup
+            || block.cleanup_policy.as_deref() == Some("required"))
 }
 
 fn phase_label(phase: LifecyclePhase) -> &'static str {
@@ -211,6 +245,31 @@ mod tests {
     };
 
     #[test]
+    fn excluded_pairs_are_skipped_cases_and_suite_counts_agree() {
+        let scope = duhem_summary::ClaimScope {
+            excluded: vec![duhem_summary::ExcludedClaim {
+                criterion_id: "AC&1".into(),
+                check_id: "excluded".into(),
+                reason: "check_filter".into(),
+            }],
+            ..Default::default()
+        };
+        let summary = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from("."))
+            .with_claim_scope(Some(scope));
+        let xml = render(&summary);
+        assert!(
+            xml.contains("tests=\"1\" failures=\"0\" skipped=\"1\""),
+            "{xml}"
+        );
+        assert!(xml.contains("excluded:AC&amp;1::excluded"), "{xml}");
+        assert!(
+            xml.contains("<skipped type=\"selection\">check_filter</skipped>"),
+            "{xml}"
+        );
+        assert_eq!(xml.matches("<testcase").count(), 1);
+    }
+
+    #[test]
     fn lifecycle_snapshot_handles_unknown_scope_depth() {
         let scope = ["alpha", "beta", "gamma"]
             .into_iter()
@@ -221,6 +280,8 @@ mod tests {
             })
             .collect();
         let passed = LifecycleBlock {
+            cleanup_policy: None,
+            registered_by: None,
             phase: LifecyclePhase::Setup,
             scope,
             status: LifecycleStatus::Passed,
@@ -231,6 +292,7 @@ mod tests {
         };
         let mut failed = passed.clone();
         failed.phase = LifecyclePhase::Teardown;
+        failed.cleanup_policy = Some("required".into());
         failed.status = LifecycleStatus::Failed;
         let summary = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from("."))
             .with_lifecycle(vec![passed, failed]);
@@ -333,6 +395,7 @@ mod tests {
     fn cleanup_is_system_error_evidence_not_a_test_failure() {
         let s = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from(".")).with_cleanup(
             vec![CleanupFailureSummary {
+                required: false,
                 step: "delete-record".into(),
                 outcome: "error".into(),
                 detail: Some("synthetic cleanup error".into()),
@@ -363,5 +426,62 @@ mod tests {
         let xml = render(&s);
         assert!(xml.contains("tests=\"1\""), "{xml}");
         assert_eq!(xml.matches("<testcase").count(), 1, "{xml}");
+    }
+}
+
+#[cfg(test)]
+mod cleanup_gate_tests {
+    use super::*;
+    use duhem_summary::{LifecycleBlock, LifecycleStep, LifecycleStepOutcome};
+
+    #[test]
+    fn diagnostic_failure_does_not_fail_junit_and_required_judgment_does() {
+        for policy in ["diagnostic_only", "required"] {
+            let block = LifecycleBlock {
+                cleanup_policy: Some(policy.into()),
+                registered_by: None,
+                phase: LifecyclePhase::Teardown,
+                scope: vec![],
+                status: LifecycleStatus::Failed,
+                started_at: "t".into(),
+                duration_ms: 0,
+                failing_step: Some(0),
+                steps: vec![LifecycleStep {
+                    index: 0,
+                    id: None,
+                    uses: "api/poll".into(),
+                    flow: None,
+                    group: None,
+                    outcome: LifecycleStepOutcome::Ok,
+                    judgment: Some(VerdictState::Fail),
+                    detail: Some("condition remained false".into()),
+                    duration_ms: 0,
+                }],
+            };
+            let required = policy == "required";
+            let summary = RunSummary::new(
+                "r",
+                if required {
+                    VerdictState::Fail
+                } else {
+                    VerdictState::Pass
+                },
+                vec![],
+                ".".into(),
+            )
+            .with_body_verdict(required.then_some(VerdictState::Pass))
+            .with_lifecycle(vec![block]);
+            let xml = render(&summary);
+            assert_eq!(
+                xml.contains("<failure type=\"lifecycle\">"),
+                required,
+                "{xml}"
+            );
+            assert_eq!(
+                xml.contains("name=\"body_verdict\" value=\"pass\""),
+                required,
+                "{xml}"
+            );
+        }
     }
 }

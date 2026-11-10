@@ -48,6 +48,7 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
         layer: None,
         flow: None,
         with,
+        group: None,
     })
     .await
     .unwrap();
@@ -59,6 +60,7 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
     .await
     .unwrap();
     w.append(EventPayload::AssertionEvaluated {
+        operands: None,
         check_id: "AC-1.1".into(),
         iteration: None,
         assertion_index: 0,
@@ -86,6 +88,7 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await
@@ -105,6 +108,7 @@ async fn round_trip_worked_example() {
     assert!(matches!(
         events.last().unwrap().payload,
         EventPayload::RunFinished {
+            body_verdict: None,
             verdict: Some(VerdictState::Pass)
         }
     ));
@@ -160,6 +164,7 @@ async fn dropped_writer_loses_nothing_and_run_stays_unfinished() {
             .unwrap();
         for i in 0..9 {
             w.append(EventPayload::AssertionEvaluated {
+                operands: None,
                 check_id: format!("C{i}"),
                 iteration: None,
                 assertion_index: 0,
@@ -195,9 +200,12 @@ async fn terminal_marker_can_finish_a_run_without_a_verdict() {
     )
     .await
     .unwrap();
-    w.append(EventPayload::RunFinished { verdict: None })
-        .await
-        .unwrap();
+    w.append(EventPayload::RunFinished {
+        body_verdict: None,
+        verdict: None,
+    })
+    .await
+    .unwrap();
     w.finish().await.unwrap();
 
     let run = store.get_run(RUN_ID).await.unwrap().unwrap();
@@ -358,6 +366,7 @@ async fn stepless_check_owner_projects_and_replays() {
         .unwrap();
     writer
         .append(EventPayload::AssertionEvaluated {
+            operands: None,
             check_id: "AC-1.1".into(),
             iteration: None,
             assertion_index: 0,
@@ -388,6 +397,7 @@ async fn stepless_check_owner_projects_and_replays() {
         .unwrap();
     writer
         .append(EventPayload::RunFinished {
+            body_verdict: None,
             verdict: Some(VerdictState::Pass),
         })
         .await
@@ -615,6 +625,7 @@ async fn a_finished_run_is_sealed_against_further_events() {
         .await
         .unwrap();
     w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await
@@ -622,11 +633,13 @@ async fn a_finished_run_is_sealed_against_further_events() {
 
     let err = w
         .append(EventPayload::SetupStarted {
+            cleanup_policy: None,
             phase: duhem_evidence::StepPhase::Setup,
             step_count: 1,
             fixture_name: None,
             check_id: None,
             criterion_id: None,
+            registered_by: None,
         })
         .await
         .expect_err("appending after run_finished must fail");
@@ -684,11 +697,13 @@ async fn events_after_supports_live_tailing() {
         .await
         .unwrap();
     w.append(EventPayload::SetupStarted {
+        cleanup_policy: None,
         phase: duhem_evidence::StepPhase::Setup,
         step_count: 1,
         fixture_name: None,
         check_id: None,
         criterion_id: None,
+        registered_by: None,
     })
     .await
     .unwrap();
@@ -747,6 +762,7 @@ async fn write_scoped_run(
         layer: None,
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();
@@ -757,6 +773,7 @@ async fn write_scoped_run(
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(verdict),
     })
     .await
@@ -1076,6 +1093,7 @@ async fn step_pair(
         layer: layer.map(str::to_string),
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();
@@ -1218,10 +1236,12 @@ async fn setup_phase_spans_carry_no_check_id() {
         check_id: None,
         criterion_id: None,
         flow: None,
+        group: None,
     })
     .await
     .unwrap();
     w.append(EventPayload::SetupStepFinished {
+        judgment: None,
         phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         outcome: StepOutcome::Ok,
@@ -1275,6 +1295,7 @@ async fn writer_tee_mirrors_persisted_events_in_order() {
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await
@@ -1349,6 +1370,7 @@ async fn secret_registry_masks_events_artifacts_and_bundle_exports() {
                 ("encoded".to_string(), serde_json::json!(encoded)),
                 ("percent".to_string(), serde_json::json!(percent)),
             ]),
+            group: None,
         })
         .await
         .unwrap();
@@ -1393,6 +1415,7 @@ async fn secret_registry_masks_events_artifacts_and_bundle_exports() {
         .unwrap();
     writer
         .append(EventPayload::RunFinished {
+            body_verdict: None,
             verdict: Some(VerdictState::Pass),
         })
         .await
@@ -1457,6 +1480,7 @@ async fn non_secret_text_is_recorded_verbatim() {
             layer: Some("data".into()),
             flow: None,
             with: BTreeMap::from([("connection".into(), serde_json::json!(visible))]),
+            group: None,
         })
         .await
         .unwrap();
@@ -1490,6 +1514,7 @@ async fn mid_run_secret_registration_is_not_retroactive() {
             layer: None,
             flow: None,
             with: BTreeMap::from([("note".into(), serde_json::json!(token))]),
+            group: None,
         })
         .await
         .unwrap();

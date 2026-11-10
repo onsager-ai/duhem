@@ -125,6 +125,9 @@ pub trait EvalContext {
     /// Optional observation of values already evaluated; never a judge input.
     fn record_operand(&self, _expr: &Expr, _value: &Value) {}
 
+    /// Observe comparison values without evaluating either operand again.
+    fn record_comparison(&self, _op: BinOp, _lhs: &Value, _rhs: &Value) {}
+
     fn input(&self, name: &str) -> Option<&Value>;
     fn page(&self, _page: &str, _element: &str) -> Option<&Value> {
         None
@@ -174,6 +177,12 @@ pub fn describe_comparison(expr: &Expr, ctx: &dyn EvalContext) -> Option<String>
     let Expr::BinOp { op, lhs, rhs } = expr else {
         return None;
     };
+    let l = eval_value(lhs, ctx).ok()?;
+    let r = eval_value(rhs, ctx).ok()?;
+    comparison_detail(*op, &l, &r)
+}
+
+pub(crate) fn comparison_detail(op: BinOp, l: &Value, r: &Value) -> Option<String> {
     let role = match op {
         BinOp::Eq => "expected",
         BinOp::Ne => "disallowed",
@@ -183,12 +192,10 @@ pub fn describe_comparison(expr: &Expr, ctx: &dyn EvalContext) -> Option<String>
         BinOp::Ge => "expected >=",
         BinOp::And | BinOp::Or => return None,
     };
-    let l = eval_value(lhs, ctx).ok()?;
-    let r = eval_value(rhs, ctx).ok()?;
     Some(format!(
         "actual {}, {role} {}",
-        display_value(&l),
-        display_value(&r)
+        display_value(l),
+        display_value(r)
     ))
 }
 
@@ -267,7 +274,7 @@ fn eval_path(p: &Path, ctx: &dyn EvalContext) -> EvalRes {
                 .input(name)
                 .cloned()
                 .ok_or_else(|| InconclusiveCause::MissingInput(name.to_string()))?;
-            navigate(base, name, &p.segments[1.min(p.segments.len())..])
+            navigate(base, name, p, 1.min(p.segments.len()))
         }
         PathRoot::Pages => {
             let page = p.segments.first().map(String::as_str).unwrap_or("");
@@ -275,7 +282,7 @@ fn eval_path(p: &Path, ctx: &dyn EvalContext) -> EvalRes {
             let base = ctx.page(page, element).cloned().ok_or_else(|| {
                 InconclusiveCause::MissingField(format!("pages.{page}.{element}"))
             })?;
-            navigate(base, element, &p.segments[2.min(p.segments.len())..])
+            navigate(base, element, p, 2.min(p.segments.len()))
         }
         PathRoot::Steps => {
             // Schema validator guarantees the leading
@@ -289,7 +296,7 @@ fn eval_path(p: &Path, ctx: &dyn EvalContext) -> EvalRes {
                     output: output.to_string(),
                 }
             })?;
-            navigate(base, output, &p.segments[3.min(p.segments.len())..])
+            navigate(base, output, p, 3.min(p.segments.len()))
         }
         PathRoot::Setup => {
             // `$setup.<step_id>.outputs.<output>` — same shape as
@@ -303,7 +310,7 @@ fn eval_path(p: &Path, ctx: &dyn EvalContext) -> EvalRes {
                     output: output.to_string(),
                 }
             })?;
-            navigate(base, output, &p.segments[3.min(p.segments.len())..])
+            navigate(base, output, p, 3.min(p.segments.len()))
         }
         PathRoot::Fixture => {
             let fixture = p.segments.first().map(String::as_str).unwrap_or("");
@@ -316,7 +323,7 @@ fn eval_path(p: &Path, ctx: &dyn EvalContext) -> EvalRes {
                     step: format!("{fixture}.{step}"),
                     output: output.to_string(),
                 })?;
-            navigate(base, output, &p.segments[4.min(p.segments.len())..])
+            navigate(base, output, p, 4.min(p.segments.len()))
         }
         PathRoot::Env => {
             // `$env.<name>` is always a string; deeper segments would be
@@ -326,7 +333,7 @@ fn eval_path(p: &Path, ctx: &dyn EvalContext) -> EvalRes {
                 .env(name)
                 .map(|s| Value::Str(s.to_string()))
                 .ok_or_else(|| InconclusiveCause::MissingEnv(name.to_string()))?;
-            navigate(base, name, &p.segments[1.min(p.segments.len())..])
+            navigate(base, name, p, 1.min(p.segments.len()))
         }
         PathRoot::Runtime => {
             // Bare `$runtime.<name>` (no call): helpers must be called.
@@ -340,7 +347,7 @@ fn eval_path(p: &Path, ctx: &dyn EvalContext) -> EvalRes {
                 .loop_binding(name)
                 .cloned()
                 .ok_or_else(|| InconclusiveCause::MissingLoopBinding(name.to_string()))?;
-            navigate(base, name, &p.segments[1.min(p.segments.len())..])
+            navigate(base, name, p, 1.min(p.segments.len()))
         }
     }
 }
@@ -348,28 +355,33 @@ fn eval_path(p: &Path, ctx: &dyn EvalContext) -> EvalRes {
 /// Walk navigation segments into a resolved value. Each segment is a
 /// key into an `Object` or — when the current value is an `Array` — a
 /// decimal index (the parser lowers `[N]` to the digit-string `"N"`).
-/// Key-vs-index is disambiguated by the value's shape, so a JSON object
-/// key that happens to be all digits still resolves as a key. A missing
+/// Quoted numeric keys cannot index arrays; other numeric segments retain
+/// shape-based navigation. A missing
 /// key / out-of-range index is `MissingField`; descending into a scalar
 /// is `NotNavigable`. An empty `segs` returns the value unchanged, so
 /// today's flat `$steps.x.outputs.y` references are unaffected. `head`
 /// is the bound output / input / env name, used only to root the
 /// `MissingField` detail path (e.g. `body.app.email`).
-fn navigate(mut value: Value, head: &str, segs: &[String]) -> EvalRes {
-    for (i, seg) in segs.iter().enumerate() {
+fn navigate(mut value: Value, head: &str, path: &Path, start: usize) -> EvalRes {
+    for (i, seg) in path.segments.iter().enumerate().skip(start) {
         value = match value {
             Value::Object(mut map) => map
                 .remove(seg)
-                .ok_or_else(|| InconclusiveCause::MissingField(nav_path(head, segs, i)))?,
+                .ok_or_else(|| InconclusiveCause::MissingField(nav_path(head, path, start, i)))?,
             Value::Array(arr) => {
+                if path.quoted_keys.contains(&i) {
+                    return Err(InconclusiveCause::MissingField(nav_path(
+                        head, path, start, i,
+                    )));
+                }
                 let idx: usize = seg.parse().map_err(|_| {
                     // An Array addressed by a non-numeric segment is a
                     // miss at this position, not a type error.
-                    InconclusiveCause::MissingField(nav_path(head, segs, i))
+                    InconclusiveCause::MissingField(nav_path(head, path, start, i))
                 })?;
-                arr.into_iter()
-                    .nth(idx)
-                    .ok_or_else(|| InconclusiveCause::MissingField(nav_path(head, segs, i)))?
+                arr.into_iter().nth(idx).ok_or_else(|| {
+                    InconclusiveCause::MissingField(nav_path(head, path, start, i))
+                })?
             }
             scalar => {
                 return Err(InconclusiveCause::NotNavigable {
@@ -386,18 +398,11 @@ fn navigate(mut value: Value, head: &str, segs: &[String]) -> EvalRes {
 /// `head`, for the `MissingField` detail — `head="body"`,
 /// `["app","email"]` at i=1 → `body.app.email`; `["items","3"]` at i=1
 /// → `body.items[3]`. Purely numeric segments render as `[N]` (array
-/// index), the rest as `.key`.
-fn nav_path(head: &str, segs: &[String], i: usize) -> String {
+/// index); quoted numeric and non-identifier keys use bracket notation.
+fn nav_path(head: &str, path: &Path, start: usize, i: usize) -> String {
     let mut out = String::from(head);
-    for s in segs.iter().take(i + 1) {
-        if s.bytes().all(|b| b.is_ascii_digit()) {
-            out.push('[');
-            out.push_str(s);
-            out.push(']');
-        } else {
-            out.push('.');
-            out.push_str(s);
-        }
+    for index in start..=i {
+        path.append_segment(&mut out, index);
     }
     out
 }
@@ -749,6 +754,7 @@ fn to_bool3(r: EvalRes) -> Bool3 {
 fn eval_compare(op: BinOp, lhs: &Expr, rhs: &Expr, ctx: &dyn EvalContext) -> EvalRes {
     let l = eval_value(lhs, ctx)?;
     let r = eval_value(rhs, ctx)?;
+    ctx.record_comparison(op, &l, &r);
     compare(op, &l, &r)
 }
 
@@ -1337,6 +1343,35 @@ mod tests {
         assert_eq!(
             run("$steps.api.outputs.body.items[1].id == 9", &ctx),
             EvalResult::True
+        );
+    }
+
+    #[test]
+    fn navigates_quoted_keys_and_preserves_numeric_key_kind() {
+        let items = Value::Array(vec![obj(vec![("a-b", Value::Int(7))])]);
+        let body = obj(vec![
+            ("items", items),
+            ("200", Value::Str("key".into())),
+            ("array", Value::Array(vec![Value::Int(1)])),
+        ]);
+        let ctx = TestCtx::new().with_output("api", "body", body);
+        assert_eq!(
+            run("$steps.api.outputs.body.items[0]['a-b'] == 7", &ctx),
+            EvalResult::True
+        );
+        assert_eq!(
+            run("$steps.api.outputs.body['200'] == 'key'", &ctx),
+            EvalResult::True
+        );
+        assert_eq!(
+            run("$steps.api.outputs.body.array['0'] == 1", &ctx),
+            EvalResult::Inconclusive(InconclusiveCause::MissingField("body.array['0']".into()))
+        );
+        assert_eq!(
+            run(r"$steps.api.outputs.body.items[0]['a\'b\\c'] == 1", &ctx),
+            EvalResult::Inconclusive(InconclusiveCause::MissingField(
+                r"body.items[0]['a\'b\\c']".into()
+            ))
         );
     }
 

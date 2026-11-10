@@ -29,7 +29,13 @@
 //! (overridable via `DUHEM_NODE`). [`RunBrowser::launch`] fails fast
 //! with a clear hint when either is missing.
 
+mod console;
 mod context;
+mod requests;
+
+pub use requests::{RequestRecord, RequestRecords};
+mod emulate;
+mod keyboard;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -114,8 +120,7 @@ impl SelectBy {
     }
 }
 
-/// A browser cookie. Extra Playwright fields are ignored on
-/// deserialize; `ui/assert-state` only needs the name.
+/// A browser cookie. Extra Playwright fields are ignored on deserialize.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Cookie {
     pub name: String,
@@ -640,11 +645,26 @@ impl CheckBrowser {
 pub struct Page {
     conn: Arc<Conn>,
     id: String,
+    frame_selectors: Vec<String>,
 }
 
 impl Page {
     fn p(&self) -> Value {
-        json!({ "pageId": self.id })
+        let mut request = json!({ "pageId": self.id });
+        if !self.frame_selectors.is_empty() {
+            request["frameSelectors"] = json!(self.frame_selectors);
+        }
+        request
+    }
+
+    /// View of the same page carrying this action's frame preconditions.
+    /// Selector translation retains frame boundaries for all driver operations.
+    pub(crate) fn for_locator(&self, locator: &crate::Locator) -> Self {
+        Self {
+            conn: self.conn.clone(),
+            id: self.id.clone(),
+            frame_selectors: crate::playwright::frame_selectors(locator),
+        }
     }
 
     pub async fn goto(&self, url: &str, timeout_ms: f64) -> Result<(), PwError> {
@@ -652,6 +672,28 @@ impl Page {
         req["url"] = json!(url);
         req["timeoutMs"] = json!(timeout_ms);
         self.conn.request("goto", req).await.map(|_| ())
+    }
+
+    /// Move one entry through the page's real history. `direction` is
+    /// `"back"` or `"forward"`. Returns `(from_url, url, navigated)`;
+    /// `navigated` is false when no history entry exists in that
+    /// direction (the sidecar observes main-frame navigation events, since
+    /// Playwright's null response is ambiguous).
+    pub async fn history(
+        &self,
+        direction: &str,
+        timeout_ms: f64,
+    ) -> Result<(String, String, bool), PwError> {
+        let mut req = self.p();
+        req["direction"] = json!(direction);
+        req["timeoutMs"] = json!(timeout_ms);
+        let v = self.conn.request("history", req).await?;
+        let text = |key: &str| v[key].as_str().unwrap_or("").to_string();
+        Ok((
+            text("fromUrl"),
+            text("url"),
+            v["navigated"].as_bool().unwrap_or(false),
+        ))
     }
 
     pub async fn click(&self, selector: &str, timeout_ms: f64) -> Result<(), PwError> {

@@ -66,12 +66,21 @@ fn normalize(event: &Event) -> Option<LifecycleEvent<'_>> {
     let timestamp_ms = event.ts.timestamp_millis();
     Some(match &event.payload {
         EventPayload::SetupStarted {
+            cleanup_policy,
             phase,
             fixture_name,
             check_id,
             criterion_id,
+            registered_by,
             ..
         } => LifecycleEvent::Started {
+            cleanup_policy: cleanup_policy.as_deref(),
+            registered_by: registered_by
+                .as_ref()
+                .map(|r| duhem_summary::LifecycleRegistration {
+                    flow: r.flow.clone(),
+                    call: r.call.clone(),
+                }),
             phase: phase_of(*phase),
             criterion_id: criterion_id.as_deref(),
             check_id: check_id.as_deref(),
@@ -87,6 +96,7 @@ fn normalize(event: &Event) -> Option<LifecycleEvent<'_>> {
             check_id,
             criterion_id,
             flow,
+            group,
             ..
         } => LifecycleEvent::StepStarted {
             phase: phase_of(*phase),
@@ -96,6 +106,7 @@ fn normalize(event: &Event) -> Option<LifecycleEvent<'_>> {
             index: *step_index,
             uses,
             flow: flow.as_ref().map(flow_of),
+            group: group.clone(),
             timestamp_ms,
         },
         EventPayload::SetupStepObservation {
@@ -111,6 +122,7 @@ fn normalize(event: &Event) -> Option<LifecycleEvent<'_>> {
             fixture_name: fixture_name.as_deref(),
         },
         EventPayload::SetupStepFinished {
+            judgment,
             phase,
             step_index,
             outcome,
@@ -119,6 +131,7 @@ fn normalize(event: &Event) -> Option<LifecycleEvent<'_>> {
             check_id,
             criterion_id,
         } => LifecycleEvent::StepFinished {
+            judgment: *judgment,
             phase: phase_of(*phase),
             criterion_id: criterion_id.as_deref(),
             check_id: check_id.as_deref(),

@@ -17,7 +17,7 @@ use duhem_evidence::{EventPayload, EvidenceWriter, StepOutcome, StepPhase};
 use duhem_schema::Step;
 
 use crate::engine::context::RunState;
-use crate::engine::gating::{evaluate as evaluate_gate, step_failed};
+use crate::engine::gating::{GroupGates, evaluate as evaluate_gate, step_failed};
 use crate::engine::registry::{ActionRegistry, Dispatch};
 use crate::engine::runner::{
     CleanupFailure, EngineError, StepEvidence, display_step_label, implicit_judgment_for_step,
@@ -73,6 +73,7 @@ pub(crate) async fn process_lifecycle_step(
     contexts: Option<&super::session::CheckContexts>,
     aborted: &mut Option<AbortReason>,
     failed_by: &mut Option<String>,
+    groups: &mut GroupGates,
     stored_error: &mut Option<EngineError>,
     cleanup: &mut Vec<CleanupFailure>,
 ) -> Result<(), EngineError> {
@@ -89,10 +90,19 @@ pub(crate) async fn process_lifecycle_step(
     // `condition`/`operands` the same way any other gated step does
     // (#511's shrunken-claim-set reporting depends on this).
     let ctx = loop_run_context(run, loop_ctx);
-    let (gate, condition_error) = match evaluate_gate(step, idx, failed_by.as_deref(), &ctx) {
+    let (gate, condition_error) = match evaluate_gate(step, idx, failed_by.as_deref(), groups, &ctx)
+    {
         Ok(gate) => (gate, None),
         Err(error) => (None, Some(error)),
     };
+    // A dispatched call to a flow with `cleanup:` registers it on this scope
+    // (#615); one gated off by `if:` registers nothing.
+    if gate.is_none()
+        && phase == StepPhase::Setup
+        && let Some(at) = scope.registration_site()
+    {
+        run.register_flow_cleanups(step, &at);
+    }
     let cleanup_step = phase == StepPhase::Teardown || (failed_by.is_some() && gate.is_none());
     // Setup steps see the run state (inputs, env, uuid, plus any
     // outputs already published by earlier setup steps in this
@@ -132,6 +142,7 @@ pub(crate) async fn process_lifecycle_step(
     {
         writer
             .append(EventPayload::SetupStepFinished {
+                judgment: None,
                 phase,
                 step_index: idx as u32,
                 outcome: StepOutcome::Skipped {
@@ -149,6 +160,7 @@ pub(crate) async fn process_lifecycle_step(
     }
 
     let mut error_detail = step_error.as_ref().map(ToString::to_string);
+    let mut judgment = None;
     let (outcome, failed) = if step_error.is_some() || environment_failed {
         if error_detail.is_none() {
             error_detail = Some(format!(
@@ -184,7 +196,8 @@ pub(crate) async fn process_lifecycle_step(
                 )
                 .await
                 {
-                    Ok((outcome, failed, action_detail)) => {
+                    Ok((outcome, failed, action_detail, implicit)) => {
+                        judgment = implicit;
                         error_detail = action_detail;
                         (outcome, failed)
                     }
@@ -214,11 +227,15 @@ pub(crate) async fn process_lifecycle_step(
         }
         Outcome::Error => error_detail
             .or_else(|| Some(format!("action `{}` returned an error", step.uses_name()))),
+        Outcome::Ok if failed => {
+            error_detail.or_else(|| Some("judging action reported failure".to_string()))
+        }
         Outcome::Ok | Outcome::Skipped { .. } => None,
     }
     .map(|detail| writer.mask_text(&detail));
     writer
         .append(EventPayload::SetupStepFinished {
+            judgment,
             phase,
             step_index: idx as u32,
             outcome: evidence_outcome.clone(),
@@ -234,6 +251,7 @@ pub(crate) async fn process_lifecycle_step(
             matches!(outcome, Outcome::Ok).then(|| "judging action reported failure".to_string())
         });
         cleanup.push(CleanupFailure {
+            required: scope.cleanup_policy().is_required(),
             step: display_step_label(step, idx),
             outcome: evidence_outcome,
             detail,
@@ -243,6 +261,9 @@ pub(crate) async fn process_lifecycle_step(
     if aborted.is_none() {
         *aborted = match outcome {
             Outcome::Timeout => Some(AbortReason::Timeout),
+            Outcome::Error if step.uses_name().starts_with("process/") => {
+                Some(AbortReason::Environment)
+            }
             Outcome::Error => Some(AbortReason::ActionError),
             Outcome::Ok if failed => Some(AbortReason::Environment),
             Outcome::Ok | Outcome::Skipped { .. } => None,
@@ -278,6 +299,7 @@ pub(crate) async fn run_for_each_step(
     contexts: Option<&super::session::CheckContexts>,
     aborted: &mut Option<AbortReason>,
     failed_by: &mut Option<String>,
+    groups: &mut GroupGates,
     stored_error: &mut Option<EngineError>,
     cleanup: &mut Vec<CleanupFailure>,
 ) -> Result<(), EngineError> {
@@ -302,10 +324,11 @@ pub(crate) async fn run_for_each_step(
     // every other step gate goes through (see `process_lifecycle_step`),
     // not a second hand-rolled evaluation.
     let gate_ctx = crate::engine::context::RunContext::new(run);
-    let (gate, condition_error) = match evaluate_gate(step, idx, failed_by.as_deref(), &gate_ctx) {
-        Ok(gate) => (gate, None),
-        Err(error) => (None, Some(error)),
-    };
+    let (gate, condition_error) =
+        match evaluate_gate(step, idx, failed_by.as_deref(), groups, &gate_ctx) {
+            Ok(gate) => (gate, None),
+            Err(error) => (None, Some(error)),
+        };
     let cleanup_step = phase == StepPhase::Teardown || failed_by.is_some();
 
     writer
@@ -319,12 +342,14 @@ pub(crate) async fn run_for_each_step(
             check_id: check_id.clone(),
             criterion_id: criterion_id.clone(),
             flow: None,
+            group: crate::engine::flow::group_path(step),
         })
         .await?;
 
     if let Some(outcome) = gate {
         writer
             .append(EventPayload::SetupStepFinished {
+                judgment: None,
                 phase,
                 step_index: idx as u32,
                 outcome,
@@ -341,15 +366,24 @@ pub(crate) async fn run_for_each_step(
         let detail = writer.mask_text(&error.to_string());
         writer
             .append(EventPayload::SetupStepFinished {
+                judgment: None,
                 phase,
                 step_index: idx as u32,
                 outcome: StepOutcome::Error,
-                detail: Some(detail),
+                detail: Some(detail.clone()),
                 fixture_name: fixture_name.clone(),
                 check_id: check_id.clone(),
                 criterion_id: criterion_id.clone(),
             })
             .await?;
+        if phase == StepPhase::Teardown {
+            cleanup.push(CleanupFailure {
+                required: scope.cleanup_policy().is_required(),
+                step: display_step_label(step, idx),
+                outcome: StepOutcome::Error,
+                detail: Some(detail),
+            });
+        }
         if aborted.is_none() {
             *aborted = Some(AbortReason::ActionError);
             *failed_by = Some(display_step_label(step, idx));
@@ -372,15 +406,24 @@ pub(crate) async fn run_for_each_step(
             ));
             writer
                 .append(EventPayload::SetupStepFinished {
+                    judgment: None,
                     phase,
                     step_index: idx as u32,
                     outcome: StepOutcome::Error,
-                    detail: Some(detail),
+                    detail: Some(detail.clone()),
                     fixture_name: fixture_name.clone(),
                     check_id: check_id.clone(),
                     criterion_id: criterion_id.clone(),
                 })
                 .await?;
+            if phase == StepPhase::Teardown {
+                cleanup.push(CleanupFailure {
+                    required: scope.cleanup_policy().is_required(),
+                    step: display_step_label(step, idx),
+                    outcome: StepOutcome::Error,
+                    detail: Some(detail),
+                });
+            }
             if aborted.is_none() {
                 *aborted = Some(AbortReason::ActionError);
                 *failed_by = Some(display_step_label(step, idx));
@@ -396,15 +439,24 @@ pub(crate) async fn run_for_each_step(
             let detail = writer.mask_text(&error.to_string());
             writer
                 .append(EventPayload::SetupStepFinished {
+                    judgment: None,
                     phase,
                     step_index: idx as u32,
                     outcome: StepOutcome::Error,
-                    detail: Some(detail),
+                    detail: Some(detail.clone()),
                     fixture_name: fixture_name.clone(),
                     check_id: check_id.clone(),
                     criterion_id: criterion_id.clone(),
                 })
                 .await?;
+            if phase == StepPhase::Teardown {
+                cleanup.push(CleanupFailure {
+                    required: scope.cleanup_policy().is_required(),
+                    step: display_step_label(step, idx),
+                    outcome: StepOutcome::Error,
+                    detail: Some(detail),
+                });
+            }
             if aborted.is_none() {
                 *aborted = Some(AbortReason::ActionError);
                 *failed_by = Some(display_step_label(step, idx));
@@ -433,15 +485,24 @@ pub(crate) async fn run_for_each_step(
         ));
         writer
             .append(EventPayload::SetupStepFinished {
+                judgment: None,
                 phase,
                 step_index: idx as u32,
                 outcome: StepOutcome::Error,
-                detail: Some(detail),
+                detail: Some(detail.clone()),
                 fixture_name: fixture_name.clone(),
                 check_id: check_id.clone(),
                 criterion_id: criterion_id.clone(),
             })
             .await?;
+        if phase == StepPhase::Teardown {
+            cleanup.push(CleanupFailure {
+                required: scope.cleanup_policy().is_required(),
+                step: display_step_label(step, idx),
+                outcome: StepOutcome::Error,
+                detail: Some(detail),
+            });
+        }
         if aborted.is_none() {
             *aborted = Some(AbortReason::ActionError);
             *failed_by = Some(display_step_label(step, idx));
@@ -452,6 +513,7 @@ pub(crate) async fn run_for_each_step(
     // R7: an empty array is zero iterations, not an error.
     writer
         .append(EventPayload::SetupStepFinished {
+            judgment: None,
             phase,
             step_index: idx as u32,
             outcome: StepOutcome::Ok,
@@ -469,6 +531,8 @@ pub(crate) async fn run_for_each_step(
             element,
             iteration: iteration as u32,
         };
+        // Body groups are entered afresh in every iteration.
+        let mut iteration_groups = GroupGates::default();
         for body_step in &step.for_each_body {
             process_lifecycle_step(
                 writer,
@@ -485,11 +549,20 @@ pub(crate) async fn run_for_each_step(
                 contexts,
                 aborted,
                 failed_by,
+                &mut iteration_groups,
                 stored_error,
                 cleanup,
             )
             .await?;
         }
+        // Each iteration's cleanups keep that iteration's outputs and element.
+        run.snapshot_flow_cleanups(
+            &crate::engine::flow_cleanup::Snapshot {
+                outputs: run.setup_outputs.clone(),
+                binding: as_name.map(|name| (name.to_string(), element.clone())),
+            },
+            true,
+        );
     }
     Ok(())
 }
@@ -525,6 +598,7 @@ async fn append_setup_started(
             check_id,
             criterion_id,
             flow,
+            group: crate::engine::flow::group_path(step),
         })
         .await?;
     Ok(())
@@ -549,7 +623,15 @@ async fn invoke_and_record(
     idx: usize,
     resolved_with: &serde_yml::Value,
     invocation: SetupInvocation<'_>,
-) -> Result<(Outcome, bool, Option<String>), EngineError> {
+) -> Result<
+    (
+        Outcome,
+        bool,
+        Option<String>,
+        Option<duhem_judge::VerdictState>,
+    ),
+    EngineError,
+> {
     let SetupInvocation {
         step,
         run,
@@ -559,7 +641,25 @@ async fn invoke_and_record(
     } = invocation;
     // The caller persisted `SetupStepStarted` before dispatch so slow
     // actions and gated skips share one honest lifecycle shape.
-    let result = dispatcher.invoke(page, idx, resolved_with, child_env).await;
+    let owner = match scope {
+        HookScope::Fixture(name, _) | HookScope::FixtureDown(name, _, _) => {
+            run.process_owner.fixture(name)
+        }
+        _ => run.process_owner.clone(),
+    };
+    let result = crate::engine::registry::invoke_scoped(
+        dispatcher,
+        page,
+        idx,
+        resolved_with,
+        child_env,
+        run,
+        &owner,
+        writer,
+        &BTreeMap::new(),
+        None,
+    )
+    .await;
     let outcome = match &result {
         Ok(r) => r.outcome.clone(),
         Err(_) => Outcome::Error,
@@ -589,7 +689,9 @@ async fn invoke_and_record(
                 &step.outputs,
                 &r.outputs,
                 |local, v| {
-                    if let HookScope::Fixture(fixture, _) = scope {
+                    if let HookScope::Fixture(fixture, _) | HookScope::FixtureDown(fixture, _, _) =
+                        scope
+                    {
                         run.record_fixture_output(fixture, id, local, v);
                     } else {
                         // Leaf, criterion, and check `setup:`/`teardown:`
@@ -664,10 +766,18 @@ async fn invoke_and_record(
                 false,
             )
         })
-        .flatten()
-        .map(|outcome| outcome.state);
-    let failed = step_failed(&outcome, judgment);
-    Ok((outcome, failed, action_detail))
+        .flatten();
+    let judgment_detail = if scope.judges_cleanup() && matches!(outcome, Outcome::Ok) {
+        judgment.as_ref().and_then(|outcome| outcome.detail.clone())
+    } else {
+        None
+    };
+    let action_detail = action_detail.or(judgment_detail);
+    let judgment = judgment.map(|outcome| outcome.state);
+    let failed = step_failed(&outcome, judgment)
+        || (scope.judges_cleanup()
+            && judgment.is_some_and(|state| state != duhem_judge::VerdictState::Pass));
+    Ok((outcome, failed, action_detail, judgment))
 }
 
 /// Mirror of `EvidenceWriter::append_observation` for setup. The

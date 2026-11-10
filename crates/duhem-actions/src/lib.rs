@@ -18,7 +18,9 @@ pub mod cli;
 pub mod db;
 pub mod error;
 pub mod locator;
+mod observe_window;
 pub mod playwright;
+pub mod process;
 pub mod ui;
 pub mod with;
 
@@ -37,25 +39,30 @@ pub use error::ActionError;
 pub use locator::{ExistenceState, Locator};
 pub use playwright::to_selector;
 pub use ui::{
-    AssertElement, AssertState, AssertUrl, CaptureSession, Click, Extract, Navigate, Select, Type,
-    Wait, validate_field_source,
+    AssertElement, AssertUrl, Back, CaptureSession, Click, Emulate, Extract, Focus, Forward,
+    Navigate, ObserveConsole, Press, Select, Type, Wait, validate_field_source,
 };
 pub use with::TimeoutSpec;
 
 /// Every built-in action's contract — the single source of truth for
 /// `duhem describe` / `duhem actions` and validate-time field checking.
 pub fn catalog() -> Vec<ActionContract> {
-    vec![
+    let mut contracts = vec![
         Navigate.contract(),
+        ObserveConsole.contract(),
+        Back.contract(),
+        Forward.contract(),
         Click.contract(),
         Extract.contract(),
         Type.contract(),
         Select.contract(),
+        Press.contract(),
+        Focus.contract(),
         AssertElement.contract(),
         AssertUrl.contract(),
-        AssertState.contract(),
         CaptureSession.contract(),
         Wait.contract(),
+        Emulate.contract(),
         Call.contract(),
         Observe.contract(),
         Poll.contract(),
@@ -64,7 +71,9 @@ pub fn catalog() -> Vec<ActionContract> {
         DbObserve.contract(),
         Seed.contract(),
         Invoke.contract(),
-    ]
+    ];
+    contracts.extend(process::contracts());
+    contracts
 }
 
 /// The contract for a single action by its `uses` string, if it exists.
@@ -79,11 +88,11 @@ mod catalog_tests {
     #[test]
     fn catalog_is_complete_with_unique_uses() {
         let cat = catalog();
-        assert_eq!(cat.len(), 18, "expected 18 action contracts");
+        assert_eq!(cat.len(), 27, "expected 27 action contracts");
         let mut uses: Vec<&str> = cat.iter().map(|c| c.uses).collect();
         uses.sort();
         uses.dedup();
-        assert_eq!(uses.len(), 18, "every `uses` is unique");
+        assert_eq!(uses.len(), 27, "every `uses` is unique");
     }
 
     #[test]

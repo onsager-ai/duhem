@@ -79,11 +79,13 @@ pub async fn write_passing_run(
     .await
     .unwrap();
     w.append(EventPayload::SetupStarted {
+        cleanup_policy: None,
         phase: duhem_evidence::StepPhase::Setup,
         step_count: 1,
         fixture_name: None,
         check_id: None,
         criterion_id: None,
+        registered_by: None,
     })
     .await
     .unwrap();
@@ -97,6 +99,7 @@ pub async fn write_passing_run(
         check_id: None,
         criterion_id: None,
         flow: None,
+        group: None,
     })
     .await
     .unwrap();
@@ -114,6 +117,7 @@ pub async fn write_passing_run(
     .await
     .unwrap();
     w.append(EventPayload::SetupStepFinished {
+        judgment: None,
         phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         outcome: StepOutcome::Ok,
@@ -142,6 +146,7 @@ pub async fn write_passing_run(
         layer: Some("ui".into()),
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();
@@ -171,6 +176,7 @@ pub async fn write_passing_run(
         layer: Some("ui".into()),
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();
@@ -193,6 +199,7 @@ pub async fn write_passing_run(
     .unwrap();
 
     w.append(EventPayload::AssertionEvaluated {
+        operands: None,
         check_id: "AC-1.1".into(),
         iteration: None,
         assertion_index: 0,
@@ -220,6 +227,7 @@ pub async fn write_passing_run(
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await
@@ -250,6 +258,7 @@ pub async fn write_replay_run(store: Arc<SqliteStore>, run_id: &str) -> (String,
         layer: Some("ui".into()),
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();
@@ -331,6 +340,7 @@ pub async fn write_replay_run(store: Arc<SqliteStore>, run_id: &str) -> (String,
     .await
     .unwrap();
     w.append(EventPayload::AssertionEvaluated {
+        operands: None,
         check_id: "AC-1.1".into(),
         iteration: None,
         assertion_index: 0,
@@ -358,6 +368,7 @@ pub async fn write_replay_run(store: Arc<SqliteStore>, run_id: &str) -> (String,
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(VerdictState::Pass),
     })
     .await
@@ -383,6 +394,7 @@ pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition
         layer: Some("api".into()),
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();
@@ -394,6 +406,7 @@ pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition
     .await
     .unwrap();
     w.append(EventPayload::AssertionEvaluated {
+        operands: None,
         check_id: "AC-1.1".into(),
         iteration: None,
         assertion_index: 0,
@@ -421,6 +434,7 @@ pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(VerdictState::Fail),
     })
     .await
@@ -439,11 +453,13 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
         .await
         .unwrap();
     w.append(EventPayload::SetupStarted {
+        cleanup_policy: None,
         phase: duhem_evidence::StepPhase::Setup,
         step_count: 1,
         fixture_name: None,
         check_id: None,
         criterion_id: None,
+        registered_by: None,
     })
     .await
     .unwrap();
@@ -457,10 +473,12 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
         check_id: None,
         criterion_id: None,
         flow: None,
+        group: None,
     })
     .await
     .unwrap();
     w.append(EventPayload::SetupStepFinished {
+        judgment: None,
         phase: duhem_evidence::StepPhase::Setup,
         step_index: 0,
         outcome: StepOutcome::Error,
@@ -481,6 +499,7 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(VerdictState::Inconclusive(
             InconclusiveCause::EnvironmentError,
         )),
@@ -506,6 +525,7 @@ pub async fn write_in_progress_run(store: Arc<SqliteStore>, run_id: &str, defini
         layer: None,
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     })
     .await
     .unwrap();

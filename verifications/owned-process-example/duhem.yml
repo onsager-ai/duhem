@@ -1,0 +1,60 @@
+verification: Owned local service restarts with persistent state
+spec_ref: https://github.com/onsager-ai/duhem/issues/579
+inputs:
+  server_script:
+    type: string
+    default: verifications/owned-process-example/server.py
+  state_file:
+    type: string
+  port:
+    type: string
+    default: "8769"
+  url:
+    type: string
+    default: http://127.0.0.1:8769/
+criteria:
+  - id: AC-1
+    description: A local service can restart without losing its persistent state.
+    checks:
+      - id: AC-1.1
+        setup:
+          - id: service
+            uses: process/start
+            with:
+              command: python3
+              args: [-u, $inputs.server_script, $inputs.state_file]
+              env: { PORT: $inputs.port }
+              ready:
+                http: { url: $inputs.url, status: 200 }
+                timeout: 5s
+        steps:
+          - id: first
+            uses: api/call
+            with: { method: GET, url: $inputs.url }
+          - id: running
+            uses: process/inspect
+            with: { handle: $setup.service.outputs.handle }
+          - id: replacement
+            uses: process/restart
+            with: { handle: $setup.service.outputs.handle }
+          - id: second
+            uses: api/call
+            with: { method: GET, url: $inputs.url }
+          - id: stop
+            uses: process/stop
+            with: { handle: $steps.replacement.outputs.handle }
+          - id: stopped
+            uses: process/inspect
+            with: { handle: $steps.replacement.outputs.handle }
+        assertions:
+          - $steps.first.outputs.body_text == "1"
+          - $steps.running.outputs.running == true
+          - $steps.replacement.outputs.generation == 2
+          - $steps.replacement.outputs.ready == true
+          - $steps.second.outputs.body_text == "2"
+          - $steps.stop.outputs.stopped == true
+          - $steps.stopped.outputs.state == "stopped"
+teardown:
+  - uses: cli/invoke
+    with:
+      command: [python3, -c, "from pathlib import Path; import sys; Path(sys.argv[1]).unlink(missing_ok=True)", $inputs.state_file]

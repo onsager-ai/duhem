@@ -145,8 +145,8 @@ test target="workspace":
             exec cargo test --workspace
             ;;
         browser-actions)
-            cargo test -p duhem-actions --test ui_smoke --test api_observe_smoke -- --ignored
-            exec cargo test -p duhem-runtime --test capture_smoke --test session_injection_smoke --test named_sessions_smoke -- --ignored
+            cargo test -p duhem-actions --test ui_smoke --test api_observe_smoke --test api_observe_window_smoke --test console_observe_smoke -- --ignored
+            exec cargo test -p duhem-runtime --test capture_smoke --test session_injection_smoke --test named_sessions_smoke --test frame_smoke --test api_smoke --test history_smoke --test keyboard_focus_smoke --test emulate_smoke --test geometry_smoke --test observe_window_masking_smoke --test console_observe_smoke --test http_page_error_masking_smoke -- --ignored
             ;;
         *)
             printf 'unknown test target: %s\n' "$1" >&2
@@ -223,6 +223,8 @@ _preflight_stages: lint test self-verify validate-suites
     # spec example could break CI while `preflight` stayed green — which
     # is exactly what happened on #453.
     cargo run -p xtask --quiet -- schema-drift
+    # Closed spec catalogs match their code counterparts.
+    cargo run -p xtask --quiet -- constraint-catalog --mode=fail
     # The generated action reference matches the action contracts.
     cargo run -p xtask --quiet -- action-reference --check
 

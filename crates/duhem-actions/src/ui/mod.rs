@@ -18,18 +18,28 @@
 //! - `ui/type`
 //! - `ui/select`
 //! - `ui/assert-url`
-//! - `ui/assert-state`
 //!
 //! Shipped in #347 (authenticated-check adapter):
 //! - `ui/capture-session`
 //!
+//! Shipped in #580 (S3):
+//! - `ui/emulate`
+//!
+//! Shipped in #580 S2 (history):
+//! - `ui/back`
+//! - `ui/forward`
+//!
+//! Shipped in #580 (keyboard and focus):
+//! - `ui/press`
+//! - `ui/focus`
+//!
 //! ## Waiter-action outcome shape
 //!
-//! The three "waiter" actions diverge on the verdict shape they
+//! The two "waiter" actions diverge on the verdict shape they
 //! emit when their deadline elapses without the expectation being
 //! met. The divergence is intentional but easy to miss:
 //!
-//! - `ui/assert-element` and `ui/assert-state`: `Outcome::Ok` with
+//! - `ui/assert-element`: `Outcome::Ok` with
 //!   `satisfied: false`. Reaching the deadline is itself a
 //!   *conclusive* observation that the element / state never
 //!   appeared.
@@ -44,25 +54,33 @@
 //! `inconclusive` verdict need to know which waiter they reference.
 
 pub mod assert_element;
-pub mod assert_state;
 pub mod assert_url;
 pub mod capture_session;
 pub mod click;
+pub mod emulate;
 pub mod extract;
 mod field;
+pub mod focus;
+pub mod history;
 pub mod navigate;
+pub mod observe_console;
+pub mod press;
 pub mod select;
 pub mod type_;
 pub mod wait;
 
 pub use assert_element::AssertElement;
-pub use assert_state::AssertState;
 pub use assert_url::AssertUrl;
 pub use capture_session::CaptureSession;
 pub use click::Click;
+pub use emulate::Emulate;
 pub use extract::Extract;
 pub use field::validate_field_source;
+pub use focus::Focus;
+pub use history::{Back, Forward};
 pub use navigate::Navigate;
+pub use observe_console::ObserveConsole;
+pub use press::Press;
 pub use select::Select;
 pub use type_::Type;
 pub use wait::Wait;

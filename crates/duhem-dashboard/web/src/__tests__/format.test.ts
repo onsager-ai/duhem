@@ -21,6 +21,14 @@ const ev = (kind: string, extra: Record<string, unknown> = {}, seq = 1): TraceEv
 });
 
 describe("formatEvent", () => {
+  it("keeps frame identity in nested and inline locator descriptions", () => {
+    for (const withFields of [
+      { locator: { frame: { testid: "report" }, role: "heading" } },
+      { frame: { testid: "report" }, role: "button" },
+    ]) {
+      expect(describeWith(withFields)).toContain('inside frame {testid "report"}');
+    }
+  });
   it("presents the recorded data layer as the db delivery-web tag", () => {
     const f = formatEvent(
       ev("step_started", { uses: "db/query", layer: "data", with: {} }),
@@ -457,4 +465,15 @@ describe("summarizeCheck", () => {
     expect(s.headline).toContain("inconclusive");
     expect(s.headline).toContain("environment_error");
   });
+});
+
+it("marks a false lifecycle judgment failed while retaining successful execution evidence", () => {
+  const events = [
+    ev("setup_step_started", { uses: "api/poll", step_index: 0, phase: "teardown" }, 1),
+    ev("setup_step_finished", { step_index: 0, phase: "teardown", outcome: "ok", judgment: "fail", detail: "condition remained false" }, 2),
+  ];
+  const node = groupTimeline(events).find((item): item is StepNode => item.kind === "step")!;
+  expect(stepStatus(node).failed).toBe(true);
+  expect(stepStatus(node).tone).toBe("fail");
+  expect(events[1].outcome).toBe("ok");
 });

@@ -9,7 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::assertion::Assertion;
 use crate::includes::MAX_INCLUDE_DEPTH;
 use crate::source::StepSourceOrigin;
-use crate::step::{ExpandedFlowOrigin, Step, StepCondition};
+use crate::step::{ExpandedFlowOrigin, FlowCleanup, Step, StepCondition, StepGroupFrame};
+use crate::step_groups;
 use crate::verification::{Flow, FlowCatalog, InputDecl, InputType, VerificationDefinition};
 
 #[path = "flows_validate.rs"]
@@ -20,6 +21,18 @@ pub(crate) const MAX_FLOW_DEPTH: usize = MAX_INCLUDE_DEPTH;
 
 /// Validate every flow-facing rule and expand all check invocations.
 pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Result<(), String> {
+    let group_errors = step_groups::validate(definition);
+    if !group_errors.is_empty() {
+        return Err(group_errors
+            .iter()
+            .map(|error| match error.location() {
+                Some(at) => format!("line {}, column {}: {error}", at.line, at.column),
+                None => error.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("; "));
+    }
+
     let errors = validate_authored(definition);
     if !errors.is_empty() {
         return Err(errors.join("; "));
@@ -142,13 +155,21 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
                     .expect("projection preserves expression syntax");
                 }
             }
-            expand_lifecycle_calls_in_list(
+            let setup_projections = expand_lifecycle_calls_in_list(
                 &mut check.setup,
                 &catalog,
                 "setup",
                 &mut lifecycle_counter,
             );
             expand_for_each_in_list(&mut check.setup, &catalog, &mut lifecycle_counter);
+            // Check-body consumers may read declared outputs from process
+            // actions in their own setup (#579). Keep ordinary setup outputs
+            // out of scope; validation enforces that distinction after these
+            // call-id references are rewritten to the expanded action ids.
+            rewrite_steps(&mut check.steps, &setup_projections);
+            for assertion in &mut check.assertions {
+                rewrite_assertion(assertion, &setup_projections);
+            }
             expand_lifecycle_calls_in_list(
                 &mut check.teardown,
                 &catalog,
@@ -156,6 +177,9 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
                 &mut lifecycle_counter,
             );
             expand_for_each_in_list(&mut check.teardown, &catalog, &mut lifecycle_counter);
+            // A check's teardown is inside the scope opened by its setup, so
+            // it can also consume that setup's declared flow outputs.
+            rewrite_steps(&mut check.teardown, &setup_projections);
         }
     }
     Ok(())
@@ -248,6 +272,8 @@ fn blank_step() -> Step {
         for_each_body: Vec::new(),
         flow: None,
         flow_secrets: Vec::new(),
+        group: Vec::new(),
+        flow_cleanup: Vec::new(),
     }
 }
 
@@ -285,6 +311,7 @@ fn expand_for_each_in_list(steps: &mut [Step], catalog: &FlowCatalog, counter: &
         let mut body = expanded.steps;
         rewrite_steps(&mut body, &expanded.projections);
         step.for_each_body = body;
+        carry_cleanup_into_loop(step);
     }
 }
 
@@ -317,6 +344,49 @@ fn expand_sequence(
     let mut result = Expansion::default();
     for (inner_index, mut step) in steps.into_iter().enumerate() {
         rewrite_value(&mut step.with, &result.projections);
+        if step_groups::is_group(&step) {
+            // Lower the group into this sequence (#614). Its children keep
+            // this namespace; each carries the group frame so the runtime
+            // evaluates the group's `if:` once, at entry.
+            let frame = StepGroupFrame {
+                key: *counter as u32,
+                label: step.id.clone().unwrap_or_else(|| inner_index.to_string()),
+                condition: step.condition.clone(),
+            };
+            *counter += 1;
+            let mut body = step.steps.take().unwrap_or_default();
+            for inner in &mut body {
+                inherit_session(inner, step.session.as_deref());
+            }
+            let mut expanded = expand_sequence(
+                body,
+                catalog,
+                namespace,
+                current_flow,
+                current_invocation,
+                inherited_secrets,
+                external_root,
+                counter,
+            );
+            // `if: always` / `if: failure` is also the default for inner steps
+            // that declare no `if:` of their own, as a call-site `if:` is for
+            // the steps its flow expands to: a diagnostics group would
+            // otherwise gate its own default steps on the failure it exists for.
+            let inherited = matches!(
+                frame.condition,
+                StepCondition::Always | StepCondition::Failure
+            );
+            for inner in &mut expanded.steps {
+                if inherited && inner.condition == StepCondition::Success {
+                    inner.condition = frame.condition.clone();
+                }
+                inner.group.insert(0, frame.clone());
+            }
+            result.steps.append(&mut expanded.steps);
+            result.origins.append(&mut expanded.origins);
+            result.projections.append(&mut expanded.projections);
+            continue;
+        }
         if step.call.is_none() || step.for_each.is_some() {
             if !namespace.is_empty()
                 && let Some(id) = &mut step.id
@@ -391,18 +461,37 @@ fn expand_sequence(
         }
 
         let mut direct_ids = BTreeMap::new();
-        for inner in flow
-            .steps
-            .iter()
-            .flat_map(|s| std::iter::once(s).chain(s.steps.iter().flatten()))
+        for inner in step_groups::tree(&flow.steps)
+            .into_iter()
+            .chain(step_groups::tree(&flow.cleanup))
         {
             if inner.call.is_none()
+                && !step_groups::is_group(inner)
                 && let Some(id) = &inner.id
             {
                 direct_ids.insert(
                     format!("$steps.{id}."),
                     format!("$steps.{invocation}__{id}."),
                 );
+            }
+        }
+        if !flow.cleanup.is_empty() {
+            let cleanup = expand_flow_cleanup(
+                flow_name,
+                flow,
+                &CleanupCall {
+                    invocation: &invocation,
+                    bindings: &bindings,
+                    secrets: &secrets,
+                    session: step.session.as_deref(),
+                },
+                &expanded.projections,
+                &direct_ids,
+                catalog,
+                counter,
+            );
+            for inner in &mut expanded.steps {
+                inner.flow_cleanup.insert(0, cleanup.clone());
             }
         }
         for (output, raw) in &flow.outputs {
@@ -430,6 +519,113 @@ fn expand_sequence(
         result.origins.append(&mut expanded.origins);
     }
     result
+}
+
+struct CleanupCall<'a> {
+    invocation: &'a str,
+    bindings: &'a BTreeMap<String, serde_yml::Value>,
+    secrets: &'a [serde_yml::Value],
+    session: Option<&'a str>,
+}
+
+/// Expand one flow's `cleanup:` for a single call (#615). Body-output
+/// references are rewritten to the namespaced `$steps.<invocation>__<id>`
+/// ids *before* params are substituted, so a caller-supplied `$steps.*`
+/// argument is never mistaken for an inner reference. The runtime resolves
+/// that accessor from a snapshot of the body's outputs.
+fn expand_flow_cleanup(
+    flow_name: &str,
+    flow: &Flow,
+    call: &CleanupCall<'_>,
+    body_projections: &BTreeMap<String, String>,
+    direct_ids: &BTreeMap<String, String>,
+    catalog: &FlowCatalog,
+    counter: &mut usize,
+) -> FlowCleanup {
+    // Auto-named invocations carry a `#`, which an expression path cannot
+    // spell, so the cleanup refers to a sanitized alias of such ids.
+    let mut aliases = BTreeMap::new();
+    let references: BTreeMap<String, String> = body_projections
+        .iter()
+        .chain(direct_ids)
+        .map(|(from, to)| {
+            let Some(rest) = to.strip_prefix("$steps.") else {
+                return (from.clone(), to.clone());
+            };
+            let (id, tail) = rest.split_once('.').unwrap_or((rest, ""));
+            let alias: String = id
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect();
+            let target = format!("$steps.{alias}.{tail}");
+            if alias != id {
+                aliases.insert(id.to_string(), alias);
+            }
+            (from.clone(), target)
+        })
+        .collect();
+    let mut cleanup = flow.cleanup.clone();
+    rewrite_authored_bodies(&mut cleanup, &references);
+    for inner in &mut cleanup {
+        substitute_step_params(inner, call.bindings);
+        inherit_session(inner, call.session);
+    }
+    let expanded = expand_sequence(
+        cleanup,
+        catalog,
+        call.invocation,
+        Some(flow_name),
+        Some(call.invocation),
+        call.secrets,
+        "steps",
+        counter,
+    );
+    let mut steps = expanded.steps;
+    rewrite_steps(&mut steps, &expanded.projections);
+    // `for_each:` in a cleanup expands like one in a lifecycle block.
+    expand_for_each_in_list(&mut steps, catalog, counter);
+    FlowCleanup {
+        flow: flow_name.to_string(),
+        call: call.invocation.to_string(),
+        policy: flow.cleanup_policy,
+        steps,
+        aliases: aliases.into_iter().collect(),
+        per_iteration: false,
+        fixture: None,
+    }
+}
+
+/// `rewrite_steps` for a list whose `for_each:` bodies are still authored
+/// (`steps:`), as a flow's `cleanup:` is before it is expanded.
+fn rewrite_authored_bodies(steps: &mut [Step], projections: &BTreeMap<String, String>) {
+    rewrite_steps(steps, projections);
+    for step in steps {
+        if let Some(body) = &mut step.steps {
+            rewrite_authored_bodies(body, projections);
+        }
+    }
+}
+
+/// A `for_each:` wrapper is never dispatched itself, so it hands the cleanups
+/// its flow call put on it to the steps of its expanded body: the first of
+/// those to dispatch registers them, once. A loop that dispatches nothing
+/// has not entered the call. Cleanups of calls inside the body repeat for
+/// every iteration.
+fn carry_cleanup_into_loop(step: &mut Step) {
+    for inner in &mut step.for_each_body {
+        for cleanup in &mut inner.flow_cleanup {
+            cleanup.per_iteration = true;
+        }
+    }
+    let carried = std::mem::take(&mut step.flow_cleanup);
+    if carried.is_empty() {
+        return;
+    }
+    for inner in &mut step.for_each_body {
+        let mut merged = carried.clone();
+        merged.append(&mut inner.flow_cleanup);
+        inner.flow_cleanup = merged;
+    }
 }
 
 fn substitute_step_params(step: &mut Step, bindings: &BTreeMap<String, serde_yml::Value>) {
@@ -484,6 +680,7 @@ fn expand_check_loops(
         rewrite_steps(&mut expanded.steps, &expanded.projections);
         projections.extend(expanded.projections);
         step.for_each_body = expanded.steps;
+        carry_cleanup_into_loop(step);
     }
 }
 
@@ -500,24 +697,16 @@ fn substitute_params(value: &mut serde_yml::Value, bindings: &BTreeMap<String, s
     match value {
         serde_yml::Value::String(raw) => {
             if let Some(reference) = raw.strip_prefix("$params.") {
-                let mut segments = reference.split('.');
-                let Some(name) = segments.next() else {
-                    return;
+                let parsed = match crate::expr::parse(raw) {
+                    Ok(crate::Expr::Path(path)) => resolve_param_path(&path, bindings),
+                    _ => None,
                 };
-                let Some(mut resolved) = bindings.get(name).cloned() else {
-                    return;
-                };
-                for segment in segments {
-                    let Some(next) = resolved
-                        .as_mapping()
-                        .and_then(|map| map.get(serde_yml::Value::String(segment.to_string())))
-                        .cloned()
-                    else {
-                        return;
-                    };
-                    resolved = next;
+                // Dot-split walk kept so flows that relied on it before bracket
+                // keys (e.g. `$params.resp.content-type`) resolve unchanged.
+                if let Some(resolved) = parsed.or_else(|| resolve_dotted_param(reference, bindings))
+                {
+                    *value = resolved.clone();
                 }
-                *value = resolved;
             } else if raw.trim_start().starts_with("$pages.")
                 && let Some(rewritten) = rewrite_page_param_args(raw, bindings)
             {
@@ -538,6 +727,40 @@ fn substitute_params(value: &mut serde_yml::Value, bindings: &BTreeMap<String, s
     }
 }
 
+fn resolve_dotted_param<'a>(
+    reference: &str,
+    bindings: &'a BTreeMap<String, serde_yml::Value>,
+) -> Option<&'a serde_yml::Value> {
+    let mut segments = reference.split('.');
+    let mut value = bindings.get(segments.next()?)?;
+    for segment in segments {
+        value = value
+            .as_mapping()?
+            .get(serde_yml::Value::String(segment.to_string()))?;
+    }
+    Some(value)
+}
+
+fn resolve_param_path<'a>(
+    path: &crate::Path,
+    bindings: &'a BTreeMap<String, serde_yml::Value>,
+) -> Option<&'a serde_yml::Value> {
+    if path.root != crate::PathRoot::Loop || path.segments.first()?.as_str() != "params" {
+        return None;
+    }
+    let mut value = bindings.get(path.segments.get(1)?)?;
+    for (index, segment) in path.segments.iter().enumerate().skip(2) {
+        value = match value {
+            serde_yml::Value::Mapping(map) => map.get(serde_yml::Value::String(segment.clone()))?,
+            serde_yml::Value::Sequence(items) if !path.quoted_keys.contains(&index) => {
+                items.get(segment.parse::<usize>().ok()?)?
+            }
+            _ => return None,
+        };
+    }
+    Some(value)
+}
+
 /// Substitute flow params embedded as page-call arguments before the
 /// expanded step reaches the ordinary expression parser (spec #495).
 fn rewrite_page_param_args(
@@ -550,11 +773,29 @@ fn rewrite_page_param_args(
     let mut changed = false;
     while let Some(offset) = rest.find(marker) {
         out.push_str(&rest[..offset]);
-        let reference = &rest[offset + marker.len()..];
-        let name = reference_head(reference)?;
-        let replacement = bindings.get(name).and_then(render_expr_value)?;
+        let reference = &rest[offset..];
+        let (path, suffix) = crate::expr::parse::parse_path_prefix(reference)?;
+        let replacement = if let Some(value) = resolve_param_path(&path, bindings) {
+            render_expr_value(value)?
+        } else {
+            // Preserve navigation on an expression passed as a parameter.
+            let name = path.segments.get(1)?;
+            let value = bindings.get(name)?;
+            let serde_yml::Value::String(expression) = value else {
+                return None;
+            };
+            if !matches!(crate::expr::parse(expression), Ok(crate::Expr::Path(_))) {
+                return None;
+            }
+            let end = reference.len() - suffix.len();
+            format!(
+                "{}{}",
+                expression,
+                &reference[marker.len() + name.len()..end]
+            )
+        };
         out.push_str(&replacement);
-        rest = &reference[name.len()..];
+        rest = suffix;
         changed = true;
     }
     out.push_str(rest);
@@ -563,11 +804,7 @@ fn rewrite_page_param_args(
 
 fn render_expr_value(value: &serde_yml::Value) -> Option<String> {
     match value {
-        serde_yml::Value::String(raw)
-            if raw.trim_start().starts_with('$') && crate::expr::parse(raw).is_ok() =>
-        {
-            Some(raw.clone())
-        }
+        serde_yml::Value::String(raw) if crate::expr::is_valid_expression(raw) => Some(raw.clone()),
         serde_yml::Value::String(raw) if !raw.contains('\'') => Some(format!("'{raw}'")),
         serde_yml::Value::String(raw) if !raw.contains('"') => Some(format!("\"{raw}\"")),
         serde_yml::Value::String(raw) => {
@@ -589,11 +826,25 @@ fn render_expr_value(value: &serde_yml::Value) -> Option<String> {
 fn rewrite_steps(steps: &mut [Step], projections: &BTreeMap<String, String>) {
     for step in steps {
         rewrite_value(&mut step.with, projections);
+        if let StepCondition::Expr(condition) = &mut step.condition {
+            *condition = crate::ExprStr::from_source(&rewrite_string(&condition.raw, projections))
+                .expect("rewriting a valid step reference preserves expression syntax");
+        }
         if let Some(source) = &mut step.for_each {
             *source = crate::ExprStr::from_source(&rewrite_string(&source.raw, projections))
                 .expect("rewriting a valid step reference preserves expression syntax");
         }
+        for frame in &mut step.group {
+            if let StepCondition::Expr(condition) = &mut frame.condition {
+                *condition =
+                    crate::ExprStr::from_source(&rewrite_string(&condition.raw, projections))
+                        .expect("rewriting a valid step reference preserves expression syntax");
+            }
+        }
         rewrite_steps(&mut step.for_each_body, projections);
+        for cleanup in &mut step.flow_cleanup {
+            rewrite_steps(&mut cleanup.steps, projections);
+        }
     }
 }
 
@@ -664,6 +915,20 @@ fn param_reference_names(raw: &str) -> Vec<&str> {
         rest = &rest[name.len()..];
     }
     names
+}
+
+fn step_reference_ids(raw: &str) -> Vec<&str> {
+    let mut ids = Vec::new();
+    let mut rest = raw;
+    while let Some(offset) = rest.find("$steps.") {
+        rest = &rest[offset + "$steps.".len()..];
+        let Some(id) = reference_head(rest) else {
+            continue;
+        };
+        ids.push(id);
+        rest = &rest[id.len()..];
+    }
+    ids
 }
 
 fn step_output_reference(raw: &str) -> Option<(&str, &str)> {
@@ -942,6 +1207,45 @@ criteria: []
         );
     }
 
+    /// #440 Tier 2: a check-step `if:` reading a call's declared output is
+    /// rewritten onto the namespaced expanded step, so it validates.
+    #[test]
+    fn check_condition_reading_a_call_output_is_rewritten_and_validates() {
+        let mut definition = authored(
+            r#"
+verification: x
+flows:
+  make_token:
+    steps:
+      - id: produce
+        uses: cli/invoke
+        with: { command: [echo, made] }
+    outputs:
+      value: $steps.produce.outputs.stdout
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: make
+            call: make_token
+          - uses: cli/invoke
+            if: $steps.make.outputs.value == 'made'
+            with: { command: [echo, again] }
+        assertions: ["true"]
+"#,
+        );
+        validate_and_expand(&mut definition).expect("expand");
+        let steps = &definition.criteria[0].checks[0].steps;
+        assert!(matches!(
+            &steps[1].condition,
+            StepCondition::Expr(expr) if expr.raw == "$steps.make__produce.outputs.stdout == 'made'"
+        ));
+        crate::validate_with_contract_outputs(&definition, &|_| vec!["stdout".into()])
+            .expect("rewritten condition resolves against the expanded step");
+    }
+
     /// #526: the same projection, but for a fixture `up:` call whose
     /// declared output a later `up:` step reads via `$fixture.<name>.*`.
     #[test]
@@ -1067,6 +1371,102 @@ criteria:
             Some("$pages.chat.history_item($inputs.index)")
         );
         crate::validate(&definition).expect("expanded page call validates");
+    }
+
+    #[test]
+    fn substitutes_nested_flow_params_with_bracket_keys() {
+        let bindings: BTreeMap<String, serde_yml::Value> = serde_yml::from_str(
+            r#"
+resp: { content-type: text/plain, nested: { name: dotted }, '200': numeric }
+items: [{ a-b: first }]
+"#,
+        )
+        .unwrap();
+        for (reference, expected) in [
+            ("$params.resp['content-type']", "text/plain"),
+            ("$params.resp.nested.name", "dotted"),
+            ("$params.resp['200']", "numeric"),
+            ("$params.items[0]['a-b']", "first"),
+        ] {
+            let mut value = serde_yml::Value::String(reference.into());
+            substitute_params(&mut value, &bindings);
+            assert_eq!(value.as_str(), Some(expected), "{reference}");
+        }
+        // Pre-bracket dotted form over a hyphenated key still resolves.
+        let mut legacy = serde_yml::Value::String("$params.resp.content-type".into());
+        substitute_params(&mut legacy, &bindings);
+        assert_eq!(legacy.as_str(), Some("text/plain"));
+        let mut numeric_key = serde_yml::Value::String("$params.items['0']".into());
+        substitute_params(&mut numeric_key, &bindings);
+        assert_eq!(numeric_key.as_str(), Some("$params.items['0']"));
+    }
+
+    #[test]
+    fn expands_bracket_keys_in_page_call_arguments() {
+        let bindings: BTreeMap<String, serde_yml::Value> = serde_yml::from_str(
+            "resp: { content-type: text/plain }\nitems: [{ a-b: 7 }]\nouter: $inputs.data\n",
+        )
+        .unwrap();
+        let raw = "$pages.chat.item($params.resp['content-type'], $params.items[0]['a-b'])";
+        assert_eq!(
+            rewrite_page_param_args(raw, &bindings).as_deref(),
+            Some("$pages.chat.item('text/plain', 7)")
+        );
+        assert_eq!(
+            rewrite_page_param_args("$pages.chat.item($params.outer.name)", &bindings).as_deref(),
+            Some("$pages.chat.item($inputs.data.name)")
+        );
+    }
+
+    #[test]
+    fn expands_bracket_keys_through_a_flow_call() {
+        let mut definition = authored(
+            r#"
+verification: flow bracket keys
+flows:
+  print_values:
+    params:
+      resp: { type: object }
+      items: { type: array }
+    steps:
+      - uses: cli/invoke
+        with:
+          command: echo
+          args:
+            - "$params.resp['content-type']"
+            - "$params.items[0]['a-b']"
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - call: print_values
+            with:
+              resp: { content-type: text/plain }
+              items: [{ a-b: first }]
+        assertions: ["true"]
+"#,
+        );
+        validate_and_expand(&mut definition).expect("flow expands");
+        let args = &definition.criteria[0].checks[0].steps[0].with["args"];
+        assert_eq!(args[0].as_str(), Some("text/plain"));
+        assert_eq!(args[1].as_str(), Some("first"));
+    }
+
+    #[test]
+    fn flow_output_projection_keeps_bracket_suffix() {
+        let projections = BTreeMap::from([(
+            "$steps.fetch.outputs.response".to_string(),
+            "$steps.fetch__request.outputs.body".to_string(),
+        )]);
+        assert_eq!(
+            rewrite_string(
+                "$steps.fetch.outputs.response['content-type']",
+                &projections
+            ),
+            "$steps.fetch__request.outputs.body['content-type']"
+        );
     }
 
     #[test]
@@ -1454,5 +1854,309 @@ criteria:
         }
         assert_eq!(teardown[0].flow.as_ref().unwrap().inner_index, 0);
         assert_eq!(teardown[1].flow.as_ref().unwrap().inner_index, 1);
+    }
+
+    const SCRATCH: &str = r#"
+flows:
+  scratch:
+    params: { prefix: { type: string } }
+    steps:
+      - id: create
+        uses: cli/invoke
+        with: { command: [mktemp, $params.prefix] }
+    outputs: { path: $steps.create.outputs.stdout }
+    cleanup:
+      - uses: cli/invoke
+        with: { command: [rm, -f, $steps.create.outputs.stdout, $params.prefix] }
+"#;
+
+    #[test]
+    fn cleanup_expands_with_namespaced_ids_params_and_a_registration_marker() {
+        let mut definition = authored(&format!(
+            r#"
+verification: flow cleanup
+{SCRATCH}
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - {{ id: tmp, call: scratch, with: {{ prefix: p1 }} }}
+          - {{ call: scratch, with: {{ prefix: p2 }} }}
+        assertions: ["true"]
+"#
+        ));
+        validate_and_expand(&mut definition).expect("expand");
+        let steps = &definition.criteria[0].checks[0].steps;
+        assert_eq!(steps.len(), 2, "cleanup is not part of the expanded body");
+        let first = &steps[0].flow_cleanup;
+        assert_eq!(first.len(), 1);
+        assert_eq!(
+            (first[0].flow.as_str(), first[0].call.as_str()),
+            ("scratch", "tmp")
+        );
+        assert_eq!(first[0].policy, crate::CleanupPolicy::Required);
+        assert_eq!(
+            first[0].steps[0].with["command"][2].as_str(),
+            Some("$steps.tmp__create.outputs.stdout")
+        );
+        assert_eq!(first[0].steps[0].with["command"][3].as_str(), Some("p1"));
+        assert_eq!(first[0].steps[0].flow.as_ref().unwrap().invocation, "tmp");
+        // An auto-named call spells its ids with a `#`, which an expression
+        // cannot, so the reference goes through an alias.
+        let second = &steps[1].flow_cleanup[0];
+        assert_eq!(
+            second.steps[0].with["command"][2].as_str(),
+            Some("$steps.scratch_1__create.outputs.stdout")
+        );
+        assert_eq!(
+            second.aliases,
+            vec![(
+                "scratch#1__create".to_string(),
+                "scratch_1__create".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn lifecycle_calls_register_cleanup_and_the_policy_round_trips() {
+        let mut definition = authored(&format!(
+            r#"
+verification: flow cleanup in setup
+{SCRATCH}
+setup: [{{ id: tmp, call: scratch, with: {{ prefix: p }} }}]
+criteria: []
+"#
+        ));
+        validate_and_expand(&mut definition).expect("expand");
+        assert_eq!(definition.setup[0].flow_cleanup.len(), 1);
+
+        let default: Flow =
+            serde_yml::from_str("steps: [{uses: a/b}]\ncleanup: [{uses: c/d}]\n").unwrap();
+        assert!(serde_yml::to_string(&default).unwrap().contains("cleanup:"));
+        assert!(
+            !serde_yml::to_string(&default)
+                .unwrap()
+                .contains("cleanup_policy")
+        );
+        let diagnostic: Flow = serde_yml::from_str(
+            "steps: [{uses: a/b}]\ncleanup: [{uses: c/d}]\ncleanup_policy: diagnostic_only\n",
+        )
+        .unwrap();
+        assert_eq!(
+            diagnostic.cleanup_policy,
+            crate::CleanupPolicy::DiagnosticOnly
+        );
+        assert!(
+            serde_yml::to_string(&diagnostic)
+                .unwrap()
+                .contains("cleanup_policy: diagnostic_only")
+        );
+    }
+
+    fn cleanup_errors(yaml: &str) -> String {
+        crate::validate(&authored(yaml))
+            .unwrap_err()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn cleanup_validation_rejects_misplaced_policy_references_and_calls() {
+        let policy_only = cleanup_errors(
+            r#"
+verification: x
+flows:
+  f:
+    steps: [{ uses: cli/invoke }]
+    cleanup_policy: diagnostic_only
+criteria: []
+"#,
+        );
+        assert!(
+            policy_only.contains("`cleanup_policy:` without `cleanup:`"),
+            "{policy_only}"
+        );
+
+        let reference = cleanup_errors(
+            r#"
+verification: x
+flows:
+  f:
+    steps: [{ id: make, uses: cli/invoke }]
+    cleanup:
+      - uses: cli/invoke
+        with: { command: [rm, $steps.elsewhere.outputs.stdout, $inputs.leaf] }
+criteria: []
+"#,
+        );
+        assert!(
+            reference.contains("`$steps.elsewhere`, which is not a step of flow `f`"),
+            "{reference}"
+        );
+        assert!(reference.contains("$inputs.leaf"), "{reference}");
+
+        let outside = cleanup_errors(&format!(
+            r#"
+verification: x
+{SCRATCH}
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps: [{{ id: tmp, call: scratch, with: {{ prefix: p }} }}]
+        assertions: ["$steps.tmp__create.outputs.stdout == 'x'"]
+"#
+        ));
+        assert!(outside.contains("tmp__create"), "{outside}");
+
+        let nested = cleanup_errors(&format!(
+            r#"
+verification: x
+{SCRATCH}
+  outer:
+    steps: [{{ uses: cli/invoke }}]
+    cleanup: [{{ call: scratch, with: {{ prefix: p }} }}]
+criteria: []
+"#
+        ));
+        assert!(
+            nested.contains("cannot be called from a flow's `cleanup:`"),
+            "{nested}"
+        );
+    }
+
+    const LOOPED: &str = r#"
+flows:
+  looped:
+    params: { names: { type: string } }
+    steps:
+      - for_each: $params.names
+        as: n
+        max: 3
+        steps:
+          - { id: make, uses: cli/invoke, with: { command: [mkdir, $n] } }
+          - { uses: cli/invoke, with: { command: [true] } }
+      - uses: cli/invoke
+        with: { command: [true] }
+    cleanup:
+      - for_each: $params.names
+        as: n
+        max: 3
+        steps:
+          - { uses: cli/invoke, with: { command: [rmdir, $n] } }
+"#;
+
+    #[test]
+    fn a_flow_that_starts_with_a_loop_registers_from_its_body_leaves_once() {
+        let mut definition = authored(&format!(
+            r#"
+verification: looped
+{LOOPED}
+setup:
+  - {{ id: rows, uses: cli/invoke }}
+  - {{ id: dirs, call: looped, with: {{ names: $setup.rows.outputs.stdout }} }}
+criteria: []
+"#
+        ));
+        validate_and_expand(&mut definition).expect("expand");
+        let wrapper = &definition.setup[1];
+        assert!(
+            wrapper.flow_cleanup.is_empty(),
+            "the wrapper never dispatches"
+        );
+        let leaves: Vec<_> = wrapper
+            .for_each_body
+            .iter()
+            .chain(&definition.setup[2..])
+            .collect();
+        assert_eq!(leaves.len(), 3);
+        for leaf in leaves {
+            assert_eq!(leaf.flow_cleanup.len(), 1);
+            assert!(!leaf.flow_cleanup[0].per_iteration);
+            assert_eq!(leaf.flow_cleanup[0].call, "dirs");
+        }
+        // The cleanup's own loop expands like a lifecycle `for_each:`.
+        let cleanup = &definition.setup[1].for_each_body[0].flow_cleanup[0];
+        assert_eq!(cleanup.steps[0].for_each_body.len(), 1);
+    }
+
+    #[test]
+    fn a_call_inside_a_loop_body_registers_per_iteration() {
+        let mut definition = authored(&format!(
+            r#"
+verification: loop of calls
+{SCRATCH}
+setup:
+  - for_each: $inputs.names
+    as: n
+    max: 2
+    call: scratch
+    with: {{ prefix: $n }}
+criteria: []
+inputs: {{ names: {{ type: array, default: [] }} }}
+"#
+        ));
+        validate_and_expand(&mut definition).expect("expand");
+        let body = &definition.setup[0].for_each_body;
+        assert_eq!(body[0].flow_cleanup.len(), 1);
+        assert!(body[0].flow_cleanup[0].per_iteration);
+    }
+
+    #[test]
+    fn cleanup_loops_are_validated_like_lifecycle_loops() {
+        let errors = cleanup_errors(
+            r#"
+verification: x
+flows:
+  f:
+    params: { names: { type: string } }
+    steps: [{ uses: cli/invoke }]
+    cleanup:
+      - for_each: $params.names
+        steps: [{ uses: cli/invoke }]
+criteria: []
+"#,
+        );
+        assert!(errors.contains("`for_each:` requires `max:`"), "{errors}");
+    }
+
+    #[test]
+    fn cleanup_flows_cannot_be_called_from_teardown_or_fixtures() {
+        for block in [
+            "teardown: [{ call: scratch, with: { prefix: p } }]",
+            "fixtures: { r: { up: [{ call: scratch, with: { prefix: p } }], down: [{ uses: cli/invoke }] } }",
+            "fixtures: { r: { up: [{ uses: cli/invoke }], down: [{ call: scratch, with: { prefix: p } }] } }",
+        ] {
+            let errors = cleanup_errors(&format!(
+                "verification: x\n{SCRATCH}\n{block}\ncriteria: []\n"
+            ));
+            assert!(
+                errors.contains("flow `scratch` declares `cleanup:` and cannot be called from"),
+                "{block}: {errors}"
+            );
+        }
+        let check_teardown = cleanup_errors(&format!(
+            r#"
+verification: x
+{SCRATCH}
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps: []
+        teardown: [{{ call: scratch, with: {{ prefix: p }} }}]
+        assertions: ["true"]
+"#
+        ));
+        assert!(
+            check_teardown.contains("cannot be called from"),
+            "{check_teardown}"
+        );
     }
 }

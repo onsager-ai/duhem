@@ -40,20 +40,71 @@ pub struct Flow {
     /// Caller-visible output name to an inner `$steps.*` output.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub outputs: BTreeMap<String, String>,
+
+    /// Steps registered on the enclosing lifecycle scope when a `call:` to
+    /// this flow is entered and unwound LIFO at that scope's exit (#615).
+    /// They may read `$params.*` and this call's own body outputs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cleanup: Vec<Step>,
+
+    // Applies to `cleanup:` only; valid only together with it.
+    #[serde(default, skip_serializing_if = "CleanupPolicy::is_required")]
+    pub cleanup_policy: CleanupPolicy,
 }
 
 pub type FlowCatalog = BTreeMap<String, Flow>;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CleanupPolicy {
+    #[default]
+    Required,
+    DiagnosticOnly,
+}
+
+impl CleanupPolicy {
+    pub fn is_required(&self) -> bool {
+        *self == Self::Required
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Required => "required",
+            Self::DiagnosticOnly => "diagnostic_only",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Fixture {
     /// Actions that establish one fresh instance for a check.
     pub up: Vec<Step>,
-    /// Best-effort cleanup actions for that instance.
+    /// Cleanup actions for that instance, required by default.
     pub down: Vec<Step>,
+    #[serde(default, skip_serializing_if = "CleanupPolicy::is_required")]
+    pub cleanup_policy: CleanupPolicy,
 }
 
 pub type FixtureCatalog = BTreeMap<String, Fixture>;
+
+/// `fixtures:` schema, marked deprecated (#618).
+fn deprecated_fixtures_schema(
+    generator: &mut schemars::SchemaGenerator,
+) -> schemars::schema::Schema {
+    let mut schema = generator.subschema_for::<FixtureCatalog>().into_object();
+    schema.metadata().deprecated = true;
+    schemars::schema::Schema::Object(schema)
+}
+
+/// `needs:` schema, marked deprecated (#618).
+pub(crate) fn deprecated_needs_schema(
+    generator: &mut schemars::SchemaGenerator,
+) -> schemars::schema::Schema {
+    let mut schema = generator.subschema_for::<Vec<String>>().into_object();
+    schema.metadata().deprecated = true;
+    schemars::schema::Schema::Object(schema)
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -139,9 +190,9 @@ pub struct VerificationDefinition {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub teardown: Vec<Step>,
 
-    /// Named, per-check lifecycle resources. Each check gets a fresh
-    /// instance of every fixture named by its `needs:` list.
+    /// Deprecated (#618), removed in v0.9.0: declare a flow with `cleanup:` instead. Named, per-check lifecycle resources. Each check gets a fresh instance of every fixture named by its `needs:` list.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(schema_with = "deprecated_fixtures_schema")]
     pub fixtures: FixtureCatalog,
 
     /// At least one criterion is required (enforced by the validator,
@@ -611,6 +662,34 @@ criteria: []
         assert!(
             msg.contains("bogus") || msg.contains("unknown variant"),
             "expected variant error mentioning `bogus`, got: {msg}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod cleanup_policy_tests {
+    use super::*;
+
+    #[test]
+    fn fixture_policy_defaults_required_omits_default_and_rejects_unknown() {
+        let fixture: Fixture = serde_yml::from_str("up: []\ndown: []\n").unwrap();
+        assert_eq!(fixture.cleanup_policy, CleanupPolicy::Required);
+        assert!(
+            !serde_yml::to_string(&fixture)
+                .unwrap()
+                .contains("cleanup_policy")
+        );
+        let diagnostic: Fixture =
+            serde_yml::from_str("up: []\ndown: []\ncleanup_policy: diagnostic_only\n").unwrap();
+        assert_eq!(diagnostic.cleanup_policy, CleanupPolicy::DiagnosticOnly);
+        assert!(
+            serde_yml::to_string(&diagnostic)
+                .unwrap()
+                .contains("diagnostic_only")
+        );
+        assert!(
+            serde_yml::from_str::<Fixture>("up: []\ndown: []\ncleanup_policy: best_effort\n")
+                .is_err()
         );
     }
 }

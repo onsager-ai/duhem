@@ -7,8 +7,8 @@
 //! per the spec on issue #37 (the URL never reaching the
 //! expectation is "we didn't get to where we said we would",
 //! which is the timeout-shaped outcome the judge maps to
-//! `Inconclusive(Timeout)`). The two sibling waiters
-//! (`ui/assert-element`, `ui/assert-state`) instead return
+//! `Inconclusive(Timeout)`). The sibling waiter
+//! `ui/assert-element` instead returns
 //! `Outcome::Ok` with `satisfied: false`; the divergence is by
 //! design and is also called out in the `ui::` module doc.
 //!

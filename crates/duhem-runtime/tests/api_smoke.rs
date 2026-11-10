@@ -34,6 +34,8 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
 const FIXTURE_YAML: &str = include_str!("../../duhem-actions/tests/fixtures/api-echo.yml");
+const BRACKET_KEYS_YAML: &str =
+    include_str!("../../../verifications/bracket-keys-example/duhem.yml");
 const FIXED_UUID: &str = "550e8400-e29b-41d4-a716-446655440000";
 
 struct Fixture {
@@ -120,4 +122,23 @@ async fn api_echo_fixture_passes_end_to_end_and_replays() {
         .expect("open trace");
     let replayed = replay(&trace).expect("replay");
     assert_eq!(replayed.run.state, VerdictState::Pass);
+}
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
+async fn bracket_keys_example_passes_against_real_http() {
+    let fx = start_fixture().await;
+    let def = VerificationDefinition::from_yaml_str(BRACKET_KEYS_YAML).expect("parse example");
+    let browser = RunBrowser::launch(false).await.expect("launch chromium");
+    let mut inputs = BTreeMap::new();
+    inputs.insert(
+        "url".to_string(),
+        serde_json::Value::String(format!("http://{}/echo", fx.addr)),
+    );
+    let verdict = Engine::new()
+        .with_browser(browser)
+        .run(&def, inputs)
+        .await
+        .expect("engine.run");
+    assert_eq!(verdict.state, VerdictState::Pass, "verdict = {verdict:?}");
 }

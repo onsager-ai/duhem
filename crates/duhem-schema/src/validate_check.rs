@@ -10,6 +10,7 @@ pub(super) fn validate_check(
     errs: &mut Vec<ValidationError>,
 ) {
     let DefinitionScope {
+        fixtures,
         inputs,
         pages,
         flows,
@@ -56,37 +57,7 @@ pub(super) fn validate_check(
     let mut step_outputs: HashMap<&str, HashSet<String>> = HashMap::new();
     let mut seen_step_ids: HashSet<&str> = HashSet::new();
 
-    for (idx, &(s, _)) in check_steps.iter().enumerate() {
-        if matches!(s.condition, StepCondition::Expr(_)) {
-            let path = [
-                SourcePathSegment::key("criteria"),
-                SourcePathSegment::index(criterion_index),
-                SourcePathSegment::key("checks"),
-                SourcePathSegment::index(check_index),
-                SourcePathSegment::key("steps"),
-                SourcePathSegment::index(idx),
-                SourcePathSegment::key("if"),
-            ];
-            let raw = match &s.condition {
-                StepCondition::Expr(e) => e.raw.as_str(),
-                _ => unreachable!(),
-            };
-            errs.push(ValidationError::CheckStepConditionUnavailable {
-                criterion: c.id.clone(),
-                check: ch.id.clone(),
-                location: source_context_matches
-                    .then(|| source_map.scalar_location(&path, raw))
-                    .flatten(),
-            });
-        }
-        let contract_outputs = s.uses.as_deref().map(outputs_for).unwrap_or_default();
-        check_secret_paths(
-            s,
-            &contract_outputs,
-            &format!("criterion `{}` / check `{}`", c.id, ch.id),
-            &step_label(s, idx),
-            errs,
-        );
+    for &(s, _) in &check_steps {
         if let Some(id) = &s.id {
             if !seen_step_ids.insert(id.as_str()) {
                 errs.push(ValidationError::DuplicateStepId {
@@ -113,19 +84,132 @@ pub(super) fn validate_check(
         .setup
         .iter()
         .chain(ch.setup.iter())
+        .filter(|step| {
+            !step
+                .uses
+                .as_deref()
+                .is_some_and(|uses| uses.starts_with("process/"))
+        })
         .filter_map(|s| s.id.as_deref())
         .collect();
 
+    // #579 exposes only the new process observations from nested setup and
+    // consuming fixtures. Existing non-process setup/fixture visibility stays
+    // unchanged; resource mutation still has separate ownership validation.
+    let mut body_setup_outputs = setup_outputs.clone();
+    for step in c
+        .setup
+        .iter()
+        .chain(&ch.setup)
+        .flat_map(Step::actions)
+        .filter(|step| {
+            step.uses
+                .as_deref()
+                .is_some_and(|uses| uses.starts_with("process/"))
+        })
+    {
+        if let Some(id) = step.id.as_deref() {
+            body_setup_outputs.insert(id, effective_outputs(step, outputs_for));
+        }
+    }
+    let mut process_fixture_outputs = HashMap::new();
+    for name in &ch.needs {
+        if let Some(fixture) = fixtures.get(name) {
+            for step in fixture.up.iter().flat_map(Step::actions).filter(|step| {
+                step.uses
+                    .as_deref()
+                    .is_some_and(|uses| uses.starts_with("process/"))
+            }) {
+                if let Some(id) = step.id.as_deref() {
+                    process_fixture_outputs
+                        .insert((name.as_str(), id), effective_outputs(step, outputs_for));
+                }
+            }
+        }
+    }
     let scope = PathScope {
+        process_fixture_outputs: &process_fixture_outputs,
         active_loop: None,
         c,
         ch,
         step_outputs: &step_outputs,
-        setup_outputs,
+        setup_outputs: &body_setup_outputs,
         out_of_scope_setup_ids: &out_of_scope_setup_ids,
         inputs,
         pages,
     };
+
+    // Value-based `if:` (#440 Tier 2): a path may only read steps that
+    // precede the conditioned step, so a forward or self reference
+    // resolves like an undeclared step. Same resolver as assertions.
+    let mut earlier_outputs: HashMap<&str, HashSet<String>> = HashMap::new();
+    let mut seen_groups: HashSet<u32> = HashSet::new();
+    for (idx, &(s, active_loop)) in check_steps.iter().enumerate() {
+        if matches!(
+            s.uses.as_deref(),
+            Some("api/observe" | "ui/observe-console")
+        ) && let Some(window) = s.with.get("window")
+            && let Some(problem) = crate::validate_observe_window::problem(window, |id| {
+                earlier_outputs.contains_key(id)
+            })
+        {
+            errs.push(ValidationError::InvalidFlow {
+                message: format!(
+                    "check `{}`: {} {problem}",
+                    ch.id,
+                    s.uses.as_deref().unwrap()
+                ),
+            });
+        }
+        if s.uses.as_deref() == Some("ui/observe-console") && s.with.get("window").is_none() {
+            errs.push(ValidationError::InvalidFlow {
+                message: format!("check `{}`: ui/observe-console window is required", ch.id),
+            });
+        }
+        if let StepCondition::Expr(expr) = &s.condition {
+            let mut path = crate::source::check_path(criterion_index, check_index, "steps");
+            path.push(SourcePathSegment::index(idx));
+            path.push(SourcePathSegment::key("if"));
+            let location = source_context_matches
+                .then(|| source_map.scalar_location(&path, &expr.raw))
+                .flatten();
+            let condition_scope = PathScope {
+                step_outputs: &earlier_outputs,
+                active_loop,
+                ..scope
+            };
+            let site = RefSite::StepCondition {
+                step: step_label(s, idx),
+            };
+            walk_checkable_paths(&expr.parsed, &mut |p, arity| {
+                check_path(&condition_scope, p, arity, &expr.raw, &site, location, errs);
+            });
+        }
+        // A group's `if:` (#614) reads what precedes the group, so it is
+        // resolved at the first step inside the group, like entry time.
+        for frame in &s.group {
+            if let StepCondition::Expr(expr) = &frame.condition
+                && seen_groups.insert(frame.key)
+            {
+                let condition_scope = PathScope {
+                    step_outputs: &earlier_outputs,
+                    active_loop,
+                    ..scope
+                };
+                let site = RefSite::StepCondition {
+                    step: format!("group `{}`", frame.label),
+                };
+                walk_checkable_paths(&expr.parsed, &mut |p, arity| {
+                    check_path(&condition_scope, p, arity, &expr.raw, &site, None, errs);
+                });
+            }
+        }
+        if let Some(id) = s.id.as_deref()
+            && let Some(outputs) = step_outputs.get(id)
+        {
+            earlier_outputs.insert(id, outputs.clone());
+        }
+    }
 
     // A browser session is acquired state, not an inline fixture. Only
     // a whole-string path reference is accepted: literals and runtime
@@ -261,7 +345,7 @@ pub(super) fn validate_check(
         source_path.push(SourcePathSegment::index(idx));
         source_path.push(SourcePathSegment::key("with"));
         crate::source::walk_with_strings(&s.with, &mut source_path, &mut |raw, path| {
-            if raw.trim_start().starts_with('$')
+            if crate::expr::is_expression(raw)
                 && let Err(error) = crate::expr::parse(raw)
             {
                 let location = source_context_matches

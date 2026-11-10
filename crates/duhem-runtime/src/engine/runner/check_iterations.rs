@@ -31,6 +31,7 @@ impl Engine {
         let mut evidence = vec![StepEvidence::empty(); check.steps.len()];
         let mut cleanup = BTreeSet::new();
         let mut failed_by = None;
+        let mut groups = GroupGates::default();
         let mut stored_error = None;
         let mut gated = 0;
         let mut outcomes = Vec::new();
@@ -53,6 +54,7 @@ impl Engine {
                     None,
                     environment_failed,
                     &mut failed_by,
+                    &mut groups,
                     &mut stored_error,
                     &mut cleanup,
                     &mut evidence,
@@ -66,7 +68,48 @@ impl Engine {
             offset = range.end;
             // Resolve once in the outer context. Bounds are enforced before
             // dispatch, so excess rows are never silently truncated.
-            let gate = evaluate_gate(step, range.start, failed_by.as_deref(), ctx)?;
+            let gate = match evaluate_in_check(
+                step,
+                range.start,
+                failed_by.as_deref(),
+                &mut groups,
+                ctx,
+            ) {
+                Ok(gate) => gate,
+                Err(detail) => {
+                    // #440 R2: an unresolvable loop condition makes the
+                    // check inconclusive; other checks keep running.
+                    let detail = writer.mask_text(&detail);
+                    let state = VerdictState::Inconclusive(
+                        duhem_judge::InconclusiveCause::MissingObservation,
+                    );
+                    writer
+                        .append(EventPayload::AssertionEvaluated {
+                            operands: None,
+                            check_id: check.id.clone(),
+                            assertion_index: control_index as u32,
+                            iteration: None,
+                            state,
+                            detail: Some(detail.clone()),
+                            expr: Some("for_each condition is resolvable".into()),
+                            step_index: None,
+                        })
+                        .await?;
+                    outcomes.push(AssertionOutcome {
+                        assertion_index: control_index,
+                        iteration: None,
+                        state,
+                        detail: Some(detail.clone()),
+                    });
+                    failed.push(FailedAssertion {
+                        expr: "for_each condition is resolvable".into(),
+                        state,
+                        detail: Some(detail),
+                    });
+                    failed_by = Some("for_each condition".into());
+                    continue;
+                }
+            };
             if gate.is_some() {
                 for idx in range {
                     evidence[idx] = StepEvidence::skipped("loop gate".into());
@@ -102,6 +145,7 @@ impl Engine {
                     });
                     writer
                         .append(EventPayload::AssertionEvaluated {
+                            operands: None,
                             check_id: check.id.clone(),
                             assertion_index: control_index as u32,
                             iteration: None,
@@ -131,13 +175,16 @@ impl Engine {
             }
             let outer = ctx.clone();
             let outer_failed = failed_by.clone();
+            let outer_groups = groups.clone();
             let outer_cleanup = cleanup.clone();
-            for element in items {
+            let iteration_count = items.len();
+            for (local_ordinal, element) in items.into_iter().enumerate() {
                 *ctx = outer.clone();
                 if let Some(name) = &step.as_binding {
                     *ctx = ctx.clone().with_loop_binding(name, element);
                 }
                 failed_by = outer_failed.clone();
+                groups = outer_groups.clone();
                 cleanup = outer_cleanup.clone();
                 for idx in range.clone() {
                     evidence[idx] = StepEvidence::empty();
@@ -152,12 +199,18 @@ impl Engine {
                     Some(ordinal),
                     environment_failed,
                     &mut failed_by,
+                    &mut groups,
                     &mut stored_error,
                     &mut cleanup,
                     &mut evidence,
                     &mut gated,
                 )
                 .await?;
+                // Cleanups registered by this iteration keep its outputs and
+                // element, which the next iteration starts over.
+                ctx.run_state()
+                    .snapshot_flow_cleanups(&ctx.snapshot(), true);
+                let first_failure = failed.len();
                 self.judge_iteration(
                     writer,
                     &check,
@@ -173,10 +226,28 @@ impl Engine {
                     &mut failed,
                 )
                 .await?;
+                // The runtime knows the resolved loop's full cardinality.
+                // Keep that presentational context in the existing failure
+                // detail, shared by default and plugin reporters (#519).
+                // The authored step identifies the loop when a check has
+                // several; ordinals are one-based within that loop.
+                for failure in &mut failed[first_failure..] {
+                    let location = format!(
+                        "for_each step {}, iteration {} of {}",
+                        wrapper_index + 1,
+                        local_ordinal + 1,
+                        iteration_count,
+                    );
+                    failure.detail = Some(match failure.detail.take() {
+                        Some(detail) => format!("{location}: {detail}"),
+                        None => location,
+                    });
+                }
                 ordinal += 1;
             }
             *ctx = outer;
             failed_by = outer_failed;
+            groups = outer_groups;
             cleanup = outer_cleanup;
         }
         writer.set_session(None);
@@ -210,6 +281,7 @@ impl Engine {
                     VerdictState::Inconclusive(duhem_judge::InconclusiveCause::EmptyAggregation);
                 writer
                     .append(EventPayload::AssertionEvaluated {
+                        operands: None,
                         check_id: check.id.clone(),
                         assertion_index: index as u32,
                         iteration: None,

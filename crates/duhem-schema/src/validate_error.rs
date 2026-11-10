@@ -23,6 +23,8 @@ pub enum RefSite {
     /// Inside a step's `with:` payload. Carries the step's label —
     /// its `id` when declared, else `step <index>`.
     StepWith { step: String },
+    /// A check step's value-based `if:` condition (#440 Tier 2).
+    StepCondition { step: String },
 }
 
 impl std::fmt::Display for RefSite {
@@ -31,6 +33,7 @@ impl std::fmt::Display for RefSite {
             RefSite::Assertion => write!(f, "assertion"),
             RefSite::Session => write!(f, "session:"),
             RefSite::StepWith { step } => write!(f, "step `{step}` with:"),
+            RefSite::StepCondition { step } => write!(f, "step `{step}` if:"),
         }
     }
 }
@@ -299,6 +302,12 @@ pub enum ValidationError {
     },
 
     #[error("{message}")]
+    InvalidStepGroup {
+        message: String,
+        location: Option<SourceLocation>,
+    },
+
+    #[error("{message}")]
     InvalidNamedSession {
         message: String,
         location: Option<SourceLocation>,
@@ -401,15 +410,6 @@ pub enum ValidationError {
         location: Option<SourceLocation>,
     },
 
-    #[error(
-        "criterion `{criterion}` / check `{check}`: value-based conditions are not yet available on check steps"
-    )]
-    CheckStepConditionUnavailable {
-        criterion: String,
-        check: String,
-        location: Option<SourceLocation>,
-    },
-
     #[error("fixture `{fixture}` must declare at least one `{phase}:` step")]
     EmptyFixturePhase {
         fixture: String,
@@ -429,6 +429,11 @@ pub enum ValidationError {
         site: String,
         location: Option<SourceLocation>,
     },
+
+    #[error(
+        "{site}: `{action}` may mutate only a current-check or fixture process; leaf/criterion handles are inspect-only"
+    )]
+    ProcessMutationScope { site: String, action: String },
 
     #[error("fixture `{fixture}` {phase} step `{step}` may not carry `needs:`")]
     FixtureStepNeeds {
@@ -468,9 +473,9 @@ impl ValidationError {
             | Self::MalformedSetupRef { location, .. }
             | Self::InvalidSessionReference { location, .. }
             | Self::InvalidNamedSession { location, .. }
+            | Self::InvalidStepGroup { location, .. }
             | Self::UnknownAction { location, .. }
             | Self::InvalidStepCondition { location, .. }
-            | Self::CheckStepConditionUnavailable { location, .. }
             | Self::LoopVariableOutOfScope { location, .. }
             | Self::ForEachMaxRequired { location, .. }
             | Self::ForEachDepthExceeded { location, .. }

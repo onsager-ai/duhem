@@ -8,6 +8,7 @@ description = "Append-only run trace + blob writer for verification evidence."
 
 [dependencies]
 duhem-judge = { path = "../duhem-judge" }
+duhem-summary = { path = "../duhem-summary" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

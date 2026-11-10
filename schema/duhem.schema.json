@@ -33,7 +33,8 @@
           "type": "string"
         },
         "needs": {
-          "description": "Fixtures instantiated for this check, in bring-up order.",
+          "deprecated": true,
+          "description": "Deprecated (#618), removed in v0.9.0: call a flow with `cleanup:` at the end of `setup:` instead. Fixtures instantiated for this check, in bring-up order.",
           "items": {
             "type": "string"
           },
@@ -89,6 +90,13 @@
         "id"
       ],
       "type": "object"
+    },
+    "CleanupPolicy": {
+      "enum": [
+        "required",
+        "diagnostic_only"
+      ],
+      "type": "string"
     },
     "Criterion": {
       "additionalProperties": false,
@@ -153,8 +161,11 @@
     "Fixture": {
       "additionalProperties": false,
       "properties": {
+        "cleanup_policy": {
+          "$ref": "#/definitions/CleanupPolicy"
+        },
         "down": {
-          "description": "Best-effort cleanup actions for that instance.",
+          "description": "Cleanup actions for that instance, required by default.",
           "items": {
             "$ref": "#/definitions/Step"
           },
@@ -178,6 +189,16 @@
       "additionalProperties": false,
       "description": "A named, parameterized sequence of steps expanded by the loader.",
       "properties": {
+        "cleanup": {
+          "description": "Steps registered on the enclosing lifecycle scope when a `call:` to this flow is entered and unwound LIFO at that scope's exit (#615). They may read `$params.*` and this call's own body outputs.",
+          "items": {
+            "$ref": "#/definitions/Step"
+          },
+          "type": "array"
+        },
+        "cleanup_policy": {
+          "$ref": "#/definitions/CleanupPolicy"
+        },
         "description": {
           "description": "Optional prose explaining what this reusable sequence is for.",
           "type": [
@@ -708,7 +729,7 @@
           ]
         },
         "steps": {
-          "description": "Inline multi-step loop body — one of the three `for_each:` body forms alongside `uses:` and `call:` (exactly one required). Recursive in the type so `secret_outputs:`/`outputs:`/`if:` etc. are never duplicated onto a separate loop-body type, but capped at depth 1 by validation: a step inside this list may not itself carry `for_each:` or `steps:`. Also rejected without an enclosing `for_each:`.",
+          "description": "Inline multi-step body. With `for_each:` it is one of the three loop body forms alongside `uses:` and `call:`; without it the step is a group (#614), a scope and label over its children that the loader lowers into the enclosing sequence. Exactly one of `uses:`, `call:` or `steps:` is required. Recursive in the type so `secret_outputs:`/`outputs:`/`if:` etc. are never duplicated onto a separate body type; loop nesting is capped at 1 by validation, so no step anywhere under a `for_each:` may itself carry `for_each:`.",
           "items": {
             "$ref": "#/definitions/Step"
           },
@@ -747,7 +768,8 @@
           "additionalProperties": {
             "$ref": "#/definitions/Fixture"
           },
-          "description": "Named, per-check lifecycle resources. Each check gets a fresh instance of every fixture named by its `needs:` list.",
+          "deprecated": true,
+          "description": "Deprecated (#618), removed in v0.9.0: declare a flow with `cleanup:` instead. Named, per-check lifecycle resources. Each check gets a fresh instance of every fixture named by its `needs:` list.",
           "type": "object"
         },
         "flows": {

@@ -1,0 +1,23 @@
+verification: Diagnostic fixture cleanup
+fixtures:
+  resource:
+    cleanup_policy: diagnostic_only
+    up:
+      - uses: cli/invoke
+        with: {command: [sh, -c, "true"]}
+    down:
+      - id: release
+        uses: cli/invoke
+        with: {command: [duhem-intentionally-nonexistent-cleanup-command]}
+criteria:
+  - id: CLEANUP
+    description: Diagnostic cleanup is reported without changing the body judgment.
+    checks:
+      - id: CLEANUP.1
+        needs: [resource]
+        steps:
+          - id: body
+            uses: cli/invoke
+            with: {command: [sh, -c, "true"]}
+        assertions:
+          - $steps.body.outputs.exit_code == 0

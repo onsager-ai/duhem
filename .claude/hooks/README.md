@@ -19,9 +19,8 @@ git worktree instead.
 | `git checkout -- <path>`, `git checkout .`, `git checkout <sha>` | ✅ allowed (not a branch switch) |
 | any command prefixed `ALLOW_BRANCH_SWITCH=1` | ✅ allowed (deliberate override) |
 
-The scripts are **repo-agnostic** (byte-identical across onsager-ai repos —
-crawlab-pro, chreode, duhem, …); the worktree hint is derived from the checkout
-at runtime.
+The scripts are **repo-agnostic**; the worktree hint is derived from the
+checkout at runtime. Copies in other repositories may differ in comments.
 
 ### Start branch work in a worktree
 

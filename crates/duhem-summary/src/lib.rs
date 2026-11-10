@@ -29,10 +29,13 @@ use std::path::PathBuf;
 use duhem_judge::VerdictState;
 use serde::{Deserialize, Serialize};
 
+mod claim_scope;
 mod lifecycle;
+pub use claim_scope::{ClaimCounts, ClaimScope, ExcludedClaim, ExcludedLeaf, ManifestSelection};
 pub use lifecycle::{
     LifecycleBlock, LifecycleEvent, LifecycleFlowOrigin, LifecycleFold, LifecycleLocation,
-    LifecyclePhase, LifecycleScopeSegment, LifecycleStatus, LifecycleStep, LifecycleStepOutcome,
+    LifecyclePhase, LifecycleRegistration, LifecycleScopeSegment, LifecycleStatus, LifecycleStep,
+    LifecycleStepOutcome,
 };
 
 /// One run's summary, serialized as one JSON line on the reporter
@@ -40,6 +43,12 @@ pub use lifecycle::{
 /// contract; field renames / removals are schema-impacting.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSummary {
+    /// Declared selection and recorded claim population; absent on old reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_scope: Option<ClaimScope>,
+    /// Source path recorded on this run, matching run-bundle vocabulary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<String>,
     /// Contract version. Bumped only on a **breaking** change; additive
     /// fields (like `failures`) keep the version. Authored explicitly so
     /// a plugin can refuse to parse a *breaking* future shape rather
@@ -49,6 +58,9 @@ pub struct RunSummary {
     pub run_id: String,
     /// Top-level verdict.
     pub verdict: VerdictState,
+    /// Original body state when required fixture cleanup changes the effective verdict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_verdict: Option<VerdictState>,
     /// Per-criterion verdicts, in document order.
     pub criteria: Vec<CriterionSummary>,
     /// Path to the evidence store (SQLite DB) the run was recorded
@@ -83,7 +95,7 @@ pub struct RunSummary {
     /// addition. Additive — `SCHEMA_VERSION` is unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
-    /// Non-verdict-altering failures from leaf `teardown:`. Additive:
+    /// Cleanup failures, including required fixture failures. Additive:
     /// older plugins ignore the field and old summaries deserialize it
     /// as empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -119,9 +131,12 @@ impl RunSummary {
         store: PathBuf,
     ) -> Self {
         Self {
+            claim_scope: None,
+            verification: None,
             schema_version: Self::SCHEMA_VERSION.to_string(),
             run_id: run_id.into(),
             verdict,
+            body_verdict: None,
             criteria,
             store,
             totals: CheckTotals::default(),
@@ -138,6 +153,16 @@ impl RunSummary {
             .into_iter()
             .filter(|c| c.gated_judging_steps > 0)
             .collect();
+        self
+    }
+
+    pub fn with_claim_scope(mut self, scope: Option<ClaimScope>) -> Self {
+        self.claim_scope = scope;
+        self
+    }
+
+    pub fn with_verification(mut self, verification: Option<String>) -> Self {
+        self.verification = verification;
         self
     }
 
@@ -161,6 +186,11 @@ impl RunSummary {
 
     pub fn with_cleanup(mut self, cleanup: Vec<CleanupFailureSummary>) -> Self {
         self.cleanup = cleanup;
+        self
+    }
+
+    pub fn with_body_verdict(mut self, body_verdict: Option<VerdictState>) -> Self {
+        self.body_verdict = body_verdict.filter(|state| *state != self.verdict);
         self
     }
 
@@ -237,9 +267,11 @@ impl std::fmt::Display for CheckGatingSummary {
     }
 }
 
-/// One teardown step that failed without changing the run verdict.
+/// One cleanup failure and whether it blocks the effective run gate.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CleanupFailureSummary {
+    #[serde(default)]
+    pub required: bool,
     pub step: String,
     pub outcome: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -285,6 +317,9 @@ pub struct FailedAssertionSummary {
 /// requires a `CHANGELOG.md` entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSetSummary {
+    /// Authored versus selected manifest leaves, including excluded leaves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection: Option<ManifestSelection>,
     /// Always `"1"` at v1. See [`RunSummary::schema_version`] for the
     /// rationale.
     pub schema_version: String,
@@ -312,6 +347,7 @@ impl RunSetSummary {
             totals.add(run.totals);
         }
         Self {
+            selection: None,
             schema_version: Self::SCHEMA_VERSION.to_string(),
             verdict,
             totals,
@@ -323,6 +359,44 @@ impl RunSetSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_reports_do_not_invent_authored_scope() {
+        let bare =
+            r#"{"schema_version":"2","run_id":"r","verdict":"pass","criteria":[],"store":"."}"#;
+        let summary: RunSummary = serde_json::from_str(bare).unwrap();
+        assert!(summary.claim_scope.is_none());
+        assert!(
+            serde_json::to_value(summary)
+                .unwrap()
+                .get("claim_scope")
+                .is_none()
+        );
+        let old_set = r#"{"schema_version":"1","verdict":"pass","runs":[]}"#;
+        let set: RunSetSummary = serde_json::from_str(old_set).unwrap();
+        assert!(set.selection.is_none());
+    }
+
+    #[test]
+    fn verification_is_optional_for_old_reports_and_round_trips_when_present() {
+        let bare =
+            r#"{"schema_version":"2","run_id":"r","verdict":"pass","criteria":[],"store":"."}"#;
+        let summary: RunSummary = serde_json::from_str(bare).unwrap();
+        assert!(summary.verification.is_none());
+        assert!(
+            serde_json::to_value(&summary)
+                .unwrap()
+                .get("verification")
+                .is_none()
+        );
+        let identified = summary.with_verification(Some("verifications/login/duhem.yml".into()));
+        let json = serde_json::to_string(&identified).unwrap();
+        assert_eq!(
+            serde_json::from_str::<RunSummary>(&json).unwrap(),
+            identified
+        );
+        assert_eq!(identified.schema_version, "2");
+    }
 
     #[test]
     fn round_trips_through_json() {
@@ -440,6 +514,7 @@ mod tests {
 
         let s = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from(".")).with_cleanup(
             vec![CleanupFailureSummary {
+                required: false,
                 step: "delete-record".into(),
                 outcome: "error".into(),
                 detail: Some("synthetic cleanup error".into()),
@@ -486,5 +561,25 @@ mod tests {
         let bare = r#"{"schema_version":"1","verdict":"pass","runs":[]}"#;
         let back: RunSetSummary = serde_json::from_str(bare).unwrap();
         assert_eq!(back.totals, CheckTotals::default());
+    }
+}
+
+#[cfg(test)]
+mod cleanup_compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_cleanup_is_diagnostic_and_body_defaults_absent() {
+        let json = r#"{"schema_version":"2","run_id":"old","verdict":"pass","criteria":[],"store":".","cleanup":[{"step":"release","outcome":"error"}]}"#;
+        let summary: RunSummary = serde_json::from_str(json).unwrap();
+        assert!(!summary.cleanup[0].required);
+        assert_eq!(summary.body_verdict, None);
+        assert!(
+            !serde_json::to_value(summary)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .contains_key("body_verdict")
+        );
     }
 }

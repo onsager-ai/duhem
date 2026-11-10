@@ -12,20 +12,46 @@ pub(crate) fn evaluate(
     expr: &ExprStr,
     inner: &dyn EvalContext,
 ) -> (EvalResult, BTreeMap<String, serde_json::Value>) {
+    let (result, values, _) = evaluate_assertion(&expr.parsed, inner);
+    (result, values)
+}
+
+/// The last comparison belongs to the root when the root is a comparison:
+/// nested comparisons finish first. Logical roots have no comparison detail.
+pub(crate) fn evaluate_assertion(
+    expr: &Expr,
+    inner: &dyn EvalContext,
+) -> (
+    EvalResult,
+    BTreeMap<String, serde_json::Value>,
+    Option<String>,
+) {
     let ctx = RecordingContext {
         inner,
         values: RefCell::new(BTreeMap::new()),
+        comparison: RefCell::new(None),
     };
-    let result = super::eval(&expr.parsed, &ctx);
-    (result, ctx.values.into_inner())
+    let result = super::eval(expr, &ctx);
+    let detail = if result == EvalResult::False
+        && matches!(expr, Expr::BinOp { op, .. } if !matches!(op, BinOp::And | BinOp::Or))
+    {
+        ctx.comparison.into_inner()
+    } else {
+        None
+    };
+    (result, ctx.values.into_inner(), detail)
 }
 
 struct RecordingContext<'a> {
     inner: &'a dyn EvalContext,
     values: RefCell<BTreeMap<String, serde_json::Value>>,
+    comparison: RefCell<Option<String>>,
 }
 
 impl EvalContext for RecordingContext<'_> {
+    fn record_comparison(&self, op: BinOp, lhs: &Value, rhs: &Value) {
+        *self.comparison.borrow_mut() = super::comparison_detail(op, lhs, rhs);
+    }
     fn input(&self, name: &str) -> Option<&Value> {
         self.inner.input(name)
     }
@@ -83,10 +109,27 @@ impl EvalContext for RecordingContext<'_> {
 /// `PathRoot::Loop`'s doc comment) — so it renders as `$row.field`,
 /// the surface an author actually wrote, not `$loop.row.field`.
 fn path_label(path: &Path) -> String {
-    match path.root {
-        PathRoot::Loop => path.segments.join("."),
-        root => format!("{}.{}", root.as_str(), path.segments.join(".")),
+    let (mut out, start) = match path.root {
+        PathRoot::Loop => (path.segments[0].clone(), 1),
+        root => (
+            if path.segments.is_empty() {
+                format!("{}.", root.as_str())
+            } else {
+                root.as_str().to_string()
+            },
+            0,
+        ),
+    };
+    for index in start..path.segments.len() {
+        let segment = &path.segments[index];
+        if !path.quoted_keys.contains(&index) && segment.bytes().all(|b| b.is_ascii_digit()) {
+            out.push('.');
+            out.push_str(segment);
+        } else {
+            path.append_segment(&mut out, index);
+        }
     }
+    out
 }
 
 fn label(expr: &Expr) -> String {
@@ -147,6 +190,42 @@ mod tests {
     }
 
     #[test]
+    fn evidence_renders_quoted_keys_as_parseable_paths() {
+        let state = RunState::new(BTreeMap::from([(
+            "data".into(),
+            Value::Object(BTreeMap::from([("a'b\\c".into(), Value::Int(7))])),
+        )]));
+        let ctx = RunContext::new(&state);
+        let expr = ExprStr::from_source(r"$inputs.data['a\'b\\c'] == 7").unwrap();
+        let (result, operands) = evaluate(&expr, &ctx);
+        assert_eq!(result, EvalResult::True);
+        assert_eq!(operands[r"$inputs.data['a\'b\\c']"], json!(7));
+    }
+
+    #[test]
+    fn evidence_preserves_dotted_array_indices_and_quoted_numeric_keys() {
+        let state = RunState::new(BTreeMap::from([(
+            "data".into(),
+            Value::Array(vec![Value::Object(BTreeMap::from([
+                ("session".into(), Value::Int(7)),
+                ("200".into(), Value::Int(8)),
+                ("a-b".into(), Value::Int(9)),
+            ]))]),
+        )]));
+        let ctx = RunContext::new(&state);
+        for (source, key) in [
+            ("$inputs.data[0].session == 7", "$inputs.data.0.session"),
+            ("$inputs.data[0]['200'] == 8", "$inputs.data.0['200']"),
+            ("$inputs.data[0]['a-b'] == 9", "$inputs.data.0['a-b']"),
+        ] {
+            let expr = ExprStr::from_source(source).unwrap();
+            let (result, operands) = evaluate(&expr, &ctx);
+            assert_eq!(result, EvalResult::True);
+            assert!(operands.contains_key(key), "{operands:?}");
+        }
+    }
+
+    #[test]
     fn keeps_each_actual_helper_evaluation() {
         let state = RunState::new(BTreeMap::new());
         let ctx = RunContext::new(&state);
@@ -158,5 +237,42 @@ mod tests {
             operands["$runtime.uuid() [evaluation 2]"],
             json!(state.uuid)
         );
+    }
+
+    #[test]
+    fn failure_detail_uses_the_original_helper_evaluation() {
+        use std::cell::Cell;
+        struct Context {
+            calls: Cell<i64>,
+        }
+        impl EvalContext for Context {
+            fn input(&self, _: &str) -> Option<&Value> {
+                None
+            }
+            fn output(&self, _: &str, _: &str) -> Option<&Value> {
+                None
+            }
+            fn env(&self, _: &str) -> Option<&str> {
+                None
+            }
+            fn uuid(&self) -> &str {
+                "test"
+            }
+            fn now(&self) -> DateTime<Utc> {
+                let n = self.calls.get();
+                self.calls.set(n + 1);
+                DateTime::from_timestamp(n, 0).unwrap()
+            }
+        }
+        let ctx = Context {
+            calls: Cell::new(0),
+        };
+        let expr = ExprStr::from_source("$runtime.now() == $runtime.now()").unwrap();
+        let (result, values, detail) = evaluate_assertion(&expr.parsed, &ctx);
+        assert_eq!(result, EvalResult::False);
+        assert_eq!(ctx.calls.get(), 2, "reporting must not invoke now again");
+        assert_eq!(values.len(), 2);
+        let detail = detail.unwrap();
+        assert_eq!(detail, "actual 0, expected 1000");
     }
 }

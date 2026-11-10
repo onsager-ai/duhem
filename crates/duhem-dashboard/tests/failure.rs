@@ -43,6 +43,7 @@ fn step_started(idx: u32, uses: &str) -> EventPayload {
         layer: Some("ui".into()),
         flow: None,
         with: BTreeMap::new(),
+        group: None,
     }
 }
 
@@ -89,6 +90,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, network: Option
         )
     };
     w.append(EventPayload::AssertionEvaluated {
+        operands: None,
         check_id: "AC-1.1".into(),
         iteration: None,
         assertion_index: 0,
@@ -150,6 +152,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, network: Option
     .await
     .unwrap();
     w.append(EventPayload::RunFinished {
+        body_verdict: None,
         verdict: Some(verdict),
     })
     .await

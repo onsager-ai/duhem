@@ -33,7 +33,7 @@ pub(crate) use crate::engine::outcome::{
 
 use crate::engine::capture::{CapturePolicy, target_from_step};
 use crate::engine::context::{RunContext, RunState, json_to_value};
-use crate::engine::gating::{evaluate as evaluate_gate, step_failed};
+use crate::engine::gating::{GroupGates, evaluate_in_check, step_failed};
 use crate::engine::registry::{ActionRegistry, default_registry, enforce_wait_ceiling};
 use crate::engine::session::CheckContexts;
 
@@ -80,6 +80,8 @@ pub struct Engine {
     /// matching checks execute; non-matching checks are skipped with
     /// no evidence emission.
     filter: Option<Box<dyn CheckFilter>>,
+    filter_patterns: Vec<String>,
+    manifest_selection: Option<duhem_summary::ManifestSelection>,
     /// Optional u64 seed for runtime entropy (spec on issue #33). When
     /// set, the per-run `$runtime.uuid()` value is derived
     /// deterministically from the seed instead of `Uuid::new_v4`. No
@@ -147,8 +149,10 @@ pub struct Engine {
 }
 
 mod builder;
+mod claim_scope;
 mod masking;
 mod missing_input;
+mod process_cleanup;
 mod signal;
 pub(crate) use signal::termination_signal;
 
@@ -166,6 +170,8 @@ impl Engine {
             definition_path: None,
             definition_source: None,
             filter: None,
+            filter_patterns: Vec::new(),
+            manifest_selection: None,
             seed: None,
             run_id: None,
             scope: RunScope::default(),
@@ -220,6 +226,9 @@ impl Engine {
         def: &VerificationDefinition,
         inputs: BTreeMap<String, serde_json::Value>,
     ) -> Result<RunOutcome, EngineError> {
+        // Deprecated `needs:` fixtures run as flows with cleanup (#618).
+        let desugared = duhem_schema::desugar_fixtures(def);
+        let def = &*desugared;
         if self.secrets.is_empty() {
             for (name, decl) in &def.inputs {
                 if decl.secret
@@ -317,6 +326,11 @@ impl Engine {
             .await?;
 
         let execution = async {
+            writer
+                .append(EventPayload::ClaimScopeDeclared {
+                    scope: self.declared_claim_scope(def),
+                })
+                .await?;
             if let Some(name) = missing_declared {
                 return missing_input::finish(&mut writer, &name, &run_id).await;
             }
@@ -362,10 +376,12 @@ impl Engine {
                     .await?;
                     writer
                         .append(EventPayload::RunFinished {
+                            body_verdict: None,
                             verdict: Some(verdict.state),
                         })
                         .await?;
                     return Ok(RunOutcome {
+                        body_verdict: None,
                         gated_checks: Default::default(),
                         verdict,
                         run_id,
@@ -380,6 +396,7 @@ impl Engine {
             }
 
             crate::engine::session_scope::SessionScope::enter(&mut run_state, &def.session, None);
+            run_state.register_process_cleanup(run_state.process_owner.clone(), &def.teardown);
 
             // Run-level `setup:` runs once before any criterion. Skipped
             // entirely when empty so the wire shape stays byte-identical
@@ -423,7 +440,7 @@ impl Engine {
                     // `Error` (or any environmental precondition) as
                     // `Inconclusive(EnvironmentError)`. Conflating the
                     // two would lose useful telemetry on the trace.
-                    let verdict = RunVerdict {
+                    let mut verdict = RunVerdict {
                         state: VerdictState::Inconclusive(reason.cause()),
                         criteria: Vec::new(),
                     };
@@ -440,12 +457,21 @@ impl Engine {
                         )
                         .await?;
                     }
+                    let body_verdict = cleanup
+                        .iter()
+                        .any(|failure| failure.required)
+                        .then_some(verdict.state);
+                    if body_verdict.is_some() {
+                        verdict.state = VerdictState::Fail;
+                    }
                     writer
                         .append(EventPayload::RunFinished {
+                            body_verdict,
                             verdict: Some(verdict.state),
                         })
                         .await?;
                     return Ok(RunOutcome {
+                        body_verdict,
                         gated_checks: Default::default(),
                         verdict,
                         run_id,
@@ -466,6 +492,8 @@ impl Engine {
             let mut fixture_cleanup: Vec<CleanupFailure> = Vec::new();
             let criteria_result: Result<(), EngineError> = async {
                 for criterion in &def.criteria {
+                    let parent_owner = run_state.process_owner.clone();
+                    run_state.process_owner = parent_owner.criterion(&criterion.id);
                     let parent_session = run_state.session.clone();
                     let parent_outputs = run_state.setup_outputs.clone();
                     crate::engine::session_scope::SessionScope::enter(
@@ -473,11 +501,14 @@ impl Engine {
                         &criterion.session,
                         None,
                     );
+                    run_state.register_process_cleanup(
+                        run_state.process_owner.clone(),
+                        &criterion.teardown,
+                    );
                     let cv = self
                         .run_criterion(
                             &mut writer,
                             &mut run_state,
-                            &def.fixtures,
                             def.max_sessions.unwrap_or(4),
                             criterion,
                             &mut failures,
@@ -486,6 +517,16 @@ impl Engine {
                             &mut gated_checks,
                         )
                         .await;
+                    fixture_cleanup.extend(
+                        run_state
+                            .processes
+                            .lock()
+                            .await
+                            .finalize(&mut writer, Some(&run_state.process_owner))
+                            .await,
+                    );
+                    run_state.begin_process_cleanup(&run_state.process_owner.clone());
+                    run_state.process_owner = parent_owner;
                     run_state.session = parent_session;
                     run_state.setup_outputs = parent_outputs;
                     let cv = cv?;
@@ -522,14 +563,22 @@ impl Engine {
             criteria_result?;
             down_result?;
 
-            let run_verdict = aggregate_run(criterion_verdicts);
+            let mut run_verdict = aggregate_run(criterion_verdicts);
+            let body_verdict = (cleanup.iter().any(|failure| failure.required)
+                && run_verdict.state != VerdictState::Fail)
+                .then_some(run_verdict.state);
+            if cleanup.iter().any(|failure| failure.required) {
+                run_verdict.state = VerdictState::Fail;
+            }
             writer
                 .append(EventPayload::RunFinished {
+                    body_verdict,
                     verdict: Some(run_verdict.state),
                 })
                 .await?;
 
             Ok(RunOutcome {
+                body_verdict,
                 gated_checks,
                 verdict: run_verdict,
                 run_id,
@@ -549,6 +598,12 @@ impl Engine {
         drop(execution);
         match completed {
             Ok(result) => {
+                // Error paths may leave a partially entered scope. They still
+                // own their process groups even when evidence cannot be sealed.
+                if result.is_err() {
+                    self.drain_interrupted_processes(&mut writer, &mut run_state)
+                        .await;
+                }
                 let result = result.map(|mut outcome| {
                     // Use the writer's live registry: it includes
                     // credentials acquired after Engine's input-only
@@ -560,6 +615,8 @@ impl Engine {
                 result
             }
             Err(signal) => {
+                self.drain_interrupted_processes(&mut writer, &mut run_state)
+                    .await;
                 writer
                     .append(EventPayload::RunAborted {
                         signal: signal.to_string(),
@@ -573,41 +630,11 @@ impl Engine {
         }
     }
 
-    async fn drain_leaf_teardown(
-        &self,
-        writer: &mut EvidenceWriter,
-        run: &mut RunState,
-        def: &VerificationDefinition,
-        run_id: &str,
-    ) -> Vec<CleanupFailure> {
-        if self.keep_env || def.teardown.is_empty() {
-            return Vec::new();
-        }
-        match crate::engine::setup::run_teardown(
-            writer,
-            &self.registry,
-            self.browser.as_ref(),
-            run,
-            &def.teardown,
-            &self.child_process_env(run_id),
-        )
-        .await
-        {
-            Ok(failures) => failures,
-            Err(error) => vec![CleanupFailure {
-                step: "teardown evidence".to_string(),
-                outcome: duhem_evidence::StepOutcome::Error,
-                detail: Some(writer.mask_text(&error.to_string())),
-            }],
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     async fn run_criterion(
         &mut self,
         writer: &mut EvidenceWriter,
         run: &mut RunState,
-        fixtures: &duhem_schema::FixtureCatalog,
         max_sessions: usize,
         criterion: &Criterion,
         failures: &mut Vec<CheckFailure>,
@@ -620,6 +647,7 @@ impl Engine {
         // check's own `setup:`. Skipped entirely when empty so the
         // wire shape stays byte-identical for hook-free criteria.
         let mut criterion_setup_abort: Option<(crate::engine::setup::AbortReason, String)> = None;
+        let cleanup_mark = run.flow_cleanup_mark();
         if !criterion.setup.is_empty() {
             let result = crate::engine::setup::run_criterion_setup(
                 writer,
@@ -710,24 +738,16 @@ impl Engine {
                     .iter()
                     .chain(&check.setup)
                     .chain(&check.teardown)
-                    .chain(
-                        check
-                            .needs
+                    .chain(check.setup.iter().flat_map(|step| {
+                        step.flow_cleanup
                             .iter()
-                            .flat_map(|name| fixtures[name].up.iter().chain(&fixtures[name].down)),
-                    )
+                            .filter(|cleanup| cleanup.fixture.is_some())
+                            .flat_map(|cleanup| &cleanup.steps)
+                    }))
                     .flat_map(duhem_schema::Step::actions)
                     .any(|step| step.uses_name().starts_with("ui/"));
                 let result = self
-                    .run_check_with_retry(
-                        writer,
-                        run,
-                        fixtures,
-                        &criterion.id,
-                        check,
-                        failures,
-                        cleanup,
-                    )
+                    .run_check_with_retry(writer, run, &criterion.id, check, failures, cleanup)
                     .await;
                 let session = if consumes {
                     crate::engine::session_scope::SessionScope::observed(run)
@@ -758,12 +778,26 @@ impl Engine {
             }
         }
 
+        // Flow `cleanup:` registered by this criterion's `setup:` unwinds
+        // LIFO before its `teardown:`.
+        let (mut flow_failures, flow_error) = crate::engine::flow_cleanup::drain(
+            writer,
+            &self.registry,
+            self.browser.as_ref(),
+            run,
+            cleanup_mark,
+            &self.child_process_env(writer.run_id()),
+        )
+        .await;
+        cleanup.append(&mut flow_failures);
+
         // Criterion-level `teardown:` runs once after every check in
         // this criterion — including after a criterion `setup:` abort,
         // and even when `setup:` is empty or dispatched nothing
         // (#543/#547) — before leaf `teardown:`. Evidence-only: never
         // replaces the criterion's verdict.
         if !criterion.teardown.is_empty() {
+            run.begin_process_cleanup(&run.process_owner.clone());
             let mut teardown_failures = crate::engine::setup::run_criterion_teardown(
                 writer,
                 &self.registry,
@@ -778,6 +812,9 @@ impl Engine {
                 failure.step = format!("criterion `{}` teardown: {}", criterion.id, failure.step);
             }
             cleanup.append(&mut teardown_failures);
+        }
+        if let Some(error) = flow_error {
+            return Err(error);
         }
 
         // Criterion-level aggregation, then the manifest's
@@ -802,6 +839,8 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
+    include!("runner/cleanup_tests.rs");
+    include!("runner/flow_cleanup_tests.rs");
     use super::*;
     use crate::engine::registry::{ConcreteAction, Dispatch};
     use async_trait::async_trait;
@@ -1601,6 +1640,8 @@ criteria:
             definition_path: None,
             definition_source: None,
             filter: None,
+            filter_patterns: Vec::new(),
+            manifest_selection: None,
             seed: None,
             run_id: None,
             scope: RunScope::default(),
@@ -4908,6 +4949,7 @@ criteria:
         assert!(matches!(
             events.last().map(|event| &event.payload),
             Some(EventPayload::RunFinished {
+                body_verdict: None,
                 verdict: Some(VerdictState::Inconclusive(
                     InconclusiveCause::EnvironmentError
                 ))

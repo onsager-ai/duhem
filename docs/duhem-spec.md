@@ -182,12 +182,13 @@ with another true observation in a passing disjunction. The two coincide
 only when an unbound judging output is promoted into an implicit
 assertion.
 
-- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Every evaluated assertion carries the same three-state `VerdictState` as the final verdict. An assertion that is not evaluated because one of its operands comes from a skipped step is omitted; absence is not a fourth state. A step that terminates in `error` or `timeout` contributes an `inconclusive` judgment naming that step, whether or not its action judges. Execution failure of an actuator is an observability gap, not an absence: the steps it was meant to enable never ran, so the check's claims were never exercised. A check whose step sequence aborted therefore cannot aggregate to `pass`. Gated-out steps (`if:` did not match) and cleanup steps (`if: always` after a failure) are exempt — they contribute nothing, as above. An environment failure likewise contributes an `inconclusive` judgment for every non-exempt step, not only judging ones: when the environment never came up, no step observed anything. Aggregation applies fail → inconclusive → pass precedence directly, and an empty assertion set becomes `inconclusive:empty_aggregation`. A check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
+- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Every evaluated assertion carries the same three-state `VerdictState` as the final verdict. An assertion that is not evaluated because one of its operands comes from a step skipped by an outcome gate (`success`, `failure`, `always`) is omitted; absence is not a fourth state. An operand from a step skipped by a *value-based* `if:` is not omitted: see the unresolvable-condition and gated-output rules below. A step that terminates in `error` or `timeout` contributes an `inconclusive` judgment naming that step, whether or not its action judges. Execution failure of an actuator is an observability gap, not an absence: the steps it was meant to enable never ran, so the check's claims were never exercised. A check whose step sequence aborted therefore cannot aggregate to `pass`. Gated-out steps (`if:` did not match) and cleanup steps (`if: always` after a failure) are exempt — they contribute nothing, as above. An environment failure likewise contributes an `inconclusive` judgment for every non-exempt step, not only judging ones: when the environment never came up, no step observed anything. Aggregation applies fail → inconclusive → pass precedence directly, and an empty assertion set becomes `inconclusive:empty_aggregation`. A check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
 - **Conditional claim-set legibility:** absence is not a fourth state; gated steps still contribute nothing. A check records its non-zero count of **judging** steps gated by **value-based** conditions (static gates, upstream blocking, and lifecycle steps never count), and the run report, default/pretty reporters, and agent failure envelope expose that smaller claim set even when the verdict is `pass`. Value-based gating records the authored condition and the operand values actually evaluated in `StepOutcome::Skipped`; upstream failure blocking carries no condition evaluation. These optional fields are omitted, never null. A check with no value-gated judging steps gains no new output, and older traces render unchanged. This clarifies legibility only: verdict aggregation remains the same deterministic, LLM-free evaluation.
+- **Unresolvable conditions and gated outputs (value-based `if:` on check steps, #440):** a check-step condition that cannot be evaluated (an operand absent at run time) is never treated as `false` or `true`. The step records `error` with detail naming the step and the unresolvable reference, so the check is `inconclusive:missing_observation` through the ordinary execution-failure rule above; the run continues and other checks and criteria record their own verdicts. A later step `if:` or an `assertions:` entry that reads `$steps.<gated>.outputs.*` of a step gated by a value-based condition is likewise evaluated and finds no observation, so it is `inconclusive:missing_observation` rather than a silent pass or omission. Lifecycle steps keep their own rule (§10.3.3): the step fails and dependents are inconclusive. No new inconclusive cause is introduced.
 - **Per-criterion verdict**: aggregated from its checks (any check `fail` → criterion `fail`; any `inconclusive` and no `fail` → criterion `inconclusive`; all `pass` → criterion `pass`).
-- **Per-run verdict**: aggregated from all criteria, same rules.
+- **Per-run body verdict**: aggregated from all criteria, same rules. The effective run verdict applies the required-cleanup gate after the body: any retained required cleanup failure (a flow `cleanup:`, §10.3.5.1, or the deprecated fixture `down:`, §10.3.5) makes the run `fail`; otherwise the effective verdict is the body verdict. `CheckFinished` and `CriterionFinished` remain body judgments. The run outcome, persisted `RunFinished.verdict`, CLI exit status, reporters, and dashboard run state use the effective verdict. When the gate changes the run verdict, optional `body_verdict` preserves the body verdict on `RunOutcome`, persisted `RunFinished`, and `RunSummary`; it is omitted when the body and effective verdict match.
 
-The three-state model is non-negotiable. `inconclusive` exists because real systems have flakes, environment failures, and observability gaps. Forcing flaky outcomes into `pass` corrupts trust; forcing them into `fail` blocks delivery without cause. `inconclusive` triggers escalation to human review without false signals.
+The three-state model is non-negotiable. `inconclusive` exists because real systems have flakes, environment failures, and observability gaps. Forcing flaky outcomes into `pass` corrupts trust; forcing them into `fail` blocks delivery without cause. `inconclusive` triggers escalation to human review without false signals. An assertion operand type mismatch instead gates as `fail` (#259): applying an operator to an incompatible value is a determinate authoring defect, not a retryable observability gap. For example, matching a string pattern against a present JSON `null` fails with `type_mismatch(null, str)`, while an absent nested field is `inconclusive:missing_observation` with `missing_field(path)` evidence. Changing a producer from explicit null to an omitted key can therefore change the verdict without changing the VD.
 
 A `fail` verdict on a holistic check tells you the web is broken. It does not tell you which strand is wrong. That attribution is the human’s job, supported by evidence — exactly as Duhem-Quine predicts.
 
@@ -383,12 +384,12 @@ Same root manifest pattern as B, just different file layout.
 
 #### Pattern D: Co-located in the target repo (cross-repo verification)
 
-Suitable when Duhem verifies a *product it does not itself ship* — a regression suite for a separate codebase. The Verification Definition lives in the **target product's** repository, co-located with the code it exercises, and declares its target coordinate with `project:` (§10.4). The product's own CI runs `duhem/run` against itself, and Duhem's dogfood CI runs the suite from the target ref; either way the verifier/target relationship is recorded with provenance (§11.1). Duhem is used here as a *tool*, not a host: this is how it verifies products like Crawlab, Chreode, and Onsager without hoarding their checks. Only Duhem's own self-verification VDs stay in `onsager-ai/duhem`; the trust that matters is mechanical judgment plus a self-consistent Duhem contract, not VD location (§11.2). Optional per-repo CODEOWNERS on the VD path and hub-recorded verdicts remain available as lightweight review/evidence discipline.
+Suitable when Duhem verifies a *product it does not itself ship* — a regression suite for a separate codebase. The Verification Definition lives in the **target product's** repository, co-located with the code it exercises, and declares its target coordinate with `project:` (§10.4). The product's own CI runs `duhem/run` against itself, and Duhem's dogfood CI runs the suite from the target ref; either way the verifier/target relationship is recorded with provenance (§11.1). Duhem is used here as a *tool*, not a host: this is how it verifies separate products without hoarding their checks. Only Duhem's own self-verification VDs stay in `onsager-ai/duhem`; the trust that matters is mechanical judgment plus a self-consistent Duhem contract, not VD location (§11.2). Optional per-repo CODEOWNERS on the VD path and hub-recorded verdicts remain available as lightweight review/evidence discipline.
 
 The concrete layout is a **`.duhem/` directory** at the product repo root — hidden and tool-namespaced like `.github/` or `.vscode/`, so it reads as "this repo adopts the Duhem tool" and never collides with the product's own `verifications/` or test folders:
 
 ```
-onsager-ai/chreode/           # the target PRODUCT repo (not onsager-ai/duhem)
+product-repo/           # the target PRODUCT repo (not onsager-ai/duhem)
   .duhem/
     duhem.yml                 # root manifest (§10.4) — aggregates the suite
     factory-cli/
@@ -544,10 +545,10 @@ reuses that immutable seed across its children and retries. Leaf declarations
 may reference declared `$inputs` only; criterion declarations may also read
 leaf `$setup.*` outputs; check declarations (including named entries) may
 also read criterion setup outputs. No declaration may read its own setup,
-check-body, or fixture outputs. Diagnostics include the declaration location.
+check-body, or (deprecated) fixture outputs. Diagnostics include the declaration location.
 Checks retain their existing environment and locator reference support.
 
-Every leaf/criterion/check setup or teardown block, fixture up/down block,
+Every leaf/criterion/check setup or teardown block, flow cleanup block,
 and check body opens **fresh** contexts from its effective seed, and closes
 them at block end. Mutations never cross these context boundaries. A block
 without browser actions opens no contexts. An unresolvable or rejected seed
@@ -621,6 +622,51 @@ Definitions using neither session field retain their existing wire shape.
 
 **Locators.** UI actions (`ui/click`, `ui/type`, `ui/assert-element`, `ui/select`) address an element by exactly one *primary strategy*: `role` (paired with an optional `name`), `label` (associated label text — how to reach an input with no ARIA role, e.g. `type=password`), `testid` (the `data-testid` attribute), `placeholder`, `css` (a raw CSS selector escape hatch), `xpath` (a raw XPath selector escape hatch), or a standalone `text`. A `text` substring may additionally *filter* a non-text primary, and a recursive `scope:` narrows the search to inside a container. Prefer `role`, `testid`, or `scope:` + `text:`; use `css:` or `xpath:` only when those cannot reach the element, because markup-coupled selectors—especially absolute XPath paths—break readily as markup changes. `ui/click` takes these fields inline in its `with:`; the other actions nest them under `locator:`. Two primaries at once, or none, is rejected. Each named strategy maps to the corresponding Playwright selector engine.
 
+
+**Keyboard and focus.** `ui/press { key, locator?, timeout? }` takes a Playwright
+key name, single character or `+`-joined chord (`Enter`, `Tab`, `Shift+Tab`,
+`Control+a`); an empty key is rejected when `with:` is parsed and an unknown key
+name fails the step with the driver's message. With a `locator` it uses
+`locator.press` (waits for actionability, focuses the element, presses). Without
+one it uses `page.keyboard.press` and dispatches to whatever is focused. The
+`target` output, `{tag, id, role, name}`, describes the receiving element sampled
+before dispatch: the located element, or the `activeElement` of the deepest
+focused document (`tag: body` when nothing is focused; absent fields are `null`).
+`role` is the explicit `role` attribute or the implicit role of common tags;
+`name` is an approximation of the accessible name (`aria-label`, then
+`aria-labelledby` text, then trimmed text content capped at 200 characters), not
+the full computation. `ui/focus { locator, timeout? }` is programmatic focus, not a
+user gesture; to verify keyboard focus movement, press `Tab` and assert
+`expected: focused`. `ui/assert-element` `expected: focused | not_focused` waits up
+to the deadline and reports `satisfied` like the other states. The locator must
+resolve to exactly one element (ambiguity is an error; an absent element is never
+`not_focused`). Focused means the element is the `activeElement` of its own
+document and that document has focus, including inside `frame:` documents. The
+[executed keyboard and focus example](../verifications/keyboard-focus-example/duhem.yml)
+runs against a local browser fixture in CI.
+
+**Frames.** An optional `frame: <Locator>` selects the iframe containing
+the target for every locator-taking UI action, including `ui/extract`.
+For example, `{frame: {testid: report-shell-iframe}, role: heading, name:
+Weekly report}` addresses the heading inside that document. A frame
+locator can itself contain `frame:` for nested documents; same-origin
+and cross-origin frames use the same browser-driver path. Frame entry
+precedes the target's `scope:` and primary strategy. `scope:` always
+selects a container in the current document and cannot contain `frame:`.
+Inline and named `$pages.*` locators have identical semantics.
+
+Timed actions share their deadline between frame attachment/document
+readiness and the inner action. A frame must resolve to exactly one
+iframe document, including for `hidden` and `not_exists` assertions;
+an unavailable frame never proves that an inner element is absent.
+Missing inner elements retain each action's existing wait/failure
+semantics. Snapshot extraction and counts reject unavailable or ambiguous
+frames. Reports retain the authored frame locator and identify it in
+target descriptions. Screenshots remain of the parent page; target
+rectangles include frame offsets. The [executed iframe example](../verifications/iframe-example/duhem.yml)
+covers named locators, assertions and interactions against a two-origin
+browser fixture in CI.
+
 ```yaml
 # Any filename. Self-identifies by top-level fields.
 verification: Create workspace E2E
@@ -634,8 +680,11 @@ inputs:
 setup:                                  # runs once before all criteria
   - uses: ui/navigate
     with: {url: "/dashboard"}
-  - uses: ui/assert-state
-    with: {role: "page", state: "authenticated"}
+  - uses: ui/assert-element
+    with:
+      locator: {testid: "signed-in-user"}
+      expected: visible
+      timeout: 20s
 
 criteria:
   - id: AC-1
@@ -750,13 +799,13 @@ criteria:
           - $steps.health.outputs.status == 200
 ```
 
-Failure policy is **inconclusive, never false**: a non-zero `up:` exit (or an unrunnable script) yields a run verdict of `Inconclusive(environment_error)`; a `ready:` probe that exhausts its `timeout:` yields `Inconclusive(timeout)`. A failed `up:` skips teardown (nothing came up to tear down); `down:` failures are recorded as evidence but never alter the verdict. Relative script paths resolve against the Verification Definition's directory. `up:`/`down:` scripts run under the runtime's sanitized subprocess environment (§9 Stage 3, §11.1 Runtime). The `ready:` catalog is closed at `http:` for v1.
+Failure policy is **inconclusive, never false**: a non-zero `up:` exit (or an unrunnable script) yields a run verdict of `Inconclusive(environment_error)`; a `ready:` probe that exhausts its `timeout:` yields `Inconclusive(timeout)`. A failed `up:` skips teardown (nothing came up to tear down); `provision.down:` failures are recorded as diagnostic evidence and never alter the verdict. Only flow `cleanup:` (§10.3.5.1), and the deprecated fixture `down:` (§10.3.5) desugared to it, support the required cleanup gate. Relative script paths resolve against the Verification Definition's directory. `up:`/`down:` scripts run under the runtime's sanitized subprocess environment (§9 Stage 3, §11.1 Runtime). The `ready:` catalog is closed at `http:` for v1.
 
 A manifest can also provision **one shared environment for the whole suite** rather than per-leaf — see the manifest `provision:` block in §10.4.
 
 #### 10.3.2 Implicit judgment (judging steps)
 
-An action whose contract emits a boolean `satisfied` output — `ui/assert-element`, `ui/assert-url`, `ui/assert-state`, `api/poll` — is a **judging action**. A judging step **implicitly asserts `satisfied == true`**: it contributes one assertion outcome to the check’s verdict without any `assertions:` entry. So the four checks above collapse to their steps alone — no `id`, no `outputs:`, no `$steps.…` line:
+An action whose contract emits a boolean `satisfied` output — `ui/assert-element`, `ui/assert-url`, `api/poll`, `db/observe` — is a **judging action**. A judging step **implicitly asserts `satisfied == true`**: it contributes one assertion outcome to the check’s verdict without any `assertions:` entry. So the four checks above collapse to their steps alone — no `id`, no `outputs:`, no `$steps.…` line:
 
 ```yaml
       - id: AC-1.2
@@ -809,8 +858,9 @@ steps:
 and the maximum number of steps a check can execute is computable from
 the Verification Definition alone, before the run. Validation rejects a
 definition whenever that bound cannot be computed; `duhem resolve`
-reports the per-check worst-case step count. Today the bound is the flat
-step count after flow expansion.
+reports the per-check worst-case step count. The bound is computed by
+walking the step tree after flow expansion: the sum of its leaf steps,
+with each `for_each:` body multiplied by its `max:`.
 
 This boundary forbids `while` and every other condition-driven form of
 repetition, recursion of any kind, unbounded iteration, unbounded
@@ -824,16 +874,22 @@ control flow without making them Turing-complete. The existing
 commitment, not standalone guards.
 
 Value-based conditions reuse the existing `Expr` grammar verbatim and
-are available on non-judging `setup:` and `teardown:` steps (Tier 1).
-They are deliberately not yet available on check steps (Tier 2): a
-condition on a step that produces judgments could shrink the check's
-claim set and create a run-dependent false green unless the run report
-makes that reduced claim set visible. Setup and teardown produce no
-judgments by design, so that risk is structurally absent there. A
-condition that cannot be evaluated fails its lifecycle step; inability
-to decide is never silently treated as false. Condition references are
-validated against declared inputs and earlier lifecycle steps and their
-action-contract outputs; forward references are invalid.
+are available on non-judging `setup:` and `teardown:` steps (Tier 1) and
+on check steps (Tier 2). A condition on a step that produces judgments
+can shrink the check's claim set, which would create a run-dependent
+false green unless the report makes the reduced claim set visible; on
+check steps the count of gated judging steps is therefore recorded and
+rendered even when the check passes (§7.6). Setup and teardown produce
+no judgments by design, so that risk is structurally absent there.
+`success | always | failure` remain the default and are unchanged. A
+condition that cannot be evaluated fails its lifecycle step; on a check
+step it makes the check `inconclusive:missing_observation` with the step
+and reference named, and the run continues (§7.6). Inability to decide
+is never silently treated as false. Condition references are validated
+against declared inputs and earlier steps (lifecycle steps for lifecycle
+conditions; earlier steps in the same check, `$setup`
+and action-contract outputs for check conditions); forward and
+self references are invalid, with source locations.
 
 **Bounded iteration (`for_each:`)** is the other Tier 1 / Tier 2 split
 this totality boundary makes room for, alongside value-based `if:`
@@ -848,9 +904,9 @@ report having verified less than the Verification Definition budgeted
 for, the false-green shape §7.6 exists to prevent. An empty array is
 zero iterations, not an error. The loop body is exactly one of a
 single `uses:` action, a `call:` to a named flow, or an inline
-multi-step `steps:` list — never more than one, never nested (a body
-step may not itself carry `for_each:` or `steps:`, capping nesting at
-depth 1). `as: <name>` binds the current element for the body's
+multi-step `steps:` list — never more than one. Loops do not nest: no
+step anywhere under a `for_each:`, groups included, may itself carry
+`for_each:`, capping loop nesting at depth 1. `as: <name>` binds the current element for the body's
 duration; `$<name>` is a validation error anywhere outside that body,
 and lifecycle body ids remain local to that body. In a check (#521),
 `assertions:` can reference its loop body's `$steps.<id>.outputs.*`:
@@ -863,6 +919,56 @@ An empty judging loop produces `Inconclusive(EmptyAggregation)`.
 The judge's existing fail-wins, then inconclusive, then pass fold is
 unchanged. Loops may also be declared in reusable flows; expansion
 retains the same mandatory bounds and depth-one limit.
+
+**Step groups (`steps:`)** make `steps:` a body form on any step (spec
+#614): every step declares exactly one of `uses:`, `call:` or `steps:`,
+and `for_each:` is a modifier that repeats it. A group is a scope and a
+label, not a sequence boundary. It may carry `id:` (a label),
+`description:`, `if:` and `session:`; it may not carry `with:`,
+`outputs:`, `secret_outputs:`, `as:` or `max:` unless it also carries
+`for_each:`, which keeps the loop-body semantics above. Groups are valid
+wherever steps are: check `steps:`, leaf/criterion/check `setup:` and
+`teardown:`, flow bodies, and fixture `up:`/`down:`.
+
+```yaml
+steps:
+  - id: prepare
+    description: Prepare the workspace
+    steps:
+      - { id: mk, uses: cli/invoke, with: { command: [sh, -c, "printf ok"] } }
+      - { id: chk, uses: cli/invoke, with: { command: [sh, -c, "true"] } }
+  - id: diagnostics
+    if: failure
+    steps:
+      - { uses: cli/invoke, with: { command: [sh, -c, "echo diag"] } }
+```
+
+A group's `if:` (status or value form) is evaluated once, at group entry,
+against the current gate state. If it is false, every step inside is
+recorded as skipped and names the group as the cause. Steps inside
+evaluate their own `if:` against the shared check gate state, so a
+failure inside a group gates later default steps both inside and after
+it, and `if: failure` / `if: always` inside a group behave as at top
+level. A group's `if: always` or `if: failure` is also the default for the
+steps inside that declare no `if:` of their own, as a call-site `if:` is for
+the steps its flow expands to; a diagnostics group therefore runs its steps
+on the failure it exists for. Value conditions follow the Tier 2 claim-set rule: judging steps
+gated off by a group-level value `if:` count as gated judging steps.
+Step ids inside a group share the enclosing namespace
+(`$steps.<id>`, `$setup.<id>`) and stay unique across the whole tree; a
+group `id:` is a label only, and `$steps.<group-id>` is a validation
+error. In a named-sessions check, `session: <name>` on a group fills
+inner `ui/*` steps that declare none and an inner declaration wins, so an
+enclosing group satisfies the every-`ui/*`-step-names-a-session rule.
+
+Groups nest, bounded by the same depth limit as flows
+(`MAX_FLOW_DEPTH`). The loader lowers each group into the enclosing
+sequence at the point flows are expanded, so the runtime executes one
+flat sequence and the worst-case step count is the sum of leaves. Each
+inner step's evidence carries its group path (labels, or sibling
+positions for an unlabelled group) as an optional field; traces without
+it still read. A worked example lives at
+`verifications/step-groups-example/duhem.yml`.
 
 ### Schema impact — bounded judging iteration (#521)
 
@@ -959,17 +1065,30 @@ is check-scoped (§10.7) and a lifecycle block never resolves it. A
 `for_each: [x]` wrapper used only to reach a flow with one iteration may
 be dropped in favor of this direct form.
 
-#### 10.3.5 Per-check fixtures (`fixtures:` and `needs:`)
+#### 10.3.5 Deprecated: `fixtures:` and `needs:`
 
-Fixture up and down each open fresh contexts from their consuming check's
-scalar or named seeds, including inherited criterion/leaf seeds. A fixture
-never inherits a live context from the body or another lifecycle block.
+> **Deprecated in v0.8.0 (#618); removed in v0.9.0.** A flow with `cleanup:`
+> (§10.3.5.1) does everything a fixture does and can take parameters. A
+> definition that still declares `fixtures:` keeps validating and running with
+> the same verdicts, gate and evidence; `duhem validate` and `duhem run` warn
+> once per declared fixture. In v0.9.0 `fixtures:`, `needs:` and `$fixture.*`
+> become a hard error carrying the same mapping.
 
-A leaf may declare named lifecycle resources once and let each consuming check
-request a fresh instance:
+The runtime desugars each fixture into the flow-cleanup form when a run starts;
+validation reads the authored form, so every fixture diagnostic keeps its
+message and source location.
+
+| Deprecated | Use instead |
+| --- | --- |
+| `fixtures.<name>.up:` | `flows.<name>.steps:` |
+| `fixtures.<name>.down:` | `flows.<name>.cleanup:` |
+| `fixtures.<name>.cleanup_policy:` | `flows.<name>.cleanup_policy:` (same values and default) |
+| `$fixture.<name>.<id>.outputs.*` in `down:` | `$steps.<id>.outputs.*` in `cleanup:` |
+| `$fixture.<name>.<id>.outputs.*` for a process action output in a consuming check body | declare the value in the flow's `outputs:`, give the check-setup call an `id:`, read `$setup.<call-id>.outputs.<name>` |
+| `needs: [a, b]` on a check | `- id: a` + `call: a` and `- id: b` + `call: b`, in order, at the **end** of that check's `setup:` |
 
 ```yaml
-verification: Per-check fixtures
+verification: Per-check fixture (deprecated form)
 fixtures:
   test_project:
     up:
@@ -992,32 +1111,233 @@ criteria:
         assertions: ["true"]
 ```
 
-`fixtures:` is a map of name to non-empty `up:` and `down:` step lists.
-`needs:` names declared fixtures in bring-up order. Each check (and each retry
-attempt) receives fresh instances: fixture `up:` runs in `needs:` order, then
-the check steps run, then fixture `down:` runs in reverse order. Leaf `setup:`
-precedes every fixture and leaf `teardown:` follows every fixture. Fixtures do
-not share state, nest, or depend on other fixtures in v1; a fixture step cannot
-carry `needs:`.
+The same check as a flow with `cleanup:`:
 
-Fixture steps are lifecycle actions and contribute no implicit judgments, even
-when their action contract judges. Their failure semantics are:
+```yaml
+verification: Per-check resource as a flow cleanup
+flows:
+  test_project:
+    steps:
+      - id: create
+        uses: api/call
+        with: { method: POST, url: /projects, body: { name: probe } }
+    cleanup:
+      - uses: api/call
+        with:
+          method: DELETE
+          url: $steps.create.outputs.body.url
 
-| Event | Check result |
-| --- | --- |
-| A fixture `up:` step fails | `inconclusive` with the existing timeout or environment-error cause; check steps do not run |
-| A fixture `down:` step fails | failure remains in attributed evidence; the check verdict is unchanged |
-| The check fails or is inconclusive | every activated fixture still runs `down:` |
+criteria:
+  - id: AC-1
+    description: A project can be inspected.
+    checks:
+      - id: AC-1.1
+        setup:
+          - call: test_project
+        steps: []
+        assertions: ["true"]
+```
 
-Fixture lifecycle events carry both the fixture name and consuming check id.
-Only a fixture's own `down:` may read its `up:` outputs, through
-`$fixture.<fixture_name>.<step_id>.outputs.<name>`. References from checks,
-leaf lifecycle blocks, another fixture, or the fixture's own `up:` are
-validation errors. The action contract must declare the referenced output.
+**What is preserved.** Each check and each retry attempt gets fresh instances.
+The order is leaf `setup:` → criterion `setup:` → check `setup:` → fixture
+`up:` in `needs:` order → check steps → fixture `down:` in reverse order →
+check `teardown:` → leaf `teardown:`; fixtures unwind in the same last-in-first-out
+stack as flow cleanups (§10.3.5.1). A failing fixture `up:` makes the check
+`inconclusive` with the specific cause and the check steps do not run. Fixture
+`up:` steps stay non-judging; a fixture `down:` follows the cleanup gate of
+§10.3.5.1, including `cleanup_policy`. A fixture step cannot carry `needs:`,
+fixtures do not nest or depend on each other, and fixture `up:`/`down:` steps
+may declare a direct `call:` as `setup:`/`teardown:` do (§10.3.4).
 
-Fixture `up:`/`down:` steps may also declare a direct `call:` to a
-reusable flow, with the same validation and load-time expansion as
-`setup:`/`teardown:` (§10.3.4) and a check's own `call:` (§10.4).
+**Evidence compatibility.** Fixture lifecycle events and the folded
+`RunSummary.lifecycle` blocks keep the fixture name and the consuming check id
+(scope fields `fixture_name` and `check_id`), and the report still says
+"fixture `<name>`". Fixture `up:`/`down:` each open fresh contexts from their
+consuming check's seeds, as every lifecycle block does.
+
+**Fixture references.** Only a fixture's own `down:` may read its `up:` outputs,
+through `$fixture.<fixture_name>.<step_id>.outputs.<name>`; the action contract
+must declare the referenced output. References from leaf lifecycle blocks,
+another fixture, or the fixture's own `up:` are validation errors. A consuming
+check may read a fixture's *process* outputs (see [owned processes](owned-processes.md)) as
+`$fixture.<fixture>.<step>.outputs.<name>`; for a flow called from check
+`setup:`, read them through the call's declared `outputs:` as
+`$setup.<call-id>.outputs.<name>`.
+
+**Warning.** One warning per declared fixture, with its source location, never
+for a flow:
+
+> `fixtures.<name>` is deprecated and will be removed in v0.9.0. Declare
+> `flows.<name>` with `steps:` (was `up:`), `cleanup:` (was `down:`) and the same
+> `cleanup_policy:`; inside `cleanup:` replace `$fixture.<name>.<id>.outputs.*`
+> with `$steps.<id>.outputs.*`. A consuming check can read only a fixture's
+> process outputs; declare one in the flow's `outputs:` and read
+> `$setup.<call-id>.outputs.<name>`; replace
+> `needs: [<name>]` with `- id: <name>` + `call: <name>` at the end of the
+> check's `setup:`.
+
+#### 10.3.5.1 Flow cleanup (`cleanup:` and `cleanup_policy:`)
+
+A flow may declare a `cleanup:` half next to its `steps:`, so a resource and its
+removal are declared once and take the flow's typed `params:`. It replaces the
+deprecated fixture (§10.3.5), which is desugared into this form.
+
+```yaml
+flows:
+  scratch_file:
+    params: { prefix: { type: string } }
+    steps:
+      - id: create
+        uses: cli/invoke
+        with: { command: [sh, -c, 'f=$(mktemp "/tmp/$1.XXXX"); printf %s "$f"', --, $params.prefix] }
+    outputs: { path: $steps.create.outputs.stdout }
+    cleanup:
+      - uses: cli/invoke
+        with: { command: [rm, -f, $steps.create.outputs.stdout] }
+```
+
+`cleanup:` is a list of steps; `cleanup_policy: required | diagnostic_only` is
+valid only together with it, defaults to `required`, and is omitted when
+serialized at the default. Cleanup steps may read `$params.*` and the **same
+call's** body outputs as `$steps.<body-id>.outputs.*` (also earlier cleanup
+steps of that flow); a `$inputs.*` reference, a step the flow does not declare,
+or any reference to a cleanup step from outside the flow is a validation error
+with a location. `for_each:` steps are accepted inside `cleanup:` and validate
+and expand exactly as in a `teardown:` block (`max:` required,
+depth 1); a loop in `cleanup:` runs over the call's resolved arguments, `$params.*`
+or the call's outputs.
+
+**Registration.** A `call:` to a flow with `cleanup:` is *entered* when its
+first leaf step is dispatched, including a step inside a `for_each:` body, so a
+flow whose body starts with (or is) a `for_each:` registers when the loop's first
+body step runs. A loop that dispatches nothing (an empty array, or every body
+step gated off by `if:`) has not entered the call and registers nothing. The
+cleanup is registered once per call, on the enclosing lifecycle scope: check
+`steps:` and check `setup:` register on that check **attempt** (so a retry
+registers and unwinds again), criterion `setup:` on the
+criterion, and leaf `setup:` on the leaf. A call gated off by `if:` registers
+nothing. A body that fails partway still registers its cleanup, and so does a
+check that fails or is inconclusive. A call that is itself inside a
+`for_each:` body registers once per iteration, with that iteration's element and
+outputs, so the total is bounded by `max:`; a flow that starts with a loop sees,
+in its cleanup, the outputs the call had recorded when its scope ended. A flow
+with `cleanup:` that calls another such flow registers both. Such a flow may not
+be called from `teardown:` or another flow's `cleanup:`; validation rejects it.
+
+**Unwind.** Registered cleanups share one LIFO stack: at scope exit everything
+registered since the scope began runs last registered first, before that scope's
+own `teardown:`. A deprecated fixture (§10.3.5) is a flow with `cleanup:` called
+at the end of check `setup:`, so a flow called from check `setup:` before it
+unwinds after it, and a flow called from check `steps:` unwinds before it. Every
+step of every registered cleanup is attempted; a failure does not stop the
+drain. Each cleanup opens fresh browser contexts from the seed its call resolved
+(§10.3.4; a call-site `session:` carries over).
+
+**Interruption.** The cleanups sit on the same stack an interrupted run drains
+for `teardown:` (process cleanup, [owned processes](owned-processes.md)): on
+SIGINT/SIGTERM or an engine error each pending flow cleanup runs, last first,
+under the session and policy it was registered with. The drain applies to runs
+that own processes. A cleanup drained
+this way sees the run's `$setup` outputs but not the body outputs of the
+interrupted block, which were never recorded; a step that needs them fails and
+is reported like any cleanup failure.
+
+**`--keep-env`.** Check- and criterion-scope flow cleanups run, as those
+scopes' `teardown:` does; only cleanups registered by the **leaf** `setup:` are
+skipped, together with leaf `teardown:`, in both the normal and the interrupted
+drain. Nothing else is skipped.
+
+**Policy.** A flow's `cleanup:` is `required` by default; set
+`cleanup_policy: diagnostic_only` when its cleanup should remain visible without
+changing the effective run gate. The policy applies only to that flow's
+`cleanup:`; `setup:` steps and leaf, criterion and check `teardown:` keep their
+existing non-gating behavior. Cleanup actions do not change the registering
+check's body verdict. Under `required`, a cleanup failure changes the effective
+run gate to `fail`, at any scope, while preserving the check and criterion body
+judgments. A failure is a step execution error, timeout, step-local
+runtime/dispatch error, or a non-passing implicit judgment from a judging
+action, including a false `satisfied == true` condition or a missing required
+judging output. A returned observation is data: a non-zero `exit_code` from
+`cli/invoke` or an HTTP 500 response from `api/call` does not by itself fail
+cleanup. To judge an HTTP cleanup result, use `api/poll` with `method: GET` and
+`until: {status: 200}`.
+
+| Event | Check/body result | Effective run gate |
+| --- | --- | --- |
+| A body step or `setup:` step fails before the cleanup is registered | `inconclusive` with the specific cause | Body aggregation applies |
+| A cleanup step fails under `required` | Body check and criterion verdicts are unchanged | `fail`, even when the body passes or is inconclusive |
+| A cleanup step fails under `diagnostic_only` | Body check and criterion verdicts are unchanged | Unchanged; failure remains diagnostic evidence |
+| The check fails or is inconclusive | Every registered cleanup still runs | Body aggregation applies unless a required cleanup fails |
+
+Required cleanup failures from every retry attempt are retained, so a later
+passing body cannot erase an earlier required cleanup failure; this does not
+change retry eligibility. Draining continues and independent checks are still
+reported after a required failure; an engine error still fails execution and
+preserves available evidence. The cleanup's lifecycle evidence and its folded
+`RunSummary.lifecycle` block record `cleanup_policy`; this fold is a report
+projection, while the run gate uses retained cleanup-failure records, which carry
+`required` (defaulting to `false` when old summaries are read and for non-flow
+cleanup). Older lifecycle evidence without the policy field remains unknown.
+Lifecycle step evidence separates execution from judgment: a judging cleanup
+action that executes successfully but returns `satisfied: false` retains
+`outcome: ok` and records `judgment: fail`. `SetupStepFinished` and the folded
+`LifecycleStep` (including normalized lifecycle events) carry optional
+`judgment` of type `VerdictState`; lifecycle failure and `failing_step` account
+for either an execution failure or failed judgment. Missing judgment on old
+evidence remains unknown.
+
+This page-free example deliberately names a nonexistent cleanup executable,
+which produces an execution error rather than a non-zero exit-code observation.
+The check body passes, but required cleanup fails, so the effective run gate is
+`fail`, `body_verdict` is `pass`, and the CLI exits nonzero:
+
+```yaml
+verification: Required flow cleanup
+flows:
+  resource:
+    steps:
+      - uses: cli/invoke
+        with: {command: [sh, -c, "true"]}
+    cleanup:
+      - id: release
+        uses: cli/invoke
+        with: {command: [duhem-intentionally-nonexistent-cleanup-command]}
+criteria:
+  - id: CLEANUP
+    description: Required resource cleanup must succeed before acceptance.
+    checks:
+      - id: CLEANUP.1
+        setup:
+          - call: resource
+        steps:
+          - id: body
+            uses: cli/invoke
+            with: {command: [sh, -c, "true"]}
+        assertions:
+          - $steps.body.outputs.exit_code == 0
+```
+
+For the diagnostic control, add `cleanup_policy: diagnostic_only` under
+`flows.resource`. The same cleanup failure remains visible as diagnostic
+evidence, while the passing body leaves the run gate `pass`.
+
+**Evidence and report.** Each registered cleanup runs as its own teardown
+lifecycle block at the registering scope. Its `setup_started` evidence carries
+`registered_by` (flow name and call id) beside the scope and `cleanup_policy`;
+the folded `RunSummary.lifecycle` block carries the same `registered_by`. The
+resolved hook chain lists every registered cleanup at its scope's exit, naming
+the registration site (for example `flow scratch_file cleanup (call tmp,
+registered in check AC-1.1)`), and marks one that did not run. The pretty
+reporter and the dashboard lifecycle views show the registering flow and call, so the implicit
+registration is visible in the report.
+
+The failing controls are the example above: a nonexistent cleanup command gives
+`body_verdict: pass`, an effective gate of `fail` and a nonzero CLI exit under
+the default policy; adding `cleanup_policy: diagnostic_only` to the flow leaves
+the gate `pass` with the failure visible. Worked example:
+`verifications/flow-cleanup-example/duhem.yml`; controls:
+`crates/duhem-cli/tests/fixtures/cleanup/flow_required.yml` and
+`flow_diagnostic.yml`.
 
 ### 10.3.6 Criterion and check lifecycle (`setup:`/`teardown:`)
 
@@ -1027,7 +1347,7 @@ concept: the same `Vec<Step>` shape, the same non-judging semantics, the
 same value-based `if:` support (§10.3.3 Tier 1), and the same direct
 `call:` support (§10.3.4). Criterion `setup:` runs
 once before that criterion's checks; check `setup:` runs before that
-check's own `steps:` (and, like fixtures, on every retry attempt).
+check's own `steps:` (and, like flow cleanups, on every retry attempt).
 
 ```yaml
 verification: Criterion and check lifecycle hooks
@@ -1059,14 +1379,14 @@ criteria:
 Full execution order, outermost first:
 
 ```
-provision.up: → leaf setup: → criterion setup: → check setup: → [fixtures via needs:] → check steps
-                                                                                              ↓
-provision.down: ← leaf teardown: ← criterion teardown: ← check teardown: ← [fixture down:] ←
+provision.up: → leaf setup: → criterion setup: → check setup: → check steps
+                  (a flow with cleanup: registers its cleanup when called) ↓
+provision.down: ← leaf teardown: ← criterion teardown: ← check teardown: ← [registered flow cleanups, last first] ←
 ```
 
 **Retry timing differs by level, deliberately.** Check-level
 `setup:`/`teardown:` re-runs on every retry attempt of that check —
-same contract as fixtures (§10.3.5): a retry re-establishes the
+same contract as flow cleanups (§10.3.5.1): a retry re-establishes the
 check's own preconditions, so its hooks must be idempotent, just like
 leaf-level cleanup (§10.3.4). Criterion-level `setup:`/`teardown:` runs
 once per criterion, outside any check's retry loop: re-running it per
@@ -1086,7 +1406,7 @@ something must guard itself with `if:`. A criterion `setup:` failure
 makes every one of that criterion's checks `inconclusive` with the
 triggering cause — none of them run, and no check-level `setup:` fires
 for them, but the criterion's own `teardown:` still does. A check
-`setup:` failure makes only that check `inconclusive`; its fixtures and
+`setup:` failure makes only that check `inconclusive`; its
 `steps:` do not run, but the check's own `teardown:` still does. A
 `teardown:` failure at either level is evidence-only and never changes
 a verdict.
@@ -1106,17 +1426,21 @@ every check's `setup:`), then this check's own `setup:` (visible to the
 check's `teardown:`). Because every non-fixture lifecycle level publishes
 into the same run-scoped `$setup.<id>` namespace (§10.3), a nested
 lifecycle step's `id` may not collide with an id already open in an outer
-scope — validation rejects it. Fixtures keep their own `$fixture.*`
-namespace and rules (§10.3.5) unchanged.
+scope — validation rejects it. The deprecated fixtures keep their own
+`$fixture.*` namespace and rules (§10.3.5) unchanged.
 
-**Setup-output visibility.** Check body `with:` and `assertions:` still read
-only leaf `$setup.*` outputs. Session declarations are resolved before their
-own setup runs and may additionally consume **enclosing** setup outputs:
-criterion sessions may read leaf setup, and check sessions may read leaf and
-criterion setup. Own-scope setup references are validation errors with a
-location. Lifecycle blocks retain the nested output visibility above; outputs
-are restored when leaving a scope and on retry, so siblings never supply a
-seed accidentally. Fixture outputs remain local to that fixture's down block.
+**Setup-output visibility.** Ordinary `$setup.*` references in a check body
+remain leaf-only. #579 additionally exposes process action outputs from
+criterion- and check-level setup through `$setup.*`; a consuming check may read
+its fixture's process outputs through `$fixture.*` (§10.3.5). Other own-scope
+setup references are validation errors with a location. Session declarations
+are resolved before their own setup runs and may additionally consume
+**enclosing** setup outputs: criterion sessions may read leaf setup, and check
+sessions may read leaf and criterion setup. Lifecycle blocks retain the nested
+output visibility above; outputs are restored when leaving a scope and on
+retry, so siblings never supply a seed accidentally. Flow cleanups read their
+call's body outputs as `$steps.*`, and deprecated non-process fixture outputs
+remain local to that fixture's down block.
 
 Check and criterion lifecycle contexts re-seed from their scope's nearest
 session. To preserve signed-out behavior under an authenticated parent,
@@ -1124,18 +1448,20 @@ declare `session: ~` on the criterion or check. Named-session cleanup must
 re-establish page navigation and any state that was only in the body context.
 
 **Lookup surface.** With this, a check's effective setup can come from up
-to four declaration sites plus fixtures. Every block that starts is folded
+to four declaration sites plus flow cleanups. Every block that starts is folded
 into `RunSummary.lifecycle` with its ordered scope path, phase, status,
 timestamps, steps, flow provenance, and failing-step position. Scope paths
 are open `{kind, id}` segment lists rather than a fixed-depth enum, so a new
 scope does not require reporter changes. The default reporter shows the
 recorded chain beside every non-passing check, marks declared entries that
 did not run, and always shows a failed lifecycle block. Pretty groups all
-blocks by their recorded path; JUnit emits failed blocks as test cases and
+blocks by their recorded path; JUnit emits failed setup and required-cleanup blocks as test cases, retains diagnostic cleanup as evidence, and
 passing blocks in `system-out`. The dashboard shows leaf/criterion blocks
-on the run page and check/fixture setup before check steps and teardown
-after them. This evidence remains non-judging: teardown failures do not
-change the run verdict, and the compatibility `cleanup` field remains.
+on the run page and check setup before check steps and teardown
+after them. Leaf, criterion, and check teardown failures remain
+diagnostic-only; required flow `cleanup:` failures (and the deprecated fixture
+`down:` desugared to it) use the separate cleanup gate in §10.3.5.1. Diagnostic capture remains evidence-only (§7.7). The
+compatibility `cleanup` field remains.
 
 ### 10.4 Root manifest (`duhem.yml`)
 
@@ -1263,9 +1589,10 @@ human-facing `description:`, typed `params:`, ordered `steps:`, and an
 `call: <flow-name>`, an optional `description:`, an `id:`, and a
 `with:` map matching the flow's typed `params:`. `call:` is distinct
 from `uses:` so a flow cannot shadow or masquerade as a closed-catalog
-action. Exactly one of the two keys is valid on a step. A lifecycle
-step — leaf/criterion/check `setup:`/`teardown:` or fixture
-`up:`/`down:` — accepts the same `call:` form directly, with the same
+action. Exactly one of the two keys is valid on a step (or `steps:`, a
+group, §10.3.3). A lifecycle step — leaf/criterion/check
+`setup:`/`teardown:`, or the deprecated fixture `up:`/`down:` — accepts
+the same `call:` form directly, with the same
 `params:`/`with:` validation (§10.3.4/§10.3.5/§10.3.6); it is not
 limited to a `for_each:` step's body (§10.3.3).
 
@@ -1274,14 +1601,17 @@ runtime sees the definition. Parameters replace `$params.*`, inner ids
 are namespaced per invocation, and a flow's `outputs:` map is the whole
 caller-visible interface, projected onto the caller's own accessor: in
 a check, `$steps.<call-id>.outputs.<declared-name>`; in a lifecycle
-block, `$setup.<call-id>.outputs.<declared-name>` (or, for a fixture's
-own `up:`/`down:`, `$fixture.<fixture-name>.<call-id>.outputs.<declared-name>`)
-— never `$steps.*`, which a lifecycle block does not resolve (§10.7).
+block, `$setup.<call-id>.outputs.<declared-name>` (or, for a deprecated
+fixture's own `up:`/`down:`,
+`$fixture.<fixture-name>.<call-id>.outputs.<declared-name>`) — never `$steps.*`, which a lifecycle block does not resolve (§10.7).
 Inner ids cannot be referenced by the caller. A `secret: true` param
 joins the same evidence-masking boundary as a secret input, on the
 lifecycle path as well as the check path. Flows may call other flows;
 cycles and chains deeper than the include-depth limit are offline
 validation errors.
+
+A flow may also declare `cleanup:` (§10.3.5.1), registered on the enclosing
+scope when a call is entered and unwound LIFO at that scope's exit.
 
 Flow bodies are hygienic. Step `with:` values may reference only
 `$params.*` and `$pages.*`; a `$inputs.*` or `$steps.*` dependency in
@@ -1311,18 +1641,23 @@ Verification Definitions invoke pre-defined action types via `uses:`. Each actio
 **UI actions** (Playwright primitives)
 
 - `ui/navigate` — go to a URL
+- `ui/observe-console` — collect page errors and console messages in a step-anchored window
+- `ui/back` — move one entry back through the page's real browser history (`page.goBack`); same waiting, outputs and no-entry contract as `ui/forward`.
+- `ui/forward` — move one entry forward through the page's real browser history (`page.goForward`), waiting for `load` (optional `timeout:`). Outputs `from_url`, `url` and `navigated`: `navigated` is `true` when the browser moved to another entry, including same-document (hash/`pushState`) entries, and `false` with `url == from_url` when no entry exists in that direction (the browser's initial blank page is not an entry the check visited). A missing entry is not an error and never triggers a direct navigation; an in-flight navigation that exceeds the timeout is a `timeout` outcome.
 - `ui/click` — click an element (role-based locators preferred)
 - `ui/type` — type into an input
 - `ui/select` — select an option
-- `ui/assert-element` — judge existence/visibility with `expected:`, or directly judge an extracted field with `expect: { field: checked, equals: true }`
-- `ui/extract` — non-judging extraction of an attribute, live DOM property, or rendered `innerText`; exposes `value`, `found`, `count`, and (with `all: true`) DOM-ordered `values`
+- `ui/press` — press a key or `+` chord (Playwright key names), on a located element or on the focused element
+- `ui/focus` — programmatically focus an element (`element.focus()`, not a user gesture)
+- `ui/assert-element` — judge existence/visibility/focus with `expected:` (`exists`, `not_exists`, `visible`, `hidden`, `focused`, `not_focused`), or directly judge an extracted field with `expect: { field: checked, equals: true }`
+- `ui/extract` — non-judging extraction of an attribute, live DOM property, rendered `innerText`, bounding rect, or computed style; exposes `value`, `found`, `count`, and (with `all: true`) DOM-ordered `values`
 - `ui/assert-url` — observe URL state
-- `ui/assert-state` — observe page-level state (authenticated, loaded, etc.)
 - `ui/capture-session` — capture cookies/local storage as a secret state value for later checks
+- `ui/emulate` — set the check's own viewport (`viewport: { width, height }`, positive integer CSS px, same rule as `defaults.viewport`) and/or `color_scheme: light | dark | no-preference`; at least one is required. It applies `page.setViewportSize` / `page.emulateMedia` to the check's page for later steps. Outputs `viewport` (`{ width, height }`) and `color_scheme` are read back from the page (`innerWidth/innerHeight`, `prefers-color-scheme` media queries), not echoed from `with:`, so Chromium reports `no-preference` as `light`. Every check and retry attempt opens a fresh context with the run viewport and host-default color scheme, so emulation never leaks into siblings or retries. Headed runs have no fixed viewport; rely on the read-back output there.
 - `ui/wait` — wait for a fixed `duration` (`TimeoutSpec`, e.g. `500ms` or `2s`) without requiring a browser page. Prefer `ui/assert-element` with `timeout:`; fixed waits are a debugging and transitional-authoring escape hatch with a 60-second default ceiling that root-manifest `defaults.max_wait` may raise or lower.
 
-`ui/extract` selects exactly one source from `field:`, `attribute:`, `property:`, or
-`text: true`. Attributes describe markup and return `null` when absent; properties
+`ui/extract` selects exactly one source from `field:`, `attribute:`, `property:`,
+`text: true`, or `style:`. Attributes describe markup and return `null` when absent; properties
 describe live state. Text uses `innerText`, so hidden content is omitted and rendered
 whitespace rules apply. `field:` is a closed lookup, never a heuristic:
 
@@ -1330,6 +1665,7 @@ whitespace rules apply. `field:` is a closed lookup, never a heuristic:
 | --- | --- |
 | `checked`, `value`, `disabled` | DOM property |
 | `text` | `innerText` |
+| `rect` | bounding rect object (see below) |
 | `href`, `class`, `id`, `title`, `alt` | HTML attribute |
 | `aria-*`, `data-*` | HTML attribute |
 
@@ -1343,21 +1679,67 @@ sensitive observation. `ui/assert-element` accepts this same source vocabulary i
 `expect:` with `equals:` for direct implicit judgment; extraction remains the path for
 later reuse and check-level assertions.
 
+`ui/observe-console` requires `window: { from_step, edge, duration }` with
+the same inclusive session-clock window and anchor rules as `api/observe`.
+It returns separate ordered `page_errors` and `console` records, counts for
+each and `console_error_count`. Console levels are facts, not verdicts.
+Assert `complete == true` before treating zero counts as absence; overflow
+sets `truncated` and makes `complete` false. Registered secrets are masked.
+
+**Geometry and computed style (#580).** `field: rect` returns
+`{ x, y, width, height, top, right, bottom, left, scroll_x, scroll_y }` in CSS px.
+The first eight are `getBoundingClientRect()` relative to the element's own document
+viewport (the frame viewport for `frame:` targets); `scroll_x` / `scroll_y` are that
+document's `scrollX` / `scrollY`, so document coordinates are `x + scroll_x`.
+`style: <css-property>` returns `getComputedStyle(el).getPropertyValue(<property>)` as a
+string with units, for example `rgb(17, 17, 17)` or `16px`; an empty property name is
+invalid, and `style` is exclusive with the other sources. Both sample once at step
+execution, with no waiting beyond locator resolution, and honor `all: true` and the
+single-match rule. Thresholds live in VD assertions, for example
+`$steps.card.outputs.value.width <= 390`. The executed example is
+`verifications/geometry-example/duhem.yml`.
+
 **API actions**
 
-- `api/call` — make an HTTP request actively
-- `api/observe` — passively observe an HTTP request the UI triggers (network sniffing)
+- `api/call` — make an HTTP request actively; outputs `status`, `body`, `body_text`, `body_bytes` and `headers`
+- `api/observe` — passively observe an HTTP request the UI triggers (network sniffing); outputs `method`, `url`, `status`, `body`, `body_text`, `body_bytes`, `headers`, `request_body` and `request_headers`
 - `api/poll` — re-hit an endpoint until a response condition holds or a timeout elapses
 - `api/stream` — follow an open-ended SSE / `text/event-stream` from an in-progress source, collecting ordered events until a terminal condition (`until_event` / `max_events` / server close) or the `timeout:` budget; outputs `events` / `event_count` / `last_event` for mechanical assertion
+
+`api/observe` optionally accepts `window: { from_step, edge, duration }` to
+collect requests starting in the inclusive window anchored to an earlier step
+in the same browser session. `edge` defaults to `start`; `finish` selects its
+finish. The positive duration runs on the session clock. `edge` and `duration` must
+be literals, and an unrunnable `from_step` (skipped, gated or from another
+session) fails the step with an action error. `count` and `requests`
+describe matching request starts in sequence order, including pending and failed
+requests and separate redirect hops. Assert `complete` before treating an empty
+result as absence: it is false if recording began too late or the bounded buffer
+was truncated. `truncated` reports buffer overflow. Without a window the legacy
+first matching response behavior remains unchanged.
+
+Both response-side actions declare their outputs in the catalog, so `$steps.<id>.outputs.<name>` resolves without an `outputs:` block. `headers` is an object with lower-case names; reach a hyphen-free header by dotted path (`headers.location`). `body_bytes` is an integer: the payload bytes the client returned after content decoding, before UTF-8-lossy or JSON conversion, excluding headers. It is not the `body_text` character count, `Content-Length` or wire size; an empty body is `0`, and a failed body read is an error, never `0`. `api/call` uses `reqwest` with no decompression feature and sends no `Accept-Encoding`, so nothing decodes `Content-Encoding` there; `api/observe` reads Chromium's decoded `response.body()`. The [executed example](../verifications/response-outputs-example/duhem.yml) asserts `status`, `body_bytes` and a header. (#603)
 
 **Database actions**
 
 - `db/query` — execute a read query, capture rows
+- `db/observe` — poll a read query until a condition holds or a timeout elapses
 - `db/seed` — seed data for setup
 
 **CLI actions**
 
 - `cli/invoke` — run a subprocess command and capture its exit code, stdout, and stderr for assertion
+
+**Owned local processes** (since v0.7.1; #579)
+
+- `process/start` — executable `command`, string-array `args`, optional `cwd`/`env`, optional bounded HTTP/log `ready`; returns run/owner/generation-bound `handle`, `generation`, diagnostic `pid`, and `ready`. No readiness probe means spawned only (`ready: false`).
+- `process/inspect` — reads state, exit/signal and bounded masked stdout/stderr logs with cursor, generation and explicit truncation/drop facts.
+- `process/stop` — bounded SIGTERM/SIGKILL of the owned Unix group, descendant termination, direct-child reaping and log draining; idempotent exit/stop facts.
+- `process/restart` — stop/reap the old generation before reusing its launch/readiness contract; preserve product-owned state and both generations' evidence.
+
+All four are non-judging. Setup/fixture-up spawn/readiness failure makes dependent checks inconclusive with environment-error semantics; body errors retain masked detail and inconclusive missing observations. Ownership follows declaring leaf/criterion/check/fixture scope, independently of browser context. Only the current check or its fixtures may be stopped/restarted; enclosing handles are inspect-only, and sibling/retry handles are rejected. After authored cleanup, reverse-order process finalizers are always required, including diagnostic-only fixtures, retries and observed cancellation; failures block the effective gate while preserving body judgments. Ordinary teardown/provision diagnostics retain their semantics.
+
+Linux/macOS use owned process groups; unsupported platforms reject before spawn. Detached daemons, interactive protocols and port leases are outside the contract. See [exact lifecycle/log/timeout semantics](owned-processes.md) and the [executable HTTP/restart example](../verifications/owned-process-example/duhem.yml). These actions first shipped in v0.7.1; they are not in v0.7.0 or earlier tags.
 
 #### Planned (Phase 2+ — §14)
 
@@ -1379,7 +1761,7 @@ Assertions evaluate to `true`, `false`, or `inconclusive` (e.g., when timeouts h
 - **Existence**: `exists: $steps.X.outputs.Y`
 - **Cross-step consistency**: `equal: [$steps.A.outputs.X, $steps.B.outputs.X]`
 
-An `inconclusive` result always carries a cause, distinguishing "the check could not be evaluated" from a genuine `false`. The verdict-level catalog is closed at v1 and surfaces as `inconclusive:<cause>` (snake-case wire tokens): `timeout`, `missing_observation`, `environment_error`, `empty_aggregation`. The runtime evaluator tracks finer internal causes (missing input, missing env, type mismatch, invalid pattern, unknown runtime helper) that collapse into these when the judge aggregates the verdict (§7.6).
+An `inconclusive` result always carries a cause, distinguishing "the check could not be evaluated" from a genuine `false`. The verdict-level catalog is closed at v1 and surfaces as `inconclusive:<cause>` (snake-case wire tokens): `timeout`, `missing_observation`, `environment_error`, `empty_aggregation`. The runtime evaluator tracks finer internal causes (missing input, missing env, missing field, invalid pattern, unknown runtime helper) that coarsen into these verdict-level causes. Its `TypeMismatch` result is the exception: the runtime maps it directly to `fail`, retaining `type_mismatch(lhs, rhs)` in evidence, before inconclusive causes are coarsened (§7.6; #259).
 
 ### 10.7 Runtime expressions
 
@@ -1390,6 +1772,17 @@ literal string. Literal strings beginning with `$` are unsupported in v1.
 String literals inside expressions may use either single (`'…'`) or double
 (`"…"`) quotes. Neither form supports escape sequences; use the other quote
 form when the string must contain a quote character.
+
+Reference and assertion paths can navigate object keys with `.name` or
+`['key']`, and arrays with `[N]`. Bracket keys use single quotes; escape a
+quote as `\'` and a backslash as `\\`. Empty keys, other escapes, and
+unterminated keys are invalid. For example,
+`$steps.r.outputs.headers['content-type']` and
+`$steps.r.outputs.items[0]['a-b']` access the named keys. A quoted numeric
+key such as `['200']` addresses an object key, never an array index.
+The same navigation works on flow parameters during static substitution,
+including page-call arguments: `$params.resp['content-type']` and
+`$params.items[0]['a-b']`.
 
 Borrowed from Arazzo. References available in expressions:
 
@@ -1405,8 +1798,8 @@ Borrowed from Arazzo. References available in expressions:
   expansion; it never reaches runtime evaluation.
 - `$steps.<id>.outputs.<name>` — outputs from a prior step (scoped to the declaring check)
 - `$setup.<id>.outputs.<name>` — outputs from a run-level `setup:` step (§10.3), read-only from inside any check
-- `$fixture.<fixture_name>.<step_id>.outputs.<name>` — outputs from one fixture instance's `up:` steps, valid only in that same fixture's `down:` block (§10.3.5)
-- `$env.<name>` — a value from the selected named profile. The `$env` whitelist is **empty by default**. An author opts a key in by declaring it (with a string value) under a manifest `profiles:` entry (§10.4) and selecting that profile with `--profile <name>` (`--environment` remains an alias; one profile auto-selects); the selected entry's string-valued keys seed the whitelist for that run. There is no process-environment passthrough and no `--env` CLI flag. A reference to a key that isn't whitelisted evaluates to `inconclusive` (it carries a missing-env cause, §10.6), never a parse error.
+- `$fixture.<fixture_name>.<step_id>.outputs.<name>` — **deprecated** (#618, removed in v0.9.0): outputs from one fixture instance's `up:` steps, valid only in that same fixture's `down:` block (§10.3.5); in a flow's `cleanup:` use `$steps.<id>.outputs.<name>` (§10.3.5.1)
+- `$env.<name>` — a value from the selected named profile. The `$env` whitelist is **empty by default**. An author opts a key in by declaring it (with a string value) under a manifest `profiles:` entry (§10.4) and selecting that profile with `--profile <name>` (one profile auto-selects); the selected entry's string-valued keys seed the whitelist for that run. There is no process-environment passthrough and no `--env` CLI flag. A reference to a key that isn't whitelisted evaluates to `inconclusive` (it carries a missing-env cause, §10.6), never a parse error.
 - `$runtime.uuid()` — a stable per-run UUID / `$runtime.now()` — the run's current time as epoch milliseconds
 - `$runtime.format(fmt, args...)` — **pure** string composition: the
   `{}` placeholders in `fmt` are filled, in order, by the remaining
@@ -1429,16 +1822,16 @@ Borrowed from Arazzo. References available in expressions:
   equal to `value` (scalar equality, same `Int`/`Float` promotion as
   `==`). The direct way to assert list membership —
   `$runtime.contains($steps.api.outputs.body.tokens, "t-1")` — instead
-  of a `len(...) >= 1` proxy. A non-array first argument is a type
-  mismatch (`inconclusive`); elements of an incomparable shape are simply
+  of a `len(...) >= 1` proxy. Incompatible operand shapes are a type
+  mismatch (`fail`); elements of an incomparable shape are simply
   not matches.
 - `$runtime.any(array, field, value)` — the object-array analogue:
   `true` if `array` has an *object* element whose `field` equals `value`
   (`$runtime.any($steps.api.outputs.body.data, "name", "ws-1")`). A
   non-array first argument or a non-string `field` is a type mismatch
-  (`inconclusive`); an element that is not an object, or an object
+  (`fail`); an element that is not an object, or an object
   missing `field`, is simply not a match (`false`), never an error.
-- `$runtime.matches(value, pattern)` — `true` when `pattern` finds a match **anywhere in** `value`. It is a search, not a full match, so anchor with `^` / `$` where you mean equality (`$runtime.matches($steps.api.outputs.body_text, "^ok$")`); an unanchored pattern standing in for an equality is the classic undiscriminating assertion. Both operands must be strings — anything else is a type mismatch (`inconclusive`), as with the comparison operators — and a `pattern` that fails to compile is `inconclusive` carrying the regex engine's message in evidence `detail`, never a silent `false`.
+- `$runtime.matches(value, pattern)` — `true` when `pattern` finds a match **anywhere in** `value`. It is a search, not a full match, so anchor with `^` / `$` where you mean equality (`$runtime.matches($steps.api.outputs.body_text, "^ok$")`); an unanchored pattern standing in for an equality is the classic undiscriminating assertion. Both operands must be strings — anything else is a type mismatch (`fail`), as with the comparison operators — and a `pattern` that fails to compile is `inconclusive` carrying the regex engine's message in evidence `detail`, never a silent `false`.
 - `$runtime.lower(s)` / `$runtime.upper(s)` / `$runtime.trim(s)` — case
   and whitespace normalization for robust string comparisons.
 - `$runtime.replace(s, from, to)` — literal substring replace.
@@ -1496,7 +1889,7 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 
 **Action Catalog** (`duhem-actions`)
 
-- The built-in `ui/*`, `api/*`, `db/*`, and `cli/*` actions (§10.5) and the `Action` trait they implement
+- The built-in `ui/*`, `api/*`, `db/*`, `cli/*`, and `process/*` actions (§10.5) and the `Action` trait they implement
 - Closed at v1; the dispatch registry is internal (§10.8)
 
 **Generation Service** (roadmap)
@@ -1555,9 +1948,68 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
   handle
 - Portable via `duhem export` (self-contained per-run bundle)
 
+
+
+### Report definitions with no recorded run
+
+`duhem coverage verifications --db /path/to/existing/duhem.db --base .` lists each
+declared definition and its latest recorded run start, run status, and
+verdict. `--format json` emits the same report as JSON. You can also supply
+a leaf file or manifest directly. A directory tree discovers conventional
+`duhem.yml`, `duhem.yaml`, `.duhem.yml`, or `.duhem.yaml` files; a found
+manifest supplies its declared leaves, including globs. Other directories
+are searched recursively, excluding `.git`, `node_modules`, and `target`,
+without following directory symlinks. An explicit leaf may have any filename.
+
+The supplied store opens read-only and must already exist. `no_recorded_run`
+means no matching canonical absolute source path has a run in this store.
+It does not claim an invocation never happened elsewhere. For ordinary relative-path runs, pass `--base` with their original invocation
+directory (often the repository root). The store key is hashed and cannot
+recover that directory safely. The command never guesses the base from
+today's cwd. Without `--base`, relative records are counted as unmatched;
+both output formats report total and relative unmatched-run counts. Moved
+working copies or stores shipped from another machine may still not match.
+A timestamp records the latest run start, including incomplete runs, and
+does not prove a check body completed. This command reports observations;
+missing runs do not fail a gate or change its successful exit code.
+
+### Assertion operand evidence
+
+Explicit `assertions:` record an `assertion_evaluated.operands` map from
+visited path/helper labels to resolved JSON values. The values come from
+the evaluation that produces the assertion outcome, including short
+circuiting; helpers are not evaluated again to produce reporting evidence.
+Repeated paths/helpers retain evaluation suffixes rather than overwriting
+earlier values. JSON `null` is a resolved value; missing or unevaluated
+paths have no entry. A present empty map means no resolved path/helper
+values were recorded. Legacy evidence and implicit judgments omit the map.
+Registered secrets are masked before storage and live delivery.
+
+The dashboard lists explicit assertions after check steps and before
+teardown. Selecting an assertion opens its recorded details, including
+assertions correlated with a single step. Legacy reports display their
+recorded expression and result without inventing operand values.
+
 **Run Summary & Reporters** (`duhem-summary`, `duhem-reporter-pretty`, `duhem-reporter-junit`)
 
 - `duhem-summary` defines the run-summary types the CLI emits. `RunSummary.totals` carries `total`, `passed`, `failed`, and `inconclusive` check counts; `RunSetSummary.totals` aggregates them across leaves. `total` means checks that executed and emitted a verdict, not checks authored in the Verification Definition, so `--filter` exclusions are absent. Both fields default to all-zero counts when an older summary is deserialized.
+- `RunSummary.claim_scope` records the authored and selected populations at criterion/check granularity, plus distinct recorded-outcome counts under `executed`. It is derived from a persisted `claim_scope_declared` event and distinct `check_finished` identities, so retries do not inflate execution counts. Inconclusive precondition outcomes count as recorded outcomes, not as proof that a body passed. `filters` preserves the applied CLI patterns, and `excluded` enumerates `{criterion_id, check_id, reason}` pairs (`check_filter`). A no-filter run still states authored/selected/recorded counts but omits empty provenance/exclusion lists. Older traces/reports omit the optional scope rather than inventing an authored denominator.
+- Manifest `RunSetSummary.selection` and each selected leaf's `claim_scope.manifest` retain authored versus selected leaf counts, the requested directory and filter patterns, and excluded `{verification, reason}` entries. Reasons distinguish `directory_selection` and `verification_filter`. A directory target's denominator is the manifest's expanded leaf set before selection; a verification-axis filter cannot silently discard that denominator. A direct leaf-file invocation describes that leaf's own authored contract, not a claim that its ancestor manifest ran. Zero selected required coverage never establishes a complete pass.
+- Default/pretty reporters print recorded-versus-authored scope and exclusions alongside the verdict; JUnit emits excluded check pairs as skipped cases with consistent suite counts. The dashboard shows the same counts, patterns and exclusions next to conditional judging-step gating. Scope is observational: it changes neither verdict aggregation nor the meaning of `quiet`. Authored/recorded equality proves only that this document's current claims were not excluded; it does not detect a contract weakened by editing the document itself.
+- Optional `RunSummary.verification` identifies the leaf source path recorded in `run_started.verification_path`, using the run-bundle contract's `verification` vocabulary (#544). CLI single-leaf and manifest reports populate it from each run's own evidence header; neither array order nor a non-unique human title is its identity. Older summaries without the field still deserialize and leave it absent. `RunSummary` stays at contract v2 because this is additive.
+- `duhem run --reporter json` writes one JSON line. The target's top-level content selects its document shape: a leaf with `criteria:` emits `RunSummary` with `schema_version: "2"`; a manifest with `verifications:` emits `RunSetSummary` with `schema_version: "1"` and one leaf `RunSummary` in each `runs[]` entry. This follows the content-sniffing rule in §10.2, so the filename does not select the shape. The two version fields are independent: a `RunSetSummary` v1 wrapping `RunSummary` v2 is the current contract, not a schema bump. In a manifest result, criterion verdicts and failure details stay inside the leaf summaries, such as `runs[0].criteria` and `runs[0].failures`; the envelope has neither field. `RunSetSummary.totals` is the sum of the totals for every leaf in `runs[]`.
+- These minimal reporter examples omit optional claim-scope and lifecycle fields. For a passing one-check leaf, the reporter line has this shape (the run ID and store path vary):
+
+  ```json
+  {"schema_version":"2","run_id":"01ARZ3NDEKTSV4RRFFQ69G5FAV","verdict":"pass","criteria":[{"id":"AC-1","verdict":"pass"}],"store":"state/duhem.db","totals":{"total":1,"passed":1,"failed":0,"inconclusive":0},"failures":[]}
+  ```
+
+- For a passing two-leaf manifest, the reporter line wraps each leaf summary; the outer totals sum their totals:
+
+  ```json
+  {"schema_version":"1","verdict":"pass","totals":{"total":2,"passed":2,"failed":0,"inconclusive":0},"runs":[{"schema_version":"2","run_id":"01ARZ3NDEKTSV4RRFFQ69G5FAV","verdict":"pass","criteria":[{"id":"AC-1","verdict":"pass"}],"store":"state/duhem.db","totals":{"total":1,"passed":1,"failed":0,"inconclusive":0},"failures":[]},{"schema_version":"2","run_id":"01ARZ3NDEKTSV4RRFFQ69G5FAW","verdict":"pass","criteria":[{"id":"AC-1","verdict":"pass"}],"store":"state/duhem.db","totals":{"total":1,"passed":1,"failed":0,"inconclusive":0},"failures":[]}]}
+  ```
+
 - `RunSummary.lifecycle` folds every recorded setup, teardown, and fixture block, including successful blocks, into an ordered generic scope path plus status, timing, steps, flow provenance, and failing-step position. It is derived from evidence, not the compatibility cleanup list, and remains outside verdict aggregation.
 - The reporters render those summaries for humans (pretty) and CI (JUnit XML); they consume judge output and never produce a verdict, so they sit on the delivery side of the trust boundary (§11.2)
 
@@ -1582,7 +2034,7 @@ Because Duhem is open-source (Apache-2.0), this commitment is directly auditable
 
 #### Duhem is a tool: product Verification Definitions live with the product
 
-**Alignment note (2026-07-11, maintainer decision).** Duhem is a standalone, self-verified package — a tool you point at a codebase, not a repository that hoards every codebase's checks. Verification Definitions that verify a *product* Duhem does not itself ship (regression suites for Crawlab, Chreode, Onsager) therefore live **in that product's own repository**, co-located with the code they exercise. Only Duhem's self-verification VDs stay in `onsager-ai/duhem`. This reframes — and deliberately relaxes — the earlier posture that centralized every VD in Duhem and treated Onsager as a structural trust anchor. Tracked under epic #225.
+**Alignment note (2026-07-11, maintainer decision).** Duhem is a standalone, self-verified package — a tool you point at a codebase, not a repository that hoards every codebase's checks. Verification Definitions that verify a *product* Duhem does not itself ship (product regression suites) therefore live **in that product's own repository**, co-located with the code they exercise. Only Duhem's self-verification VDs stay in `onsager-ai/duhem`. This reframes — and deliberately relaxes — the earlier posture that centralized every VD in Duhem and treated Onsager as a structural trust anchor. Tracked under epic #225.
 
 What the platform must keep true is narrower than "all checks live in one repo":
 
@@ -1664,60 +2116,91 @@ The CLI binary is free to download and use across all tiers. It is open-source (
 
 ## 14. Roadmap
 
-The roadmap reflects a solo founder building with Claude Code as the primary development assistant, with Onsager as the first dogfooding customer (now paused — the active dogfood runs against Chreode and Crawlab; see Appendix D). It is not a typical funded startup roadmap; it is intentionally calibrated to a single-builder reality.
+The active roadmap is product-regression migration under [#575](https://github.com/onsager-ai/duhem/issues/575), driven by Semon's real workload and its [assertion map (#501)](https://github.com/onsager-ai/semon/issues/501). The [migration contract](product-regression-migration.md) defines ownership, the source-pinned capability inventory and qualification. Milestones below express dependencies and acceptance outcomes, not calendar promises or claims that a product has already migrated.
 
-### Phase 0 — Foundation (months 0–3)
+The foundation has shipped: schema, CLI, runtime, mechanical judge, browser/API/database/command actions, evidence, dashboard, composite GitHub Action and co-located product suites. The engine has been open-source under Apache-2.0 since v0.1.0 (§11.3); that is completed work. The released workspace/schema version is **0.7.2** ([tag v0.7.2](https://github.com/onsager-ai/duhem/releases/tag/v0.7.2), commit `0cfc5e4`). v0.6.0 added #567's required-fixture-cleanup contract; v0.7.0 shipped the M1 gate/report contracts; v0.7.1 added owned local processes (#579) and iframe-scoped locators (#568); v0.7.2 added value-based `if:` on check steps (#440). `duhem_schema::SCHEMA_VERSION` and `CHANGELOG.md` remain authoritative for an exact revision; neither a version cut nor an open milestone proves qualification.
 
-**Goal**: stand up minimum viable Duhem; first real verification running against Onsager.
+Onsager daily-use (#54) and generation alpha (#52) are explicitly parked while that workload is paused. They are not prerequisites for the current migration. The retired consumer drift lane and old v0.2 product epics do not define the active roadmap.
 
-- Solo build the schema, CLI, runtime, and judge using Claude Code as primary development assistant. ✅ shipped (Cargo workspace landed via #7; ten crates `duhem-cli`, `duhem-runtime`, `duhem-judge`, `duhem-schema`, `duhem-actions`, `duhem-evidence`, `duhem-summary`, `duhem-dashboard`, `duhem-reporter-pretty`, `duhem-reporter-junit`; CLI verbs `init` / `run` / `validate` / `dashboard` / `--version` via #13, #16, #17, #18, #19, #24, #40, #42, #43, #58, #60).
-- Schema spec v0.1 → v0.5 (rapid iteration; expected breaking changes). ⏳ in progress (current: v0.1.0 via `duhem_schema::SCHEMA_VERSION`; per-landing ledger in `CHANGELOG.md`; v0.5 lockdown criteria tracked under #51 / shipped via #59).
-- Built-in action library: minimum useful subset (UI click/type/assert, API call/observe, basic assertions). ✅ shipped (`ui/*` slice via #14, #41; `api/observe` via #44; `api/call` v1 via #25; full catalog under `duhem-actions`).
-- First Onsager feature verified using Duhem (manually-authored checks, no AI generation yet). ✅ shipped (#46, #47; refreshed to the spec-plan flow via #79; co-located at `onsager-ai/onsager/.duhem/create-spec-plan/` since #225 P4; environment `up:` / `down:` hooks via #61).
-- Parallel: 5–10 customer interviews with AI-coding-agent power users (Cursor, Claude Code, Devin) to validate market hypothesis beyond Onsager. ⏳ outstanding.
-- **Open-source release (pulled forward from Phase 2/4):** relicense to Apache-2.0 and ship the engine — schema, CLI, runtime, judge, dashboard — as open source in the first public release (v0.1.0). ⏳ in progress (epic #143). Originally planned as a Phase 2 maturity gate; brought forward as a deliberate strategy change (see §11.3 Alignment note).
+### M1 — v0.6 trustworthy gate
 
-**Onsager dependency**: Onsager has at least one feature in active development to verify against. If Onsager is not at this stage yet, Phase 0 starts with a smaller toy app instead.
+**Goal:** a required result states what it actually verified and exposes why it passed or failed.
 
-### Phase 1 — MVP (months 3–6)
+[#531](https://github.com/onsager-ai/duhem/issues/531), [#544](https://github.com/onsager-ai/duhem/issues/544), [#574](https://github.com/onsager-ai/duhem/issues/574), [#546](https://github.com/onsager-ai/duhem/issues/546), [#519](https://github.com/onsager-ai/duhem/issues/519), [#537](https://github.com/onsager-ai/duhem/issues/537), [#538](https://github.com/onsager-ai/duhem/issues/538) and [#545](https://github.com/onsager-ai/duhem/issues/545) are tracked in [milestone M1](https://github.com/onsager-ai/duhem/milestone/1). All are closed, and their producer contracts shipped in v0.7.0. The milestone stays open on its consumer-qualification condition below.
 
-**Goal**: Duhem reliably verifies Onsager’s outputs; first external alpha users.
+- Distinguish authored, selected, executed, gated and excluded claims. A filtered pass must not imply complete coverage, and a zero-selected required domain must not qualify.
+- Attribute results to leaf, check, parameter instance and attempt; preserve every retry and any first-attempt requirement. Report missing execution evidence as absence of a record in the specified store, without claiming an unseen invocation never happened.
+- Show assertion expressions, resolved values and evidence with registered-secret masking. Reuse the landed lifecycle ownership/reporting work (#524), rather than hiding cleanup or assertions behind green step rows.
+- Reuse the landed JSON leaf/manifest contracts (#535/#576) and required fixture cleanup (#567/#578). Required fixture cleanup failure blocks the effective gate while retaining the body verdict; other cleanup scopes retain their documented diagnostic semantics.
+- Correct verdict documentation and lifecycle validation gaps, and carry the public-artifact privacy discipline through the report/tooling work.
 
-- Schema v1.0 (still subject to change, but with deprecation policy).
-- Generation service alpha: AI translates criteria → checks for simple cases.
-- GitHub Action integration: Duhem runs on Onsager’s PRs.
-- Web dashboard for runs and evidence (minimum viable).
-- 3–5 friendly external alpha users from the customer-interview cohort.
+The milestone is complete only when the relevant gate-integrity contracts have CI evidence and the selected consumer domain can demonstrate positive and negative controls. Closing the owner issues and releasing v0.7.0 meets the first condition; no consumer domain has yet recorded qualifying positive/negative controls, so M1 is not complete.
 
-**Onsager dependency**: Onsager has CI; Onsager-Duhem integration is daily-use during this phase.
+### M2 — First real-binary pilot
 
-### Phase 2 — Public alpha and schema OSS (months 6–12)
+**Goal:** qualify a complete product journey against actual supported binaries and services, including setup, readiness, evidence and cleanup.
+
+[Milestone M2](https://github.com/onsager-ai/duhem/milestone/2) carries the remaining [#543](https://github.com/onsager-ai/duhem/issues/543) nested-group/fixture-to-flow scope. The [owned local-process contract (#579)](https://github.com/onsager-ai/duhem/issues/579) shipped in v0.7.1 and value-based `if:` on check steps ([#440](https://github.com/onsager-ai/duhem/issues/440)) in v0.7.2. Reuse landed session cascade, teardown and flow work; do not rebuild it. The Semon #516 map supplied the Receive/watch/restart cases for #579. Qualify the real-binary consumer at v0.7.1 or later, with product-owned readiness and assertions.
+
+Pilot the complete native-log → Push/Receive → publication and authorized reading → paging → append/restart/recovery/revocation journey described in the migration contract, split into independently runnable checks. Products own criteria, real fixtures, thresholds and CI policy. Helpers expose facts under explicit contracts; the VD keeps the acceptance rule visible. A whole acceptance runner hidden behind `cli/invoke` and `exit_code == 0` does not qualify the journey.
+
+### M3 — Interaction + visual
+
+**Goal:** cover mapped user interactions and deterministic visual acceptance with explicit evidence and reviewed expectations.
+
+[Milestone M3](https://github.com/onsager-ai/duhem/milestone/3) includes iframe scoping [#568](https://github.com/onsager-ai/duhem/issues/568) (the frames gap from #369, shipped in v0.7.1), keyboard/pointer/scroll/focus operations [#580](https://github.com/onsager-ai/duhem/issues/580), request/console/HTTP-response observations [#603](https://github.com/onsager-ai/duhem/issues/603), and the visual comparator draft [#581](https://github.com/onsager-ai/duhem/issues/581). Pin exact contracts through representative consumer assertions before implementing each slice.
+
+Visual judgment needs full-frame/region observations, candidate/reference/diff artifacts, dimensions, declared thresholds, exact reviewed acceptance bindings and source/fixture/browser/font/viewport/theme provenance. Diagnostic screenshots alone are not visual assertions. [#573](https://github.com/onsager-ai/duhem/issues/573) is separate dashboard development tooling, not delivery of this product capability.
+
+### M4 — Performance + concurrency
+
+**Goal:** judge actual performance metrics and recovery behavior while preserving resource isolation.
+
+[Milestone M4](https://github.com/onsager-ai/duhem/milestone/4) includes the metric sampler/comparator draft [#582](https://github.com/onsager-ai/duhem/issues/582) and the lease/hermetic-port subset of [#410](https://github.com/onsager-ai/duhem/issues/410). Samples require declared measurement windows, units, cold/warm state and aggregation; runner-step duration is not a substitute for the product metric. The lease vocabulary decision remains with #410.
+
+Qualify isolated files, ports, databases, credentials and setup-through-cleanup ownership under concurrent recovery workloads. Existing isolated CI sharding can remain until native scheduling is qualified. Neither all of #410 nor broad native scheduling blocks the first real-binary pilot.
+
+### Qualification sequence
+
+Follow the [#575 migration contract's qualification sequence](product-regression-migration.md#qualification-sequence) for each domain:
+
+1. Complete the product-owned assertion map, including active/deferred/native/historical dispositions, evidence and CI owner.
+2. Qualify the selected domain's trustworthy-gate prerequisites (M1), including malformed/missing reports, filtering, skipped work, timeout and required cleanup failure.
+3. Pilot the complete real-binary path (M2) with explicit input, fixture, readiness and cleanup ownership.
+4. Migrate remaining active behavior by domain, retaining native unit/parser/state-machine/build checks at their appropriate layer.
+5. Add interaction and reviewed visual qualification (M3) as mapped assertions require it.
+6. Add measured performance and recovery claims (M4), then qualify parallel execution where needed.
+7. Before each product CI cutover, compare old/new checks on the same candidate and fixtures, exercise known-good and representative known-bad behavior, reconcile disagreements, and record stability, duration and resource cost. Pin the exact Duhem/schema/action/fixture/browser/measurement environment; remove only duplicate execution after qualification.
+
+Each capability-changing implementation updates the canonical spec, action reference/`describe`, public authoring guidance, executable examples and adoption template. New surface sketches in draft issues are not shipped syntax. Product gate changes remain owned by the product; this roadmap grants no merge, deploy, launch or baseline-acceptance authority.
+
+### Phase 2 — Public alpha and schema stability (long-range)
 
 **Goal**: schema stabilizes; broader external adoption begins.
 
 - Schema breaking-change rate drops; lock down v1.0 contract.
 - VS Code extension.
-- MCP server for AI coding agents.
+- Broader agent integration (the CLI already exposes an MCP server).
 - Public alpha: open signup, generous free tier.
 - ~~Schema specification opened under permissive OSS license. Reference judge implementation released.~~ ✅ pulled forward to v0.1.0 (Phase 0): the whole engine — schema, CLI, runtime, and judge — ships open-source under Apache-2.0 from the first public release (epic #143).
 - Hosted commercial tier launches (Team plan).
 
-**Onsager dependency**: Duhem is mature enough that Onsager development would be slower without it.
+Qualification and external adoption, rather than a paused workload's schedule, determine readiness.
 
-### Phase 3 — Expansion (months 12–24)
+### Phase 3 — Expansion (long-range)
 
 **Goal**: enterprise customers; production-grade reliability.
 
 - Custom action type SDK (community can write actions).
 - Action marketplace (alpha).
-- L3 visual baseline assertions.
+- Expand visual acceptance beyond the qualified M3 contract.
 - Multi-environment management.
-- Enterprise features (SSO, audit, self-hostable judge under enterprise license).
+- Enterprise service features (SSO, audit and hosted controls); the self-hostable engine remains Apache-2.0 (§11.3).
 - Adapter to Arazzo (export verifications as Arazzo workflows for interop).
 
-**Onsager dependency**: minimal at this point; Duhem’s growth becomes independent of Onsager’s pace.
+These remain directional goals, separate from M1–M4 acceptance.
 
-### Phase 4 — AI Factory layer (months 24+)
+### Phase 4 — AI Factory layer (long-range)
 
 **Goal**: when Onsager’s AI factory paradigm matures and begins producing other products at scale, Duhem becomes the verification infrastructure for that production line.
 
@@ -1726,16 +2209,7 @@ The roadmap reflects a solo founder building with Claude Code as the primary dev
 
 This phase is contingent on Onsager’s own roadmap. It is not blocking for Duhem’s market viability.
 
-### Onsager-Duhem milestones (interleaved)
-
-|Window     |Duhem milestone                                  |Onsager dependency                                                   |
-|-----------|-------------------------------------------------|---------------------------------------------------------------------|
-|Weeks 1–4  |Schema v0.1, CLI scaffold, basic runtime ✅ shipped (#7, #13, #17, #19) |None                                                                 |
-|Weeks 5–8  |Judge implementation, 5–10 action types ✅ shipped (#14, #16, #25, #41, #44) |Onsager has 1 active feature                                         |
-|Weeks 9–12 |First Onsager check shipped (manual authoring) ✅ shipped (#46, #47; refreshed to the spec-plan flow #79) — `onsager-ai/onsager/.duhem/create-spec-plan/` (moved #225 P4) |Onsager begins using Duhem on selected PRs                           |
-|Weeks 13–20|Generation service alpha; expanded action library|Onsager’s PRs require Duhem verdict                                  |
-|Weeks 21–28|External alpha; schema lock-down preparation     |Onsager continues daily-use dogfood                                  |
-|Months 7–12|Schema OSS; public alpha; commercial tier        |Duhem sufficiently mature that Onsager’s pace would suffer without it|
+**Alignment note (2026-10-30):** #575 replaces the old calendar-based Phase-0/1 and Onsager daily-use sequence as the active delivery plan. Phases 2–4 remain long-range direction. This changes sequencing and records shipped status; it does not weaken holistic verification, mechanical judgment, stable criteria or verifier independence.
 
 ## 15. Risks and Open Questions
 
@@ -1771,7 +2245,7 @@ This phase is contingent on Onsager’s own roadmap. It is not blocking for Duhe
 |Term                   |Definition                                                                                                                                                            |
 |-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 |Verification           |A complete cycle that produces a verdict for an artifact in a holistic environment                                                                                    |
-|Verification Definition|The structured YAML format containing criteria and their checks for a feature; identified by content (top-level `verification:` or `criteria:` field), not by filename|
+|Verification Definition|The structured YAML format containing criteria and their checks for a feature; identified by content, not by filename: a top-level `criteria:` field marks a leaf and `verifications:` marks a root manifest; `verification:` is a name, not a discriminator (§10.2)|
 |Root Manifest          |The canonical `duhem.yml` at project root that aggregates Verification Definitions and provides shared defaults; auto-discovered by the tool                          |
 |Criterion              |A human-authored natural-language commitment about a feature                                                                                                          |
 |Check                  |A structured executable verification unit derived from a criterion, exercising a slice of the delivery web                                                            |
@@ -1799,7 +2273,7 @@ This phase is contingent on Onsager’s own roadmap. It is not blocking for Duhe
 |UI testing scope (MVP)  |DOM-level + behavioral                    |Covers most user-visible failure modes; visual-baseline post-MVP           |
 |Source posture          |Open source (Apache-2.0), open-core       |Adoption via the open engine; commercial moat is the hosted cloud, not source|
 |Schema/engine OSS       |Open (Apache-2.0) from v0.1.0             |Pulled forward from the old Phase-2 gate; ecosystem adoption beats proprietary IP|
-|First customer          |Onsager (dogfood; paused) → Chreode, Crawlab|Real complexity, real urgency, continuous use, free testimonial            |
+|First customer          |Onsager (dogfood; paused)|Real complexity, real urgency, continuous use, free testimonial            |
 |Pricing anchor          |$30/seat/month                            |Validated by adjacent products (Qodo, CodeRabbit)                          |
 |Build approach          |Solo founder + Claude Code                |Realistic given Sydney migration and parallel Onsager work                 |
 
@@ -1815,7 +2289,7 @@ Duhem the platform is named in honor of the man whose thesis tells us why we are
 
 ## Appendix D — Why Onsager dogfoods Duhem
 
-Onsager was Duhem’s first dogfooding customer. **Onsager work is currently paused** (epic #225 P4), so the active dogfood now runs against Chreode and Crawlab, and Onsager re-homes when its work resumes. This appendix is retained because the *reasoning* below — why a real product makes a valuable dogfood — was never a placeholder relationship until “real customers” arrive, and it now applies directly to the active dogfood products. It is a strategically chosen arrangement that gives Duhem capabilities no other early-stage validation could provide.
+Onsager was Duhem’s first dogfooding customer. **Onsager work is currently paused** (epic #225 P4). The reasoning below explains why a real product makes a valuable dogfood workload.
 
 ### What Onsager provides Duhem
 
@@ -1825,7 +2299,7 @@ Onsager was Duhem’s first dogfooding customer. **Onsager work is currently pau
 
 **Continuous use.** Duhem is exercised every PR, every day. Design flaws surface fast because they cause friction in the builder’s own work. This is the strongest possible signal-to-noise ratio for early product iteration.
 
-> **Reframe (epic #225 — Duhem is a tool).** The dogfood relationship described in this appendix predates the co-location decision (§11.2 Alignment note). Product Verification Definitions now live **with the product** in a co-located `.duhem/` suite (§10.1 Pattern D), not in `onsager-ai/duhem`, and the dogfood is **drift monitoring** — running each product's real VDs with the current Duhem to catch a Duhem regression that would break a consumer. Chreode is the shipped example (`onsager-ai/chreode/.duhem/`): self-gated in its own CI (Mode A). Its Duhem-side drift lane (Mode B, `drift-chreode.yml`) is retired (last on main at `be5a8b2`): chreode ADR 0016 schedules for deletion the managed-app suites it targeted, and Mode B re-points at Chreode's deploy-contract replacement once it ships (#380). Onsager is the same pattern; its VD relocated to `onsager-ai/onsager/.duhem/create-spec-plan/` in epic #225 P4 (onsager#664), self-gated there behind a dormant lane while Onsager is paused. Everything below about *why* Onsager is a valuable dogfood still holds; only *where the checks live* and *why a `pass` is trustworthy* (mechanical judgment + a self-verified Duhem contract, not hoarded checks) changed.
+> **Reframe (epic #225 — Duhem is a tool).** Product Verification Definitions live **with the product** in a co-located `.duhem/` suite (§10.1 Pattern D). Product owners run verification and pin-currency checks in their own CI (#380). A `pass` is trustworthy through mechanical judgment and a self-verified Duhem contract (§11.2), independent of where the checks live.
 
 **Proof point for external sales.** When Duhem is ready for external customers, “we use it ourselves to verify a complex AI-orchestration platform” is a stronger claim than any synthetic case study. The product carries its own proof.
 
@@ -1841,4 +2315,4 @@ A naive reading might worry that Onsager and Duhem cannot both be early simultan
 
 What Onsager provides Duhem is not infrastructure but customer use. Onsager is the workload Duhem verifies, not the production line that builds Duhem.
 
-The factory paradigm — Onsager producing other products — is a future state (Phase 4+) where Duhem’s role becomes that of the production line’s quality gate. Onsager was Duhem’s most valuable early customer; with Onsager paused, that role is carried by the active dogfood products (Chreode, Crawlab) while Duhem is built the conventional way.
+The factory paradigm — Onsager producing other products — is a future state (Phase 4+) where Duhem’s role becomes that of the production line’s quality gate. Duhem is built the conventional way while Onsager work is paused.

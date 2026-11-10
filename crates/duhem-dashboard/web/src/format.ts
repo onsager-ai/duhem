@@ -90,6 +90,17 @@ export function assertionText(evt: TraceEvent): string {
   return detail || expr || "";
 }
 
+/** Legacy implicit judgments have a runtime-owned expression, never VD syntax. */
+export function isExplicitAssertion(evt: TraceEvent): boolean {
+  return evt.kind === "assertion_evaluated" &&
+    (evt.operands !== undefined ||
+      (typeof evt.expr === "string" && !evt.expr.startsWith("step `")));
+}
+
+export function assertionKey(evt: TraceEvent): string {
+  return `a${evt.seq}`;
+}
+
 /** Compact one-line value for an inline observation or arg scalar. */
 export function compactValue(v: unknown): string {
   if (v === null) return "null";
@@ -122,6 +133,9 @@ function describeLocator(loc: Record<string, unknown>): string {
   if (loc.scope && typeof loc.scope === "object") {
     parts.push(`in {${describeLocator(loc.scope as Record<string, unknown>)}}`);
   }
+  if (loc.frame && typeof loc.frame === "object") {
+    parts.push(`inside frame {${describeLocator(loc.frame as Record<string, unknown>)}}`);
+  }
   return parts.join(", ");
 }
 
@@ -148,6 +162,7 @@ export function describeWith(withObj: unknown): string {
       "name",
       "text",
       "scope",
+      "frame",
     ];
     const inlineLocator = Object.fromEntries(
       locatorKeys.filter((key) => w[key] !== undefined).map((key) => [key, w[key]]),
@@ -519,17 +534,17 @@ export function stepStatus(node: StepNode): {
   reason: string;
   failed: boolean;
 } {
-  const jstate = node.judgment ? (str(node.judgment.state) ?? "") : "";
-  const reason = node.judgment ? assertionText(node.judgment) : "";
+  const finished = node.events.find(
+    (e) => e.kind === "step_finished" || e.kind === "setup_step_finished",
+  );
+  const jstate = node.judgment ? (str(node.judgment.state) ?? "") : str(finished?.judgment) ?? "";
+  const reason = node.judgment ? assertionText(node.judgment) : str(finished?.detail) ?? "";
   if (jstate === "fail") {
     return { icon: "fail", label: "step failed", tone: "fail", reason, failed: true };
   }
   if (jstate.startsWith("inconclusive")) {
     return { icon: "inconclusive", label: "step inconclusive", tone: "inconclusive", reason, failed: true };
   }
-  const finished = node.events.find(
-    (e) => e.kind === "step_finished" || e.kind === "setup_step_finished",
-  );
   const outcome = stepOutcome(finished?.outcome);
   const map: Record<string, { icon: IconName; label: string; tone: Tone }> = {
     ok: { icon: "pass", label: "step ok", tone: "ok" },

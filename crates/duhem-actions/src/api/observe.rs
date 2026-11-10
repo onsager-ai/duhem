@@ -24,6 +24,12 @@
 //!   `application/json`; `null` otherwise. Matches `api/call`.
 //! - `body_text`: raw response bytes as UTF-8 (lossy). Matches
 //!   `api/call`.
+//! - `body_bytes`: payload byte count as an integer: the length of the
+//!   decoded bytes Playwright's `response.body()` returned (content
+//!   decoding such as gzip/br is done by the browser; chunked framing is
+//!   gone), before the UTF-8-lossy/JSON conversion. Not the `body_text`
+//!   character count, `Content-Length` or wire size. An empty body is
+//!   `0`; a failed body read errors instead of reporting `0`.
 //! - `headers`: response headers as a JSON object of strings. Matches
 //!   `api/call`. Header values are surfaced as `String` — there is no
 //!   byte-fidelity path here, unlike `api/call`'s `reqwest`-backed
@@ -101,6 +107,7 @@ use tokio::time::{sleep, timeout};
 use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT, Observation};
 use crate::browser::NetworkEvent;
 use crate::error::ActionError;
+use crate::observe_window::Window;
 use crate::with::TimeoutSpec;
 
 /// How often to re-poll the sidecar's network buffer while waiting for
@@ -130,6 +137,8 @@ pub(crate) struct With {
     /// Max wait for a matching event. Defaults to [`DEFAULT_TIMEOUT`].
     #[serde(default)]
     timeout: Option<TimeoutSpec>,
+    #[serde(default)]
+    window: Option<Window>,
 }
 
 pub struct Observe;
@@ -150,8 +159,24 @@ impl Action for Observe {
                 FieldSpec::required("url_pattern"),
                 FieldSpec::optional("after"),
                 FieldSpec::optional("timeout"),
+                FieldSpec::optional("window"),
             ],
-            outputs: vec![],
+            outputs: vec![
+                "method",
+                "url",
+                "status",
+                "body",
+                "body_text",
+                "body_bytes",
+                "headers",
+                "request_body",
+                "request_headers",
+                "count",
+                "requests",
+                "window",
+                "complete",
+                "truncated",
+            ],
             secret_outputs: vec![],
             example: "- uses: api/observe\n  with: { method: POST, url_pattern: \"**/api/login\" }",
         }
@@ -172,6 +197,39 @@ impl Action for Observe {
 
         let matcher = UrlMatcher::parse(&with.url_pattern)?;
         let method_filter = with.method.as_deref().map(str::to_ascii_uppercase);
+
+        if let Some(window) = with.window {
+            let (edge, start_ms, end_ms) =
+                crate::observe_window::resolve(&window, ctx, page, "api/observe").await?;
+            let batch = page.request_records().await.map_err(|e| {
+                ActionError::Playwright(format!("api/observe: request recorder: {e}"))
+            })?;
+            let requests: Vec<_> = batch
+                .events
+                .into_iter()
+                .filter(|record| {
+                    record.started_ms >= start_ms
+                        && record.started_ms <= end_ms
+                        && matcher.matches(&record.url)
+                        && method_filter
+                            .as_deref()
+                            .is_none_or(|m| record.method.eq_ignore_ascii_case(m))
+                })
+                .collect();
+            let complete = batch.attached_ms < start_ms && !batch.truncated;
+            return Ok(ActionResult::ok()
+                .with_output("count", serde_json::json!(requests.len()))
+                .with_output("requests", serde_json::json!(requests))
+                .with_output(
+                    "window",
+                    serde_json::json!({
+                        "from_step": window.from_step, "edge": edge,
+                        "start_ms": start_ms, "end_ms": end_ms,
+                    }),
+                )
+                .with_output("complete", serde_json::json!(complete))
+                .with_output("truncated", serde_json::json!(batch.truncated)));
+        }
 
         // Poll the sidecar's per-page recorder until a matching event
         // appears or `timeout:` elapses. `cursor` advances past events
@@ -271,12 +329,12 @@ fn collect_match(evt: &NetworkEvent, m: FilterMatch) -> Result<MatchedEvent, Act
     let request_headers = lowercase_headers(&evt.request_headers);
     let response_headers = lowercase_headers(&evt.response_headers);
 
-    let body_bytes = decode_response_bytes(evt)?;
+    let payload = decode_response_bytes(evt)?;
 
     let mut observations: Vec<Observation> = Vec::new();
     let request_body = decode_request_body(evt, &request_headers, &mut observations)?;
     let (response_body, body_text) =
-        decode_response_body(&body_bytes, &response_headers, &mut observations);
+        decode_response_body(&payload, &response_headers, &mut observations);
 
     let mut outputs: BTreeMap<String, serde_json::Value> = BTreeMap::new();
     outputs.insert("method".into(), serde_json::Value::String(method_norm));
@@ -290,6 +348,7 @@ fn collect_match(evt: &NetworkEvent, m: FilterMatch) -> Result<MatchedEvent, Act
     // was an `api/call` or `api/observe` step.
     outputs.insert("body".into(), response_body);
     outputs.insert("body_text".into(), serde_json::Value::String(body_text));
+    outputs.insert("body_bytes".into(), serde_json::Value::from(payload.len()));
     outputs.insert("headers".into(), headers_to_json(&response_headers));
     Ok(MatchedEvent {
         outputs,
@@ -440,6 +499,28 @@ use serde::de::Error as SerdeError;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn window_requires_positive_duration_and_known_edge() {
+        use super::With;
+        assert!(
+            serde_yml::from_str::<With>(
+                "url_pattern: x\nwindow: { from_step: load, duration: 0ms }"
+            )
+            .is_err()
+        );
+        assert!(
+            serde_yml::from_str::<With>(
+                "url_pattern: x\nwindow: { from_step: load, edge: middle, duration: 1s }"
+            )
+            .is_err()
+        );
+        assert!(
+            serde_yml::from_str::<With>(
+                "url_pattern: x\nwindow: { from_step: load, duration: 1s }"
+            )
+            .is_ok()
+        );
+    }
     use super::*;
 
     fn yaml(s: &str) -> serde_yml::Value {
@@ -693,5 +774,24 @@ timeout: 3s
         let err = collect_match(&evt, m).unwrap_err();
         assert!(matches!(err, ActionError::Playwright(_)));
         assert!(err.to_string().contains("net::ERR_ABORTED"));
+    }
+
+    #[test]
+    fn collect_match_body_bytes_counts_decoded_payload_bytes() {
+        let cases: Vec<(Vec<u8>, u64)> = vec![
+            ("é".as_bytes().to_vec(), 2),
+            (Vec::new(), 0),
+            (vec![0xff, 0x00, 0xfe], 3),
+        ];
+        for (payload, want) in cases {
+            let mut evt = event("GET", "http://host/api/x");
+            evt.body_base64 = Some(BASE64.encode(&payload));
+            let m = FilterMatch {
+                method_norm: "GET".to_string(),
+                url: evt.url.clone(),
+            };
+            let matched = collect_match(&evt, m).unwrap();
+            assert_eq!(matched.outputs["body_bytes"], serde_json::json!(want));
+        }
     }
 }

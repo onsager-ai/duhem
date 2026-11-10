@@ -123,6 +123,19 @@ pub fn render(
     match reporter {
         Reporter::Default => {
             writeln!(out, "{}", outcome.verdict.state)?;
+            if let Some(scope) = &summary.claim_scope {
+                writeln!(out, "Scope: {scope}")?;
+                for excluded in &scope.excluded {
+                    writeln!(
+                        out,
+                        "  excluded {}::{} ({})",
+                        excluded.criterion_id, excluded.check_id, excluded.reason
+                    )?;
+                }
+            }
+            if let Some(body) = outcome.body_verdict {
+                writeln!(out, "  body: {body}")?;
+            }
             write_failures(out, &outcome.failures, def, &summary.lifecycle)?;
             write_failed_lifecycle(out, &summary.lifecycle, &outcome.failures)?;
             write_gated_checks(out, outcome)?;
@@ -165,16 +178,34 @@ pub fn render_set(
     set_verdict: &RunSetVerdict,
     store_db: &std::path::Path,
     leaf_events: &[Vec<duhem_evidence::Event>],
+    selection: Option<&duhem_summary::ManifestSelection>,
 ) -> Result<(), RenderError> {
     match reporter {
         Reporter::Default => {
             for ((name, outcome), events) in leaves.iter().zip(leaf_events) {
                 writeln!(out, "{name}: {}", outcome.verdict.state)?;
+                if let Some(scope) = duhem_evidence::claim_scope::claim_scope(events) {
+                    writeln!(out, "  Scope: {scope}")?;
+                }
+                if let Some(body) = outcome.body_verdict {
+                    writeln!(out, "  body: {body}")?;
+                }
+                write_cleanup(out, &outcome.cleanup)?;
                 write_gated_checks(out, outcome)?;
                 let lifecycle = fold_lifecycle(events);
                 write_failed_lifecycle(out, &lifecycle, &[])?;
             }
             writeln!(out, "{}", set_verdict.state)?;
+            if let Some(selection) = selection {
+                writeln!(out, "Scope: {selection}")?;
+                for excluded in &selection.excluded {
+                    writeln!(
+                        out,
+                        "  excluded {} ({})",
+                        excluded.verification, excluded.reason
+                    )?;
+                }
+            }
             let lifecycle: Vec<_> = leaf_events.iter().flat_map(|e| fold_lifecycle(e)).collect();
             write_totals(out, check_totals_for_set(leaves), &lifecycle)?;
             Ok(())
@@ -186,7 +217,8 @@ pub fn render_set(
                 .zip(leaf_events)
                 .map(|((_, o), events)| build_summary(o, store_db, events))
                 .collect();
-            let summary = RunSetSummary::new(set_verdict.state, runs);
+            let mut summary = RunSetSummary::new(set_verdict.state, runs);
+            summary.selection = selection.cloned();
             serde_json::to_writer(&mut *out, &summary)
                 .map_err(|e| RenderError::Io(std::io::Error::other(e)))?;
             writeln!(out)?;
@@ -205,6 +237,9 @@ pub fn render_set(
             }
             if !tracked.at_line_start() {
                 writeln!(&mut tracked)?;
+            }
+            if let Some(selection) = selection {
+                writeln!(&mut tracked, "Scope: {selection}")?;
             }
             writeln!(&mut tracked, "{}", set_verdict.state)?;
             Ok(())
@@ -338,9 +373,14 @@ fn write_cleanup(
     for failure in cleanup {
         writeln!(
             out,
-            "  cleanup: {} ({})",
+            "  cleanup: {} ({}, {})",
             failure.step,
-            cleanup_outcome(&failure.outcome)
+            cleanup_outcome(&failure.outcome),
+            if failure.required {
+                "required"
+            } else {
+                "diagnostic_only"
+            }
         )?;
         if let Some(detail) = &failure.detail {
             writeln!(out, "      ({detail})")?;
@@ -471,6 +511,15 @@ fn write_lifecycle_block(
         status_label(block.status),
         block.duration_ms,
     )?;
+    if let Some(registration) = &block.registered_by {
+        writeln!(
+            out,
+            "{indent}  cleanup of flow `{}` (call `{}`) registered at {}",
+            registration.flow,
+            registration.call,
+            block.scope_path(),
+        )?;
+    }
     if let Some(position) = block.failing_step
         && let Some(step) = block.steps.get(position)
     {
@@ -574,12 +623,21 @@ fn fold_lifecycle(events: &[duhem_evidence::Event]) -> Vec<LifecycleBlock> {
         let timestamp_ms = event.ts.timestamp_millis();
         let normalized = match &event.payload {
             EventPayload::SetupStarted {
+                cleanup_policy,
                 phase,
                 fixture_name,
                 check_id,
                 criterion_id,
+                registered_by,
                 ..
             } => LifecycleEvent::Started {
+                cleanup_policy: cleanup_policy.as_deref(),
+                registered_by: registered_by.as_ref().map(|r| {
+                    duhem_summary::LifecycleRegistration {
+                        flow: r.flow.clone(),
+                        call: r.call.clone(),
+                    }
+                }),
                 phase: lifecycle_phase(*phase),
                 criterion_id: criterion_id.as_deref(),
                 check_id: check_id.as_deref(),
@@ -595,6 +653,7 @@ fn fold_lifecycle(events: &[duhem_evidence::Event]) -> Vec<LifecycleBlock> {
                 check_id,
                 criterion_id,
                 flow,
+                group,
                 ..
             } => LifecycleEvent::StepStarted {
                 phase: lifecycle_phase(*phase),
@@ -604,6 +663,7 @@ fn fold_lifecycle(events: &[duhem_evidence::Event]) -> Vec<LifecycleBlock> {
                 index: *step_index,
                 uses,
                 flow: flow.as_ref().map(lifecycle_flow),
+                group: group.clone(),
                 timestamp_ms,
             },
             EventPayload::SetupStepObservation {
@@ -619,6 +679,7 @@ fn fold_lifecycle(events: &[duhem_evidence::Event]) -> Vec<LifecycleBlock> {
                 fixture_name: fixture_name.as_deref(),
             },
             EventPayload::SetupStepFinished {
+                judgment,
                 phase,
                 step_index,
                 outcome,
@@ -627,6 +688,7 @@ fn fold_lifecycle(events: &[duhem_evidence::Event]) -> Vec<LifecycleBlock> {
                 check_id,
                 criterion_id,
             } => LifecycleEvent::StepFinished {
+                judgment: *judgment,
                 phase: lifecycle_phase(*phase),
                 criterion_id: criterion_id.as_deref(),
                 check_id: check_id.as_deref(),
@@ -693,6 +755,14 @@ fn build_summary(
         store_db.to_path_buf(),
     )
     .with_totals(check_totals(o))
+    .with_claim_scope(duhem_evidence::claim_scope::claim_scope(events))
+    .with_verification(events.iter().find_map(|event| match &event.payload {
+        duhem_evidence::EventPayload::RunStarted {
+            verification_path, ..
+        } => Some(verification_path.clone()),
+        _ => None,
+    }))
+    .with_body_verdict(o.body_verdict)
     .with_gated_checks(gated_checks(o))
     .with_failures(failures)
     .with_warnings(o.warnings.clone())
@@ -701,6 +771,7 @@ fn build_summary(
         o.cleanup
             .iter()
             .map(|failure| CleanupFailureSummary {
+                required: failure.required,
                 step: failure.step.clone(),
                 outcome: cleanup_outcome(&failure.outcome).to_string(),
                 detail: failure.detail.clone(),
@@ -844,6 +915,8 @@ mod tests {
     #[test]
     fn built_in_lifecycle_snapshot_handles_unknown_scope_depth() {
         let block = LifecycleBlock {
+            cleanup_policy: None,
+            registered_by: None,
             phase: LifecyclePhase::Teardown,
             scope: ["alpha", "beta", "gamma"]
                 .into_iter()
@@ -1005,6 +1078,7 @@ criteria:
 
     fn outcome(state: VerdictState) -> RunOutcome {
         RunOutcome {
+            body_verdict: None,
             gated_checks: Default::default(),
             verdict: RunVerdict {
                 state,
@@ -1161,6 +1235,7 @@ criteria:
     #[test]
     fn default_reporter_states_zero_executed_checks() {
         let o = RunOutcome {
+            body_verdict: None,
             gated_checks: Default::default(),
             verdict: RunVerdict {
                 state: VerdictState::Inconclusive(InconclusiveCause::EnvironmentError),
@@ -1240,6 +1315,7 @@ criteria:
     fn reporters_surface_cleanup_without_changing_the_verdict() {
         let mut o = outcome(VerdictState::Pass);
         o.cleanup.push(duhem_runtime::CleanupFailure {
+            required: false,
             step: "delete-record".into(),
             outcome: duhem_evidence::StepOutcome::Error,
             detail: Some("synthetic cleanup error".into()),
@@ -1247,7 +1323,7 @@ criteria:
 
         let default = capture(&Reporter::Default, &o);
         assert!(default.starts_with("pass\n"), "got: {default}");
-        assert!(default.contains("cleanup: delete-record (error)"));
+        assert!(default.contains("cleanup: delete-record (error, diagnostic_only)"));
         assert_eq!(
             default.lines().last(),
             Some("Total: 1 checks · 1 passed · 0 failed · 0 inconclusive")
@@ -1258,6 +1334,24 @@ criteria:
         assert_eq!(value["verdict"], "pass");
         assert_eq!(value["cleanup"][0]["step"], "delete-record");
         assert_eq!(value["cleanup"][0]["outcome"], "error");
+    }
+
+    #[test]
+    fn default_reporter_preserves_body_for_required_cleanup_gate() {
+        let mut o = outcome(VerdictState::Fail);
+        o.body_verdict = Some(VerdictState::Pass);
+        o.cleanup.push(duhem_runtime::CleanupFailure {
+            required: true,
+            step: "release".into(),
+            outcome: duhem_evidence::StepOutcome::Error,
+            detail: Some("could not release".into()),
+        });
+        let default = capture(&Reporter::Default, &o);
+        assert!(default.starts_with("fail\n  body: pass\n"), "{default}");
+        assert!(
+            default.contains("cleanup: release (error, required)"),
+            "{default}"
+        );
     }
 
     #[test]
@@ -1275,6 +1369,7 @@ criteria:
         });
         o.warnings.push("synthetic warning".into());
         o.cleanup.push(duhem_runtime::CleanupFailure {
+            required: false,
             step: "release fixture".into(),
             outcome: duhem_evidence::StepOutcome::Error,
             detail: None,
@@ -1407,6 +1502,7 @@ criteria:
             set,
             std::path::Path::new("state/duhem.db"),
             &vec![Vec::new(); leaves.len()],
+            None,
         )
         .unwrap();
         String::from_utf8(buf).unwrap()

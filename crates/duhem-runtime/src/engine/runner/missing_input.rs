@@ -16,10 +16,12 @@ pub(super) async fn finish(
     };
     writer
         .append(EventPayload::RunFinished {
+            body_verdict: None,
             verdict: Some(verdict.state),
         })
         .await?;
     Ok(RunOutcome {
+        body_verdict: None,
         gated_checks: Default::default(),
         verdict,
         run_id: run_id.to_string(),

@@ -29,6 +29,48 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] Add coverage checks for per-step validation across step-bearing blocks; schema behavior is unchanged. (#619)
+- [additive] Reference and assertion paths accept quoted bracket keys such as `headers['content-type']` for keys that are not identifiers. (#603)
+- [additive] New `ui/observe-console` action returns windowed page errors and console records with counts and completeness. (#603)
+
+- [additive] `api/observe` accepts `window: { from_step, edge, duration }` and returns ordered request records with `count`, `complete` and `truncated`; legacy first-match behavior is unchanged. (#603)
+- [additive] `api/observe` accepts `window: { from_step, edge, duration }` and returns ordered request records with `count`, `complete` and `truncated`; legacy first-match behavior is unchanged. (#603)
+- [additive] `ui/extract` accepts `field: rect` (CSS-px bounding rect plus scroll offsets) and `style: <property>` (computed CSS value). (#580)
+- [additive] New `ui/emulate` action sets the check's viewport and `prefers-color-scheme` and reports the effective settings; each check and retry starts from defaults. (#580)
+- [additive] New `ui/back` / `ui/forward` actions drive real browser history and report `from_url`, `url` and `navigated` (false when no entry exists). (#580)
+- [additive] New `ui/press` and `ui/focus` actions, and `ui/assert-element` `expected: focused | not_focused`, for keyboard activation and focus identity. (#580)
+- [additive] `api/call` and `api/observe` declare their response outputs (including `headers`) and add `body_bytes`, the response payload byte count (as received for `api/call`, browser-decoded for `api/observe`). (#603)
+- [additive] steps: is a body form on any step — nested step groups with one label, entry-time if:/session:, and shared failure-gate state. (#614)
+- [additive] flows: gain a cleanup: half (and cleanup_policy:) registered at the enclosing scope's exit and unwound LIFO with fixture down: blocks before teardown:, also on interruption, with required-cleanup gate semantics; for_each: is allowed in cleanup: and as a flow's first step. (#615)
+- [clarifying] fixtures:/needs:/$fixture.* are deprecated and desugar to flows with cleanup:; duhem validate warns with the rewrite. Removal in v0.9.0. (#618)
+- [clarifying] Manifest `defaults.timeout` is filled in only for actions whose `with:` declares `timeout`, so timeout-less actions such as `ui/capture-session` no longer reject a step under a suite default. (#632)
+- [clarifying] Expression detection is consolidated into one shared predicate; inline definitions with inconsistent forms are retired. (#540)
+
+## v0.7.2 — 2026-11-06
+
+- [clarifying] Remove private consumer names from tracked source; consumers run `consumer-pins --pinned <version>` in their own CI, replacing the central registry and scheduled pin job; retire the tracker vocabulary scan. (#605)
+- [additive] `if: <expr>` accepted on check steps, resolved against earlier steps/`$inputs`/`$setup` with source-located validation; gated judging steps stay visible in reports, an unresolvable condition makes its check `inconclusive:missing_observation`, as does reading a gated step's outputs. (#440)
+
+## v0.7.1 — 2026-11-05
+
+- [additive] Owned process actions record readiness, bounded logs, stop/restart and required cleanup for long-lived local binaries; process outputs from criterion/check setup and consumed fixtures are addressable from the check; non-process visibility unchanged. (#579)
+- [additive] UI locators accept frame scoping, including nested and cross-origin iframes, for assertions and interactions. (#568)
+
+## v0.7.0 — 2026-10-30
+
+- [breaking] Remove ui/assert-state; assert the state's marker with ui/assert-element instead. (#588)
+- [clarifying] Identify failing for_each iterations in existing reporter detail text. (#519)
+- [additive] Add duhem coverage to report definitions with no recorded run in a supplied store. (#546)
+- [breaking] Remove the --environment alias from run and resolve; use --profile NAME instead. (#589)
+- [additive] Show explicit assertions in the dashboard rail and record their resolved operand values with existing secret masking. (#574)
+- [additive] Reports and evidence retain authored, selected and recorded claim counts, filter exclusions and manifest leaf selection; human reports, JUnit and the dashboard expose reduced scope. (#531)
+- [additive] RunSummary.verification carries the recorded leaf source path for single-leaf and manifest reports, so consumers can attribute verdicts without relying on array order. (#544)
+- [clarifying] Unknown-action, contract-field, redundancy-lint and secret-path validation cover criterion- and check-level setup/teardown through the same block walker as other steps. (#538)
+- [clarifying] Assertion type mismatches gate as fail; the spec distinguishes present null operands from absent fields, which remain inconclusive missing observations. (#537)
+
+## v0.6.0 — 2026-10-30
+
+- [breaking] Fixture down failures block the run gate by default while retaining body verdict and cleanup evidence; use cleanup_policy: diagnostic_only for intentional diagnostic cleanup. (#567)
 - [clarifying] The dashboard wears the Duhem brand: the real mark and wordmark, a favicon set, bundled Inter for offline use, an ink-and-navy palette whose verdict colors meet WCAG AA in both themes, and a verdict mark in the run header that pulses while a run is live. (#560)
 - [clarifying] The dashboard run header is a verdict band that reads in a screenshot: the verdict as a word at display size beside a larger verdict mark, a criteria tally with duration and finish time, and on fail the first failed check with its expected and observed values; it collapses to one line on scroll. (#563)
 
@@ -182,7 +224,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 - [additive] Mongo `db/query` coerces 24-hex string filters on ID fields to BSON ObjectIds. (#171)
 - [additive] `$runtime.contains` and `$runtime.any` provide deterministic array-membership assertions. (#173)
 - [additive] `api/call` accepts an optional mapping encoded as a deterministic query string. (#172)
-- [clarifying] Chreode verification definitions and supporting documentation replace the former Arbor product name and literals. (#163)
+- [clarifying] A private consumer’s verification definitions and supporting documentation adopt its updated product name. (#163)
 - [clarifying] Specification sections 10.2, 10.3, 10.5–10.7, and 11.1 now match the shipped implementation. (#90, #91, #92, #93, #94, #95)
 - [additive] `api/stream` follows SSE or chunked streams until a terminal event or timeout and exposes events, count, and stop reason for assertions. (#153)
 - [clarifying] `duhem validate` accepts manifests and directories through the same discovery and loading path as `duhem run`. (#150)

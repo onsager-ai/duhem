@@ -12,7 +12,7 @@ use thiserror::Error;
 use crate::engine::context::RunContext;
 use crate::engine::shim::assertion_to_expr;
 use crate::engine::translate::{eval_cause_detail, eval_to_state};
-use crate::eval::{EvalResult, describe_comparison, eval};
+use crate::eval::EvalResult;
 
 /// Surfaces only "the runtime itself failed" cases. A failing
 /// artifact yields `RunVerdict::Fail`, not `Err`.
@@ -356,6 +356,12 @@ fn assert_element_fail_detail(ev: &StepEvidence) -> Option<String> {
         ExistenceState::Exists => {
             format!("expected {desc} to appear{timeout_clause}, but none was found")
         }
+        ExistenceState::Focused => {
+            format!("expected {desc} to be focused{timeout_clause}, but it never held focus")
+        }
+        ExistenceState::NotFocused => {
+            format!("expected {desc} to be not focused{timeout_clause}, but it stayed focused")
+        }
         ExistenceState::Visible => match count {
             Some(n) if n > 0 => {
                 format!(
@@ -368,7 +374,7 @@ fn assert_element_fail_detail(ev: &StepEvidence) -> Option<String> {
 }
 
 /// Generic humanizer for the other judging actions (`ui/assert-url`,
-/// `ui/assert-state`, `api/poll`, …): compose a short "what was
+/// `api/poll`, `db/observe`, …): compose a short "what was
 /// expected" line from the well-known `with:` fields, plus the last
 /// observed HTTP status when the action recorded one. `None` when
 /// there's nothing legible to say — the caller falls back to the plain
@@ -442,6 +448,7 @@ pub(crate) async fn evaluate_explicit_assertions(
         if skipped_reference_reason(&expr, check, step_evidence).is_some() {
             continue;
         }
+        let mut operands = BTreeMap::new();
         let (state, detail) = if any_unknown {
             (
                 VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
@@ -457,7 +464,8 @@ pub(crate) async fn evaluate_explicit_assertions(
                 }),
             )
         } else {
-            let r = eval(&expr, ctx);
+            let (r, values, comparison) = crate::eval::operands::evaluate_assertion(&expr, ctx);
+            operands = values;
             let detail = match &r {
                 EvalResult::Inconclusive(c) => Some(eval_cause_detail(c)),
                 // A failed comparison gets its observed operands —
@@ -466,7 +474,7 @@ pub(crate) async fn evaluate_explicit_assertions(
                 // (`disallowed {rhs}`, `expected < {rhs}`; #407) — so
                 // the reporter shows the values, not just the
                 // expression.
-                EvalResult::False => describe_comparison(&expr, ctx),
+                EvalResult::False => comparison,
                 EvalResult::True => None,
             };
             (eval_to_state(&r), detail)
@@ -474,6 +482,7 @@ pub(crate) async fn evaluate_explicit_assertions(
         writer
             .append(EventPayload::AssertionEvaluated {
                 check_id: check.id.clone(),
+                operands: Some(operands),
                 iteration,
                 assertion_index: i as u32,
                 state,
@@ -558,7 +567,9 @@ fn skipped_reference_reason(
     steps_referenced(expr, &mut refs);
     check.steps.iter().enumerate().find_map(|(index, step)| {
         let id = step.id.as_ref()?;
-        if !refs.contains(id) {
+        // A value-gated step's absent outputs must stay visible as a
+        // missing observation, not vanish with the assertion (#440 R4).
+        if !refs.contains(id) || matches!(step.condition, duhem_schema::StepCondition::Expr(_)) {
             return None;
         }
         evidence.get(index)?.skip_reason.clone()
@@ -610,6 +621,7 @@ pub(crate) async fn append_implicit_judgment(
         writer
             .append(EventPayload::AssertionEvaluated {
                 check_id: check_id.to_string(),
+                operands: None,
                 iteration,
                 assertion_index: index as u32,
                 state: imp.state,
@@ -675,6 +687,8 @@ pub trait CheckFilter: Send + Sync {
 /// store by `run_id`.
 #[derive(Debug, Clone)]
 pub struct RunOutcome {
+    /// Original body state when required cleanup changes the effective gate.
+    pub body_verdict: Option<VerdictState>,
     /// Non-zero gated judging-step counts, keyed by criterion and check.
     /// Kept separate from the judge's verdict and lifecycle outcomes.
     pub gated_checks: std::collections::BTreeMap<(String, String), u32>,
@@ -691,14 +705,16 @@ pub struct RunOutcome {
     /// manifest default. Empty unless `warn` softened something. The
     /// reporter surfaces these in the run summary.
     pub warnings: Vec<String>,
-    /// Failures observed while draining leaf `teardown:`. They are
-    /// retained for reporters but never enter verdict aggregation.
+    /// Failures observed while draining cleanup across all attempts.
+    /// Required fixture failures block the effective run gate.
     pub cleanup: Vec<CleanupFailure>,
 }
 
-/// One non-verdict-altering teardown failure.
+/// One cleanup failure, classified by whether it blocks the run gate.
 #[derive(Debug, Clone)]
 pub struct CleanupFailure {
+    /// Only required fixture down failures block the run gate.
+    pub required: bool,
     pub step: String,
     pub outcome: duhem_evidence::StepOutcome,
     pub detail: Option<String>,

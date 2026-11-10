@@ -50,6 +50,52 @@ Navigate the browser to a URL.
   with: { url: https://example.com }
 ```
 
+### `ui/observe-console`
+
+Observe page errors and console messages in a step-anchored window.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `window` | yes | — |
+
+**outputs:** `page_errors`, `page_error_count`, `console`, `console_count`, `console_error_count`, `window`, `complete`, `truncated`
+
+```yaml
+- uses: ui/observe-console
+  with:
+    window: { from_step: load, edge: start, duration: 1s }
+```
+
+### `ui/back`
+
+Go back one real browser history entry (same-document entries included); `navigated` is false, with the URL unchanged, when no entry exists.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `timeout` | no | — |
+
+**outputs:** `from_url`, `url`, `navigated`
+
+```yaml
+- id: back
+  uses: ui/back
+```
+
+### `ui/forward`
+
+Go forward one real browser history entry (same-document entries included); `navigated` is false, with the URL unchanged, when no entry exists.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `timeout` | no | — |
+
+**outputs:** `from_url`, `url`, `navigated`
+
+```yaml
+- id: forward
+  uses: ui/forward
+```
+
 ### `ui/click`
 
 Click an element (locator shorthand fields, or a `locator` object).
@@ -65,6 +111,7 @@ Click an element (locator shorthand fields, or a `locator` object).
 | `name` | no | — |
 | `text` | no | — |
 | `scope` | no | — |
+| `frame` | no | — |
 | `locator` | no | — |
 | `timeout` | no | — |
 
@@ -77,7 +124,7 @@ Click an element (locator shorthand fields, or a `locator` object).
 
 ### `ui/extract`
 
-Extract an attribute, DOM property, or rendered text from matching elements.
+Extract an attribute, DOM property, rendered text, bounding rect, or computed style from matching elements.
 
 | `with:` field | required | values |
 |---|:---:|---|
@@ -86,6 +133,7 @@ Extract an attribute, DOM property, or rendered text from matching elements.
 | `attribute` | no | — |
 | `property` | no | — |
 | `text` | no | — |
+| `style` | no | — |
 | `all` | no | — |
 
 **outputs:** `value`, `found`, `count`, `values`
@@ -131,14 +179,48 @@ Select an option in a <select> by value, label, or index.
   with: { locator: { css: "#role" }, by: { label: "Admin" } }
 ```
 
-### `ui/assert-element`
+### `ui/press`
 
-Assert an element reaches an existence/visibility state within a deadline.
+Press a key or `+` chord (Playwright key names, e.g. Enter, Tab, Shift+Tab). With a locator the element is focused first; without one the key goes to the focused element. `target` records the receiver ({tag, id, role, name}, sampled before the press; `name` is an approximation of the accessible name).
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `key` | yes | — |
+| `locator` | no | — |
+| `timeout` | no | — |
+
+**outputs:** `target`
+
+```yaml
+- id: open
+  uses: ui/press
+  with: { key: Enter }
+```
+
+### `ui/focus`
+
+Focus an element programmatically (element.focus(), not a user gesture). To verify keyboard focus movement, use ui/press with Tab and then ui/assert-element with expected: focused.
 
 | `with:` field | required | values |
 |---|:---:|---|
 | `locator` | yes | — |
-| `expected` | no | `exists` \| `not_exists` \| `visible` \| `hidden` |
+| `timeout` | no | — |
+
+**outputs:** (none)
+
+```yaml
+- uses: ui/focus
+  with: { locator: { role: button, name: Options } }
+```
+
+### `ui/assert-element`
+
+Assert an element reaches an existence/visibility/focus state within a deadline. `focused` means the element is its own document's activeElement and that document has focus; `not_focused` requires exactly one present, unfocused match.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `locator` | yes | — |
+| `expected` | no | `exists` \| `not_exists` \| `visible` \| `hidden` \| `focused` \| `not_focused` |
 | `expect` | no | — |
 | `timeout` | no | — |
 
@@ -164,23 +246,6 @@ Assert the page URL equals a string or matches a regex (exactly one of equals/ma
 ```yaml
 - uses: ui/assert-url
   with: { equals: https://example.com/ }
-```
-
-### `ui/assert-state`
-
-Assert an app state (e.g. signed in/out, or a marker) via `state:`.
-
-| `with:` field | required | values |
-|---|:---:|---|
-| `state` | yes | — |
-| `marker` | no | — |
-| `timeout` | no | — |
-
-**outputs:** `satisfied`
-
-```yaml
-- uses: ui/assert-state
-  with: { state: signed_in }
 ```
 
 ### `ui/capture-session`
@@ -214,6 +279,23 @@ Wait for a fixed duration within the suite ceiling (debugging escape hatch; pref
   with: { duration: 500ms }
 ```
 
+### `ui/emulate`
+
+Set the check's viewport (CSS px) and/or prefers-color-scheme; outputs are the settings read back from the page.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `viewport` | no | — |
+| `color_scheme` | no | `light` \| `dark` \| `no-preference` |
+
+**outputs:** `viewport`, `color_scheme`
+
+```yaml
+- id: emu
+  uses: ui/emulate
+  with: { viewport: { width: 390, height: 844 }, color_scheme: dark }
+```
+
 ## `api/*`
 
 ### `api/call`
@@ -229,7 +311,7 @@ Make an HTTP request and observe the response.
 | `body` | no | — |
 | `timeout` | no | — |
 
-**outputs:** `status`, `body`, `body_text`
+**outputs:** `status`, `body`, `body_text`, `body_bytes`, `headers`
 
 ```yaml
 - uses: api/call
@@ -247,8 +329,9 @@ Observe a network request the page made (matched by method + URL pattern).
 | `url_pattern` | yes | — |
 | `after` | no | — |
 | `timeout` | no | — |
+| `window` | no | — |
 
-**outputs:** (none)
+**outputs:** `method`, `url`, `status`, `body`, `body_text`, `body_bytes`, `headers`, `request_body`, `request_headers`, `count`, `requests`, `window`, `complete`, `truncated`
 
 ```yaml
 - uses: api/observe
@@ -379,5 +462,82 @@ Invoke a local command and observe its exit code, stdout, and stderr.
 - uses: cli/invoke
   with: { command: ["echo", "hi"] }
   outputs: { code: exit_code }
+```
+
+## `process/*`
+
+### `process/start`
+
+Start an owned local process with optional bounded HTTP or log readiness.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `command` | yes | — |
+| `args` | no | — |
+| `cwd` | no | — |
+| `env` | no | — |
+| `ready` | no | — |
+| `stop_timeout` | no | — |
+| `kill_timeout` | no | — |
+
+**outputs:** `handle`, `generation`, `pid`, `ready`
+
+```yaml
+- id: server
+  uses: process/start
+  with:
+    command: ./server
+    args: [serve]
+    ready:
+      http: { url: http://127.0.0.1:8080/health, status: 200 }
+      timeout: 10s
+```
+
+### `process/inspect`
+
+Read an owned process's exit facts and bounded, masked stdout/stderr logs.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `handle` | yes | — |
+| `cursor` | no | — |
+
+**outputs:** `state`, `running`, `exit_code`, `signal`, `logs`, `next_cursor`, `truncated`, `dropped_bytes`, `generation`, `stream_errors`
+
+```yaml
+- id: status
+  uses: process/inspect
+  with: { handle: $setup.server.outputs.handle }
+```
+
+### `process/stop`
+
+Stop and reap a current-check or fixture process group with bounded escalation.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `handle` | yes | — |
+
+**outputs:** `stopped`, `already_exited`, `exit_code`, `signal`, `escalated`
+
+```yaml
+- uses: process/stop
+  with: { handle: $setup.server.outputs.handle }
+```
+
+### `process/restart`
+
+Stop the old generation before restarting a current-check or fixture process.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `handle` | yes | — |
+
+**outputs:** `handle`, `generation`, `pid`, `ready`
+
+```yaml
+- id: replacement
+  uses: process/restart
+  with: { handle: $setup.server.outputs.handle }
 ```
 

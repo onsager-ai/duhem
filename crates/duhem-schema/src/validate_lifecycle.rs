@@ -230,6 +230,21 @@ fn validate_fixture_value_exprs(
         StepCondition::Expr(expr) => Some(expr),
         _ => None,
     };
+    for frame in &step.group {
+        if let StepCondition::Expr(expr) = &frame.condition {
+            validate_lifecycle_value_expr(
+                v,
+                &format!("fixture `{name}` {phase} group `{}` condition", frame.label),
+                &expr.raw,
+                &expr.parsed,
+                None,
+                preceding,
+                None,
+                Some(FixtureValueScope { name, up_outputs }),
+                errs,
+            );
+        }
+    }
     for (key, label, expr) in [
         ("if", "condition", condition),
         ("for_each", "for_each source", step.for_each.as_ref()),
@@ -294,6 +309,22 @@ pub(crate) fn validate_lifecycle_condition_in_loop(
     active_loop: Option<&str>,
     errs: &mut Vec<ValidationError>,
 ) {
+    // A group's `if:` (#614) is read at its first step, like entry time.
+    for frame in &step.group {
+        if let StepCondition::Expr(expr) = &frame.condition {
+            validate_lifecycle_value_expr(
+                definition,
+                &format!("{phase} group `{}` condition", frame.label),
+                &expr.raw,
+                &expr.parsed,
+                None,
+                preceding,
+                active_loop,
+                None,
+                errs,
+            );
+        }
+    }
     let StepCondition::Expr(expr) = &step.condition else {
         return;
     };

@@ -60,12 +60,14 @@ pub(crate) fn page_reference(with: &serde_yml::Value) -> Option<String> {
             Expr::Path(Path {
                 root: duhem_schema::PathRoot::Pages,
                 segments,
+                ..
             }) if segments.len() == 2 => Some(raw.trim().to_string()),
             Expr::Call {
                 path:
                     Path {
                         root: duhem_schema::PathRoot::Pages,
                         segments,
+                        ..
                     },
                 ..
             } if segments.len() == 2 => Some(raw.trim().to_string()),
@@ -153,7 +155,7 @@ fn try_resolve(s: &str, ctx: &dyn EvalContext) -> Resolution {
     // strings (`"200"`) as Expr literals and substitute them into a
     // String slot. The author intent for `$inputs.X` / `$steps.X` /
     // `$runtime.X()` is unambiguous; everything else stays a string.
-    if !s.trim_start().starts_with('$') {
+    if !duhem_schema::expr::is_expression(s) {
         return Resolution::Passthrough;
     }
     let expr = match duhem_schema::expr::parse(s) {
@@ -315,20 +317,18 @@ fn culprit<'a>(expr: &'a Expr, ctx: &dyn EvalContext) -> Option<&'a Path> {
 }
 
 /// Render a parsed [`Path`] back to its `$<root>.<seg>...` source form.
-/// Digit-only segments are array indices (`[0]`); everything else is a
-/// dotted key — matching the parser's lowering and `eval`'s `nav_path`.
+/// Uses bracket notation for indices and keys that are not identifiers.
 fn render_path(p: &Path) -> String {
     let mut out = String::from("$");
-    out.push_str(p.root.as_str());
-    for seg in &p.segments {
-        if !seg.is_empty() && seg.bytes().all(|b| b.is_ascii_digit()) {
-            out.push('[');
-            out.push_str(seg);
-            out.push(']');
-        } else {
-            out.push('.');
-            out.push_str(seg);
-        }
+    let start = if p.root == duhem_schema::PathRoot::Loop {
+        out.push_str(&p.segments[0]);
+        1
+    } else {
+        out.push_str(p.root.as_str());
+        0
+    };
+    for i in start..p.segments.len() {
+        p.append_segment(&mut out, i);
     }
     out
 }

@@ -1,8 +1,8 @@
 //! Action registry — `Step.uses` → action dispatcher.
 //!
 //! The v1 registry is keyed by `Step.uses` and contains the closed
-//! action catalog: the full `ui/*` slice (three from #12, four from
-//! #37) plus `api/call` from the spec on issue #21. Pluggable /
+//! action catalog, including the `ui/*` slice and `api/call`
+//! from the spec on issue #21. Pluggable /
 //! user-defined `uses:` is §10.8 and lands in Phase 2+. The registry
 //! is `pub(crate)`-shaped: external callers only see
 //! [`Engine::new`](super::Engine), which wires the default catalog.
@@ -27,9 +27,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use duhem_actions::Page;
 use duhem_actions::{
-    Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertState, AssertUrl, Call,
-    CaptureSession, Click, DbObserve, Extract, Invoke, Navigate, Observe, Poll, Query, Seed,
-    Select, Stream, Type, Wait,
+    Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertUrl, Back, Call,
+    CaptureSession, Click, DbObserve, Emulate, Extract, Focus, Forward, Invoke, Navigate, Observe,
+    ObserveConsole, Poll, Press, Query, Seed, Select, Stream, Type, Wait,
 };
 use serde::Deserialize;
 use serde::de::Error as _;
@@ -71,6 +71,12 @@ pub(crate) trait Dispatch: Send + Sync {
         Vec::new()
     }
 
+    /// Whether the action's `with:` accepts `timeout:`, so the manifest
+    /// `defaults.timeout` may be filled in (spec #66). Test stubs accept it.
+    fn accepts_timeout(&self) -> bool {
+        true
+    }
+
     async fn invoke(
         &self,
         page: Option<&Page>,
@@ -78,6 +84,69 @@ pub(crate) trait Dispatch: Send + Sync {
         with: &serde_yml::Value,
         child_env: &BTreeMap<String, String>,
     ) -> Result<ActionResult, ActionError>;
+
+    async fn invoke_with_boundaries(
+        &self,
+        page: Option<&Page>,
+        step_index: usize,
+        with: &serde_yml::Value,
+        child_env: &BTreeMap<String, String>,
+        _boundaries: &BTreeMap<String, duhem_actions::action::StepBoundary>,
+        _session: Option<&str>,
+    ) -> Result<ActionResult, ActionError> {
+        self.invoke(page, step_index, with, child_env).await
+    }
+}
+
+/// Both engine dispatch sites share this boundary. Process actions need a
+/// declaring resource scope rather than a temporary browser page.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn invoke_scoped(
+    dispatcher: &dyn Dispatch,
+    page: Option<&Page>,
+    index: usize,
+    with: &serde_yml::Value,
+    child_env: &BTreeMap<String, String>,
+    run: &super::RunState,
+    owner: &super::process::Owner,
+    writer: &mut duhem_evidence::EvidenceWriter,
+    boundaries: &BTreeMap<String, duhem_actions::action::StepBoundary>,
+    session: Option<&str>,
+) -> Result<ActionResult, ActionError> {
+    if dispatcher.uses().starts_with("process/") {
+        run.processes
+            .lock()
+            .await
+            .invoke(dispatcher.uses(), with, owner, child_env, writer)
+            .await
+    } else {
+        dispatcher
+            .invoke_with_boundaries(page, index, with, child_env, boundaries, session)
+            .await
+    }
+}
+
+struct OwnedProcess(&'static str);
+
+#[async_trait]
+impl Dispatch for OwnedProcess {
+    fn uses(&self) -> &'static str {
+        self.0
+    }
+    fn requires_page(&self) -> bool {
+        false
+    }
+    async fn invoke(
+        &self,
+        _: Option<&Page>,
+        _: usize,
+        _: &serde_yml::Value,
+        _: &BTreeMap<String, String>,
+    ) -> Result<ActionResult, ActionError> {
+        Err(ActionError::OwnedProcess(
+            "owned process dispatch requires a runtime scope".into(),
+        ))
+    }
 }
 
 /// Production wrapper around a `Box<dyn Action>` from `duhem-actions`.
@@ -114,12 +183,33 @@ impl Dispatch for ConcreteAction {
         self.action.contract().secret_outputs
     }
 
+    fn accepts_timeout(&self) -> bool {
+        self.action
+            .contract()
+            .with
+            .iter()
+            .any(|field| field.name == "timeout")
+    }
+
     async fn invoke(
         &self,
         page: Option<&Page>,
         step_index: usize,
         with: &serde_yml::Value,
         child_env: &BTreeMap<String, String>,
+    ) -> Result<ActionResult, ActionError> {
+        self.invoke_with_boundaries(page, step_index, with, child_env, &BTreeMap::new(), None)
+            .await
+    }
+
+    async fn invoke_with_boundaries(
+        &self,
+        page: Option<&Page>,
+        step_index: usize,
+        with: &serde_yml::Value,
+        child_env: &BTreeMap<String, String>,
+        boundaries: &BTreeMap<String, duhem_actions::action::StepBoundary>,
+        session: Option<&str>,
     ) -> Result<ActionResult, ActionError> {
         // A page-requiring action without a page is a dispatch-layer
         // failure (the engine should have refused the check upstream).
@@ -129,7 +219,12 @@ impl Dispatch for ConcreteAction {
                 self.uses
             )));
         }
-        let ctx = ActionCtx { page, step_index };
+        let ctx = ActionCtx {
+            page,
+            step_index,
+            step_boundaries: boundaries,
+            session,
+        };
         // Only `cli/invoke` needs the runtime-owned env layered in, so
         // only it pays for the clone; every other action (the hot
         // UI/API path) invokes against the original `with` by
@@ -217,20 +312,25 @@ fn inject_child_env(with: &mut serde_yml::Value, child_env: &BTreeMap<String, St
 pub(crate) type ActionRegistry = BTreeMap<&'static str, Box<dyn Dispatch>>;
 
 /// The v1 catalog: the full `ui/*` slice (`ui/navigate`, `ui/click`,
-/// `ui/assert-element`, `ui/type`, `ui/select`, `ui/assert-url`,
-/// `ui/assert-state`) and `api/call`.
+/// `ui/assert-element`, `ui/type`, `ui/select`, `ui/assert-url`)
+/// and the API, database and command actions.
 pub(crate) fn default_registry() -> ActionRegistry {
     let mut m: ActionRegistry = BTreeMap::new();
     insert(&mut m, ConcreteAction::new(Box::new(Navigate)));
+    insert(&mut m, ConcreteAction::new(Box::new(ObserveConsole)));
+    insert(&mut m, ConcreteAction::new(Box::new(Back)));
+    insert(&mut m, ConcreteAction::new(Box::new(Forward)));
     insert(&mut m, ConcreteAction::new(Box::new(Click)));
     insert(&mut m, ConcreteAction::new(Box::new(Extract)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertElement)));
     insert(&mut m, ConcreteAction::new(Box::new(Type)));
     insert(&mut m, ConcreteAction::new(Box::new(Select)));
+    insert(&mut m, ConcreteAction::new(Box::new(Press)));
+    insert(&mut m, ConcreteAction::new(Box::new(Focus)));
     insert(&mut m, ConcreteAction::new(Box::new(AssertUrl)));
-    insert(&mut m, ConcreteAction::new(Box::new(AssertState)));
     insert(&mut m, ConcreteAction::new(Box::new(CaptureSession)));
     insert(&mut m, ConcreteAction::new(Box::new(Wait)));
+    insert(&mut m, ConcreteAction::new(Box::new(Emulate)));
     insert(&mut m, ConcreteAction::new(Box::new(Call)));
     insert(&mut m, ConcreteAction::new(Box::new(Observe)));
     insert(&mut m, ConcreteAction::new(Box::new(Poll)));
@@ -239,6 +339,9 @@ pub(crate) fn default_registry() -> ActionRegistry {
     insert(&mut m, ConcreteAction::new(Box::new(Query)));
     insert(&mut m, ConcreteAction::new(Box::new(DbObserve)));
     insert(&mut m, ConcreteAction::new(Box::new(Seed)));
+    for contract in duhem_actions::process::contracts() {
+        m.insert(contract.uses, Box::new(OwnedProcess(contract.uses)));
+    }
     m
 }
 
@@ -249,6 +352,15 @@ fn insert(m: &mut ActionRegistry, d: ConcreteAction) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_timeout_targets_only_actions_that_declare_it() {
+        let registry = default_registry();
+        assert!(registry["ui/click"].accepts_timeout());
+        assert!(registry["api/call"].accepts_timeout());
+        assert!(!registry["ui/capture-session"].accepts_timeout());
+        assert!(!registry["ui/extract"].accepts_timeout());
+    }
 
     #[test]
     fn default_catalog_lists_the_v1_actions() {
@@ -266,13 +378,22 @@ mod tests {
                 "db/observe",
                 "db/query",
                 "db/seed",
+                "process/inspect",
+                "process/restart",
+                "process/start",
+                "process/stop",
                 "ui/assert-element",
-                "ui/assert-state",
                 "ui/assert-url",
+                "ui/back",
                 "ui/capture-session",
                 "ui/click",
+                "ui/emulate",
                 "ui/extract",
+                "ui/focus",
+                "ui/forward",
                 "ui/navigate",
+                "ui/observe-console",
+                "ui/press",
                 "ui/select",
                 "ui/type",
                 "ui/wait",

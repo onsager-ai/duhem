@@ -97,14 +97,22 @@ mod tests {
 
     #[test]
     fn proc_entry_disappearance_errors_are_ignored() {
-        assert!(proc_entry_disappeared(&io::Error::from(io::ErrorKind::NotFound)));
-        assert!(proc_entry_disappeared(&io::Error::from_raw_os_error(libc::ESRCH)));
+        assert!(proc_entry_disappeared(&io::Error::from(
+            io::ErrorKind::NotFound
+        )));
+        assert!(proc_entry_disappeared(&io::Error::from_raw_os_error(
+            libc::ESRCH
+        )));
     }
 
     #[test]
     fn other_proc_entry_errors_are_preserved() {
-        assert!(!proc_entry_disappeared(&io::Error::from_raw_os_error(libc::EACCES)));
-        assert!(!proc_entry_disappeared(&io::Error::other("unexpected read error")));
+        assert!(!proc_entry_disappeared(&io::Error::from_raw_os_error(
+            libc::EACCES
+        )));
+        assert!(!proc_entry_disappeared(&io::Error::other(
+            "unexpected read error"
+        )));
     }
 }
 

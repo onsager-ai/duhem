@@ -183,9 +183,18 @@ mod tests {
 
     #[test]
     fn walker_covers_the_schema_step_collections() {
-        let definition = VerificationDefinition::from_yaml_str(
-            "verification: all blocks\nsetup:\n  - for_each: '$inputs.items'\n    as: item\n    max: 1\n    steps:\n      - uses: api/call\nflows:\n  sample:\n    steps: []\nfixtures:\n  sample:\n    up: []\n    down: []\ncriteria:\n  - id: AC-1\n    description: all blocks\n    checks:\n      - id: AC-1.1\n        steps: []\n",
-        ).unwrap();
+        let definition = VerificationDefinition::from_yaml_str(include_str!(
+            "../tests/fixtures/coverage-blocks.yaml"
+        ))
+        .unwrap();
+        for block in step_blocks(&definition) {
+            assert!(
+                block.steps.iter().any(|step| step.uses.is_some()),
+                "coverage fixture has no action in {}: {:?}",
+                block.site,
+                block.path
+            );
+        }
         let observed: BTreeSet<String> = step_blocks(&definition)
             .iter()
             .map(|block| {

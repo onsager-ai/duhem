@@ -25,6 +25,8 @@ pub mod provision;
 mod source;
 pub mod step;
 mod step_groups;
+#[cfg(test)]
+mod step_rule_coverage;
 pub mod step_walk;
 pub mod validate;
 mod validate_actions;

@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] Add coverage checks for per-step validation across step-bearing blocks; schema behavior is unchanged. (#619)
 - [additive] Reference and assertion paths accept quoted bracket keys such as `headers['content-type']` for keys that are not identifiers. (#603)
 - [additive] New `ui/observe-console` action returns windowed page errors and console records with counts and completeness. (#603)
 

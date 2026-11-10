@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "source": {
+    "repository": "onsager-ai/dev-skills",
+    "revision": "c7b061c9e3ddfdd1e86dca29cb8d6bcbc23e5dc0"
+  },
+  "skills": [
+    "issue-spec",
+    "pre-push",
+    "pr-lifecycle",
+    "ci-triage",
+    "docs-drift-guard"
+  ],
+  "rules": [
+    "authority",
+    "checks",
+    "discovery",
+    "ownership",
+    "workflow-policy",
+    "human-decisions",
+    "git-hooks"
+  ],
+  "local_skills": [
+    "duhem-dev-process",
+    "onsager-dogfood",
+    "verification-authoring"
+  ],
+  "hooks": [
+    "rustfmt"
+  ]
+}

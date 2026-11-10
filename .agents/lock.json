@@ -1,0 +1,225 @@
+{
+  "schema": 1,
+  "manifest_sha256": "9eb2583df261730c681fcc447cfe0bdb9b3a371b0af960b2c00aa55643acaf97",
+  "block_sha256": "1439c3ccca8e357299cad3e45d87db923b7ac76fc0ebb671d72984001bd6ab85",
+  "resolved_skills": [
+    "ci-triage",
+    "docs-drift-guard",
+    "harness-operations",
+    "issue-spec",
+    "pr-lifecycle",
+    "pre-push"
+  ],
+  "files": {
+    ".agents/LICENSE.dev-skills": {
+      "sha256": "1141cb7b9b803241d6214c6bb0934f9c7f0d57eecdae8c35a4a2478fcdd6546c",
+      "owner": "shared-license",
+      "mode": "100644"
+    },
+    ".agents/skills/ci-triage/SKILL.md": {
+      "sha256": "a61e1f9c08c5305c5c1fbaeccee806e13c505939c1436b78ec34d17f4e47b59f",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/docs-drift-guard/SKILL.md": {
+      "sha256": "158e9c8c2d68b598a5609b181f97081c784dfe2b85a1b00a26a9b3e26d322d3f",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/harness-operations/references/chatgpt-work.md": {
+      "sha256": "c6130e726c55d009b6c6938c6eeab85afe4372c3d86d2f0018e7dec970e8b17b",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/harness-operations/references/claude-code.md": {
+      "sha256": "0917258bb67a0a121120cb419e6a272dc047ea881205033f7e3dbb12b3844632",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/harness-operations/references/codex.md": {
+      "sha256": "cba947b5fafd6b7a82422fbfb45f1073db7bc1f2b68c4dba3b98b864ff8c0a31",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/harness-operations/SKILL.md": {
+      "sha256": "63a72db7b2893148463b8861322a52489fd24992ec88af5be6ff7a4e146d193e",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/issue-spec/references/spec-format.md": {
+      "sha256": "2ac20e0d70887fdc6a0393a7261a4408038480d188e0603941c497b1592ae97a",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/issue-spec/scripts/spec-list.sh": {
+      "sha256": "8a8abf9c5ae4b325604a836d23f735660034332d478b49af00a1029a9a16c0d4",
+      "owner": "shared",
+      "mode": "100755"
+    },
+    ".agents/skills/issue-spec/scripts/spec-show.sh": {
+      "sha256": "752c49df15a924a0b9c400c4d5cef8542ea14a90b0d49e813eccb47d56f01442",
+      "owner": "shared",
+      "mode": "100755"
+    },
+    ".agents/skills/issue-spec/SKILL.md": {
+      "sha256": "4faa4cc41a4091cf623497dc6b1f84dd36895115da01550e99050e63659ceb1b",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/issue-spec/templates/issue-spec-template.md": {
+      "sha256": "ce3c1a044c6eb25aea7e8bd7f7cd2d939f353e3e84351683143100b0b0092875",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/pr-lifecycle/references/pr-ci-trigger.md": {
+      "sha256": "a1ce7225b8649ef178a7be1a66a5303685c656c777ba4807770aac8f66eb4b52",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/pr-lifecycle/references/review-and-cleanup.md": {
+      "sha256": "b06c3b88b4a8461a84a13032f9843da900c90134e5331bb9509c6a9d18ff1acc",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/pr-lifecycle/SKILL.md": {
+      "sha256": "b1afb127bf10fbf6736349b3d2da7b5a5b8755b56fd25f36ff67a53ad2b74b8e",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/pre-push/references/commits.md": {
+      "sha256": "4cd62dde32a894944805648f15012d219460a942f376ced5f74402bc6288b7c9",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/skills/pre-push/SKILL.md": {
+      "sha256": "42392e9937b1401745b253780dd7816c6509ea8ab171a5a6c8efa16f1a821eb8",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".agents/sync.mjs": {
+      "sha256": "d982b940cb47c31b1246ada6890f3035f6249b4d796c465a65725719b7270844",
+      "owner": "tooling",
+      "mode": "100644"
+    },
+    ".claude/skills/ci-triage/SKILL.md": {
+      "sha256": "a61e1f9c08c5305c5c1fbaeccee806e13c505939c1436b78ec34d17f4e47b59f",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/docs-drift-guard/SKILL.md": {
+      "sha256": "158e9c8c2d68b598a5609b181f97081c784dfe2b85a1b00a26a9b3e26d322d3f",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/duhem-dev-process/SKILL.md": {
+      "sha256": "33ce965d257a4684d0e5548f91eb05fcdf5181bc95553fd37ffad2e95d299db6",
+      "owner": "local-projection",
+      "mode": "100644"
+    },
+    ".claude/skills/harness-operations/references/chatgpt-work.md": {
+      "sha256": "c6130e726c55d009b6c6938c6eeab85afe4372c3d86d2f0018e7dec970e8b17b",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/harness-operations/references/claude-code.md": {
+      "sha256": "0917258bb67a0a121120cb419e6a272dc047ea881205033f7e3dbb12b3844632",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/harness-operations/references/codex.md": {
+      "sha256": "cba947b5fafd6b7a82422fbfb45f1073db7bc1f2b68c4dba3b98b864ff8c0a31",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/harness-operations/SKILL.md": {
+      "sha256": "63a72db7b2893148463b8861322a52489fd24992ec88af5be6ff7a4e146d193e",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/issue-spec/references/spec-format.md": {
+      "sha256": "2ac20e0d70887fdc6a0393a7261a4408038480d188e0603941c497b1592ae97a",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/issue-spec/scripts/spec-list.sh": {
+      "sha256": "8a8abf9c5ae4b325604a836d23f735660034332d478b49af00a1029a9a16c0d4",
+      "owner": "shared",
+      "mode": "100755"
+    },
+    ".claude/skills/issue-spec/scripts/spec-show.sh": {
+      "sha256": "752c49df15a924a0b9c400c4d5cef8542ea14a90b0d49e813eccb47d56f01442",
+      "owner": "shared",
+      "mode": "100755"
+    },
+    ".claude/skills/issue-spec/SKILL.md": {
+      "sha256": "4faa4cc41a4091cf623497dc6b1f84dd36895115da01550e99050e63659ceb1b",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/issue-spec/templates/issue-spec-template.md": {
+      "sha256": "ce3c1a044c6eb25aea7e8bd7f7cd2d939f353e3e84351683143100b0b0092875",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/onsager-dogfood/SKILL.md": {
+      "sha256": "8913e86fdee0b284f115c1a3d4b548b64c791f9afb8ecb0712ba38b4cb99d21b",
+      "owner": "local-projection",
+      "mode": "100644"
+    },
+    ".claude/skills/pr-lifecycle/references/pr-ci-trigger.md": {
+      "sha256": "a1ce7225b8649ef178a7be1a66a5303685c656c777ba4807770aac8f66eb4b52",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/pr-lifecycle/references/review-and-cleanup.md": {
+      "sha256": "b06c3b88b4a8461a84a13032f9843da900c90134e5331bb9509c6a9d18ff1acc",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/pr-lifecycle/SKILL.md": {
+      "sha256": "b1afb127bf10fbf6736349b3d2da7b5a5b8755b56fd25f36ff67a53ad2b74b8e",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/pre-push/references/commits.md": {
+      "sha256": "4cd62dde32a894944805648f15012d219460a942f376ced5f74402bc6288b7c9",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/pre-push/SKILL.md": {
+      "sha256": "42392e9937b1401745b253780dd7816c6509ea8ab171a5a6c8efa16f1a821eb8",
+      "owner": "shared",
+      "mode": "100644"
+    },
+    ".claude/skills/verification-authoring/references/authoring-reference.md": {
+      "sha256": "4dd9d17889218772ad16409be498e1f058aaf7f1475f26dbb4537176c144b2bc",
+      "owner": "local-projection",
+      "mode": "100644"
+    },
+    ".claude/skills/verification-authoring/SKILL.md": {
+      "sha256": "d639079302392a59b8768e0e88d01406421733ae5ab7bdfebb44cb558c4fbcee",
+      "owner": "local-projection",
+      "mode": "100644"
+    },
+    ".githooks/checks/rustfmt": {
+      "sha256": "04454c6ef15548648df5c36c9a51de67c0ed33764951ef904ca2cbfe3ccff0fe",
+      "owner": "hooks",
+      "mode": "100755"
+    },
+    ".githooks/pre-commit": {
+      "sha256": "a78dff69220f18fa5a914fd41b45319c00823d52897058d62154c501274e65d5",
+      "owner": "hooks",
+      "mode": "100755"
+    },
+    ".githooks/README.md": {
+      "sha256": "915de38a96822e1e32ecd63532924d40583570b2986a1acc2003cfe1130e1bf5",
+      "owner": "hooks",
+      "mode": "100644"
+    },
+    ".github/workflows/agent-config.yml": {
+      "sha256": "f7567d8a59bfe33c6962a5f36fce118ec0bef385be0f70770effcc6717353f8d",
+      "owner": "tooling",
+      "mode": "100644"
+    }
+  }
+}

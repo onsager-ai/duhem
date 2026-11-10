@@ -115,4 +115,3 @@ jobs:
             echo "::error::action accepted a traversal verification-path; trust-boundary regression"
             exit 1
           fi
-

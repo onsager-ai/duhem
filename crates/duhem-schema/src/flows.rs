@@ -1072,13 +1072,6 @@ teardown:
   - id: b
     call: greet
     with: { name: leaf-teardown }
-  - id: resource
-    call: greet
-    with: { name: setup-call }
-teardown:
-  - id: release
-    call: greet
-    with: { name: teardown-call }
 criteria:
   - id: AC-1
     description: x

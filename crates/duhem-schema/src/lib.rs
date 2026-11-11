@@ -22,6 +22,7 @@ mod manifest_path;
 pub mod page_template;
 pub mod project;
 pub mod provision;
+mod removed_fixture_syntax;
 mod source;
 pub mod step;
 mod step_groups;

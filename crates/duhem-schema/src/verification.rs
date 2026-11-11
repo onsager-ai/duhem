@@ -268,54 +268,15 @@ impl SchemaError {
     }
 }
 
-fn removed_fixture_syntax(
-    document: &serde_yml::Value,
-    source_map: &SourceMap,
-) -> Option<SchemaError> {
-    fn visit(
-        value: &serde_yml::Value,
-        path: &mut Vec<crate::source::SourcePathSegment>,
-        source_map: &SourceMap,
-    ) -> Option<SchemaError> {
-        match value {
-            serde_yml::Value::Mapping(mapping) => {
-                for (key, value) in mapping {
-                    let key = key.as_str().unwrap_or_default();
-                    path.push(crate::source::SourcePathSegment::key(key));
-                    if (key == "fixtures" && path.len() == 1)
-                        || (key == "needs" && !path.iter().any(|segment| matches!(segment, crate::source::SourcePathSegment::Key(key) if matches!(key.as_str(), "with" | "inputs" | "outputs" | "params" | "sessions"))))
-                    {
-                        let location = source_map.key_location(path);
-                        return Some(removed_fixture_error(key, location));
-                    }
-                    if let Some(error) = visit(value, path, source_map) {
-                        return Some(error);
-                    }
-                    path.pop();
-                }
-            }
-            serde_yml::Value::Sequence(values) => {
-                for (index, value) in values.iter().enumerate() {
-                    path.push(crate::source::SourcePathSegment::index(index));
-                    if let Some(error) = visit(value, path, source_map) {
-                        return Some(error);
-                    }
-                    path.pop();
-                }
-            }
-            serde_yml::Value::String(raw) if raw.contains("$fixture.") => {
-                let location = source_map.node_location(path);
-                return Some(removed_fixture_error("$fixture", location));
-            }
-            _ => {}
-        }
-        None
-    }
-
-    visit(document, &mut Vec::new(), source_map)
+pub(crate) fn reject_removed_fixture_syntax(src: &str) -> Result<(), SchemaError> {
+    let document: serde_yml::Value = serde_yml::from_str(src)?;
+    crate::removed_fixture_syntax::validate(&document, &SourceMap::from_yaml(src))
 }
 
-fn removed_fixture_error(surface: &str, location: Option<crate::SourceLocation>) -> SchemaError {
+pub(crate) fn removed_fixture_error(
+    surface: &str,
+    location: Option<crate::SourceLocation>,
+) -> SchemaError {
     let mapping = "Declare `flows.<name>` with `steps:` (was `up:`), `cleanup:` (was `down:`) and the same `cleanup_policy:`; replace `$fixture.<name>.<id>.outputs.*` with `$steps.<id>.outputs.*`; replace `needs: [<name>]` with `- call: <name>` at the end of the check's `setup:`.";
     SchemaError::RemovedFixtureSyntax {
         message: format!("`{surface}` was removed in v0.9.0. {mapping}"),
@@ -328,10 +289,7 @@ impl VerificationDefinition {
     /// the structural validator; call `crate::validate()` for that.
     pub fn from_yaml_str(src: &str) -> Result<Self, SchemaError> {
         let source_map = SourceMap::from_yaml(src);
-        let document: serde_yml::Value = serde_yml::from_str(src).map_err(SchemaError::from)?;
-        if let Some(error) = removed_fixture_syntax(&document, &source_map) {
-            return Err(error);
-        }
+        reject_removed_fixture_syntax(src)?;
         let mut definition: Self = serde_yml::from_str(src).map_err(SchemaError::from)?;
         definition.source_map = source_map;
         Ok(definition)

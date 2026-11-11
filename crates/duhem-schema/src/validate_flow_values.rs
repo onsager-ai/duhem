@@ -66,11 +66,52 @@ pub(crate) fn validate(
                     });
                 }
                 if let Some(id) = &step.id {
-                    body.insert(
-                        id.as_str(),
-                        crate::validate::effective_outputs(step, outputs_for),
-                    );
+                    let mut outputs = crate::validate::effective_outputs(step, outputs_for);
+                    if let Some(flow) = step
+                        .call
+                        .as_ref()
+                        .and_then(|name| definition.flows.get(name))
+                    {
+                        outputs.extend(flow.outputs.keys().cloned());
+                    }
+                    body.insert(id.as_str(), outputs);
                 }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_conditions_accept_nested_call_outputs_and_reject_unknown_outputs() {
+        let yaml = r#"verification: nested cleanup
+flows:
+  child:
+    steps: [{id: make, uses: cli/invoke}]
+    outputs: {token: $steps.make.outputs.stdout}
+  parent:
+    steps: [{id: acquire, call: child}]
+    cleanup:
+      - uses: cli/invoke
+        if: $steps.acquire.outputs.token == 'ready'
+criteria: []
+"#;
+        for (source, valid) in [
+            (yaml.to_string(), true),
+            (
+                yaml.replace("outputs.token ==", "outputs.missing =="),
+                false,
+            ),
+        ] {
+            let definition = VerificationDefinition::from_yaml_str(&source).unwrap();
+            let mut errors = Vec::new();
+            validate(&definition, &|_| Vec::new(), &mut errors);
+            assert_eq!(errors.is_empty(), valid, "{errors:?}");
+            if !valid {
+                assert!(errors[0].location().is_some());
             }
         }
     }

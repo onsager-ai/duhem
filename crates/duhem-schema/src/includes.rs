@@ -64,6 +64,7 @@ impl PartialRootManifest {
     /// source. A `manifest_version:` key — or any other key not on the
     /// partial — is a parse error.
     pub fn from_yaml_str(src: &str) -> Result<Self, SchemaError> {
+        crate::verification::reject_removed_fixture_syntax(src)?;
         serde_yml::from_str(src).map_err(SchemaError::from)
     }
 }

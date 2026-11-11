@@ -270,6 +270,7 @@ impl RootManifest {
     /// Parse a root manifest from YAML source. Does not resolve
     /// entries; call [`crate::load`] for the full discovery pipeline.
     pub fn from_yaml_str(src: &str) -> Result<Self, SchemaError> {
+        crate::verification::reject_removed_fixture_syntax(src)?;
         serde_yml::from_str(src).map_err(SchemaError::from)
     }
 }

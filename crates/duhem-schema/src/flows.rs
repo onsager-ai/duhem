@@ -2061,7 +2061,8 @@ criteria: []
 
     #[test]
     fn cleanup_flows_cannot_be_called_from_teardown() {
-        for block in ["teardown: [{ call: scratch, with: { prefix: p } }]"] {
+        {
+            let block = "teardown: [{ call: scratch, with: { prefix: p } }]";
             let errors = cleanup_errors(&format!(
                 "verification: x\n{SCRATCH}\n{block}\ncriteria: []\n"
             ));

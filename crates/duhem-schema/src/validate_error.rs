@@ -256,7 +256,7 @@ pub enum ValidationError {
     },
 
     #[error(
-        "criterion `{criterion}` / check `{check}`: {site} `{raw}` references setup step `{step}`, which is declared but out of scope: a criterion- or check-level `setup:` step's outputs are not addressable from the check body (only leaf-level `setup:` is). If `{step}` should produce a value this check reads, move it to the leaf-level `setup:` block instead; `fixtures:` + `needs:` (#449) is a different tool — guaranteed per-check cleanup that can address what it created, but only from that fixture's own `down:`, never from a check body either"
+        "criterion `{criterion}` / check `{check}`: {site} `{raw}` references setup step `{step}`, which is declared but out of scope: a criterion- or check-level `setup:` step's outputs are not addressable from the check body (only leaf-level `setup:` is). If `{step}` should produce a value this check reads, move it to the leaf-level `setup:` block instead"
     )]
     SetupStepOutOfScope {
         criterion: String,
@@ -376,7 +376,7 @@ pub enum ValidationError {
     },
 
     #[error(
-        "{site} references `${name}`, but `${name}` is not a `for_each` binding in scope here (expected `$steps`, `$setup`, `$fixture`, `$inputs`, `$pages`, `$env`, `$runtime`, or the `as:` name of an enclosing `for_each`)"
+        "{site} references `${name}`, but `${name}` is not a `for_each` binding in scope here (expected `$steps`, `$setup`, `$inputs`, `$pages`, `$env`, `$runtime`, or the `as:` name of an enclosing `for_each`)"
     )]
     LoopVariableOutOfScope {
         site: String,
@@ -410,48 +410,10 @@ pub enum ValidationError {
         location: Option<SourceLocation>,
     },
 
-    #[error("fixture `{fixture}` must declare at least one `{phase}:` step")]
-    EmptyFixturePhase {
-        fixture: String,
-        phase: &'static str,
-    },
-
-    #[error("criterion `{criterion}` / check `{check}` needs undeclared fixture `{fixture}`")]
-    UndeclaredFixture {
-        criterion: String,
-        check: String,
-        fixture: String,
-        location: Option<SourceLocation>,
-    },
-
-    #[error("{site}: fixture references are only valid in that fixture's own `down:` block")]
-    FixtureRefOutsideDown {
-        site: String,
-        location: Option<SourceLocation>,
-    },
-
     #[error(
-        "{site}: `{action}` may mutate only a current-check or fixture process; leaf/criterion handles are inspect-only"
+        "{site}: `{action}` may mutate only a current-check process; leaf/criterion handles are inspect-only"
     )]
     ProcessMutationScope { site: String, action: String },
-
-    #[error("fixture `{fixture}` {phase} step `{step}` may not carry `needs:`")]
-    FixtureStepNeeds {
-        fixture: String,
-        phase: &'static str,
-        step: String,
-        location: Option<SourceLocation>,
-    },
-
-    #[error(
-        "fixture `{fixture}` down step `{down_step}` references invalid fixture output `{raw}`"
-    )]
-    InvalidFixtureRef {
-        fixture: String,
-        down_step: String,
-        raw: String,
-        location: Option<SourceLocation>,
-    },
 }
 
 impl ValidationError {
@@ -480,10 +442,6 @@ impl ValidationError {
             | Self::ForEachMaxRequired { location, .. }
             | Self::ForEachDepthExceeded { location, .. }
             | Self::ForEachWrapperFieldNotAllowed { location, .. } => *location,
-            Self::UndeclaredFixture { location, .. }
-            | Self::FixtureRefOutsideDown { location, .. }
-            | Self::FixtureStepNeeds { location, .. }
-            | Self::InvalidFixtureRef { location, .. } => *location,
             Self::DuplicateLifecycleStepId { location, .. }
             | Self::LifecycleStepIdCollision { location, .. } => *location,
             _ => None,

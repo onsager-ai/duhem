@@ -62,8 +62,7 @@ A process belongs to the leaf, criterion or check attempt that declared its
 start (a flow called from check `setup:` included), independently of
 temporary browser contexts. A check may inspect its enclosing leaf/criterion
 processes but may stop/restart only processes owned by that check attempt.
-A deprecated `fixtures:` entry (#618) is desugared onto its consuming check's
-`setup:`, so it owns processes at check-attempt scope too. Sibling checks
+Sibling checks
 and later retries cannot use each other's handles. Validation rejects
 resolvable enclosing mutations; runtime ownership checks cover dynamically
 supplied handles.
@@ -71,8 +70,7 @@ supplied handles.
 Process outputs from criterion/check setup are addressable as
 `$setup.<step>.outputs.<name>`, which includes a flow called from check
 `setup:` (read through the call's declared `outputs:` as
-`$setup.<call-id>.outputs.<name>`); a consuming check reads a deprecated
-fixture's process outputs as `$fixture.<fixture>.<step>.outputs.<name>`.
+`$setup.<call-id>.outputs.<name>`).
 This is a narrow addition for the new process actions; existing non-process
 setup visibility is unchanged.
 

@@ -433,7 +433,7 @@ criteria:
 }
 
 #[tokio::test]
-async fn flow_cleanups_and_fixture_downs_unwind_in_one_lifo_order() {
+async fn flow_cleanups_unwind_in_one_lifo_order() {
     let (mut engine, _tmp) = engine_for_test().await;
     let log = tag_engine(
         &mut engine,
@@ -445,19 +445,20 @@ async fn flow_cleanups_and_fixture_downs_unwind_in_one_lifo_order() {
     );
     let definition = load_flows(&format!(
         r#"
-verification: flow cleanup and fixtures
+verification: flow cleanup stack
 {RES_FLOW}
-fixtures:
+flows:
   f:
-    up: [{{uses: fake/body, with: {{tag: fu}}}}]
-    down: [{{uses: fake/clean, with: {{tag: fd}}}}]
+    steps: [{{uses: fake/body, with: {{tag: fu}}}}]
+    cleanup: [{{uses: fake/clean, with: {{tag: fd}}}}]
 criteria:
   - id: AC
-    description: One stack orders flow cleanups and fixture downs
+    description: One stack orders flow cleanups
     checks:
       - id: c
-        needs: [f]
-        setup: [{{id: pre, call: res, with: {{name: s}}}}]
+        setup:
+          - {{id: pre, call: res, with: {{name: s}}}}
+          - {{call: f}}
         steps: [{{id: a, call: res, with: {{name: a}}}}]
         teardown: [{{uses: fake/td, with: {{tag: t}}}}]
         assertions: ["true"]
@@ -560,71 +561,6 @@ criteria:
 }
 
 #[tokio::test]
-async fn a_desugared_fixture_keeps_its_name_and_check_in_lifecycle_evidence() {
-    let (mut engine, _tmp) = engine_for_test().await;
-    let log = tag_engine(&mut engine, &[("fake/up", false), ("fake/down", false)]);
-    let definition = def(r#"
-verification: deprecated fixture evidence
-fixtures:
-  resource:
-    up: [{id: make, uses: fake/up, with: {tag: u}}]
-    down: [{uses: fake/down, with: {tag: "$fixture.resource.make.outputs.value"}}]
-criteria:
-  - id: AC
-    description: Evidence still names the fixture and its consuming check
-    checks:
-      - {id: c, needs: [resource], assertions: ["true"]}
-"#);
-    let outcome = engine
-        .run_with_metadata(&definition, BTreeMap::new())
-        .await
-        .unwrap();
-    assert!(outcome.cleanup.is_empty(), "{:?}", outcome.cleanup);
-    // The down block reads the up step's output through the rewritten reference.
-    assert_eq!(*log.lock().unwrap(), ["up:u", "down:u"]);
-    let trace = Trace::from_store(engine.store.as_ref().unwrap().as_ref(), &outcome.run_id)
-        .await
-        .unwrap();
-    let blocks: Vec<_> = trace
-        .into_events()
-        .into_iter()
-        .filter_map(|event| match event.payload {
-            EventPayload::SetupStarted {
-                phase,
-                fixture_name,
-                check_id,
-                criterion_id,
-                registered_by,
-                ..
-            } => Some((
-                phase,
-                fixture_name,
-                check_id,
-                criterion_id,
-                registered_by.is_some(),
-            )),
-            _ => None,
-        })
-        .collect();
-    let named = |phase| {
-        (
-            phase,
-            Some("resource".to_string()),
-            Some("c".to_string()),
-            None,
-            false,
-        )
-    };
-    assert_eq!(
-        blocks,
-        [
-            named(duhem_evidence::StepPhase::Setup),
-            named(duhem_evidence::StepPhase::Teardown)
-        ]
-    );
-}
-
-#[tokio::test]
 async fn a_call_inside_a_group_registers_at_the_check_and_a_gated_group_registers_nothing() {
     let (mut engine, _tmp) = engine_for_test().await;
     let log = tag_engine(
@@ -668,4 +604,31 @@ criteria:
         *log.lock().unwrap(),
         ["body:y", "body:z", "clean:y", "td:t"]
     );
+}
+
+#[tokio::test]
+async fn failed_check_setup_flow_is_inconclusive_and_cleans_before_teardown() {
+    let (mut engine, _tmp) = engine_for_test().await;
+    let log = tag_engine(&mut engine, &[("fake/body", false), ("fake/fail", true), ("fake/clean", false), ("fake/td", false)]);
+    let definition = load_flows(r#"
+verification: failed setup flow
+flows:
+  res:
+    steps: [{uses: fake/fail, with: {tag: up}}]
+    cleanup: [{uses: fake/clean, with: {tag: down}}]
+criteria:
+  - id: AC
+    description: Setup abort retains cleanup and skips body
+    checks:
+      - id: c
+        setup:
+          - {uses: fake/body, with: {tag: setup}}
+          - {call: res}
+        steps: [{uses: fake/body, with: {tag: skipped}}]
+        teardown: [{uses: fake/td, with: {tag: teardown}}]
+        assertions: ["true"]
+"#);
+    let outcome = engine.run_with_metadata(&definition, BTreeMap::new()).await.unwrap();
+    assert!(matches!(outcome.verdict.criteria[0].checks[0].state, VerdictState::Inconclusive(_)));
+    assert_eq!(*log.lock().unwrap(), ["body:setup", "fail:up", "clean:down", "td:teardown"]);
 }

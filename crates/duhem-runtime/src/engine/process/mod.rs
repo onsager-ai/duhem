@@ -26,7 +26,6 @@ pub(crate) struct Owner {
     pub criterion: Option<String>,
     pub check: Option<String>,
     pub attempt: Option<String>,
-    pub fixture: Option<String>,
 }
 
 impl Owner {
@@ -36,7 +35,6 @@ impl Owner {
             criterion: None,
             check: None,
             attempt: None,
-            fixture: None,
         }
     }
     pub fn criterion(&self, id: &str) -> Self {
@@ -49,12 +47,6 @@ impl Owner {
         Self {
             check: Some(id.into()),
             attempt: Some(uuid::Uuid::new_v4().to_string()),
-            ..self.clone()
-        }
-    }
-    pub fn fixture(&self, name: &str) -> Self {
-        Self {
-            fixture: Some(name.into()),
             ..self.clone()
         }
     }
@@ -133,7 +125,7 @@ impl Processes {
         }
         if uses != "process/inspect" && !owner.may_mutate(&entry.owner) {
             return Err(error(
-                "process/stop and process/restart require a current-check or fixture handle; enclosing handles are read-only",
+                "process/stop and process/restart require a current-check handle; enclosing handles are read-only",
             ));
         }
         if uses == "process/restart" && entry.restarted {

@@ -110,23 +110,6 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
         &mut lifecycle_counter,
     );
     expand_for_each_in_list(&mut definition.teardown, &catalog, &mut lifecycle_counter);
-    for (fixture_name, lifecycle) in definition.fixtures.iter_mut() {
-        let fixture_root = format!("fixture.{fixture_name}");
-        expand_lifecycle_calls_in_list(
-            &mut lifecycle.up,
-            &catalog,
-            &fixture_root,
-            &mut lifecycle_counter,
-        );
-        expand_for_each_in_list(&mut lifecycle.up, &catalog, &mut lifecycle_counter);
-        expand_lifecycle_calls_in_list(
-            &mut lifecycle.down,
-            &catalog,
-            &fixture_root,
-            &mut lifecycle_counter,
-        );
-        expand_for_each_in_list(&mut lifecycle.down, &catalog, &mut lifecycle_counter);
-    }
     for criterion in &mut definition.criteria {
         rewrite_seed(&mut criterion.session, &leaf_projections);
         let mut seed_projections = leaf_projections.clone();
@@ -186,13 +169,13 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
 }
 
 /// Expand a direct (non-`for_each`) `call:` step in one lifecycle step
-/// list — leaf/criterion/check `setup:`/`teardown:` or fixture
-/// `up:`/`down:` — into its flow's flattened steps, in place (#526).
+/// list — leaf, criterion or check `setup:`/`teardown:` — into its flow's
+/// flattened steps, in place (#526).
 /// Reuses the same static expansion a check's `steps:` list gets
 /// (`expand_sequence`). `external_root` is the accessor lifecycle
 /// steps in *this* list actually publish their outputs to at runtime
-/// (`setup` for leaf/criterion/check blocks, `fixture.<name>` for a
-/// fixture's own `up:`/`down:`) — never `steps`, which is check-only
+/// (`setup` for lifecycle blocks, or `steps` for check bodies) — never
+/// a flow's own body namespace, which is always `steps`.
 /// (§10.7) — so a call's declared `outputs:` project onto
 /// `$<external_root>.<call id>.outputs.<name>` and a later step in the
 /// same block can read them the way it already reads any other
@@ -255,7 +238,6 @@ fn for_each_body_steps(step: &Step) -> Option<Vec<Step>> {
 /// for_each body forms without hand-listing every field.
 fn blank_step() -> Step {
     Step {
-        needs: Vec::new(),
         id: None,
         session: None,
         description: None,
@@ -278,8 +260,7 @@ fn blank_step() -> Step {
 }
 
 /// Expand every `for_each:` step's body in one lifecycle step list
-/// (leaf `setup:`/`teardown:`, fixture `up:`/`down:`, or a
-/// criterion-/check-level `setup:`/`teardown:`). Non-`for_each` steps
+/// (leaf, criterion, or check `setup:`/`teardown:`). Non-`for_each` steps
 /// are untouched. `counter` is threaded across every call so
 /// invocation ordinals stay unique across the whole definition, same
 /// as check-step flow expansion.
@@ -322,8 +303,8 @@ struct Expansion {
     projections: BTreeMap<String, String>,
 }
 
-/// `external_root` is the accessor prefix (`steps`, `setup`, or
-/// `fixture.<name>`) that a call step's *caller* would use to read the
+/// `external_root` is the accessor prefix (`steps` or `setup`) that a call
+/// step's *caller* would use to read the
 /// call's declared `outputs:` — i.e. what `result.projections`' keys
 /// and values are rooted in for calls processed directly by *this*
 /// invocation. A flow's own body is always internally `$steps.`-rooted
@@ -501,7 +482,7 @@ fn expand_sequence(
             // is `$steps.<...>` here regardless of `external_root`.
             // Re-root it onto the accessor this call's own caller
             // actually reads from (`$steps.` unchanged for a check;
-            // `$setup.`/`$fixture.<name>.` for a lifecycle block,
+            // `$setup.` for a lifecycle block,
             // #526) before it becomes the caller-facing projection.
             let projected =
                 rewrite_string(&rewrite_string(raw, &expanded.projections), &direct_ids);
@@ -591,7 +572,6 @@ fn expand_flow_cleanup(
         steps,
         aliases: aliases.into_iter().collect(),
         per_iteration: false,
-        fixture: None,
     }
 }
 
@@ -1069,11 +1049,9 @@ criteria:
         assert!(errors.contains("missing parameter `name`"), "{errors}");
     }
 
-    /// #526 Test item 1: a direct `call:` validates at each of the
-    /// five lifecycle sites (leaf, criterion, check, fixture up,
-    /// fixture down — `setup:`/`teardown:` counted together per
-    /// site), and an unknown flow name or a missing/mistyped param is
-    /// still rejected with a location, same as a check's own `call:`.
+    /// #526 Test item 1: a direct `call:` validates at each lifecycle
+    /// site, and an unknown flow name or missing/mistyped param is
+    /// rejected with a location, same as a check's own `call:`.
     #[test]
     fn direct_call_validates_at_every_lifecycle_site_and_flow_params_are_checked() {
         let ok = authored(
@@ -1094,16 +1072,13 @@ teardown:
   - id: b
     call: greet
     with: { name: leaf-teardown }
-fixtures:
-  server:
-    up:
-      - id: c
-        call: greet
-        with: { name: fixture-up }
-    down:
-      - id: d
-        call: greet
-        with: { name: fixture-down }
+  - id: resource
+    call: greet
+    with: { name: setup-call }
+teardown:
+  - id: release
+    call: greet
+    with: { name: teardown-call }
 criteria:
   - id: AC-1
     description: x
@@ -1155,13 +1130,9 @@ flows:
       name: { type: string }
     steps:
       - uses: cli/invoke
-fixtures:
-  server:
-    up:
-      - call: greet
-        with: {}
-    down:
-      - uses: cli/invoke
+setup:
+  - call: greet
+    with: {}
 criteria: []
 "#,
         );
@@ -1244,43 +1215,6 @@ criteria:
         ));
         crate::validate_with_contract_outputs(&definition, &|_| vec!["stdout".into()])
             .expect("rewritten condition resolves against the expanded step");
-    }
-
-    /// #526: the same projection, but for a fixture `up:` call whose
-    /// declared output a later `up:` step reads via `$fixture.<name>.*`.
-    #[test]
-    fn direct_call_output_in_fixture_up_projects_onto_the_fixture_accessor() {
-        let mut definition = authored(
-            r#"
-verification: x
-flows:
-  make_token:
-    steps:
-      - id: produce
-        uses: cli/invoke
-        with: { command: [echo, made] }
-    outputs:
-      value: $steps.produce.outputs.stdout
-fixtures:
-  server:
-    up:
-      - id: make
-        call: make_token
-      - uses: cli/invoke
-        with: { command: [echo, $fixture.server.make.outputs.value] }
-    down:
-      - uses: cli/invoke
-criteria: []
-"#,
-        );
-        validate_and_expand(&mut definition).expect("expand");
-        let up = &definition.fixtures["server"].up;
-        assert_eq!(up.len(), 2);
-        assert_eq!(up[0].id.as_deref(), Some("make__produce"));
-        assert_eq!(
-            up[1].with["command"][1].as_str(),
-            Some("$fixture.server.make__produce.outputs.stdout")
-        );
     }
 
     #[test]
@@ -2126,12 +2060,8 @@ criteria: []
     }
 
     #[test]
-    fn cleanup_flows_cannot_be_called_from_teardown_or_fixtures() {
-        for block in [
-            "teardown: [{ call: scratch, with: { prefix: p } }]",
-            "fixtures: { r: { up: [{ call: scratch, with: { prefix: p } }], down: [{ uses: cli/invoke }] } }",
-            "fixtures: { r: { up: [{ uses: cli/invoke }], down: [{ call: scratch, with: { prefix: p } }] } }",
-        ] {
+    fn cleanup_flows_cannot_be_called_from_teardown() {
+        for block in ["teardown: [{ call: scratch, with: { prefix: p } }]"] {
             let errors = cleanup_errors(&format!(
                 "verification: x\n{SCRATCH}\n{block}\ncriteria: []\n"
             ));

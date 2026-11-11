@@ -67,22 +67,6 @@ pub fn step_blocks(definition: &VerificationDefinition) -> Vec<StepBlock<'_>> {
             &mut blocks,
         );
     }
-    for (name, fixture) in &definition.fixtures {
-        for (phase, steps) in [("up", &fixture.up), ("down", &fixture.down)] {
-            collect(
-                steps,
-                format!("fixture `{name}` {phase}"),
-                vec![
-                    Segment::key("fixtures"),
-                    Segment::key(name),
-                    Segment::key(phase),
-                ],
-                None,
-                false,
-                &mut blocks,
-            );
-        }
-    }
     for (name, flow) in &definition.flows {
         for (field, steps, site) in [
             ("steps", &flow.steps, format!("flow `{name}`")),

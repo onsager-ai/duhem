@@ -12,20 +12,6 @@ pub(crate) fn validate_authored(definition: &VerificationDefinition) -> Vec<Stri
         definition,
         &mut errors,
     );
-    for (fixture, lifecycle) in &definition.fixtures {
-        validate_lifecycle_dispatch(
-            &lifecycle.up,
-            &format!("fixture `{fixture}` up step"),
-            definition,
-            &mut errors,
-        );
-        validate_lifecycle_dispatch(
-            &lifecycle.down,
-            &format!("fixture `{fixture}` down step"),
-            definition,
-            &mut errors,
-        );
-    }
     for criterion in &definition.criteria {
         validate_lifecycle_dispatch(
             &criterion.setup,
@@ -132,8 +118,8 @@ pub(crate) fn validate_authored(definition: &VerificationDefinition) -> Vec<Stri
     errors
 }
 
-/// Validate one lifecycle step list — `setup:`, `teardown:`, fixture
-/// `up:`/`down:`, or a criterion-/check-level `setup:`/`teardown:`
+/// Validate one lifecycle step list — `setup:`/`teardown:` at the
+/// leaf, criterion or check level
 /// (§10.3.6). A direct `call:` is legitimate here (#526), same as a
 /// `for_each:` step's `call:` body form (#443) — both get the same
 /// flow-param validation a check's `call:` step already gets.
@@ -156,7 +142,7 @@ fn validate_lifecycle_dispatch(
             {
                 if registers_cleanup(called, &definition.flows, &mut BTreeSet::new()) {
                     errors.push(format!(
-                        "{site}: flow `{called}` declares `cleanup:` and cannot be called from `teardown:` or a fixture; flows with `cleanup:` may only be called from `setup:` or check `steps:`"
+                        "{site}: flow `{called}` declares `cleanup:` and cannot be called from `teardown:` from `teardown:`; flows with `cleanup:` may only be called from lifecycle `setup:` or check `steps:`"
                     ));
                 }
             }

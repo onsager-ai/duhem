@@ -6,7 +6,7 @@
 //! ([`process_lifecycle_step`]) plus the loop that reuses it once per
 //! `for_each:` element ([`run_for_each_step`]) — that setup.rs's
 //! lifecycle-block orchestration (`run_lifecycle_steps` and its
-//! `run_setup`/`run_teardown`/fixture/criterion/check wrappers) calls
+//! `run_setup`/`run_teardown`/criterion/check wrappers) calls
 //! into but doesn't need the internals of.
 
 use std::collections::BTreeMap;
@@ -641,12 +641,7 @@ async fn invoke_and_record(
     } = invocation;
     // The caller persisted `SetupStepStarted` before dispatch so slow
     // actions and gated skips share one honest lifecycle shape.
-    let owner = match scope {
-        HookScope::Fixture(name, _) | HookScope::FixtureDown(name, _, _) => {
-            run.process_owner.fixture(name)
-        }
-        _ => run.process_owner.clone(),
-    };
+    let owner = run.process_owner.clone();
     let result = crate::engine::registry::invoke_scoped(
         dispatcher,
         page,
@@ -689,21 +684,9 @@ async fn invoke_and_record(
                 &step.outputs,
                 &r.outputs,
                 |local, v| {
-                    if let HookScope::Fixture(fixture, _) | HookScope::FixtureDown(fixture, _, _) =
-                        scope
-                    {
-                        run.record_fixture_output(fixture, id, local, v);
-                    } else {
-                        // Leaf, criterion, and check `setup:`/`teardown:`
-                        // steps all publish into the same `$setup.<id>`
-                        // namespace (#441 Part B): execution is strictly
-                        // sequential and validation forbids an inner
-                        // scope's step id from shadowing an outer scope's
-                        // still-open id, so a flat map is safe and lets
-                        // an outer teardown read its own outer setup's
-                        // outputs with no new reference syntax.
-                        run.record_setup_output(id, local, v);
-                    }
+                    // Leaf, criterion, and check lifecycle steps share the
+                    // `$setup.<id>` namespace (#441 Part B).
+                    run.record_setup_output(id, local, v);
                 },
             );
             for name in refused {
@@ -754,19 +737,15 @@ async fn invoke_and_record(
             .as_deref()
             .map(|detail| writer.mask_text(detail)),
     };
-    let judgment = (!scope.is_fixture())
-        .then(|| {
-            implicit_judgment_for_step(
-                step,
-                idx,
-                dispatcher.judges(),
-                true,
-                &evidence,
-                false,
-                false,
-            )
-        })
-        .flatten();
+    let judgment = implicit_judgment_for_step(
+        step,
+        idx,
+        dispatcher.judges(),
+        true,
+        &evidence,
+        false,
+        false,
+    );
     let judgment_detail = if scope.judges_cleanup() && matches!(outcome, Outcome::Ok) {
         judgment.as_ref().and_then(|outcome| outcome.detail.clone())
     } else {

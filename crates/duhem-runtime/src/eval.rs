@@ -136,9 +136,6 @@ pub trait EvalContext {
     fn setup_output(&self, _step_id: &str, _output: &str) -> Option<&Value> {
         None
     }
-    fn fixture_output(&self, _fixture: &str, _step_id: &str, _output: &str) -> Option<&Value> {
-        None
-    }
     /// The current `for_each:` element, when `name` matches the
     /// enclosing loop's `as:` binding (#443). Nesting is capped at
     /// depth 1, so at most one binding is ever active.
@@ -311,19 +308,6 @@ fn eval_path(p: &Path, ctx: &dyn EvalContext) -> EvalRes {
                 }
             })?;
             navigate(base, output, p, 3.min(p.segments.len()))
-        }
-        PathRoot::Fixture => {
-            let fixture = p.segments.first().map(String::as_str).unwrap_or("");
-            let step = p.segments.get(1).map(String::as_str).unwrap_or("");
-            let output = p.segments.get(3).map(String::as_str).unwrap_or("");
-            let base = ctx
-                .fixture_output(fixture, step, output)
-                .cloned()
-                .ok_or_else(|| InconclusiveCause::MissingSetupObservation {
-                    step: format!("{fixture}.{step}"),
-                    output: output.to_string(),
-                })?;
-            navigate(base, output, p, 4.min(p.segments.len()))
         }
         PathRoot::Env => {
             // `$env.<name>` is always a string; deeper segments would be

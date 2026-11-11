@@ -77,37 +77,6 @@ impl CleanupPolicy {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Fixture {
-    /// Actions that establish one fresh instance for a check.
-    pub up: Vec<Step>,
-    /// Cleanup actions for that instance, required by default.
-    pub down: Vec<Step>,
-    #[serde(default, skip_serializing_if = "CleanupPolicy::is_required")]
-    pub cleanup_policy: CleanupPolicy,
-}
-
-pub type FixtureCatalog = BTreeMap<String, Fixture>;
-
-/// `fixtures:` schema, marked deprecated (#618).
-fn deprecated_fixtures_schema(
-    generator: &mut schemars::SchemaGenerator,
-) -> schemars::schema::Schema {
-    let mut schema = generator.subschema_for::<FixtureCatalog>().into_object();
-    schema.metadata().deprecated = true;
-    schemars::schema::Schema::Object(schema)
-}
-
-/// `needs:` schema, marked deprecated (#618).
-pub(crate) fn deprecated_needs_schema(
-    generator: &mut schemars::SchemaGenerator,
-) -> schemars::schema::Schema {
-    let mut schema = generator.subschema_for::<Vec<String>>().into_object();
-    schema.metadata().deprecated = true;
-    schemars::schema::Schema::Object(schema)
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 pub struct VerificationDefinition {
     /// Deserializer-retained YAML marks for semantic diagnostics. This is
     /// provenance only: it is absent from the wire shape and semantic equality.
@@ -163,7 +132,7 @@ pub struct VerificationDefinition {
     pub provision: Option<Provision>,
 
     /// Declared inputs. Map keys are alphabetized on round-trip
-    /// (BTreeMap); fixtures should be authored alphabetized.
+    /// (BTreeMap); keys should be authored alphabetized.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, InputDecl>,
 
@@ -189,11 +158,6 @@ pub struct VerificationDefinition {
     /// least one setup action was dispatched.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub teardown: Vec<Step>,
-
-    /// Deprecated (#618), removed in v0.9.0: declare a flow with `cleanup:` instead. Named, per-check lifecycle resources. Each check gets a fresh instance of every fixture named by its `needs:` list.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    #[schemars(schema_with = "deprecated_fixtures_schema")]
-    pub fixtures: FixtureCatalog,
 
     /// At least one criterion is required (enforced by the validator,
     /// not the type system, so we can produce a friendly error).
@@ -282,16 +246,80 @@ impl std::fmt::Display for InputType {
 pub enum SchemaError {
     #[error("YAML parse error: {0}")]
     Yaml(#[from] serde_yml::Error),
+    #[error("{message}")]
+    RemovedFixtureSyntax {
+        message: String,
+        location: Option<crate::SourceLocation>,
+    },
 }
 
 impl SchemaError {
     /// Source location (line/column) of the parse failure, if the
     /// underlying error carries one. Lets callers render errors with
     /// editor-friendly provenance without matching on the variant.
-    pub fn location(&self) -> Option<serde_yml::Location> {
+    pub fn location(&self) -> Option<crate::SourceLocation> {
         match self {
-            SchemaError::Yaml(e) => e.location(),
+            SchemaError::Yaml(e) => e.location().map(|location| crate::SourceLocation {
+                line: location.line(),
+                column: location.column(),
+            }),
+            SchemaError::RemovedFixtureSyntax { location, .. } => *location,
         }
+    }
+}
+
+fn removed_fixture_syntax(
+    document: &serde_yml::Value,
+    source_map: &SourceMap,
+) -> Option<SchemaError> {
+    fn visit(
+        value: &serde_yml::Value,
+        path: &mut Vec<crate::source::SourcePathSegment>,
+        source_map: &SourceMap,
+    ) -> Option<SchemaError> {
+        match value {
+            serde_yml::Value::Mapping(mapping) => {
+                for (key, value) in mapping {
+                    let key = key.as_str().unwrap_or_default();
+                    path.push(crate::source::SourcePathSegment::key(key));
+                    if (key == "fixtures" && path.len() == 1)
+                        || (key == "needs" && !path.iter().any(|segment| matches!(segment, crate::source::SourcePathSegment::Key(key) if matches!(key.as_str(), "with" | "inputs" | "outputs" | "params" | "sessions"))))
+                    {
+                        let location = source_map.node_location(path);
+                        return Some(removed_fixture_error(key, location));
+                    }
+                    if let Some(error) = visit(value, path, source_map) {
+                        return Some(error);
+                    }
+                    path.pop();
+                }
+            }
+            serde_yml::Value::Sequence(values) => {
+                for (index, value) in values.iter().enumerate() {
+                    path.push(crate::source::SourcePathSegment::index(index));
+                    if let Some(error) = visit(value, path, source_map) {
+                        return Some(error);
+                    }
+                    path.pop();
+                }
+            }
+            serde_yml::Value::String(raw) if raw.contains("$fixture.") => {
+                let location = source_map.node_location(path);
+                return Some(removed_fixture_error("$fixture", location));
+            }
+            _ => {}
+        }
+        None
+    }
+
+    visit(document, &mut Vec::new(), source_map)
+}
+
+fn removed_fixture_error(surface: &str, location: Option<crate::SourceLocation>) -> SchemaError {
+    let mapping = "Declare `flows.<name>` with `steps:` (was `up:`), `cleanup:` (was `down:`) and the same `cleanup_policy:`; replace `$fixture.<name>.<id>.outputs.*` with `$steps.<id>.outputs.*`; replace `needs: [<name>]` with `- call: <name>` at the end of the check's `setup:`.";
+    SchemaError::RemovedFixtureSyntax {
+        message: format!("`{surface}` was removed in v0.9.0. {mapping}"),
+        location,
     }
 }
 
@@ -299,8 +327,13 @@ impl VerificationDefinition {
     /// Parse a Verification Definition from YAML source. Does not run
     /// the structural validator; call `crate::validate()` for that.
     pub fn from_yaml_str(src: &str) -> Result<Self, SchemaError> {
+        let source_map = SourceMap::from_yaml(src);
+        let document: serde_yml::Value = serde_yml::from_str(src).map_err(SchemaError::from)?;
+        if let Some(error) = removed_fixture_syntax(&document, &source_map) {
+            return Err(error);
+        }
         let mut definition: Self = serde_yml::from_str(src).map_err(SchemaError::from)?;
-        definition.source_map = SourceMap::from_yaml(src);
+        definition.source_map = source_map;
         Ok(definition)
     }
 
@@ -391,7 +424,6 @@ criteria:
             flows: BTreeMap::new(),
             setup: vec![],
             teardown: vec![],
-            fixtures: BTreeMap::new(),
             criteria: vec![],
         };
         let y = v.to_yaml_string().unwrap();
@@ -458,28 +490,22 @@ criteria: []
     }
 
     #[test]
-    fn fixtures_round_trip_and_absence_keeps_wire_shape() {
-        let source = "verification: x\ncriteria: []\n";
-        let absent = VerificationDefinition::from_yaml_str(source).unwrap();
-        assert!(absent.fixtures.is_empty());
-        assert_eq!(absent.to_yaml_string().unwrap(), source);
+    fn removed_fixture_syntax_fails_with_mapping_and_source_location() {
+        let source = "verification: x\nfixtures:\n  project: {}\ncriteria: []\n";
+        let error = VerificationDefinition::from_yaml_str(source).unwrap_err();
+        assert!(error.to_string().contains("Declare `flows.<name>`"));
+        assert!(error.to_string().contains("replace `needs: [<name>]`"));
+        let location = error.location().expect("removed syntax location");
+        assert_eq!((location.line, location.column), (2, 1));
 
-        let source = r#"verification: x
-fixtures:
-  project:
-    up:
-      - id: create
-        uses: api/call
-    down:
-      - uses: api/call
-        with: {url: $fixture.project.create.outputs.body.url}
-criteria: []
-"#;
-        let parsed = VerificationDefinition::from_yaml_str(source).unwrap();
-        assert_eq!(parsed.fixtures["project"].up.len(), 1);
-        let round_trip =
-            VerificationDefinition::from_yaml_str(&parsed.to_yaml_string().unwrap()).unwrap();
-        assert_eq!(round_trip.fixtures, parsed.fixtures);
+        for source in [
+            "verification: x\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        needs: [thing]\n        assertions: [\"true\"]\n",
+            "verification: x\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        assertions: [\"$fixture.thing.make.outputs.value\"]\n",
+        ] {
+            let error = VerificationDefinition::from_yaml_str(source).unwrap_err();
+            assert!(error.to_string().contains("removed in v0.9.0"));
+            assert!(error.location().is_some());
+        }
     }
 
     #[test]
@@ -662,34 +688,6 @@ criteria: []
         assert!(
             msg.contains("bogus") || msg.contains("unknown variant"),
             "expected variant error mentioning `bogus`, got: {msg}"
-        );
-    }
-}
-
-#[cfg(test)]
-mod cleanup_policy_tests {
-    use super::*;
-
-    #[test]
-    fn fixture_policy_defaults_required_omits_default_and_rejects_unknown() {
-        let fixture: Fixture = serde_yml::from_str("up: []\ndown: []\n").unwrap();
-        assert_eq!(fixture.cleanup_policy, CleanupPolicy::Required);
-        assert!(
-            !serde_yml::to_string(&fixture)
-                .unwrap()
-                .contains("cleanup_policy")
-        );
-        let diagnostic: Fixture =
-            serde_yml::from_str("up: []\ndown: []\ncleanup_policy: diagnostic_only\n").unwrap();
-        assert_eq!(diagnostic.cleanup_policy, CleanupPolicy::DiagnosticOnly);
-        assert!(
-            serde_yml::to_string(&diagnostic)
-                .unwrap()
-                .contains("diagnostic_only")
-        );
-        assert!(
-            serde_yml::from_str::<Fixture>("up: []\ndown: []\ncleanup_policy: best_effort\n")
-                .is_err()
         );
     }
 }

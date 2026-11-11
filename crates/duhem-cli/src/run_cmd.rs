@@ -338,9 +338,6 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             );
             return ExitCode::FAILURE;
         }
-        for warning in duhem_schema::fixture_deprecation_warnings(&leaf.definition) {
-            eprintln!("warning: {}: {warning}", leaf.path.display());
-        }
         let (inputs, secrets) = match resolve_leaf_inputs(
             &merged_inputs,
             &env_inputs,
@@ -668,11 +665,6 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                             .flat_map(|ch| &ch.steps),
                     )
                     .chain(&def.teardown)
-                    .chain(
-                        def.fixtures
-                            .values()
-                            .flat_map(|fixture| fixture.up.iter().chain(&fixture.down)),
-                    )
                     .flat_map(duhem_schema::Step::actions)
                     .any(|s| duhem_actions::uses_requires_page(s.uses_name())));
 

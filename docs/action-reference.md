@@ -512,7 +512,7 @@ Read an owned process's exit facts and bounded, masked stdout/stderr logs.
 
 ### `process/stop`
 
-Stop and reap a current-check or fixture process group with bounded escalation.
+Stop and reap a current-check process group with bounded escalation.
 
 | `with:` field | required | values |
 |---|:---:|---|
@@ -527,7 +527,7 @@ Stop and reap a current-check or fixture process group with bounded escalation.
 
 ### `process/restart`
 
-Stop the old generation before restarting a current-check or fixture process.
+Stop the old generation before restarting a current-check process.
 
 | `with:` field | required | values |
 |---|:---:|---|

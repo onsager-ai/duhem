@@ -6,9 +6,7 @@ use crate::engine::CleanupFailure;
 impl Owner {
     fn evidence_owner(&self) -> duhem_evidence::event::ProcessOwner {
         duhem_evidence::event::ProcessOwner {
-            scope: if self.fixture.is_some() {
-                "fixture"
-            } else if self.check.is_some() {
+            scope: if self.check.is_some() {
                 "check"
             } else if self.criterion.is_some() {
                 "criterion"
@@ -20,7 +18,7 @@ impl Owner {
             criterion_id: self.criterion.clone(),
             check_id: self.check.clone(),
             attempt: self.attempt.clone(),
-            fixture_name: self.fixture.clone(),
+            fixture_name: None,
         }
     }
 }
@@ -49,8 +47,8 @@ impl Entry {
 }
 
 impl Processes {
-    /// Always required, regardless of an authored fixture cleanup policy or
-    /// --keep-env. A None owner drains all remaining scopes after cancellation
+    /// Always required, regardless of --keep-env. A None owner drains all
+    /// remaining scopes after cancellation
     /// or an engine/evidence error. Stop continues even if evidence fails.
     pub async fn finalize(
         &mut self,
@@ -61,8 +59,7 @@ impl Processes {
         for entry in self.entries.iter_mut().rev().filter(|entry| {
             owner.is_none_or(|owner| {
                 entry.owner == *owner
-                    || (owner.fixture.is_none()
-                        && entry.owner.may_read(owner)
+                    || (entry.owner.may_read(owner)
                         && (owner.attempt.is_some() || owner.check.is_none()))
             })
         }) {

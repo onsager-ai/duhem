@@ -1,22 +1,27 @@
+fn cleanup_definition(engine: &mut Engine, yaml: &str) -> VerificationDefinition {
+    engine.register_test_action(Box::new(StubAction::new("fake/setup", Outcome::Ok)));
+    load_flows(yaml)
+}
+
 #[tokio::test]
 async fn required_cleanup_preserves_body_and_independent_checks() {
     for body in ["true", "false", "$steps.missing.outputs.value == true"] {
         for policy in ["required", "diagnostic_only"] {
             let (mut engine, tmp) = engine_for_test().await;
             engine.register_test_action(Box::new(StubAction::new("fake/down", Outcome::Error)));
-            let definition = def(&format!(r#"
+            let definition = cleanup_definition(&mut engine, &format!(r#"
 verification: cleanup gate
-fixtures:
+flows:
   resource:
+    steps: [{{uses: fake/setup}}]
+    cleanup: [{{id: release, uses: fake/down}}]
     cleanup_policy: {policy}
-    up: []
-    down: [{{id: release, uses: fake/down}}]
 criteria:
   - id: AC
     description: Preserve body and keep independent checks
     checks:
       - id: body
-        needs: [resource]
+        setup: [{{call: resource}}]
         assertions: ["{body}"]
       - id: independent
         assertions: ["true"]
@@ -37,21 +42,24 @@ criteria:
 }
 
 #[tokio::test]
-async fn fixture_down_judgment_is_distinct_from_execution() {
+async fn flow_cleanup_judgment_is_distinct_from_execution() {
     for execution in [Outcome::Ok, Outcome::Error, Outcome::Timeout] {
         let (mut engine, tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(StubAction::new("fake/judge", execution.clone())
             .judging().with_output("satisfied", serde_json::json!(false))));
-        let definition = def(r#"
+        let definition = cleanup_definition(&mut engine, r#"
 verification: cleanup judgment
-fixtures:
+flows:
   resource:
-    up: [{uses: fake/judge}]
-    down: [{id: release, uses: fake/judge}]
+    steps: [{uses: fake/judge}]
+    cleanup: [{id: release, uses: fake/judge}]
 criteria:
   - id: AC
-    description: Cleanup judges but fixture up does not
-    checks: [{id: body, needs: [resource], assertions: ["true"]}]
+    description: Flow body and cleanup actions judge independently
+    checks:
+      - id: body
+        setup: [{call: resource}]
+        assertions: ["true"]
 "#);
         let outcome = engine.run_with_metadata(&definition, BTreeMap::new()).await.unwrap();
         assert_eq!(outcome.verdict.state, VerdictState::Fail);
@@ -76,16 +84,19 @@ async fn ordinary_cleanup_observations_do_not_judge() {
     engine.register_test_action(Box::new(StubAction::new("fake/observe", Outcome::Ok)
         .with_output("exit_code", serde_json::json!(1))
         .with_output("status", serde_json::json!(500))));
-    let definition = def(r#"
+    let definition = cleanup_definition(&mut engine, r#"
 verification: cleanup observation
-fixtures:
+flows:
   resource:
-    up: []
-    down: [{uses: fake/observe}]
+    steps: [{uses: fake/observe}]
+    cleanup: [{uses: fake/observe}]
 criteria:
   - id: AC
     description: Observations remain observations
-    checks: [{id: body, needs: [resource], assertions: ["true"]}]
+    checks:
+      - id: body
+        setup: [{call: resource}]
+        assertions: ["true"]
 "#);
     let outcome = engine.run_with_metadata(&definition, BTreeMap::new()).await.unwrap();
     assert_eq!(outcome.verdict.state, VerdictState::Pass);
@@ -119,19 +130,19 @@ async fn cleanup_failure_from_first_attempt_survives_passing_retry() {
         for (name, cleanup) in [("fake/body", false), ("fake/down", true)] {
             engine.register_test_action(Box::new(CleanupRetryAction { name, cleanup, calls: AtomicUsize::new(0) }));
         }
-        let definition = def(&format!(r#"
+        let definition = cleanup_definition(&mut engine, &format!(r#"
 verification: retry cleanup gate
-fixtures:
+flows:
   resource:
+    steps: [{{uses: fake/setup}}]
+    cleanup: [{{uses: fake/down}}]
     cleanup_policy: {policy}
-    up: []
-    down: [{{uses: fake/down}}]
 criteria:
   - id: AC
     description: First attempt cleanup remains evidence
     checks:
       - id: body
-        needs: [resource]
+        setup: [{{call: resource}}]
         steps: [{{uses: fake/body}}]
         assertions: ["true"]
 "#));
@@ -144,7 +155,7 @@ criteria:
 }
 
 #[tokio::test]
-async fn body_engine_error_drains_fixture_and_keeps_original_error() {
+async fn body_engine_error_drains_flow_cleanup_and_keeps_original_error() {
     let (mut engine, _tmp) = engine_for_test().await;
     let down = StubAction::new("fake/down", Outcome::Error);
     let down_calls = down.invocations.clone();
@@ -153,18 +164,18 @@ async fn body_engine_error_drains_fixture_and_keeps_original_error() {
     let teardown = StubAction::new("fake/teardown", Outcome::Ok);
     let teardown_calls = teardown.invocations.clone();
     engine.register_test_action(Box::new(teardown));
-    let definition = def(r#"
+    let definition = cleanup_definition(&mut engine, r#"
 verification: Drain after engine error
-fixtures:
+flows:
   resource:
-    up: []
-    down: [{uses: fake/down}]
+    steps: [{uses: fake/setup}]
+    cleanup: [{uses: fake/down}]
 criteria:
   - id: AC
     description: Original engine failure survives cleanup
     checks:
       - id: body
-        needs: [resource]
+        setup: [{call: resource}]
         steps:
           - uses: fake/body
             with: {value: $steps.missing.outputs.value}
@@ -183,20 +194,24 @@ async fn required_cleanup_dispatch_error_masks_registered_secrets() {
     engine.register_test_action(Box::new(FailingAction {
         uses: "fake/down", field: "token", message: "cleanup could not release",
     }));
-    let definition = def(r#"
+    let definition = cleanup_definition(&mut engine, r#"
 verification: Mask cleanup failure
 inputs:
   token: {type: string, secret: true}
-fixtures:
+flows:
   resource:
-    up: []
-    down:
+    params: {token: {type: string, secret: true}}
+    steps: [{uses: fake/setup}]
+    cleanup:
       - uses: fake/down
-        with: {token: $inputs.token}
+        with: {token: $params.token}
 criteria:
   - id: AC
     description: Cleanup errors are masked at the evidence boundary
-    checks: [{id: body, needs: [resource], assertions: ["true"]}]
+    checks:
+      - id: body
+        setup: [{call: resource, with: {token: $inputs.token}}]
+        assertions: ["true"]
 "#);
     let secret = "registered-cleanup-secret";
     let outcome = engine.run_with_metadata(&definition,
@@ -212,17 +227,20 @@ async fn missing_cleanup_judging_output_blocks_required_gate_and_replays() {
     for policy in ["required", "diagnostic_only"] {
         let (mut engine, _tmp) = engine_for_test().await;
         engine.register_test_action(Box::new(StubAction::new("fake/judge", Outcome::Ok).judging()));
-        let definition = def(&format!(r#"
+        let definition = cleanup_definition(&mut engine, &format!(r#"
 verification: Missing cleanup judging output
-fixtures:
+flows:
   resource:
+    steps: [{{uses: fake/setup}}]
+    cleanup: [{{uses: fake/judge}}]
     cleanup_policy: {policy}
-    up: []
-    down: [{{uses: fake/judge}}]
 criteria:
   - id: AC
     description: A required cleanup judgment must be observable
-    checks: [{{id: body, needs: [resource], assertions: ["true"]}}]
+    checks:
+      - id: body
+        setup: [{{call: resource}}]
+        assertions: ["true"]
 "#));
         let outcome = engine.run_with_metadata(&definition, BTreeMap::new()).await.unwrap();
         assert_eq!(outcome.verdict.state, if policy == "required" { VerdictState::Fail } else { VerdictState::Pass });

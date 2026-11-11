@@ -29,7 +29,8 @@ fn visit(
                             Segment::Index(ai),
                         ] => source.assertion_location(*ci, *ki, *ai, &assertion, &expression.raw),
                         _ => None,
-                    };
+                    }
+                    .or_else(|| source.node_location(path));
                     failure = Some(removed_fixture_error("$fixture", location));
                 }
             });
@@ -165,6 +166,31 @@ criteria:
             );
             assert!(error.location().is_some(), "{error}");
         }
+    }
+
+    #[test]
+    fn duplicate_equal_operands_fall_back_to_the_assertion_location() {
+        let yaml = r#"verification: duplicate operands
+criteria:
+  - id: AC
+    description: Duplicate removed references retain a location
+    checks:
+      - id: c
+        assertions:
+          - equal: ["$fixture.res.make.outputs.value", "$fixture.res.make.outputs.value"]
+"#;
+        let error = VerificationDefinition::from_yaml_str(yaml).unwrap_err();
+        assert!(
+            error.to_string().contains("Declare `flows.<name>`"),
+            "{error}"
+        );
+        assert_eq!(
+            error.location(),
+            Some(crate::SourceLocation {
+                line: 8,
+                column: 13
+            })
+        );
     }
 
     #[test]

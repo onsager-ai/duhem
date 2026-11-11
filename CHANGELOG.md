@@ -28,6 +28,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 [`docs/changelog-archive.md`](docs/changelog-archive.md).
 
 ## Unreleased
+- [clarifying] api/poll `until:` must be the structured form; validate now rejects a string expression, matching the runtime. (#643)
 
 ## v0.8.0 — 2026-11-10
 

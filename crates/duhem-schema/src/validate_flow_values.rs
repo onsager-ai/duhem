@@ -2,7 +2,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::source::SourcePathSegment as Segment;
-use crate::{PathRoot, Step, StepCondition, ValidationError, VerificationDefinition};
+use crate::{PathRoot, StepCondition, ValidationError, VerificationDefinition};
 
 pub(crate) fn validate(
     definition: &VerificationDefinition,

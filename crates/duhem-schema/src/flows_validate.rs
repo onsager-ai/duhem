@@ -142,7 +142,7 @@ fn validate_lifecycle_dispatch(
             {
                 if registers_cleanup(called, &definition.flows, &mut BTreeSet::new()) {
                     errors.push(format!(
-                        "{site}: flow `{called}` declares `cleanup:` and cannot be called from `teardown:` from `teardown:`; flows with `cleanup:` may only be called from lifecycle `setup:` or check `steps:`"
+                        "{site}: flow `{called}` declares `cleanup:` and cannot be called from `teardown:`; flows with `cleanup:` may only be called from lifecycle `setup:` or check `steps:`"
                     ));
                 }
             }

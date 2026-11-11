@@ -53,7 +53,6 @@ impl HookEntry {
                 ),
                 criterion_id,
                 check_id,
-                None,
             )
         }
     }

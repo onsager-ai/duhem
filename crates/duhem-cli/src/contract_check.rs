@@ -28,6 +28,20 @@ pub(crate) fn field_errors(def: &VerificationDefinition) -> Vec<String> {
         for (index, step) in block.steps.iter().enumerate() {
             let site = block.step_site(index);
             check_step(step, &site, &mut errs);
+            if step.uses.as_deref() == Some("api/poll")
+                && let serde_yml::Value::Mapping(with) = &step.with
+                && let Some(until) = with.get(serde_yml::Value::String("until".into()))
+                && !matches!(until, serde_yml::Value::Mapping(_))
+            {
+                let location = block
+                    .location(def, index, "with")
+                    .map(|at| format!(" at {}:{}", at.line, at.column))
+                    .unwrap_or_default();
+                errs.push(format!(
+                    "{}{location}: `api/poll` field `until` must be a mapping with fields `status`, `path`, `equals`, `matches`, `exists`, or `gte`",
+                    block.step_site(index)
+                ));
+            }
             let location = block
                 .location(def, index, "with")
                 .map(|at| format!(" at {}:{}", at.line, at.column))

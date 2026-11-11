@@ -18,6 +18,69 @@ fn stderr(output: &Output) -> String {
 }
 
 #[test]
+fn api_poll_string_until_is_rejected_at_its_location() {
+    let tmp = tempfile::tempdir().unwrap();
+    let leaf = tmp.path().join("string-until.yml");
+    std::fs::write(
+        &leaf,
+        r#"verification: bad poll until
+criteria:
+  - id: AC-1
+    description: reject string until
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: poll
+            uses: api/poll
+            with:
+              method: GET
+              url: https://example.test/jobs/1
+              until: "$response.body.state == 'done'"
+"#,
+    )
+    .unwrap();
+
+    let validate = invoke("validate", &leaf);
+    assert!(!validate.status.success());
+    let message = stderr(&validate);
+    assert!(
+        message.starts_with(&format!("{}:10:13: [schema v", leaf.display())),
+        "got: {message}"
+    );
+    assert!(message.contains("`until` must be a mapping"));
+    for field in ["status", "path", "equals", "matches", "exists", "gte"] {
+        assert!(message.contains(field), "missing field {field}: {message}");
+    }
+}
+
+#[test]
+fn api_poll_structured_until_is_accepted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let leaf = tmp.path().join("structured-until.yml");
+    std::fs::write(
+        &leaf,
+        r#"verification: good poll until
+criteria:
+  - id: AC-1
+    description: accept structured until
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: poll
+            uses: api/poll
+            with:
+              method: GET
+              url: https://example.test/jobs/1
+              until: { path: body.state, equals: done }
+"#,
+    )
+    .unwrap();
+
+    let validate = invoke("validate", &leaf);
+    assert!(validate.status.success(), "{}", stderr(&validate));
+}
+
+#[test]
 fn semantic_reference_error_points_at_exact_with_value() {
     let tmp = tempfile::tempdir().unwrap();
     let leaf = tmp.path().join("bad-semantic.yml");

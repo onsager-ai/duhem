@@ -356,7 +356,7 @@ Poll an HTTP endpoint until a condition holds or the deadline elapses.
 
 ```yaml
 - uses: api/poll
-  with: { method: GET, url: $inputs.job_url, until: "$response.body.state == 'done'" }
+  with: { method: GET, url: $inputs.job_url, until: { path: body.state, equals: done } }
 ```
 
 ### `api/stream`

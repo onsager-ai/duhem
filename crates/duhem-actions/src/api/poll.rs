@@ -106,7 +106,7 @@ impl Action for Poll {
             ],
             outputs: vec!["satisfied", "status", "body", "body_text"],
             secret_outputs: vec![],
-            example: "- uses: api/poll\n  with: { method: GET, url: $inputs.job_url, until: \"$response.body.state == 'done'\" }",
+            example: "- uses: api/poll\n  with: { method: GET, url: $inputs.job_url, until: { path: body.state, equals: done } }",
         }
     }
 

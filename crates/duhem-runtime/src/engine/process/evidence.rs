@@ -79,7 +79,7 @@ impl Processes {
                 cleanup_policy: Some("required".into()),
                 phase: StepPhase::Teardown,
                 step_count: 1,
-                fixture_name: scope.fixture.clone(),
+                fixture_name: None,
                 check_id: scope.check.clone(),
                 criterion_id: scope.criterion.clone(),
                 registered_by: None,
@@ -93,7 +93,7 @@ impl Processes {
                     ("handle".into(), entry.handle.clone().into()),
                     ("finalizer".into(), true.into())
                 ]),
-                fixture_name: scope.fixture.clone(),
+                fixture_name: None,
                 check_id: scope.check.clone(),
                 criterion_id: scope.criterion.clone(),
                 flow: None,
@@ -122,14 +122,14 @@ impl Processes {
                 step_index: 0,
                 outcome: outcome.clone(),
                 detail: detail.clone(),
-                fixture_name: scope.fixture.clone(),
+                fixture_name: None,
                 check_id: scope.check.clone(),
                 criterion_id: scope.criterion.clone(),
             });
             append!(EventPayload::SetupFinished {
                 phase: StepPhase::Teardown,
                 aborted: false,
-                fixture_name: scope.fixture.clone(),
+                fixture_name: None,
                 check_id: scope.check.clone(),
                 criterion_id: scope.criterion.clone(),
             });

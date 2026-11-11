@@ -11,8 +11,9 @@ fn flow_body_and_cleanup_validate_conditions_loops_and_output_scope() {
                 } else {
                     ""
                 };
+                let root = if phase == "steps" { "$setup" } else { "$steps" };
                 let step = format!(
-                    "      - uses: cli/invoke\n        {field}: $steps.rows.outputs.{output}\n{extra}"
+                    "      - uses: cli/invoke\n        {field}: {root}.rows.outputs.{output}\n{extra}"
                 );
                 let (body, cleanup) = if phase == "steps" {
                     (
@@ -26,7 +27,7 @@ fn flow_body_and_cleanup_validate_conditions_loops_and_output_scope() {
                     )
                 };
                 let yaml = format!(
-                    "verification: flow values\nflows:\n  res:\n    steps:\n{body}    cleanup:\n{cleanup}criteria:\n  - id: AC\n    description: Flow values\n    checks:\n      - id: c\n        setup: [{{call: res}}]\n        assertions: [\"true\"]\n"
+                    "verification: flow values\nsetup:\n  - id: rows\n    uses: cli/invoke\nflows:\n  res:\n    steps:\n{body}    cleanup:\n{cleanup}criteria:\n  - id: AC\n    description: Flow values\n    checks:\n      - id: c\n        setup: [{{call: res}}]\n        assertions: [\"true\"]\n"
                 );
                 let tmp = tempfile::tempdir().unwrap();
                 let path = tmp.path().join("flow.yml");

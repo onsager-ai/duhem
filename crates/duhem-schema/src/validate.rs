@@ -70,6 +70,7 @@ fn validate_lowered(
 ) -> Result<(), Vec<ValidationError>> {
     let mut errs = Vec::new();
     crate::validate_sessions::validate(v, outputs_for, &mut errs);
+    crate::validate_flow_values::validate(v, outputs_for, &mut errs);
     crate::validate_process::validate(v, &mut errs);
 
     errs.extend(

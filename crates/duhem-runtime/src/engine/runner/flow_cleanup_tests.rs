@@ -447,7 +447,6 @@ async fn flow_cleanups_unwind_in_one_lifo_order() {
         r#"
 verification: flow cleanup stack
 {RES_FLOW}
-flows:
   f:
     steps: [{{uses: fake/body, with: {{tag: fu}}}}]
     cleanup: [{{uses: fake/clean, with: {{tag: fd}}}}]

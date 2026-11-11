@@ -1180,7 +1180,8 @@ criteria:
             judges: true,
             outputs: vec![("satisfied", serde_json::json!(true))],
         }));
-        let v = def(r#"
+        let v = load_flows(
+            r#"
 verification: full chain
 setup: [{ uses: fake/leaf_setup }]
 teardown: [{ uses: fake/leaf_teardown }]
@@ -1200,7 +1201,8 @@ criteria:
           - { id: resource, call: res }
         teardown: [{ uses: fake/check_teardown }]
         steps: [{ uses: fake/check_step }]
-"#);
+"#,
+        );
         let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
         assert_eq!(outcome.verdict.state, VerdictState::Pass);
         assert_eq!(

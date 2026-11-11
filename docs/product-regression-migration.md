@@ -78,3 +78,7 @@ These rows record producer deliveries; they do not establish qualification of an
 8. **Prove parity before each CI cutover.** Run old and VD checks against the same candidate and fixtures; compare known-good and representative known-bad cases; reconcile every disagreement; record stability, duration, and resource cost. Pin Duhem commit, VD/schema/action contract, fixture, and browser/measurement environment. Switch only a fully mapped domain with an explicit product CI owner; remove only duplicate execution after qualification.
 
 For every capability-changing child, update the canonical spec, generated action reference/`describe`, authoring guide, worked product VD, and adoption template in that implementation change. This inventory is the planning baseline; it is not a schema change, a Semon assertion map, a CI gate change, or evidence that the full #575 plan is complete.
+
+## Qualification record
+
+- **crawlab-pro spider → task (2026-11-11, Duhem 0.8.0).** Steps 2 and 3 of the sequence above qualified for this domain: trustworthy-gate controls and a four-check real-binary pilot on a master + worker + Mongo cluster. Evidence and limits are recorded under M1/M2 in docs/duhem-spec.md; the suite, criteria and driver live in [crawlab-pro#395](https://github.com/crawlab-team/crawlab-pro/pull/395). Steps 4–7 (broader migration, interaction/visual, performance, CI cutover) are not claimed. Duhem gaps it surfaced: #642, #643 (fixed), #644, #645.

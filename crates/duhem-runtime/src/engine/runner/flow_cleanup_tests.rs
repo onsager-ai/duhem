@@ -98,7 +98,7 @@ criteria:
     description: Helper arguments read the flow call scope
     checks:
       - id: c
-        steps: [{call: res, with: {url: https://example.test}}]
+        steps: [{call: res, with: {url: 'https://example.test'}}]
         assertions: ["true"]
 "#,
     );

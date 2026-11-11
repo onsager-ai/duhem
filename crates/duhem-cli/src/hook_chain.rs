@@ -109,13 +109,12 @@ pub fn resolve(
     if !def.setup.is_empty() {
         chain
             .before
-            .push(HookEntry::new("leaf setup".to_string(), None, None, None));
+            .push(HookEntry::new("leaf setup".to_string(), None, None));
     }
     if !criterion.setup.is_empty() {
         chain.before.push(HookEntry::new(
             format!("criterion `{}` setup", criterion.id),
             Some(&criterion.id),
-            None,
             None,
         ));
     }
@@ -124,7 +123,6 @@ pub fn resolve(
             format!("check `{}` setup", check.id),
             Some(&criterion.id),
             Some(&check.id),
-            None,
         ));
     }
     // Flow `cleanup:` unwinds LIFO at the exit of the scope that registered
@@ -168,7 +166,6 @@ pub fn resolve(
             format!("check `{}` teardown", check.id),
             Some(&criterion.id),
             Some(&check.id),
-            None,
         ));
     }
     chain.after.extend(
@@ -186,7 +183,6 @@ pub fn resolve(
             format!("criterion `{}` teardown", criterion.id),
             Some(&criterion.id),
             None,
-            None,
         ));
     }
     chain.after.extend(
@@ -195,12 +191,9 @@ pub fn resolve(
             .rev(),
     );
     if !def.teardown.is_empty() {
-        chain.after.push(HookEntry::new(
-            "leaf teardown".to_string(),
-            None,
-            None,
-            None,
-        ));
+        chain
+            .after
+            .push(HookEntry::new("leaf teardown".to_string(), None, None));
     }
 
     if chain.is_empty() { None } else { Some(chain) }

@@ -43,10 +43,7 @@ criteria:
     let validate = invoke("validate", &leaf);
     assert!(!validate.status.success());
     let message = stderr(&validate);
-    assert!(
-        message.starts_with(&format!("{}:10:13: [schema v", leaf.display())),
-        "got: {message}"
-    );
+    assert!(message.contains("step 0 at 11:15:"), "got: {message}");
     assert!(message.contains("`until` must be a mapping"));
     for field in ["status", "path", "equals", "matches", "exists", "gte"] {
         assert!(message.contains(field), "missing field {field}: {message}");

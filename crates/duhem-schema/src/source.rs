@@ -59,6 +59,7 @@ pub(crate) enum StepSourceOrigin {
 #[derive(Debug, Clone, Default)]
 pub struct SourceMap {
     nodes: BTreeMap<Vec<SourcePathSegment>, SourceNode>,
+    keys: BTreeMap<Vec<SourcePathSegment>, SourceLocation>,
     expanded_step_origins: BTreeMap<(usize, usize, usize), StepSourceOrigin>,
 }
 
@@ -131,6 +132,10 @@ impl SourceMap {
     /// e.g. a `steps:` sequence, never a `$...`-bearing scalar.
     pub(crate) fn node_location(&self, path: &[SourcePathSegment]) -> Option<SourceLocation> {
         self.nodes.get(path).map(|node| node.location)
+    }
+
+    pub(crate) fn key_location(&self, path: &[SourcePathSegment]) -> Option<SourceLocation> {
+        self.keys.get(path).copied()
     }
 
     pub(crate) fn check_context_matches(
@@ -336,6 +341,13 @@ impl SourceMap {
                     };
                     if let Some(key) = key {
                         path.push(SourcePathSegment::Key(key));
+                        self.keys.insert(
+                            path.clone(),
+                            SourceLocation {
+                                line: key_mark.line() as usize + 1,
+                                column: key_mark.column() as usize + 1,
+                            },
+                        );
                         self.record_node(value, value_mark, parser, path);
                         path.pop();
                     } else {

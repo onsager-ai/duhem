@@ -285,7 +285,7 @@ fn removed_fixture_syntax(
                     if (key == "fixtures" && path.len() == 1)
                         || (key == "needs" && !path.iter().any(|segment| matches!(segment, crate::source::SourcePathSegment::Key(key) if matches!(key.as_str(), "with" | "inputs" | "outputs" | "params" | "sessions"))))
                     {
-                        let location = source_map.node_location(path);
+                        let location = source_map.key_location(path);
                         return Some(removed_fixture_error(key, location));
                     }
                     if let Some(error) = visit(value, path, source_map) {

@@ -321,9 +321,10 @@ Authoring rules:
 
 #### Cleanup judgment
 
-`flows.<name>.cleanup_policy` applies only to that flow's `cleanup:`. The
-deprecated `fixtures.<name>` form (#618, removed in v0.9.0) desugars to a
-flow with `cleanup:` and keeps the same policy.
+`flows.<name>.cleanup_policy` applies only to that flow's `cleanup:`. The removed `fixtures:`/`needs:`/`$fixture.*` forms fail validation in v0.9.0
+with a location and migration mapping (#618). Use flow `steps:` for `up:`,
+`cleanup:` for `down:`, the same `cleanup_policy:`, and `$steps.*` in cleanup.
+Append `- call: <name>` to the consuming check’s `setup:`.
 Omitting it means `required`; the default is omitted on serialization. A
 required cleanup execution error, timeout, step-local runtime or
 dispatch error, or a non-passing implicit judgment from a catalog action
@@ -339,7 +340,7 @@ An action's returned values remain observations unless its contract judges
 them. For example, a non-zero `cli/invoke` `exit_code` or an HTTP 500 returned
 by `api/call` is data, not an automatic cleanup failure. To judge an HTTP
 cleanup result, use `api/poll` with `method: GET` and `until: {status: 200}`.
-A fixture's `up:` stays non-judging. Leaf/criterion/check `teardown:`,
+Leaf/criterion/check `teardown:`,
 `provision.down:`, and diagnostic capture remain diagnostic-only in this
 slice. Set `cleanup_policy: diagnostic_only` for a flow whose `cleanup:`
 should keep its evidence without blocking the run.

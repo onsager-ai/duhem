@@ -57,7 +57,6 @@ fn path_parser<'src>() -> impl Parser<'src, &'src str, Path, Err<'src>> + Clone 
         .map(|s: &str| match s {
             "steps" => (PathRoot::Steps, None),
             "setup" => (PathRoot::Setup, None),
-            "fixture" => (PathRoot::Fixture, None),
             "inputs" => (PathRoot::Inputs, None),
             "pages" => (PathRoot::Pages, None),
             "env" => (PathRoot::Env, None),

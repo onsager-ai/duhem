@@ -11,14 +11,6 @@ setup:
 teardown:
   - id: run_teardown
     uses: api/call
-fixtures:
-  sample:
-    up:
-      - id: fixture_up
-        uses: api/call
-    down:
-      - id: fixture_down
-        uses: api/call
 flows:
   sample:
     steps:

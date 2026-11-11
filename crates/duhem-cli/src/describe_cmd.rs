@@ -72,7 +72,7 @@ fn print_contract(c: &ActionContract) {
             "session: inherits the nearest check, criterion, or leaf seed; session: ~ stops inheritance."
         );
         println!(
-            "  Each body/setup/teardown/fixture block opens fresh contexts. Named checks select a session on each UI step or enclosing call."
+            "  Each body/setup/teardown block opens fresh contexts. Named checks select a session on each UI step or enclosing call."
         );
         println!();
     }

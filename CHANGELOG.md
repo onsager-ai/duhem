@@ -30,6 +30,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 - [clarifying] api/poll `until:` must be the structured form; validate now rejects a string expression, matching the runtime. (#643)
 
+- [breaking] fixtures:/needs:/$fixture.* removed; use flows with cleanup: (#615). (#618)
+
 ## v0.8.0 — 2026-11-10
 
 - [clarifying] Add coverage checks for per-step validation across step-bearing blocks; schema behavior is unchanged. (#619)

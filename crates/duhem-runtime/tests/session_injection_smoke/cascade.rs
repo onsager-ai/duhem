@@ -47,10 +47,10 @@ inputs:
   operator_session: {{ type: object, secret: true }}
 setup: [{{ uses: ui/capture-session }}]
 teardown: [{{ uses: ui/capture-session }}]
-fixtures:
+flows:
   resource:
-    up: [{{ uses: ui/capture-session }}]
-    down: [{{ uses: ui/capture-session }}]
+    steps: [{{ uses: ui/capture-session }}]
+    cleanup: [{{ uses: ui/capture-session }}]
 criteria:
   - id: AC-1
     description: Every scope uses its nearest seed.
@@ -60,14 +60,13 @@ criteria:
     checks:
       - id: AC-1.1
         {check}
-        needs: [resource]
-        setup: [{{ uses: ui/capture-session }}]
+        setup: [{{ uses: ui/capture-session }}, {{ call: resource }}]
         teardown: [{{ uses: ui/capture-session }}]
         steps: [{{ uses: ui/capture-session }}]
         assertions: ['true']
 "#
         );
-        let definition = VerificationDefinition::from_yaml_str(&yaml).unwrap();
+        let definition = load_cascade(&yaml);
         let result = engine
             .run_with_metadata(
                 &definition,
@@ -93,7 +92,7 @@ criteria:
                 )
             })
             .collect();
-        assert_eq!(blocks.len(), 4, "check setup/teardown and fixture up/down");
+        assert_eq!(blocks.len(), 3, "check setup/teardown and flow cleanup");
         for block in blocks {
             assert_eq!(
                 block
@@ -154,20 +153,20 @@ inputs:
   base_url: { type: string }
   operator_session: { type: object, secret: true }
   expected_cookie: { type: string, secret: true }
-fixtures:
+flows:
   resource:
-    up: [{ uses: ui/capture-session, session: actor }]
-    down: [{ uses: ui/capture-session, session: actor }]
+    steps: [{ uses: ui/capture-session, session: actor }]
+    cleanup: [{ uses: ui/capture-session, session: actor }]
 criteria:
   - id: AC-1
     description: Cleanup starts from the seed even after the body changes its cookie.
     checks:
       - id: AC-1.1
         sessions: { actor: $inputs.operator_session, other: ~ }
-        needs: [resource]
         setup:
           - uses: ui/capture-session
             session: actor
+          - call: resource
         steps:
           - uses: ui/navigate
             session: actor
@@ -188,7 +187,7 @@ criteria:
             if: $setup.cleanup_state.outputs.state.cookies[0].value != $inputs.expected_cookie
             with: { command: [sh, -c, 'exit 1'] }
 "#;
-    let mut definition = VerificationDefinition::from_yaml_str(yaml).unwrap();
+    let mut definition = load_cascade(yaml);
     definition.max_sessions = Some(2);
     let mut values = inputs(&fixture);
     values.insert("expected_cookie".into(), serde_json::json!(CREDENTIAL));
@@ -203,7 +202,7 @@ criteria:
         .iter()
         .filter(|event| matches!(event.payload, EventPayload::SetupStarted { .. }))
         .collect();
-    assert_eq!(blocks.len(), 4);
+    assert_eq!(blocks.len(), 3);
     for block in blocks {
         assert_eq!(
             block.session_digest.as_ref().unwrap()["actor"],
@@ -276,4 +275,14 @@ criteria:
             .iter()
             .all(|event| event.session_source.is_none() && event.session_digest.is_none())
     );
+}
+
+fn load_cascade(yaml: &str) -> VerificationDefinition {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("leaf.yml");
+    std::fs::write(&path, yaml).unwrap();
+    let duhem_schema::Loaded::Leaf { definition, .. } = duhem_schema::load(&path).unwrap() else {
+        panic!("expected leaf")
+    };
+    definition
 }

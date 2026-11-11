@@ -282,7 +282,7 @@ steps:
 - A group may carry `id:` (a label only), `description:`, `if:` and
   `session:`. It takes no `with:`, `outputs:`, `secret_outputs:`, `as:`
   or `max:` unless it is also a `for_each:` step. Groups work wherever
-  steps do: check `steps:`, `setup:`/`teardown:`, flow bodies, fixture
+  steps do: check `steps:`, `setup:`/`teardown:`, flow bodies, flow
   `up:`/`down:`.
 - The group's `if:` (`success | always | failure`, or a value
   expression) is evaluated once, when the group is entered. If false,
@@ -574,13 +574,13 @@ For the diagnostic control, add `cleanup_policy: diagnostic_only` under
 `flows.resource`. The cleanup failure is still reported, but the passing
 body leaves the run gate `pass`.
 
-#### Deprecated: `fixtures:` and `needs:`
+#### Migrating removed `fixtures:` and `needs:`
 
-`fixtures:`, `needs:` and `$fixture.*` still work but are deprecated and
-will be removed in v0.9.0; `duhem validate` and `duhem run` warn once per
-declared fixture. Rewrite each one as a flow with `cleanup:`:
+`fixtures:`, `needs:` and `$fixture.*` are removed in v0.9.0.
+`duhem validate` and `duhem run` reject them with a source location and
+the rewrite. Migrate each one to a flow with `cleanup:`:
 
-| Deprecated | Use |
+| Removed | Use |
 |---|---|
 | `fixtures.<name>.up:` | `flows.<name>.steps:` |
 | `fixtures.<name>.down:` | `flows.<name>.cleanup:` |

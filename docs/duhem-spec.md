@@ -186,7 +186,7 @@ assertion.
 - **Conditional claim-set legibility:** absence is not a fourth state; gated steps still contribute nothing. A check records its non-zero count of **judging** steps gated by **value-based** conditions (static gates, upstream blocking, and lifecycle steps never count), and the run report, default/pretty reporters, and agent failure envelope expose that smaller claim set even when the verdict is `pass`. Value-based gating records the authored condition and the operand values actually evaluated in `StepOutcome::Skipped`; upstream failure blocking carries no condition evaluation. These optional fields are omitted, never null. A check with no value-gated judging steps gains no new output, and older traces render unchanged. This clarifies legibility only: verdict aggregation remains the same deterministic, LLM-free evaluation.
 - **Unresolvable conditions and gated outputs (value-based `if:` on check steps, #440):** a check-step condition that cannot be evaluated (an operand absent at run time) is never treated as `false` or `true`. The step records `error` with detail naming the step and the unresolvable reference, so the check is `inconclusive:missing_observation` through the ordinary execution-failure rule above; the run continues and other checks and criteria record their own verdicts. A later step `if:` or an `assertions:` entry that reads `$steps.<gated>.outputs.*` of a step gated by a value-based condition is likewise evaluated and finds no observation, so it is `inconclusive:missing_observation` rather than a silent pass or omission. Lifecycle steps keep their own rule (§10.3.3): the step fails and dependents are inconclusive. No new inconclusive cause is introduced.
 - **Per-criterion verdict**: aggregated from its checks (any check `fail` → criterion `fail`; any `inconclusive` and no `fail` → criterion `inconclusive`; all `pass` → criterion `pass`).
-- **Per-run body verdict**: aggregated from all criteria, same rules. The effective run verdict applies the required-cleanup gate after the body: any retained required cleanup failure (a flow `cleanup:`, §10.3.5.1, or the deprecated fixture `down:`, §10.3.5) makes the run `fail`; otherwise the effective verdict is the body verdict. `CheckFinished` and `CriterionFinished` remain body judgments. The run outcome, persisted `RunFinished.verdict`, CLI exit status, reporters, and dashboard run state use the effective verdict. When the gate changes the run verdict, optional `body_verdict` preserves the body verdict on `RunOutcome`, persisted `RunFinished`, and `RunSummary`; it is omitted when the body and effective verdict match.
+- **Per-run body verdict**: aggregated from all criteria, same rules. The effective run verdict applies the required-cleanup gate after the body: any retained required flow `cleanup:` failure (§10.3.5) makes the run `fail`; otherwise the effective verdict is the body verdict. `CheckFinished` and `CriterionFinished` remain body judgments. The run outcome, persisted `RunFinished.verdict`, CLI exit status, reporters, and dashboard run state use the effective verdict. When the gate changes the run verdict, optional `body_verdict` preserves the body verdict on `RunOutcome`, persisted `RunFinished`, and `RunSummary`; it is omitted when the body and effective verdict match.
 
 The three-state model is non-negotiable. `inconclusive` exists because real systems have flakes, environment failures, and observability gaps. Forcing flaky outcomes into `pass` corrupts trust; forcing them into `fail` blocks delivery without cause. `inconclusive` triggers escalation to human review without false signals. An assertion operand type mismatch instead gates as `fail` (#259): applying an operator to an incompatible value is a determinate authoring defect, not a retryable observability gap. For example, matching a string pattern against a present JSON `null` fails with `type_mismatch(null, str)`, while an absent nested field is `inconclusive:missing_observation` with `missing_field(path)` evidence. Changing a producer from explicit null to an omitted key can therefore change the verdict without changing the VD.
 
@@ -545,7 +545,7 @@ reuses that immutable seed across its children and retries. Leaf declarations
 may reference declared `$inputs` only; criterion declarations may also read
 leaf `$setup.*` outputs; check declarations (including named entries) may
 also read criterion setup outputs. No declaration may read its own setup,
-check-body, or (deprecated) fixture outputs. Diagnostics include the declaration location.
+or check-body outputs. Diagnostics include the declaration location.
 Checks retain their existing environment and locator reference support.
 
 Every leaf/criterion/check setup or teardown block, flow cleanup block,
@@ -564,7 +564,6 @@ a map of bare name to an acquired-state expression or `~` for a deliberately
 signed-out context. `session:` and `sessions:` on a check are mutually exclusive.
 Every browser-driving step in a named-session check must select a declared name;
 including its check-level `setup:` and `teardown:`; there is no implicit default.
-Fixtures use the consuming check's named entries and must select names too.
 Each lifecycle block opens fresh contexts for the entries; it never shares the
 body's live contexts. A `call:` step may select a named context for its flow:
 inner browser steps without a selector inherit it, while inner declarations
@@ -799,7 +798,7 @@ criteria:
           - $steps.health.outputs.status == 200
 ```
 
-Failure policy is **inconclusive, never false**: a non-zero `up:` exit (or an unrunnable script) yields a run verdict of `Inconclusive(environment_error)`; a `ready:` probe that exhausts its `timeout:` yields `Inconclusive(timeout)`. A failed `up:` skips teardown (nothing came up to tear down); `provision.down:` failures are recorded as diagnostic evidence and never alter the verdict. Only flow `cleanup:` (§10.3.5.1), and the deprecated fixture `down:` (§10.3.5) desugared to it, support the required cleanup gate. Relative script paths resolve against the Verification Definition's directory. `up:`/`down:` scripts run under the runtime's sanitized subprocess environment (§9 Stage 3, §11.1 Runtime). The `ready:` catalog is closed at `http:` for v1.
+Failure policy is **inconclusive, never false**: a non-zero `up:` exit (or an unrunnable script) yields a run verdict of `Inconclusive(environment_error)`; a `ready:` probe that exhausts its `timeout:` yields `Inconclusive(timeout)`. A failed `up:` skips teardown (nothing came up to tear down); `provision.down:` failures are recorded as diagnostic evidence and never alter the verdict. Only flow `cleanup:` (§10.3.5) supports the required cleanup gate. Relative script paths resolve against the Verification Definition's directory. `up:`/`down:` scripts run under the runtime's sanitized subprocess environment (§9 Stage 3, §11.1 Runtime). The `ready:` catalog is closed at `http:` for v1.
 
 A manifest can also provision **one shared environment for the whole suite** rather than per-leaf — see the manifest `provision:` block in §10.4.
 
@@ -928,7 +927,7 @@ label, not a sequence boundary. It may carry `id:` (a label),
 `outputs:`, `secret_outputs:`, `as:` or `max:` unless it also carries
 `for_each:`, which keeps the loop-body semantics above. Groups are valid
 wherever steps are: check `steps:`, leaf/criterion/check `setup:` and
-`teardown:`, flow bodies, and fixture `up:`/`down:`.
+`teardown:`, flow bodies, and flow `cleanup:`.
 
 ```yaml
 steps:
@@ -1065,122 +1064,10 @@ is check-scoped (§10.7) and a lifecycle block never resolves it. A
 `for_each: [x]` wrapper used only to reach a flow with one iteration may
 be dropped in favor of this direct form.
 
-#### 10.3.5 Deprecated: `fixtures:` and `needs:`
-
-> **Deprecated in v0.8.0 (#618); removed in v0.9.0.** A flow with `cleanup:`
-> (§10.3.5.1) does everything a fixture does and can take parameters. A
-> definition that still declares `fixtures:` keeps validating and running with
-> the same verdicts, gate and evidence; `duhem validate` and `duhem run` warn
-> once per declared fixture. In v0.9.0 `fixtures:`, `needs:` and `$fixture.*`
-> become a hard error carrying the same mapping.
-
-The runtime desugars each fixture into the flow-cleanup form when a run starts;
-validation reads the authored form, so every fixture diagnostic keeps its
-message and source location.
-
-| Deprecated | Use instead |
-| --- | --- |
-| `fixtures.<name>.up:` | `flows.<name>.steps:` |
-| `fixtures.<name>.down:` | `flows.<name>.cleanup:` |
-| `fixtures.<name>.cleanup_policy:` | `flows.<name>.cleanup_policy:` (same values and default) |
-| `$fixture.<name>.<id>.outputs.*` in `down:` | `$steps.<id>.outputs.*` in `cleanup:` |
-| `$fixture.<name>.<id>.outputs.*` for a process action output in a consuming check body | declare the value in the flow's `outputs:`, give the check-setup call an `id:`, read `$setup.<call-id>.outputs.<name>` |
-| `needs: [a, b]` on a check | `- id: a` + `call: a` and `- id: b` + `call: b`, in order, at the **end** of that check's `setup:` |
-
-```yaml
-verification: Per-check fixture (deprecated form)
-fixtures:
-  test_project:
-    up:
-      - id: create
-        uses: api/call
-        with: { method: POST, url: /projects, body: { name: probe } }
-    down:
-      - uses: api/call
-        with:
-          method: DELETE
-          url: $fixture.test_project.create.outputs.body.url
-
-criteria:
-  - id: AC-1
-    description: A project can be inspected.
-    checks:
-      - id: AC-1.1
-        needs: [test_project]
-        steps: []
-        assertions: ["true"]
-```
-
-The same check as a flow with `cleanup:`:
-
-```yaml
-verification: Per-check resource as a flow cleanup
-flows:
-  test_project:
-    steps:
-      - id: create
-        uses: api/call
-        with: { method: POST, url: /projects, body: { name: probe } }
-    cleanup:
-      - uses: api/call
-        with:
-          method: DELETE
-          url: $steps.create.outputs.body.url
-
-criteria:
-  - id: AC-1
-    description: A project can be inspected.
-    checks:
-      - id: AC-1.1
-        setup:
-          - call: test_project
-        steps: []
-        assertions: ["true"]
-```
-
-**What is preserved.** Each check and each retry attempt gets fresh instances.
-The order is leaf `setup:` → criterion `setup:` → check `setup:` → fixture
-`up:` in `needs:` order → check steps → fixture `down:` in reverse order →
-check `teardown:` → leaf `teardown:`; fixtures unwind in the same last-in-first-out
-stack as flow cleanups (§10.3.5.1). A failing fixture `up:` makes the check
-`inconclusive` with the specific cause and the check steps do not run. Fixture
-`up:` steps stay non-judging; a fixture `down:` follows the cleanup gate of
-§10.3.5.1, including `cleanup_policy`. A fixture step cannot carry `needs:`,
-fixtures do not nest or depend on each other, and fixture `up:`/`down:` steps
-may declare a direct `call:` as `setup:`/`teardown:` do (§10.3.4).
-
-**Evidence compatibility.** Fixture lifecycle events and the folded
-`RunSummary.lifecycle` blocks keep the fixture name and the consuming check id
-(scope fields `fixture_name` and `check_id`), and the report still says
-"fixture `<name>`". Fixture `up:`/`down:` each open fresh contexts from their
-consuming check's seeds, as every lifecycle block does.
-
-**Fixture references.** Only a fixture's own `down:` may read its `up:` outputs,
-through `$fixture.<fixture_name>.<step_id>.outputs.<name>`; the action contract
-must declare the referenced output. References from leaf lifecycle blocks,
-another fixture, or the fixture's own `up:` are validation errors. A consuming
-check may read a fixture's *process* outputs (see [owned processes](owned-processes.md)) as
-`$fixture.<fixture>.<step>.outputs.<name>`; for a flow called from check
-`setup:`, read them through the call's declared `outputs:` as
-`$setup.<call-id>.outputs.<name>`.
-
-**Warning.** One warning per declared fixture, with its source location, never
-for a flow:
-
-> `fixtures.<name>` is deprecated and will be removed in v0.9.0. Declare
-> `flows.<name>` with `steps:` (was `up:`), `cleanup:` (was `down:`) and the same
-> `cleanup_policy:`; inside `cleanup:` replace `$fixture.<name>.<id>.outputs.*`
-> with `$steps.<id>.outputs.*`. A consuming check can read only a fixture's
-> process outputs; declare one in the flow's `outputs:` and read
-> `$setup.<call-id>.outputs.<name>`; replace
-> `needs: [<name>]` with `- id: <name>` + `call: <name>` at the end of the
-> check's `setup:`.
-
-#### 10.3.5.1 Flow cleanup (`cleanup:` and `cleanup_policy:`)
+#### 10.3.5 Flow cleanup (`cleanup:` and `cleanup_policy:`)
 
 A flow may declare a `cleanup:` half next to its `steps:`, so a resource and its
-removal are declared once and take the flow's typed `params:`. It replaces the
-deprecated fixture (§10.3.5), which is desugared into this form.
+removal are declared once and take the flow's typed `params:`.
 
 ```yaml
 flows:
@@ -1226,9 +1113,7 @@ be called from `teardown:` or another flow's `cleanup:`; validation rejects it.
 
 **Unwind.** Registered cleanups share one LIFO stack: at scope exit everything
 registered since the scope began runs last registered first, before that scope's
-own `teardown:`. A deprecated fixture (§10.3.5) is a flow with `cleanup:` called
-at the end of check `setup:`, so a flow called from check `setup:` before it
-unwinds after it, and a flow called from check `steps:` unwinds before it. Every
+own `teardown:`. Every
 step of every registered cleanup is attempted; a failure does not stop the
 drain. Each cleanup opens fresh browser contexts from the seed its call resolved
 (§10.3.4; a call-site `session:` carries over).
@@ -1386,7 +1271,7 @@ provision.down: ← leaf teardown: ← criterion teardown: ← check teardown: �
 
 **Retry timing differs by level, deliberately.** Check-level
 `setup:`/`teardown:` re-runs on every retry attempt of that check —
-same contract as flow cleanups (§10.3.5.1): a retry re-establishes the
+same contract as flow cleanups (§10.3.5): a retry re-establishes the
 check's own preconditions, so its hooks must be idempotent, just like
 leaf-level cleanup (§10.3.4). Criterion-level `setup:`/`teardown:` runs
 once per criterion, outside any check's retry loop: re-running it per
@@ -1423,24 +1308,21 @@ against declared inputs, `$runtime`, `$pages`, and every lifecycle step
 already in scope when that step runs: leaf `setup:`, then this
 criterion's own `setup:` (visible to the criterion's `teardown:` and to
 every check's `setup:`), then this check's own `setup:` (visible to the
-check's `teardown:`). Because every non-fixture lifecycle level publishes
+check's `teardown:`). Because every lifecycle level publishes
 into the same run-scoped `$setup.<id>` namespace (§10.3), a nested
 lifecycle step's `id` may not collide with an id already open in an outer
-scope — validation rejects it. The deprecated fixtures keep their own
-`$fixture.*` namespace and rules (§10.3.5) unchanged.
+scope — validation rejects it.
 
 **Setup-output visibility.** Ordinary `$setup.*` references in a check body
 remain leaf-only. #579 additionally exposes process action outputs from
-criterion- and check-level setup through `$setup.*`; a consuming check may read
-its fixture's process outputs through `$fixture.*` (§10.3.5). Other own-scope
+criterion- and check-level setup through `$setup.*`. Other own-scope
 setup references are validation errors with a location. Session declarations
 are resolved before their own setup runs and may additionally consume
 **enclosing** setup outputs: criterion sessions may read leaf setup, and check
 sessions may read leaf and criterion setup. Lifecycle blocks retain the nested
 output visibility above; outputs are restored when leaving a scope and on
 retry, so siblings never supply a seed accidentally. Flow cleanups read their
-call's body outputs as `$steps.*`, and deprecated non-process fixture outputs
-remain local to that fixture's down block.
+call's body outputs as `$steps.*`.
 
 Check and criterion lifecycle contexts re-seed from their scope's nearest
 session. To preserve signed-out behavior under an authenticated parent,
@@ -1459,8 +1341,7 @@ blocks by their recorded path; JUnit emits failed setup and required-cleanup blo
 passing blocks in `system-out`. The dashboard shows leaf/criterion blocks
 on the run page and check setup before check steps and teardown
 after them. Leaf, criterion, and check teardown failures remain
-diagnostic-only; required flow `cleanup:` failures (and the deprecated fixture
-`down:` desugared to it) use the separate cleanup gate in §10.3.5.1. Diagnostic capture remains evidence-only (§7.7). The
+diagnostic-only; required flow `cleanup:` failures use the separate cleanup gate in §10.3.5. Diagnostic capture remains evidence-only (§7.7). The
 compatibility `cleanup` field remains.
 
 ### 10.4 Root manifest (`duhem.yml`)
@@ -1591,7 +1472,7 @@ human-facing `description:`, typed `params:`, ordered `steps:`, and an
 from `uses:` so a flow cannot shadow or masquerade as a closed-catalog
 action. Exactly one of the two keys is valid on a step (or `steps:`, a
 group, §10.3.3). A lifecycle step — leaf/criterion/check
-`setup:`/`teardown:`, or the deprecated fixture `up:`/`down:` — accepts
+`setup:`/`teardown:` — accepts
 the same `call:` form directly, with the same
 `params:`/`with:` validation (§10.3.4/§10.3.5/§10.3.6); it is not
 limited to a `for_each:` step's body (§10.3.3).
@@ -1601,16 +1482,14 @@ runtime sees the definition. Parameters replace `$params.*`, inner ids
 are namespaced per invocation, and a flow's `outputs:` map is the whole
 caller-visible interface, projected onto the caller's own accessor: in
 a check, `$steps.<call-id>.outputs.<declared-name>`; in a lifecycle
-block, `$setup.<call-id>.outputs.<declared-name>` (or, for a deprecated
-fixture's own `up:`/`down:`,
-`$fixture.<fixture-name>.<call-id>.outputs.<declared-name>`) — never `$steps.*`, which a lifecycle block does not resolve (§10.7).
+block, `$setup.<call-id>.outputs.<declared-name>` — never `$steps.*`, which a lifecycle block does not resolve (§10.7).
 Inner ids cannot be referenced by the caller. A `secret: true` param
 joins the same evidence-masking boundary as a secret input, on the
 lifecycle path as well as the check path. Flows may call other flows;
 cycles and chains deeper than the include-depth limit are offline
 validation errors.
 
-A flow may also declare `cleanup:` (§10.3.5.1), registered on the enclosing
+A flow may also declare `cleanup:` (§10.3.5), registered on the enclosing
 scope when a call is entered and unwound LIFO at that scope's exit.
 
 Flow bodies are hygienic. Step `with:` values may reference only
@@ -1737,7 +1616,7 @@ Both response-side actions declare their outputs in the catalog, so `$steps.<id>
 - `process/stop` — bounded SIGTERM/SIGKILL of the owned Unix group, descendant termination, direct-child reaping and log draining; idempotent exit/stop facts.
 - `process/restart` — stop/reap the old generation before reusing its launch/readiness contract; preserve product-owned state and both generations' evidence.
 
-All four are non-judging. Setup/fixture-up spawn/readiness failure makes dependent checks inconclusive with environment-error semantics; body errors retain masked detail and inconclusive missing observations. Ownership follows declaring leaf/criterion/check/fixture scope, independently of browser context. Only the current check or its fixtures may be stopped/restarted; enclosing handles are inspect-only, and sibling/retry handles are rejected. After authored cleanup, reverse-order process finalizers are always required, including diagnostic-only fixtures, retries and observed cancellation; failures block the effective gate while preserving body judgments. Ordinary teardown/provision diagnostics retain their semantics.
+All four are non-judging. Setup spawn/readiness failure makes dependent checks inconclusive with environment-error semantics; body errors retain masked detail and inconclusive missing observations. Ownership follows declaring leaf/criterion/check scope, independently of browser context. Only processes owned by the current check may be stopped/restarted; enclosing handles are inspect-only, and sibling/retry handles are rejected. After authored cleanup, reverse-order process finalizers are always required, including diagnostic-only flow cleanups, retries and observed cancellation; failures block the effective gate while preserving body judgments. Ordinary teardown/provision diagnostics retain their semantics.
 
 Linux/macOS use owned process groups; unsupported platforms reject before spawn. Detached daemons, interactive protocols and port leases are outside the contract. See [exact lifecycle/log/timeout semantics](owned-processes.md) and the [executable HTTP/restart example](../verifications/owned-process-example/duhem.yml). These actions first shipped in v0.7.1; they are not in v0.7.0 or earlier tags.
 
@@ -1798,7 +1677,6 @@ Borrowed from Arazzo. References available in expressions:
   expansion; it never reaches runtime evaluation.
 - `$steps.<id>.outputs.<name>` — outputs from a prior step (scoped to the declaring check)
 - `$setup.<id>.outputs.<name>` — outputs from a run-level `setup:` step (§10.3), read-only from inside any check
-- `$fixture.<fixture_name>.<step_id>.outputs.<name>` — **deprecated** (#618, removed in v0.9.0): outputs from one fixture instance's `up:` steps, valid only in that same fixture's `down:` block (§10.3.5); in a flow's `cleanup:` use `$steps.<id>.outputs.<name>` (§10.3.5.1)
 - `$env.<name>` — a value from the selected named profile. The `$env` whitelist is **empty by default**. An author opts a key in by declaring it (with a string value) under a manifest `profiles:` entry (§10.4) and selecting that profile with `--profile <name>` (one profile auto-selects); the selected entry's string-valued keys seed the whitelist for that run. There is no process-environment passthrough and no `--env` CLI flag. A reference to a key that isn't whitelisted evaluates to `inconclusive` (it carries a missing-env cause, §10.6), never a parse error.
 - `$runtime.uuid()` — a stable per-run UUID / `$runtime.now()` — the run's current time as epoch milliseconds
 - `$runtime.format(fmt, args...)` — **pure** string composition: the

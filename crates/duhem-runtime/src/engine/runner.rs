@@ -87,7 +87,7 @@ pub struct Engine {
     /// deterministically from the seed instead of `Uuid::new_v4`. No
     /// other runtime semantics depend on this today.
     seed: Option<u64>,
-    /// Optional caller-supplied run id (#189). Fixtures and tests use
+    /// Optional caller-supplied run id (#189). Tests use
     /// it for deterministic run URLs; production runs leave it unset
     /// and mint a fresh ULID. A collision with an existing run fails
     /// loudly at `begin_run` (run ids are primary keys).
@@ -226,9 +226,6 @@ impl Engine {
         def: &VerificationDefinition,
         inputs: BTreeMap<String, serde_json::Value>,
     ) -> Result<RunOutcome, EngineError> {
-        // Deprecated `needs:` fixtures run as flows with cleanup (#618).
-        let desugared = duhem_schema::desugar_fixtures(def);
-        let def = &*desugared;
         if self.secrets.is_empty() {
             for (name, decl) in &def.inputs {
                 if decl.secret
@@ -489,7 +486,7 @@ impl Engine {
             let mut criterion_verdicts: Vec<CriterionVerdict> = Vec::new();
             let mut failures: Vec<CheckFailure> = Vec::new();
             let mut warnings: Vec<String> = Vec::new();
-            let mut fixture_cleanup: Vec<CleanupFailure> = Vec::new();
+            let mut cleanup: Vec<CleanupFailure> = Vec::new();
             let criteria_result: Result<(), EngineError> = async {
                 for criterion in &def.criteria {
                     let parent_owner = run_state.process_owner.clone();
@@ -513,11 +510,11 @@ impl Engine {
                             criterion,
                             &mut failures,
                             &mut warnings,
-                            &mut fixture_cleanup,
+                            &mut cleanup,
                             &mut gated_checks,
                         )
                         .await;
-                    fixture_cleanup.extend(
+                    cleanup.extend(
                         run_state
                             .processes
                             .lock()
@@ -542,12 +539,10 @@ impl Engine {
             }
             .await;
 
-            let mut cleanup = self
-                .drain_leaf_teardown(&mut writer, &mut run_state, def, &run_id)
-                .await;
-            fixture_cleanup.append(&mut cleanup);
-            let cleanup = fixture_cleanup;
-
+            cleanup.extend(
+                self.drain_leaf_teardown(&mut writer, &mut run_state, def, &run_id)
+                    .await,
+            );
             let down_result = if let Some(env) = def.provision.as_ref() {
                 crate::engine::env::tear_environment_down(
                     &mut writer,
@@ -673,8 +668,8 @@ impl Engine {
         if let Some((reason, step)) = &criterion_setup_abort {
             // The criterion never obtained its preconditions: every one
             // of its checks is `Inconclusive` with the triggering
-            // cause, and none of them run — no step evidence, no
-            // fixtures, no check-level setup.
+            // cause, and none of them run — no step evidence or
+            // check-level setup.
             for check in &criterion.checks {
                 if let Some(f) = &self.filter
                     && !f.matches(&criterion.id, &check.id)
@@ -738,12 +733,6 @@ impl Engine {
                     .iter()
                     .chain(&check.setup)
                     .chain(&check.teardown)
-                    .chain(check.setup.iter().flat_map(|step| {
-                        step.flow_cleanup
-                            .iter()
-                            .filter(|cleanup| cleanup.fixture.is_some())
-                            .flat_map(|cleanup| &cleanup.steps)
-                    }))
                     .flat_map(duhem_schema::Step::actions)
                     .any(|step| step.uses_name().starts_with("ui/"));
                 let result = self
@@ -1156,181 +1145,10 @@ criteria:
         }
     }
 
-    #[tokio::test]
-    async fn fixtures_are_fresh_ordered_and_contribute_no_judgments() {
-        let (mut engine, _tmp) = engine_for_test().await;
-        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
-        for action in [
-            RecordingAction {
-                uses: "fake/up",
-                label: "up",
-                outcome: Outcome::Ok,
-                log: log.clone(),
-                judges: true,
-                outputs: vec![
-                    ("token", serde_json::json!("fresh")),
-                    ("satisfied", serde_json::json!(false)),
-                ],
-            },
-            RecordingAction {
-                uses: "fake/up2",
-                label: "up2",
-                outcome: Outcome::Ok,
-                log: log.clone(),
-                judges: false,
-                outputs: vec![("token", serde_json::json!("fresh"))],
-            },
-            RecordingAction {
-                uses: "fake/check",
-                label: "check",
-                outcome: Outcome::Ok,
-                log: log.clone(),
-                judges: true,
-                outputs: vec![("satisfied", serde_json::json!(true))],
-            },
-            RecordingAction {
-                uses: "fake/down",
-                label: "down",
-                outcome: Outcome::Ok,
-                log: log.clone(),
-                judges: false,
-                outputs: vec![],
-            },
-            RecordingAction {
-                uses: "fake/down2",
-                label: "down2",
-                outcome: Outcome::Ok,
-                log: log.clone(),
-                judges: false,
-                outputs: vec![],
-            },
-        ] {
-            engine.register_test_action(Box::new(action));
-        }
-        let v = def(r#"
-verification: fixtures
-fixtures:
-  resource:
-    up: [{ id: create, uses: fake/up }]
-    down:
-      - uses: fake/down
-        with: { token: $fixture.resource.create.outputs.token }
-  second:
-    up: [{ id: create, uses: fake/up2 }]
-    down:
-      - uses: fake/down2
-        with: { token: $fixture.second.create.outputs.token }
-criteria:
-  - id: AC-1
-    description: fresh fixture
-    checks:
-      - { id: AC-1.1, needs: [resource, second], steps: [{ uses: fake/check }] }
-      - { id: AC-1.2, needs: [resource], steps: [{ uses: fake/check }] }
-"#);
-        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
-        assert_eq!(outcome.verdict.state, VerdictState::Pass);
-        assert_eq!(
-            *log.lock().unwrap(),
-            vec!["up", "up2", "check", "down2", "down", "up", "check", "down"]
-        );
-    }
-
-    #[tokio::test]
-    async fn fixture_up_action_error_is_missing_observation_and_still_drains_down() {
-        let (mut engine, _tmp) = engine_for_test().await;
-        let up = StubAction::new("fake/up", Outcome::Error);
-        let check = StubAction::new("fake/check", Outcome::Ok)
-            .judging()
-            .with_output("satisfied", serde_json::json!(true));
-        let check_calls = check.invocations.clone();
-        let down = StubAction::new("fake/down", Outcome::Ok);
-        let down_calls = down.invocations.clone();
-        for action in [up, check, down] {
-            engine.register_test_action(Box::new(action));
-        }
-        let v = def(r#"
-verification: fixtures
-fixtures:
-  resource:
-    up: [{ id: create, uses: fake/up }]
-    down: [{ uses: fake/down }]
-criteria:
-  - id: AC-1
-    description: fixture failure
-    checks: [{ id: AC-1.1, needs: [resource], steps: [{ uses: fake/check }] }]
-"#);
-        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
-        assert_eq!(
-            outcome.verdict.state,
-            VerdictState::Inconclusive(InconclusiveCause::MissingObservation)
-        );
-        assert_eq!(check_calls.load(Ordering::SeqCst), 0);
-        assert_eq!(down_calls.load(Ordering::SeqCst), 1);
-        assert!(
-            outcome.failures[0].assertions[0]
-                .detail
-                .as_deref()
-                .unwrap()
-                .contains("resource")
-        );
-    }
-
-    #[tokio::test]
-    async fn fixture_up_timeout_remains_inconclusive_timeout() {
-        let (mut engine, _tmp) = engine_for_test().await;
-        engine.register_test_action(Box::new(StubAction::new("fake/up", Outcome::Timeout)));
-        let v = def(r#"
-verification: fixtures
-fixtures:
-  resource:
-    up: [{ uses: fake/up }]
-    down: []
-criteria:
-  - id: AC-1
-    description: fixture timeout
-    checks: [{ id: AC-1.1, needs: [resource], assertions: ["true"] }]
-"#);
-        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
-        assert_eq!(
-            outcome.verdict.state,
-            VerdictState::Inconclusive(InconclusiveCause::Timeout)
-        );
-    }
-
-    #[tokio::test]
-    async fn fixture_down_failure_does_not_change_check_verdict() {
-        let (mut engine, _tmp) = engine_for_test().await;
-        engine.register_test_action(Box::new(StubAction::new("fake/up", Outcome::Ok)));
-        engine.register_test_action(Box::new(
-            StubAction::new("fake/check", Outcome::Ok)
-                .judging()
-                .with_output("satisfied", serde_json::json!(false)),
-        ));
-        engine.register_test_action(Box::new(StubAction::new("fake/down", Outcome::Error)));
-        let v = def(r#"
-verification: fixtures
-fixtures:
-  resource:
-    up: [{ uses: fake/up }]
-    down: [{ id: remove, uses: fake/down }]
-criteria:
-  - id: AC-1
-    description: cleanup does not judge
-    checks: [{ id: AC-1.1, needs: [resource], steps: [{ uses: fake/check }] }]
-"#);
-        let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
-        assert_eq!(outcome.verdict.state, VerdictState::Fail);
-        assert_eq!(outcome.cleanup.len(), 1);
-        assert!(outcome.cleanup[0].step.contains("fixture `resource`"));
-    }
-
     // --- #441 Part B: criterion- and check-level setup:/teardown: ---
 
-    /// The documented execution order, outermost first:
-    /// `provision.up → leaf setup → criterion setup → check setup →
-    /// [fixtures via needs] → check steps`, then teardown unwinds in
-    /// exact reverse. Asserts the *observed order*, not just that
-    /// every hook ran.
+    /// Lifecycle steps run outermost first, then flow cleanup unwinds
+    /// before check and outer teardown. Asserts the observed order.
     #[tokio::test]
     async fn all_four_lifecycle_levels_execute_in_order_and_teardown_unwinds_in_reverse() {
         let (mut engine, _tmp) = engine_for_test().await;
@@ -1342,8 +1160,8 @@ criteria:
             ("fake/crit_teardown", "crit_teardown"),
             ("fake/check_setup", "check_setup"),
             ("fake/check_teardown", "check_teardown"),
-            ("fake/fixture_up", "fixture_up"),
-            ("fake/fixture_down", "fixture_down"),
+            ("fake/flow_body", "flow_body"),
+            ("fake/flow_cleanup", "flow_cleanup"),
         ] {
             engine.register_test_action(Box::new(RecordingAction {
                 uses,
@@ -1362,14 +1180,15 @@ criteria:
             judges: true,
             outputs: vec![("satisfied", serde_json::json!(true))],
         }));
-        let v = def(r#"
+        let v = load_flows(
+            r#"
 verification: full chain
 setup: [{ uses: fake/leaf_setup }]
 teardown: [{ uses: fake/leaf_teardown }]
-fixtures:
+flows:
   res:
-    up: [{ uses: fake/fixture_up }]
-    down: [{ uses: fake/fixture_down }]
+    steps: [{ uses: fake/flow_body }]
+    cleanup: [{ uses: fake/flow_cleanup }]
 criteria:
   - id: AC-1
     description: full chain
@@ -1377,11 +1196,13 @@ criteria:
     teardown: [{ uses: fake/crit_teardown }]
     checks:
       - id: AC-1.1
-        needs: [res]
-        setup: [{ uses: fake/check_setup }]
+        setup:
+          - { uses: fake/check_setup }
+          - { id: resource, call: res }
         teardown: [{ uses: fake/check_teardown }]
         steps: [{ uses: fake/check_step }]
-"#);
+"#,
+        );
         let outcome = engine.run_with_metadata(&v, BTreeMap::new()).await.unwrap();
         assert_eq!(outcome.verdict.state, VerdictState::Pass);
         assert_eq!(
@@ -1390,9 +1211,9 @@ criteria:
                 "leaf_setup",
                 "crit_setup",
                 "check_setup",
-                "fixture_up",
+                "flow_body",
                 "check_step",
-                "fixture_down",
+                "flow_cleanup",
                 "check_teardown",
                 "crit_teardown",
                 "leaf_teardown",

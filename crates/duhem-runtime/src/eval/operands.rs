@@ -64,9 +64,6 @@ impl EvalContext for RecordingContext<'_> {
     fn setup_output(&self, step: &str, output: &str) -> Option<&Value> {
         self.inner.setup_output(step, output)
     }
-    fn fixture_output(&self, fixture: &str, step: &str, output: &str) -> Option<&Value> {
-        self.inner.fixture_output(fixture, step, output)
-    }
     fn loop_binding(&self, name: &str) -> Option<&Value> {
         // Without this forward, `EvalContext::loop_binding`'s default
         // no-op impl wins and a `for_each:` (#443) body step's `if:`

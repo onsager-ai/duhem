@@ -122,8 +122,8 @@ fn format_load_error(e: LoadError) -> String {
             Some(loc) => format!(
                 "{}:{}:{}: [schema v{SCHEMA_VERSION}] {source}",
                 path.display(),
-                loc.line(),
-                loc.column(),
+                loc.line,
+                loc.column,
             ),
             None => format!("{}: [schema v{SCHEMA_VERSION}] {source}", path.display()),
         },

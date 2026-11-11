@@ -167,6 +167,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn published_schema_matches_generated_schema_after_fixture_removal() {
+        let published: serde_json::Value =
+            serde_json::from_str(include_str!("../../../schema/duhem.schema.json")).unwrap();
+        assert_eq!(published, json_schema());
+        let definitions = &published["definitions"];
+        assert!(definitions.get("Fixture").is_none());
+        for owner in ["Check", "Step"] {
+            assert!(definitions[owner]["properties"].get("needs").is_none());
+        }
+        assert!(
+            definitions["VerificationDefinition"]["properties"]
+                .get("fixtures")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn json_schema_has_expected_top_level_shape() {
         let schema = json_schema();
         let obj = schema.as_object().expect("schema is an object");

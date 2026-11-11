@@ -16,7 +16,12 @@ fn definition(scenario: &str, dir: &std::path::Path) -> VerificationDefinition {
     let yaml = format!("verification: Owned processes\ninputs:\n  secret: {{ type: string, secret: true }}\n{scenario}")
         .replace("@FIXTURE@", &serde_json::to_string(&fixture).unwrap())
         .replace("@STATE@", &serde_json::to_string(&dir.join("state")).unwrap());
-    VerificationDefinition::from_yaml_str(&yaml).unwrap()
+    let path = dir.join("leaf.yml");
+    std::fs::write(&path, yaml).unwrap();
+    let duhem_schema::Loaded::Leaf { definition, .. } = duhem_schema::load(&path).unwrap() else {
+        panic!("expected leaf")
+    };
+    definition
 }
 
 async fn run(scenario: &str) -> (RunOutcome, Trace, tempfile::TempDir) {
@@ -355,30 +360,31 @@ criteria:
 #[tokio::test]
 async fn diagnostic_fixture_still_has_required_process_finalizer() {
     let (outcome, trace, _) = run(r#"
-fixtures:
+flows:
   watcher:
     cleanup_policy: diagnostic_only
-    up:
+    steps:
       - id: child
         uses: process/start
         with: { command: python3, args: [-u, @FIXTURE@, idle] }
-    down:
+    outputs: {handle: $steps.child.outputs.handle}
+    cleanup:
       - uses: process/inspect
-        with: { handle: $fixture.watcher.child.outputs.handle }
+        with: { handle: $steps.child.outputs.handle }
 criteria:
   - id: AC-1
     description: A diagnostic fixture cannot weaken owned cleanup.
     checks:
       - id: AC-1.1
-        needs: [watcher]
+        setup: [{call: watcher}]
         steps: []
         assertions: ["false"]
 "#)
     .await;
     assert_eq!(outcome.verdict.state, VerdictState::Fail);
     assert!(trace.events().iter().any(|event| matches!(&event.payload,
-        EventPayload::SetupStarted { cleanup_policy: Some(policy), fixture_name: Some(name), .. }
-        if policy == "required" && name == "watcher")));
+        EventPayload::SetupStarted { cleanup_policy: Some(policy), check_id: Some(_), .. }
+        if policy == "required")));
     assert_eq!(process_facts(&trace, "finalizer")[0]["state"], "stopped");
 }
 
@@ -553,16 +559,16 @@ async fn required_finalizer_failure_preserves_body_and_prevents_restart() {
         let dir = tempfile::tempdir().unwrap();
         let _escaped = EscapedFixture(dir.path().join("state"));
         let body = if restart {
-            "steps:\n          - uses: process/restart\n            with: { handle: $fixture.watcher.child.outputs.handle }"
+            "steps:\n          - uses: process/restart\n            with: { handle: $setup.watcher.outputs.handle }"
         } else {
             "steps: []"
         };
         let scenario = format!(
             r#"
-fixtures:
+flows:
   watcher:
     cleanup_policy: diagnostic_only
-    up:
+    steps:
       - id: child
         uses: process/start
         with:
@@ -570,15 +576,16 @@ fixtures:
           args: [-u, @FIXTURE@, escaped-pipe, @STATE@]
           kill_timeout: 100ms
           ready: {{ log: {{ stream: stdout, pattern: READY }}, timeout: 5s }}
-    down:
+    outputs: {{handle: $steps.child.outputs.handle}}
+    cleanup:
       - uses: process/inspect
-        with: {{ handle: $fixture.watcher.child.outputs.handle }}
+        with: {{ handle: $steps.child.outputs.handle }}
 criteria:
   - id: AC-1
     description: Incomplete owned cleanup independently blocks the gate.
     checks:
       - id: AC-1.1
-        needs: [watcher]
+        setup: [{{id: watcher, call: watcher}}]
         {body}
         assertions: ["true"]
 "#
@@ -754,12 +761,11 @@ flows:
     cleanup:
       - uses: cli/invoke
         with: {{ command: [python3, -c, "{APPEND}", {log}, flow] }}
-fixtures:
   watcher:
-    up:
+    steps:
       - uses: cli/invoke
         with: {{ command: [python3, -c, "pass"] }}
-    down:
+    cleanup:
       - uses: cli/invoke
         with: {{ command: [python3, -c, "{APPEND}", {log}, fixture] }}
 criteria:
@@ -767,7 +773,6 @@ criteria:
     description: Cancellation drains flow cleanup and fixture down together.
     checks:
       - id: AC-1.1
-        needs: [watcher]
         setup:
           - uses: process/start
             with:
@@ -775,6 +780,7 @@ criteria:
               args: [-u, @FIXTURE@, idle]
               ready: {{ log: {{ stream: stdout, pattern: READY }}, timeout: 5s }}
           - call: mark
+          - call: watcher
         steps:
           - uses: cli/invoke
             with:

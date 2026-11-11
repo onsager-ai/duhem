@@ -39,34 +39,6 @@ pub(crate) fn validate_for_each(
         &[SourcePathSegment::key("teardown")],
         errs,
     );
-    for (fixture, lifecycle) in &v.fixtures {
-        validate_for_each_list(
-            v,
-            outputs_for,
-            &lifecycle.up,
-            "up",
-            &format!("fixture `{fixture}`"),
-            &[
-                SourcePathSegment::key("fixtures"),
-                SourcePathSegment::key(fixture.as_str()),
-                SourcePathSegment::key("up"),
-            ],
-            errs,
-        );
-        validate_for_each_list(
-            v,
-            outputs_for,
-            &lifecycle.down,
-            "down",
-            &format!("fixture `{fixture}`"),
-            &[
-                SourcePathSegment::key("fixtures"),
-                SourcePathSegment::key(fixture.as_str()),
-                SourcePathSegment::key("down"),
-            ],
-            errs,
-        );
-    }
     for (criterion_index, criterion) in v.criteria.iter().enumerate() {
         let criterion_label = format!("criterion `{}`", criterion.id);
         validate_for_each_list(

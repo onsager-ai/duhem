@@ -46,22 +46,6 @@ pub(crate) fn validate(definition: &VerificationDefinition, errs: &mut Vec<Valid
     let leaf = setup_ids(&definition.setup);
     check(&definition.setup, "leaf setup", &leaf, false, errs);
     check(&definition.teardown, "leaf teardown", &leaf, false, errs);
-    for (name, fixture) in &definition.fixtures {
-        check(
-            &fixture.up,
-            &format!("fixture `{name}` up"),
-            &leaf,
-            true,
-            errs,
-        );
-        check(
-            &fixture.down,
-            &format!("fixture `{name}` down"),
-            &leaf,
-            true,
-            errs,
-        );
-    }
     for criterion in &definition.criteria {
         let mut outer = leaf.clone();
         outer.extend(setup_ids(&criterion.setup));
@@ -91,50 +75,6 @@ pub(crate) fn validate(definition: &VerificationDefinition, errs: &mut Vec<Valid
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn new_process_outputs_are_visible_only_to_consuming_checks() {
-        let yaml = r#"
-verification: Scoped process outputs
-fixtures:
-  watcher:
-    up:
-      - id: worker
-        uses: process/start
-        with: { command: sleep, args: ["30"] }
-    down:
-      - uses: process/inspect
-        with: { handle: $fixture.watcher.worker.outputs.handle }
-criteria:
-  - id: AC-1
-    description: Only the consuming check receives the process handle.
-    checks:
-      - id: AC-1.1
-        needs: [watcher]
-        setup:
-          - id: local
-            uses: process/start
-            with: { command: sleep, args: ["30"] }
-        steps:
-          - uses: process/inspect
-            with: { handle: $setup.local.outputs.handle }
-          - uses: process/stop
-            with: { handle: $fixture.watcher.worker.outputs.handle }
-        assertions: ["true"]
-"#;
-        let definition = VerificationDefinition::from_yaml_str(yaml).unwrap();
-        crate::validate_with_contract_outputs(&definition, &|_| vec!["handle".into()]).unwrap();
-        let mut non_consumer = definition;
-        non_consumer.criteria[0].checks[0].needs.clear();
-        let errors =
-            crate::validate_with_contract_outputs(&non_consumer, &|_| vec!["handle".into()])
-                .unwrap_err();
-        assert!(
-            errors
-                .iter()
-                .any(|error| matches!(error, ValidationError::FixtureRefOutsideDown { .. }))
-        );
-    }
 
     #[test]
     fn enclosing_handles_cannot_be_mutated_even_through_output_aliases() {

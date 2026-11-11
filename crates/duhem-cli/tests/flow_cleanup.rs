@@ -1,10 +1,10 @@
-//! Executable examples for required and diagnostic fixture cleanup (#567).
+//! Executable examples for required and diagnostic flow cleanup (#567).
 
 use std::path::Path;
 use std::process::Command;
 
 #[test]
-fn fixture_cleanup_policy_controls_cli_gate() {
+fn flow_cleanup_policy_controls_cli_gate() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cleanup");
     for (file, passes) in [
         ("required.yml", false),
@@ -66,11 +66,11 @@ async fn body_gate_cleanup_and_store_agree_for_leaf_and_manifest() {
                 format!(
                     r#"
 verification: Cleanup gate
-fixtures:
+flows:
   resource:
     cleanup_policy: {policy}
-    up: [{{uses: cli/invoke, with: {{command: [sh, -c, "true"]}}}}]
-    down:
+    steps: [{{uses: cli/invoke, with: {{command: [sh, -c, "true"]}}}}]
+    cleanup:
       - uses: cli/invoke
         with: {{command: [duhem-intentionally-nonexistent-cleanup-command]}}
 criteria:
@@ -78,7 +78,7 @@ criteria:
     description: Body judgment stays visible
     checks:
       - id: body
-        needs: [resource]
+        setup: [{{call: resource}}]
 {body_steps}
         assertions: ["{assertion}"]
       - id: independent
@@ -195,16 +195,16 @@ fn real_api_poll_judges_cleanup_but_call_status_and_cli_exit_are_observations() 
             format!(
                 r#"
 verification: Cleanup action
-fixtures:
+flows:
   resource:
-    up: [{{uses: cli/invoke, with: {{command: [sh, -c, "true"]}}}}]
-    down:
+    steps: [{{uses: cli/invoke, with: {{command: [sh, -c, "true"]}}}}]
+    cleanup:
       - uses: {action}
         with: {with}
 criteria:
   - id: AC
     description: Only judging actions judge
-    checks: [{{id: body, needs: [resource], assertions: ["true"]}}]
+    checks: [{{id: body, setup: [{{call: resource}}], assertions: ["true"]}}]
 "#
             ),
         )

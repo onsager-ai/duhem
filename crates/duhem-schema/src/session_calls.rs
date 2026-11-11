@@ -36,20 +36,6 @@ pub(crate) fn validate(v: &VerificationDefinition) -> Vec<String> {
                     &mut errors,
                 );
             }
-            for name in &check.needs {
-                if let Some(fixture) = v.fixtures.get(name) {
-                    for (field, steps) in [("up", &fixture.up), ("down", &fixture.down)] {
-                        walk(
-                            v,
-                            steps,
-                            Some(check),
-                            &[S::key("fixtures"), S::key(name), S::key(field)],
-                            0,
-                            &mut errors,
-                        );
-                    }
-                }
-            }
         }
     }
     errors

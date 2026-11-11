@@ -1,15 +1,9 @@
-//! Validation for the lifecycle authoring surface — `fixtures:` (#449)
-//! and value-based `if:` on lifecycle steps (#440).
+//! Validation for value-based `if:` on lifecycle steps (#440).
 //!
 //! Split out of `validate.rs` alongside the error vocabulary (#411).
-//! Both checks concern the same surface — the `setup:` / `teardown:` /
-//! `fixtures:` lifecycle — and are self-contained walks over it, so
-//! they move together rather than growing the structural validator.
 
 use std::collections::{HashMap, HashSet};
 
-use crate::SourceLocation;
-use crate::criterion::Criterion;
 use crate::expr::PathRoot;
 use crate::source::SourcePathSegment;
 use crate::step::{Step, StepCondition};
@@ -17,265 +11,7 @@ use crate::validate::{check_with_expression_syntax, effective_outputs, step_labe
 use crate::validate_error::{RefSite, ValidationError};
 use crate::validate_runtime::walk_checkable_paths;
 use crate::verification::VerificationDefinition;
-
-pub(crate) fn validate_fixtures(
-    v: &VerificationDefinition,
-    outputs_for: &dyn Fn(&str) -> Vec<String>,
-    errs: &mut Vec<ValidationError>,
-) {
-    for (name, fixture) in &v.fixtures {
-        if fixture.up.is_empty() {
-            errs.push(ValidationError::EmptyFixturePhase {
-                fixture: name.clone(),
-                phase: "up",
-            });
-        }
-        if fixture.down.is_empty() {
-            errs.push(ValidationError::EmptyFixturePhase {
-                fixture: name.clone(),
-                phase: "down",
-            });
-        }
-        // Only leaf setup publishes to the `$setup` namespace available here.
-        // Fixture steps publish to `$fixture`, never to `$setup`.
-        let preceding: HashMap<&str, HashSet<String>> = v
-            .setup
-            .iter()
-            .filter_map(|step| {
-                step.id
-                    .as_deref()
-                    .map(|id| (id, effective_outputs(step, outputs_for)))
-            })
-            .collect();
-        let mut up_outputs: HashMap<&str, HashSet<String>> = HashMap::new();
-        for (index, step) in fixture.up.iter().enumerate() {
-            if !step.needs.is_empty() {
-                let path = [
-                    SourcePathSegment::key("fixtures"),
-                    SourcePathSegment::key(name),
-                    SourcePathSegment::key("up"),
-                    SourcePathSegment::index(index),
-                    SourcePathSegment::key("needs"),
-                    SourcePathSegment::index(0),
-                ];
-                errs.push(ValidationError::FixtureStepNeeds {
-                    fixture: name.clone(),
-                    phase: "up",
-                    step: step_label(step, index),
-                    location: v.source_map.scalar_location(&path, &step.needs[0]),
-                });
-            }
-            validate_fixture_value_exprs(v, name, "up", index, step, &preceding, None, errs);
-            if let Some(id) = step.id.as_deref() {
-                up_outputs.insert(id, effective_outputs(step, outputs_for));
-            }
-            let mut path = vec![
-                SourcePathSegment::key("fixtures"),
-                SourcePathSegment::key(name),
-                SourcePathSegment::key("up"),
-                SourcePathSegment::index(index),
-                SourcePathSegment::key("with"),
-            ];
-            crate::validate::check_with_expression_syntax(
-                &step.with,
-                &mut path,
-                crate::validate::RefSite::StepWith {
-                    step: step_label(step, index),
-                },
-                &v.source_map,
-                errs,
-            );
-            crate::source::walk_with_refs(&step.with, &mut path, &mut |expr, raw, source_path| {
-                let location = v.source_map.scalar_location(source_path, raw);
-                expr.walk_paths(|reference| {
-                    if reference.root == PathRoot::Fixture {
-                        errs.push(ValidationError::FixtureRefOutsideDown {
-                            site: format!(
-                                "fixture `{name}` up step `{}` with:",
-                                step_label(step, index)
-                            ),
-                            location,
-                        });
-                    } else if reference.root == PathRoot::Loop {
-                        // #513 follow-up: the parser no longer rejects
-                        // an unknown `$name` outright (it's
-                        // provisionally a `for_each` loop reference,
-                        // see `PathRoot::Loop`), so this scope check —
-                        // already present for every other lifecycle
-                        // `with:` — is what catches an ordinary typo
-                        // here too.
-                        let bound = reference
-                            .segments()
-                            .first()
-                            .map(String::as_str)
-                            .unwrap_or("");
-                        if step.as_binding.as_deref() != Some(bound) {
-                            errs.push(ValidationError::LoopVariableOutOfScope {
-                                site: format!(
-                                    "fixture `{name}` up step `{}` with:",
-                                    step_label(step, index)
-                                ),
-                                name: bound.to_string(),
-                                location,
-                            });
-                        }
-                    }
-                });
-            });
-        }
-        for (index, step) in fixture.down.iter().enumerate() {
-            validate_fixture_value_exprs(
-                v,
-                name,
-                "down",
-                index,
-                step,
-                &preceding,
-                Some(&up_outputs),
-                errs,
-            );
-            if !step.needs.is_empty() {
-                let path = [
-                    SourcePathSegment::key("fixtures"),
-                    SourcePathSegment::key(name),
-                    SourcePathSegment::key("down"),
-                    SourcePathSegment::index(index),
-                    SourcePathSegment::key("needs"),
-                    SourcePathSegment::index(0),
-                ];
-                errs.push(ValidationError::FixtureStepNeeds {
-                    fixture: name.clone(),
-                    phase: "down",
-                    step: step_label(step, index),
-                    location: v.source_map.scalar_location(&path, &step.needs[0]),
-                });
-            }
-            let mut path = vec![
-                SourcePathSegment::key("fixtures"),
-                SourcePathSegment::key(name),
-                SourcePathSegment::key("down"),
-                SourcePathSegment::index(index),
-                SourcePathSegment::key("with"),
-            ];
-            crate::validate::check_with_expression_syntax(
-                &step.with,
-                &mut path,
-                crate::validate::RefSite::StepWith {
-                    step: step_label(step, index),
-                },
-                &v.source_map,
-                errs,
-            );
-            crate::source::walk_with_refs(&step.with, &mut path, &mut |expr, raw, source_path| {
-                let location = v.source_map.scalar_location(source_path, raw);
-                expr.walk_paths(|reference| {
-                    if reference.root == PathRoot::Loop {
-                        // See the matching `up:` check above.
-                        let bound = reference
-                            .segments()
-                            .first()
-                            .map(String::as_str)
-                            .unwrap_or("");
-                        if step.as_binding.as_deref() != Some(bound) {
-                            errs.push(ValidationError::LoopVariableOutOfScope {
-                                site: format!(
-                                    "fixture `{name}` down step `{}` with:",
-                                    step_label(step, index)
-                                ),
-                                name: bound.to_string(),
-                                location,
-                            });
-                        }
-                        return;
-                    }
-                    if reference.root != PathRoot::Fixture {
-                        return;
-                    }
-                    let segs = reference.segments();
-                    let valid = segs.len() >= 4
-                        && segs[0] == *name
-                        && segs[2] == "outputs"
-                        && up_outputs
-                            .get(segs[1].as_str())
-                            .is_some_and(|outputs| outputs.contains(&segs[3]));
-                    if !valid {
-                        errs.push(ValidationError::InvalidFixtureRef {
-                            fixture: name.clone(),
-                            down_step: step_label(step, index),
-                            raw: raw.to_string(),
-                            location,
-                        });
-                    }
-                });
-            });
-        }
-    }
-}
-
-/// Fixture expressions share the lifecycle resolver. `$setup` addresses only
-/// leaf setup; `$fixture` addresses this fixture's up outputs only from its
-/// own `down:` block (§10.3.5).
-#[allow(clippy::too_many_arguments)]
-fn validate_fixture_value_exprs(
-    v: &VerificationDefinition,
-    name: &str,
-    phase: &str,
-    index: usize,
-    step: &Step,
-    preceding: &HashMap<&str, HashSet<String>>,
-    up_outputs: Option<&HashMap<&str, HashSet<String>>>,
-    errs: &mut Vec<ValidationError>,
-) {
-    let condition = match &step.condition {
-        StepCondition::Expr(expr) => Some(expr),
-        _ => None,
-    };
-    for frame in &step.group {
-        if let StepCondition::Expr(expr) = &frame.condition {
-            validate_lifecycle_value_expr(
-                v,
-                &format!("fixture `{name}` {phase} group `{}` condition", frame.label),
-                &expr.raw,
-                &expr.parsed,
-                None,
-                preceding,
-                None,
-                Some(FixtureValueScope { name, up_outputs }),
-                errs,
-            );
-        }
-    }
-    for (key, label, expr) in [
-        ("if", "condition", condition),
-        ("for_each", "for_each source", step.for_each.as_ref()),
-    ] {
-        let Some(expr) = expr else { continue };
-        let path = [
-            SourcePathSegment::key("fixtures"),
-            SourcePathSegment::key(name),
-            SourcePathSegment::key(phase),
-            SourcePathSegment::index(index),
-            SourcePathSegment::key(key),
-        ];
-        validate_lifecycle_value_expr(
-            v,
-            &format!("fixture `{name}` {phase} step {label}"),
-            &expr.raw,
-            &expr.parsed,
-            v.source_map.scalar_location(&path, &expr.raw),
-            preceding,
-            None,
-            Some(FixtureValueScope { name, up_outputs }),
-            errs,
-        );
-    }
-}
-
-pub(crate) struct FixtureValueScope<'a> {
-    name: &'a str,
-    // None in `up:`, Some in `down:`; never includes down-step outputs.
-    up_outputs: Option<&'a HashMap<&'a str, HashSet<String>>>,
-}
+use crate::{Criterion, SourceLocation};
 
 pub(crate) fn validate_lifecycle_condition(
     definition: &VerificationDefinition,
@@ -320,7 +56,6 @@ pub(crate) fn validate_lifecycle_condition_in_loop(
                 None,
                 preceding,
                 active_loop,
-                None,
                 errs,
             );
         }
@@ -339,7 +74,6 @@ pub(crate) fn validate_lifecycle_condition_in_loop(
         location,
         preceding,
         active_loop,
-        None,
         errs,
     );
 }
@@ -374,7 +108,6 @@ pub(crate) fn validate_for_each_source(
         location,
         preceding,
         None,
-        None,
         errs,
     );
 }
@@ -382,8 +115,7 @@ pub(crate) fn validate_for_each_source(
 /// Shared resolver for a lifecycle-scoped value expression — a
 /// step's `if:` condition (§10.3.3 Tier 1) or a `for_each:` source
 /// expression (#443 Tier 1). Both read the same `$setup`/`$inputs`/
-/// `$pages`/`$runtime`/loop-variable surface. Fixture `down:` additionally
-/// permits its own `up:` outputs; all contexts use this same resolver.
+/// `$pages`/`$runtime`/loop-variable surface.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn validate_lifecycle_value_expr(
     definition: &VerificationDefinition,
@@ -393,7 +125,6 @@ pub(crate) fn validate_lifecycle_value_expr(
     location: Option<SourceLocation>,
     preceding: &HashMap<&str, HashSet<String>>,
     active_loop: Option<&str>,
-    fixture_scope: Option<FixtureValueScope<'_>>,
     errs: &mut Vec<ValidationError>,
 ) {
     walk_checkable_paths(parsed, &mut |path, arity| {
@@ -401,35 +132,10 @@ pub(crate) fn validate_lifecycle_value_expr(
             errs.push(ValidationError::InvalidStepCondition { message, location });
         };
         match path.root {
-            PathRoot::Setup | PathRoot::Fixture => {
+            PathRoot::Setup => {
                 let segs = path.segments();
-                let (outputs, offset, root, expected) = if path.root == PathRoot::Fixture {
-                    let Some(scope) = &fixture_scope else {
-                        fail(
-                            format!("{site} `{raw}` may not reference fixture outputs"),
-                            errs,
-                        );
-                        return;
-                    };
-                    let Some(outputs) = scope
-                        .up_outputs
-                        .filter(|_| segs.first().map(String::as_str) == Some(scope.name))
-                    else {
-                        errs.push(ValidationError::FixtureRefOutsideDown {
-                            site: site.to_string(),
-                            location,
-                        });
-                        return;
-                    };
-                    (
-                        outputs,
-                        1,
-                        "$fixture",
-                        "$fixture.<fixture_name>.<step_id>.outputs.<output>",
-                    )
-                } else {
-                    (preceding, 0, "$setup", "$setup.<step_id>.outputs.<output>")
-                };
+                let (outputs, offset, root, expected) =
+                    (preceding, 0, "$setup", "$setup.<step_id>.outputs.<output>");
                 if segs.len() < offset + 3 || segs[offset + 1] != "outputs" {
                     fail(
                         format!(
@@ -448,23 +154,6 @@ pub(crate) fn validate_lifecycle_value_expr(
                             errs,
                         );
                     }
-                } else if path.root == PathRoot::Setup
-                    && let Some(scope) = &fixture_scope
-                    && definition.fixtures.get(scope.name).is_some_and(|fixture| {
-                        fixture
-                            .up
-                            .iter()
-                            .chain(&fixture.down)
-                            .any(|step| step.id.as_deref() == Some(segs[0].as_str()))
-                    })
-                {
-                    fail(
-                        format!(
-                            "{site} `{raw}` references fixture step `{}`, which is declared but out of scope for `$setup`: only leaf-level `setup:` outputs are available through `$setup` in fixture bodies. Fixture `up:` outputs use `$fixture.{}.<up_step_id>.outputs.<output>` and may only be read from that fixture's own `down:` block (see §10.3.5)",
-                            segs[0], scope.name
-                        ),
-                        errs,
-                    );
                 } else {
                     fail(
                         format!(
@@ -529,7 +218,7 @@ pub(crate) fn validate_lifecycle_value_expr(
 /// Validate one criterion- or check-level `setup:`/`teardown:` block
 /// (#441 Part B) — the same walk the leaf-level pair gets (value-based
 /// `if:` per #440 Tier 1, `with:` expression syntax, `$pages`/
-/// `$runtime` reference checks, `$fixture` rejection), plus one rule
+/// `$runtime` reference checks), plus one rule
 /// unique to nesting: a step id here must not collide with an id
 /// already open in an *outer* lifecycle scope (`outer_ids`). At
 /// runtime every lifecycle level publishes into the same flat
@@ -656,11 +345,6 @@ pub(crate) fn validate_nested_lifecycle_block_in_loop(
                         &format!("{label} {phase} step `{step_name}` with:"),
                         errs,
                     );
-                } else if path.root == PathRoot::Fixture {
-                    errs.push(ValidationError::FixtureRefOutsideDown {
-                        site: format!("{label} {phase} step `{step_name}` with:"),
-                        location,
-                    });
                 } else if path.root == PathRoot::Loop {
                     // A step's own `with:` is per-iteration content
                     // when the step is itself a `for_each:` wrapper
@@ -880,18 +564,13 @@ mod tests {
         VerificationDefinition::from_yaml_str(y).expect("parse")
     }
 
-    /// #513 blocker: the `PathRoot::Loop` grammar widening means an
-    /// unrecognized `$name` no longer fails to *parse* — every other
-    /// lifecycle `with:` got a scope check to compensate, but
-    /// `validate_fixtures`'s up:/down: walk only checked `$fixture`,
-    /// so an ordinary typo (`$input` for `$inputs`) escaped validation
-    /// entirely and only surfaced as a runtime `MissingLoopBinding`
-    /// with no location. Pin the fix: the typo is rejected with a
-    /// `file:line:col`, naming the closed root set and the `as:` rule.
+    /// #513 blocker: an unrecognized `$name` is provisionally a loop
+    /// binding, so lifecycle `with:` checks must reject undeclared names
+    /// with a location rather than deferring them to runtime.
     #[test]
-    fn fixture_up_with_typo_scope_reference_is_rejected_with_a_location() {
+    fn lifecycle_step_typo_scope_reference_is_rejected_with_a_location() {
         let v = parse(
-            "verification: x\ninputs:\n  base_url: { type: string, default: x }\nfixtures:\n  thing:\n    up:\n      - id: mk\n        uses: cli/invoke\n        with: { command: [echo, $input.base_url] }\n    down:\n      - uses: cli/invoke\n        with: { command: [echo, done] }\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        needs: [thing]\n        steps: []\n        assertions: [\"true\"]\n",
+            "verification: x\ninputs:\n  base_url: { type: string, default: x }\nsetup:\n  - id: mk\n    uses: cli/invoke\n    with: { command: [echo, $input.base_url] }\ncriteria: []\n",
         );
         let errs = crate::validate(&v).unwrap_err();
         let found = errs.iter().find(|e| {
@@ -904,7 +583,6 @@ mod tests {
         assert!(
             err.to_string().contains("$steps")
                 && err.to_string().contains("$setup")
-                && err.to_string().contains("$fixture")
                 && err.to_string().contains("$inputs")
                 && err.to_string().contains("as:"),
             "message should name the valid roots and the as: rule: {err}"

@@ -14,7 +14,7 @@ use crate::expr::{Expr, Path, PathRoot};
 use crate::source::SourcePathSegment;
 use crate::step::{Step, StepCondition};
 pub use crate::validate_error::{RefSite, ValidationError};
-use crate::validate_lifecycle::{validate_fixtures, validate_lifecycle_condition};
+use crate::validate_lifecycle::validate_lifecycle_condition;
 use crate::validate_runtime::walk_checkable_paths;
 use crate::verification::{FlowCatalog, InputDecl, InputType, PageCatalog, VerificationDefinition};
 
@@ -70,6 +70,7 @@ fn validate_lowered(
 ) -> Result<(), Vec<ValidationError>> {
     let mut errs = Vec::new();
     crate::validate_sessions::validate(v, outputs_for, &mut errs);
+    crate::validate_flow_values::validate(v, outputs_for, &mut errs);
     crate::validate_process::validate(v, &mut errs);
 
     errs.extend(
@@ -100,8 +101,6 @@ fn validate_lowered(
     }
 
     let setup_outputs = collect_setup_outputs(&v.setup, outputs_for, &mut errs);
-
-    validate_fixtures(v, outputs_for, &mut errs);
 
     errs.extend(input_decl_errors(&v.inputs, true));
     crate::validate_pages::validate_catalog_inputs(v, &mut errs);
@@ -172,11 +171,6 @@ fn validate_lowered(
                         &format!("setup step `{step_name}` with:"),
                         &mut errs,
                     );
-                } else if path.root == PathRoot::Fixture {
-                    errs.push(ValidationError::FixtureRefOutsideDown {
-                        site: format!("setup step `{step_name}` with:"),
-                        location,
-                    });
                 } else if path.root == PathRoot::Loop {
                     // #443: legitimate only for this step's own `for_each:`.
                     let name = path.segments().first().map(String::as_str).unwrap_or("");
@@ -265,11 +259,6 @@ fn validate_lowered(
                         &format!("teardown step `{step_name}` with:"),
                         &mut errs,
                     );
-                } else if path.root == PathRoot::Fixture {
-                    errs.push(ValidationError::FixtureRefOutsideDown {
-                        site: format!("teardown step `{step_name}` with:"),
-                        location,
-                    });
                 } else if path.root == PathRoot::Loop {
                     let name = path.segments().first().map(String::as_str).unwrap_or("");
                     if step.as_binding.as_deref() != Some(name) {
@@ -288,7 +277,6 @@ fn validate_lowered(
     }
 
     let definition_scope = DefinitionScope {
-        fixtures: &v.fixtures,
         inputs: &v.inputs,
         pages: &v.pages,
         flows: &v.flows,
@@ -319,26 +307,6 @@ fn validate_lowered(
             &mut errs,
         );
 
-        for (check_index, check) in c.checks.iter().enumerate() {
-            for (need_index, fixture) in check.needs.iter().enumerate() {
-                if !v.fixtures.contains_key(fixture) {
-                    let path = [
-                        SourcePathSegment::key("criteria"),
-                        SourcePathSegment::index(criterion_index),
-                        SourcePathSegment::key("checks"),
-                        SourcePathSegment::index(check_index),
-                        SourcePathSegment::key("needs"),
-                        SourcePathSegment::index(need_index),
-                    ];
-                    errs.push(ValidationError::UndeclaredFixture {
-                        criterion: c.id.clone(),
-                        check: check.id.clone(),
-                        fixture: fixture.clone(),
-                        location: v.source_map.scalar_location(&path, fixture),
-                    });
-                }
-            }
-        }
         validate_criterion(c, criterion_index, &definition_scope, &mut errs);
     }
 
@@ -607,7 +575,6 @@ fn matches_with_promotion(declared: InputType, actual: InputType) -> bool {
 }
 
 struct DefinitionScope<'a> {
-    fixtures: &'a crate::verification::FixtureCatalog,
     inputs: &'a BTreeMap<String, InputDecl>,
     pages: &'a PageCatalog,
     flows: &'a FlowCatalog,
@@ -637,7 +604,6 @@ fn validate_criterion(
 /// Per-check view of resolvable references — bundled to keep
 /// `check_path`'s arity within clippy's `too_many_arguments` lint.
 struct PathScope<'a> {
-    process_fixture_outputs: &'a HashMap<(&'a str, &'a str), HashSet<String>>,
     active_loop: Option<&'a str>,
     c: &'a Criterion,
     ch: &'a Check,
@@ -699,7 +665,6 @@ fn check_path(
     errs: &mut Vec<ValidationError>,
 ) {
     let PathScope {
-        process_fixture_outputs,
         active_loop,
         c,
         ch,
@@ -763,20 +728,6 @@ fn check_path(
             out_of_scope_setup_ids,
             errs,
         ),
-        PathRoot::Fixture => {
-            let parts = path.segments();
-            let available = parts.len() >= 4
-                && parts[2] == "outputs"
-                && process_fixture_outputs
-                    .get(&(parts[0].as_str(), parts[1].as_str()))
-                    .is_some_and(|outputs| outputs.contains(&parts[3]));
-            if !available {
-                errs.push(ValidationError::FixtureRefOutsideDown {
-                    site: format!("criterion `{}` / check `{}`: {site}", c.id, ch.id),
-                    location,
-                });
-            }
-        }
         PathRoot::Inputs => {
             let segs = path.segments();
             // Leading `$inputs.<name>`; deeper segments navigate into a
@@ -991,100 +942,6 @@ criteria:
             error,
             ValidationError::InvalidPageTemplate { entry, .. }
                 if entry == "$pages.chat.history_item"
-        )));
-    }
-
-    #[test]
-    fn fixture_needs_and_output_scope_are_location_aware() {
-        let valid = parse(
-            r#"
-verification: fixtures
-fixtures:
-  project:
-    up:
-      - id: create
-        uses: api/call
-    down:
-      - uses: api/call
-        with: { url: $fixture.project.create.outputs.body.url }
-criteria:
-  - id: AC-1
-    description: fixture
-    checks:
-      - id: AC-1.1
-        needs: [project]
-        steps: [{ uses: api/call }]
-"#,
-        );
-        validate_with_contract_outputs(&valid, &api_call_outputs).unwrap();
-
-        let invalid = parse(
-            r#"
-verification: fixtures
-fixtures:
-  project:
-    up: [{ id: create, uses: api/call }]
-    down: [{ uses: api/call }]
-criteria:
-  - id: AC-1
-    description: fixture
-    checks:
-      - id: AC-1.1
-        needs: [missing]
-        steps:
-          - uses: api/call
-            with: { url: $fixture.project.create.outputs.body }
-"#,
-        );
-        let errors = validate_with_contract_outputs(&invalid, &api_call_outputs).unwrap_err();
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ValidationError::UndeclaredFixture {
-                location: Some(_),
-                ..
-            }
-        )));
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ValidationError::FixtureRefOutsideDown {
-                location: Some(_),
-                ..
-            }
-        )));
-    }
-
-    #[test]
-    fn fixture_rejects_empty_phases_and_step_needs() {
-        let invalid = parse(
-            r#"
-verification: fixtures
-fixtures:
-  empty:
-    up: []
-    down: []
-  nested:
-    up: [{ uses: api/call, needs: [empty] }]
-    down: [{ uses: api/call }]
-criteria:
-  - id: AC-1
-    description: fixture
-    checks: [{ id: AC-1.1, steps: [{ uses: api/call }] }]
-"#,
-        );
-        let errors = validate_with_contract_outputs(&invalid, &api_call_outputs).unwrap_err();
-        assert_eq!(
-            errors
-                .iter()
-                .filter(|e| matches!(e, ValidationError::EmptyFixturePhase { .. }))
-                .count(),
-            2
-        );
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ValidationError::FixtureStepNeeds {
-                location: Some(_),
-                ..
-            }
         )));
     }
 
@@ -2440,76 +2297,6 @@ criteria:
                 e,
                 ValidationError::ReservedOutputPrefix { site, name, .. }
                     if site == "teardown" && name == "capture/x"
-            )),
-            "expected ReservedOutputPrefix, got {errs:?}"
-        );
-    }
-
-    #[test]
-    fn fixture_up_output_under_capture_prefix_is_rejected() {
-        let y = r#"
-verification: x
-fixtures:
-  proj:
-    up:
-      - id: create
-        uses: api/call
-        with: { method: GET, url: http://x }
-        outputs:
-          capture/x: satisfied
-    down:
-      - uses: api/call
-        with: { method: GET, url: http://x }
-criteria:
-  - id: AC-1
-    description: x
-    checks:
-      - id: AC-1.1
-        needs: [proj]
-        assertions: ["true"]
-"#;
-        let v = parse(y);
-        let errs = validate_with_contract_outputs(&v, &api_call_outputs).unwrap_err();
-        assert!(
-            errs.iter().any(|e| matches!(
-                e,
-                ValidationError::ReservedOutputPrefix { site, name, .. }
-                    if site == "fixture `proj` up" && name == "capture/x"
-            )),
-            "expected ReservedOutputPrefix, got {errs:?}"
-        );
-    }
-
-    #[test]
-    fn fixture_down_output_under_capture_prefix_is_rejected() {
-        let y = r#"
-verification: x
-fixtures:
-  proj:
-    up:
-      - id: create
-        uses: api/call
-        with: { method: GET, url: http://x }
-    down:
-      - uses: api/call
-        with: { method: GET, url: http://x }
-        outputs:
-          capture/x: satisfied
-criteria:
-  - id: AC-1
-    description: x
-    checks:
-      - id: AC-1.1
-        needs: [proj]
-        assertions: ["true"]
-"#;
-        let v = parse(y);
-        let errs = validate_with_contract_outputs(&v, &api_call_outputs).unwrap_err();
-        assert!(
-            errs.iter().any(|e| matches!(
-                e,
-                ValidationError::ReservedOutputPrefix { site, name, .. }
-                    if site == "fixture `proj` down" && name == "capture/x"
             )),
             "expected ReservedOutputPrefix, got {errs:?}"
         );

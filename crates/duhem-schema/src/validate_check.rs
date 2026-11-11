@@ -10,7 +10,6 @@ pub(super) fn validate_check(
     errs: &mut Vec<ValidationError>,
 ) {
     let DefinitionScope {
-        fixtures,
         inputs,
         pages,
         flows,
@@ -93,9 +92,8 @@ pub(super) fn validate_check(
         .filter_map(|s| s.id.as_deref())
         .collect();
 
-    // #579 exposes only the new process observations from nested setup and
-    // consuming fixtures. Existing non-process setup/fixture visibility stays
-    // unchanged; resource mutation still has separate ownership validation.
+    // #579 exposes only process observations from nested setup blocks.
+    // Existing ordinary setup outputs remain out of scope in the body.
     let mut body_setup_outputs = setup_outputs.clone();
     for step in c
         .setup
@@ -112,23 +110,7 @@ pub(super) fn validate_check(
             body_setup_outputs.insert(id, effective_outputs(step, outputs_for));
         }
     }
-    let mut process_fixture_outputs = HashMap::new();
-    for name in &ch.needs {
-        if let Some(fixture) = fixtures.get(name) {
-            for step in fixture.up.iter().flat_map(Step::actions).filter(|step| {
-                step.uses
-                    .as_deref()
-                    .is_some_and(|uses| uses.starts_with("process/"))
-            }) {
-                if let Some(id) = step.id.as_deref() {
-                    process_fixture_outputs
-                        .insert((name.as_str(), id), effective_outputs(step, outputs_for));
-                }
-            }
-        }
-    }
     let scope = PathScope {
-        process_fixture_outputs: &process_fixture_outputs,
         active_loop: None,
         c,
         ch,
@@ -261,10 +243,7 @@ pub(super) fn validate_check(
             .flatten();
         match crate::expr::parse(raw) {
             Ok(Expr::Path(path)) => {
-                if matches!(
-                    path.root,
-                    PathRoot::Steps | PathRoot::Fixture | PathRoot::Loop
-                ) {
+                if matches!(path.root, PathRoot::Steps | PathRoot::Loop) {
                     errs.push(ValidationError::InvalidSessionReference {
                         criterion: c.id.clone(),
                         check: ch.id.clone(),

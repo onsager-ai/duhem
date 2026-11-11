@@ -41,7 +41,7 @@ pub fn contracts() -> Vec<ActionContract> {
         },
         ActionContract {
             uses: "process/stop",
-            summary: "Stop and reap a current-check or fixture process group with bounded escalation.",
+            summary: "Stop and reap a current-check process group with bounded escalation.",
             with: vec![FieldSpec::required("handle")],
             outputs: vec![
                 "stopped",
@@ -55,7 +55,7 @@ pub fn contracts() -> Vec<ActionContract> {
         },
         ActionContract {
             uses: "process/restart",
-            summary: "Stop the old generation before restarting a current-check or fixture process.",
+            summary: "Stop the old generation before restarting a current-check process.",
             with: vec![FieldSpec::required("handle")],
             outputs: vec!["handle", "generation", "pid", "ready"],
             secret_outputs: vec![],

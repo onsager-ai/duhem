@@ -87,22 +87,6 @@ pub(crate) fn validate(
                     validate_step(v, step, Some(check), path, &site, errors);
                 }
             }
-            for name in &check.needs {
-                if let Some(fixture) = v.fixtures.get(name) {
-                    for (field, steps) in [("up", &fixture.up), ("down", &fixture.down)] {
-                        for (i, step) in steps.iter().enumerate() {
-                            validate_step(
-                                v,
-                                step,
-                                Some(check),
-                                vec![S::key("fixtures"), S::key(name), S::key(field), S::index(i)],
-                                &site,
-                                errors,
-                            );
-                        }
-                    }
-                }
-            }
         }
         for (field, steps) in [
             ("setup", &criterion.setup),

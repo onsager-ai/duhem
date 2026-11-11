@@ -204,12 +204,6 @@ pub(crate) fn lint_warnings(def: &VerificationDefinition) -> Vec<String> {
                     .iter()
                     .chain(&ch.setup)
                     .chain(&ch.teardown)
-                    .chain(
-                        ch.needs
-                            .iter()
-                            .filter_map(|name| def.fixtures.get(name))
-                            .flat_map(|fixture| fixture.up.iter().chain(&fixture.down)),
-                    )
                     .flat_map(duhem_schema::Step::actions)
                     .any(|step| step.uses_name().starts_with("ui/"))
             {
@@ -220,8 +214,6 @@ pub(crate) fn lint_warnings(def: &VerificationDefinition) -> Vec<String> {
             }
         }
     }
-    // `fixtures:` / `needs:` are deprecated in favour of flow `cleanup:` (#618).
-    warns.extend(duhem_schema::fixture_deprecation_warnings(def));
     warns
 }
 

@@ -34,10 +34,6 @@ pub struct FlowCleanup {
     /// The call sits in a `for_each:` body, so each iteration registers its
     /// own cleanup; otherwise the call registers once per scope.
     pub per_iteration: bool,
-    /// Set when this cleanup is a deprecated `fixtures.<name>` `down:`
-    /// desugared onto a check's `setup:` (#618): the fixture's name, so
-    /// evidence keeps its fixture scope fields.
-    pub fixture: Option<String>,
 }
 
 /// Loader-only provenance attached to an action expanded from a
@@ -145,10 +141,6 @@ impl StepCondition {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Step {
-    /// Reserved for a friendly validation error: fixtures may only be
-    /// requested by checks, never by lifecycle steps.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub needs: Vec<String>,
     /// Optional — required only when another assertion or step
     /// references this step via `$steps.<id>.outputs.*`. The
     /// validator enforces that an unreferenced step may omit `id`,

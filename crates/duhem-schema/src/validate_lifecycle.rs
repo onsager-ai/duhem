@@ -4,14 +4,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::SourceLocation;
 use crate::expr::PathRoot;
 use crate::source::SourcePathSegment;
 use crate::step::{Step, StepCondition};
-use crate::validate::{effective_outputs, step_label};
+use crate::validate::{check_with_expression_syntax, effective_outputs, step_label};
 use crate::validate_error::{RefSite, ValidationError};
 use crate::validate_runtime::walk_checkable_paths;
 use crate::verification::VerificationDefinition;
+use crate::{Criterion, SourceLocation};
 
 pub(crate) fn validate_lifecycle_condition(
     definition: &VerificationDefinition,

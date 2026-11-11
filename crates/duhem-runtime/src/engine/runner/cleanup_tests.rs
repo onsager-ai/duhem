@@ -22,6 +22,7 @@ criteria:
     checks:
       - id: body
         setup: [{{call: resource}}]
+        steps: [{{id: missing, uses: fake/setup}}]
         assertions: ["{body}"]
       - id: independent
         assertions: ["true"]
@@ -51,7 +52,7 @@ async fn flow_cleanup_judgment_is_distinct_from_execution() {
 verification: cleanup judgment
 flows:
   resource:
-    steps: [{uses: fake/judge}]
+    steps: [{uses: fake/setup}]
     cleanup: [{id: release, uses: fake/judge}]
 criteria:
   - id: AC
@@ -177,6 +178,8 @@ criteria:
       - id: body
         setup: [{call: resource}]
         steps:
+          - id: missing
+            uses: fake/setup
           - uses: fake/body
             with: {value: $steps.missing.outputs.value}
         teardown: [{uses: fake/teardown}]

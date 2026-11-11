@@ -90,9 +90,9 @@ flows:
     steps: [{id: make, uses: fake/body, with: {tag: done}}]
     cleanup:
       - uses: fake/clean
-        with: {tag: $runtime.format('{}/x', $params.url)}
+        with: {tag: "$runtime.format('{}/x', $params.url)"}
       - uses: fake/clean
-        with: {tag: $runtime.format('body/{}', $steps.make.outputs.value)}
+        with: {tag: "$runtime.format('body/{}', $steps.make.outputs.value)"}
 criteria:
   - id: AC
     description: Helper arguments read the flow call scope

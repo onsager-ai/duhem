@@ -687,6 +687,10 @@ fn substitute_params(value: &mut serde_yml::Value, bindings: &BTreeMap<String, s
                 {
                     *value = resolved.clone();
                 }
+            } else if raw.trim_start().starts_with("$runtime.")
+                && let Some(rewritten) = rewrite_runtime_param_args(raw, bindings)
+            {
+                *raw = rewritten;
             } else if raw.trim_start().starts_with("$pages.")
                 && let Some(rewritten) = rewrite_page_param_args(raw, bindings)
             {
@@ -739,6 +743,29 @@ fn resolve_param_path<'a>(
         };
     }
     Some(value)
+}
+
+/// Substitute flow params embedded in runtime helper arguments before the
+/// expanded step reaches the ordinary expression parser.
+fn rewrite_runtime_param_args(
+    raw: &str,
+    bindings: &BTreeMap<String, serde_yml::Value>,
+) -> Option<String> {
+    let marker = "$params.";
+    let mut rest = raw;
+    let mut out = String::with_capacity(raw.len());
+    let mut changed = false;
+    while let Some(offset) = rest.find(marker) {
+        out.push_str(&rest[..offset]);
+        let reference = &rest[offset..];
+        let (path, suffix) = crate::expr::parse::parse_path_prefix(reference)?;
+        let replacement = render_expr_value(resolve_param_path(&path, bindings)?)?;
+        out.push_str(&replacement);
+        rest = suffix;
+        changed = true;
+    }
+    out.push_str(rest);
+    changed.then_some(out)
 }
 
 /// Substitute flow params embedded as page-call arguments before the

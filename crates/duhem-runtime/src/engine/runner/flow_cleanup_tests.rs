@@ -78,6 +78,43 @@ flows:
 "#;
 
 #[tokio::test]
+async fn cleanup_runtime_helpers_resolve_params_and_body_outputs() {
+    let (mut engine, _tmp) = engine_for_test().await;
+    let log = tag_engine(&mut engine, &[("fake/body", false), ("fake/clean", false)]);
+    let definition = load_flows(
+        r#"
+verification: cleanup helper scopes
+flows:
+  res:
+    params: {url: {type: string}}
+    steps: [{id: make, uses: fake/body, with: {tag: done}}]
+    cleanup:
+      - uses: fake/clean
+        with: {tag: $runtime.format('{}/x', $params.url)}
+      - uses: fake/clean
+        with: {tag: $runtime.format('body/{}', $steps.make.outputs.value)}
+criteria:
+  - id: AC
+    description: Helper arguments read the flow call scope
+    checks:
+      - id: c
+        steps: [{call: res, with: {url: https://example.test}}]
+        assertions: ["true"]
+"#,
+    );
+    let outcome = engine
+        .run_with_metadata(&definition, BTreeMap::new())
+        .await
+        .unwrap();
+    assert_eq!(outcome.verdict.state, VerdictState::Pass);
+    assert!(outcome.cleanup.is_empty());
+    assert_eq!(
+        *log.lock().unwrap(),
+        ["body:done", "clean:https://example.test/x", "clean:body/done"]
+    );
+}
+
+#[tokio::test]
 async fn check_step_calls_unwind_lifo_after_the_body_and_before_teardown() {
     let (mut engine, _tmp) = engine_for_test().await;
     let log = tag_engine(

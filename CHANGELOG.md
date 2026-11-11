@@ -28,6 +28,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 [`docs/changelog-archive.md`](docs/changelog-archive.md).
 
 ## Unreleased
+- [fix] Flow cleanup steps resolve `$params.*` inside runtime helper calls. (#642)
 - [clarifying] api/poll `until:` must be the structured form; validate now rejects a string expression, matching the runtime. (#643)
 
 - [breaking] fixtures:/needs:/$fixture.* removed; use flows with cleanup: (#615). (#618)

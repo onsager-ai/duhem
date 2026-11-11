@@ -6,9 +6,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::SourceLocation;
 use crate::expr::PathRoot;
+use crate::source::SourcePathSegment;
 use crate::step::{Step, StepCondition};
 use crate::validate::{effective_outputs, step_label};
-use crate::validate_error::ValidationError;
+use crate::validate_error::{RefSite, ValidationError};
 use crate::validate_runtime::walk_checkable_paths;
 use crate::verification::VerificationDefinition;
 
@@ -114,8 +115,7 @@ pub(crate) fn validate_for_each_source(
 /// Shared resolver for a lifecycle-scoped value expression — a
 /// step's `if:` condition (§10.3.3 Tier 1) or a `for_each:` source
 /// expression (#443 Tier 1). Both read the same `$setup`/`$inputs`/
-/// `$pages`/`$runtime`/loop-variable surface. Fixture `down:` additionally
-/// permits its own `up:` outputs; all contexts use this same resolver.
+/// `$pages`/`$runtime`/loop-variable surface.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn validate_lifecycle_value_expr(
     definition: &VerificationDefinition,
@@ -218,7 +218,7 @@ pub(crate) fn validate_lifecycle_value_expr(
 /// Validate one criterion- or check-level `setup:`/`teardown:` block
 /// (#441 Part B) — the same walk the leaf-level pair gets (value-based
 /// `if:` per #440 Tier 1, `with:` expression syntax, `$pages`/
-/// `$runtime` reference checks, `$fixture` rejection), plus one rule
+/// `$runtime` reference checks), plus one rule
 /// unique to nesting: a step id here must not collide with an id
 /// already open in an *outer* lifecycle scope (`outer_ids`). At
 /// runtime every lifecycle level publishes into the same flat

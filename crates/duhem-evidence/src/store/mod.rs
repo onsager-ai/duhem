@@ -123,6 +123,8 @@ pub struct RunRecord {
     /// Last persisted proof of runtime ownership. `run_started` is the
     /// initial heartbeat for traces that have not emitted a beat yet.
     pub last_heartbeat_at: DateTime<Utc>,
+    /// Server receipt time when replicated, independent of the producer clock.
+    pub received_at: Option<DateTime<Utc>>,
     /// Recorded lineage (#348).
     pub lineage: RunLineage,
     /// Scoping + provenance (#190). All-`None` for runs recorded

@@ -54,6 +54,9 @@ async fn ingest(State(state): State<IngestState>, headers: HeaderMap, body: Byte
         Err(duhem_evidence::store::IngestError::Invalid(message)) => {
             (StatusCode::BAD_REQUEST, message).into_response()
         }
+        Err(duhem_evidence::store::IngestError::Conflict(message)) => {
+            (StatusCode::CONFLICT, message).into_response()
+        }
         Err(duhem_evidence::store::IngestError::Store(_)) => {
             (StatusCode::INTERNAL_SERVER_ERROR, "could not store bundle").into_response()
         }

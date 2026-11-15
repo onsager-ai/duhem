@@ -85,6 +85,24 @@ through the existing raw artifact route; no new endpoint or test verdict is
 introduced. Static exports copy these blobs and rewrite URLs relative to the
 export root. The per-check endpoint remains check-only.
 
+### Missing shards (#650)
+
+Logical-parent envelopes include every shard's suite descendants, checks and
+native failures. While coverage is pending, `verdict` is null. After the
+configured grace since the last distinct arrival (30 minutes by default), the
+verdict is `inconclusive:missing_observation` and an additive field names missing
+planned work:
+
+```json
+"missing_shards": [{"index": 2, "units": ["[\"criterion\",\"leaf.yml\",\"AC-2\"]"]}]
+```
+
+`missing_shards` is omitted when none are missing or the parent is still pending.
+Each entry is an inconclusive coverage item, including an empty `units` list for
+an expected shard assigned no units. Existing failing checks and native results
+remain available alongside it. The status can resolve after a late arrival;
+this is read-time policy, with no stored parent verdict or terminal marker.
+
 ### Semantics
 
 - **`gated_checks`** (#509, optional) — entries with `criterion_id`,

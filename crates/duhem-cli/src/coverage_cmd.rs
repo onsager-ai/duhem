@@ -189,6 +189,7 @@ async fn report(args: &CoverageArgs) -> Result<CoverageReport, String> {
                     run_id: run.run_id,
                     started_at: run.started_at,
                     status: match run.status {
+                        RunStatus::Pending => "pending",
                         RunStatus::Running => "running",
                         RunStatus::Finished => "finished",
                         RunStatus::Aborted => "aborted",

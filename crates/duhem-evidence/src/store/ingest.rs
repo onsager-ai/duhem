@@ -10,6 +10,8 @@ use super::{SqliteStore, StoreError, sqlite};
 pub enum IngestError {
     #[error("invalid bundle: {0}")]
     Invalid(String),
+    #[error("conflicting shard: {0}")]
+    Conflict(String),
     #[error(transparent)]
     Store(#[from] StoreError),
 }
@@ -118,6 +120,15 @@ impl SqliteStore {
         {
             return Err(invalid("invalid shard index"));
         }
+        if run.origin == Some(crate::RunOrigin::Shard)
+            && (run.shard.is_none()
+                || run.manifest_digest.is_none()
+                || run.expected_partition.is_none())
+        {
+            return Err(invalid(
+                "shard requires identity, manifest digest and expected partition",
+            ));
+        }
         let started_at: chrono::DateTime<chrono::Utc> = run.started_at.parse().map_err(invalid)?;
         let mut blobs = Vec::new();
         for artifact in &bundle.artifacts {
@@ -168,6 +179,42 @@ impl SqliteStore {
         .map_err(StoreError::from)?;
         if received {
             return Ok(());
+        }
+        if run.origin == Some(crate::RunOrigin::Shard) {
+            let shard = run.shard.as_ref().expect("validated shard identity");
+            let siblings: Vec<String> = sqlx::query_scalar(
+                "SELECT e.payload FROM events e JOIN runs r ON r.run_id = e.run_id \
+                 WHERE r.parent_run_id = ? AND r.shard_origin = 1 AND e.kind = 'claim_scope_declared'",
+            )
+            .bind(&run.parent_run_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(StoreError::from)?;
+            for payload in siblings {
+                let event: crate::Event = serde_json::from_str(&payload).map_err(invalid)?;
+                let EventPayload::ClaimScopeDeclared { scope } = event.payload else {
+                    continue;
+                };
+                let previous = scope.distributed;
+                if previous.manifest_digest != run.manifest_digest {
+                    return Err(IngestError::Conflict(
+                        "manifest_digest differs under logical parent".into(),
+                    ));
+                }
+                if let Some(previous) = previous.shard {
+                    if previous.total != shard.total {
+                        return Err(IngestError::Conflict(
+                            "shard total differs under logical parent".into(),
+                        ));
+                    }
+                    if previous.index == shard.index {
+                        return Err(IngestError::Conflict(format!(
+                            "shard {} already has different content",
+                            shard.index
+                        )));
+                    }
+                }
+            }
         }
         let existing: bool =
             sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM runs WHERE run_id = ?)")
@@ -246,12 +293,15 @@ impl SqliteStore {
                 sqlite::append_event(&mut tx, &run.run_id, event).await?;
             }
         }
-        sqlx::query("INSERT INTO bundle_receipts (content_hash, run_id) VALUES (?, ?)")
-            .bind(hash)
-            .bind(&run.run_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(StoreError::from)?;
+        sqlx::query(
+            "INSERT INTO bundle_receipts (content_hash, run_id, received_at) VALUES (?, ?, ?)",
+        )
+        .bind(hash)
+        .bind(&run.run_id)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .execute(&mut *tx)
+        .await
+        .map_err(StoreError::from)?;
         tx.commit().await.map_err(StoreError::from)?;
         Ok(())
     }

@@ -18,6 +18,7 @@ import { lifecycleFailure, lifecycleHref, lifecycleScopePath } from "../lifecycl
 import { formatDuration, formatStartedAt } from "../ui";
 import { RunScaffold } from "./RunScaffold";
 import { NativeFailures, NativeRuns } from "./NativeRuns";
+import { Shards } from "./Shards";
 
 // #280 Phase 2/3: an Allure-style status roll-up for a run — a donut of
 // the check verdicts plus a count legend. Mechanically derived from the
@@ -191,7 +192,7 @@ function StatusBreakdown({
 
 export function RunSummary({ run }: { run: RunDetail }) {
   const hasChildren = (run.children?.length ?? 0) > 0;
-  const checks = tallyChecks(run.criteria);
+  const checks = run.check_totals ?? tallyChecks(run.criteria);
   const criteria = tallyCriteria(run.criteria);
   const inputs = Object.entries(run.inputs);
   const [failureEnvelope, setFailureEnvelope] = useState<FailureEnvelope | null>(null);
@@ -223,7 +224,13 @@ export function RunSummary({ run }: { run: RunDetail }) {
         </div>
       )}
 
-      {hasChildren && (
+      {run.shards && <>
+        <Shards coverage={run.shards} />
+        <p aria-label="Aggregated checks" className="text-sm text-muted-foreground">
+          Checks: {checks.total} total · {checks.pass} passed · {checks.fail} failed · {checks.inconclusive} inconclusive · {checks.pending} pending
+        </p>
+      </>}
+      {hasChildren && !run.shards && (
         <section aria-labelledby="run-children-heading" className="space-y-3">
           <h3 id="run-children-heading" className="text-sm font-semibold">
             Runs
@@ -261,9 +268,14 @@ export function RunSummary({ run }: { run: RunDetail }) {
           <h3 id="run-failures-heading" className="text-sm font-semibold">
             Failures
           </h3>
-          {failureEnvelope && (failureEnvelope.failing.length > 0 || (failureEnvelope.failing_native?.length ?? 0) > 0) ? (
+          {failureEnvelope && (failureEnvelope.failing.length > 0 || (failureEnvelope.failing_native?.length ?? 0) > 0 || (failureEnvelope.missing_shards?.length ?? 0) > 0) ? (
             <>
             <NativeFailures failures={failureEnvelope.failing_native ?? []} />
+            {failureEnvelope.missing_shards?.map((shard) => (
+              <p key={shard.index} className="break-all text-sm text-inconclusive">
+                Shard {shard.index} inconclusive: missing units {shard.units.join(", ") || "(empty partition)"}
+              </p>
+            ))}
             <ol aria-label="Failures" className="space-y-2">
               {failureEnvelope.failing.map((failure, index) => {
                 const childId = failure.run_id ?? run.run_id;

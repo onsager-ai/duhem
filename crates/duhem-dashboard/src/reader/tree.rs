@@ -49,14 +49,6 @@ pub(super) async fn tree_verdict(
     tree_ids: &[String],
 ) -> Result<Option<VerdictState>, duhem_evidence::StoreError> {
     use duhem_judge::{RunVerdict, aggregate_run_set};
-    // Distributed coverage is not computed by this fold yet. Never turn
-    // whichever shards have arrived into a passing logical-parent verdict.
-    if records.iter().any(|record| {
-        record.lineage.origin == Some(RunOrigin::Shard)
-            && record.lineage.parent_run_id.as_deref() == tree_ids.first().map(String::as_str)
-    }) {
-        return Ok(None);
-    }
     let by_id: BTreeMap<&str, &RunRecord> = records
         .iter()
         .map(|record| (record.run_id.as_str(), record))
@@ -72,13 +64,52 @@ pub(super) async fn tree_verdict(
         })
         .collect();
     leaves.sort_by_key(|record| (record.started_at, record.run_id.as_str()));
+    let mut empty_shards = std::collections::BTreeSet::new();
+    for leaf in &leaves {
+        if leaf.lineage.origin != Some(RunOrigin::Shard)
+            || leaf.status != duhem_evidence::RunStatus::Finished
+            || leaf.verdict.is_some()
+        {
+            continue;
+        }
+        let events = store.run_events(&leaf.run_id).await?;
+        if duhem_evidence::claim_scope::claim_scope(&events)
+            .and_then(|scope| scope.distributed.expected_partition)
+            .is_some_and(|partition| {
+                partition.total_units > 0
+                    && partition.units.iter().all(|unit| {
+                        serde_json::from_str::<(String, String, String)>(unit)
+                            .is_ok_and(|(kind, leaf, _)| kind == "native" && leaf == "$manifest")
+                    })
+            })
+        {
+            empty_shards.insert(leaf.run_id.as_str());
+        }
+    }
     let leaf_verdicts: Option<Vec<RunVerdict>> = leaves
         .iter()
         .map(|record| {
-            record.verdict.map(|state| RunVerdict {
-                state,
-                criteria: Vec::new(),
-            })
+            record
+                .verdict
+                .or_else(|| {
+                    // Empty/native-only shards have a terminal container but no
+                    // criterion verdict. Their native gate is folded below.
+                    if empty_shards.contains(record.run_id.as_str()) {
+                        Some(VerdictState::Pass)
+                    } else if record.lineage.origin == Some(RunOrigin::Shard)
+                        && record.status == duhem_evidence::RunStatus::Finished
+                    {
+                        Some(VerdictState::Inconclusive(
+                            duhem_judge::InconclusiveCause::EmptyAggregation,
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .map(|state| RunVerdict {
+                    state,
+                    criteria: Vec::new(),
+                })
         })
         .collect();
     let Some(verdicts) = leaf_verdicts else {
@@ -88,7 +119,10 @@ pub(super) async fn tree_verdict(
     // Leaf RunFinished verdicts already include their native gate. Suite
     // parents have no judged body, so fold their recorded native outcomes here.
     for id in tree_ids {
-        if leaves.iter().any(|leaf| &leaf.run_id == id) {
+        if leaves
+            .iter()
+            .any(|leaf| &leaf.run_id == id && leaf.verdict.is_some())
+        {
             continue;
         }
         let events = store.run_events(id).await?;

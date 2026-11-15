@@ -57,6 +57,10 @@ pub struct RunDetail {
     pub started_at: Option<DateTime<Utc>>,
     pub duration_ms: Option<u64>,
     pub children: Vec<RunChildDetail>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shards: Option<ShardCoverage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub check_totals: Option<RunCheckTotals>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub native: Vec<NativeRunDetail>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -82,6 +86,33 @@ pub struct RunDetail {
     /// All recorded lifecycle blocks for the Results navigator.
     pub lifecycle: Vec<LifecycleBlockDetail>,
     pub criteria: Vec<CriterionDetail>,
+}
+
+/// Read-time coverage of one distributed logical run.
+#[derive(Debug, Clone, Serialize)]
+pub struct ShardCoverage {
+    pub total: usize,
+    pub status: RunStatus,
+    pub units: Vec<String>,
+    pub arrived: Vec<ShardDetail>,
+    pub missing: Vec<MissingShard>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ShardDetail {
+    pub run_id: String,
+    pub index: usize,
+    pub total: usize,
+    pub source: String,
+    pub unit_count: usize,
+    pub verdict: Option<VerdictState>,
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MissingShard {
+    pub index: usize,
+    pub units: Vec<String>,
 }
 
 /// One suite child listed on a parent run page.
@@ -325,6 +356,9 @@ pub struct FailureEnvelope {
     pub failing: Vec<FailingCheck>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub failing_native: Vec<FailingNative>,
+    /// Missing planned work after the grace window, omitted while pending.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub missing_shards: Vec<MissingShard>,
 }
 
 /// A native summary with source-run provenance and navigable blob addresses.

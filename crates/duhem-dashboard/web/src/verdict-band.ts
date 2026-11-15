@@ -13,6 +13,7 @@ export function verdictWord(
   verdict: Verdict | null,
   status: RunStatus,
 ): { word: string; tone: BandTone } {
+  if (status === "pending") return { word: "Pending", tone: "none" };
   if (status === "running") return { word: "Running", tone: "live" };
   const family = verdictFamily(verdict);
   if (family === "pass") return { word: "Passed", tone: "pass" };

@@ -34,4 +34,4 @@ criteria:
               cwd: $inputs.repo_dir
         assertions:
           - $steps.greet.outputs.exit_code == 0
-          - $steps.greet.outputs.stdout == "Hello, Ada!\n"
+          - matches: {value: $steps.greet.outputs.stdout, pattern: '^Hello, Ada!\n$'}

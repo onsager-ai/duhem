@@ -1,7 +1,5 @@
 //! CI-neutral shard detection and deterministic, criterion-sized partitioning.
 
-use std::collections::BTreeSet;
-
 use duhem_summary::ShardIdentity;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,22 +119,12 @@ pub fn parse(value: &str) -> Result<(usize, usize), String> {
     Ok((index, total))
 }
 
-/// Sort stable unit IDs and assign round-robin. This balances unit counts to
-/// within one without depending on process hashes, manifest glob order or paths
-/// outside the manifest root. IDs must be unique within the selected run.
-pub fn partition(units: &[String], index: usize, total: usize) -> BTreeSet<String> {
-    assert!(index > 0 && index <= total);
-    let ordered: BTreeSet<_> = units.iter().cloned().collect();
-    ordered
-        .into_iter()
-        .enumerate()
-        .filter_map(|(offset, unit)| (offset % total == index - 1).then_some(unit))
-        .collect()
-}
+pub use duhem_evidence::distributed::partition;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     fn detected(
         vars: &[(&str, &str)],

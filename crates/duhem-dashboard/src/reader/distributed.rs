@@ -72,11 +72,9 @@ impl EvidenceReader {
             .filter(|index| !arrived.contains_key(index))
             .map(|index| MissingShard {
                 index,
-                units: expected
-                    .iter()
-                    .enumerate()
-                    .filter(|(position, _)| position % total + 1 == index)
-                    .map(|(_, unit)| unit.clone())
+                // The same assignment every shard computed for itself.
+                units: duhem_evidence::distributed::partition(&expected, index, total)
+                    .into_iter()
                     .collect(),
             })
             .collect();

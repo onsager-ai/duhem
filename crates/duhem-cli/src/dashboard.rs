@@ -49,6 +49,12 @@ pub struct DashboardOpts {
     /// Listen host (serve mode; default 127.0.0.1).
     #[arg(long = "host", value_name = "HOST")]
     pub host: Option<String>,
+    /// Accept completed run bundles at POST /api/ingest.
+    #[arg(long)]
+    pub ingest: bool,
+    /// Bearer token for ingest (requires --ingest).
+    #[arg(long, requires = "ingest")]
+    pub ingest_token: Option<String>,
     #[command(subcommand)]
     pub cmd: Option<DashboardCmd>,
 }
@@ -69,6 +75,8 @@ pub struct DashboardArgs {
     pub db: Option<PathBuf>,
     pub port: Option<u16>,
     pub host: Option<String>,
+    pub ingest: bool,
+    pub ingest_token: Option<String>,
     /// `Some(out)` selects export mode.
     pub export_out: Option<PathBuf>,
 }
@@ -79,12 +87,16 @@ impl From<DashboardOpts> for DashboardArgs {
             db,
             port,
             host,
+            ingest,
+            ingest_token,
             cmd,
         } = opts;
         DashboardArgs {
             db,
             port,
             host,
+            ingest,
+            ingest_token,
             export_out: cmd.map(|DashboardCmd::Export { out }| out),
         }
     }
@@ -103,6 +115,13 @@ pub fn forward_args(args: &DashboardArgs) -> Vec<String> {
             argv.push(out.display().to_string());
         }
         None => {
+            if args.ingest {
+                argv.push("--ingest".into());
+            }
+            if let Some(token) = &args.ingest_token {
+                argv.push("--ingest-token".into());
+                argv.push(token.clone());
+            }
             if let Some(port) = args.port {
                 argv.push("--port".into());
                 argv.push(port.to_string());
@@ -120,6 +139,10 @@ pub fn forward_args(args: &DashboardArgs) -> Vec<String> {
 /// process group, so Ctrl-C reaches it directly; we just reflect its
 /// exit status.
 pub fn run(args: &DashboardArgs) -> ExitCode {
+    if args.ingest && args.export_out.is_some() {
+        eprintln!("--ingest is only available in serve mode");
+        return ExitCode::FAILURE;
+    }
     let env_override = std::env::var(BIN_ENV_OVERRIDE).ok();
     let current_exe = std::env::current_exe().ok();
     let bin = resolve_binary(env_override.as_deref(), current_exe.as_deref());
@@ -187,6 +210,8 @@ mod tests {
             db: Some(PathBuf::from("state/duhem.db")),
             port: Some(8080),
             host: Some("0.0.0.0".into()),
+            ingest: false,
+            ingest_token: None,
             export_out: None,
         };
         assert_eq!(
@@ -205,6 +230,8 @@ mod tests {
             db: None,
             port: Some(8080), // serve-only flag: not forwarded in export mode
             host: None,
+            ingest: false,
+            ingest_token: None,
             export_out: Some(PathBuf::from("site/")),
         };
         assert_eq!(forward_args(&export), vec!["export", "--out", "site/"]);

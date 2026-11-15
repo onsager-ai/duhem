@@ -35,6 +35,14 @@ struct Cli {
     #[arg(long = "host", value_name = "HOST", default_value = "127.0.0.1")]
     host: String,
 
+    /// Accept run bundles at POST /api/ingest (disabled by default).
+    #[arg(long)]
+    ingest: bool,
+
+    /// Require this bearer token for ingest; required on non-loopback hosts.
+    #[arg(long, requires = "ingest")]
+    ingest_token: Option<String>,
+
     #[command(subcommand)]
     cmd: Option<Cmd>,
 }
@@ -80,7 +88,39 @@ async fn run(cli: Cli) -> ExitCode {
         },
     };
 
-    // Read-only lens: the dashboard can never mutate the store.
+    let mut ingest = None;
+    if cli.ingest && cli.cmd.is_some() {
+        eprintln!("--ingest is only available in serve mode");
+        return ExitCode::FAILURE;
+    }
+    if cli.ingest {
+        let loopback = cli
+            .host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|host| host.is_loopback());
+        if cli
+            .ingest_token
+            .as_ref()
+            .is_some_and(|token| token.is_empty())
+            || (!loopback && cli.ingest_token.is_none())
+        {
+            eprintln!("ingest requires a nonempty --ingest-token on a non-loopback host");
+            return ExitCode::FAILURE;
+        }
+        match SqliteStore::open(&db_path).await {
+            Ok(store) => {
+                ingest = Some(duhem_dashboard::ingest::ingest_router(
+                    Arc::new(store),
+                    cli.ingest_token,
+                ))
+            }
+            Err(error) => {
+                eprintln!("open ingest store: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    // Reader routes retain their independent read-only handle.
     let store = match SqliteStore::open_read_only(&db_path).await {
         Ok(s) => s,
         Err(e) => {
@@ -108,16 +148,17 @@ async fn run(cli: Cli) -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        None => serve(reader, &db_path, &cli.host, cli.port).await,
+        None => {
+            let app = match ingest {
+                Some(ingest) => router(reader).merge(ingest),
+                None => router(reader),
+            };
+            serve(app, &db_path, &cli.host, cli.port).await
+        }
     }
 }
 
-async fn serve(
-    reader: EvidenceReader,
-    db_path: &std::path::Path,
-    host: &str,
-    port: u16,
-) -> ExitCode {
+async fn serve(app: axum::Router, db_path: &std::path::Path, host: &str, port: u16) -> ExitCode {
     let listener = match tokio::net::TcpListener::bind((host, port)).await {
         Ok(l) => l,
         Err(e) => {
@@ -146,7 +187,7 @@ async fn serve(
         eprintln!("advertise {}: {e}", addr_file.display());
     }
 
-    let result = axum::serve(listener, router(reader))
+    let result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await;
     // Withdraw the advertisement on the way out (best-effort).

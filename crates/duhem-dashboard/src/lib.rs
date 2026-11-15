@@ -2,13 +2,12 @@
 //! evidence store (specs #53 / #85 / #86 / #87, live streaming #84;
 //! store posture #189).
 //!
-//! The dashboard is a *lens* over the store: it opens a **read-only**
-//! handle, owns no mutable state, never invokes the runtime or judge,
-//! and every verdict it shows is the judge's recorded verdict. That
-//! posture is the identity cross-check from spec #53, restated for
-//! the store era on #189 — the store is the single source of truth,
-//! the judge (via the runtime) is its sole writer, the dashboard is a
-//! read-only lens, and `duhem export` is the portability path.
+//! Reader routes open a read-only handle and display recorded evidence.
+//! With explicit `--ingest` opt-in (#650), a separate writable handle
+//! replicates validated bundles after replaying their judged events;
+//! it never executes verifications. The store remains the single source
+//! of truth, and the normal event projections serve both local and
+//! replicated evidence. Default serve and export modes stay read-only.
 //!
 //! Three surfaces:
 //! - [`server::router`] — the JSON API + embedded SPA (serve mode);
@@ -18,6 +17,7 @@
 //!   upload from CI (#87).
 
 pub mod export;
+pub mod ingest;
 pub mod live;
 pub mod model;
 pub mod reader;

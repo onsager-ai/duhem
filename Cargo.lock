@@ -817,9 +817,11 @@ name = "duhem-cli"
 version = "0.8.0"
 dependencies = [
  "anyhow",
+ "axum",
  "chrono",
  "clap",
  "duhem-actions",
+ "duhem-dashboard",
  "duhem-evidence",
  "duhem-judge",
  "duhem-runtime",

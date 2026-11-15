@@ -131,6 +131,10 @@ pub struct VerificationDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provision: Option<Provision>,
 
+    /// Project-owned verification commands, executed before criteria.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub native: Vec<crate::NativeRun>,
+
     /// Declared inputs. Map keys are alphabetized on round-trip
     /// (BTreeMap); keys should be authored alphabetized.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -377,6 +381,7 @@ criteria:
             metadata: BTreeMap::new(),
             project: None,
             provision: None,
+            native: Vec::new(),
             inputs,
             pages: BTreeMap::new(),
             flows: BTreeMap::new(),

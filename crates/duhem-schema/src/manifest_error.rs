@@ -14,6 +14,9 @@ use crate::verification::SchemaError;
 /// manifest/leaf-shape discriminator — not just YAML parsing.
 #[derive(Debug, Error)]
 pub enum LoadError {
+    #[error("{path}: {message}")]
+    InvalidNative { path: PathBuf, message: String },
+
     #[error("read {path}: {source}")]
     Io {
         path: PathBuf,

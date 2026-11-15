@@ -69,6 +69,9 @@ fn validate_lowered(
     outputs_for: &dyn Fn(&str) -> Vec<String>,
 ) -> Result<(), Vec<ValidationError>> {
     let mut errs = Vec::new();
+    if let Err(message) = crate::native::validate_native(&v.native) {
+        errs.push(ValidationError::InvalidNative { message });
+    }
     crate::validate_sessions::validate(v, outputs_for, &mut errs);
     crate::validate_flow_values::validate(v, outputs_for, &mut errs);
     crate::validate_process::validate(v, &mut errs);

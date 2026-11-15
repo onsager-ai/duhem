@@ -14,6 +14,8 @@ pub mod includes;
 pub mod jsonschema;
 mod leaf_context;
 pub mod manifest;
+pub mod native;
+pub use native::{NativeExpect, NativeLayer, NativeOutputExpect, NativeRun};
 mod manifest_compose;
 mod manifest_error;
 mod manifest_filter;

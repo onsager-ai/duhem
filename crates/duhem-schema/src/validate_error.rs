@@ -40,6 +40,9 @@ impl std::fmt::Display for RefSite {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ValidationError {
+    #[error("{message}")]
+    InvalidNative { message: String },
+
     #[error("verification has no criteria")]
     NoCriteria,
 

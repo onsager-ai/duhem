@@ -154,6 +154,12 @@ pub(crate) fn compose_manifest(manifest_path: &Path, src: &str) -> Result<RootMa
         0,
     )?;
     crate::manifest_inputs::validate(manifest_path, &manifest.inputs)?;
+    crate::native::validate_native(&manifest.native).map_err(|message| {
+        LoadError::InvalidNative {
+            path: manifest_path.to_path_buf(),
+            message,
+        }
+    })?;
     // Suite-wide `project:` discipline (#191): exactly one non-empty
     // coordinate. Same load-time home as the other structural checks.
     if let Some(project) = &manifest.project

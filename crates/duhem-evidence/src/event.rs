@@ -203,6 +203,11 @@ pub struct ProcessOwner {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EventPayload {
+    /// Project-owned verification evidence, isolated from assertion outputs.
+    NativeRunFinished {
+        result: duhem_summary::NativeRunSummary,
+    },
+
     /// Lifecycle facts for one runtime-owned process generation (#579).
     /// Logs are bounded and masked before retention; these are observations,
     /// never additional judgment inputs.
@@ -512,6 +517,7 @@ impl EventPayload {
     /// extraction.
     pub fn kind(&self) -> &'static str {
         match self {
+            EventPayload::NativeRunFinished { .. } => "native_run_finished",
             EventPayload::ProcessObserved { .. } => "process_observed",
             EventPayload::RunStarted { .. } => "run_started",
             EventPayload::RunHeartbeat => "run_heartbeat",
@@ -543,7 +549,8 @@ impl EventPayload {
     pub fn is_finished(&self) -> bool {
         matches!(
             self,
-            EventPayload::EnvUpFinished { .. }
+            EventPayload::NativeRunFinished { .. }
+                | EventPayload::EnvUpFinished { .. }
                 | EventPayload::EnvDownFinished { .. }
                 | EventPayload::SetupStepFinished { .. }
                 | EventPayload::SetupFinished { .. }

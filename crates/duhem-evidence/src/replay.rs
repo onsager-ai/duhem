@@ -89,6 +89,7 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     let mut recorded_body = None;
     let mut required_cleanup = std::collections::BTreeSet::new();
     let mut cleanup_failed = false;
+    let mut native_outcomes = Vec::new();
     let mut process_setup = crate::replay_process::ProcessSetup::default();
     let mut saw_run_started = false;
 
@@ -118,6 +119,9 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     for evt in events {
         process_setup.observe(&evt.payload);
         match &evt.payload {
+            EventPayload::NativeRunFinished { result } => {
+                native_outcomes.push((result.required, result.outcome))
+            }
             EventPayload::RunStarted { .. } => {
                 if saw_run_started {
                     return Err(ReplayError::OutOfOrder("more than one run_started".into()));
@@ -340,6 +344,7 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     if cleanup_failed {
         run.state = VerdictState::Fail;
     }
+    run.state = duhem_judge::native_gate(run.state, native_outcomes);
     if run.state != recorded_run {
         return Err(ReplayDivergence::Run {
             recorded: recorded_run,

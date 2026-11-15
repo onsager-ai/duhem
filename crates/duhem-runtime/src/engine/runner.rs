@@ -378,6 +378,7 @@ impl Engine {
                         })
                         .await?;
                     return Ok(RunOutcome {
+                        native: Vec::new(),
                         body_verdict: None,
                         gated_checks: Default::default(),
                         verdict,
@@ -392,6 +393,9 @@ impl Engine {
                 }
             }
 
+            let native =
+                crate::engine::native::run_native(&mut writer, &def.native, vd_dir.as_deref())
+                    .await?;
             crate::engine::session_scope::SessionScope::enter(&mut run_state, &def.session, None);
             run_state.register_process_cleanup(run_state.process_owner.clone(), &def.teardown);
 
@@ -461,6 +465,13 @@ impl Engine {
                     if body_verdict.is_some() {
                         verdict.state = VerdictState::Fail;
                     }
+                    let body = verdict.state;
+                    verdict.state = duhem_judge::native_gate(
+                        body,
+                        native.iter().map(|run| (run.required, run.outcome)),
+                    );
+                    let body_verdict =
+                        body_verdict.or_else(|| (body != verdict.state).then_some(body));
                     writer
                         .append(EventPayload::RunFinished {
                             body_verdict,
@@ -468,6 +479,7 @@ impl Engine {
                         })
                         .await?;
                     return Ok(RunOutcome {
+                        native,
                         body_verdict,
                         gated_checks: Default::default(),
                         verdict,
@@ -559,12 +571,15 @@ impl Engine {
             down_result?;
 
             let mut run_verdict = aggregate_run(criterion_verdicts);
-            let body_verdict = (cleanup.iter().any(|failure| failure.required)
-                && run_verdict.state != VerdictState::Fail)
-                .then_some(run_verdict.state);
+            let body = run_verdict.state;
             if cleanup.iter().any(|failure| failure.required) {
                 run_verdict.state = VerdictState::Fail;
             }
+            run_verdict.state = duhem_judge::native_gate(
+                run_verdict.state,
+                native.iter().map(|run| (run.required, run.outcome)),
+            );
+            let body_verdict = (body != run_verdict.state).then_some(body);
             writer
                 .append(EventPayload::RunFinished {
                     body_verdict,
@@ -573,6 +588,7 @@ impl Engine {
                 .await?;
 
             Ok(RunOutcome {
+                native,
                 body_verdict,
                 gated_checks,
                 verdict: run_verdict,

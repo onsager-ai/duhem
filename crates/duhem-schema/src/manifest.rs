@@ -62,6 +62,9 @@ pub struct RootManifest {
     /// shared stack. Additive: a manifest without it behaves as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provision: Option<Provision>,
+    /// Project-owned commands executed once before the suite's leaves.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub native: Vec<crate::NativeRun>,
     /// Named configuration profiles (`docs/duhem-spec.md` §10.4, spec
     /// #68). Each key under `profiles:` is a profile name
     /// (e.g. `staging`, `prod`) whose value is a free-form

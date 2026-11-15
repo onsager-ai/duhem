@@ -21,6 +21,7 @@ pub(super) async fn finish(
         })
         .await?;
     Ok(RunOutcome {
+        native: Vec::new(),
         body_verdict: None,
         gated_checks: Default::default(),
         verdict,

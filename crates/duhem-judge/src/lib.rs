@@ -19,7 +19,9 @@
 //! structural firewall behind the mechanical-judgment commitment.
 
 pub mod aggregate;
+mod native;
 pub mod outcome;
+pub use native::native_gate;
 pub mod verdict;
 
 pub use aggregate::{

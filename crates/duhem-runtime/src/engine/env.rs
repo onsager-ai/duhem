@@ -313,6 +313,40 @@ impl SuiteEnvironment {
         })
     }
 
+    /// Execute suite-native commands once, after shared provisioning.
+    pub async fn run_native(
+        &mut self,
+        runs: &[duhem_schema::NativeRun],
+        secrets: &std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Result<Vec<duhem_summary::NativeRunSummary>, EngineError> {
+        for (name, value) in secrets {
+            self.writer.register_secret(name, value);
+        }
+        let mut execution = Box::pin(super::native::run_native(
+            &mut self.writer,
+            runs,
+            self.dir.as_deref(),
+        ));
+        let completed = tokio::select! {
+            signal = super::runner::termination_signal() => Err(signal),
+            result = &mut execution => Ok(result),
+        };
+        drop(execution);
+        match completed {
+            Ok(result) => result,
+            Err(signal) => {
+                self.writer
+                    .append(EventPayload::RunAborted {
+                        signal: signal.to_string(),
+                    })
+                    .await?;
+                Err(EngineError::Aborted {
+                    signal: signal.to_string(),
+                })
+            }
+        }
+    }
+
     /// Why provisioning aborted (failed `up:` → `EnvironmentError`,
     /// readiness `Timeout`), if it did. `None` means the suite is up.
     pub fn aborted_cause(&self) -> Option<InconclusiveCause> {

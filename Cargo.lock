@@ -948,6 +948,7 @@ dependencies = [
  "chrono",
  "chumsky",
  "glob",
+ "regex",
  "schemars",
  "serde",
  "serde_json",

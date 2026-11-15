@@ -31,18 +31,24 @@ use serde::{Deserialize, Serialize};
 
 mod claim_scope;
 mod lifecycle;
+mod native;
 pub use claim_scope::{ClaimCounts, ClaimScope, ExcludedClaim, ExcludedLeaf, ManifestSelection};
 pub use lifecycle::{
     LifecycleBlock, LifecycleEvent, LifecycleFlowOrigin, LifecycleFold, LifecycleLocation,
     LifecyclePhase, LifecycleRegistration, LifecycleScopeSegment, LifecycleStatus, LifecycleStep,
     LifecycleStepOutcome,
 };
+pub use native::{LayerTotals, NativeRunSummary, layer_totals};
 
 /// One run's summary, serialized as one JSON line on the reporter
 /// subprocess's stdin. The schema is the externally-frozen plugin
 /// contract; field renames / removals are schema-impacting.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSummary {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub native: Vec<NativeRunSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<LayerTotals>,
     /// Declared selection and recorded claim population; absent on old reports.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claim_scope: Option<ClaimScope>,
@@ -131,6 +137,8 @@ impl RunSummary {
         store: PathBuf,
     ) -> Self {
         Self {
+            native: Vec::new(),
+            layers: Vec::new(),
             claim_scope: None,
             verification: None,
             schema_version: Self::SCHEMA_VERSION.to_string(),
@@ -146,6 +154,14 @@ impl RunSummary {
             cleanup: Vec::new(),
             lifecycle: Vec::new(),
         }
+    }
+
+    pub fn with_native(mut self, native: Vec<NativeRunSummary>, check_duration_ms: u64) -> Self {
+        if !native.is_empty() {
+            self.layers = layer_totals(&native, self.totals, check_duration_ms);
+            self.native = native;
+        }
+        self
     }
 
     pub fn with_gated_checks(mut self, gated_checks: Vec<CheckGatingSummary>) -> Self {
@@ -317,6 +333,10 @@ pub struct FailedAssertionSummary {
 /// requires a `CHANGELOG.md` entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSetSummary {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub native: Vec<NativeRunSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<LayerTotals>,
     /// Parent run id for the manifest's whole run.
     #[serde(default)]
     pub run_id: String,
@@ -349,7 +369,21 @@ impl RunSetSummary {
         for run in &runs {
             totals.add(run.totals);
         }
+        let native: Vec<_> = runs.iter().flat_map(|run| run.native.clone()).collect();
+        let check_duration_ms = runs
+            .iter()
+            .flat_map(|run| &run.layers)
+            .filter(|layer| layer.layer == "duhem")
+            .map(|layer| layer.duration_ms)
+            .sum();
+        let layers = if native.is_empty() {
+            Vec::new()
+        } else {
+            layer_totals(&native, totals, check_duration_ms)
+        };
         Self {
+            native,
+            layers,
             run_id: run_id.into(),
             selection: None,
             schema_version: Self::SCHEMA_VERSION.to_string(),

@@ -687,6 +687,7 @@ pub trait CheckFilter: Send + Sync {
 /// store by `run_id`.
 #[derive(Debug, Clone)]
 pub struct RunOutcome {
+    pub native: Vec<duhem_summary::NativeRunSummary>,
     /// Original body state when required cleanup changes the effective gate.
     pub body_verdict: Option<VerdictState>,
     /// Non-zero gated judging-step counts, keyed by criterion and check.

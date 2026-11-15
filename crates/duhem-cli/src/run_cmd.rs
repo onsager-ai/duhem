@@ -246,6 +246,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 Scope::Manifest {
                     warnings,
                     provision: manifest.provision,
+                    native: manifest.native,
                     manifest_dir,
                     defaults: manifest.defaults,
                     project: manifest.project,
@@ -509,12 +510,14 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    let mut suite_native = Vec::new();
     let mut suite_parent_id: Option<String> = None;
     let mut inherited_scope: Option<RunScope> = invocation_parent
         .as_ref()
         .map(|parent| parent.scope.clone());
     if let Scope::Manifest {
         provision: environment,
+        native,
         manifest_dir,
         ..
     } = &scope
@@ -580,12 +583,32 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             None => provision.await,
         };
         match outcome {
-            Ok(session) => {
+            Ok(mut session) => {
                 if let Some(cause) = session.aborted_cause() {
                     eprintln!("suite environment did not come up: {cause:?}");
                     let _ = tear_down_suite(session, keep_env, &mut suite_progress).await;
                     return ExitCode::FAILURE;
                 }
+                let mut suite_secrets = BTreeMap::new();
+                for (_, _, definition, values, _) in &resolved {
+                    for (name, declaration) in &definition.inputs {
+                        if (declaration.secret
+                            || (declaration.inherit
+                                && manifest_inputs.get(name).is_some_and(|input| input.secret)))
+                            && let Some(value) = values.get(name)
+                        {
+                            suite_secrets.insert(name.clone(), value.clone());
+                        }
+                    }
+                }
+                suite_native = match session.run_native(native, &suite_secrets).await {
+                    Ok(results) => results,
+                    Err(error) => {
+                        eprintln!("suite native runs: {error}");
+                        let _ = tear_down_suite(session, keep_env, &mut suite_progress).await;
+                        return ExitCode::FAILURE;
+                    }
+                };
                 suite_env = Some(session);
             }
             Err(e) => {
@@ -891,7 +914,11 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         .iter()
         .map(|(_, o)| o.verdict.clone())
         .collect();
-    let set_verdict = aggregate_run_set(run_verdicts);
+    let mut set_verdict = aggregate_run_set(run_verdicts);
+    set_verdict.state = duhem_judge::native_gate(
+        set_verdict.state,
+        suite_native.iter().map(|run| (run.required, run.outcome)),
+    );
     if let Err(e) = reporter::render_set(
         &reporter,
         &mut stdout,
@@ -902,6 +929,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         &leaf_defs,
         suite_parent_id.as_deref().unwrap_or(""),
         manifest_selection.as_ref(),
+        &suite_native,
     ) {
         eprintln!("reporter: {e}");
         return ExitCode::FAILURE;

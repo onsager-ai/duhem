@@ -95,12 +95,26 @@ duhem validate ./verifications/hello      # structural check — fast, offline
 duhem run      ./verifications/hello       # execute end-to-end, print a verdict
 ```
 
-`duhem run` prints a per-check line and the run verdict:
+`duhem run` prints the run verdict and executed-check totals:
 
 ```
-checks: pass
 pass
 Total: 1 checks · 1 passed · 0 failed · 0 inconclusive
+```
+
+A manifest run keeps one verdict line per leaf, then reports the parent run
+and groups failures by leaf. For example:
+
+```
+login: fail
+checkout: pass
+fail
+run 01J000000000000000000PARENT
+login:
+  AC-1::AC-1.1:
+    fail  $steps.submit.outputs.status == 200
+        (actual value was 500)
+Total: 2 checks · 1 passed · 1 failed · 0 inconclusive
 ```
 
 `pass` means every assertion held against the *real* system — no mocks.

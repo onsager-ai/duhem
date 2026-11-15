@@ -317,6 +317,9 @@ pub struct FailedAssertionSummary {
 /// requires a `CHANGELOG.md` entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSetSummary {
+    /// Parent run id for the manifest's whole run.
+    #[serde(default)]
+    pub run_id: String,
     /// Authored versus selected manifest leaves, including excluded leaves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selection: Option<ManifestSelection>,
@@ -341,12 +344,13 @@ impl RunSetSummary {
     /// `### Reporter contract` heading.
     pub const SCHEMA_VERSION: &'static str = "1";
 
-    pub fn new(verdict: VerdictState, runs: Vec<RunSummary>) -> Self {
+    pub fn new(run_id: impl Into<String>, verdict: VerdictState, runs: Vec<RunSummary>) -> Self {
         let mut totals = CheckTotals::default();
         for run in &runs {
             totals.add(run.totals);
         }
         Self {
+            run_id: run_id.into(),
             selection: None,
             schema_version: Self::SCHEMA_VERSION.to_string(),
             verdict,
@@ -543,10 +547,15 @@ mod tests {
             failed: 1,
             inconclusive: 1,
         });
-        let set = RunSetSummary::new(VerdictState::Pass, vec![leaf]);
+        let set = RunSetSummary::new(
+            "01J000000000000000000PARENT",
+            VerdictState::Pass,
+            vec![leaf],
+        );
         let line = serde_json::to_string(&set).unwrap();
         let back: RunSetSummary = serde_json::from_str(&line).unwrap();
         assert_eq!(back, set);
+        assert_eq!(back.run_id, "01J000000000000000000PARENT");
         assert!(line.contains("\"schema_version\":\"1\""));
         assert!(line.contains("\"runs\""));
         assert_eq!(back.totals.total, 3);

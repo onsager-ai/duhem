@@ -178,6 +178,8 @@ pub fn render_set(
     set_verdict: &RunSetVerdict,
     store_db: &std::path::Path,
     leaf_events: &[Vec<duhem_evidence::Event>],
+    leaf_defs: &[VerificationDefinition],
+    run_id: &str,
     selection: Option<&duhem_summary::ManifestSelection>,
 ) -> Result<(), RenderError> {
     match reporter {
@@ -196,6 +198,14 @@ pub fn render_set(
                 write_failed_lifecycle(out, &lifecycle, &[])?;
             }
             writeln!(out, "{}", set_verdict.state)?;
+            writeln!(out, "run {run_id}")?;
+            for (((name, outcome), events), def) in leaves.iter().zip(leaf_events).zip(leaf_defs) {
+                if !outcome.failures.is_empty() {
+                    writeln!(out, "{name}:")?;
+                    let lifecycle = fold_lifecycle(events);
+                    write_failures(out, &outcome.failures, def, &lifecycle)?;
+                }
+            }
             if let Some(selection) = selection {
                 writeln!(out, "Scope: {selection}")?;
                 for excluded in &selection.excluded {
@@ -217,7 +227,7 @@ pub fn render_set(
                 .zip(leaf_events)
                 .map(|((_, o), events)| build_summary(o, store_db, events))
                 .collect();
-            let mut summary = RunSetSummary::new(set_verdict.state, runs);
+            let mut summary = RunSetSummary::new(run_id, set_verdict.state, runs);
             summary.selection = selection.cloned();
             serde_json::to_writer(&mut *out, &summary)
                 .map_err(|e| RenderError::Io(std::io::Error::other(e)))?;
@@ -1212,11 +1222,11 @@ criteria:
     }
 
     #[test]
-    fn default_reporter_writes_verdict_and_check_totals() {
+    fn default_reporter_writes_verdict_and_check_totals_byte_identically() {
         let s = capture(&Reporter::Default, &outcome(VerdictState::Pass));
         assert_eq!(
-            s,
-            "pass\nTotal: 1 checks · 1 passed · 0 failed · 0 inconclusive\n"
+            s.as_bytes(),
+            "pass\nTotal: 1 checks · 1 passed · 0 failed · 0 inconclusive\n".as_bytes()
         );
     }
 
@@ -1502,6 +1512,8 @@ criteria:
             set,
             std::path::Path::new("state/duhem.db"),
             &vec![Vec::new(); leaves.len()],
+            &vec![minimal_def(); leaves.len()],
+            "01J000000000000000000PARENT",
             None,
         )
         .unwrap();
@@ -1509,15 +1521,39 @@ criteria:
     }
 
     #[test]
-    fn render_set_default_prints_per_leaf_and_aggregate() {
-        // Spec on #49: default reporter on a manifest prints one
-        // `<name>: <verdict>` line per leaf, then the aggregated
-        // verdict. Spec #493 adds the set denominator as the final line.
-        let (leaves, set) = leaves_pair();
+    fn render_set_default_prints_aggregate_and_failure_list() {
+        let (mut leaves, set) = leaves_pair();
+        leaves[1].1.failures.push(duhem_runtime::CheckFailure {
+            criterion_id: "AC-1".into(),
+            check_id: "AC-1.1".into(),
+            assertions: vec![duhem_runtime::FailedAssertion {
+                state: VerdictState::Fail,
+                expr: "false".into(),
+                detail: Some("assertion was false".into()),
+            }],
+            captures: vec![],
+        });
         let s = capture_set(&Reporter::Default, &leaves, &set);
+        assert!(!s.contains("  AC-1::AC-1.1:"));
+        assert!(
+            s.starts_with("leaf-a: pass\nleaf-b: fail\nfail\nrun 01J000000000000000000PARENT\n")
+        );
+        assert!(s.contains(
+            "leaf-b:\n  AC-1::AC-1.1:\n    fail  false\n        (assertion was false)\n"
+        ));
+        assert!(s.ends_with("Total: 2 checks · 1 passed · 1 failed · 0 inconclusive\n"));
+    }
+
+    #[test]
+    fn render_set_default_no_failures_keeps_leaf_lines() {
+        let leaves = vec![("leaf-a".to_string(), outcome(VerdictState::Pass))];
+        let set = RunSetVerdict {
+            state: VerdictState::Pass,
+            runs: vec![leaves[0].1.verdict.clone()],
+        };
         assert_eq!(
-            s,
-            "leaf-a: pass\nleaf-b: fail\nfail\nTotal: 2 checks · 1 passed · 1 failed · 0 inconclusive\n"
+            capture_set(&Reporter::Default, &leaves, &set),
+            "leaf-a: pass\npass\nrun 01J000000000000000000PARENT\nTotal: 1 checks · 1 passed · 0 failed · 0 inconclusive\n"
         );
     }
 
@@ -1539,6 +1575,7 @@ criteria:
         assert!(!trimmed.contains('\n'), "single line: {s:?}");
         let v: serde_json::Value = serde_json::from_str(trimmed).expect("valid JSON");
         assert_eq!(v["schema_version"], "1");
+        assert_eq!(v["run_id"], "01J000000000000000000PARENT");
         assert_eq!(v["verdict"], "fail");
         assert_eq!(v["totals"]["total"], 2);
         assert_eq!(v["totals"]["passed"], 1);

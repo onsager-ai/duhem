@@ -532,6 +532,11 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             None => RunLineage::default(),
         };
         let suite_run_id = duhem_evidence::new_run_id();
+        suite_parent_id = Some(suite_run_id.clone());
+        if let Some(base) = dashboard_base.as_deref() {
+            let url = crate::live_link::run_page_url(base, &suite_run_id);
+            eprintln!("live: {url}");
+        }
         let progress = if live_progress {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
             suite_progress = Some(rx);
@@ -581,7 +586,6 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                     let _ = tear_down_suite(session, keep_env, &mut suite_progress).await;
                     return ExitCode::FAILURE;
                 }
-                suite_parent_id = Some(suite_run_id);
                 suite_env = Some(session);
             }
             Err(e) => {
@@ -895,6 +899,8 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         &set_verdict,
         &db_path,
         &leaf_events,
+        &leaf_defs,
+        suite_parent_id.as_deref().unwrap_or(""),
         manifest_selection.as_ref(),
     ) {
         eprintln!("reporter: {e}");

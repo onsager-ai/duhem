@@ -13,8 +13,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use duhem_dashboard::{EvidenceReader, router};
 use duhem_evidence::{
-    EventPayload, EvidenceWriter, ObservationValue, SqliteStore, StepOutcome, VerdictState,
-    run_started,
+    EventPayload, EvidenceWriter, ObservationValue, RunLineage, RunOrigin, RunScope, SqliteStore,
+    StepOutcome, VerdictState, run_started_with_definition_and_lineage,
 };
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
@@ -58,10 +58,35 @@ fn good_har() -> Value {
 /// verdict + assertion; a failing run records a screenshot and, when
 /// `network` is given, a `capture/network` HAR blob.
 async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, network: Option<Value>) {
-    let mut w = EvidenceWriter::begin(store, run_id, DEF, BTreeMap::new())
-        .await
-        .unwrap();
-    w.append(run_started(DEF, BTreeMap::new())).await.unwrap();
+    seed_lineage(store, run_id, pass, network, RunLineage::default()).await;
+}
+
+async fn seed_lineage(
+    store: Arc<SqliteStore>,
+    run_id: &str,
+    pass: bool,
+    network: Option<Value>,
+    lineage: RunLineage,
+) {
+    let mut w = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
+        store,
+        run_id,
+        DEF,
+        BTreeMap::new(),
+        RunScope::default(),
+        lineage.clone(),
+        duhem_evidence::SecretRegistry::new(),
+    )
+    .await
+    .unwrap();
+    w.append(run_started_with_definition_and_lineage(
+        DEF,
+        BTreeMap::new(),
+        None,
+        lineage,
+    ))
+    .await
+    .unwrap();
     // Two ui steps → two `ui` spans (the delivery-web layer chain).
     w.append(step_started(0, "ui/navigate")).await.unwrap();
     w.append(EventPayload::StepFinished {
@@ -172,6 +197,8 @@ async fn envelope_hands_an_agent_everything_to_react() {
     let failing = json["failing"].as_array().unwrap();
     assert_eq!(failing.len(), 1);
     let fc = &failing[0];
+    assert!(fc.get("run_id").is_none());
+    assert!(fc.get("verification").is_none());
     assert_eq!(fc["criterion_id"], "AC-1");
     assert_eq!(fc["check_id"], "AC-1.1");
     // The delivery-web layer chain (#192).
@@ -191,12 +218,144 @@ async fn envelope_hands_an_agent_everything_to_react() {
     // The first failing request, mined from the HAR.
     assert_eq!(fc["first_failing_request"]["method"], "POST");
     assert_eq!(fc["first_failing_request"]["status"], 500);
+    let mut legacy_fc = fc.clone();
+    legacy_fc
+        .as_object_mut()
+        .unwrap()
+        .remove("gated_judging_steps");
+    assert_eq!(
+        serde_json::to_vec(&legacy_fc).unwrap(),
+        serde_json::to_vec(&json!({
+            "criterion_id": "AC-1",
+            "check_id": "AC-1.1",
+            "verdict": "fail",
+            "layers": ["ui", "ui"],
+            "assertions": [{
+                "assertion_index": 0,
+                "state": "fail",
+                "detail": "actual false, expected true"
+            }],
+            "artifacts": [
+                {"id": fc["artifacts"][0]["id"], "kind": "capture/screenshot", "url": format!("/api/runs/{RUN}/artifact/{}", fc["artifacts"][0]["id"].as_str().unwrap())},
+                {"id": fc["artifacts"][1]["id"], "kind": "capture/network", "url": format!("/api/runs/{RUN}/artifact/{}", fc["artifacts"][1]["id"].as_str().unwrap())},
+            ],
+            "first_failing_request": fc["first_failing_request"],
+        }))
+        .unwrap()
+    );
     assert!(
         fc["first_failing_request"]["url"]
             .as_str()
             .unwrap()
             .contains("/api/charge")
     );
+}
+
+#[tokio::test]
+async fn parent_envelope_lists_descendant_failure_with_provenance() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    const ROOT: &str = "01FAILENVELOPE00000000000D";
+    const CHILD: &str = "01FAILENVELOPE00000000000E";
+    const LATER: &str = "01FAILENVELOPE00000000000H";
+    seed_lineage(rw.clone(), ROOT, true, None, RunLineage::default()).await;
+    seed_lineage(
+        rw.clone(),
+        LATER,
+        true,
+        None,
+        RunLineage {
+            parent_run_id: Some(ROOT.to_string()),
+            origin: Some(RunOrigin::Suite),
+        },
+    )
+    .await;
+    seed_lineage(
+        rw,
+        CHILD,
+        false,
+        None,
+        RunLineage {
+            parent_run_id: Some(ROOT.to_string()),
+            origin: Some(RunOrigin::Suite),
+        },
+    )
+    .await;
+
+    let (status, json) = get_json(
+        EvidenceReader::new(ro),
+        &format!("/api/runs/{ROOT}/failure"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["verdict"], "fail");
+    assert_eq!(json["failing"].as_array().unwrap().len(), 1);
+    assert_eq!(json["failing"][0]["run_id"], CHILD);
+    assert_eq!(json["failing"][0]["verification"], "checkout");
+    assert_eq!(json["failing"][0]["check_id"], "AC-1.1");
+    assert!(
+        json["failing"][0]["artifacts"][0]["url"]
+            .as_str()
+            .unwrap()
+            .contains(CHILD)
+    );
+}
+
+#[tokio::test]
+async fn nested_invocation_child_is_not_part_of_the_tree() {
+    // A failing control run started from inside a check (origin
+    // `invocation`) stays that check's evidence; the leaf's own envelope
+    // keeps its single-leaf shape and verdict.
+    let (_tmp, rw, ro) = common::open_stores().await;
+    const LEAF: &str = "01FAILENVELOPE00000000000J";
+    const NESTED: &str = "01FAILENVELOPE00000000000K";
+    seed_lineage(rw.clone(), LEAF, true, None, RunLineage::default()).await;
+    seed_lineage(
+        rw,
+        NESTED,
+        false,
+        None,
+        RunLineage {
+            parent_run_id: Some(LEAF.to_string()),
+            origin: Some(RunOrigin::Invocation),
+        },
+    )
+    .await;
+
+    let (status, json) = get_json(
+        EvidenceReader::new(ro),
+        &format!("/api/runs/{LEAF}/failure"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["verdict"], "pass");
+    assert_eq!(json["failing"], json!([]));
+}
+
+#[tokio::test]
+async fn passing_parent_tree_has_no_failing_checks() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    const ROOT: &str = "01FAILENVELOPE00000000000F";
+    const CHILD: &str = "01FAILENVELOPE00000000000G";
+    seed_lineage(rw.clone(), ROOT, true, None, RunLineage::default()).await;
+    seed_lineage(
+        rw,
+        CHILD,
+        true,
+        None,
+        RunLineage {
+            parent_run_id: Some(ROOT.to_string()),
+            origin: Some(RunOrigin::Suite),
+        },
+    )
+    .await;
+
+    let (status, json) = get_json(
+        EvidenceReader::new(ro),
+        &format!("/api/runs/{ROOT}/failure"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["failing"], json!([]));
 }
 
 #[tokio::test]

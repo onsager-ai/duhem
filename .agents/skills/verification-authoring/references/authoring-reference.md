@@ -32,7 +32,18 @@ native command's cwd. A pass needs the expected exit, matching output and a pars
 report with no failures/errors; missing or malformed reports and timeouts are
 inconclusive. Skips are counted without failing. Summaries include actual test
 counts, bounded masked failures and blob addresses for the source report and full
-normalized results. CTRF and native selection filters are deferred.
+normalized results. Use `format: ctrf` for CTRF v0.2.0 JSON: `passed`/`failed`
+map to pass/fail, `skipped`/`pending` to skip, and `other` to error. Missing required
+test fields, unknown statuses and newer major versions are inconclusive; omitted
+`specVersion` is accepted. Suite hierarchies preserve test identity, and message
+and trace are masked together. Native selection filters are deferred.
+
+`duhem init` detects Cargo, package test scripts (npm/pnpm/yarn), pytest and Go in
+the target project and proposes `native:` entries in a new project root manifest.
+Review commands and paths before running; existing manifests are preserved. Cargo
+uses exit-code `cargo test --workspace` unless nextest explicitly configures
+`[profile.ci.junit] path = "junit.xml"`, which enables its JUnit report. No detection
+preserves the previous scaffold output.
 
 ## When to use this skill
 

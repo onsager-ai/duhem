@@ -128,3 +128,28 @@ must be `CTRF`. A suite array is JSON-encoded as the normalized `classname` to
 preserve its hierarchy in stable test IDs. Message and trace are combined and
 masked through the same evidence pipeline as JUnit. Counts, gate behavior, blobs
 and bounded failure navigation are shared by both formats.
+
+## Detecting existing tests with init
+
+`duhem init verifications/hello --name hello` walks from the target directory to
+the nearest project with detected tests, stopping at a repository or project
+boundary. Both scaffold patterns propose entries in that project's `duhem.yml`
+root manifest, with the generated leaf in `verifications`. Commands run relative
+to this project root. Init only writes YAML; it never runs tests or edits runner
+configuration. It prints a short review note (the existing warning exit code 3).
+Existing root manifests are preserved; add the suggested native entries manually.
+
+| Detected setup | Proposed command | Report |
+| --- | --- | --- |
+| `Cargo.toml` | `cargo test --workspace` | Exit code |
+| Cargo plus `.config/nextest.toml` with `[profile.ci.junit] path = "junit.xml"` | `cargo nextest run --profile ci` | JUnit `target/nextest/ci/junit.xml` |
+| `package.json` with `scripts.test` | `npm test`, `pnpm test` for `pnpm-lock.yaml`, or `yarn test` for `yarn.lock` | Exit code |
+| `pytest.ini`, `conftest.py`, or `[tool.pytest.ini_options]` in `pyproject.toml` | `pytest --junitxml=duhem-pytest.xml` | JUnit `duhem-pytest.xml` |
+| `go.mod` | `go test ./...` | Exit code |
+
+All suggestions use `layer: unit` and are required by default. If both JavaScript
+lockfiles exist, pnpm takes precedence. Missing or malformed nextest JUnit config
+uses `cargo test --workspace`; init does not assume nextest will emit a report.
+The path follows [nextest's documented JUnit configuration](https://nexte.st/docs/machine-readable/junit/).
+Review installed tools, command options and report paths before running. With no
+detected tests, init retains its previous output, including Pattern B's stub.

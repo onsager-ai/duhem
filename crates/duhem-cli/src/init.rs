@@ -169,6 +169,7 @@ pub(crate) fn run_with_prompt(
     fs::create_dir_all(&target)
         .map_err(|e| InitError::Io(format!("create {}: {e}", target.display())))?;
 
+    let proposal = super::init_native::detect(&target);
     let mut created = Vec::new();
     let mut warnings = Vec::new();
     let path_in_commands = display_path_for_commands(&target);
@@ -245,7 +246,9 @@ pub(crate) fn run_with_prompt(
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| name.clone());
-            if manifest.exists() {
+            if proposal.is_some() {
+                // The detected project root gets a real manifest below.
+            } else if manifest.exists() {
                 warnings.push(format!(
                     "left existing root manifest {} unchanged; add `{leaf}/duhem.yml` to its \
                      verifications list when the root-manifest loader spec lands",
@@ -286,6 +289,25 @@ pub(crate) fn run_with_prompt(
         }
     }
 
+    if let Some(proposal) = proposal {
+        let manifest = proposal.root.join("duhem.yml");
+        if manifest.exists() {
+            warnings.push(format!(
+                "native entries proposed from test setup detection; left existing root manifest {} unchanged; review and add these entries manually:\n{}",
+                manifest.display(),
+                serde_yml::to_string(&serde_json::json!({"native": proposal.runs}))
+                    .expect("native suggestions serialize")
+            ));
+        } else {
+            fs::write(&manifest, proposal.manifest(&target))
+                .map_err(|e| InitError::Io(format!("write {}: {e}", manifest.display())))?;
+            created.push(manifest.clone());
+            warnings.push(format!(
+                "proposed native entries from test setup detection in {}; review commands and report paths before running",
+                manifest.display()
+            ));
+        }
+    }
     Ok(InitOutcome { created, warnings })
 }
 

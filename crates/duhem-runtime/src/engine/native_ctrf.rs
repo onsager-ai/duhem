@@ -3,7 +3,7 @@
 //! Counts come from tests, not producer summary totals. Unused metadata is ignored.
 use serde::Deserialize;
 
-use super::native_junit::{TestResult, TestStatus};
+use super::native_report::{TestResult, TestStatus};
 
 const SPEC_VERSION: &str = "0.2.0";
 

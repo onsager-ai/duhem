@@ -56,7 +56,16 @@ to the native command's cwd. A pass needs the expected exit, matching output and
 a parsed report with zero failures/errors. Missing or malformed reports and
 timeouts are inconclusive. Skips count without failing. JSON and terminal reports
 show individual test counts and bounded masked failures; evidence blobs retain
-the source XML and all normalized results. CTRF remains unsupported.
+the source report and all normalized results. `format: ctrf` reads CTRF v0.2.0
+JSON: pending counts as skipped and other as errored; unknown statuses or missing
+required test fields are inconclusive. Missing `specVersion` is accepted; newer
+major versions are inconclusive. Messages and traces are masked together.
+
+`duhem init` detects Cargo, package test scripts (npm/pnpm/yarn), pytest and Go,
+and proposes native entries in a new project root manifest for review. Existing
+manifests are preserved. Nextest JUnit is proposed only when the ci profile
+explicitly configures `[profile.ci.junit] path = "junit.xml"`. Review generated
+commands and paths before running.
 
 ## When to use this skill
 

@@ -3,12 +3,37 @@ use std::path::Path;
 
 use duhem_evidence::EvidenceWriter;
 use duhem_judge::{InconclusiveCause, VerdictState};
-use duhem_schema::NativeReportFormat;
+use duhem_schema::native::NativeReportFormat;
 use duhem_summary::{NativeRunSummary, NativeTestCounts, NativeTestFailure};
 
 use super::EngineError;
 use super::native_ctrf;
-use super::native_junit::{self, TestStatus};
+use super::native_junit;
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum TestStatus {
+    Pass,
+    Fail,
+    Skip,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct TestResult {
+    pub test_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classname: Option<String>,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    pub status: TestStatus,
+    pub duration_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
 
 const FAILURE_LIMIT: usize = 10;
 const MESSAGE_LIMIT: usize = 2048;

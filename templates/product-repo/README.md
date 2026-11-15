@@ -37,6 +37,14 @@ writes there — add this to your `.gitignore`:
 .duhem/*.db-*
 ```
 
+To scaffold another leaf, run `duhem init .duhem/hello --name hello`. Init detects
+Cargo, package test scripts (npm/pnpm/yarn), pytest and Go and proposes `native:`
+commands in a new project root manifest. Review those commands before running;
+existing manifests are preserved. Native commands gate the run while criteria
+keep their independent check verdicts. Add `report: {format: junit, path: report.xml}`
+or `report: {format: ctrf, path: ctrf.json}` to retain test counts and masked failure
+evidence. CTRF v0.2.0 pending tests count as skipped; other outcomes count as errors.
+
 ## Run it locally
 
 ```bash

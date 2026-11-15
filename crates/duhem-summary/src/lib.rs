@@ -379,6 +379,7 @@ mod tests {
         let old_set = r#"{"schema_version":"1","verdict":"pass","runs":[]}"#;
         let set: RunSetSummary = serde_json::from_str(old_set).unwrap();
         assert!(set.selection.is_none());
+        assert!(set.run_id.is_empty());
     }
 
     #[test]

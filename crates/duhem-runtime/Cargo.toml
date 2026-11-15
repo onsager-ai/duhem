@@ -28,6 +28,7 @@ base64.workspace = true
 signal-hook = "0.3"
 sha2 = "0.10"
 hex = "0.4"
+roxmltree = "0.21"
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 libc = "0.2"

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="3" failures="1" errors="0" time="0.25">
+  <testsuite name="example" errors="0" failures="1" skipped="1" timestamp="2026-11-15T00:00:00" time="0.25" tests="3">
+    <testcase classname="example passes" name="example passes" time="0.125" file="example.test.js"/>
+    <testcase classname="example fails" name="example fails" time="0.125"><failure>Error: expect(received).toBe(expected)</failure></testcase>
+    <testcase classname="example skipped" name="example skipped" time="0"><skipped/></testcase>
+  </testsuite>
+</testsuites>

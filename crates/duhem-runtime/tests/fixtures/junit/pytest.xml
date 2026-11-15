@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="pytest" errors="1" failures="1" skipped="1" tests="4" time="0.25" timestamp="2026-11-15T00:00:00" hostname="ci">
+  <testcase classname="tests.test_example" name="test_pass" file="tests/test_example.py" line="1" time="0.125"/>
+  <testcase classname="tests.test_example" name="test_fail" time="0.125"><failure message="assert 1 == 2">tests/test_example.py:5: AssertionError</failure></testcase>
+  <testcase classname="tests.test_example" name="test_error" time="0"><error message="failed on setup with ValueError">ValueError: fixture failed</error></testcase>
+  <testcase classname="tests.test_example" name="test_skip" time="0"><skipped type="pytest.skip" message="unsupported platform">tests/test_example.py:9: unsupported platform</skipped></testcase>
+</testsuite></testsuites>

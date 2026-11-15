@@ -21,7 +21,7 @@ use duhem_schema::{
     load_for_run as load_definition, validate_with_action_catalog,
 };
 
-use crate::filter::CliCheckFilter;
+use crate::filter::{CliCheckFilter, native_selection};
 use crate::inputs;
 use crate::profile;
 use crate::reporter::{self, Reporter};
@@ -285,10 +285,12 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         for path in &authored_leaf_paths {
             let reason = if !leaves.iter().any(|leaf| &leaf.path == path) {
                 Some("directory_selection")
-            } else if check_filter
-                .as_ref()
-                .is_some_and(|filter| filter.for_verification(&leaf_name(path)).is_none())
-            {
+            } else if check_filter.as_ref().is_some_and(|filter| {
+                filter.has_criterion_filters()
+                    && filter.for_criteria().is_some_and(|criteria| {
+                        criteria.for_verification(&leaf_name(path)).is_none()
+                    })
+            }) {
                 Some("verification_filter")
             } else {
                 None
@@ -302,6 +304,21 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 selection.selected += 1;
             }
         }
+        let mut excluded_native_runs = Vec::new();
+        if let Scope::Manifest { native, .. } = &scope {
+            let (_, excluded) = native_selection(check_filter.as_ref(), native);
+            excluded_native_runs.extend(excluded);
+        }
+        for leaf in leaves
+            .iter()
+            .filter(|leaf| authored_leaf_paths.iter().any(|path| path == &leaf.path))
+        {
+            let (_, excluded) = native_selection(check_filter.as_ref(), &leaf.definition.native);
+            excluded_native_runs.extend(excluded);
+        }
+        let mut seen_native_ids = std::collections::BTreeSet::new();
+        excluded_native_runs.retain(|id| seen_native_ids.insert(id.clone()));
+        selection.excluded_native_runs = excluded_native_runs;
         selection
     });
     // Suite-wide `defaults:` (spec #66) applied to every leaf's engine.
@@ -384,7 +401,13 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         let mut stdout = std::io::stdout().lock();
         let mut wrote = false;
         for (name, _path, def, _inputs, _secrets) in &resolved {
-            let leaf_filter = check_filter.as_ref().and_then(|f| f.for_verification(name));
+            let leaf_filter = check_filter.as_ref().and_then(|f| {
+                if f.has_criterion_filters() {
+                    f.for_verification(name)
+                } else {
+                    Some(CliCheckFilter::matches_nothing())
+                }
+            });
             // If a filter was passed and nothing scopes to this leaf,
             // skip — no spurious "no checks matched" line per-leaf.
             if check_filter.is_some() && leaf_filter.is_none() {
@@ -414,6 +437,28 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 }
             }
         }
+        for (name, _path, definition, _inputs, _secrets) in &resolved {
+            let (selected, excluded) = native_selection(check_filter.as_ref(), &definition.native);
+            for run in selected {
+                let line = if is_manifest {
+                    format!("WOULD RUN NATIVE: {name}::{}", run.id)
+                } else {
+                    format!("WOULD RUN NATIVE: {}", run.id)
+                };
+                if let Err(e) = writeln!(stdout, "{line}") {
+                    eprintln!("dry-run: {e}");
+                    return ExitCode::FAILURE;
+                }
+                wrote = true;
+            }
+            if !excluded.is_empty() {
+                let line = format!("EXCLUDED NATIVE: {}", excluded.join(", "));
+                if let Err(e) = writeln!(stdout, "{line}") {
+                    eprintln!("dry-run: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
         if !wrote && let Err(e) = writeln!(stdout, "WOULD RUN: (no checks matched filter)") {
             eprintln!("dry-run: {e}");
             return ExitCode::FAILURE;
@@ -427,7 +472,13 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // `WOULD RUN` lines. Values render deterministically (strings
         // bare, other types as compact JSON of the coerced value).
         for (name, _path, _def, inputs, secrets) in &resolved {
-            let leaf_filter = check_filter.as_ref().and_then(|f| f.for_verification(name));
+            let leaf_filter = check_filter.as_ref().and_then(|f| {
+                if f.has_criterion_filters() {
+                    f.for_verification(name)
+                } else {
+                    Some(CliCheckFilter::matches_nothing())
+                }
+            });
             if check_filter.is_some() && leaf_filter.is_none() {
                 continue;
             }
@@ -601,7 +652,8 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                         }
                     }
                 }
-                suite_native = match session.run_native(native, &suite_secrets).await {
+                let (selected_native, _) = native_selection(check_filter.as_ref(), native);
+                suite_native = match session.run_native(&selected_native, &suite_secrets).await {
                     Ok(results) => results,
                     Err(error) => {
                         eprintln!("suite native runs: {error}");
@@ -644,9 +696,24 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // signal a typo'd `--filter` would on any leaf — consistent
         // with `--dry-run` which already prints
         // `(no checks matched filter)` for the same case.
+        let (selected_leaf_native, excluded_leaf_native) =
+            native_selection(check_filter.as_ref(), &def.native);
+        let native_only_vacuous = check_filter.as_ref().is_some_and(|filter| {
+            !filter.has_criterion_filters()
+                && (!selected_leaf_native.is_empty() || !suite_native.is_empty())
+        });
+        let mut def = def;
+        def.native = selected_leaf_native;
+        let run_leaf_native = check_filter.is_none()
+            || check_filter
+                .as_ref()
+                .is_some_and(CliCheckFilter::has_native_filters);
+
         let leaf_filter = match check_filter.as_ref() {
+            Some(f) if !f.has_criterion_filters() => Some(CliCheckFilter::matches_nothing()),
             Some(f) => {
-                let narrowed = f.for_verification(&name);
+                let criteria_filter = f.for_criteria().expect("criterion filter exists");
+                let narrowed = criteria_filter.for_verification(&name);
                 match (narrowed, is_manifest) {
                     (Some(n), _) => Some(n),
                     (None, true) => continue,
@@ -720,6 +787,8 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             .skip_env_up(no_env_up || suite_managed)
             .keep_env(keep_env)
             .skip_env_down(suite_managed)
+            .with_native_execution(run_leaf_native)
+            .with_native_only_vacuous_body(native_only_vacuous)
             .with_env(env_whitelist.clone())
             .with_inherited(
                 def.inputs
@@ -815,7 +884,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         if let Some(f) = leaf_filter {
             engine = engine.with_filter(f);
         }
-        engine = engine.with_claim_provenance(raw_filter.clone(), manifest_selection.clone());
+        engine = engine
+            .with_excluded_native_runs(excluded_leaf_native)
+            .with_claim_provenance(raw_filter.clone(), manifest_selection.clone());
         // Live terminal progress (#299): subscribe a renderer to the
         // engine's progress sink. It folds the same evidence events
         // the store persists onto stderr and returns at

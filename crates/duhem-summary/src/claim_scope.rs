@@ -34,6 +34,8 @@ pub struct ManifestSelection {
     pub filters: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub excluded: Vec<ExcludedLeaf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub excluded_native_runs: Vec<String>,
 }
 
 impl std::fmt::Display for ManifestSelection {
@@ -50,6 +52,9 @@ pub struct ClaimScope {
     pub filters: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub excluded: Vec<ExcludedClaim>,
+    /// Native runs the `--filter` selection left out (they did not run or gate).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub excluded_native_runs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest: Option<ManifestSelection>,
 }

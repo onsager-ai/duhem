@@ -37,6 +37,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 - [additive] Native runs parse JUnit XML reports, gate on test failures and report availability, and expose per-status counts, bounded masked failures and full report/result evidence blobs. (#649)
 
+- [additive] `--filter native:<id>` selects native commands by exact or glob ID; unselected commands are excluded from execution and the gate, with exclusions shown in claim scope. (#649)
+
 - [additive] Exit-code native runs (`native:`) execute under Duhem with optional output matching, gate the run without satisfying criteria, and appear in summaries with cross-layer counts and durations. (#649)
 
 - [additive] Dashboard parent run page: tree verdict, children in execution order and a failures-first list; RunDetail gains children and duration. (#651)

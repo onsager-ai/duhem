@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="3" failures="1">
+  <testsuite name="example.org/project" tests="3" failures="1" errors="0" id="0" hostname="" time="0.250" timestamp="2026-11-15T00:00:00Z">
+    <properties><property name="go.version" value="go1.24"/></properties>
+    <testcase name="TestPass" classname="example.org/project" time="0.125"/>
+    <testcase name="TestFail" classname="example.org/project" time="0.125"><failure message="Failed" type="">example_test.go:12: expected true</failure></testcase>
+    <testcase name="TestSkip" classname="example.org/project" time="0.000"><skipped message="Skipped"><![CDATA[example_test.go:18: unavailable]]></skipped></testcase>
+  </testsuite>
+</testsuites>

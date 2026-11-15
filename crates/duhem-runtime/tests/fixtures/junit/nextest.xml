@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="3" failures="1" errors="0" time="0.25">
+  <testsuite name="example::example" tests="3" disabled="0" errors="0" failures="1" time="0.25">
+    <testcase name="tests::passes" classname="example::example" time="0.125"/>
+    <testcase name="tests::fails" classname="example::example" time="0.125"><failure message="test failed" type="test failure"><![CDATA[assertion failed: left == right]]></failure><system-out>test output</system-out></testcase>
+    <testcase name="tests::ignored" classname="example::example"><skipped/></testcase>
+  </testsuite>
+</testsuites>

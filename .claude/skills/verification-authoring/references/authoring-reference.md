@@ -27,7 +27,12 @@ See [Native runs](../../../../docs/native-runs.md) for the field reference.
 Use unique IDs and argv commands; optional `expect` matches stdout/stderr or sets
 an expected exit code. Required failures block the gate without changing criterion
 verdicts. Native outcomes cannot be referenced from assertions or expressions.
-Report parsing and native selection filters are deferred.
+Add `report: {format: junit, path: report.xml}` to read JUnit XML relative to the
+native command's cwd. A pass needs the expected exit, matching output and a parsed
+report with no failures/errors; missing or malformed reports and timeouts are
+inconclusive. Skips are counted without failing. Summaries include actual test
+counts, bounded masked failures and blob addresses for the source report and full
+normalized results. CTRF and native selection filters are deferred.
 
 ## When to use this skill
 

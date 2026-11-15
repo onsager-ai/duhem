@@ -10,14 +10,36 @@ pub(super) fn write_native(
     }
     writeln!(out, "Native runs")?;
     for run in runs {
+        let counts = run.counts.as_ref().map_or_else(String::new, |counts| {
+            format!(
+                "{} passed, {} failed, {} errored, {} skipped; ",
+                counts.passed, counts.failed, counts.errored, counts.skipped
+            )
+        });
         writeln!(
             out,
-            "  {}: {} ({}ms{})",
+            "  {}: {} ({}{}ms{})",
             run.id,
             run.outcome,
+            counts,
             run.duration_ms,
             if run.required { "" } else { ", diagnostic" }
         )?;
+        for test in &run.failing_tests {
+            let message = test
+                .message
+                .as_deref()
+                .and_then(|text| text.lines().next())
+                .unwrap_or("");
+            writeln!(out, "    {}: {message}", test.name)?;
+        }
+        if let Some(counts) = &run.counts {
+            let remaining = (counts.failed as usize + counts.errored as usize)
+                .saturating_sub(run.failing_tests.len());
+            if remaining > 0 {
+                writeln!(out, "    {remaining} more (see results evidence blob)")?;
+            }
+        }
         if let Some(detail) = &run.detail {
             for line in detail.lines() {
                 writeln!(out, "    {line}")?;

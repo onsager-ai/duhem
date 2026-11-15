@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="passing" tests="2" failures="0" skipped="1">
+  <testcase classname="suite" name="ok" time="0.125"/>
+  <testcase classname="suite" name="skip"><skipped/></testcase>
+</testsuite>

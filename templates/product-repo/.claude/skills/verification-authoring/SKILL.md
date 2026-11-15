@@ -51,8 +51,12 @@ count as one test. A wrong exit code or output match fails; timeout or spawn
 failure is inconclusive. `required: false` reports the result without blocking.
 Native results affect the overall gate, never satisfy criteria, and cannot be
 referenced from expressions. Output and failure details are masked as evidence.
-`report:` recognizes `junit|ctrf` with a required `path`, but validation rejects
-it until report parsing is available.
+Add `report: {format: junit, path: report.xml}` for JUnit XML; the path is relative
+to the native command's cwd. A pass needs the expected exit, matching output and
+a parsed report with zero failures/errors. Missing or malformed reports and
+timeouts are inconclusive. Skips count without failing. JSON and terminal reports
+show individual test counts and bounded masked failures; evidence blobs retain
+the source XML and all normalized results. CTRF remains unsupported.
 
 ## When to use this skill
 

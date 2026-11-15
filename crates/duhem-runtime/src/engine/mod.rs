@@ -22,6 +22,8 @@ pub mod identity;
 pub mod inherit;
 pub mod lineage;
 pub(crate) mod native;
+mod native_junit;
+mod native_report;
 pub mod outcome;
 #[cfg(test)]
 mod outcome_regression_tests;

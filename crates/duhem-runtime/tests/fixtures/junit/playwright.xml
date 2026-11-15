@@ -1,0 +1,7 @@
+<testsuites id="" name="" tests="3" failures="1" skipped="1" errors="0" time="0.25">
+  <testsuite name="example.spec.ts" timestamp="2026-11-15T00:00:00" hostname="chromium" tests="3" failures="1" skipped="1" time="0.25" errors="0">
+    <testcase name="opens page" classname="example.spec.ts" time="0.125"/>
+    <testcase name="saves page" classname="example.spec.ts" time="0.125"><failure message="example.spec.ts:8:1 saves page" type="FAILURE"><![CDATA[Error: expect(locator).toBeVisible() failed]]></failure></testcase>
+    <testcase name="mobile only" classname="example.spec.ts" time="0"><skipped/></testcase>
+  </testsuite>
+</testsuites>

@@ -54,7 +54,15 @@ pub(crate) async fn run_native(
             outcome: VerdictState::Pass,
             duration_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
             required: run.required,
-            tests: 1,
+            tests: if run.report.is_some() { 0 } else { 1 },
+            counts: None,
+            report_path: run
+                .report
+                .as_ref()
+                .map(|report| writer.mask_text(&report.path)),
+            report_blob_sha256: None,
+            results_blob_sha256: None,
+            failing_tests: vec![],
             exit_code: None,
             detail: None,
             stdout_blob_sha256: None,
@@ -107,6 +115,15 @@ pub(crate) async fn run_native(
                         tail(stdout),
                         tail(stderr)
                     )));
+                }
+                if let Some(report) = &run.report {
+                    super::native_report::collect(
+                        writer,
+                        &run.id,
+                        &cwd.join(&report.path),
+                        &mut result,
+                    )
+                    .await?;
                 }
             }
         }

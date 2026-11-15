@@ -117,7 +117,9 @@ jobs:
           verification-path: .duhem/duhem.yml
 ```
 
-Then add the `duhem` check as required in branch protection.
+Then add the `duhem` check as required in branch protection. To split a larger
+suite across CI machines, see the
+[distributed run CI recipes](https://github.com/onsager-ai/duhem/blob/main/docs/distributed-runs.md#ci-recipes).
 
 ## Mode B — Duhem monitors compatibility (nothing to set up here)
 

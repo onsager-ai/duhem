@@ -5,8 +5,15 @@ import { ClaimScopeNotice } from "../components/ClaimScopeNotice";
 // tree (criteria → checks in the rail, this summary in the panel).
 // Live runs (#84) fold their SSE stream in RunScaffold's `useRun`.
 
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { traceUrl, type LifecycleBlock, type RunDetail } from "../api";
+import {
+  fetchFailure,
+  traceUrl,
+  type FailureEnvelope,
+  type LifecycleBlock,
+  type RunDetail,
+} from "../api";
 import { lifecycleFailure, lifecycleHref, lifecycleScopePath } from "../lifecycle";
 import { formatDuration, formatStartedAt } from "../ui";
 import { RunScaffold } from "./RunScaffold";
@@ -182,9 +189,24 @@ function StatusBreakdown({
 }
 
 export function RunSummary({ run }: { run: RunDetail }) {
+  const hasChildren = (run.children?.length ?? 0) > 0;
   const checks = tallyChecks(run.criteria);
   const criteria = tallyCriteria(run.criteria);
   const inputs = Object.entries(run.inputs);
+  const [failureEnvelope, setFailureEnvelope] = useState<FailureEnvelope | null>(null);
+  const [failureError, setFailureError] = useState(false);
+  useEffect(() => {
+    setFailureEnvelope(null);
+    setFailureError(false);
+    if (!run.children?.length) return;
+    let live = true;
+    fetchFailure(run.run_id)
+      .then((envelope) => live && setFailureEnvelope(envelope))
+      .catch(() => live && setFailureError(true));
+    return () => {
+      live = false;
+    };
+  }, [run.run_id, run.children?.length]);
   return (
     <div className="min-w-0 max-w-full space-y-5" data-testid="run-summary">
       {run.body_verdict && <p className="border-l-2 border-fail px-4 py-3 text-sm">Gate: {run.verdict}. Body: {run.body_verdict}. Required fixture cleanup failed.</p>}
@@ -200,10 +222,79 @@ export function RunSummary({ run }: { run: RunDetail }) {
         </div>
       )}
 
+      {hasChildren && (
+        <section aria-labelledby="run-children-heading" className="space-y-3">
+          <h3 id="run-children-heading" className="text-sm font-semibold">
+            Runs
+          </h3>
+          <ol aria-label="Runs" className="divide-y rounded-md border">
+            {(run.children ?? []).map((child) => (
+              <li
+                key={child.run_id}
+                className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
+              >
+                <Link
+                  className="font-medium hover:underline"
+                  to={`/run/${encodeURIComponent(child.run_id)}`}
+                >
+                  {child.verification}
+                </Link>
+                <span className="text-muted-foreground">
+                  {child.verdict ?? child.status}
+                </span>
+                <span className="tabular-nums text-muted-foreground">
+                  {child.duration_ms === null
+                    ? "duration unavailable"
+                    : formatDuration(child.duration_ms)}
+                </span>
+                <span className="text-muted-foreground">
+                  {child.check_totals.pass}/{child.check_totals.total} passed · {child.check_totals.fail} failed
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+      {hasChildren && (
+        <section aria-labelledby="run-failures-heading" className="space-y-3">
+          <h3 id="run-failures-heading" className="text-sm font-semibold">
+            Failures
+          </h3>
+          {failureEnvelope?.failing.length ? (
+            <ol aria-label="Failures" className="space-y-2">
+              {failureEnvelope.failing.map((failure, index) => {
+                const childId = failure.run_id ?? run.run_id;
+                return (
+                  <li
+                    key={`${childId}:${failure.criterion_id}:${failure.check_id}:${index}`}
+                  >
+                    <Link
+                      className="text-fail hover:underline"
+                      to={`/run/${encodeURIComponent(childId)}/check/${encodeURIComponent(`${failure.criterion_id}::${failure.check_id}`)}`}
+                    >
+                      {failure.verification ?? run.verification} · {failure.criterion_id}::{failure.check_id}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : (
+            // Only a loaded envelope may claim absence; loading and fetch
+            // errors must not read as "no failures".
+            <p className="text-sm text-muted-foreground">
+              {failureEnvelope
+                ? "No failures recorded."
+                : failureError
+                  ? "Failures could not be loaded."
+                  : "Loading failures…"}
+            </p>
+          )}
+        </section>
+      )}
       <LifecycleList runId={run.run_id} blocks={(run.lifecycle ?? []).filter((block) => block.scope.length <= 1)} />
       <ClaimScopeNotice scope={run.claim_scope} />
 
-      {run.criteria.flatMap((criterion) => criterion.checks
+      {!hasChildren && run.criteria.flatMap((criterion) => criterion.checks
         .filter((check) => (check.gated_judging_steps ?? 0) > 0)
         .map((check) => (
           <p key={`${criterion.id}::${check.id}`}>
@@ -217,17 +308,21 @@ export function RunSummary({ run }: { run: RunDetail }) {
       {/* Checks and criteria use different denominators. Keep both explicit:
           criteria without checks must remain visible instead of disappearing
           into the executable-check roll-up. */}
-      <div className="space-y-4 border-y py-4">
-        <StatusBreakdown label="Checks" tally={checks} />
-        <div className="border-t pt-4">
-          <StatusBreakdown label="Criteria" tally={criteria} />
+      {!hasChildren && (
+        <div className="space-y-4 border-y py-4">
+          <StatusBreakdown label="Checks" tally={checks} />
+          <div className="border-t pt-4">
+            <StatusBreakdown label="Criteria" tally={criteria} />
+          </div>
         </div>
-      </div>
+      )}
 
-      <p className="border-l-2 border-muted-foreground/30 px-3 py-1 text-sm text-muted-foreground">
-        Select a check in the criteria navigator to inspect its failed steps,
-        assertions, and evidence.
-      </p>
+      {!hasChildren && (
+        <p className="border-l-2 border-muted-foreground/30 px-3 py-1 text-sm text-muted-foreground">
+          Select a check in the criteria navigator to inspect its failed steps,
+          assertions, and evidence.
+        </p>
+      )}
 
       {/* Provenance + evidence links. */}
       <dl className="grid gap-x-6 gap-y-4 text-sm sm:grid-cols-2">

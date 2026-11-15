@@ -17,20 +17,22 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use duhem_evidence::{
-    Event, EventPayload, ObservationValue, RunOrigin, RunRecord, RunStatus, Store, VerdictState,
+    Event, EventPayload, ObservationValue, RunRecord, RunStatus, Store, VerdictState,
 };
 use thiserror::Error;
 
 use crate::model::{
     ArtifactRef, CheckDetail, CheckRef, CriterionDetail, CriterionHistory, EntryKind,
-    FailingAssertion, FailingCheck, FailingRequest, FailureEnvelope, HistoryRun, RunDetail,
-    RunDiff, RunsListEntry, SpanModel, VerificationHistory,
+    FailingAssertion, FailingCheck, FailingRequest, FailureEnvelope, HistoryRun, RunChildDetail,
+    RunDetail, RunDiff, RunsListEntry, SpanModel, VerificationHistory,
 };
 
 mod diff;
 mod run_detail;
+mod tree;
 
 use diff::{CheckProjection, diff_criteria, project_run};
+use tree::{check_totals, descendant_run_ids, suite_children, tree_verdict};
 
 mod lifecycle;
 mod mime;
@@ -139,7 +141,35 @@ impl EvidenceReader {
         let Some(run) = self.load(run_id).await? else {
             return Ok(None);
         };
-        Ok(Some(build_run_detail(&run)))
+        let records = self.store.list_runs().await?;
+        let tree_ids = descendant_run_ids(run_id, &records);
+        let tree_wide = tree_ids.len() > 1;
+        let children = if tree_wide {
+            let mut children = Vec::new();
+            for record in suite_children(run_id, &records) {
+                let Some(child) = self.load(&record.run_id).await? else {
+                    continue;
+                };
+                let totals = check_totals(&build_run_detail(&child));
+                children.push(RunChildDetail {
+                    run_id: record.run_id.clone(),
+                    verification: child.verification(),
+                    verdict: child.verdict(),
+                    status: child.record.status,
+                    duration_ms: child.duration_ms(),
+                    check_totals: totals,
+                });
+            }
+            children
+        } else {
+            Vec::new()
+        };
+        let mut detail = build_run_detail(&run);
+        detail.children = children;
+        if tree_wide {
+            detail.verdict = tree_verdict(&records, &tree_ids);
+        }
+        Ok(Some(detail))
     }
 
     pub async fn check_detail(
@@ -307,35 +337,7 @@ impl EvidenceReader {
         let tree_ids = descendant_run_ids(run_id, &records);
         let tree_wide = tree_ids.len() > 1;
         let verdict = if tree_wide {
-            use duhem_judge::{RunVerdict, aggregate_run_set};
-            let by_id: BTreeMap<&str, &RunRecord> = records
-                .iter()
-                .map(|record| (record.run_id.as_str(), record))
-                .collect();
-            let mut leaves: Vec<&RunRecord> = tree_ids
-                .iter()
-                .filter_map(|id| by_id.get(id.as_str()).copied())
-                .filter(|record| {
-                    !records.iter().any(|candidate| {
-                        candidate.lineage.parent_run_id.as_deref() == Some(record.run_id.as_str())
-                            && tree_ids.iter().any(|tree_id| tree_id == &candidate.run_id)
-                    })
-                })
-                .collect();
-            leaves.sort_by_key(|record| (record.started_at, record.run_id.as_str()));
-            // An unjudged leaf (still running, aborted, orphaned) leaves
-            // the whole tree unjudged: an incomplete tree never reads as
-            // a pass.
-            let leaf_verdicts: Option<Vec<RunVerdict>> = leaves
-                .iter()
-                .map(|record| {
-                    record.verdict.map(|state| RunVerdict {
-                        state,
-                        criteria: Vec::new(),
-                    })
-                })
-                .collect();
-            leaf_verdicts.map(|verdicts| aggregate_run_set(verdicts).state)
+            tree_verdict(&records, &tree_ids)
         } else {
             run.record.verdict
         };
@@ -550,37 +552,6 @@ pub fn events_to_jsonl(events: &[Event]) -> String {
     out
 }
 
-/// The run tree under `root_id`: the root plus its manifest (`suite`)
-/// children, recursively. Nested `invocation` runs started from inside a
-/// check are evidence of that check, not parts of the whole run (Duhem's
-/// own self-verification deliberately runs failing controls that way).
-fn descendant_run_ids(root_id: &str, records: &[RunRecord]) -> Vec<String> {
-    let mut children: BTreeMap<&str, Vec<&RunRecord>> = BTreeMap::new();
-    for record in records {
-        if record.lineage.origin != Some(RunOrigin::Suite) {
-            continue;
-        }
-        if let Some(parent) = record.lineage.parent_run_id.as_deref() {
-            children.entry(parent).or_default().push(record);
-        }
-    }
-    fn visit(run_id: &str, children: &BTreeMap<&str, Vec<&RunRecord>>, output: &mut Vec<String>) {
-        output.push(run_id.to_string());
-        let mut descendants = children.get(run_id).cloned().unwrap_or_default();
-        descendants.sort_by_key(|record| (record.started_at, record.run_id.as_str()));
-        for child in descendants {
-            visit(&child.run_id, children, output);
-        }
-    }
-    if records.iter().any(|record| record.run_id == root_id) {
-        let mut output = Vec::new();
-        visit(root_id, &children, &mut output);
-        output
-    } else {
-        vec![root_id.to_string()]
-    }
-}
-
 fn sort_newest_first(entries: &mut [RunsListEntry]) {
     // Newest first; runs with no parseable start sink to the bottom —
     // a bare `Reverse(Option)` would float them to the top instead,
@@ -600,7 +571,7 @@ fn lineage_entry(
         .filter_map(|id| by_id.get(id).copied())
         .map(|child| lineage_entry(child, by_id, child_ids))
         .collect();
-    sort_newest_first(&mut children);
+    children.sort_by_key(|child| (child.started_at, child.run_id.clone()));
     let has_children = !children.is_empty();
     RunsListEntry {
         run_id: record.run_id.clone(),
@@ -848,6 +819,8 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         cleanup,
         lifecycle,
         criteria,
+        duration_ms: run.duration_ms(),
+        children: Vec::new(),
     }
 }
 

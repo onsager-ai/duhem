@@ -2,7 +2,7 @@
 // value here is presentation over the judge's recorded verdicts — the
 // band never re-judges; it only names what the run detail already says.
 
-import type { CheckDetail, RunDetail, RunStatus, RunsListEntry, Verdict } from "./api";
+import type { CheckDetail, RunDetail, RunStatus, Verdict } from "./api";
 import { compactValue, failureParts } from "./format";
 import { verdictFamily } from "./ui";
 
@@ -25,26 +25,17 @@ export function verdictWord(
   return { word: "No verdict", tone: "none" };
 }
 
-/** "2 of 3 criteria pass" — the judge's per-criterion verdicts, counted. */
-export function criteriaTally(run: Pick<RunDetail, "criteria">): string {
+/** Count passing criteria for leaves or passing direct children for parents. */
+export function criteriaTally(run: Pick<RunDetail, "criteria" | "children">): string {
+  const children = run.children ?? [];
+  if (children.length > 0) {
+    const passed = children.filter((child) => child.verdict === "pass").length;
+    return `${passed} of ${children.length} ${children.length === 1 ? "run passes" : "runs pass"}`;
+  }
   const total = run.criteria.length;
   if (total === 0) return "No criteria recorded";
   const passing = run.criteria.filter((c) => c.verdict === "pass").length;
   return `${passing} of ${total} ${total === 1 ? "criterion passes" : "criteria pass"}`;
-}
-
-/** Locate a run's row in the polled runs list, descending into run-set
- *  children. `RunDetail` carries no duration; the list row does. */
-export function findRunEntry(
-  runs: RunsListEntry[] | null | undefined,
-  runId: string,
-): RunsListEntry | null {
-  for (const entry of runs ?? []) {
-    if (entry.run_id === runId) return entry;
-    const child = findRunEntry(entry.children, runId);
-    if (child) return child;
-  }
-  return null;
 }
 
 /** Wall-clock finish: start + recorded duration. Null while running or

@@ -7,12 +7,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { CheckDetail, RunDetail, RunsListEntry } from "../api";
-import { RunsProvider } from "../runs-context";
+import type { CheckDetail, RunDetail } from "../api";
 import { RunScaffold, VerdictBand } from "../views/RunScaffold";
 import {
   criteriaTally,
-  findRunEntry,
   finishedAt,
   firstFailedAssertion,
   firstFailedCheck,
@@ -30,6 +28,8 @@ function run(overrides: Partial<RunDetail> = {}): RunDetail {
     run_id: "R1",
     verification: "pegasus-register",
     started_at: "2026-07-22T14:03:00.000Z",
+    duration_ms: 1200,
+    children: [],
     inputs: {},
     verdict: "pass",
     status: "finished",
@@ -88,18 +88,18 @@ const FAILED_CHECK = check([
   assertion("fail", "actual 404, expected 200"),
 ]);
 
-function stubFetch(checkDetail: CheckDetail = FAILED_CHECK, runs: RunsListEntry[] = []) {
+function stubFetch(checkDetail: CheckDetail = FAILED_CHECK) {
   const fetchMock = vi.fn(async (url: string) => {
     const path = String(url);
+    if (path.includes("/failure.json")) return new Response(JSON.stringify({ failing: [] }));
     if (path.includes("/checks/")) return new Response(JSON.stringify(checkDetail));
-    if (path === "api/runs.json") return new Response(JSON.stringify(runs));
     return new Response(JSON.stringify(FAILING));
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
 
-function renderBand(detail: RunDetail, props: { collapsed?: boolean; durationMs?: number | null } = {}) {
+function renderBand(detail: RunDetail, props: { collapsed?: boolean } = {}) {
   return render(
     <MemoryRouter>
       <VerdictBand run={detail} connection="connected" {...props} />
@@ -135,6 +135,17 @@ describe("verdict band derivations", () => {
       "0 of 1 criterion passes",
     );
     expect(criteriaTally(run({ criteria: [] }))).toBe("No criteria recorded");
+    expect(criteriaTally(run({
+      criteria: [],
+      children: [{
+        run_id: "C",
+        verification: "child",
+        verdict: "fail",
+        status: "finished",
+        duration_ms: 50,
+        check_totals: { pass: 0, fail: 1, inconclusive: 0, pending: 0, total: 1 },
+      }],
+    }))).toBe("0 of 1 run passes");
   });
 
   it("finds the first failed check in criteria order, skipping non-fail verdicts", () => {
@@ -180,19 +191,7 @@ describe("verdict band derivations", () => {
     expect(firstFailedAssertion(check([assertion("pass", "actual 1, expected 1")]))).toBeNull();
   });
 
-  it("reads the duration from the runs list, including run-set children", () => {
-    const entry = (run_id: string, children?: RunsListEntry[]): RunsListEntry => ({
-      run_id,
-      verification: "v",
-      started_at: null,
-      duration_ms: run_id === "child" ? 42 : 1,
-      verdict: null,
-      kind: children ? "run-set" : "leaf",
-      status: "finished",
-      children,
-    });
-    expect(findRunEntry([entry("a"), entry("set", [entry("child")])], "child")?.duration_ms).toBe(42);
-    expect(findRunEntry(null, "a")).toBeNull();
+  it("uses RunDetail duration and calculates the finished timestamp", () => {
     expect(finishedAt("2026-07-22T14:03:00.000Z", 1500)?.toISOString()).toBe("2026-07-22T14:03:01.500Z");
     expect(finishedAt("2026-07-22T14:03:00.000Z", null)).toBeNull();
   });
@@ -211,17 +210,18 @@ describe("verdict band timestamps", () => {
 
   it("shows the finished time in UTC with the full ISO timestamp in the title", () => {
     stubFetch();
-    renderBand(run(), { durationMs: 1234 });
+    renderBand(run());
     const time = screen.getByTestId("verdict-time");
     expect(time.textContent).toBe("finished 2026-07-22 14:03 UTC");
     const stamp = time.querySelector("time");
-    expect(stamp?.getAttribute("title")).toBe("2026-07-22T14:03:01.234Z");
-    expect(stamp?.getAttribute("datetime")).toBe("2026-07-22T14:03:01.234Z");
+    // Finish = started_at + RunDetail.duration_ms (1200 ms in this fixture).
+    expect(stamp?.getAttribute("title")).toBe("2026-07-22T14:03:01.200Z");
+    expect(stamp?.getAttribute("datetime")).toBe("2026-07-22T14:03:01.200Z");
   });
 
   it("falls back to the started time in the same format", () => {
     stubFetch();
-    renderBand(run({ verdict: null, status: "running" }), { durationMs: null });
+    renderBand(run({ verdict: null, status: "running" }));
     const time = screen.getByTestId("verdict-time");
     expect(time.textContent).toBe("started 2026-07-22 14:03 UTC");
     expect(time.querySelector("time")?.getAttribute("title")).toBe("2026-07-22T14:03:00.000Z");
@@ -231,7 +231,7 @@ describe("verdict band timestamps", () => {
 describe("VerdictBand", () => {
   it("renders a pass at display size inside the heading", () => {
     stubFetch();
-    renderBand(run(), { durationMs: 1234 });
+    renderBand(run());
     const word = screen.getByTestId("verdict-word");
     expect(word.textContent).toBe("Passed");
     expect(word.className).toContain("text-pass");
@@ -301,7 +301,7 @@ describe("VerdictBand", () => {
 
   it("renders a running run in the live tone, without a duration", () => {
     stubFetch();
-    renderBand(run({ verdict: null, status: "running" }), { durationMs: 900 });
+    renderBand(run({ verdict: null, status: "running" }));
     const word = screen.getByTestId("verdict-word");
     expect(word.textContent).toBe("Running");
     expect(word.className).toContain("text-live");
@@ -314,7 +314,7 @@ describe("VerdictBand", () => {
 
   it("collapses to a single line that keeps the verdict in the heading", () => {
     stubFetch();
-    renderBand(FAILING, { collapsed: true, durationMs: 1234 });
+    renderBand(FAILING, { collapsed: true });
     expect(screen.getByTestId("verdict-band").getAttribute("data-collapsed")).toBe("true");
     expect(screen.queryByTestId("verdict-summary")).toBeNull();
     expect(screen.queryByTestId("first-failure")).toBeNull();
@@ -337,11 +337,9 @@ describe("RunScaffold verdict band", () => {
   function renderScaffold() {
     return render(
       <MemoryRouter>
-        <RunsProvider>
-          <RunScaffold runId="R1" activeResults>
-            {() => <div data-testid="pane-body">body</div>}
-          </RunScaffold>
-        </RunsProvider>
+        <RunScaffold runId="R1" activeResults>
+          {() => <div data-testid="pane-body">body</div>}
+        </RunScaffold>
       </MemoryRouter>,
     );
   }
@@ -393,21 +391,11 @@ describe("RunScaffold verdict band", () => {
     expect(band.getAttribute("title")).toBe("actual 500, expected 201");
   });
 
-  it("shows the duration recorded on the runs list", async () => {
-    stubFetch(FAILED_CHECK, [
-      {
-        run_id: "R1",
-        verification: "pegasus-register",
-        started_at: "2026-07-22T14:03:00.000Z",
-        duration_ms: 65_000,
-        verdict: "fail",
-        kind: "leaf",
-        status: "finished",
-      },
-    ]);
+  it("shows the duration recorded on RunDetail", async () => {
+    stubFetch();
     renderScaffold();
     await waitFor(() =>
-      expect(screen.getByTestId("verdict-summary").textContent).toContain("took 1m 5s"),
+      expect(screen.getByTestId("verdict-summary").textContent).toContain("took 1.2s"),
     );
   });
 });

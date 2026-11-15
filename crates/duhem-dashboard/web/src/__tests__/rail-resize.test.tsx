@@ -36,6 +36,8 @@ const RUN = {
   run_id: "R1",
   verification: "pegasus-register",
   started_at: "2026-07-22T14:03:00.000Z",
+  duration_ms: 1200,
+  children: [],
   inputs: {},
   verdict: "fail",
   status: "finished",

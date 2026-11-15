@@ -6,6 +6,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { RunDetail } from "../api";
 import RunPage from "../views/RunPage";
 import CheckPage from "../views/CheckPage";
 import CriterionPage from "../views/CriterionPage";
@@ -22,6 +23,8 @@ const RUN = {
   run_id: "R1",
   verification: "pegasus-register",
   started_at: "2026-07-22T14:03:00.000Z",
+  duration_ms: 1200,
+  children: [],
   inputs: {},
   verdict: "fail",
   status: "finished",
@@ -112,6 +115,9 @@ function stub(
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
+      if (String(url).includes("/failure.json")) {
+        return new Response(JSON.stringify({ failing: [] }), { status: 200 });
+      }
       if (String(url).includes("/checks/")) {
         return new Response(JSON.stringify(check), { status: 200 });
       }
@@ -144,6 +150,44 @@ function LocationProbe() {
 }
 
 describe("run report tree", () => {
+  it("renders parent children in order and tree failures without the empty-criteria message", async () => {
+    const checkTotals = { pass: 0, fail: 1, inconclusive: 0, pending: 0, total: 1 };
+    const children: RunDetail["children"] = [
+      {
+        run_id: "C1", verification: "first", verdict: "fail", status: "finished",
+        duration_ms: 100, check_totals: checkTotals,
+      },
+      {
+        run_id: "C2", verification: "second", verdict: "pass", status: "finished",
+        duration_ms: 100, check_totals: checkTotals,
+      },
+    ];
+    const parent = {
+      ...RUN, run_id: "P", verification: "suite", verdict: "fail", criteria: [], children,
+    };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("/failure.json")) {
+        return new Response(JSON.stringify({ failing: [{ run_id: "C1", verification: "first", criterion_id: "AC-1", check_id: "AC-1.1" }] }));
+      }
+      return new Response(JSON.stringify(parent));
+    }));
+    renderAt("/run/P");
+    expect((await screen.findByRole("link", { name: "first" })).getAttribute("href")).toBe("/run/C1");
+    const firstFailure = await screen.findByRole("link", { name: /first · AC-1::AC-1.1/ });
+    expect(firstFailure.getAttribute("href")).toBe(`/run/C1/check/${encodeURIComponent("AC-1::AC-1.1")}`);
+    await waitFor(() => expect(screen.queryByText(/No criteria recorded/)).toBeNull());
+    const rows = screen.getByRole("list", { name: "Runs" });
+    expect(rows.textContent?.indexOf("first")).toBeLessThan(rows.textContent?.indexOf("second") ?? 0);
+    const failureList = screen.getByRole("list", { name: "Failures" });
+    expect(failureList.textContent).toContain("first · AC-1::AC-1.1");
+  });
+
+  it("keeps the single-leaf empty-criteria page message", async () => {
+    stub({ ...RUN, criteria: [] });
+    renderAt("/run/R1");
+    expect(await screen.findByText(/No criteria recorded/)).toBeTruthy();
+  });
+
   it("pulls the run workspace up into the app-shell vertical inset", async () => {
     stub();
     const { container } = renderAt("/run/R1");

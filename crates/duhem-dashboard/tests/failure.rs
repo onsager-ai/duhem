@@ -252,6 +252,34 @@ async fn envelope_hands_an_agent_everything_to_react() {
 }
 
 #[tokio::test]
+async fn parent_run_detail_lists_direct_children_and_tree_verdict() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    const ROOT: &str = "01FAILENVELOPE00000000000L";
+    const CHILD: &str = "01FAILENVELOPE00000000000M";
+    seed_lineage(rw.clone(), ROOT, true, None, RunLineage::default()).await;
+    seed_lineage(
+        rw,
+        CHILD,
+        false,
+        None,
+        RunLineage {
+            parent_run_id: Some(ROOT.to_string()),
+            origin: Some(RunOrigin::Suite),
+        },
+    )
+    .await;
+
+    let (status, json) = get_json(EvidenceReader::new(ro), &format!("/api/runs/{ROOT}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["verdict"], "fail");
+    assert!(json["duration_ms"].is_number());
+    assert_eq!(json["children"].as_array().unwrap().len(), 1);
+    assert_eq!(json["children"][0]["run_id"], CHILD);
+    assert_eq!(json["children"][0]["verification"], "checkout");
+    assert_eq!(json["children"][0]["check_totals"]["total"], 1);
+}
+
+#[tokio::test]
 async fn parent_envelope_lists_descendant_failure_with_provenance() {
     let (_tmp, rw, ro) = common::open_stores().await;
     const ROOT: &str = "01FAILENVELOPE00000000000D";

@@ -35,7 +35,7 @@ const blocks = [
 ];
 
 const run: RunDetail = {
-  run_id: "run-1", verification: "example", started_at: null, inputs: {}, verdict: "pass",
+  run_id: "run-1", verification: "example", started_at: null, duration_ms: null, children: [], inputs: {}, verdict: "pass",
   status: "finished", setup_aborted: false, has_definition: false,
   lifecycle: blocks,
   criteria: [{ id: "AC-1", verdict: "pass", checks: [{ id: "AC-1.1", verdict: "pass" }] }],

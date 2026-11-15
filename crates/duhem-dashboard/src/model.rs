@@ -55,6 +55,8 @@ pub struct RunDetail {
     pub run_id: String,
     pub verification: String,
     pub started_at: Option<DateTime<Utc>>,
+    pub duration_ms: Option<u64>,
+    pub children: Vec<RunChildDetail>,
     pub inputs: serde_json::Map<String, serde_json::Value>,
     pub verdict: Option<VerdictState>,
     pub status: RunStatus,
@@ -76,6 +78,26 @@ pub struct RunDetail {
     /// All recorded lifecycle blocks for the Results navigator.
     pub lifecycle: Vec<LifecycleBlockDetail>,
     pub criteria: Vec<CriterionDetail>,
+}
+
+/// One suite child listed on a parent run page.
+#[derive(Debug, Clone, Serialize)]
+pub struct RunChildDetail {
+    pub run_id: String,
+    pub verification: String,
+    pub verdict: Option<VerdictState>,
+    pub status: RunStatus,
+    pub duration_ms: Option<u64>,
+    pub check_totals: RunCheckTotals,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RunCheckTotals {
+    pub pass: u32,
+    pub fail: u32,
+    pub inconclusive: u32,
+    pub pending: u32,
+    pub total: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]

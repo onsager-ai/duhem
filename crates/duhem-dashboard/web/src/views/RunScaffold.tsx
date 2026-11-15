@@ -9,6 +9,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import {
   fetchCheck,
+  fetchFailure,
   fetchRun,
   liveUrl,
   type CheckDetail,
@@ -40,10 +41,8 @@ import { VerdictBadge, formatDuration } from "../ui";
 import { VerdictMark } from "../components/brand/VerdictMark";
 import { DefinitionProvider, useVd } from "./definition-context";
 import { useCollapseOnScroll } from "../hooks/use-collapse-on-scroll";
-import { useOptionalRunsData } from "../runs-context";
 import {
   criteriaTally,
-  findRunEntry,
   finishedAt,
   firstFailedAssertion,
   firstFailedCheck,
@@ -120,9 +119,11 @@ function resultsHref(run: RunDetail): string {
   const criterion =
     run.criteria.find((item) => item.verdict !== "pass") ??
     run.criteria[0];
-  if (!criterion) return run.lifecycle?.[0]
-    ? lifecycleHref(run.run_id, run.lifecycle[0])
-    : `/run/${encodeURIComponent(run.run_id)}/results`;
+  if (!criterion) {
+    if (run.lifecycle?.[0]) return lifecycleHref(run.run_id, run.lifecycle[0]);
+    if (run.children?.[0]) return `/run/${encodeURIComponent(run.children[0].run_id)}`;
+    return `/run/${encodeURIComponent(run.run_id)}/results`;
+  }
   const check =
     criterion.checks.find((item) => item.verdict !== "pass") ??
     criterion.checks[0];
@@ -608,35 +609,54 @@ const TONE_TEXT: Record<BandTone, string> = {
   none: "text-foreground",
 };
 
-// The first failed check's recorded failure. The check id comes from the
-// run detail (the same criteria → checks the Results tree lists); its
-// expected/observed pair needs that check's slice of the trace, fetched
-// once per failed check — the Results tree fetches the active check the
-// same way.
+// The first failure target comes from the tree envelope on parents and
+// from the run's recorded check order on leaves. Leaf assertion detail is
+// fetched from the check endpoint; parent targets link to that same page.
 function useFirstFailure(run: RunDetail): {
+  runId: string;
   criterionId: string;
   checkId: string;
   failure: FirstFailure | null;
 } | null {
   const target = useMemo(() => firstFailedCheck(run), [run]);
-  const criterionId = target?.criterionId;
-  const checkId = target?.checkId;
   const [failure, setFailure] = useState<FirstFailure | null>(null);
+  const [treeFailure, setTreeFailure] = useState<{
+    runId: string;
+    criterionId: string;
+    checkId: string;
+  } | null>(null);
+  const parentRun = (run.children?.length ?? 0) > 0;
   useEffect(() => {
-    setFailure(null);
-    if (criterionId === undefined || checkId === undefined) return;
     let live = true;
-    // The band names the check either way; a failed fetch or an
-    // unreadable detail only drops the expected/observed pair.
-    fetchCheck(run.run_id, criterionId, checkId)
-      .then((detail) => live && setFailure(firstFailedAssertion(detail)))
-      .catch(() => {});
+    setFailure(null);
+    setTreeFailure(null);
+    if (parentRun) {
+      fetchFailure(run.run_id)
+        .then((envelope) => {
+          const first = envelope.failing[0];
+          if (live && first?.run_id) {
+            setTreeFailure({
+              runId: first.run_id,
+              criterionId: first.criterion_id,
+              checkId: first.check_id,
+            });
+          }
+        })
+        .catch(() => {});
+    } else if (target) {
+      fetchCheck(run.run_id, target.criterionId, target.checkId)
+        .then((detail) => live && setFailure(firstFailedAssertion(detail)))
+        .catch(() => {});
+    }
     return () => {
       live = false;
     };
-  }, [run.run_id, criterionId, checkId]);
-  if (criterionId === undefined || checkId === undefined) return null;
-  return { criterionId, checkId, failure };
+  }, [run.run_id, parentRun, target?.criterionId, target?.checkId]);
+  if (parentRun) {
+    return treeFailure ? { ...treeFailure, failure: null } : null;
+  }
+  if (!target) return null;
+  return { runId: run.run_id, criterionId: target.criterionId, checkId: target.checkId, failure };
 }
 
 // The run header's verdict band (#563) — the image people share.
@@ -649,13 +669,10 @@ export function VerdictBand({
   run,
   connection,
   collapsed = false,
-  durationMs = null,
 }: {
   run: RunDetail;
   connection: ConnectionState;
   collapsed?: boolean;
-  /** From the runs list — `RunDetail` records no duration. */
-  durationMs?: number | null;
 }) {
   const { word, tone } = verdictWord(run.verdict, run.status);
   const cause =
@@ -663,7 +680,10 @@ export function VerdictBand({
       ? run.verdict.slice("inconclusive:".length)
       : null;
   const first = useFirstFailure(run);
-  const finished = run.status === "running" ? null : utcStamp(finishedAt(run.started_at, durationMs));
+  const finished =
+    run.status === "running"
+      ? null
+      : utcStamp(finishedAt(run.started_at, run.duration_ms));
   const started = utcStamp(run.started_at);
   const stamp = finished ?? started;
   return (
@@ -723,10 +743,10 @@ export function VerdictBand({
             className="mt-1.5 flex flex-wrap gap-x-2 gap-y-0.5 text-sm text-muted-foreground"
           >
             <span className="font-medium text-foreground">{criteriaTally(run)}</span>
-            {run.status !== "running" && durationMs !== null && (
+            {run.status !== "running" && run.duration_ms != null && (
               <>
                 <span aria-hidden="true">·</span>
-                <span className="tabular-nums">took {formatDuration(durationMs)}</span>
+                <span className="tabular-nums">took {formatDuration(run.duration_ms)}</span>
               </>
             )}
             {stamp && (
@@ -744,7 +764,7 @@ export function VerdictBand({
         )}
         {!collapsed && first && (
           <Link
-            to={checkHref(run.run_id, first.criterionId, first.checkId)}
+            to={checkHref(first.runId, first.criterionId, first.checkId)}
             data-testid="first-failure"
             // Not the bare check id: the Results tree's check link is
             // named exactly `chk.id`, and VDs click `{role: link, name:
@@ -806,8 +826,6 @@ export function RunScaffold({
   const workspaceRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLElement>(null);
   const collapsed = useCollapseOnScroll(workspaceRef);
-  const runs = useOptionalRunsData()?.runs;
-  const durationMs = findRunEntry(runs, runId)?.duration_ms ?? null;
   const loaded = run !== null;
   // The Results panes size to the viewport minus the sticky header. The
   // expanded band is taller than the single-line header, so its measured
@@ -846,13 +864,12 @@ export function RunScaffold({
             run={run}
             connection={connection}
             collapsed={collapsed}
-            durationMs={durationMs}
           />
           <RunTabs run={run} active={active} />
         </header>
 
         {active === "results" ? (
-          run.criteria.length === 0 && (run.lifecycle?.length ?? 0) === 0 ? (
+          run.criteria.length === 0 && (run.lifecycle?.length ?? 0) === 0 && (run.children?.length ?? 0) === 0 ? (
             <p className="py-6 text-sm text-muted-foreground">
               No criteria recorded{run.status === "running" ? " yet" : ""}.
             </p>

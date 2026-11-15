@@ -32,7 +32,7 @@ it("keeps legacy explicit assertions readable without inventing values", () => {
 function Location() { const location = useLocation(); return <output data-testid="location">{location.search}</output>; }
 
 it("lists every explicit assertion after steps and navigates to standalone and step-owned details", async () => {
-  const run: RunDetail = { run_id: "R", verification: "case.yml", started_at: null, inputs: {}, verdict: "fail", status: "finished", setup_aborted: false, has_definition: false,
+  const run: RunDetail = { run_id: "R", verification: "case.yml", started_at: null, duration_ms: null, children: [], inputs: {}, verdict: "fail", status: "finished", setup_aborted: false, has_definition: false,
     criteria: [{ id: "AC", verdict: "fail", checks: [{ id: "C", verdict: "fail" }] }] };
   const check: CheckDetail = { criterion_id: "AC", check_id: "C", verdict: "fail", spans: [], timeline: events, artifacts: [] };
   vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("/checks/") ? check : run), { status: 200 })));

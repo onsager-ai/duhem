@@ -21,6 +21,7 @@
 
 pub mod bundle;
 pub mod claim_scope;
+pub mod distributed;
 pub mod event;
 pub mod reader;
 pub mod replay;

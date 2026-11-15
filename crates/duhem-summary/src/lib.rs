@@ -30,7 +30,7 @@ use duhem_judge::VerdictState;
 use serde::{Deserialize, Serialize};
 
 mod distributed;
-pub use distributed::{DistributedRun, ExpectedPartition, ShardIdentity};
+pub use distributed::{DistributedRun, ExcludedUnit, ExpectedPartition, ShardIdentity};
 mod claim_scope;
 mod lifecycle;
 mod native;
@@ -49,6 +49,8 @@ pub use native::{
 /// contract; field renames / removals are schema-impacting.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSummary {
+    #[serde(flatten)]
+    pub distributed: DistributedRun,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub native: Vec<NativeRunSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -141,6 +143,7 @@ impl RunSummary {
         store: PathBuf,
     ) -> Self {
         Self {
+            distributed: Default::default(),
             native: Vec::new(),
             layers: Vec::new(),
             claim_scope: None,
@@ -177,6 +180,10 @@ impl RunSummary {
     }
 
     pub fn with_claim_scope(mut self, scope: Option<ClaimScope>) -> Self {
+        self.distributed = scope
+            .as_ref()
+            .map(|scope| scope.distributed.clone())
+            .unwrap_or_default();
         self.claim_scope = scope;
         self
     }
@@ -337,6 +344,8 @@ pub struct FailedAssertionSummary {
 /// requires a `CHANGELOG.md` entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSetSummary {
+    #[serde(flatten)]
+    pub distributed: DistributedRun,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub native: Vec<NativeRunSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -386,6 +395,7 @@ impl RunSetSummary {
             layer_totals(&native, totals, check_duration_ms)
         };
         Self {
+            distributed: Default::default(),
             native,
             layers,
             run_id: run_id.into(),

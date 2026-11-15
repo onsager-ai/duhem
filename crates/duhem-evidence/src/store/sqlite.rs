@@ -147,7 +147,7 @@ fn row_to_run_record(row: &sqlx::sqlite::SqliteRow) -> Result<RunRecord, StoreEr
 }
 
 const RUN_SELECT: &str = "SELECT r.run_id, r.verification, r.schema_version, r.inputs, \
-     r.started_at, r.parent_run_id, r.origin, r.project_id, r.verifier_repo, r.verifier_sha, \
+     r.started_at, r.parent_run_id, CASE WHEN r.shard_origin = 1 THEN 'shard' ELSE r.origin END AS origin, r.project_id, r.verifier_repo, r.verifier_sha, \
      r.target_repo, r.target_sha, v.verdict, t.status AS terminal_status, t.terminal_at, t.duration_ms, \
      COALESCE((SELECT MAX(e.ts) FROM events e WHERE e.run_id = r.run_id \
        AND e.kind = 'run_heartbeat'), r.started_at) AS last_heartbeat_at \
@@ -166,6 +166,7 @@ fn parse_run_origin(token: &str) -> Result<RunOrigin, StoreError> {
     match token {
         "suite" => Ok(RunOrigin::Suite),
         "invocation" => Ok(RunOrigin::Invocation),
+        "shard" => Ok(RunOrigin::Shard),
         other => Err(StoreError::BadRunOrigin(other.to_string())),
     }
 }
@@ -174,6 +175,9 @@ fn run_origin_token(origin: RunOrigin) -> &'static str {
     match origin {
         RunOrigin::Suite => "suite",
         RunOrigin::Invocation => "invocation",
+        // The additive column bypasses the legacy origin CHECK without
+        // rebuilding the append-only runs table and all its foreign keys.
+        RunOrigin::Shard => "suite",
     }
 }
 
@@ -209,8 +213,8 @@ impl Store for SqliteStore {
         sqlx::query(
             "INSERT INTO runs (run_id, verification, schema_version, inputs, started_at, \
              parent_run_id, origin, workspace_id, project_id, verification_id, verifier_repo, \
-             verifier_sha, target_repo, target_sha) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'local', ?, ?, ?, ?, ?, ?)",
+             verifier_sha, target_repo, target_sha, shard_origin) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'local', ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&meta.run_id)
         .bind(&meta.verification)
@@ -225,6 +229,7 @@ impl Store for SqliteStore {
         .bind(&meta.scope.verifier_sha)
         .bind(&meta.scope.target_repo)
         .bind(&meta.scope.target_sha)
+        .bind(meta.lineage.origin == Some(RunOrigin::Shard))
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;

@@ -86,6 +86,7 @@ pub enum RunStatus {
 pub enum RunOrigin {
     Suite,
     Invocation,
+    Shard,
 }
 
 /// Outcome of a single step invocation. Distinct from a verdict —

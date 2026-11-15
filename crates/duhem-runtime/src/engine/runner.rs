@@ -84,6 +84,7 @@ pub struct Engine {
     native_only_vacuous_body: bool,
     excluded_native_runs: Vec<String>,
     filter_patterns: Vec<String>,
+    distributed: duhem_summary::DistributedRun,
     manifest_selection: Option<duhem_summary::ManifestSelection>,
     /// Optional u64 seed for runtime entropy (spec on issue #33). When
     /// set, the per-run `$runtime.uuid()` value is derived
@@ -177,6 +178,7 @@ impl Engine {
             native_only_vacuous_body: false,
             excluded_native_runs: Vec::new(),
             filter_patterns: Vec::new(),
+            distributed: Default::default(),
             manifest_selection: None,
             seed: None,
             run_id: None,
@@ -329,11 +331,41 @@ impl Engine {
             .await?;
 
         let execution = async {
+            let scope = self.declared_claim_scope(def);
+            let empty_shard =
+                scope
+                    .distributed
+                    .expected_partition
+                    .as_ref()
+                    .is_some_and(|partition| {
+                        partition.total_units > 0
+                            && scope.criteria.selected == 0
+                            && def.native.is_empty()
+                    });
             writer
-                .append(EventPayload::ClaimScopeDeclared {
-                    scope: self.declared_claim_scope(def),
-                })
+                .append(EventPayload::ClaimScopeDeclared { scope })
                 .await?;
+            if empty_shard {
+                writer
+                    .append(EventPayload::RunFinished {
+                        body_verdict: None,
+                        verdict: Some(VerdictState::Pass),
+                    })
+                    .await?;
+                return Ok(RunOutcome {
+                    native: Vec::new(),
+                    body_verdict: None,
+                    gated_checks: Default::default(),
+                    verdict: RunVerdict {
+                        state: VerdictState::Pass,
+                        criteria: Vec::new(),
+                    },
+                    run_id,
+                    failures: Vec::new(),
+                    warnings: Vec::new(),
+                    cleanup: Vec::new(),
+                });
+            }
             if let Some(name) = missing_declared {
                 return missing_input::finish(&mut writer, &name, &run_id).await;
             }
@@ -510,6 +542,13 @@ impl Engine {
             let mut cleanup: Vec<CleanupFailure> = Vec::new();
             let criteria_result: Result<(), EngineError> = async {
                 for criterion in &def.criteria {
+                    if self
+                        .filter
+                        .as_ref()
+                        .is_some_and(|filter| !filter.includes_criterion(&criterion.id))
+                    {
+                        continue;
+                    }
                     let parent_owner = run_state.process_owner.clone();
                     run_state.process_owner = parent_owner.criterion(&criterion.id);
                     let parent_session = run_state.session.clone();
@@ -1496,6 +1535,7 @@ criteria:
             native_only_vacuous_body: false,
             excluded_native_runs: Vec::new(),
             filter_patterns: Vec::new(),
+            distributed: Default::default(),
             manifest_selection: None,
             seed: None,
             run_id: None,

@@ -6,6 +6,7 @@ impl Engine {
         definition: &VerificationDefinition,
     ) -> duhem_summary::ClaimScope {
         let mut scope = duhem_summary::ClaimScope {
+            distributed: self.distributed.clone(),
             filters: self.filter_patterns.clone(),
             manifest: self.manifest_selection.clone(),
             ..Default::default()
@@ -26,7 +27,12 @@ impl Engine {
                     scope.excluded.push(duhem_summary::ExcludedClaim {
                         criterion_id: criterion.id.clone(),
                         check_id: check.id.clone(),
-                        reason: "check_filter".into(),
+                        reason: self
+                            .filter
+                            .as_ref()
+                            .expect("excluded by filter")
+                            .exclusion_reason(&criterion.id, &check.id)
+                            .into(),
                     });
                 }
             }

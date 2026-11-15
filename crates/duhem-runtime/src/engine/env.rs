@@ -313,6 +313,22 @@ impl SuiteEnvironment {
         })
     }
 
+    /// Persist a shard's plan on the suite record before native commands run.
+    pub async fn record_distributed_plan(
+        &mut self,
+        distributed: duhem_summary::DistributedRun,
+    ) -> Result<(), EngineError> {
+        self.writer
+            .append(duhem_evidence::EventPayload::ClaimScopeDeclared {
+                scope: duhem_summary::ClaimScope {
+                    distributed,
+                    ..Default::default()
+                },
+            })
+            .await?;
+        Ok(())
+    }
+
     /// Execute suite-native commands once, after shared provisioning.
     pub async fn run_native(
         &mut self,

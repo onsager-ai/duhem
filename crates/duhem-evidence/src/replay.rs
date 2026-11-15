@@ -332,6 +332,13 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
 
     // Recompute the run verdict.
     let mut run = aggregate_run(recomputed_criteria);
+    if run.criteria.is_empty() && trace.events().iter().any(|event| matches!(
+        &event.payload,
+        EventPayload::ClaimScopeDeclared { scope } if scope.distributed.expected_partition.as_ref()
+            .is_some_and(|partition| partition.total_units > 0 && scope.criteria.selected == 0)
+    )) {
+        run.state = VerdictState::Pass;
+    }
     if let Some(recorded) = recorded_body
         && recorded != run.state
     {

@@ -13,7 +13,7 @@
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/schema-v0.x-blue.svg" alt="Schema"></a>
 </p>
 
-Duhem turns your acceptance criteria into mechanically judged checks that exercise the real thing you ship — code, prompts, tools, data, and runtime, together — and gates merge on the verdict.
+Duhem is the verification runner for AI-built software: one entry point runs every verification layer, gates on all of them, aggregates statistics and indexes evidence. It runs native test frameworks without replacing them, alongside mechanically judged holistic checks.
 
 - **Runnable specs.** A Verification Definition is one artifact: readable intent bound to runnable checks. The thing you read *is* the thing that runs *is* the thing that gates the merge — spec, tests, and code can't drift apart.
 - **Holistic, no mocks.** Duhem drives the real shipped artifact through its real interfaces — the whole delivery web at once. A green means the real system worked, not that a stand-in did.

@@ -63,17 +63,16 @@ Duhem is opinionated about three things:
 
 ### What Duhem is
 
-- **The verification layer your AI coding agent doesn’t have.**
+- **The verification runner your AI coding agent doesn’t have.** Duhem is one entry point that runs every verification layer, gates on all of them, aggregates their statistics, and indexes their evidence.
 - Holistic, spec-driven, mechanical-judgment, evidence-grounded verification of AI delivery.
 - Open source (Apache-2.0) with a free CLI and a free hosted tier. The engine — schema, CLI, runtime, judge, dashboard — ships open; the hosted cloud is the commercial layer (see Section 11.3).
 
 ### What Duhem is not
 
-- **Not a testing tool.** Testing tools assume humans write tests against units. Duhem assumes AI authors checks under human review against whole-system behavior.
+- **Not a test framework.** Duhem runs and reads projects’ native verification but does not replace their test frameworks.
 - **Not a code review tool.** Code review evaluates source. Duhem evaluates behavior of the delivery web.
 - **Not a QA replacement service.** Services like QA Wolf provide test-writing labor. Duhem provides verification infrastructure.
 - **Not an AI judge.** Duhem never asks an LLM “did this pass?” The verdict is mechanical.
-- **Not a unit test framework.** Unit tests verify decomposed components. Duhem verifies the web that the AI actually delivered.
 
 ### How Duhem differs from adjacent products
 
@@ -186,7 +185,7 @@ assertion.
 - **Conditional claim-set legibility:** absence is not a fourth state; gated steps still contribute nothing. A check records its non-zero count of **judging** steps gated by **value-based** conditions (static gates, upstream blocking, and lifecycle steps never count), and the run report, default/pretty reporters, and agent failure envelope expose that smaller claim set even when the verdict is `pass`. Value-based gating records the authored condition and the operand values actually evaluated in `StepOutcome::Skipped`; upstream failure blocking carries no condition evaluation. These optional fields are omitted, never null. A check with no value-gated judging steps gains no new output, and older traces render unchanged. This clarifies legibility only: verdict aggregation remains the same deterministic, LLM-free evaluation.
 - **Unresolvable conditions and gated outputs (value-based `if:` on check steps, #440):** a check-step condition that cannot be evaluated (an operand absent at run time) is never treated as `false` or `true`. The step records `error` with detail naming the step and the unresolvable reference, so the check is `inconclusive:missing_observation` through the ordinary execution-failure rule above; the run continues and other checks and criteria record their own verdicts. A later step `if:` or an `assertions:` entry that reads `$steps.<gated>.outputs.*` of a step gated by a value-based condition is likewise evaluated and finds no observation, so it is `inconclusive:missing_observation` rather than a silent pass or omission. Lifecycle steps keep their own rule (§10.3.3): the step fails and dependents are inconclusive. No new inconclusive cause is introduced.
 - **Per-criterion verdict**: aggregated from its checks (any check `fail` → criterion `fail`; any `inconclusive` and no `fail` → criterion `inconclusive`; all `pass` → criterion `pass`).
-- **Per-run body verdict**: aggregated from all criteria, same rules. The effective run verdict applies the required-cleanup gate after the body: any retained required flow `cleanup:` failure (§10.3.5) makes the run `fail`; otherwise the effective verdict is the body verdict. `CheckFinished` and `CriterionFinished` remain body judgments. The run outcome, persisted `RunFinished.verdict`, CLI exit status, reporters, and dashboard run state use the effective verdict. When the gate changes the run verdict, optional `body_verdict` preserves the body verdict on `RunOutcome`, persisted `RunFinished`, and `RunSummary`; it is omitted when the body and effective verdict match.
+- **Per-run body verdict**: aggregated from all criteria, same rules. The effective run verdict applies the required-cleanup gate after the body: any retained required flow `cleanup:` failure (§10.3.5) makes the run `fail`; otherwise the effective verdict is the body verdict. A required native run that does not pass likewise blocks the effective gate (a `fail` or `inconclusive` native outcome makes the effective verdict `fail` or `inconclusive`). As with required flow cleanup, native outcomes do not change `body_verdict`; `CheckFinished` and `CriterionFinished` remain body judgments. Native runs with `required: false` are diagnostic and do not affect the gate. Native results can never satisfy a criterion and cannot be referenced from check assertions or expressions. The run outcome, persisted `RunFinished.verdict`, CLI exit status, reporters, and dashboard run state use the effective verdict. When the gate changes the run verdict, optional `body_verdict` preserves the body verdict on `RunOutcome`, persisted `RunFinished`, and `RunSummary`; it is omitted when the body and effective verdict match.
 
 The three-state model is non-negotiable. `inconclusive` exists because real systems have flakes, environment failures, and observability gaps. Forcing flaky outcomes into `pass` corrupts trust; forcing them into `fail` blocks delivery without cause. `inconclusive` triggers escalation to human review without false signals. An assertion operand type mismatch instead gates as `fail` (#259): applying an operator to an incompatible value is a determinate authoring defect, not a retryable observability gap. For example, matching a string pattern against a present JSON `null` fails with `type_mismatch(null, str)`, while an absent nested field is `inconclusive:missing_observation` with `missing_field(path)` evidence. Changing a producer from explicit null to an omitted key can therefore change the verdict without changing the VD.
 
@@ -221,6 +220,10 @@ The thing being verified. Typically a Git ref (commit, PR, deploy candidate). Th
 One execution of a verification against an artifact. Runs are idempotent given a frozen check spec and a stable environment, but Duhem records run history because environments do drift — and environment drift is part of the web Duhem-Quine talks about.
 
 A run's runtime-owned lifecycle is independent of its judge-owned verdict. Lifecycle is `running`, `finished`, `aborted`, or `orphaned`: the runtime emits a heartbeat every 10 seconds, writes a terminal marker on normal completion or a trapped termination signal, and readers classify an unterminated run as `orphaned` after 30 seconds without a heartbeat. `orphaned` is read-time policy, not a stored fact. A run may be `finished` without a verdict — notably the suite container that records shared environment provisioning but has no criteria to judge. Viewer connection state is neither lifecycle nor evidence; it remains local to each live SSE client.
+
+### 7.10 Native run
+
+A *native run* is the project's own verification (a test framework, an end-to-end runner or a static tool) executed by Duhem under `native:`. It is the project's own evidence, not independent verification: it can block the run gate and can be linked for navigation, but it is never a check and never satisfies a criterion. The name describes where the evidence comes from, not a policy, so it stays accurate if a later spec changes the native role.
 
 ## 8. The Holistic Verification Principle
 
@@ -262,6 +265,8 @@ This makes verification expensive relative to unit tests. That cost is acknowled
 When a Duhem check fails, the verdict tells you the web is broken. Pinpointing which strand is wrong is human-led, supported by evidence. Duhem will not pretend to localize failures with confidence Duhem-Quine says cannot exist.
 
 This is honesty about what verification can and cannot do. Localizing a holistic failure to a specific cause requires further investigation — log inspection, hypothesis testing, sometimes reproducing in a debugger. Duhem provides the evidence trail that makes that investigation tractable; it does not produce false certainty about cause.
+
+**Alignment note (2026-11-15, #649 — native runs).** Duhem is the verification runner: one entry point runs every verification layer, gates on all of them, aggregates statistics and indexes evidence, without replacing test frameworks. The principal chose option A: required native runs contribute only to the effective gate, preserving `body_verdict`; native results never satisfy criteria or enter check assertions or expressions, while `required: false` remains diagnostic. This follows the effective-gate precedent for required cleanup (§10.3.5; #567/#615). The decision changes the verification runner's role while preserving holistic checks and independent judgment.
 
 ## 9. Workflow Stages
 

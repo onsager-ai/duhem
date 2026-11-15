@@ -23,8 +23,8 @@ use thiserror::Error;
 
 use crate::model::{
     ArtifactRef, CheckDetail, CheckRef, CriterionDetail, CriterionHistory, EntryKind,
-    FailingAssertion, FailingCheck, FailingRequest, FailureEnvelope, HistoryRun, RunDetail,
-    RunDiff, RunsListEntry, SpanModel, VerificationHistory,
+    FailingAssertion, FailingCheck, FailingRequest, FailureEnvelope, HistoryRun, RunCheckTotals,
+    RunChildDetail, RunDetail, RunDiff, RunsListEntry, SpanModel, VerificationHistory,
 };
 
 mod diff;
@@ -119,6 +119,9 @@ impl EvidenceReader {
             .collect();
         let mut child_ids: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for record in &records {
+            if record.lineage.origin != Some(RunOrigin::Suite) {
+                continue;
+            }
             if let Some(parent) = record.lineage.parent_run_id.as_deref() {
                 child_ids
                     .entry(parent)
@@ -139,7 +142,66 @@ impl EvidenceReader {
         let Some(run) = self.load(run_id).await? else {
             return Ok(None);
         };
-        Ok(Some(build_run_detail(&run)))
+        let records = self.store.list_runs().await?;
+        let tree_ids = descendant_run_ids(run_id, &records);
+        let tree_wide = tree_ids.len() > 1;
+        let children = if tree_wide {
+            let mut children = Vec::new();
+            let mut direct_ids: Vec<&RunRecord> = records
+                .iter()
+                .filter(|record| {
+                    record.lineage.parent_run_id.as_deref() == Some(run_id)
+                        && record.lineage.origin == Some(RunOrigin::Suite)
+                })
+                .collect();
+            direct_ids.sort_by_key(|record| (record.started_at, record.run_id.as_str()));
+            for record in direct_ids {
+                let Some(child) = self.load(&record.run_id).await? else {
+                    continue;
+                };
+                let child_detail = build_run_detail(&child);
+                let totals = child_detail
+                    .criteria
+                    .iter()
+                    .flat_map(|criterion| &criterion.checks)
+                    .fold(
+                        RunCheckTotals {
+                            pass: 0,
+                            fail: 0,
+                            inconclusive: 0,
+                            pending: 0,
+                            total: 0,
+                        },
+                        |mut totals, check| {
+                            totals.total += 1;
+                            match check.verdict {
+                                Some(VerdictState::Pass) => totals.pass += 1,
+                                Some(VerdictState::Fail) => totals.fail += 1,
+                                Some(VerdictState::Inconclusive(_)) => totals.inconclusive += 1,
+                                None => totals.pending += 1,
+                            }
+                            totals
+                        },
+                    );
+                children.push(RunChildDetail {
+                    run_id: record.run_id.clone(),
+                    verification: child.verification(),
+                    verdict: child.verdict(),
+                    status: child.record.status,
+                    duration_ms: child.duration_ms(),
+                    check_totals: totals,
+                });
+            }
+            children
+        } else {
+            Vec::new()
+        };
+        let mut detail = build_run_detail(&run);
+        detail.children = children;
+        if tree_wide {
+            detail.verdict = tree_verdict(&records, &tree_ids);
+        }
+        Ok(Some(detail))
     }
 
     pub async fn check_detail(
@@ -307,35 +369,7 @@ impl EvidenceReader {
         let tree_ids = descendant_run_ids(run_id, &records);
         let tree_wide = tree_ids.len() > 1;
         let verdict = if tree_wide {
-            use duhem_judge::{RunVerdict, aggregate_run_set};
-            let by_id: BTreeMap<&str, &RunRecord> = records
-                .iter()
-                .map(|record| (record.run_id.as_str(), record))
-                .collect();
-            let mut leaves: Vec<&RunRecord> = tree_ids
-                .iter()
-                .filter_map(|id| by_id.get(id.as_str()).copied())
-                .filter(|record| {
-                    !records.iter().any(|candidate| {
-                        candidate.lineage.parent_run_id.as_deref() == Some(record.run_id.as_str())
-                            && tree_ids.iter().any(|tree_id| tree_id == &candidate.run_id)
-                    })
-                })
-                .collect();
-            leaves.sort_by_key(|record| (record.started_at, record.run_id.as_str()));
-            // An unjudged leaf (still running, aborted, orphaned) leaves
-            // the whole tree unjudged: an incomplete tree never reads as
-            // a pass.
-            let leaf_verdicts: Option<Vec<RunVerdict>> = leaves
-                .iter()
-                .map(|record| {
-                    record.verdict.map(|state| RunVerdict {
-                        state,
-                        criteria: Vec::new(),
-                    })
-                })
-                .collect();
-            leaf_verdicts.map(|verdicts| aggregate_run_set(verdicts).state)
+            tree_verdict(&records, &tree_ids)
         } else {
             run.record.verdict
         };
@@ -581,6 +615,37 @@ fn descendant_run_ids(root_id: &str, records: &[RunRecord]) -> Vec<String> {
     }
 }
 
+/// Aggregate the recorded verdicts of suite-tree leaves. Any unjudged leaf
+/// leaves the whole tree unjudged, matching the failure-envelope contract.
+fn tree_verdict(records: &[RunRecord], tree_ids: &[String]) -> Option<VerdictState> {
+    use duhem_judge::{RunVerdict, aggregate_run_set};
+    let by_id: BTreeMap<&str, &RunRecord> = records
+        .iter()
+        .map(|record| (record.run_id.as_str(), record))
+        .collect();
+    let mut leaves: Vec<&RunRecord> = tree_ids
+        .iter()
+        .filter_map(|id| by_id.get(id.as_str()).copied())
+        .filter(|record| {
+            !records.iter().any(|candidate| {
+                candidate.lineage.parent_run_id.as_deref() == Some(record.run_id.as_str())
+                    && tree_ids.iter().any(|tree_id| tree_id == &candidate.run_id)
+            })
+        })
+        .collect();
+    leaves.sort_by_key(|record| (record.started_at, record.run_id.as_str()));
+    let leaf_verdicts: Option<Vec<RunVerdict>> = leaves
+        .iter()
+        .map(|record| {
+            record.verdict.map(|state| RunVerdict {
+                state,
+                criteria: Vec::new(),
+            })
+        })
+        .collect();
+    leaf_verdicts.map(|verdicts| aggregate_run_set(verdicts).state)
+}
+
 fn sort_newest_first(entries: &mut [RunsListEntry]) {
     // Newest first; runs with no parseable start sink to the bottom —
     // a bare `Reverse(Option)` would float them to the top instead,
@@ -600,7 +665,7 @@ fn lineage_entry(
         .filter_map(|id| by_id.get(id).copied())
         .map(|child| lineage_entry(child, by_id, child_ids))
         .collect();
-    sort_newest_first(&mut children);
+    children.sort_by_key(|child| (child.started_at, child.run_id.clone()));
     let has_children = !children.is_empty();
     RunsListEntry {
         run_id: record.run_id.clone(),
@@ -848,6 +913,8 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         cleanup,
         lifecycle,
         criteria,
+        duration_ms: run.duration_ms(),
+        children: Vec::new(),
     }
 }
 

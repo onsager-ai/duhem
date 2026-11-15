@@ -1,8 +1,8 @@
 //! The `Store` trait — the single-source-of-truth seam (#189).
 //!
 //! Runs live in a database, not in per-run JSONL files. The runtime
-//! (which owns the judge's verdicts) is the **sole writer**; the
-//! dashboard opens a **read-only handle** and can never mutate. The
+//! writes local events; opt-in ingest replicates replay-validated bundles.
+//! Dashboard reader routes open a **read-only handle**. The
 //! trait is the open-core boundary from #188: `SqliteStore` (local,
 //! this crate) and a future hosted `PostgresStore` implement the same
 //! surface.
@@ -15,8 +15,11 @@
 //! [`Store::run_events`] / [`Store::events_after`] /
 //! [`Store::get_blob`].
 
+mod ingest;
 mod location;
 mod sqlite;
+
+pub use ingest::IngestError;
 
 pub use location::{dashboard_addr_path, project_db_path, project_slug, state_root};
 pub use sqlite::SqliteStore;

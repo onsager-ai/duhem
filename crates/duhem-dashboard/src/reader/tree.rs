@@ -14,7 +14,10 @@ use crate::model::{RunCheckTotals, RunDetail};
 pub(super) fn descendant_run_ids(root_id: &str, records: &[RunRecord]) -> Vec<String> {
     let mut children: BTreeMap<&str, Vec<&RunRecord>> = BTreeMap::new();
     for record in records {
-        if record.lineage.origin != Some(RunOrigin::Suite) {
+        if !matches!(
+            record.lineage.origin,
+            Some(RunOrigin::Suite | RunOrigin::Shard)
+        ) {
             continue;
         }
         if let Some(parent) = record.lineage.parent_run_id.as_deref() {
@@ -46,6 +49,14 @@ pub(super) async fn tree_verdict(
     tree_ids: &[String],
 ) -> Result<Option<VerdictState>, duhem_evidence::StoreError> {
     use duhem_judge::{RunVerdict, aggregate_run_set};
+    // Distributed coverage is not computed by this fold yet. Never turn
+    // whichever shards have arrived into a passing logical-parent verdict.
+    if records.iter().any(|record| {
+        record.lineage.origin == Some(RunOrigin::Shard)
+            && record.lineage.parent_run_id.as_deref() == tree_ids.first().map(String::as_str)
+    }) {
+        return Ok(None);
+    }
     let by_id: BTreeMap<&str, &RunRecord> = records
         .iter()
         .map(|record| (record.run_id.as_str(), record))
@@ -100,7 +111,10 @@ pub(super) fn suite_children<'a>(run_id: &str, records: &'a [RunRecord]) -> Vec<
         .iter()
         .filter(|record| {
             record.lineage.parent_run_id.as_deref() == Some(run_id)
-                && record.lineage.origin == Some(RunOrigin::Suite)
+                && matches!(
+                    record.lineage.origin,
+                    Some(RunOrigin::Suite | RunOrigin::Shard)
+                )
         })
         .collect();
     children.sort_by_key(|record| (record.started_at, record.run_id.as_str()));

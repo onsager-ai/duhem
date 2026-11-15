@@ -29,6 +29,9 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] RunBundle v1 carries optional lineage and distributed plan fields; completed runs automatically send their trees through the content-hash-idempotent ship transport. (#650)
+- [additive] Dashboard opt-in `--ingest` accepts bounded, authenticated run bundles and atomically stores replay-validated events, artifacts and lineage for existing reader routes. (#650)
+
 - [additive] `duhem run` detects CI shards, partitions selected criteria and native runs deterministically, and records shard identity, manifest digest and expected partition in evidence and summaries. (#650)
 
 - [additive] `duhem init` detects Cargo, npm/pnpm/yarn, pytest and Go tests and prints suggested native entries for review without changing scaffold files. (#649)

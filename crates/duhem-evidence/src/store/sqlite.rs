@@ -184,255 +184,15 @@ fn run_origin_token(origin: RunOrigin) -> &'static str {
 #[async_trait]
 impl Store for SqliteStore {
     async fn begin_run(&self, meta: &RunMeta) -> Result<(), StoreError> {
-        let name = verification_name(&meta.verification);
-        let verification_id = verification_key(meta.scope.project_id.as_deref(), &name);
         let mut tx = self.pool.begin().await?;
-
-        // Fold the dimension rows first (idempotent identity upserts),
-        // then the run row referencing them — one transaction, so the
-        // writer's referential integrity can't be observed half-done.
-        if let Some(project) = &meta.scope.project_id {
-            sqlx::query(
-                "INSERT OR IGNORE INTO projects (project_id, workspace_id) VALUES (?, 'local')",
-            )
-            .bind(project)
-            .execute(&mut *tx)
-            .await?;
-        }
-        sqlx::query(
-            "INSERT OR IGNORE INTO verifications \
-             (verification_id, project_id, name, definition_path) VALUES (?, ?, ?, ?)",
-        )
-        .bind(&verification_id)
-        .bind(&meta.scope.project_id)
-        .bind(&name)
-        .bind(&meta.verification)
-        .execute(&mut *tx)
-        .await?;
-
-        sqlx::query(
-            "INSERT INTO runs (run_id, verification, schema_version, inputs, started_at, \
-             parent_run_id, origin, workspace_id, project_id, verification_id, verifier_repo, \
-             verifier_sha, target_repo, target_sha, shard_origin) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'local', ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&meta.run_id)
-        .bind(&meta.verification)
-        .bind(&meta.schema_version)
-        .bind(serde_json::to_string(&meta.inputs)?)
-        .bind(fmt_ts(&meta.started_at))
-        .bind(&meta.lineage.parent_run_id)
-        .bind(meta.lineage.origin.map(run_origin_token))
-        .bind(&meta.scope.project_id)
-        .bind(&verification_id)
-        .bind(&meta.scope.verifier_repo)
-        .bind(&meta.scope.verifier_sha)
-        .bind(&meta.scope.target_repo)
-        .bind(&meta.scope.target_sha)
-        .bind(meta.lineage.origin == Some(RunOrigin::Shard))
-        .execute(&mut *tx)
-        .await?;
+        begin_run(&mut tx, meta).await?;
         tx.commit().await?;
         Ok(())
     }
 
     async fn append_event(&self, run_id: &str, event: &Event) -> Result<(), StoreError> {
-        let line = serde_json::to_string(event)?;
         let mut tx = self.pool.begin().await?;
-
-        sqlx::query("INSERT INTO events (run_id, seq, ts, kind, payload) VALUES (?, ?, ?, ?, ?)")
-            .bind(run_id)
-            .bind(event.seq as i64)
-            .bind(fmt_ts(&event.ts))
-            .bind(event.payload.kind())
-            .bind(&line)
-            .execute(&mut *tx)
-            .await?;
-
-        // Fold the derived projection row, if this event carries one.
-        // Same transaction: the projections can never drift from the
-        // event stream.
-        match &event.payload {
-            EventPayload::AssertionEvaluated {
-                check_id,
-                assertion_index,
-                state,
-                detail,
-                // `step_index` (the implicit-judgment → step link) rides
-                // the raw event JSON; the read side folds it from there.
-                // The `assertions` projection stays index-keyed, so no
-                // migration is needed for it here.
-                ..
-            } => {
-                sqlx::query(
-                    "INSERT INTO assertions \
-                     (run_id, seq, check_id, assertion_index, state, detail) \
-                     VALUES (?, ?, ?, ?, ?, ?)",
-                )
-                .bind(run_id)
-                .bind(event.seq as i64)
-                .bind(check_id)
-                .bind(*assertion_index as i64)
-                .bind(super::verdict_token(state)?)
-                .bind(detail)
-                .execute(&mut *tx)
-                .await?;
-            }
-            EventPayload::CheckFinished {
-                check_id,
-                criterion_id,
-                verdict,
-                ..
-            } => {
-                // A first step owner wins; the finished event fills the
-                // projection for a check that emitted no step (#490).
-                let step_criterion: Option<String> = sqlx::query_scalar(
-                    "SELECT json_extract(payload, '$.criterion_id') FROM events \
-                     WHERE run_id = ? AND kind = 'step_started' \
-                     AND json_extract(payload, '$.check_id') = ? \
-                     ORDER BY seq LIMIT 1",
-                )
-                .bind(run_id)
-                .bind(check_id)
-                .fetch_optional(&mut *tx)
-                .await?
-                .flatten();
-                let criterion = step_criterion.or_else(|| criterion_id.clone());
-                sqlx::query(
-                    "INSERT INTO checks (run_id, check_id, criterion_id, verdict) \
-                     VALUES (?, ?, ?, ?)",
-                )
-                .bind(run_id)
-                .bind(check_id)
-                .bind(criterion)
-                .bind(verdict_token(verdict)?)
-                .execute(&mut *tx)
-                .await?;
-            }
-            EventPayload::CriterionFinished {
-                criterion_id,
-                verdict,
-            } => {
-                sqlx::query(
-                    "INSERT INTO criteria (run_id, criterion_id, verdict) VALUES (?, ?, ?)",
-                )
-                .bind(run_id)
-                .bind(criterion_id)
-                .bind(verdict_token(verdict)?)
-                .execute(&mut *tx)
-                .await?;
-            }
-            EventPayload::StepFinished {
-                step_index,
-                outcome,
-                ..
-            }
-            | EventPayload::SetupStepFinished {
-                step_index,
-                outcome,
-                ..
-            } => {
-                // Delivery-web span fold (#192): pair this finish with
-                // the most recent matching `*_step_started`; a span row
-                // exists only when that opener carried a layer tag —
-                // untagged steps yield no row (honesty: no inference).
-                let opener_kind = if matches!(event.payload, EventPayload::StepFinished { .. }) {
-                    "step_started"
-                } else {
-                    "setup_step_started"
-                };
-                let opener: Option<(i64, String)> = sqlx::query_as(
-                    "SELECT seq, payload FROM events                      WHERE run_id = ? AND kind = ?                      AND json_extract(payload, '$.step_index') = ? AND seq < ?                      ORDER BY seq DESC LIMIT 1",
-                )
-                .bind(run_id)
-                .bind(opener_kind)
-                .bind(*step_index as i64)
-                .bind(event.seq as i64)
-                .fetch_optional(&mut *tx)
-                .await?;
-                if let Some((opener_seq, payload)) = opener {
-                    let opener_evt: serde_json::Value = serde_json::from_str(&payload)?;
-                    if !matches!(outcome, crate::event::StepOutcome::Skipped { .. })
-                        && let Some(layer) = opener_evt.get("layer").and_then(|l| l.as_str())
-                    {
-                        let ok = matches!(outcome, crate::event::StepOutcome::Ok);
-                        let detail = match outcome {
-                            crate::event::StepOutcome::Ok => None,
-                            crate::event::StepOutcome::Error => Some("error"),
-                            crate::event::StepOutcome::Timeout => Some("timeout"),
-                            crate::event::StepOutcome::Skipped { .. } => unreachable!(),
-                        };
-                        sqlx::query(
-                            "INSERT INTO spans (run_id, seq, check_id, layer, ok, detail)                              VALUES (?, ?, ?, ?, ?, ?)",
-                        )
-                        .bind(run_id)
-                        .bind(opener_seq)
-                        .bind(opener_evt.get("check_id").and_then(|c| c.as_str()))
-                        .bind(layer)
-                        .bind(ok as i64)
-                        .bind(detail)
-                        .execute(&mut *tx)
-                        .await?;
-                    }
-                }
-            }
-            EventPayload::RunFinished { verdict, .. } => {
-                let started_at: Option<String> =
-                    sqlx::query_scalar("SELECT started_at FROM runs WHERE run_id = ?")
-                        .bind(run_id)
-                        .fetch_optional(&mut *tx)
-                        .await?;
-                let started_at =
-                    started_at.ok_or_else(|| StoreError::UnknownRun(run_id.to_string()))?;
-                let duration_ms = (event.ts - parse_ts(&started_at)?)
-                    .num_milliseconds()
-                    .max(0);
-                if let Some(verdict) = verdict {
-                    sqlx::query(
-                        "INSERT INTO run_verdicts (run_id, verdict, finished_at, duration_ms) \
-                         VALUES (?, ?, ?, ?)",
-                    )
-                    .bind(run_id)
-                    .bind(verdict_token(verdict)?)
-                    .bind(fmt_ts(&event.ts))
-                    .bind(duration_ms)
-                    .execute(&mut *tx)
-                    .await?;
-                }
-                sqlx::query(
-                    "INSERT INTO run_terminals (run_id, status, terminal_at, duration_ms) \
-                     VALUES (?, 'finished', ?, ?)",
-                )
-                .bind(run_id)
-                .bind(fmt_ts(&event.ts))
-                .bind(duration_ms)
-                .execute(&mut *tx)
-                .await?;
-            }
-            EventPayload::RunAborted { .. } => {
-                let started_at: Option<String> =
-                    sqlx::query_scalar("SELECT started_at FROM runs WHERE run_id = ?")
-                        .bind(run_id)
-                        .fetch_optional(&mut *tx)
-                        .await?;
-                let started_at =
-                    started_at.ok_or_else(|| StoreError::UnknownRun(run_id.to_string()))?;
-                let duration_ms = (event.ts - parse_ts(&started_at)?)
-                    .num_milliseconds()
-                    .max(0);
-                sqlx::query(
-                    "INSERT INTO run_terminals (run_id, status, terminal_at, duration_ms) \
-                     VALUES (?, 'aborted', ?, ?)",
-                )
-                .bind(run_id)
-                .bind(fmt_ts(&event.ts))
-                .bind(duration_ms)
-                .execute(&mut *tx)
-                .await?;
-            }
-            _ => {}
-        }
-
+        append_event(&mut tx, run_id, event).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -623,4 +383,259 @@ impl Store for SqliteStore {
             })
             .collect())
     }
+}
+
+pub(super) async fn begin_run(
+    connection: &mut sqlx::SqliteConnection,
+    meta: &RunMeta,
+) -> Result<(), StoreError> {
+    let name = verification_name(&meta.verification);
+    let verification_id = verification_key(meta.scope.project_id.as_deref(), &name);
+
+    // Fold the dimension rows first (idempotent identity upserts),
+    // then the run row referencing them — one transaction, so the
+    // writer's referential integrity can't be observed half-done.
+    if let Some(project) = &meta.scope.project_id {
+        sqlx::query(
+            "INSERT OR IGNORE INTO projects (project_id, workspace_id) VALUES (?, 'local')",
+        )
+        .bind(project)
+        .execute(&mut *connection)
+        .await?;
+    }
+    sqlx::query(
+        "INSERT OR IGNORE INTO verifications \
+             (verification_id, project_id, name, definition_path) VALUES (?, ?, ?, ?)",
+    )
+    .bind(&verification_id)
+    .bind(&meta.scope.project_id)
+    .bind(&name)
+    .bind(&meta.verification)
+    .execute(&mut *connection)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO runs (run_id, verification, schema_version, inputs, started_at, \
+             parent_run_id, origin, workspace_id, project_id, verification_id, verifier_repo, \
+             verifier_sha, target_repo, target_sha, shard_origin) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'local', ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&meta.run_id)
+    .bind(&meta.verification)
+    .bind(&meta.schema_version)
+    .bind(serde_json::to_string(&meta.inputs)?)
+    .bind(fmt_ts(&meta.started_at))
+    .bind(&meta.lineage.parent_run_id)
+    .bind(meta.lineage.origin.map(run_origin_token))
+    .bind(&meta.scope.project_id)
+    .bind(&verification_id)
+    .bind(&meta.scope.verifier_repo)
+    .bind(&meta.scope.verifier_sha)
+    .bind(&meta.scope.target_repo)
+    .bind(&meta.scope.target_sha)
+    .bind(meta.lineage.origin == Some(RunOrigin::Shard))
+    .execute(&mut *connection)
+    .await?;
+    Ok(())
+}
+
+pub(super) async fn append_event(
+    connection: &mut sqlx::SqliteConnection,
+    run_id: &str,
+    event: &Event,
+) -> Result<(), StoreError> {
+    let line = serde_json::to_string(event)?;
+
+    sqlx::query("INSERT INTO events (run_id, seq, ts, kind, payload) VALUES (?, ?, ?, ?, ?)")
+        .bind(run_id)
+        .bind(event.seq as i64)
+        .bind(fmt_ts(&event.ts))
+        .bind(event.payload.kind())
+        .bind(&line)
+        .execute(&mut *connection)
+        .await?;
+
+    // Fold the derived projection row, if this event carries one.
+    // Same transaction: the projections can never drift from the
+    // event stream.
+    match &event.payload {
+        EventPayload::AssertionEvaluated {
+            check_id,
+            assertion_index,
+            state,
+            detail,
+            // `step_index` (the implicit-judgment → step link) rides
+            // the raw event JSON; the read side folds it from there.
+            // The `assertions` projection stays index-keyed, so no
+            // migration is needed for it here.
+            ..
+        } => {
+            sqlx::query(
+                "INSERT INTO assertions \
+                     (run_id, seq, check_id, assertion_index, state, detail) \
+                     VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(run_id)
+            .bind(event.seq as i64)
+            .bind(check_id)
+            .bind(*assertion_index as i64)
+            .bind(super::verdict_token(state)?)
+            .bind(detail)
+            .execute(&mut *connection)
+            .await?;
+        }
+        EventPayload::CheckFinished {
+            check_id,
+            criterion_id,
+            verdict,
+            ..
+        } => {
+            // A first step owner wins; the finished event fills the
+            // projection for a check that emitted no step (#490).
+            let step_criterion: Option<String> = sqlx::query_scalar(
+                "SELECT json_extract(payload, '$.criterion_id') FROM events \
+                     WHERE run_id = ? AND kind = 'step_started' \
+                     AND json_extract(payload, '$.check_id') = ? \
+                     ORDER BY seq LIMIT 1",
+            )
+            .bind(run_id)
+            .bind(check_id)
+            .fetch_optional(&mut *connection)
+            .await?
+            .flatten();
+            let criterion = step_criterion.or_else(|| criterion_id.clone());
+            sqlx::query(
+                "INSERT INTO checks (run_id, check_id, criterion_id, verdict) \
+                     VALUES (?, ?, ?, ?)",
+            )
+            .bind(run_id)
+            .bind(check_id)
+            .bind(criterion)
+            .bind(verdict_token(verdict)?)
+            .execute(&mut *connection)
+            .await?;
+        }
+        EventPayload::CriterionFinished {
+            criterion_id,
+            verdict,
+        } => {
+            sqlx::query("INSERT INTO criteria (run_id, criterion_id, verdict) VALUES (?, ?, ?)")
+                .bind(run_id)
+                .bind(criterion_id)
+                .bind(verdict_token(verdict)?)
+                .execute(&mut *connection)
+                .await?;
+        }
+        EventPayload::StepFinished {
+            step_index,
+            outcome,
+            ..
+        }
+        | EventPayload::SetupStepFinished {
+            step_index,
+            outcome,
+            ..
+        } => {
+            // Delivery-web span fold (#192): pair this finish with
+            // the most recent matching `*_step_started`; a span row
+            // exists only when that opener carried a layer tag —
+            // untagged steps yield no row (honesty: no inference).
+            let opener_kind = if matches!(event.payload, EventPayload::StepFinished { .. }) {
+                "step_started"
+            } else {
+                "setup_step_started"
+            };
+            let opener: Option<(i64, String)> = sqlx::query_as(
+                    "SELECT seq, payload FROM events                      WHERE run_id = ? AND kind = ?                      AND json_extract(payload, '$.step_index') = ? AND seq < ?                      ORDER BY seq DESC LIMIT 1",
+                )
+                .bind(run_id)
+                .bind(opener_kind)
+                .bind(*step_index as i64)
+                .bind(event.seq as i64)
+                .fetch_optional(&mut *connection)
+                .await?;
+            if let Some((opener_seq, payload)) = opener {
+                let opener_evt: serde_json::Value = serde_json::from_str(&payload)?;
+                if !matches!(outcome, crate::event::StepOutcome::Skipped { .. })
+                    && let Some(layer) = opener_evt.get("layer").and_then(|l| l.as_str())
+                {
+                    let ok = matches!(outcome, crate::event::StepOutcome::Ok);
+                    let detail = match outcome {
+                        crate::event::StepOutcome::Ok => None,
+                        crate::event::StepOutcome::Error => Some("error"),
+                        crate::event::StepOutcome::Timeout => Some("timeout"),
+                        crate::event::StepOutcome::Skipped { .. } => unreachable!(),
+                    };
+                    sqlx::query(
+                            "INSERT INTO spans (run_id, seq, check_id, layer, ok, detail)                              VALUES (?, ?, ?, ?, ?, ?)",
+                        )
+                        .bind(run_id)
+                        .bind(opener_seq)
+                        .bind(opener_evt.get("check_id").and_then(|c| c.as_str()))
+                        .bind(layer)
+                        .bind(ok as i64)
+                        .bind(detail)
+                        .execute(&mut *connection)
+                        .await?;
+                }
+            }
+        }
+        EventPayload::RunFinished { verdict, .. } => {
+            let started_at: Option<String> =
+                sqlx::query_scalar("SELECT started_at FROM runs WHERE run_id = ?")
+                    .bind(run_id)
+                    .fetch_optional(&mut *connection)
+                    .await?;
+            let started_at =
+                started_at.ok_or_else(|| StoreError::UnknownRun(run_id.to_string()))?;
+            let duration_ms = (event.ts - parse_ts(&started_at)?)
+                .num_milliseconds()
+                .max(0);
+            if let Some(verdict) = verdict {
+                sqlx::query(
+                    "INSERT INTO run_verdicts (run_id, verdict, finished_at, duration_ms) \
+                         VALUES (?, ?, ?, ?)",
+                )
+                .bind(run_id)
+                .bind(verdict_token(verdict)?)
+                .bind(fmt_ts(&event.ts))
+                .bind(duration_ms)
+                .execute(&mut *connection)
+                .await?;
+            }
+            sqlx::query(
+                "INSERT INTO run_terminals (run_id, status, terminal_at, duration_ms) \
+                     VALUES (?, 'finished', ?, ?)",
+            )
+            .bind(run_id)
+            .bind(fmt_ts(&event.ts))
+            .bind(duration_ms)
+            .execute(&mut *connection)
+            .await?;
+        }
+        EventPayload::RunAborted { .. } => {
+            let started_at: Option<String> =
+                sqlx::query_scalar("SELECT started_at FROM runs WHERE run_id = ?")
+                    .bind(run_id)
+                    .fetch_optional(&mut *connection)
+                    .await?;
+            let started_at =
+                started_at.ok_or_else(|| StoreError::UnknownRun(run_id.to_string()))?;
+            let duration_ms = (event.ts - parse_ts(&started_at)?)
+                .num_milliseconds()
+                .max(0);
+            sqlx::query(
+                "INSERT INTO run_terminals (run_id, status, terminal_at, duration_ms) \
+                     VALUES (?, 'aborted', ?, ?)",
+            )
+            .bind(run_id)
+            .bind(fmt_ts(&event.ts))
+            .bind(duration_ms)
+            .execute(&mut *connection)
+            .await?;
+        }
+        _ => {}
+    }
+
+    Ok(())
 }

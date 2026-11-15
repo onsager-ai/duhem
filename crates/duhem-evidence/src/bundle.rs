@@ -69,6 +69,16 @@ pub struct BundleRun {
     pub target_repo: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<crate::RunOrigin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shard: Option<duhem_summary::ShardIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_partition: Option<duhem_summary::ExpectedPartition>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -111,9 +121,15 @@ impl RunBundle {
                 mask_counts,
             });
         }
+        let mut run = bundle_run(&record);
+        if let Some(scope) = crate::claim_scope::claim_scope(&events) {
+            run.shard = scope.distributed.shard;
+            run.manifest_digest = scope.distributed.manifest_digest;
+            run.expected_partition = scope.distributed.expected_partition;
+        }
         Ok(Self {
             bundle_version: BUNDLE_VERSION,
-            run: bundle_run(&record),
+            run,
             events,
             artifacts,
         })
@@ -244,6 +260,11 @@ fn bundle_run(record: &RunRecord) -> BundleRun {
         verifier_sha: record.scope.verifier_sha.clone(),
         target_repo: record.scope.target_repo.clone(),
         target_sha: record.scope.target_sha.clone(),
+        parent_run_id: record.lineage.parent_run_id.clone(),
+        origin: record.lineage.origin,
+        shard: None,
+        manifest_digest: None,
+        expected_partition: None,
     }
 }
 
@@ -263,6 +284,12 @@ pub fn referenced_blobs(events: &[Event]) -> Vec<String> {
                     push(sha);
                 }
                 if let Some(sha) = &result.stderr_blob_sha256 {
+                    push(sha);
+                }
+                if let Some(sha) = &result.report_blob_sha256 {
+                    push(sha);
+                }
+                if let Some(sha) = &result.results_blob_sha256 {
                     push(sha);
                 }
             }

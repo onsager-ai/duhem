@@ -3,7 +3,42 @@
 Each CI machine runs the same `duhem run` with its own environment. Duhem
 partitions selected criteria and native runs locally; CI still starts the
 machines and gates their results. Each machine must have its own mutable test
-environment. Server aggregation and automatic upload are separate work.
+environment. Completed run trees can be sent automatically to a Duhem server;
+coverage computation and the aggregated view are separate work.
+
+## Send shards to a server
+
+Start an explicitly writable dashboard (the default remains read-only):
+
+```sh
+duhem dashboard --db collected.db --ingest --ingest-token "$DUHEM_HUB_TOKEN"
+```
+
+On every machine, point the existing hub setting at its ingest route:
+
+```sh
+export DUHEM_HUB_URL=https://verification.example/api/ingest
+export DUHEM_HUB_TOKEN='<the server ingest token>'
+duhem run verifications/sharding-example --shard 1/2 --run-id example-invocation
+# The other machine uses --shard 2/2 with the same --run-id.
+```
+
+For a local server use `http://127.0.0.1:7878/api/ingest`. Listening on a remote
+interface requires `--host` plus a nonempty `--ingest-token`; terminate TLS in
+front of a remotely exposed server. No token is required for explicitly enabled
+loopback ingest. Each machine uploads parents and descendants after execution;
+ordinary unsharded runs upload too. No manual `ship` CI step is needed. Failed
+uploads warn once and retain the verdict, exit code and local evidence. Use
+`duhem ship <run-id> --db <local.db>` to resend a stored tree; identical content
+is a no-op. Requests have a 10-second timeout and one attempt; the automatic tree
+send is limited to 30 seconds.
+
+The existing runs list, detail and failure endpoints expose stored shard trees
+and replay-validated leaf verdicts. Logical parents remain unjudged in this
+slice; pending/inconclusive coverage, cross-shard digest/count conflict rejection
+and the aggregated report are coming separately. See the
+[bundle contract](run-bundle-contract.md) and the
+[worked ingest definition](../verifications/bundle-ingest-example/duhem.yml).
 
 ## Detection and overrides
 

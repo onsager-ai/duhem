@@ -1,0 +1,53 @@
+# Regression example: drives the real CLI and dashboard with a fresh store.
+verification: Completed runs replicate their evidence without changing the gate
+spec_ref: https://github.com/onsager-ai/duhem/issues/650
+inputs:
+  duhem_bin:
+    type: string
+    default: duhem
+  dashboard_bin:
+    type: string
+    default: duhem-dashboard
+  port:
+    type: string
+    default: "8787"
+  url:
+    type: string
+    default: http://127.0.0.1:8787/api/runs
+  ingest_url:
+    type: string
+    default: http://127.0.0.1:8787/api/ingest
+  store:
+    type: string
+    default: /tmp/duhem-bundle-ingest-example.db
+criteria:
+  - id: AC-1
+    description: Completed runs arrive at an explicitly enabled dashboard with their replayed verdict.
+    checks:
+      - id: receive
+        setup:
+          - id: server
+            uses: process/start
+            with:
+              command: $inputs.dashboard_bin
+              args: [--db, $inputs.store, --port, $inputs.port, --ingest, --ingest-token, example-token]
+              ready:
+                http: {url: $inputs.url, status: 200}
+                timeout: 5s
+        steps:
+          - id: run
+            uses: cli/invoke
+            with:
+              # Detach this demonstration invocation from the verifying run's
+              # inherited lineage/store so it can finish and upload independently.
+              command: [env, -u, DUHEM_PARENT_RUN_ID, -u, DUHEM_PARENT_DB_PATH, $inputs.duhem_bin, run, verifications/sharding-example, --no-live, --no-env-file]
+              env:
+                DUHEM_HUB_URL: $inputs.ingest_url
+                DUHEM_HUB_TOKEN: example-token
+          - id: received
+            uses: api/call
+            with: {method: GET, url: $inputs.url}
+        assertions:
+          - $steps.run.outputs.exit_code == 0
+          - $steps.received.outputs.status == 200
+          - $steps.received.outputs.body[0].verdict == "pass"

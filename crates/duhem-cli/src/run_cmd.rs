@@ -933,6 +933,19 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         }
     }
 
+    let send_roots = match &suite_parent_id {
+        Some(id) => vec![id.clone()],
+        None => leaf_outcomes
+            .iter()
+            .map(|(_, outcome)| outcome.run_id.clone())
+            .collect(),
+    };
+    // Nested invocations are included when their enclosing invocation finishes;
+    // uploading their still-running ancestor here would violate immutability.
+    if invocation_parent.is_none() {
+        crate::export_cmd::auto_send(store.as_ref(), &send_roots).await;
+    }
+
     // Reporter rendering:
     //
     // - Single leaf: today's behavior — one `render(reporter, outcome)`

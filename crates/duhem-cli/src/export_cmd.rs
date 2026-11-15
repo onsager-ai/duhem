@@ -80,14 +80,24 @@ pub async fn run_ship(
         return ExitCode::FAILURE;
     };
 
-    let bundle = match open_and_bundle(run_id, db).await {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("ship: {e}");
+    let db_path = match db {
+        Some(path) => Ok(path.to_path_buf()),
+        None => std::env::current_dir()
+            .map_err(duhem_evidence::StoreError::from)
+            .and_then(|cwd| duhem_evidence::project_db_path(&cwd)),
+    };
+    let store = match db_path {
+        Ok(path) => SqliteStore::open_read_only(path).await,
+        Err(error) => Err(error),
+    };
+    let store = match store {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("ship: {error}");
             return ExitCode::FAILURE;
         }
     };
-    match ship_bundle(&bundle, &url, std::env::var(HUB_TOKEN_ENV).ok().as_deref()).await {
+    match ship_tree(&store, &[run_id.to_string()], &url).await {
         Ok(hash) => {
             println!("shipped run {run_id} to {url} (content hash {hash})");
             ExitCode::SUCCESS
@@ -101,7 +111,7 @@ pub async fn run_ship(
 
 /// The ingest client (#194): one POST of the canonical envelope.
 /// Idempotency: the `X-Duhem-Content-Hash` header carries the
-/// bundle's hash; a hub that has it already answers 200/409 without
+/// bundle's hash; a hub that has it already answers 2xx without
 /// re-storing. 2xx = shipped.
 pub async fn ship_bundle(
     bundle: &RunBundle,
@@ -111,7 +121,8 @@ pub async fn ship_bundle(
     let body = bundle.wire_bytes().map_err(|e| e.to_string())?;
     let hash = bundle.content_hash().map_err(|e| e.to_string())?;
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
+        .timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| e.to_string())?;
     let mut req = client
@@ -120,14 +131,98 @@ pub async fn ship_bundle(
         .header("x-duhem-bundle-version", bundle.bundle_version.to_string())
         .header("x-duhem-content-hash", &hash)
         .body(body);
+    // One bounded attempt; identical manual re-sends use the same hash.
     if let Some(token) = token {
         req = req.bearer_auth(token);
     }
-    let res = req.send().await.map_err(|e| e.to_string())?;
+    let res = req.send().await.map_err(|e| e.without_url().to_string())?;
     if !res.status().is_success() {
         let status = res.status();
-        let text = res.text().await.unwrap_or_default();
-        return Err(format!("hub answered {status}: {}", text.trim()));
+        return Err(format!("hub answered {status}"));
     }
     Ok(hash)
+}
+
+/// Parents first, then every descendant (including nested invocations).
+async fn ship_tree(
+    store: &dyn duhem_evidence::Store,
+    roots: &[String],
+    url: &str,
+) -> Result<String, String> {
+    let records = store.list_runs().await.map_err(|e| e.to_string())?;
+    let mut ordered = Vec::new();
+    let mut stack = roots.to_vec();
+    while let Some(id) = stack.pop() {
+        if ordered.contains(&id) {
+            continue;
+        }
+        ordered.push(id.clone());
+        stack.extend(
+            records
+                .iter()
+                .filter(|record| record.lineage.parent_run_id.as_deref() == Some(id.as_str()))
+                .map(|record| record.run_id.clone()),
+        );
+    }
+    // Include ancestors so one manually shipped child can reconstruct its tree.
+    let mut index = 0;
+    while index < ordered.len() {
+        if let Some(parent) = records
+            .iter()
+            .find(|record| record.run_id == ordered[index])
+            .and_then(|record| record.lineage.parent_run_id.as_ref())
+            && !ordered.contains(parent)
+        {
+            ordered.push(parent.clone());
+        }
+        index += 1;
+    }
+    let mut sent: Vec<String> = Vec::new();
+    let token = std::env::var(HUB_TOKEN_ENV).ok();
+    let mut last_hash = String::new();
+    while sent.len() < ordered.len() {
+        let id = ordered
+            .iter()
+            .find(|id| {
+                !sent.contains(*id)
+                    && records
+                        .iter()
+                        .find(|record| &record.run_id == *id)
+                        .is_some_and(|record| {
+                            record
+                                .lineage
+                                .parent_run_id
+                                .as_ref()
+                                .is_none_or(|parent| sent.contains(parent))
+                        })
+            })
+            .ok_or_else(|| "missing parent or cyclic run lineage".to_string())?;
+        let bundle = RunBundle::from_store(store, id)
+            .await
+            .map_err(|e| e.to_string())?;
+        last_hash = ship_bundle(&bundle, url, token.as_deref()).await?;
+        sent.push(id.clone());
+    }
+    Ok(last_hash)
+}
+
+/// Delivery is best-effort and never enters the verdict or reporter fold.
+pub async fn auto_send(store: &dyn duhem_evidence::Store, roots: &[String]) {
+    let Ok(url) = std::env::var(HUB_URL_ENV) else {
+        return;
+    };
+    if url.is_empty() {
+        return;
+    }
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        ship_tree(store, roots, &url),
+    )
+    .await;
+    let error = match result {
+        Ok(Ok(_)) => return,
+        Ok(Err(error)) => error,
+        Err(_) => "delivery timed out".into(),
+    };
+    eprintln!("warning: auto-send: {}", error.replace(['\r', '\n'], " "));
 }

@@ -3,9 +3,8 @@
 //! bundle (#86).
 //!
 //! Every handler re-queries the evidence store on each request — the
-//! MVP's hot-reload posture. The server holds a read-only store
-//! handle, owns no mutable state, and never invokes the runtime or
-//! judge.
+//! MVP's hot-reload posture. Reader routes hold a read-only store
+//! handle. Explicit bundle ingest is composed separately by the binary.
 
 use axum::Router;
 use axum::body::Body;

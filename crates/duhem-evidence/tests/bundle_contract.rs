@@ -32,6 +32,11 @@ fn fixed_bundle() -> RunBundle {
             verifier_sha: Some("deadbeef".into()),
             target_repo: Some("github.com/acme/app".into()),
             target_sha: Some("cafef00d".into()),
+            parent_run_id: None,
+            origin: None,
+            shard: None,
+            manifest_digest: None,
+            expected_partition: None,
         },
         events: vec![Event {
             session_source: None,
@@ -69,6 +74,32 @@ fn wire_envelope_shape_is_pinned() {
         r#""artifacts":[{"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bytes_base64":"aGVsbG8="}]}"#,
     );
     assert_eq!(wire, golden, "bundle wire shape drifted — see test doc");
+}
+
+#[test]
+fn additive_lineage_and_plan_fields_round_trip_without_changing_v1() {
+    let old = fixed_bundle();
+    let mut bundle = old.clone();
+    bundle.run.parent_run_id = Some("parent".into());
+    bundle.run.origin = Some(duhem_evidence::RunOrigin::Shard);
+    bundle.run.shard = Some(duhem_summary::ShardIdentity {
+        index: 1,
+        total: 2,
+        source: "env".into(),
+    });
+    bundle.run.manifest_digest = Some("a".repeat(64));
+    bundle.run.expected_partition = Some(duhem_summary::ExpectedPartition {
+        units: vec!["unit".into()],
+        total_units: 2,
+        excluded: vec![],
+    });
+    assert_eq!(bundle.bundle_version, 1);
+    assert_ne!(old.content_hash().unwrap(), bundle.content_hash().unwrap());
+    let restored: RunBundle = serde_json::from_slice(&bundle.wire_bytes().unwrap()).unwrap();
+    assert_eq!(restored, bundle);
+    let tmp = tempfile::tempdir().unwrap();
+    bundle.write_dir(tmp.path()).unwrap();
+    assert_eq!(RunBundle::from_dir(tmp.path()).unwrap(), bundle);
 }
 
 #[test]

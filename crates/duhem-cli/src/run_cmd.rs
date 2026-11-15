@@ -273,7 +273,6 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         }
     }
     let is_manifest = matches!(scope, Scope::Manifest { .. });
-    let mut excluded_native_runs = Vec::new();
     let manifest_selection = is_manifest.then(|| {
         let mut selection = duhem_summary::ManifestSelection {
             authored: authored_leaf_paths.len() as u32,
@@ -305,6 +304,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 selection.selected += 1;
             }
         }
+        let mut excluded_native_runs = Vec::new();
         if let Scope::Manifest { native, .. } = &scope {
             let (_, excluded) = native_selection(check_filter.as_ref(), native);
             excluded_native_runs.extend(excluded);
@@ -318,7 +318,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         }
         let mut seen_native_ids = std::collections::BTreeSet::new();
         excluded_native_runs.retain(|id| seen_native_ids.insert(id.clone()));
-        selection.excluded_native_runs = excluded_native_runs.clone();
+        selection.excluded_native_runs = excluded_native_runs;
         selection
     });
     // Suite-wide `defaults:` (spec #66) applied to every leaf's engine.
@@ -698,9 +698,6 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // `(no checks matched filter)` for the same case.
         let (selected_leaf_native, excluded_leaf_native) =
             native_selection(check_filter.as_ref(), &def.native);
-        if !excluded_leaf_native.is_empty() && !is_manifest {
-            excluded_native_runs.extend(excluded_leaf_native.clone());
-        }
         let native_only_vacuous = check_filter.as_ref().is_some_and(|filter| {
             !filter.has_criterion_filters()
                 && (!selected_leaf_native.is_empty() || !suite_native.is_empty())
@@ -947,10 +944,6 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
-    }
-
-    if let Some(selection) = manifest_selection.as_mut() {
-        selection.excluded_native_runs = excluded_native_runs.clone();
     }
 
     // Reporter rendering:

@@ -678,6 +678,12 @@ pub(crate) fn display_step_label(step: &duhem_schema::Step, idx: usize) -> Strin
 /// `Inconclusive(EmptyAggregation)` per `aggregate_criterion(&[])`.
 pub trait CheckFilter: Send + Sync {
     fn matches(&self, criterion_id: &str, check_id: &str) -> bool;
+    fn includes_criterion(&self, _criterion_id: &str) -> bool {
+        true
+    }
+    fn exclusion_reason(&self, _criterion_id: &str, _check_id: &str) -> &'static str {
+        "check_filter"
+    }
 }
 
 /// Engine-side run summary that carries the run identity alongside

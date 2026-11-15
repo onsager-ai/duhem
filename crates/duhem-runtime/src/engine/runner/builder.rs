@@ -100,6 +100,12 @@ impl Engine {
         self
     }
 
+    /// Record the distributed plan with the declared claim scope.
+    pub fn with_distributed_plan(mut self, plan: duhem_summary::DistributedRun) -> Self {
+        self.distributed = plan;
+        self
+    }
+
     /// Whether this run executes the definition's native commands.
     pub fn with_native_execution(mut self, enabled: bool) -> Self {
         self.run_native = enabled;

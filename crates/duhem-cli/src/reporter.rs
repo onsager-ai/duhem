@@ -247,6 +247,9 @@ pub fn render_set(
                 .map(|((_, o), events)| build_summary(o, store_db, events))
                 .collect();
             let mut summary = RunSetSummary::new(run_id, set_verdict.state, runs);
+            summary.distributed = selection
+                .map(|selection| selection.distributed.clone())
+                .unwrap_or_default();
             summary.selection = selection.cloned();
             summary.native.splice(0..0, suite_native.iter().cloned());
             if !summary.native.is_empty() {

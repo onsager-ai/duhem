@@ -1,0 +1,27 @@
+# Criterion checks stay together; native commands are independent shard units.
+# See docs/distributed-runs.md for the two-machine invocation.
+verification: Criterion-sized distributed selection
+native:
+  - id: shell-smoke
+    command: [sh, -c, 'printf "native smoke\n"']
+    expect: {exit_code: 0}
+criteria:
+  - id: GREETING
+    description: The shell emits the promised greeting and exits successfully.
+    checks:
+      - id: greeting
+        steps:
+          - id: greet
+            uses: cli/invoke
+            with:
+              command: [sh, -c, 'printf "hello\n"']
+        assertions:
+          - $steps.greet.outputs.exit_code == 0
+          - matches: {value: $steps.greet.outputs.stdout, pattern: '^hello\n$'}
+      - id: shell-status
+        assertions: ['true']
+  - id: SECOND
+    description: Another criterion can execute on the other machine.
+    checks:
+      - id: second
+        assertions: ['true']

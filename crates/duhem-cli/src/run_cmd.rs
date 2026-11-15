@@ -25,13 +25,13 @@ use crate::filter::{CliCheckFilter, native_selection};
 use crate::inputs;
 use crate::profile;
 use crate::reporter::{self, Reporter};
-use crate::resolve::{render_input_value, resolve_leaf_inputs};
+use crate::resolve::resolve_leaf_inputs;
 use crate::run_scope::Scope;
 
 /// One validated leaf after all input precedence layers have resolved.
 /// Kept as an alias because the surrounding execution loop benefits from
 /// tuple destructuring while the secret registry remains leaf-scoped.
-type ResolvedLeaf = (
+pub(crate) type ResolvedLeaf = (
     String,
     PathBuf,
     VerificationDefinition,
@@ -48,6 +48,7 @@ pub struct RunArgs {
     pub filter: Vec<String>,
     pub db: Option<PathBuf>,
     pub run_id: Option<String>,
+    pub shard: Option<String>,
     pub reporter: Reporter,
     pub profile: Option<String>,
     pub dry_run: bool,
@@ -73,7 +74,8 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         inputs: raw_inputs,
         filter: raw_filter,
         db,
-        run_id: pinned_run_id,
+        run_id: mut pinned_run_id,
+        shard,
         reporter,
         profile: requested_profile,
         dry_run,
@@ -85,6 +87,19 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         capture_video,
         viewport: viewport_override,
     } = args;
+
+    let detection = match crate::shard::detect(shard.as_deref(), pinned_run_id.as_deref(), |key| {
+        std::env::var(key).ok()
+    }) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if detection.is_some() {
+        pinned_run_id = None;
+    }
 
     // Live progress posture (#299), resolved once: forced by
     // `--live`/`--no-live`, else on iff stderr is a terminal (a piped
@@ -159,9 +174,15 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // so authors see at a glance which schema the loader parsed
     // against (spec on #51).
     let mut authored_leaf_paths = Vec::new();
+    let mut manifest_digest = None;
     let loaded = match load_definition(&target).and_then(|loaded| {
         if let Loaded::Manifest { leaves, .. } = &loaded {
             authored_leaf_paths = leaves.iter().map(|leaf| leaf.path.clone()).collect();
+        }
+        if detection.is_some() {
+            // Serialization of loaded schema types is infallible for validated YAML.
+            manifest_digest =
+                Some(crate::shard_plan::digest(&loaded).expect("loaded definitions serialize"));
         }
         if let Some(directory) = &directory_filter {
             return filter_loaded_to_directory(loaded, directory);
@@ -273,7 +294,16 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         }
     }
     let is_manifest = matches!(scope, Scope::Manifest { .. });
-    let manifest_selection = is_manifest.then(|| {
+    let shard_plan = detection.map(|detection| {
+        crate::shard_plan::Plan::new(
+            detection,
+            manifest_digest.expect("sharded digest"),
+            &leaves,
+            &scope,
+            check_filter.as_ref(),
+        )
+    });
+    let mut manifest_selection = is_manifest.then(|| {
         let mut selection = duhem_summary::ManifestSelection {
             authored: authored_leaf_paths.len() as u32,
             directory: directory_filter
@@ -321,6 +351,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         selection.excluded_native_runs = excluded_native_runs;
         selection
     });
+    if let Some(plan) = &shard_plan {
+        plan.narrow_selection(&leaves, &scope, &mut manifest_selection);
+    }
     // Suite-wide `defaults:` (spec #66) applied to every leaf's engine.
     // A single-leaf run has no manifest, so defaults are inert there —
     // Pattern A authors pay no cost.
@@ -378,140 +411,13 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         ));
     }
 
-    // `--dry-run` short-circuits before any browser launch: print the
-    // resolved `(criterion::check)` plan (qualified with the
-    // verification name on manifest runs) and exit 0.
     if dry_run {
-        // Dry-run is a plan inspection, not a recorded run, so it has
-        // no three-state verdict in which to classify an unavailable
-        // required input. Preserve its existing fail-fast diagnostic;
-        // real runs continue below and record EnvironmentError.
-        for (_name, path, definition, inputs, _secrets) in &resolved {
-            if let Some(missing) = definition
-                .inputs
-                .iter()
-                .filter(|(_, decl)| !decl.inherit)
-                .map(|(name, _)| name)
-                .find(|name| !inputs.contains_key(*name))
-            {
-                eprintln!("{}: missing required input: `{missing}`", path.display());
-                return ExitCode::FAILURE;
-            }
-        }
-        let mut stdout = std::io::stdout().lock();
-        let mut wrote = false;
-        for (name, _path, def, _inputs, _secrets) in &resolved {
-            let leaf_filter = check_filter.as_ref().and_then(|f| {
-                if f.has_criterion_filters() {
-                    f.for_verification(name)
-                } else {
-                    Some(CliCheckFilter::matches_nothing())
-                }
-            });
-            // If a filter was passed and nothing scopes to this leaf,
-            // skip — no spurious "no checks matched" line per-leaf.
-            if check_filter.is_some() && leaf_filter.is_none() {
-                continue;
-            }
-            for criterion in &def.criteria {
-                for check in &criterion.checks {
-                    let matched = match &leaf_filter {
-                        None => true,
-                        Some(f) => {
-                            use duhem_runtime::CheckFilter;
-                            f.matches(&criterion.id, &check.id)
-                        }
-                    };
-                    if matched {
-                        let line = if is_manifest {
-                            format!("WOULD RUN: {}::{}::{}", name, criterion.id, check.id)
-                        } else {
-                            format!("WOULD RUN: {}::{}", criterion.id, check.id)
-                        };
-                        if let Err(e) = writeln!(stdout, "{line}") {
-                            eprintln!("dry-run: {e}");
-                            return ExitCode::FAILURE;
-                        }
-                        wrote = true;
-                    }
-                }
-            }
-        }
-        for (name, _path, definition, _inputs, _secrets) in &resolved {
-            let (selected, excluded) = native_selection(check_filter.as_ref(), &definition.native);
-            for run in selected {
-                let line = if is_manifest {
-                    format!("WOULD RUN NATIVE: {name}::{}", run.id)
-                } else {
-                    format!("WOULD RUN NATIVE: {}", run.id)
-                };
-                if let Err(e) = writeln!(stdout, "{line}") {
-                    eprintln!("dry-run: {e}");
-                    return ExitCode::FAILURE;
-                }
-                wrote = true;
-            }
-            if !excluded.is_empty() {
-                let line = format!("EXCLUDED NATIVE: {}", excluded.join(", "));
-                if let Err(e) = writeln!(stdout, "{line}") {
-                    eprintln!("dry-run: {e}");
-                    return ExitCode::FAILURE;
-                }
-            }
-        }
-        if !wrote && let Err(e) = writeln!(stdout, "WOULD RUN: (no checks matched filter)") {
-            eprintln!("dry-run: {e}");
-            return ExitCode::FAILURE;
-        }
-        // RESOLVED INPUTS (spec #155): the post-precedence input map
-        // (`--inputs` last-wins > selected profile > VD `default:`),
-        // one `name = value` per line so a black-box VD can assert the
-        // winning value directly off stdout — the value-level assertion
-        // that was only reachable indirectly before (via type levers).
-        // Qualified by verification name on manifest runs, mirroring the
-        // `WOULD RUN` lines. Values render deterministically (strings
-        // bare, other types as compact JSON of the coerced value).
-        for (name, _path, _def, inputs, secrets) in &resolved {
-            let leaf_filter = check_filter.as_ref().and_then(|f| {
-                if f.has_criterion_filters() {
-                    f.for_verification(name)
-                } else {
-                    Some(CliCheckFilter::matches_nothing())
-                }
-            });
-            if check_filter.is_some() && leaf_filter.is_none() {
-                continue;
-            }
-            if inputs.is_empty() {
-                let line = if is_manifest {
-                    format!("RESOLVED INPUT: {name}:: (none)")
-                } else {
-                    "RESOLVED INPUT: (none)".to_string()
-                };
-                if let Err(e) = writeln!(stdout, "{line}") {
-                    eprintln!("dry-run: {e}");
-                    return ExitCode::FAILURE;
-                }
-                continue;
-            }
-            for (key, value) in inputs {
-                let rendered = secrets.mask(&render_input_value(value)).text;
-                let line = if is_manifest {
-                    format!("RESOLVED INPUT: {name}::{key} = {rendered}")
-                } else {
-                    format!("RESOLVED INPUT: {key} = {rendered}")
-                };
-                if let Err(e) = writeln!(stdout, "{line}") {
-                    eprintln!("dry-run: {e}");
-                    return ExitCode::FAILURE;
-                }
-            }
-        }
-        if let Err(e) = stdout.flush() {
-            eprintln!("dry-run: {e}");
-            return ExitCode::FAILURE;
-        }
-        return ExitCode::SUCCESS;
+        return crate::run_dry::render(
+            &resolved,
+            &scope,
+            check_filter.as_ref(),
+            shard_plan.as_ref(),
+        );
     }
 
     // Open the evidence store (#189): the explicit `--db` path, else
@@ -561,6 +467,12 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    if let Some(plan) = &shard_plan
+        && let Err(error) = plan.ensure_parent(store.clone(), &target).await
+    {
+        eprintln!("shard parent: {error}");
+        return ExitCode::FAILURE;
+    }
     let mut suite_native = Vec::new();
     let mut suite_parent_id: Option<String> = None;
     let mut inherited_scope: Option<RunScope> = invocation_parent
@@ -578,12 +490,16 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             duhem_runtime::resolve_scope(manifest_project.as_ref(), &cwd, manifest_dir.as_deref())
         });
         inherited_scope = Some(suite_scope.clone());
-        let suite_lineage = match &invocation_parent {
-            Some(parent) => RunLineage {
-                parent_run_id: Some(parent.run_id.clone()),
-                origin: Some(RunOrigin::Invocation),
-            },
-            None => RunLineage::default(),
+        let suite_lineage = if let Some(plan) = &shard_plan {
+            plan.lineage()
+        } else {
+            match &invocation_parent {
+                Some(parent) => RunLineage {
+                    parent_run_id: Some(parent.run_id.clone()),
+                    origin: Some(RunOrigin::Invocation),
+                },
+                None => RunLineage::default(),
+            }
         };
         let suite_run_id = duhem_evidence::new_run_id();
         suite_parent_id = Some(suite_run_id.clone());
@@ -652,7 +568,18 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                         }
                     }
                 }
-                let (selected_native, _) = native_selection(check_filter.as_ref(), native);
+                if let Some(plan) = &shard_plan
+                    && let Err(error) = session.record_distributed_plan(plan.metadata.clone()).await
+                {
+                    eprintln!("record shard plan: {error}");
+                    let _ = tear_down_suite(session, keep_env, &mut suite_progress).await;
+                    return ExitCode::FAILURE;
+                }
+                let (mut selected_native, mut excluded) =
+                    native_selection(check_filter.as_ref(), native);
+                if let Some(plan) = &shard_plan {
+                    plan.native("$manifest", &mut selected_native, &mut excluded);
+                }
                 suite_native = match session.run_native(&selected_native, &suite_secrets).await {
                     Ok(results) => results,
                     Err(error) => {
@@ -696,9 +623,17 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // signal a typo'd `--filter` would on any leaf — consistent
         // with `--dry-run` which already prints
         // `(no checks matched filter)` for the same case.
-        let (selected_leaf_native, excluded_leaf_native) =
+        let (mut selected_leaf_native, mut excluded_leaf_native) =
             native_selection(check_filter.as_ref(), &def.native);
-        let native_only_vacuous = check_filter.as_ref().is_some_and(|filter| {
+        let shard_key = crate::shard_plan::Plan::key(&leaf_path, &scope);
+        if let Some(plan) = &shard_plan {
+            plan.native(
+                &shard_key,
+                &mut selected_leaf_native,
+                &mut excluded_leaf_native,
+            );
+        }
+        let mut native_only_vacuous = check_filter.as_ref().is_some_and(|filter| {
             !filter.has_criterion_filters()
                 && (!selected_leaf_native.is_empty() || !suite_native.is_empty())
         });
@@ -716,12 +651,28 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 let narrowed = criteria_filter.for_verification(&name);
                 match (narrowed, is_manifest) {
                     (Some(n), _) => Some(n),
+                    (None, true) if shard_plan.is_some() && !def.native.is_empty() => {
+                        Some(CliCheckFilter::matches_nothing())
+                    }
                     (None, true) => continue,
                     (None, false) => Some(CliCheckFilter::matches_nothing()),
                 }
             }
             None => None,
         };
+
+        if is_manifest
+            && shard_plan.as_ref().is_some_and(|plan| {
+                plan.criteria(
+                    &shard_key,
+                    def.criteria.iter().map(|criterion| criterion.id.clone()),
+                )
+                .is_empty()
+                    && def.native.is_empty()
+            })
+        {
+            continue;
+        }
 
         // #305 B: on a live manifest run, a header separates each
         // verification's narration. The name is the same path-derived
@@ -741,19 +692,34 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             .inputs
             .iter()
             .any(|(name, decl)| !decl.inherit && !inputs.contains_key(name));
-        let declares_contexts = def.criteria.iter().flat_map(|c| &c.checks).any(|check| {
-            check
-                .sessions
-                .as_ref()
-                .is_some_and(|sessions| !sessions.is_empty())
-        });
-        let needs_browser = !has_missing_input
+        let selected_criteria: Vec<_> = def
+            .criteria
+            .iter()
+            .filter(|criterion| {
+                shard_plan
+                    .as_ref()
+                    .is_none_or(|plan| plan.owns_criterion(&shard_key, &criterion.id))
+            })
+            .collect();
+        let has_units =
+            shard_plan.is_none() || !selected_criteria.is_empty() || !def.native.is_empty();
+        let declares_contexts = selected_criteria
+            .iter()
+            .flat_map(|c| &c.checks)
+            .any(|check| {
+                check
+                    .sessions
+                    .as_ref()
+                    .is_some_and(|sessions| !sessions.is_empty())
+            });
+        let needs_browser = has_units
+            && !has_missing_input
             && (declares_contexts
                 || def
                     .setup
                     .iter()
                     .chain(
-                        def.criteria
+                        selected_criteria
                             .iter()
                             .flat_map(|c| &c.checks)
                             .flat_map(|ch| &ch.steps),
@@ -881,7 +847,28 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 vd_dir.as_deref(),
             ));
         }
-        if let Some(f) = leaf_filter {
+        if let Some(plan) = &shard_plan {
+            let owned = plan.criteria(
+                &shard_key,
+                def.criteria.iter().map(|criterion| criterion.id.clone()),
+            );
+            native_only_vacuous |= owned.is_empty()
+                && plan
+                    .metadata
+                    .expected_partition
+                    .as_ref()
+                    .is_some_and(|partition| partition.total_units > 0);
+            engine = engine
+                .with_filter(crate::shard_plan::CriterionFilter {
+                    original: leaf_filter,
+                    owned,
+                })
+                .with_native_only_vacuous_body(native_only_vacuous)
+                .with_distributed_plan(plan.metadata.clone());
+            if !is_manifest {
+                engine = engine.with_lineage(plan.lineage());
+            }
+        } else if let Some(f) = leaf_filter {
             engine = engine.with_filter(f);
         }
         engine = engine
@@ -986,6 +973,16 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         .map(|(_, o)| o.verdict.clone())
         .collect();
     let mut set_verdict = aggregate_run_set(run_verdicts);
+    if leaf_outcomes.is_empty()
+        && shard_plan.as_ref().is_some_and(|plan| {
+            plan.metadata
+                .expected_partition
+                .as_ref()
+                .is_some_and(|partition| partition.total_units > 0)
+        })
+    {
+        set_verdict.state = VerdictState::Pass;
+    }
     set_verdict.state = duhem_judge::native_gate(
         set_verdict.state,
         suite_native.iter().map(|run| (run.required, run.outcome)),

@@ -6,7 +6,7 @@ use crate::{Event, EventPayload};
 
 pub fn claim_scope(events: &[Event]) -> Option<duhem_summary::ClaimScope> {
     let mut scope = events.iter().find_map(|event| match &event.payload {
-        EventPayload::ClaimScopeDeclared { scope } => Some(scope.clone()),
+        EventPayload::ClaimScopeDeclared { scope } => Some(scope.as_ref().clone()),
         _ => None,
     })?;
     let mut checks = BTreeSet::new();

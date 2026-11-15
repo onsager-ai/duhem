@@ -26,6 +26,8 @@ pub struct ExcludedLeaf {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ManifestSelection {
+    #[serde(flatten)]
+    pub distributed: crate::DistributedRun,
     pub authored: u32,
     pub selected: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -46,6 +48,8 @@ impl std::fmt::Display for ManifestSelection {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ClaimScope {
+    #[serde(flatten)]
+    pub distributed: crate::DistributedRun,
     pub criteria: ClaimCounts,
     pub checks: ClaimCounts,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

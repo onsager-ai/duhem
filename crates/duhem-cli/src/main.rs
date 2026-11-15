@@ -32,8 +32,11 @@ mod resolve;
 mod resolve_cmd;
 mod resolve_provenance;
 mod run_cmd;
+mod run_dry;
 mod run_lineage;
 mod run_scope;
+mod shard;
+mod shard_plan;
 mod validate_cmd;
 
 use std::path::PathBuf;
@@ -206,11 +209,13 @@ enum Cmd {
         /// migrated if missing.
         #[arg(long = "db", value_name = "PATH")]
         db: Option<PathBuf>,
-        /// Pin the run id instead of minting a fresh ULID. For
-        /// fixtures and tests that need deterministic run URLs;
-        /// single-leaf runs only (a manifest run has several leaves).
+        /// Shared logical identity when sharding (also allowed on manifests).
+        /// Otherwise pin a single-leaf run's ID instead of minting a ULID.
         #[arg(long = "run-id", value_name = "ID")]
         run_id: Option<String>,
+        /// Run shard k/n (one-based); overrides DUHEM_SHARD and native CI detection.
+        #[arg(long, value_name = "k/n")]
+        shard: Option<String>,
         /// Stdout formatting for the post-run summary. Built-in
         /// names: `default` (verdict line), `quiet` (exit code
         /// only), `json` (`RunSummary` v2 for a leaf, or `RunSetSummary`
@@ -431,6 +436,7 @@ fn main() -> ExitCode {
             filter,
             db,
             run_id,
+            shard,
             reporter,
             profile,
             dry_run,
@@ -492,6 +498,7 @@ fn main() -> ExitCode {
                 filter,
                 db,
                 run_id,
+                shard,
                 reporter: resolved_reporter,
                 profile,
                 dry_run,

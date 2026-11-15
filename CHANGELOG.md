@@ -28,6 +28,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 [`docs/changelog-archive.md`](docs/changelog-archive.md).
 
 ## Unreleased
+- [additive] The whole run is first-class in terminal and JSON: manifest failure list, parent run id, and `RunSetSummary.run_id`. (#651)
 - [clarifying] Flow steps, including cleanup, resolve `$params.*` inside runtime helper calls, as documented. (#642)
 - [clarifying] api/poll `until:` must be the structured form; validate now rejects a string expression, matching the runtime. (#643)
 - [breaking] fixtures:/needs:/$fixture.* removed; use flows with cleanup: (#615). (#618)

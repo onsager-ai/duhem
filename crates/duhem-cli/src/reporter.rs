@@ -139,6 +139,7 @@ pub fn render(
             write_failures(out, &outcome.failures, def, &summary.lifecycle)?;
             write_failed_lifecycle(out, &summary.lifecycle, &outcome.failures)?;
             write_gated_checks(out, outcome)?;
+            write_native(out, &outcome.native)?;
             write_warnings(out, &outcome.warnings)?;
             write_cleanup(out, &outcome.cleanup)?;
             write_totals(out, check_totals(outcome), &summary.lifecycle)?;
@@ -182,6 +183,7 @@ pub fn render_set(
     leaf_defs: &[VerificationDefinition],
     run_id: &str,
     selection: Option<&duhem_summary::ManifestSelection>,
+    suite_native: &[duhem_summary::NativeRunSummary],
 ) -> Result<(), RenderError> {
     match reporter {
         Reporter::Default => {
@@ -195,9 +197,11 @@ pub fn render_set(
                 }
                 write_cleanup(out, &outcome.cleanup)?;
                 write_gated_checks(out, outcome)?;
+                write_native(out, &outcome.native)?;
                 let lifecycle = fold_lifecycle(events);
                 write_failed_lifecycle(out, &lifecycle, &[])?;
             }
+            write_native(out, suite_native)?;
             writeln!(out, "{}", set_verdict.state)?;
             writeln!(out, "run {run_id}")?;
             for (((name, outcome), events), def) in leaves.iter().zip(leaf_events).zip(leaf_defs) {
@@ -230,6 +234,15 @@ pub fn render_set(
                 .collect();
             let mut summary = RunSetSummary::new(run_id, set_verdict.state, runs);
             summary.selection = selection.cloned();
+            summary.native.splice(0..0, suite_native.iter().cloned());
+            if !summary.native.is_empty() {
+                let duration = leaf_events
+                    .iter()
+                    .map(|events| native_check_duration(events))
+                    .sum();
+                summary.layers =
+                    duhem_summary::layer_totals(&summary.native, summary.totals, duration);
+            }
             serde_json::to_writer(&mut *out, &summary)
                 .map_err(|e| RenderError::Io(std::io::Error::other(e)))?;
             writeln!(out)?;
@@ -730,6 +743,9 @@ fn fold_lifecycle(events: &[duhem_evidence::Event]) -> Vec<LifecycleBlock> {
     fold.into_blocks()
 }
 
+mod native;
+use native::{native_check_duration, write_native};
+
 fn build_summary(
     o: &RunOutcome,
     store_db: &std::path::Path,
@@ -766,6 +782,7 @@ fn build_summary(
         store_db.to_path_buf(),
     )
     .with_totals(check_totals(o))
+    .with_native(o.native.clone(), native_check_duration(events))
     .with_claim_scope(duhem_evidence::claim_scope::claim_scope(events))
     .with_verification(events.iter().find_map(|event| match &event.payload {
         duhem_evidence::EventPayload::RunStarted {
@@ -1089,6 +1106,7 @@ criteria:
 
     fn outcome(state: VerdictState) -> RunOutcome {
         RunOutcome {
+            native: Vec::new(),
             body_verdict: None,
             gated_checks: Default::default(),
             verdict: RunVerdict {
@@ -1246,6 +1264,7 @@ criteria:
     #[test]
     fn default_reporter_states_zero_executed_checks() {
         let o = RunOutcome {
+            native: Vec::new(),
             body_verdict: None,
             gated_checks: Default::default(),
             verdict: RunVerdict {
@@ -1516,6 +1535,7 @@ criteria:
             &vec![minimal_def(); leaves.len()],
             "01J000000000000000000PARENT",
             None,
+            &[],
         )
         .unwrap();
         String::from_utf8(buf).unwrap()

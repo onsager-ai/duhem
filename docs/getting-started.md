@@ -8,6 +8,11 @@ For the *why* (the Holistic Verification Principle, criteria-vs-checks,
 mechanical judgment), read [`docs/duhem-spec.md`](./duhem-spec.md). This
 is the *how*.
 
+You can also run your project's own tests and linters under `native:` in a leaf
+or root manifest. Required native failures block the overall run while criteria
+keep their independent check verdicts. See [Native runs](./native-runs.md) for the
+fields, output matching, and summary format.
+
 ## 1. Install
 
 ```bash

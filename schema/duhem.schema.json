@@ -404,6 +404,162 @@
       ],
       "description": "One entry in `verifications:`. An author writes either `path:` for an explicit leaf (Pattern B) or `glob:` for a globbed expansion (Pattern C). The two are mutually exclusive at the YAML level (untagged enum), which keeps the wire shape unambiguous."
     },
+    "NativeExpect": {
+      "additionalProperties": false,
+      "properties": {
+        "exit_code": {
+          "default": 0,
+          "format": "int32",
+          "type": "integer"
+        },
+        "stderr": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NativeOutputExpect"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stdout": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NativeOutputExpect"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "NativeLayer": {
+      "enum": [
+        "unit",
+        "integration",
+        "e2e",
+        "static",
+        "other"
+      ],
+      "type": "string"
+    },
+    "NativeOutputExpect": {
+      "additionalProperties": false,
+      "properties": {
+        "matches": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "not_matches": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "NativeReport": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "$ref": "#/definitions/NativeReportFormat"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "path"
+      ],
+      "type": "object"
+    },
+    "NativeReportFormat": {
+      "enum": [
+        "junit",
+        "ctrf"
+      ],
+      "type": "string"
+    },
+    "NativeRun": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "expect": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NativeExpect"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "layer": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NativeLayer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "report": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NativeReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DurationSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "command",
+        "id"
+      ],
+      "type": "object"
+    },
     "ProjectDecl": {
       "additionalProperties": false,
       "description": "The declared target coordinate. Wire shape:\n\n```yaml project: repo: github.com/crawlab-team/crawlab-pro   # git kind, OR # url: https://app.example.com              # url kind, OR # image: registry.example.com/app:tag       # image kind, OR # id: crawlab-pro                           # custom kind ```",
@@ -557,6 +713,13 @@
           "format": "uint32",
           "minimum": 0.0,
           "type": "integer"
+        },
+        "native": {
+          "description": "Project-owned commands executed once before the suite's leaves.",
+          "items": {
+            "$ref": "#/definitions/NativeRun"
+          },
+          "type": "array"
         },
         "pages": {
           "additionalProperties": {
@@ -740,6 +903,13 @@
           "additionalProperties": true,
           "description": "Opaque consumer-defined data. Duhem never interprets this map; it is recorded in run evidence, must never affect a verdict, and must not count as a change if a diff command is added in future.",
           "type": "object"
+        },
+        "native": {
+          "description": "Project-owned verification commands, executed before criteria.",
+          "items": {
+            "$ref": "#/definitions/NativeRun"
+          },
+          "type": "array"
         },
         "pages": {
           "additionalProperties": {

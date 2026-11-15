@@ -16,6 +16,7 @@ pub(crate) enum Scope {
         /// Shared environment provisioned once for the whole suite
         /// (spec #131), anchored at the manifest directory.
         provision: Option<duhem_schema::Provision>,
+        native: Vec<duhem_schema::NativeRun>,
         manifest_dir: Option<PathBuf>,
         /// Suite-wide engine posture inherited by every leaf (#66).
         defaults: Option<duhem_schema::ManifestDefaults>,

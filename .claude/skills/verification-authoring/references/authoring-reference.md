@@ -20,6 +20,15 @@ This skill is the *authoring* counterpart to those sections.
 
 > This reference carries the current Duhem action and authoring details, including recent browser, observation, geometry, lifecycle, and emulation surfaces. The local [verification-authoring skill](../../SKILL.md) owns this checkout's scope, prerequisites, and policy overlay. Where older examples here imply another session scope or product ownership model, follow the local skill and current product contract.
 
+## Native commands
+
+Root manifests and leaf VDs support a `native:` list for project-owned commands.
+See [Native runs](../../../../docs/native-runs.md) for the field reference.
+Use unique IDs and argv commands; optional `expect` matches stdout/stderr or sets
+an expected exit code. Required failures block the gate without changing criterion
+verdicts. Native outcomes cannot be referenced from assertions or expressions.
+Report parsing and native selection filters are deferred.
+
 ## When to use this skill
 
 Use when:

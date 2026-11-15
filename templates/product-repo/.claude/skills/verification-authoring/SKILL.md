@@ -30,6 +30,30 @@ duhem mcp                     # expose describe/actions/validate to your
 Author → `validate` → fix converges to a correct VD without any prior
 Duhem knowledge. That's retrieval plus verification, not pretraining.
 
+## Native runs
+
+A root manifest or leaf VD can declare `native:` commands for the project's own
+verification. They run in order after provisioning, before setup and criteria:
+
+```yaml
+native:
+  - id: lint
+    layer: static
+    command: [sh, -c, 'echo checked']
+    timeout: 30s
+    expect: {exit_code: 0, stdout: {matches: checked}, stderr: {not_matches: warning}}
+```
+
+Each entry needs a unique `id` and nonempty argv `command`. Optional `layer` is
+`unit|integration|e2e|static|other`; `cwd` defaults to the document directory,
+`env` supplies child variables, and `required` defaults to true. Exit-code runs
+count as one test. A wrong exit code or output match fails; timeout or spawn
+failure is inconclusive. `required: false` reports the result without blocking.
+Native results affect the overall gate, never satisfy criteria, and cannot be
+referenced from expressions. Output and failure details are masked as evidence.
+`report:` recognizes `junit|ctrf` with a required `path`, but validation rejects
+it until report parsing is available.
+
 ## When to use this skill
 
 Use when:

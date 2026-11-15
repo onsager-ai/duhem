@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Exit-code native runs (`native:`) execute under Duhem with optional output matching, gate the run without satisfying criteria, and appear in summaries with cross-layer counts and durations. (#649)
+
 - [additive] Dashboard parent run page: tree verdict, children in execution order and a failures-first list; RunDetail gains children and duration. (#651)
 - [additive] Failure envelope on a parent run lists failures from the whole run tree, tagged with run_id and verification. (#651)
 - [additive] The whole run is first-class in terminal and JSON: manifest failure list, parent run id, and `RunSetSummary.run_id`. (#651)

@@ -130,9 +130,9 @@ mod tests {
                 .contains("duplicate")
         );
         for invalid in [
-            "- {id: x, command: [true], layer: unknown}",
-            "- {id: x, command: [true], report: {format: unknown, path: x}}",
-            "- {id: x, command: [true], report: {format: junit}}",
+            "- {id: x, command: ['true'], layer: unknown}",
+            "- {id: x, command: ['true'], report: {format: unknown, path: x}}",
+            "- {id: x, command: ['true'], report: {format: junit}}",
         ] {
             assert!(parse(invalid).is_err(), "{invalid}");
         }
@@ -147,6 +147,12 @@ mod tests {
     }
     #[test]
     fn native_is_not_an_expression_root() {
-        assert!(crate::expr::parse("$native.lint.outcome").is_err());
+        let definition = crate::VerificationDefinition::from_yaml_str("verification: isolated\nnative: [{id: lint, command: ['true']}]\ncriteria:\n  - id: AC\n    description: Independent\n    checks:\n      - id: body\n        assertions: ['$native.lint.outcome == 0']\n").unwrap();
+        let errors = crate::validate(&definition).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.to_string().contains("native"))
+        );
     }
 }

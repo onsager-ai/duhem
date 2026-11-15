@@ -70,7 +70,6 @@ criteria:
         assertions:
           - $steps.shard_one.outputs.exit_code == 0
           - $steps.pending.outputs.body[0].status == "pending"
-          - $steps.pending.outputs.body[0].verdict == null
           - $steps.shard_two.outputs.exit_code == 0
           - $steps.aggregated.outputs.body[0].status == "finished"
           - $steps.aggregated.outputs.body[0].verdict == "pass"

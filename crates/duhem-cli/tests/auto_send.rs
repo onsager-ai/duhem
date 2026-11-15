@@ -465,6 +465,23 @@ async fn aggregate_preserves_failures_native_gates_and_empty_shards() {
         .unwrap()
         .unwrap();
     assert_eq!(failure.failing.len(), 1);
+    let check = &failure.failing[0];
+    assert_eq!(check.criterion_id, "A");
+    assert_eq!(check.check_id, "a");
+    assert_eq!(check.verdict, Some(VerdictState::Fail));
+    assert_eq!(check.assertions.len(), 1);
+    assert_eq!(check.assertions[0].state, VerdictState::Fail);
+    // The same assertion-only leaf must remain visible when requested directly.
+    let leaf_failure = reader
+        .failure_envelope(check.run_id.as_deref().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(leaf_failure.failing.len(), 1);
+    assert_eq!(
+        leaf_failure.failing[0].assertions[0].state,
+        VerdictState::Fail
+    );
     assert_eq!(failure.failing_native.len(), 1);
     assert!(failure.missing_shards.is_empty());
     task.abort();

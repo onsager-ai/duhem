@@ -1359,13 +1359,13 @@ The root manifest is a single canonical file at the project root that aggregates
 
 CI starts the machines and owns the merge gate: a failed or missing shard fails the pipeline. Every machine runs the same `duhem run` and computes its own share. The Duhem server receives completed run trees, groups shards, re-judges from their events, and serves the combined view; it never assigns work. Thus a server outage cannot change a shard's verdict, exit code, local record, or CI gate.
 
-A shard is identified as `k/n` (one-based `k`) and each machine in the same CI invocation shares a run ID. Unless flags override them, `duhem run` detects shard identity from these CI variables:
+A shard is identified as `k/n` (one-based `k`) and each machine in the same CI invocation shares a run ID. Unless flags override them, `duhem run` detects shard identity from these CI variables (indexes are normalized to one-based `k`; the run identity includes the job or step so two parallel jobs in one pipeline never share a parent):
 
 | CI | Shard index | Shard count | Shared run identity |
 | --- | --- | --- | --- |
-| GitLab CI | `CI_NODE_INDEX` | `CI_NODE_TOTAL` | `CI_PIPELINE_ID` (shared by the pipeline's parallel jobs) |
-| Buildkite | `BUILDKITE_PARALLEL_JOB` | `BUILDKITE_PARALLEL_JOB_COUNT` | `BUILDKITE_BUILD_ID` (shared by the build's parallel jobs) |
-| CircleCI | `CIRCLE_NODE_INDEX` | `CIRCLE_NODE_TOTAL` | `CIRCLE_WORKFLOW_ID` and `CIRCLE_BUILD_NUM` |
+| GitLab CI | `CI_NODE_INDEX` (1-based) | `CI_NODE_TOTAL` | `CI_PIPELINE_ID` + `CI_JOB_NAME` without its ` k/n` suffix |
+| Buildkite | `BUILDKITE_PARALLEL_JOB` (0-based) | `BUILDKITE_PARALLEL_JOB_COUNT` | `BUILDKITE_BUILD_ID` + `BUILDKITE_STEP_ID` |
+| CircleCI | `CIRCLE_NODE_INDEX` (0-based) | `CIRCLE_NODE_TOTAL` | `CIRCLE_WORKFLOW_ID` + `CIRCLE_JOB` |
 
 GitHub Actions exposes `strategy.job-index` and `strategy.job-total` as workflow contexts rather than environment variables. Its documented recipe maps these contexts and a shared workflow run ID/attempt to `DUHEM_SHARD` and `DUHEM_RUN_ID`. The CI-neutral inputs are `DUHEM_SHARD=k/n` and `DUHEM_RUN_ID`, equivalently `--shard` and `--run-id`; explicit flags take precedence over generic variables, which take precedence over CI detection. The detected source is recorded. With no shard information, behavior is unchanged, and these generic inputs also allow local reproduction of a single shard.
 

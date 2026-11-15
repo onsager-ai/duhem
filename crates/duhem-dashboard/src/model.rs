@@ -57,6 +57,10 @@ pub struct RunDetail {
     pub started_at: Option<DateTime<Utc>>,
     pub duration_ms: Option<u64>,
     pub children: Vec<RunChildDetail>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub native: Vec<NativeRunDetail>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<duhem_summary::LayerTotals>,
     pub inputs: serde_json::Map<String, serde_json::Value>,
     pub verdict: Option<VerdictState>,
     pub status: RunStatus,
@@ -319,6 +323,31 @@ pub struct FailureEnvelope {
     pub verdict: Option<VerdictState>,
     /// One entry per non-passing check. Empty on a fully-passing run.
     pub failing: Vec<FailingCheck>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub failing_native: Vec<FailingNative>,
+}
+
+/// A native summary with source-run provenance and navigable blob addresses.
+#[derive(Debug, Clone, Serialize)]
+pub struct NativeRunDetail {
+    pub run_id: String,
+    #[serde(flatten)]
+    pub summary: duhem_summary::NativeRunSummary,
+    pub evidence: Vec<ArtifactRef>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FailingNative {
+    pub run_id: String,
+    pub native_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer: Option<String>,
+    pub outcome: VerdictState,
+    pub required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    pub failing_tests: Vec<duhem_summary::NativeTestFailure>,
+    pub evidence: Vec<ArtifactRef>,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -40,7 +40,11 @@ pub(super) fn descendant_run_ids(root_id: &str, records: &[RunRecord]) -> Vec<St
 
 /// Aggregate the recorded verdicts of suite-tree leaves. Any unjudged leaf
 /// leaves the whole tree unjudged, matching the failure-envelope contract.
-pub(super) fn tree_verdict(records: &[RunRecord], tree_ids: &[String]) -> Option<VerdictState> {
+pub(super) async fn tree_verdict(
+    store: &dyn duhem_evidence::Store,
+    records: &[RunRecord],
+    tree_ids: &[String],
+) -> Result<Option<VerdictState>, duhem_evidence::StoreError> {
     use duhem_judge::{RunVerdict, aggregate_run_set};
     let by_id: BTreeMap<&str, &RunRecord> = records
         .iter()
@@ -66,7 +70,28 @@ pub(super) fn tree_verdict(records: &[RunRecord], tree_ids: &[String]) -> Option
             })
         })
         .collect();
-    leaf_verdicts.map(|verdicts| aggregate_run_set(verdicts).state)
+    let Some(verdicts) = leaf_verdicts else {
+        return Ok(None);
+    };
+    let mut verdict = aggregate_run_set(verdicts).state;
+    // Leaf RunFinished verdicts already include their native gate. Suite
+    // parents have no judged body, so fold their recorded native outcomes here.
+    for id in tree_ids {
+        if leaves.iter().any(|leaf| &leaf.run_id == id) {
+            continue;
+        }
+        let events = store.run_events(id).await?;
+        verdict = duhem_judge::native_gate(
+            verdict,
+            events.iter().filter_map(|event| match &event.payload {
+                duhem_evidence::EventPayload::NativeRunFinished { result } => {
+                    Some((result.required, result.outcome))
+                }
+                _ => None,
+            }),
+        );
+    }
+    Ok(Some(verdict))
 }
 
 /// Direct `suite` children of `run_id`, in execution order.

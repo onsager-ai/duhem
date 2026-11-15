@@ -63,11 +63,32 @@ filters select at least one native run and no criteria/checks, the empty body is
 vacuously passing and the overall verdict is the selected native runs' gate
 contribution. No `body_verdict` is reported, and claim scope still reports zero
 selected checks and excluded criteria. If no native run matches, the existing
-empty-selection inconclusive behavior remains. Excluded IDs
-appear in JSON selection/claim-scope output and as `excluded native runs: ...` in
-the default terminal report. A native pattern matching no declared ID behaves
-like an unmatched criterion filter: the selected checks (or no checks) still
-follow normal filter behavior, and no native command runs for that pattern.
+empty-selection inconclusive behavior remains. Excluded IDs appear in JSON
+selection/claim-scope output and as `excluded native runs: ...` in the default
+terminal report. A native pattern matching no declared ID behaves like an
+unmatched criterion filter: the selected checks (or no checks) still follow normal
+filter behavior, and no native command runs for that pattern.
+
+## Dashboard navigation
+
+The run page lists native runs with layer, outcome, required/diagnostic status,
+counts, duration and failing tests. Evidence links open masked stdout, stderr,
+source report and normalized results through the existing artifact route. A
+parent page combines its own native runs with all manifest descendants, retaining
+`run_id` on each summary so identical native IDs in different leaves stay distinct.
+Invocation runs inside checks remain scoped to those checks.
+
+`GET /api/runs/:id` adds optional `native` and `layers` arrays. Each native entry
+contains its summary fields, source `run_id` and `evidence` addresses. The layer
+table includes Duhem's executed checks and their summed step durations. Native
+test counts and durations use the shared summary aggregation. These arrays are
+omitted when no native commands ran. During a live run, native completion refreshes
+the recorded detail; the normal run loading/error states also cover this data.
+
+The existing [failure envelope](failure-envelope-contract.md) adds `failing_native`
+for every non-passing native run, including diagnostic runs. A required native
+failure on a suite parent blocks the tree verdict even when all leaves pass.
+Static exports retain native summaries, failure envelopes and evidence links.
 
 ## JUnit reports
 

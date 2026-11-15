@@ -70,6 +70,7 @@ export function useRun(runId: string): {
     let source: EventSource | null = null;
     let cancelled = false;
     const events: TraceEvent[] = [];
+    let refreshVersion = 0;
 
     setRun(null);
     setError(null);
@@ -80,7 +81,7 @@ export function useRun(runId: string): {
       // The fetched detail stays authoritative for everything the fold
       // cannot see — notably `has_definition`, which gates the whole
       // description overlay (#491).
-      const fetched = detail;
+      let fetched = detail;
       if (detail.status !== "running") return;
       // Replay-then-follow: the SSE stream re-sends the whole trace,
       // so folding from scratch is gap- and dupe-free by contract.
@@ -91,10 +92,19 @@ export function useRun(runId: string): {
         const evt = JSON.parse((msg as MessageEvent).data) as TraceEvent;
         events.push(evt);
         setRun(carryFetched(foldRun(runId, events), fetched));
-        if (evt.kind === "run_finished" || evt.kind === "run_aborted") {
+        const terminal = evt.kind === "run_finished" || evt.kind === "run_aborted";
+        if (terminal) {
           source?.close();
           setConnection("disconnected");
-          fetchRun(runId).then((d) => !cancelled && setRun(d), () => {});
+        }
+        if (terminal || evt.kind === "native_run_finished") {
+          const version = ++refreshVersion;
+          fetchRun(runId).then((d) => {
+            if (!cancelled && version === refreshVersion) {
+              fetched = d;
+              setRun(terminal ? d : carryFetched(foldRun(runId, events), fetched));
+            }
+          }, () => {});
         }
       });
       source.onerror = () => !cancelled && setConnection("reconnecting");

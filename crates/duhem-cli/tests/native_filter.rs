@@ -39,7 +39,13 @@ criteria:
     )
     .unwrap();
     let output = run(&leaf, tmp.path(), &["native:a*"], "json");
-    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+        panic!(
+            "{e}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
     assert!(output.status.success(), "{summary}");
     assert_eq!(summary["verdict"], "pass");
     assert!(summary.get("body_verdict").is_none());
@@ -69,7 +75,13 @@ criteria: []
     )
     .unwrap();
     let output = run(&failing, tmp.path(), &["native:alpha"], "json");
-    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+        panic!(
+            "{e}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
     assert!(!output.status.success(), "{summary}");
     assert_eq!(summary["verdict"], "fail");
     assert!(summary.get("body_verdict").is_none());
@@ -85,10 +97,16 @@ fn unmatched_native_only_filter_keeps_empty_selection_inconclusive() {
     )
     .unwrap();
     let output = run(&leaf, tmp.path(), &["native:missing"], "json");
-    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+        panic!(
+            "{e}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
     assert!(!output.status.success(), "{summary}");
     assert_eq!(summary["verdict"], "inconclusive:empty_aggregation");
-    assert!(summary["native"].as_array().unwrap().is_empty());
+    assert!(summary.get("native").is_none(), "{summary}");
     assert_eq!(summary["claim_scope"]["checks"]["selected"], 0);
     assert_eq!(
         summary["claim_scope"]["excluded_native_runs"],
@@ -120,7 +138,13 @@ fn native_only_filter_passes_manifest_with_vacuous_leaf_bodies() {
     )
     .unwrap();
     let output = run(&manifest, tmp.path(), &["native:suite"], "json");
-    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+        panic!(
+            "{e}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
     assert!(output.status.success(), "{summary}");
     assert_eq!(summary["verdict"], "pass");
     assert!(tmp.path().join("suite").exists());
@@ -156,10 +180,16 @@ criteria:
     )
     .unwrap();
     let output = run(&leaf, tmp.path(), &["AC"], "json");
-    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+        panic!(
+            "{e}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
     assert!(output.status.success(), "{summary}");
     assert!(!tmp.path().join("alpha").exists());
-    assert!(summary["native"].as_array().unwrap().is_empty());
+    assert!(summary.get("native").is_none(), "{summary}");
     assert_eq!(
         summary["claim_scope"]["excluded_native_runs"],
         serde_json::json!(["alpha"])
@@ -184,7 +214,13 @@ criteria: []
     )
     .unwrap();
     let output = run(&leaf, tmp.path(), &["native:alpha", "native:beta"], "json");
-    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+        panic!(
+            "{e}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
     assert!(output.status.success(), "{summary}");
     assert!(tmp.path().join("alpha").exists());
     assert!(tmp.path().join("beta").exists());

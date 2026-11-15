@@ -27,8 +27,32 @@ pub(super) struct CheckProjection {
 }
 
 pub(super) fn project_run(run: &RunEvidence) -> RunProjection {
-    let mut criteria: Vec<(String, Option<VerdictState>)> = Vec::new();
-    let mut checks: Vec<CheckProjection> = Vec::new();
+    // Use the detail fold's ownership rule: step_started wins, with
+    // check_finished.criterion_id as the fallback for assertion-only checks.
+    // Seed before reading assertions, which precede check_finished in the trace.
+    let detail = super::build_run_detail(run);
+    let mut criteria: Vec<(String, Option<VerdictState>)> = detail
+        .criteria
+        .iter()
+        .map(|criterion| (criterion.id.clone(), criterion.verdict))
+        .collect();
+    let mut checks: Vec<CheckProjection> = detail
+        .criteria
+        .into_iter()
+        .flat_map(|criterion| {
+            criterion
+                .checks
+                .into_iter()
+                .map(move |check| CheckProjection {
+                    gated_judging_steps: check.gated_judging_steps,
+                    criterion_id: criterion.id.clone(),
+                    check_id: check.id,
+                    verdict: check.verdict,
+                    assertions: Vec::new(),
+                    artifacts: Vec::new(),
+                })
+        })
+        .collect();
     // Positional attribution for blob observations: they belong to the
     // check whose `step_started` most recently opened (same rule as
     // `build_check_detail`), so trailing `capture/*` observations land

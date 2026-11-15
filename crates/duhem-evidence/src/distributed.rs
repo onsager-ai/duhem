@@ -16,3 +16,20 @@ pub fn logical_run_id(identity: &str) -> String {
     bytes.copy_from_slice(&digest[..16]);
     ulid::Ulid::from_bytes(bytes).to_string()
 }
+
+/// Sort stable unit IDs and assign round-robin. This balances unit counts to
+/// within one without depending on process hashes, manifest glob order or paths
+/// outside the manifest root. IDs must be unique within the selected run.
+pub fn partition(
+    units: &[String],
+    index: usize,
+    total: usize,
+) -> std::collections::BTreeSet<String> {
+    assert!(index > 0 && index <= total);
+    let ordered: std::collections::BTreeSet<_> = units.iter().cloned().collect();
+    ordered
+        .into_iter()
+        .enumerate()
+        .filter_map(|(offset, unit)| (offset % total == index - 1).then_some(unit))
+        .collect()
+}

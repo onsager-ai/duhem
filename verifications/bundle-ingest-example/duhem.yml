@@ -47,7 +47,32 @@ criteria:
           - id: received
             uses: api/call
             with: {method: GET, url: $inputs.url}
+          - id: shard_one
+            uses: cli/invoke
+            with:
+              command: [env, -u, DUHEM_PARENT_RUN_ID, -u, DUHEM_PARENT_DB_PATH, $inputs.duhem_bin, run, verifications/sharding-example, --shard, 1/2, --run-id, ingest-aggregation-example, --no-live, --no-env-file]
+              env:
+                DUHEM_HUB_URL: $inputs.ingest_url
+                DUHEM_HUB_TOKEN: example-token
+          - id: pending
+            uses: api/call
+            with: {method: GET, url: $inputs.url}
+          - id: shard_two
+            uses: cli/invoke
+            with:
+              command: [env, -u, DUHEM_PARENT_RUN_ID, -u, DUHEM_PARENT_DB_PATH, $inputs.duhem_bin, run, verifications/sharding-example, --shard, 2/2, --run-id, ingest-aggregation-example, --no-live, --no-env-file]
+              env:
+                DUHEM_HUB_URL: $inputs.ingest_url
+                DUHEM_HUB_TOKEN: example-token
+          - id: aggregated
+            uses: api/call
+            with: {method: GET, url: $inputs.url}
         assertions:
+          - $steps.shard_one.outputs.exit_code == 0
+          - $steps.pending.outputs.body[0].status == "pending"
+          - $steps.shard_two.outputs.exit_code == 0
+          - $steps.aggregated.outputs.body[0].status == "finished"
+          - $steps.aggregated.outputs.body[0].verdict == "pass"
           - $steps.run.outputs.exit_code == 0
           - $steps.received.outputs.status == 200
           - $steps.received.outputs.body[0].verdict == "pass"

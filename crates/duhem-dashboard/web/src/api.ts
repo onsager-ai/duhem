@@ -8,7 +8,7 @@
 // in both modes.
 
 export type Verdict = string; // "pass" | "fail" | "inconclusive:<cause>"
-export type RunStatus = "running" | "finished" | "aborted" | "orphaned";
+export type RunStatus = "pending" | "running" | "finished" | "aborted" | "orphaned";
 
 export interface RunsListEntry {
   run_id: string;
@@ -19,7 +19,7 @@ export interface RunsListEntry {
   kind: "leaf" | "run-set";
   status: RunStatus;
   parent_run_id?: string;
-  origin?: "suite" | "invocation";
+  origin?: "suite" | "invocation" | "shard";
   children?: RunsListEntry[];
 }
 
@@ -95,7 +95,30 @@ export interface FailingNative {
   evidence: ArtifactRef[];
 }
 
+export interface MissingShard {
+  index: number;
+  units: string[];
+}
+
+export interface ShardCoverage {
+  total: number;
+  status: RunStatus;
+  units: string[];
+  arrived: {
+    run_id: string;
+    index: number;
+    total: number;
+    source: string;
+    unit_count: number;
+    verdict: Verdict | null;
+    duration_ms: number | null;
+  }[];
+  missing: MissingShard[];
+}
+
 export interface RunDetail {
+  shards?: ShardCoverage;
+  check_totals?: RunCheckTotals;
   claim_scope?: ClaimScope;
   body_verdict?: Verdict;
   run_id: string;
@@ -281,6 +304,7 @@ export interface FailureEnvelope {
   verdict: Verdict | null;
   failing: FailingCheck[];
   failing_native?: FailingNative[];
+  missing_shards?: MissingShard[];
 }
 
 export interface HistoryRun {

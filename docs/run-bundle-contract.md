@@ -117,6 +117,10 @@ recorded logical-parent start times may differ; the first unjudged parent wins.
 Distributed metadata comes from `claim_scope_declared`; lineage comes from the
 store row and agrees with `run_started`. Leaf metadata can describe the enclosing
 shard while its actual parent remains the suite container. Ingest stores these
-facts for later coverage computation. Pending/inconclusive coverage, digest/count
-conflict rejection across shards and the aggregated UI remain a later #650
-slice. Until then, logical parents have no verdict, even when all shards arrive.
+facts for read-time coverage computation. Logical parents remain unjudged in the
+store; readers aggregate complete shard coverage and apply the configured grace
+window to missing work (see [distributed runs](distributed-runs.md)). Ingest
+returns HTTP 409 for mismatched manifest digests or shard totals under a parent,
+and for a different content hash at an already stored shard index. Identical
+content remains a no-op and does not advance the server receipt time. CI attempts
+with distinct identities, including `GITHUB_RUN_ATTEMPT`, create distinct parents.

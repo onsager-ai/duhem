@@ -4,7 +4,7 @@ Each CI machine runs the same `duhem run` with its own environment. Duhem
 partitions selected criteria and native runs locally; CI still starts the
 machines and gates their results. Each machine must have its own mutable test
 environment. Completed run trees can be sent automatically to a Duhem server;
-coverage computation and the aggregated view are separate work.
+the server computes coverage and serves an aggregated view.
 
 ## Send shards to a server
 
@@ -33,10 +33,32 @@ uploads warn once and retain the verdict, exit code and local evidence. Use
 is a no-op. Requests have a 10-second timeout and one attempt; the automatic tree
 send is limited to 30 seconds.
 
-The existing runs list, detail and failure endpoints expose stored shard trees
-and replay-validated leaf verdicts. Logical parents remain unjudged in this
-slice; pending/inconclusive coverage, cross-shard digest/count conflict rejection
-and the aggregated report are coming separately. See the
+The runs list, detail and failure endpoints expose replay-validated shard trees.
+The logical parent's verdict is computed at read time, never stored. Until all
+`n` distinct shard indexes arrive, the parent is `pending` with no verdict.
+Logical parents have no heartbeat and are never classified as orphaned.
+
+After 30 minutes since the last distinct shard's server receipt, missing work
+becomes `inconclusive:missing_observation`. Configure this read-time grace with
+`duhem dashboard --shard-timeout 1800` (seconds; zero expires immediately).
+There is no background job or CI close signal. A late shard can complete the
+coverage and resolve the verdict on the next read; identical resends never reset
+the window. Old receipts without server timestamps use the recorded shard start.
+
+With all shards present, the server aggregates recorded leaf verdicts and
+required native gates just as for an ordinary run tree. Covered units are the
+union of shard partitions. The run page lists each shard's index, verdict,
+duration, detection source and unit count, with links to its evidence. Missing
+shards list their planned units, reconstructed from `expected_partition` and the
+deterministic round-robin assignment. Totals and layers include all shards.
+The failure envelope traverses their checks and native runs and adds
+`missing_shards: [{index, units}]` after expiry, omitted when empty or pending.
+
+Ingest rejects a different manifest digest or `n` under one logical parent with
+HTTP 409 and a specific message. A different content hash for an already stored
+shard index is also 409, even if its run ID differs. An identical resend remains
+a no-op. A GitHub Actions retry has a new `GITHUB_RUN_ATTEMPT`, so it gets a new
+logical parent rather than conflicting with the previous attempt. See the
 [bundle contract](run-bundle-contract.md) and the
 [worked ingest definition](../verifications/bundle-ingest-example/duhem.yml).
 

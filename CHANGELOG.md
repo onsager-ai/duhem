@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Dashboard aggregates distributed runs with pending coverage, configurable missing-shard grace, conflict rejection, per-shard provenance and missing units in failure envelopes. (#650)
+
 - [additive] RunBundle v1 carries optional lineage and distributed plan fields; completed runs automatically send their trees through the content-hash-idempotent ship transport. (#650)
 - [additive] Dashboard opt-in `--ingest` accepts bounded, authenticated run bundles and atomically stores replay-validated events, artifacts and lineage for existing reader routes. (#650)
 

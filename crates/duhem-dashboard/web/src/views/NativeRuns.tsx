@@ -33,14 +33,14 @@ export function NativeFailures({ failures }: { failures: FailingNative[] }) {
 }
 
 export function NativeRuns({ run }: { run: RunDetail }) {
-  if (!run.native?.length) return null;
+  if (!run.native?.length && !run.layers?.length) return null;
   return (
     <>
-      <section aria-label="Native runs" className="space-y-3">
+      {!!run.native?.length && <section aria-label="Native runs" className="space-y-3">
         <h3 className="text-sm font-semibold">Native runs</h3>
         <p className="text-sm text-muted-foreground">The project’s own tests and tools. Required runs gate this run; they do not satisfy criteria.</p>
         <ol className="space-y-3">
-          {run.native.map((native) => (
+          {run.native?.map((native) => (
             <li key={`${native.run_id}:${native.id}`} className="space-y-2 border-l-2 pl-4 text-sm">
               <p className="flex flex-wrap gap-2">
                 <span className="font-medium">{native.id}</span>
@@ -66,7 +66,7 @@ export function NativeRuns({ run }: { run: RunDetail }) {
             </li>
           ))}
         </ol>
-      </section>
+      </section>}
       {!!run.layers?.length && (
         <section aria-label="Layer totals" className="space-y-3">
           <h3 className="text-sm font-semibold">Layer totals</h3>

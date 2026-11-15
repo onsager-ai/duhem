@@ -71,6 +71,7 @@ export function useRun(runId: string): {
     let cancelled = false;
     const events: TraceEvent[] = [];
     let refreshVersion = 0;
+    let shardTimer: ReturnType<typeof setInterval> | null = null;
 
     setRun(null);
     setError(null);
@@ -82,6 +83,14 @@ export function useRun(runId: string): {
       // cannot see — notably `has_definition`, which gates the whole
       // description overlay (#491).
       let fetched = detail;
+      if (detail.shards) {
+        shardTimer = setInterval(() => {
+          fetchRun(runId).then((updated) => {
+            if (!cancelled) setRun(updated);
+          }, (e) => !cancelled && setError(String(e)));
+        }, 5000);
+        return;
+      }
       if (detail.status !== "running") return;
       // Replay-then-follow: the SSE stream re-sends the whole trace,
       // so folding from scratch is gap- and dupe-free by contract.
@@ -112,6 +121,7 @@ export function useRun(runId: string): {
 
     return () => {
       cancelled = true;
+      if (shardTimer !== null) clearInterval(shardTimer);
       source?.close();
     };
   }, [runId]);

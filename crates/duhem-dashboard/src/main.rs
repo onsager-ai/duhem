@@ -43,6 +43,10 @@ struct Cli {
     #[arg(long, requires = "ingest")]
     ingest_token: Option<String>,
 
+    /// Grace after the last shard arrival before missing work is inconclusive (seconds).
+    #[arg(long, default_value_t = 1800)]
+    shard_timeout: u64,
+
     #[command(subcommand)]
     cmd: Option<Cmd>,
 }
@@ -128,7 +132,8 @@ async fn run(cli: Cli) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let reader = EvidenceReader::new(Arc::new(store));
+    let reader = EvidenceReader::new(Arc::new(store))
+        .with_shard_timeout(std::time::Duration::from_secs(cli.shard_timeout));
 
     match cli.cmd {
         Some(Cmd::Export { out }) => match export(&reader, &out).await {

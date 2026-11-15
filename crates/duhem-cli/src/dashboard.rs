@@ -55,6 +55,9 @@ pub struct DashboardOpts {
     /// Bearer token for ingest (requires --ingest).
     #[arg(long, requires = "ingest")]
     pub ingest_token: Option<String>,
+    /// Grace after the last shard arrival before missing work is inconclusive (seconds).
+    #[arg(long)]
+    pub shard_timeout: Option<u64>,
     #[command(subcommand)]
     pub cmd: Option<DashboardCmd>,
 }
@@ -77,6 +80,7 @@ pub struct DashboardArgs {
     pub host: Option<String>,
     pub ingest: bool,
     pub ingest_token: Option<String>,
+    pub shard_timeout: Option<u64>,
     /// `Some(out)` selects export mode.
     pub export_out: Option<PathBuf>,
 }
@@ -89,6 +93,7 @@ impl From<DashboardOpts> for DashboardArgs {
             host,
             ingest,
             ingest_token,
+            shard_timeout,
             cmd,
         } = opts;
         DashboardArgs {
@@ -97,6 +102,7 @@ impl From<DashboardOpts> for DashboardArgs {
             host,
             ingest,
             ingest_token,
+            shard_timeout,
             export_out: cmd.map(|DashboardCmd::Export { out }| out),
         }
     }
@@ -107,6 +113,10 @@ pub fn forward_args(args: &DashboardArgs) -> Vec<String> {
     if let Some(db) = &args.db {
         argv.push("--db".into());
         argv.push(db.display().to_string());
+    }
+    if let Some(timeout) = args.shard_timeout {
+        argv.push("--shard-timeout".into());
+        argv.push(timeout.to_string());
     }
     match &args.export_out {
         Some(out) => {
@@ -212,6 +222,7 @@ mod tests {
             host: Some("0.0.0.0".into()),
             ingest: false,
             ingest_token: None,
+            shard_timeout: None,
             export_out: None,
         };
         assert_eq!(
@@ -232,6 +243,7 @@ mod tests {
             host: None,
             ingest: false,
             ingest_token: None,
+            shard_timeout: None,
             export_out: Some(PathBuf::from("site/")),
         };
         assert_eq!(forward_args(&export), vec!["export", "--out", "site/"]);

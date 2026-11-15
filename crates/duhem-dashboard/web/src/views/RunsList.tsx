@@ -54,7 +54,7 @@ import {
 import type { RunsListEntry } from "../api";
 
 const VERDICT_CHIPS = ["pass", "fail", "inconclusive"] as const;
-const STATUS_CHIPS = ["running", "finished", "aborted", "orphaned"] as const;
+const STATUS_CHIPS = ["pending", "running", "finished", "aborted", "orphaned"] as const;
 const ALL = "__all__";
 type RunsView = "runs" | "verification" | "triage";
 

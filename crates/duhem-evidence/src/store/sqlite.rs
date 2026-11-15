@@ -123,11 +123,20 @@ fn row_to_run_record(row: &sqlx::sqlite::SqliteRow) -> Result<RunRecord, StoreEr
         schema_version: row.get("schema_version"),
         inputs: serde_json::from_str(&inputs_json)?,
         started_at: parse_ts(row.get("started_at"))?,
-        status: derive_run_status(terminal, last_heartbeat_at, Utc::now()),
+        status: if terminal.is_none() && row.get::<bool, _>("logical_parent") {
+            RunStatus::Pending
+        } else {
+            derive_run_status(terminal, last_heartbeat_at, Utc::now())
+        },
         verdict: verdict.as_deref().map(parse_verdict).transpose()?,
         finished_at: finished_at.as_deref().map(parse_ts).transpose()?,
         duration_ms: duration_ms.map(|d| d as u64),
         last_heartbeat_at,
+        received_at: row
+            .get::<Option<String>, _>("received_at")
+            .as_deref()
+            .map(parse_ts)
+            .transpose()?,
         lineage: RunLineage {
             parent_run_id: row.get("parent_run_id"),
             origin: row
@@ -149,6 +158,8 @@ fn row_to_run_record(row: &sqlx::sqlite::SqliteRow) -> Result<RunRecord, StoreEr
 const RUN_SELECT: &str = "SELECT r.run_id, r.verification, r.schema_version, r.inputs, \
      r.started_at, r.parent_run_id, CASE WHEN r.shard_origin = 1 THEN 'shard' ELSE r.origin END AS origin, r.project_id, r.verifier_repo, r.verifier_sha, \
      r.target_repo, r.target_sha, v.verdict, t.status AS terminal_status, t.terminal_at, t.duration_ms, \
+     (SELECT MAX(b.received_at) FROM bundle_receipts b WHERE b.run_id = r.run_id) AS received_at, \
+     EXISTS(SELECT 1 FROM runs c WHERE c.parent_run_id = r.run_id AND c.shard_origin = 1) AS logical_parent, \
      COALESCE((SELECT MAX(e.ts) FROM events e WHERE e.run_id = r.run_id \
        AND e.kind = 'run_heartbeat'), r.started_at) AS last_heartbeat_at \
      FROM runs r LEFT JOIN run_verdicts v ON v.run_id = r.run_id \

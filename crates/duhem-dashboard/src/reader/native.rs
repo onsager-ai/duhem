@@ -121,7 +121,7 @@ pub(super) async fn populate(
             duration += elapsed;
         }
     }
-    if !detail.native.is_empty() {
+    if !detail.native.is_empty() || tree_ids.len() > 1 {
         let summaries: Vec<NativeRunSummary> = detail
             .native
             .iter()

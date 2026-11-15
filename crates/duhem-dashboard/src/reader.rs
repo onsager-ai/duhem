@@ -23,17 +23,20 @@ use thiserror::Error;
 
 use crate::model::{
     ArtifactRef, CheckDetail, CheckRef, CriterionDetail, CriterionHistory, EntryKind,
-    FailingAssertion, FailingCheck, FailingRequest, FailureEnvelope, HistoryRun, RunChildDetail,
-    RunDetail, RunDiff, RunsListEntry, SpanModel, VerificationHistory,
+    FailingAssertion, FailingCheck, FailingRequest, FailureEnvelope, HistoryRun, RunDetail,
+    RunDiff, RunsListEntry, SpanModel, VerificationHistory,
 };
 
 mod diff;
+mod distributed;
+#[cfg(test)]
+mod distributed_tests;
 mod native;
 mod run_detail;
 mod tree;
 
 use diff::{CheckProjection, diff_criteria, project_run};
-use tree::{check_totals, descendant_run_ids, suite_children, tree_verdict};
+use tree::{descendant_run_ids, tree_verdict};
 
 mod lifecycle;
 mod mime;
@@ -90,6 +93,7 @@ pub use duhem_evidence::verification_name;
 #[derive(Clone)]
 pub struct EvidenceReader {
     store: Arc<dyn Store>,
+    shard_timeout: std::time::Duration,
 }
 
 impl EvidenceReader {
@@ -97,7 +101,16 @@ impl EvidenceReader {
     /// (`SqliteStore::open_read_only`) — the dashboard never needs a
     /// writable one.
     pub fn new(store: Arc<dyn Store>) -> Self {
-        Self { store }
+        Self {
+            store,
+            shard_timeout: std::time::Duration::from_secs(30 * 60),
+        }
+    }
+
+    /// Grace since the last distinct shard arrival; evaluated on each read.
+    pub fn with_shard_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.shard_timeout = timeout;
+        self
     }
 
     pub fn store(&self) -> &Arc<dyn Store> {
@@ -134,44 +147,18 @@ impl EvidenceReader {
             .filter(|record| record.lineage.parent_run_id.is_none())
             .map(|record| lineage_entry(record, &by_id, &child_ids))
             .collect();
+        for entry in &mut entries {
+            if let Some(coverage) = self.coverage(&entry.run_id, &records, Utc::now()).await? {
+                let ids = descendant_run_ids(&entry.run_id, &records);
+                entry.verdict = distributed::verdict(
+                    &coverage,
+                    tree_verdict(self.store.as_ref(), &records, &ids).await?,
+                );
+                entry.status = coverage.status;
+            }
+        }
         sort_newest_first(&mut entries);
         Ok(entries)
-    }
-
-    pub async fn run_detail(&self, run_id: &str) -> Result<Option<RunDetail>, ReaderError> {
-        let Some(run) = self.load(run_id).await? else {
-            return Ok(None);
-        };
-        let records = self.store.list_runs().await?;
-        let tree_ids = descendant_run_ids(run_id, &records);
-        let tree_wide = tree_ids.len() > 1;
-        let children = if tree_wide {
-            let mut children = Vec::new();
-            for record in suite_children(run_id, &records) {
-                let Some(child) = self.load(&record.run_id).await? else {
-                    continue;
-                };
-                let totals = check_totals(&build_run_detail(&child));
-                children.push(RunChildDetail {
-                    run_id: record.run_id.clone(),
-                    verification: child.verification(),
-                    verdict: child.verdict(),
-                    status: child.record.status,
-                    duration_ms: child.duration_ms(),
-                    check_totals: totals,
-                });
-            }
-            children
-        } else {
-            Vec::new()
-        };
-        let mut detail = build_run_detail(&run);
-        native::populate(self, &run, &tree_ids, &mut detail).await?;
-        detail.children = children;
-        if tree_wide {
-            detail.verdict = tree_verdict(self.store.as_ref(), &records, &tree_ids).await?;
-        }
-        Ok(Some(detail))
     }
 
     pub async fn check_detail(
@@ -343,6 +330,14 @@ impl EvidenceReader {
         } else {
             run.record.verdict
         };
+        let coverage = self.coverage(run_id, &records, Utc::now()).await?;
+        let verdict = coverage
+            .as_ref()
+            .map_or(verdict, |coverage| distributed::verdict(coverage, verdict));
+        let missing_shards = coverage
+            .filter(|coverage| coverage.status == RunStatus::Finished)
+            .map(|coverage| coverage.missing)
+            .unwrap_or_default();
         let mut failing = Vec::new();
         let mut failing_native = Vec::new();
         let mut gated_checks = Vec::new();
@@ -386,6 +381,7 @@ impl EvidenceReader {
             verdict,
             failing,
             failing_native,
+            missing_shards,
         }))
     }
 
@@ -826,6 +822,8 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         criteria,
         duration_ms: run.duration_ms(),
         children: Vec::new(),
+        shards: None,
+        check_totals: None,
         native: Vec::new(),
         layers: Vec::new(),
     }

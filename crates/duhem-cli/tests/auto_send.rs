@@ -87,6 +87,11 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
         "manifest_version: 1\nverifications: [{path: leaf.yml}]\n",
     )
     .unwrap();
+    let baseline = command(&manifest, &tmp.path().join("baseline.db"))
+        .output()
+        .unwrap();
+    assert_pass(&baseline);
+    let baseline: serde_json::Value = serde_json::from_slice(&baseline.stdout).unwrap();
     let (url, store, server) = server(&tmp.path().join("server.db"), true).await;
     for shard in ["1/2", "2/2"] {
         let db = tmp.path().join(format!("shard-{}.db", &shard[..1]));
@@ -97,6 +102,74 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
             .output()
             .unwrap();
         assert_pass(&output);
+        if shard == "1/2" {
+            let parent = store
+                .list_runs()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|run| run.lineage.parent_run_id.is_none())
+                .unwrap();
+            let reader = EvidenceReader::new(Arc::new(
+                SqliteStore::open_read_only(tmp.path().join("server.db"))
+                    .await
+                    .unwrap(),
+            ));
+            let pending: serde_json::Value = reqwest::get(format!(
+                "{}/api/runs/{}",
+                url.strip_suffix("/api/ingest").unwrap(),
+                parent.run_id
+            ))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+            assert_eq!(pending["status"], "pending");
+            assert!(pending["verdict"].is_null());
+            let detail = reader.run_detail(&parent.run_id).await.unwrap().unwrap();
+            assert_eq!(detail.status, duhem_evidence::RunStatus::Pending);
+            assert_eq!(detail.verdict, None);
+            assert_eq!(detail.shards.as_ref().unwrap().missing.len(), 1);
+            assert_eq!(parent.status, duhem_evidence::RunStatus::Pending);
+            let expired = reader.with_shard_timeout(std::time::Duration::ZERO);
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let expired_url = format!(
+                "http://{}/api/runs/{}",
+                listener.local_addr().unwrap(),
+                parent.run_id
+            );
+            let app = router(expired.clone());
+            let expired_server = tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+            let response: serde_json::Value = reqwest::get(format!("{expired_url}/failure"))
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(response["verdict"], "inconclusive:missing_observation");
+            assert_eq!(response["missing_shards"][0]["index"], 2);
+            expired_server.abort();
+            let detail = expired.run_detail(&parent.run_id).await.unwrap().unwrap();
+            assert_eq!(detail.status, duhem_evidence::RunStatus::Finished);
+            assert_eq!(
+                detail.verdict,
+                Some(VerdictState::Inconclusive(
+                    duhem_judge::InconclusiveCause::MissingObservation
+                ))
+            );
+            let envelope = expired
+                .failure_envelope(&parent.run_id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(envelope.missing_shards.len(), 1);
+            assert_eq!(envelope.missing_shards[0].index, 2);
+            assert_eq!(envelope.missing_shards[0].units.len(), 1);
+            assert!(envelope.missing_shards[0].units[0].contains('B'));
+        }
     }
     let records = store.list_runs().await.unwrap();
     assert_eq!(records.len(), 5, "logical parent + two suites + two leaves");
@@ -130,7 +203,11 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
         .await
         .unwrap();
     assert_eq!(detail["children"].as_array().unwrap().len(), 2);
-    assert!(detail["verdict"].is_null());
+    assert_eq!(detail["verdict"], baseline["verdict"]);
+    assert_eq!(detail["status"], "finished");
+    assert_eq!(detail["check_totals"]["total"], baseline["totals"]["total"]);
+    assert_eq!(detail["shards"]["units"].as_array().unwrap().len(), 2);
+    assert_eq!(detail["shards"]["missing"], serde_json::json!([]));
     let failure = client
         .get(format!("{base}/api/runs/{}/failure", parent.run_id))
         .send()
@@ -177,6 +254,30 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
             .header("x-duhem-content-hash", bundle.content_hash().unwrap())
             .body(bundle.wire_bytes().unwrap())
     };
+    assert_eq!(post(&standalone).send().await.unwrap().status(), 204);
+    for kind in ["digest", "total", "duplicate"] {
+        let mut conflict = standalone.clone();
+        conflict.run.run_id = format!("conflict-{kind}");
+        if kind == "digest" {
+            conflict.run.manifest_digest = Some("different-digest".into());
+        } else if kind == "total" {
+            conflict.run.shard.as_mut().unwrap().total = 3;
+        }
+        for event in &mut conflict.events {
+            if let duhem_evidence::EventPayload::ClaimScopeDeclared { scope } = &mut event.payload {
+                scope.distributed.manifest_digest = conflict.run.manifest_digest.clone();
+                scope.distributed.shard = conflict.run.shard.clone();
+            }
+        }
+        let response = post(&conflict).send().await.unwrap();
+        assert_eq!(
+            response.status(),
+            409,
+            "{kind}: {}",
+            response.text().await.unwrap()
+        );
+        assert!(store.get_run(&conflict.run.run_id).await.unwrap().is_none());
+    }
     assert_eq!(post(&bundle).send().await.unwrap().status(), 204);
     assert_eq!(store.list_runs().await.unwrap().len(), 5);
     assert_eq!(store.run_events(&leaf.run_id).await.unwrap().len(), count);
@@ -301,4 +402,87 @@ fn unreachable_hub_only_warns_and_preserves_pass_and_fail_exit_codes() {
             1
         );
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn aggregate_preserves_failures_native_gates_and_empty_shards() {
+    let tmp = tempfile::tempdir().unwrap();
+    let definition = tmp.path().join("leaf.yml");
+    let manifest = tmp.path().join("duhem.yml");
+    std::fs::write(&manifest, "manifest_version: 1\nnative:\n  - {id: required-native, command: [sh, -c, 'exit 1']}\nverifications: [{path: leaf.yml}]\n").unwrap();
+    leaf(&definition, false);
+    let baseline = command(&manifest, &tmp.path().join("baseline.db"))
+        .output()
+        .unwrap();
+    let baseline: serde_json::Value = serde_json::from_slice(&baseline.stdout).unwrap();
+    let (url, store, task) = server(&tmp.path().join("server.db"), true).await;
+    // More machines than units also exercises completed empty shard containers.
+    for index in 1..=4 {
+        let output = command(&manifest, &tmp.path().join(format!("shard-{index}.db")))
+            .args([
+                "--shard",
+                &format!("{index}/4"),
+                "--run-id",
+                "failure-and-empty",
+            ])
+            .env("DUHEM_HUB_URL", &url)
+            .env("DUHEM_HUB_TOKEN", "test-token")
+            .output()
+            .unwrap();
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("auto-send:"),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let parent = store
+        .list_runs()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|run| run.lineage.parent_run_id.is_none())
+        .unwrap();
+    let reader = EvidenceReader::new(Arc::new(
+        SqliteStore::open_read_only(tmp.path().join("server.db"))
+            .await
+            .unwrap(),
+    ));
+    let detail = reader.run_detail(&parent.run_id).await.unwrap().unwrap();
+    assert_eq!(
+        serde_json::to_value(detail.verdict).unwrap(),
+        baseline["verdict"]
+    );
+    assert_eq!(detail.verdict, Some(VerdictState::Fail));
+    assert_eq!(detail.check_totals.unwrap().total, 2);
+    assert_eq!(detail.shards.unwrap().arrived.len(), 4);
+    assert_eq!(
+        detail.layers.iter().map(|layer| layer.tests).sum::<u64>(),
+        3
+    );
+    let failure = reader
+        .failure_envelope(&parent.run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(failure.failing.len(), 1);
+    let check = &failure.failing[0];
+    assert_eq!(check.criterion_id, "A");
+    assert_eq!(check.check_id, "a");
+    assert_eq!(check.verdict, Some(VerdictState::Fail));
+    assert_eq!(check.assertions.len(), 1);
+    assert_eq!(check.assertions[0].state, VerdictState::Fail);
+    // The same assertion-only leaf must remain visible when requested directly.
+    let leaf_failure = reader
+        .failure_envelope(check.run_id.as_deref().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(leaf_failure.failing.len(), 1);
+    assert_eq!(
+        leaf_failure.failing[0].assertions[0].state,
+        VerdictState::Fail
+    );
+    assert_eq!(failure.failing_native.len(), 1);
+    assert!(failure.missing_shards.is_empty());
+    task.abort();
 }

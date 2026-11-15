@@ -162,12 +162,6 @@ impl CliCheckFilter {
         }
     }
 
-    pub fn without_criteria(&self) -> Self {
-        Self {
-            patterns: Vec::new(),
-        }
-    }
-
     pub fn has_criterion_filters(&self) -> bool {
         self.patterns.iter().any(|pattern| pattern.native.is_none())
     }

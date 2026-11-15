@@ -653,10 +653,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                     }
                 }
                 let (selected_native, _) = native_selection(check_filter.as_ref(), native);
-                suite_native = match session
-                    .run_native(&selected_native, &suite_secrets, true)
-                    .await
-                {
+                suite_native = match session.run_native(&selected_native, &suite_secrets).await {
                     Ok(results) => results,
                     Err(error) => {
                         eprintln!("suite native runs: {error}");
@@ -672,10 +669,6 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             }
         }
     }
-    let selected_root_native = match &scope {
-        Scope::Manifest { native, .. } => native_selection(check_filter.as_ref(), native).0,
-        Scope::SingleLeaf => Vec::new(),
-    };
     let suite_managed = matches!(
         &scope,
         Scope::Manifest {

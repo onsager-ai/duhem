@@ -9,9 +9,11 @@
 //! reporters and CI scripts.
 //!
 //! Resolution ladder:
-//! 1. `DUHEM_DASHBOARD_URL` — explicit operator intent (a remote or
-//!    reverse-proxied dashboard); trusted without probing.
-//! 2. `dashboard.addr` next to the evidence DB — written by a serving
+//! 1. `DUHEM_SERVER_URL` — explicit operator intent (a remote server); trusted
+//!    without probing.
+//! 2. Deprecated `DUHEM_DASHBOARD_URL` — legacy explicit URL; trusted without
+//!    probing and warned once per process.
+//! 3. `dashboard.addr` next to the evidence DB — written by a serving
 //!    dashboard on bind (`duhem_evidence::dashboard_addr_path`),
 //!    removed on shutdown. Probed with a short TCP connect so a stale
 //!    file after a crash stays silent.
@@ -127,17 +129,22 @@ mod tests {
     // race each other's env state.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    fn with_env<R>(value: Option<&str>, f: impl FnOnce() -> R) -> R {
+    fn with_env<R>(new: Option<&str>, old: Option<&str>, f: impl FnOnce() -> R) -> R {
         let _guard = ENV_LOCK.lock().unwrap();
-        // SAFETY: guarded by ENV_LOCK; no other test mutates this var.
+        // SAFETY: guarded by ENV_LOCK; no other test mutates these vars.
         unsafe {
-            match value {
-                Some(v) => std::env::set_var(URL_ENV_OVERRIDE, v),
-                None => std::env::remove_var(URL_ENV_OVERRIDE),
+            for (key, value) in [(URL_ENV_OVERRIDE, new), (LEGACY_URL_ENV, old)] {
+                match value {
+                    Some(v) => std::env::set_var(key, v),
+                    None => std::env::remove_var(key),
+                }
             }
         }
         let out = f();
-        unsafe { std::env::remove_var(URL_ENV_OVERRIDE) };
+        unsafe {
+            std::env::remove_var(URL_ENV_OVERRIDE);
+            std::env::remove_var(LEGACY_URL_ENV);
+        }
         out
     }
 
@@ -145,9 +152,11 @@ mod tests {
     fn env_override_wins_and_is_normalized() {
         let tmp = tempfile::tempdir().unwrap();
         let db = tmp.path().join("duhem.db");
-        let base = with_env(Some("http://dash.example:9999/"), || {
-            resolve_dashboard_base(&db)
-        });
+        let base = with_env(
+            Some("http://dash.example:9999/"),
+            Some("http://old.example"),
+            || resolve_dashboard_base(&db),
+        );
         assert_eq!(base.as_deref(), Some("http://dash.example:9999"));
     }
 
@@ -155,7 +164,7 @@ mod tests {
     fn no_env_no_addr_file_is_silent() {
         let tmp = tempfile::tempdir().unwrap();
         let db = tmp.path().join("duhem.db");
-        let base = with_env(None, || resolve_dashboard_base(&db));
+        let base = with_env(None, None, || resolve_dashboard_base(&db));
         assert_eq!(base, None);
     }
 
@@ -169,12 +178,12 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         std::fs::write(&addr_file, format!("http://{addr}\n")).unwrap();
-        let base = with_env(None, || resolve_dashboard_base(&db));
+        let base = with_env(None, None, || resolve_dashboard_base(&db));
         assert_eq!(base, Some(format!("http://{addr}")));
 
         // Listener gone (crash leftover) → the probe defuses the file.
         drop(listener);
-        let base = with_env(None, || resolve_dashboard_base(&db));
+        let base = with_env(None, None, || resolve_dashboard_base(&db));
         assert_eq!(base, None);
     }
 

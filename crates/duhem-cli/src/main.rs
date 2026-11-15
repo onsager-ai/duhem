@@ -1,7 +1,7 @@
 //! `duhem` — the command-line entry point.
 //!
 //! Phase-0 skeleton. The free CLI binary (`docs/duhem-spec.md` §13)
-//! offers `init`, `validate`, `resolve`, `run`, `export`, and `dashboard`.
+//! offers `init`, `validate`, `resolve`, `run`, `export`, and `server`.
 //! `init` (issue #48) scaffolds a runnable Verification Definition
 //! skeleton; the `run` subcommand carries the authoring-ergonomics
 //! surface (`--filter`, `--db`, `--reporter`) per the spec on issue
@@ -277,10 +277,10 @@ enum Cmd {
         /// Suppress live progress even on a TTY (spec #299).
         #[arg(long = "no-live", default_value_t = false)]
         no_live: bool,
-        /// Open the dashboard's live run page in a browser (spec
-        /// #305), once per invocation. Needs a resolvable dashboard —
-        /// a serving `duhem dashboard` on this store, or
-        /// DUHEM_DASHBOARD_URL; without one it warns and the run
+        /// Open the server's live run page in a browser (spec
+        /// #305), once per invocation. Needs a resolvable server —
+        /// a serving `duhem server` on this store, or
+        /// DUHEM_SERVER_URL; without one it warns and the run
         /// proceeds. DUHEM_OPENER overrides the platform opener.
         #[arg(long = "watch", default_value_t = false)]
         watch: bool,
@@ -327,9 +327,9 @@ enum Cmd {
         #[arg(long = "out", value_name = "DIR")]
         out: Option<PathBuf>,
     },
-    /// Ship one run's bundle to a hub ingest endpoint (#194) —
+    /// Ship one run's bundle to the server ingest endpoint (#194) —
     /// replication keyed by content hash, not dual-truth. No-op
-    /// success with `--if-configured` when no hub is set.
+    /// success with `--if-configured` when no server is set.
     Ship {
         /// Run id (ULID) to ship.
         run_id: String,
@@ -337,11 +337,12 @@ enum Cmd {
         /// copy's project store.
         #[arg(long = "db", value_name = "PATH")]
         db: Option<PathBuf>,
-        /// Ingest URL. Defaults to $DUHEM_SERVER_URL + /api/ingest;
-        /// the bearer token comes from $DUHEM_SERVER_TOKEN.
+        /// Explicit ingest URL. Defaults to $DUHEM_SERVER_URL + /api/ingest
+        /// (or the deprecated full-URL $DUHEM_HUB_URL); the bearer
+        /// token comes from $DUHEM_SERVER_TOKEN.
         #[arg(long = "hub-url", value_name = "URL")]
-        hub_url: Option<String>,
-        /// Exit 0 (skip) instead of erroring when no hub URL is
+        server_url: Option<String>,
+        /// Exit 0 (skip) instead of erroring when no server URL is
         /// configured — the CI ship step runs unconditionally.
         #[arg(long = "if-configured", default_value_t = false)]
         if_configured: bool,
@@ -414,7 +415,7 @@ fn main() -> ExitCode {
         Some(Cmd::Ship {
             run_id,
             db,
-            hub_url,
+            server_url,
             if_configured,
         }) => {
             let rt = tokio::runtime::Builder::new_multi_thread()
@@ -424,7 +425,7 @@ fn main() -> ExitCode {
             rt.block_on(export_cmd::run_ship(
                 &run_id,
                 db.as_deref(),
-                hub_url.as_deref(),
+                server_url.as_deref(),
                 if_configured,
             ))
         }

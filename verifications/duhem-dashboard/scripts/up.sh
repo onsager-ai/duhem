@@ -11,7 +11,7 @@
 #      production evidence store (#189), pinned to the fixed id
 #      `dashboard-fixture-run` via `--run-id` so the VD's API/SPA/SSE
 #      URLs are deterministic.
-#   2. Launch `duhem dashboard` (serve mode) over that store on a
+#   2. Launch `duhem server` (serve mode) over that store on a
 #      fixed port, backgrounded so it survives this script.
 #
 # Holistic posture (`docs/duhem-spec.md` §8): the served data is a real
@@ -25,7 +25,7 @@
 # inputs:
 #   - DUHEM_BIN             : `duhem` binary under test (default: `duhem`
 #                             on PATH). CI points it at the built artifact.
-#                             `duhem dashboard` resolves the sibling
+#                             `duhem server` resolves the sibling
 #                             `duhem-dashboard` next to this binary.
 #   - DUHEM_DASHBOARD_PORT  : listen port (default 7878). MUST match the
 #                             port baked into the VD's URL inputs.
@@ -83,12 +83,12 @@ echo "up.sh: producing fixture run with '$DUHEM_BIN run fixture/dashboard-fixtur
 echo "up.sh: fixture run recorded as run id '$RUN_ID' in $DB"
 
 # --- 2. Launch the dashboard (serve mode) -----------------------------
-# `duhem dashboard` is a thin wrapper that spawns the `duhem-dashboard`
+# `duhem server` is a thin wrapper that spawns the `duhem-dashboard`
 # server as a child, so killing the wrapper alone would orphan the
 # listener. Start it in its own process group (`setsid`) and record the
 # leader pid; `down.sh` signals the whole group so both die together.
-echo "up.sh: starting duhem dashboard on port $PORT (store: $DB)"
-setsid "$DUHEM_BIN" dashboard --db "$DB" --port "$PORT" --host 127.0.0.1 \
+echo "up.sh: starting duhem server on port $PORT (store: $DB)"
+setsid "$DUHEM_BIN" server --db "$DB" --port "$PORT" --host 127.0.0.1 \
   >"$LOG" 2>&1 &
 echo $! > "$PID_FILE"
 

@@ -25,7 +25,7 @@ Prebuilt binaries are also attached to each
 duhem init        # scaffold a Verification Definition
 duhem validate    # validate VDs / manifest against the schema
 duhem run         # run a verification and emit a verdict
-duhem dashboard   # serve / export the run dashboard
+duhem server    # run the server / export a static site
 duhem --version
 ```
 

@@ -71,8 +71,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   # Every completed invocation replicates its tree; delivery never gates CI.
-  DUHEM_HUB_URL: ${{ secrets.DUHEM_HUB_URL }}
-  DUHEM_HUB_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
+  DUHEM_SERVER_URL: ${{ secrets.DUHEM_HUB_URL }}
+  DUHEM_SERVER_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
 
 jobs:
   # Per-lane path scoping. Workflow-level `on.paths` only decides
@@ -296,7 +296,7 @@ jobs:
           npx --yes playwright install --with-deps chromium
 
       # `scripts/up.sh` reads DUHEM_BIN to produce the fixture run and to
-      # launch `duhem dashboard` (which resolves the sibling
+      # launch `duhem server` (which resolves the sibling
       # `duhem-dashboard`). A non-pass verdict exits non-zero.
       - name: Run duhem-dashboard regression VD
         env:

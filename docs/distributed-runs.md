@@ -8,23 +8,23 @@ the server computes coverage and serves an aggregated view.
 
 ## Send shards to a server
 
-Start an explicitly writable dashboard (the default remains read-only):
+Start an explicitly writable server (the default remains read-only):
 
 ```sh
-duhem dashboard --db collected.db --ingest --ingest-token "$DUHEM_HUB_TOKEN"
+duhem server --db collected.db --ingest --ingest-token "$DUHEM_SERVER_TOKEN"
 ```
 
-On every machine, point the existing hub setting at its ingest route:
+On every machine, set the server base URL and token:
 
 ```sh
-export DUHEM_HUB_URL=https://verification.example/api/ingest
-export DUHEM_HUB_TOKEN='<the server ingest token>'
+export DUHEM_SERVER_URL=https://verification.example
+export DUHEM_SERVER_TOKEN='<the server ingest token>'
 duhem run verifications/sharding-example --shard 1/2 --run-id example-invocation
 # The other machine uses --shard 2/2 with the same --run-id.
 ```
 
-For a local server use `http://127.0.0.1:7878/api/ingest`. Listening on a remote
-interface requires `--host` plus a nonempty `--ingest-token`; terminate TLS in
+For a local server use `http://127.0.0.1:7878`. Duhem posts to `/api/ingest`
+under that base URL. Listening on a remote interface requires `--host` plus a nonempty `--ingest-token`; terminate TLS in
 front of a remotely exposed server. No token is required for explicitly enabled
 loopback ingest. Each machine uploads parents and descendants after execution;
 ordinary unsharded runs upload too. No manual `ship` CI step is needed. Failed
@@ -40,7 +40,7 @@ Logical parents have no heartbeat and are never classified as orphaned.
 
 After 30 minutes since the last distinct shard's server receipt, missing work
 becomes `inconclusive:missing_observation`. Configure this read-time grace with
-`duhem dashboard --shard-timeout 1800` (seconds; zero expires immediately).
+`duhem server --shard-timeout 1800` (seconds; zero expires immediately).
 There is no background job or CI close signal. A late shard can complete the
 coverage and resolve the verdict on the next read; identical resends never reset
 the window. Old receipts without server timestamps use the recorded shard start.
@@ -92,8 +92,10 @@ keeps these components unchanged, include your attempt identifier explicitly.
 
 CI's own shard job statuses are the merge gate: a failed or missing shard fails
 the pipeline. A Duhem server's combined view is informational and does not
-replace that gate. Set `DUHEM_HUB_URL` and `DUHEM_HUB_TOKEN` from repository
-secrets when you want runs sent to a shared server; omit both when you do not.
+replace that gate. Set `DUHEM_SERVER_URL` (the base URL) and
+`DUHEM_SERVER_TOKEN` from repository secrets when you want runs sent to a shared
+server; omit both when you do not. Deprecated `DUHEM_HUB_URL` still takes a full
+ingest URL, and `DUHEM_HUB_TOKEN` remains its token alias.
 
 ### GitHub Actions
 
@@ -110,8 +112,8 @@ jobs:
     env:
       DUHEM_SHARD: ${{ matrix.shard }}/2
       DUHEM_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-      DUHEM_HUB_URL: ${{ secrets.DUHEM_HUB_URL }}
-      DUHEM_HUB_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
+      DUHEM_SERVER_URL: ${{ secrets.DUHEM_HUB_URL }}
+      DUHEM_SERVER_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - name: Run verification

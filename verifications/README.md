@@ -116,7 +116,7 @@ Duhem usage looks like — and, being Duhem-on-Duhem, it catches
 | Directory | Drives | Real target | Spec |
 |-----------|--------|-------------|:----:|
 | [`duhem-cli`](duhem-cli/) | The shipped `duhem` binary via `cli/invoke` — its black-box command-line contract | the `duhem` build under test | #148 |
-| [`duhem-dashboard`](duhem-dashboard/) | The `duhem dashboard` web surface — embedded SPA + JSON API + live SSE — over a real run's evidence | a dashboard server on `:7878` (`up:`/`down:` hooks) | #148 |
+| [`duhem-dashboard`](duhem-dashboard/) | The `duhem server` web surface — embedded SPA + JSON API + live SSE — over a real run's evidence | a dashboard server on `:7878` (`up:`/`down:` hooks) | #148 |
 | [`db-task-state`](db-task-state/) | `db/seed` + `db/query` — asserts a task-lifecycle fact that lives in **database state** | a seeded DB (`up:` hook) | #101 |
 
 ## Where product VDs live

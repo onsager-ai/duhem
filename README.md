@@ -32,7 +32,7 @@ Crawlab Pro gates its `:edge` image on a Duhem suite before promoting to `:stabl
   <em>A runnable reproduction — <a href="demo/self-masking/"><code>demo/self-masking/</code></a>: <code>/health</code> stays green while the web front breaks, so a real <code>duhem run</code> fails, then passes once the fix ships.</em>
 </p>
 
-When a check fails, `duhem dashboard` shows which assertion did not hold — expected beside observed — next to the steps and evidence the run recorded:
+When a check fails, `duhem server` shows which assertion did not hold — expected beside observed — next to the steps and evidence the run recorded:
 
 <p align="center">
   <img src="docs/images/dashboard-failing-run.png" alt="The Duhem dashboard on a failing run: the run header shows a fail verdict, the results tree marks criteria AC-1 and AC-2 as pass and AC-3 as fail, and the selected check AC-3.1 shows its failed assertion with expected &quot;7 / 7&quot; beside observed &quot;6 / 6&quot;, above the step timeline." width="800">
@@ -142,9 +142,9 @@ duhem validate   Parse and structurally validate a Verification Definition file
 duhem resolve    Print the fully composed document without executing it
 duhem run        Execute a Verification Definition end-to-end
 duhem browser    Provision the Playwright sidecar + Chromium for ui/* checks
-duhem dashboard  Browse run evidence in a read-only web dashboard (serve + static export)
+duhem server    Run the server to browse run evidence (serve + static export)
 duhem export     Export one run from the store as a self-contained bundle
-duhem ship       Ship a run bundle to a hub ingest endpoint (content-hash replication)
+duhem ship       Ship a run bundle to the server (content-hash replication)
 duhem mcp        Serve the action contract + validate over MCP (stdio) for AI authoring
 duhem --version  Print the CLI and schema version
 ```

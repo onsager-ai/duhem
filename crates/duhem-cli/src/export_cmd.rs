@@ -21,10 +21,13 @@ static DEPRECATION_WARNED: std::sync::OnceLock<
     std::sync::Mutex<std::collections::HashSet<&'static str>>,
 > = std::sync::OnceLock::new();
 
-pub fn warn_deprecated_env(old: &'static str, new: &'static str) {
+fn mark_deprecated_env(old: &'static str) -> bool {
     let warned = DEPRECATION_WARNED.get_or_init(Default::default);
-    let mut warned = warned.lock().unwrap();
-    if warned.insert(old) {
+    warned.lock().unwrap().insert(old)
+}
+
+pub fn warn_deprecated_env(old: &'static str, new: &'static str) {
+    if mark_deprecated_env(old) {
         eprintln!("warning: {old} is deprecated; use {new}");
     }
 }
@@ -235,6 +238,19 @@ async fn ship_tree(
 }
 
 /// Delivery is best-effort and never enters the verdict or reporter fold.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deprecated_env_warning_is_once_per_name_and_process() {
+        assert!(mark_deprecated_env("OLD_URL_TEST"));
+        assert!(!mark_deprecated_env("OLD_URL_TEST"));
+        assert!(mark_deprecated_env("OLD_TOKEN_TEST"));
+        assert!(!mark_deprecated_env("OLD_TOKEN_TEST"));
+    }
+}
+
 pub async fn auto_send(store: &dyn duhem_evidence::Store, roots: &[String]) {
     let Some(url) = upload_url(None) else {
         return;

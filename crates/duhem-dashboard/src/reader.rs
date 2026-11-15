@@ -167,7 +167,7 @@ impl EvidenceReader {
         let mut detail = build_run_detail(&run);
         detail.children = children;
         if tree_wide {
-            detail.verdict = tree_verdict(&records, &tree_ids);
+            detail.verdict = tree_verdict(self.store.as_ref(), &records, &tree_ids).await?;
         }
         Ok(Some(detail))
     }
@@ -337,7 +337,7 @@ impl EvidenceReader {
         let tree_ids = descendant_run_ids(run_id, &records);
         let tree_wide = tree_ids.len() > 1;
         let verdict = if tree_wide {
-            tree_verdict(&records, &tree_ids)
+            tree_verdict(self.store.as_ref(), &records, &tree_ids).await?
         } else {
             run.record.verdict
         };

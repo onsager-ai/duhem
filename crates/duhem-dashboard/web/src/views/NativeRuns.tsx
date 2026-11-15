@@ -24,7 +24,7 @@ export function NativeFailures({ failures }: { failures: FailingNative[] }) {
             {failure.native_id}
           </Link>
           {" · "}{failure.outcome}{" · "}{failure.required ? "Required" : "Diagnostic"}
-          {failure.detail && <p className="break-words">{failure.detail}</p>}
+          {failure.detail && <p className="whitespace-pre-wrap break-words">{failure.detail}</p>}
           <NativeEvidence evidence={failure.evidence} />
         </li>
       ))}
@@ -50,7 +50,7 @@ export function NativeRuns({ run }: { run: RunDetail }) {
                 <span>{formatDuration(native.duration_ms)}</span>
               </p>
               <p>{native.tests} tests{native.counts && ` · ${native.counts.passed} passed · ${native.counts.failed} failed · ${native.counts.errored} errored · ${native.counts.skipped} skipped`}</p>
-              {native.detail && <p className="break-words">{native.detail}</p>}
+              {native.detail && <p className="whitespace-pre-wrap break-words">{native.detail}</p>}
               <NativeEvidence evidence={native.evidence} />
               {!!native.failing_tests?.length && (
                 <ul aria-label={`Failing tests for ${native.id}`} className="space-y-2">

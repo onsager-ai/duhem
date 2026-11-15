@@ -90,7 +90,7 @@ fn ship_posts_the_bundle_with_hash_and_token() {
     let out = Command::new(bin())
         .args(["ship", &run_id, "--db"])
         .arg(&db)
-        .args(["--hub-url", &url])
+        .args(["--server-url", &url])
         .env("DUHEM_SERVER_URL", "http://127.0.0.1:1/configured")
         .env("DUHEM_SERVER_TOKEN", "sekret")
         .env("DUHEM_HUB_TOKEN", "old-token")

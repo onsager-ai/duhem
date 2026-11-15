@@ -112,7 +112,7 @@ pub async fn run_ship(
             println!("ship: no server configured ({SERVER_URL_ENV} unset); skipping");
             return ExitCode::SUCCESS;
         }
-        eprintln!("ship: no server URL — pass --hub-url or set {SERVER_URL_ENV}");
+        eprintln!("ship: no server URL — pass --server-url or set {SERVER_URL_ENV}");
         return ExitCode::FAILURE;
     };
 
@@ -146,6 +146,9 @@ pub async fn run_ship(
 }
 
 /// The ingest client (#194): one POST of the canonical envelope.
+/// Idempotency: the `X-Duhem-Content-Hash` header carries the
+/// bundle's hash; a server that has it already answers 2xx without
+/// re-storing. 2xx = shipped.
 pub async fn ship_bundle(
     bundle: &RunBundle,
     url: &str,
@@ -169,7 +172,7 @@ pub async fn ship_bundle(
     }
     let res = req.send().await.map_err(|e| e.without_url().to_string())?;
     if !res.status().is_success() {
-        return Err(format!("hub answered {}", res.status()));
+        return Err(format!("server answered {}", res.status()));
     }
     Ok(hash)
 }
@@ -237,7 +240,6 @@ async fn ship_tree(
     Ok(last_hash)
 }
 
-/// Delivery is best-effort and never enters the verdict or reporter fold.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,6 +253,7 @@ mod tests {
     }
 }
 
+/// Delivery is best-effort and never enters the verdict or reporter fold.
 pub async fn auto_send(store: &dyn duhem_evidence::Store, roots: &[String]) {
     let Some(url) = upload_url(None) else {
         return;

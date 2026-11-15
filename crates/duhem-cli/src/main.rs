@@ -340,7 +340,7 @@ enum Cmd {
         /// Explicit ingest URL. Defaults to $DUHEM_SERVER_URL + /api/ingest
         /// (or the deprecated full-URL $DUHEM_HUB_URL); the bearer
         /// token comes from $DUHEM_SERVER_TOKEN.
-        #[arg(long = "hub-url", value_name = "URL")]
+        #[arg(long = "server-url", alias = "hub-url", value_name = "URL")]
         server_url: Option<String>,
         /// Exit 0 (skip) instead of erroring when no server URL is
         /// configured — the CI ship step runs unconditionally.

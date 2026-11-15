@@ -343,7 +343,9 @@ impl Engine {
                             && def.native.is_empty()
                     });
             writer
-                .append(EventPayload::ClaimScopeDeclared { scope })
+                .append(EventPayload::ClaimScopeDeclared {
+                    scope: Box::new(scope),
+                })
                 .await?;
             if empty_shard {
                 writer

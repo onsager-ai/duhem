@@ -254,7 +254,8 @@ pub enum EventPayload {
     RunHeartbeat,
     /// The immutable authored selection, before lifecycle or checks execute.
     ClaimScopeDeclared {
-        scope: duhem_summary::ClaimScope,
+        // Boxed: the claim scope is far larger than the other variants.
+        scope: Box<duhem_summary::ClaimScope>,
     },
     EnvUpStarted {
         command: String,

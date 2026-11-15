@@ -320,10 +320,10 @@ impl SuiteEnvironment {
     ) -> Result<(), EngineError> {
         self.writer
             .append(duhem_evidence::EventPayload::ClaimScopeDeclared {
-                scope: duhem_summary::ClaimScope {
+                scope: Box::new(duhem_summary::ClaimScope {
                     distributed,
                     ..Default::default()
-                },
+                }),
             })
             .await?;
         Ok(())

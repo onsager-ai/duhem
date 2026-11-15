@@ -580,26 +580,13 @@ impl Engine {
             down_result?;
 
             let mut run_verdict = aggregate_run(criterion_verdicts);
-            let selected_scope = self.declared_claim_scope(def);
-            let native_only_selection = selected_scope.checks.selected == 0
-                && !native.is_empty()
-                && !self.filter_patterns.is_empty()
-                && self
-                    .filter_patterns
-                    .iter()
-                    .all(|pattern| pattern.starts_with("native:"));
-            let native_only_vacuous = native_only_selection || self.native_only_vacuous_body;
-            if native_only_selection {
-                run_verdict.state = VerdictState::Pass;
-            }
-            let body = if native_only_vacuous {
-                VerdictState::Pass
-            } else {
-                run_verdict.state
-            };
+            // A native-only selection (set by the CLI) judges no criteria: the
+            // body is vacuous and the gate comes from the selected native runs.
+            let native_only_vacuous = self.native_only_vacuous_body;
             if native_only_vacuous {
                 run_verdict.state = VerdictState::Pass;
             }
+            let body = run_verdict.state;
             if cleanup.iter().any(|failure| failure.required) {
                 run_verdict.state = VerdictState::Fail;
             }

@@ -17,6 +17,7 @@ import {
 import { lifecycleFailure, lifecycleHref, lifecycleScopePath } from "../lifecycle";
 import { formatDuration, formatStartedAt } from "../ui";
 import { RunScaffold } from "./RunScaffold";
+import { NativeFailures, NativeRuns } from "./NativeRuns";
 
 // #280 Phase 2/3: an Allure-style status roll-up for a run — a donut of
 // the check verdicts plus a count legend. Mechanically derived from the
@@ -206,10 +207,10 @@ export function RunSummary({ run }: { run: RunDetail }) {
     return () => {
       live = false;
     };
-  }, [run.run_id, run.children?.length]);
+  }, [run.run_id, run.children?.length, run.native?.length, run.status]);
   return (
     <div className="min-w-0 max-w-full space-y-5" data-testid="run-summary">
-      {run.body_verdict && <p className="border-l-2 border-fail px-4 py-3 text-sm">Gate: {run.verdict}. Body: {run.body_verdict}. Required fixture cleanup failed.</p>}
+      {run.body_verdict && <p className="border-l-2 border-fail px-4 py-3 text-sm">Gate: {run.verdict}. Body: {run.body_verdict}. Required verification did not pass.</p>}
       {run.setup_aborted && (
         <div className="border-l-2 border-fail bg-fail/5 px-4 py-3 text-sm text-fail">
           Setup aborted — no checks ran. The verdict reflects the abort, not the
@@ -260,7 +261,9 @@ export function RunSummary({ run }: { run: RunDetail }) {
           <h3 id="run-failures-heading" className="text-sm font-semibold">
             Failures
           </h3>
-          {failureEnvelope?.failing.length ? (
+          {failureEnvelope && (failureEnvelope.failing.length > 0 || (failureEnvelope.failing_native?.length ?? 0) > 0) ? (
+            <>
+            <NativeFailures failures={failureEnvelope.failing_native ?? []} />
             <ol aria-label="Failures" className="space-y-2">
               {failureEnvelope.failing.map((failure, index) => {
                 const childId = failure.run_id ?? run.run_id;
@@ -278,6 +281,7 @@ export function RunSummary({ run }: { run: RunDetail }) {
                 );
               })}
             </ol>
+            </>
           ) : (
             // Only a loaded envelope may claim absence; loading and fetch
             // errors must not read as "no failures".
@@ -291,6 +295,7 @@ export function RunSummary({ run }: { run: RunDetail }) {
           )}
         </section>
       )}
+      <NativeRuns run={run} />
       <LifecycleList runId={run.run_id} blocks={(run.lifecycle ?? []).filter((block) => block.scope.length <= 1)} />
       <ClaimScopeNotice scope={run.claim_scope} />
 

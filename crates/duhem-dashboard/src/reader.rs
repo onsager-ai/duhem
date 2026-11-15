@@ -28,6 +28,7 @@ use crate::model::{
 };
 
 mod diff;
+mod native;
 mod run_detail;
 mod tree;
 
@@ -165,6 +166,7 @@ impl EvidenceReader {
             Vec::new()
         };
         let mut detail = build_run_detail(&run);
+        native::populate(self, &run, &tree_ids, &mut detail).await?;
         detail.children = children;
         if tree_wide {
             detail.verdict = tree_verdict(self.store.as_ref(), &records, &tree_ids).await?;
@@ -342,6 +344,7 @@ impl EvidenceReader {
             run.record.verdict
         };
         let mut failing = Vec::new();
+        let mut failing_native = Vec::new();
         let mut gated_checks = Vec::new();
         for member_id in tree_ids {
             let member = if member_id == run_id {
@@ -352,6 +355,7 @@ impl EvidenceReader {
                 };
                 member
             };
+            failing_native.extend(native::failures(&member));
             let proj = project_run(&member);
             for c in &proj.checks {
                 if c.verdict == Some(VerdictState::Pass) {
@@ -381,6 +385,7 @@ impl EvidenceReader {
             verification: verification_name(&run.record.verification),
             verdict,
             failing,
+            failing_native,
         }))
     }
 
@@ -821,6 +826,8 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         criteria,
         duration_ms: run.duration_ms(),
         children: Vec::new(),
+        native: Vec::new(),
+        layers: Vec::new(),
     }
 }
 

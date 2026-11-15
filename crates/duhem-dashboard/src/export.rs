@@ -67,15 +67,56 @@ pub async fn export(reader: &EvidenceReader, out: &Path) -> anyhow::Result<Expor
     Ok(stats)
 }
 
+async fn export_evidence(
+    reader: &EvidenceReader,
+    out: &Path,
+    run_id: &str,
+    evidence: &mut [crate::model::ArtifactRef],
+    stats: &mut ExportStats,
+) -> anyhow::Result<()> {
+    for artifact in evidence {
+        if let Some((bytes, mime)) = reader.artifact(run_id, &artifact.id).await? {
+            let rel = format!(
+                "run/{run_id}/artifact/{}.{}",
+                artifact.id,
+                extension_for(mime)
+            );
+            if !out.join(&rel).exists() {
+                stats.artifacts += 1;
+                write_file(out, &rel, &bytes)?;
+            }
+            artifact.url = rel;
+        }
+    }
+    Ok(())
+}
+
 async fn export_run(
     reader: &EvidenceReader,
     out: &Path,
     run_id: &str,
     stats: &mut ExportStats,
 ) -> anyhow::Result<()> {
-    let Some(detail) = reader.run_detail(run_id).await? else {
+    let Some(mut detail) = reader.run_detail(run_id).await? else {
         return Ok(());
     };
+    for native in &mut detail.native {
+        export_evidence(reader, out, &native.run_id, &mut native.evidence, stats).await?;
+    }
+    if let Some(mut failure) = reader.failure_envelope(run_id).await? {
+        for check in &mut failure.failing {
+            let source = check.run_id.as_deref().unwrap_or(run_id);
+            export_evidence(reader, out, source, &mut check.artifacts, stats).await?;
+        }
+        for native in &mut failure.failing_native {
+            export_evidence(reader, out, &native.run_id, &mut native.evidence, stats).await?;
+        }
+        write_file(
+            out,
+            &format!("api/runs/{run_id}/failure.json"),
+            &serde_json::to_vec_pretty(&failure)?,
+        )?;
+    }
     write_file(
         out,
         &format!("api/runs/{run_id}.json"),
@@ -108,11 +149,13 @@ async fn export_run(
                 let ext = extension_for(sniff_content_type(&bytes));
                 debug_assert_eq!(mime, sniff_content_type(&bytes));
                 let rel = format!("run/{run_id}/artifact/{}.{ext}", artifact.id);
-                write_file(out, &rel, &bytes)?;
+                if !out.join(&rel).exists() {
+                    write_file(out, &rel, &bytes)?;
+                    stats.artifacts += 1;
+                }
                 // Relative to the export root — the SPA fetches it
                 // relative to the document base.
                 artifact.url = rel;
-                stats.artifacts += 1;
             }
             // Replay embeds resolved media refs in addition to the flat
             // artifact list. Rewrite both so static exports are as complete

@@ -92,12 +92,11 @@ seconds are rounded to milliseconds. Skipped tests count without failing the run
 Passing requires the expected exit code (zero by default), all output expectations,
 a readable and valid report, and no failed or errored tests. An unexpected exit
 fails even with an all-pass report. A missing or malformed report is inconclusive,
-even on exit zero; timeout is also inconclusive. `format: ctrf` remains rejected
-with `ctrf not yet supported`.
+even on exit zero; timeout is also inconclusive.
 
 For report runs, `native[].tests` is the testcase total and `counts` contains
 `passed`, `failed`, `errored`, and `skipped`. `report_path` records the declared
-path, `report_blob_sha256` addresses the masked source XML, and
+path, `report_blob_sha256` addresses the masked source report, and
 `results_blob_sha256` addresses a JSON array of all normalized tests. Each result
 has `test_id`, optional `classname`, `name`, optional `file`, `status`
 (`pass|fail|skip|error`), `duration_ms`, and optional `message`. The stable test ID
@@ -110,3 +109,22 @@ failure names and the first message line, followed by the number of further
 failures. Layer totals use actual test statuses, with separate `errored` and
 `skipped` counts when nonzero; a command crash still blocks the gate even when
 all reported tests passed. Report fields are omitted for exit-code-only runs.
+
+## CTRF reports
+
+Use `report: {format: ctrf, path: ctrf.json}` for UTF-8 JSON reports. The parser
+is pinned to [CTRF v0.2.0](https://github.com/ctrf-io/ctrf/blob/v0.2.0/schema/ctrf.schema.json).
+It reads `results.tests[]`: required `name`, `status`, and integer `duration`
+(milliseconds), plus optional `message`, `trace`, `filePath` and `suite` hierarchy.
+`passed` → pass, `failed` → fail, `skipped` and `pending` → skip, and `other` → error.
+Unknown statuses, missing required test fields and malformed values make the report
+inconclusive. Counts come from test records; producer summary totals are ignored.
+Unused producer metadata is ignored; this is ingestion, not full schema validation.
+
+Missing `specVersion` is accepted for producers that omit it. When present it must
+be a three-part numeric version; a major newer than the pinned major (0) makes the
+report inconclusive with an explicit version detail. `reportFormat`, when present,
+must be `CTRF`. A suite array is JSON-encoded as the normalized `classname` to
+preserve its hierarchy in stable test IDs. Message and trace are combined and
+masked through the same evidence pipeline as JUnit. Counts, gate behavior, blobs
+and bounded failure navigation are shared by both formats.

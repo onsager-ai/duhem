@@ -121,6 +121,7 @@ pub(crate) async fn run_native(
                         writer,
                         &run.id,
                         &cwd.join(&report.path),
+                        report.format,
                         &mut result,
                     )
                     .await?;

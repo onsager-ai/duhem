@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] native reports accept CTRF v0.2.0 with shared counts, masked evidence and failure navigation. (#649)
+
 - [additive] Dashboard run pages show native runs and layer totals; failure envelopes index native failures and evidence, and suite native outcomes gate tree verdicts. (#649)
 
 - [additive] Native runs parse JUnit XML reports, gate on test failures and report availability, and expose per-status counts, bounded masked failures and full report/result evidence blobs. (#649)

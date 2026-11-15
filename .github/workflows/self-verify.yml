@@ -101,6 +101,72 @@ jobs:
               - 'verifications/duhem-dashboard/**'
               - '.github/workflows/self-verify.yml'
 
+  sharding-example:
+    name: sharding example (${{ matrix.shard }}/2)
+    needs: changes
+    if: ${{ needs.changes.outputs.cli == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        shard: [1, 2]
+    env:
+      DUHEM_SHARD: ${{ matrix.shard }}/2
+      DUHEM_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: Build duhem CLI
+        run: cargo build --release -p duhem-cli
+      - name: Run sharding example
+        run: |
+          ./target/release/duhem run verifications/sharding-example \
+            --db "${RUNNER_TEMP}/sharding-example-${{ matrix.shard }}.db" \
+            --reporter json > "${RUNNER_TEMP}/shard-${{ matrix.shard }}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sharding-summary-${{ matrix.shard }}
+          path: ${{ runner.temp }}/shard-${{ matrix.shard }}.json
+          if-no-files-found: error
+
+  verify-sharding-partition:
+    name: verify sharding partition
+    needs: sharding-example
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sharding-summary-*
+          path: ${{ runner.temp }}/shards
+          merge-multiple: true
+      - name: Check disjoint complete partition
+        env:
+          SHARD_SUMMARY_DIR: ${{ runner.temp }}/shards
+        run: |
+          python3 - <<'PY'
+          import glob
+          import json
+          import os
+
+          summaries = [
+              json.load(open(path, encoding="utf-8"))
+              for path in sorted(glob.glob(os.path.join(os.environ["SHARD_SUMMARY_DIR"], "shard-*.json")))
+          ]
+          assert len(summaries) == 2, f"expected two shard summaries, got {len(summaries)}"
+          partitions = [summary["expected_partition"] for summary in summaries]
+          assert all(summary["origin"] == "shard" for summary in summaries)
+          assert {summary["shard"]["index"] for summary in summaries} == {1, 2}
+          assert all(summary["shard"]["total"] == 2 for summary in summaries)
+          expected = partitions[0]["total_units"]
+          assert expected > 0
+          assert all(partition["total_units"] == expected for partition in partitions)
+          units = [unit for partition in partitions for unit in partition["units"]]
+          assert len(units) == expected, f"partitions overlap or miss units: {len(units)} != {expected}"
+          assert len(set(units)) == expected, "shard unit sets overlap"
+          assert all(len(partition["units"]) > 0 for partition in partitions)
+          print(f"two disjoint shards cover all {expected} expected units")
+          PY
+
   cli-regression:
     name: cli regression
     needs: changes

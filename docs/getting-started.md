@@ -11,7 +11,8 @@ is the *how*.
 You can also run your project's own tests and linters under `native:` in a leaf
 or root manifest. Required native failures block the overall run while criteria
 keep their independent check verdicts. See [Native runs](./native-runs.md) for the
-fields, output matching, and summary format.
+fields, output matching, and summary format. For CI parallel runs, see the
+[distributed run recipes](./distributed-runs.md#ci-recipes).
 
 ## 1. Install
 

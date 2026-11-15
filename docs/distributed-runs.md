@@ -63,9 +63,86 @@ alone does not enable sharding: it is also set for nonparallel jobs.
 See [GitLab parallel jobs](https://docs.gitlab.com/ci/yaml/#parallel) for the
 `job 1/N` naming convention and the [Playwright GitLab example](https://playwright.dev/docs/ci#gitlab-ci)
 that passes `CI_NODE_INDEX` directly to its one-based `--shard` flag.
-CI workflow recipes will follow separately.
 Use a new shared identity for each logical invocation; if a provider's retry
 keeps these components unchanged, include your attempt identifier explicitly.
+
+## CI recipes
+
+CI's own shard job statuses are the merge gate: a failed or missing shard fails
+the pipeline. A Duhem server's combined view is informational and does not
+replace that gate. Set `DUHEM_HUB_URL` and `DUHEM_HUB_TOKEN` from repository
+secrets when you want runs sent to a shared server; omit both when you do not.
+
+### GitHub Actions
+
+`DUHEM_SHARD` uses Duhem's one-based `k/n` form. The same `DUHEM_RUN_ID`
+is shared by both jobs and changes on each run attempt.
+
+```yaml
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shard: [1, 2]
+    env:
+      DUHEM_SHARD: ${{ matrix.shard }}/2
+      DUHEM_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      DUHEM_HUB_URL: ${{ secrets.DUHEM_HUB_URL }}
+      DUHEM_HUB_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run verification
+        run: duhem run .duhem/duhem.yml
+```
+
+For a packaged CLI, install it before the run step; for a source checkout,
+build it and invoke the resulting binary.
+
+### GitLab CI
+
+GitLab supplies one-based `CI_NODE_INDEX` and `CI_NODE_TOTAL`, plus a shared
+pipeline and parallel job identity; Duhem detects these directly.
+
+```yaml
+verify:
+  parallel: 2
+  script:
+    - duhem run .duhem/duhem.yml
+```
+
+### Buildkite
+
+Buildkite supplies zero-based `BUILDKITE_PARALLEL_JOB` and the total
+`BUILDKITE_PARALLEL_JOB_COUNT`, plus a shared build and step identity. Duhem
+converts the index to one-based form.
+
+```yaml
+steps:
+  - label: ":duhem: Verify"
+    parallelism: 2
+    command: duhem run .duhem/duhem.yml
+```
+
+### CircleCI
+
+CircleCI supplies zero-based `CIRCLE_NODE_INDEX` and `CIRCLE_NODE_TOTAL`, plus
+a shared workflow and job identity. Duhem converts the index to one-based form.
+
+```yaml
+version: 2.1
+jobs:
+  verify:
+    docker:
+      - image: cimg/base:stable
+    parallelism: 2
+    steps:
+      - checkout
+      - run: duhem run .duhem/duhem.yml
+workflows:
+  verify:
+    jobs: [verify]
+```
 
 ## Partition and lifecycle
 

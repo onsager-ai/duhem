@@ -93,16 +93,13 @@ pub fn validate_native(runs: &[NativeRun]) -> Result<(), String> {
                 run.id
             ));
         }
-        if let Some(report) = &run.report {
-            if report.format == NativeReportFormat::Ctrf {
-                return Err(format!("native run `{}`: ctrf not yet supported", run.id));
-            }
-            if report.path.trim().is_empty() || std::path::Path::new(&report.path).is_absolute() {
-                return Err(format!(
-                    "native run `{}`: report path must be nonempty and relative to cwd",
-                    run.id
-                ));
-            }
+        if let Some(report) = &run.report
+            && (report.path.trim().is_empty() || std::path::Path::new(&report.path).is_absolute())
+        {
+            return Err(format!(
+                "native run `{}`: report path must be nonempty and relative to cwd",
+                run.id
+            ));
         }
         if let Some(expect) = &run.expect {
             for output in [&expect.stdout, &expect.stderr].into_iter().flatten() {
@@ -147,11 +144,7 @@ mod tests {
         validate_native(&report).unwrap();
         let ctrf = parse("- {id: x, command: ['true'], report: {format: ctrf, path: report.json}}")
             .unwrap();
-        assert!(
-            validate_native(&ctrf)
-                .unwrap_err()
-                .contains("ctrf not yet supported")
-        );
+        validate_native(&ctrf).unwrap();
         for path in ["''", "/absolute.xml"] {
             let invalid = parse(&format!(
                 "- {{id: x, command: ['true'], report: {{format: junit, path: {path}}}}}"

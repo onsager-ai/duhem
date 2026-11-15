@@ -86,6 +86,7 @@ impl std::str::FromStr for Kind {
 pub struct InitOutcome {
     pub created: Vec<PathBuf>,
     pub warnings: Vec<String>,
+    pub notes: Vec<String>,
 }
 
 pub struct InitArgs {
@@ -169,6 +170,7 @@ pub(crate) fn run_with_prompt(
     fs::create_dir_all(&target)
         .map_err(|e| InitError::Io(format!("create {}: {e}", target.display())))?;
 
+    let proposal = super::init_native::detect(&target);
     let mut created = Vec::new();
     let mut warnings = Vec::new();
     let path_in_commands = display_path_for_commands(&target);
@@ -286,7 +288,15 @@ pub(crate) fn run_with_prompt(
         }
     }
 
-    Ok(InitOutcome { created, warnings })
+    let notes = proposal
+        .map(|proposal| proposal.note())
+        .into_iter()
+        .collect();
+    Ok(InitOutcome {
+        created,
+        warnings,
+        notes,
+    })
 }
 
 fn write_template(
@@ -532,6 +542,9 @@ pub fn run_init(
             );
             let _ = stdout.flush();
 
+            for note in &outcome.notes {
+                eprintln!("{note}");
+            }
             if outcome.warnings.is_empty() {
                 ExitCode::SUCCESS
             } else {

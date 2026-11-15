@@ -80,6 +80,11 @@ the engine default. There is intentionally no `DUHEM_DEFAULT_TIMEOUT`.
 duhem init ./verifications/hello --name hello
 ```
 
+When init detects Cargo, a package test script, pytest or Go tests in the target
+project, it prints suggested `native:` entries to paste into your root manifest.
+Review commands and report paths first; the commands assume the project root as
+cwd. Detection does not change scaffold files or create a manifest. See [init test detection](./native-runs.md#detecting-existing-tests-with-init).
+
 This writes a runnable **Verification Definition (VD)** — three files:
 
 | File | What it is |

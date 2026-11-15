@@ -926,3 +926,43 @@ criteria:
           - $steps.evidence.outputs.rows[0].skipped_blocked == 1
           - $steps.evidence.outputs.rows[0].ok_steps == 1
           - $steps.evidence.outputs.rows[0].collect_skipped == 0
+
+  - id: AC-20
+    description: Required native results gate the run without satisfying its independent greeting criterion.
+    checks:
+      - id: AC-20.1
+        steps:
+          - id: required
+            uses: cli/invoke
+            with:
+              command: [$inputs.duhem_bin, run, verifications/duhem-cli/fixtures/native/required.yml, --reporter, json, --no-live]
+              cwd: $inputs.repo_dir
+              timeout: 120s
+          - id: missing
+            uses: cli/invoke
+            with:
+              command: [$inputs.duhem_bin, run, verifications/duhem-cli/fixtures/native/missing-report.yml, --reporter, json, --no-live]
+              cwd: $inputs.repo_dir
+              timeout: 120s
+          - id: diagnostic
+            uses: cli/invoke
+            with:
+              command: [$inputs.duhem_bin, run, verifications/duhem-cli/fixtures/native/diagnostic.yml, --reporter, json, --no-live]
+              cwd: $inputs.repo_dir
+              timeout: 120s
+        assertions:
+          - $steps.required.outputs.exit_code != 0
+          - matches: {value: $steps.required.outputs.stdout, pattern: '"verdict":"fail"'}
+          - matches: {value: $steps.required.outputs.stdout, pattern: '"body_verdict":"pass"'}
+          - matches: {value: $steps.required.outputs.stdout, pattern: '"outcome":"fail"'}
+          - matches: {value: $steps.required.outputs.stdout, pattern: '"failed":1'}
+          - matches: {value: $steps.required.outputs.stdout, pattern: '"required":true'}
+          - $steps.missing.outputs.exit_code != 0
+          - matches: {value: $steps.missing.outputs.stdout, pattern: '"verdict":"inconclusive:missing_observation"'}
+          - matches: {value: $steps.missing.outputs.stdout, pattern: '"body_verdict":"pass"'}
+          - matches: {value: $steps.missing.outputs.stdout, pattern: '"outcome":"inconclusive:missing_observation"'}
+          - $steps.diagnostic.outputs.exit_code == 0
+          - matches: {value: $steps.diagnostic.outputs.stdout, pattern: '"verdict":"pass"'}
+          - matches: {value: $steps.diagnostic.outputs.stdout, pattern: '"outcome":"fail"'}
+          - matches: {value: $steps.diagnostic.outputs.stdout, pattern: '"failed":1'}
+          - matches: {value: $steps.diagnostic.outputs.stdout, pattern: '"required":false'}

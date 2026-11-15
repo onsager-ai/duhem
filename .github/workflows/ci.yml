@@ -41,8 +41,23 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: cargo test
-        run: cargo test --workspace
+      # Build the runner, then execute the workspace tests exactly once through
+      # its required native gate. A nonzero cargo exit still fails this step.
+      - name: cargo test (Duhem native gate)
+        run: |
+          cargo build -p duhem-cli
+          ./target/debug/duhem validate verifications/duhem-rust
+          ./target/debug/duhem run verifications/duhem-rust --no-live --db .duhem/ci-rust.db
+
+      # The terminal shows the last 20 lines of cargo's output; the full masked
+      # stdout/stderr are evidence blobs in this store.
+      - name: Upload Rust test evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rust-test-evidence
+          path: .duhem/
+          if-no-files-found: ignore
 
       - name: file-budget lint
         run: cargo run -p xtask --quiet -- check-file-budget --mode=fail

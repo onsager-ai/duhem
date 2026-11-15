@@ -1,0 +1,25 @@
+# Duhem-on-Duhem regression coverage, not an independent trust anchor (#649).
+# Replaces CI's direct `cargo test --workspace`; run from the repository root.
+verification: Duhem Rust verification
+native:
+  - id: cargo-test
+    layer: unit
+    cwd: ../..
+    command: [cargo, test, --workspace]
+    # Native subprocesses sanitize the inherited environment. Preserve CI's
+    # compiler policy and color setting explicitly, including the build cache key.
+    env: {RUSTFLAGS: '-D warnings', CARGO_TERM_COLOR: always}
+    timeout: 360m
+criteria:
+  - id: CLI-VERSION
+    description: The built Duhem CLI reports its product and schema versions.
+    checks:
+      - id: CLI-VERSION.1
+        steps:
+          - id: version
+            uses: cli/invoke
+            with:
+              command: [target/debug/duhem, --version]
+        assertions:
+          - $steps.version.outputs.exit_code == 0
+          - matches: {value: $steps.version.outputs.stdout, pattern: 'duhem \d+\.\d+\.\d+.*schema v\d+\.\d+\.\d+'}

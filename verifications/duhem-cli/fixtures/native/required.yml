@@ -1,0 +1,21 @@
+# Real failed JUnit test, independent greeting check still passes (#649).
+verification: Required native failure
+native:
+  - id: greeting-unit
+    layer: unit
+    cwd: ../../../native-example/project
+    command: [node, --test, --test-reporter=junit, --test-reporter-destination=required.xml, failing.test.mjs]
+    report: {format: junit, path: required.xml}
+criteria:
+  - id: GREETING
+    description: The greeting CLI welcomes the visitor by name.
+    checks:
+      - id: GREETING.1
+        steps:
+          - id: greet
+            uses: cli/invoke
+            with:
+              command: [node, verifications/native-example/project/cli.mjs, Ada]
+        assertions:
+          - $steps.greet.outputs.exit_code == 0
+          - matches: {value: $steps.greet.outputs.stdout, pattern: '^Hello, Ada!\n$'}

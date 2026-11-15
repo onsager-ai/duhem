@@ -5,6 +5,13 @@ project's own tests, formatters, linters, or other command-line verification.
 Commands run in declaration order after provisioning and before setup and criteria.
 A manifest command runs once before any leaf; each leaf can also declare commands.
 
+The [native greeting worked example](../verifications/native-example/) combines
+exit-code output matching, a real Node `node:test` project emitting JUnit, and an
+independent CLI criterion. Its failing controls prove required failures, missing
+reports, and `required: false` behavior in CI. Duhem's own
+[Rust verification](../verifications/duhem-rust/duhem.yml) runs the existing
+`cargo test --workspace` CI suite through an exit-code native gate.
+
 ```yaml
 native:
   - id: lint

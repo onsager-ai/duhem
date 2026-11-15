@@ -21,6 +21,13 @@ Two kinds of directory live here, for two kinds of reader:
 > ladder below in order. From the repo root, `duhem run
 > verifications/<dir>` runs any of them.
 
+The [native greeting example](native-example/) combines an exit-code run with
+output expectations, real Node tests producing JUnit, and an independent CLI
+criterion. The CLI suite drives required-failure, missing-report, and diagnostic
+controls against the same project. Self-verification CI runs the example and
+controls. The [Rust verification](duhem-rust/duhem.yml) wraps CI's existing
+`cargo test --workspace` invocation in a required native gate. (#649)
+
 The [per-row validation example](for-each-rows-example/duhem.yml) applies
 the same assertions to every row with bounded `for_each:` (#521).
 

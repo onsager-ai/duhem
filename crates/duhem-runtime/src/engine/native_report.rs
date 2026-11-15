@@ -3,10 +3,37 @@ use std::path::Path;
 
 use duhem_evidence::EvidenceWriter;
 use duhem_judge::{InconclusiveCause, VerdictState};
+use duhem_schema::native::NativeReportFormat;
 use duhem_summary::{NativeRunSummary, NativeTestCounts, NativeTestFailure};
 
 use super::EngineError;
-use super::native_junit::{self, TestStatus};
+use super::native_ctrf;
+use super::native_junit;
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum TestStatus {
+    Pass,
+    Fail,
+    Skip,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct TestResult {
+    pub test_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classname: Option<String>,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    pub status: TestStatus,
+    pub duration_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
 
 const FAILURE_LIMIT: usize = 10;
 const MESSAGE_LIMIT: usize = 2048;
@@ -15,21 +42,29 @@ pub(super) async fn collect(
     writer: &mut EvidenceWriter,
     native_id: &str,
     path: &Path,
+    format: NativeReportFormat,
     result: &mut NativeRunSummary,
 ) -> Result<(), EngineError> {
+    let label = match format {
+        NativeReportFormat::Junit => "JUnit",
+        NativeReportFormat::Ctrf => "CTRF",
+    };
     let parsed = match tokio::fs::read(path).await {
         Ok(bytes) => {
             // Decode before storage: the writer masks UTF-8 text, while arbitrary
-            // binary evidence is byte-preserving. JUnit must be UTF-8 XML.
+            // binary evidence is byte-preserving. Both formats require UTF-8.
             match String::from_utf8(bytes) {
-                Ok(xml) => {
-                    result.report_blob_sha256 = Some(writer.write_blob(xml.as_bytes()).await?.0);
-                    native_junit::parse(native_id, &xml)
+                Ok(text) => {
+                    result.report_blob_sha256 = Some(writer.write_blob(text.as_bytes()).await?.0);
+                    match format {
+                        NativeReportFormat::Junit => native_junit::parse(native_id, &text),
+                        NativeReportFormat::Ctrf => native_ctrf::parse(native_id, &text),
+                    }
                 }
-                Err(_) => Err("JUnit report must be UTF-8 XML".into()),
+                Err(_) => Err(format!("{label} report must be UTF-8 text")),
             }
         }
-        Err(error) => Err(format!("cannot read JUnit report: {error}")),
+        Err(error) => Err(format!("cannot read {label} report: {error}")),
     };
     let mut tests = match parsed {
         Ok(tests) => tests,

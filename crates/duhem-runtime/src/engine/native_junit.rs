@@ -1,28 +1,5 @@
 //! JUnit ingestion counts testcase records, never producer-supplied suite totals.
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum TestStatus {
-    Pass,
-    Fail,
-    Skip,
-    Error,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct TestResult {
-    pub test_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub classname: Option<String>,
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub file: Option<String>,
-    pub status: TestStatus,
-    pub duration_ms: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-}
+use super::native_report::{TestResult, TestStatus};
 
 pub(super) fn parse(native_id: &str, xml: &str) -> Result<Vec<TestResult>, String> {
     // DTDs/entities are deliberately disabled by roxmltree's default options.

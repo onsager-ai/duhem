@@ -20,6 +20,7 @@ mod export_cmd;
 mod filter;
 mod hook_chain;
 mod init;
+mod init_native;
 mod inputs;
 mod live_link;
 mod live_progress;

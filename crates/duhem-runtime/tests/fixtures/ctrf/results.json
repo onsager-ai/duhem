@@ -1,0 +1,15 @@
+{
+  "reportFormat": "CTRF",
+  "specVersion": "0.2.0",
+  "results": {
+    "tool": {"name": "fixture"},
+    "summary": {"tests": 5, "passed": 1, "failed": 1, "skipped": 1, "pending": 1, "other": 1, "start": 0, "stop": 200},
+    "tests": [
+      {"name": "passes", "status": "passed", "duration": 125, "filePath": "tests/example.js", "suite": ["example"]},
+      {"name": "fails", "status": "failed", "duration": 20, "message": "ctrf-secret-value", "trace": "at example.js:12"},
+      {"name": "skipped", "status": "skipped", "duration": 0},
+      {"name": "pending", "status": "pending", "duration": 0},
+      {"name": "other", "status": "other", "duration": 1, "message": "unknown producer outcome"}
+    ]
+  }
+}

@@ -70,7 +70,12 @@ criteria:
         r#"verification: native-filter
 native:
   - {id: alpha, command: [sh, -c, 'exit 7']}
-criteria: []
+criteria:
+  - id: AC
+    description: independent
+    checks:
+      - id: body
+        assertions: ['true']
 "#,
     )
     .unwrap();
@@ -93,7 +98,7 @@ fn unmatched_native_only_filter_keeps_empty_selection_inconclusive() {
     let leaf = tmp.path().join("leaf.yml");
     std::fs::write(
         &leaf,
-        "verification: unmatched\nnative: [{id: alpha, command: [sh, -c, 'touch alpha']}]\ncriteria: []\n",
+        "verification: unmatched\nnative: [{id: alpha, command: [sh, -c, 'touch alpha']}]\ncriteria:\n  - id: AC\n    description: independent\n    checks: [{id: body, assertions: ['true']}]\n",
     )
     .unwrap();
     let output = run(&leaf, tmp.path(), &["native:missing"], "json");
@@ -209,7 +214,12 @@ native:
   - {id: alpha, command: [sh, -c, 'touch alpha']}
   - {id: beta, command: [sh, -c, 'touch beta']}
   - {id: gamma, command: [sh, -c, 'touch gamma']}
-criteria: []
+criteria:
+  - id: AC
+    description: independent
+    checks:
+      - id: body
+        assertions: ['true']
 "#,
     )
     .unwrap();

@@ -1,7 +1,7 @@
 //! JUnit ingestion counts testcase records, never producer-supplied suite totals.
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum TestStatus {
     Pass,
@@ -50,7 +50,7 @@ pub(super) fn parse(native_id: &str, xml: &str) -> Result<Vec<TestResult>, Strin
             if !seconds.is_finite() || seconds < 0.0 || seconds * 1000.0 > u64::MAX as f64 {
                 return Err("testcase time must be finite, nonnegative milliseconds".into());
             }
-            let child = |tag| case.children().find(|node| node.has_tag_name(tag));
+            let child = |tag: &str| case.children().find(|node| node.has_tag_name(tag));
             let (status, diagnostic) = if let Some(node) = child("error") {
                 (TestStatus::Error, Some(node))
             } else if let Some(node) = child("failure") {

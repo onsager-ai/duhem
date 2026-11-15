@@ -171,6 +171,7 @@ pub fn render(
 ///   on stdout from the CLI. The set-level summary is not yet shipped
 ///   to plugins — issue #49 explicitly calls out `run_set_finished`
 ///   as an optional, no-op-by-default extension.
+#[allow(clippy::too_many_arguments)]
 pub fn render_set(
     reporter: &Reporter,
     out: &mut dyn Write,

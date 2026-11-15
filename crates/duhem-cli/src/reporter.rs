@@ -1534,10 +1534,12 @@ criteria:
             captures: vec![],
         });
         let s = capture_set(&Reporter::Default, &leaves, &set);
-        assert!(!s.contains("  AC-1::AC-1.1:"));
+        // Failure details appear once, after the aggregate verdict and
+        // parent run id, never inside the per-leaf verdict lines.
         assert!(
             s.starts_with("leaf-a: pass\nleaf-b: fail\nfail\nrun 01J000000000000000000PARENT\n")
         );
+        assert_eq!(s.matches("AC-1::AC-1.1:").count(), 1);
         assert!(s.contains(
             "leaf-b:\n  AC-1::AC-1.1:\n    fail  false\n        (assertion was false)\n"
         ));

@@ -93,13 +93,13 @@ pub fn validate_native(runs: &[NativeRun]) -> Result<(), String> {
                 run.id
             ));
         }
-        if let Some(report) = &run.report {
-            if report.path.trim().is_empty() || std::path::Path::new(&report.path).is_absolute() {
-                return Err(format!(
-                    "native run `{}`: report path must be nonempty and relative to cwd",
-                    run.id
-                ));
-            }
+        if let Some(report) = &run.report
+            && (report.path.trim().is_empty() || std::path::Path::new(&report.path).is_absolute())
+        {
+            return Err(format!(
+                "native run `{}`: report path must be nonempty and relative to cwd",
+                run.id
+            ));
         }
         if let Some(expect) = &run.expect {
             for output in [&expect.stdout, &expect.stderr].into_iter().flatten() {

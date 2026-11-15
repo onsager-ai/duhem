@@ -25,7 +25,8 @@ struct Results {
 struct Test {
     name: String,
     status: Status,
-    duration: u64,
+    // Milliseconds; some producers emit fractional values.
+    duration: f64,
     message: Option<String>,
     trace: Option<String>,
     file_path: Option<String>,
@@ -78,6 +79,9 @@ pub(super) fn parse(native_id: &str, json: &str) -> Result<Vec<TestResult>, Stri
         .tests
         .into_iter()
         .map(|test| {
+            if !test.duration.is_finite() || test.duration < 0.0 {
+                return Err("CTRF test duration must be finite, nonnegative milliseconds".into());
+            }
             if test.name.is_empty() || test.suite.as_ref().is_some_and(Vec::is_empty) {
                 return Err(
                     "CTRF tests need a nonempty name and, when present, suite hierarchy".into(),
@@ -104,7 +108,7 @@ pub(super) fn parse(native_id: &str, json: &str) -> Result<Vec<TestResult>, Stri
                     Status::Skipped | Status::Pending => TestStatus::Skip,
                     Status::Other => TestStatus::Error,
                 },
-                duration_ms: test.duration,
+                duration_ms: test.duration.round() as u64,
                 message,
             })
         })
@@ -158,6 +162,12 @@ mod tests {
         ] {
             assert!(parse("unit", &FIXTURE.replace(old, new)).is_err());
         }
+        let fractional = parse(
+            "unit",
+            &FIXTURE.replace("\"duration\": 125", "\"duration\": 124.6"),
+        )
+        .unwrap();
+        assert_eq!(fractional[0].duration_ms, 125);
         assert!(
             parse("unit", &FIXTURE.replace("0.2.0", "1.0.0"))
                 .unwrap_err()

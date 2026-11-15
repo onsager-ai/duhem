@@ -35,12 +35,31 @@ export interface CriterionDetail {
   checks: CheckRef[];
 }
 
+export interface RunCheckTotals {
+  pass: number;
+  fail: number;
+  inconclusive: number;
+  pending: number;
+  total: number;
+}
+
+export interface RunChildDetail {
+  run_id: string;
+  verification: string;
+  verdict: Verdict | null;
+  status: RunStatus;
+  duration_ms: number | null;
+  check_totals: RunCheckTotals;
+}
+
 export interface RunDetail {
   claim_scope?: ClaimScope;
   body_verdict?: Verdict;
   run_id: string;
   verification: string;
   started_at: string | null;
+  duration_ms?: number | null;
+  children?: RunChildDetail[];
   inputs: Record<string, unknown>;
   verdict: Verdict | null;
   status: RunStatus;
@@ -193,6 +212,31 @@ export interface ReplayModel {
   };
 }
 
+export interface FailingAssertion {
+  assertion_index: number;
+  state: Verdict;
+  detail?: string;
+}
+
+export interface FailingCheck {
+  run_id?: string;
+  verification?: string;
+  criterion_id: string;
+  check_id: string;
+  verdict: Verdict | null;
+  layers: string[];
+  assertions: FailingAssertion[];
+  artifacts: ArtifactRef[];
+  first_failing_request?: { method: string; url: string; status: number };
+}
+
+export interface FailureEnvelope {
+  run_id: string;
+  verification: string;
+  verdict: Verdict | null;
+  failing: FailingCheck[];
+}
+
 export interface HistoryRun {
   run_id: string;
   started_at: string | null;
@@ -265,6 +309,10 @@ export function fetchRuns(): Promise<RunsListEntry[]> {
 
 export function fetchRun(runId: string): Promise<RunDetail> {
   return getJson(`api/runs/${encodeURIComponent(runId)}.json`);
+}
+
+export function fetchFailure(runId: string): Promise<FailureEnvelope> {
+  return getJson(`api/runs/${encodeURIComponent(runId)}/failure.json`);
 }
 
 export function fetchCheck(

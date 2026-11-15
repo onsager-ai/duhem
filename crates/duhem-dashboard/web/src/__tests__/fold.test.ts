@@ -145,6 +145,8 @@ describe("carryFetched", () => {
     run_id: "r1",
     verification: "verifications/login.yml",
     started_at: "2026-06-10T10:00:00.000Z",
+    duration_ms: 5,
+    children: [],
     inputs: { user: "u1" },
     verdict: null,
     status: "running",

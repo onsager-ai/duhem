@@ -119,9 +119,6 @@ impl EvidenceReader {
             .collect();
         let mut child_ids: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for record in &records {
-            if record.lineage.origin != Some(RunOrigin::Suite) {
-                continue;
-            }
             if let Some(parent) = record.lineage.parent_run_id.as_deref() {
                 child_ids
                     .entry(parent)

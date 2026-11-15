@@ -270,6 +270,8 @@ async fn run_detail_carries_inputs_verdict_and_criteria() {
     assert_eq!(json["inputs"]["workspace_name"], "ws-fixture");
     assert_eq!(json["verdict"], "pass");
     assert_eq!(json["status"], "finished");
+    assert!(json["duration_ms"].is_number());
+    assert_eq!(json["children"], serde_json::json!([]));
     assert!(json.get("live").is_none());
     assert_eq!(json["setup_aborted"], false);
     let criteria = json["criteria"].as_array().unwrap();

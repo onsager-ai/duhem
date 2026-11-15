@@ -46,7 +46,7 @@ function report(count?: number, step?: string, hasDefinition = true, omitOwners 
     if (String(url).endsWith("/definition")) return new Response(definition);
     return new Response(JSON.stringify({
       run_id: "r", verification: "loops", status: "finished", verdict: "fail", inputs: {},
-      started_at: "2026-09-10T00:00:00Z", setup_aborted: false, has_definition: hasDefinition,
+      started_at: "2026-09-10T00:00:00Z", duration_ms: null, children: [], setup_aborted: false, has_definition: hasDefinition,
       criteria: [{ id: "AC-1", verdict: "fail", checks: [{ id: "C", verdict: "fail" }] }],
     }));
   }));

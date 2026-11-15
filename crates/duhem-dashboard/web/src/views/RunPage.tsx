@@ -261,7 +261,7 @@ export function RunSummary({ run }: { run: RunDetail }) {
             Failures
           </h3>
           {failureEnvelope?.failing.length ? (
-            <ol className="space-y-2">
+            <ol aria-label="Failures" className="space-y-2">
               {failureEnvelope.failing.map((failure, index) => {
                 const childId = failure.run_id ?? run.run_id;
                 return (

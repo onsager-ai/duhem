@@ -214,8 +214,9 @@ describe("verdict band timestamps", () => {
     const time = screen.getByTestId("verdict-time");
     expect(time.textContent).toBe("finished 2026-07-22 14:03 UTC");
     const stamp = time.querySelector("time");
-    expect(stamp?.getAttribute("title")).toBe("2026-07-22T14:03:01.234Z");
-    expect(stamp?.getAttribute("datetime")).toBe("2026-07-22T14:03:01.234Z");
+    // Finish = started_at + RunDetail.duration_ms (1200 ms in this fixture).
+    expect(stamp?.getAttribute("title")).toBe("2026-07-22T14:03:01.200Z");
+    expect(stamp?.getAttribute("datetime")).toBe("2026-07-22T14:03:01.200Z");
   });
 
   it("falls back to the started time in the same format", () => {

@@ -49,6 +49,27 @@ required status, exit code, failure detail, and output blob addresses. `layers`
 contains test counts and durations per native layer, plus a `duhem` row for checks.
 These fields are omitted when no native commands ran.
 
+## Dashboard navigation
+
+The run page lists native runs with layer, outcome, required/diagnostic status,
+counts, duration and failing tests. Evidence links open masked stdout, stderr,
+source report and normalized results through the existing artifact route. A
+parent page combines its own native runs with all manifest descendants, retaining
+`run_id` on each summary so identical native IDs in different leaves stay distinct.
+Invocation runs inside checks remain scoped to those checks.
+
+`GET /api/runs/:id` adds optional `native` and `layers` arrays. Each native entry
+contains its summary fields, source `run_id` and `evidence` addresses. The layer
+table includes Duhem's executed checks and their summed step durations. Native
+test counts and durations use the shared summary aggregation. These arrays are
+omitted when no native commands ran. During a live run, native completion refreshes
+the recorded detail; the normal run loading/error states also cover this data.
+
+The existing [failure envelope](failure-envelope-contract.md) adds `failing_native`
+for every non-passing native run, including diagnostic runs. A required native
+failure on a suite parent blocks the tree verdict even when all leaves pass.
+Static exports retain native summaries, failure envelopes and evidence links.
+
 ## JUnit reports
 
 Add a JUnit XML report to count individual tests and retain failure evidence:

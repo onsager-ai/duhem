@@ -16,7 +16,7 @@ trace data, mechanically assembled. No verdict is recomputed.
 ## Endpoints
 
 - `GET /api/runs/:run_id/failure` — the whole run: every non-passing
-  check.
+  check and every non-passing native run (including diagnostic runs).
 - `GET /api/runs/:run_id/failure/:crit::check` — one check's entry (an
   agent handling a specific failure).
 
@@ -53,6 +53,38 @@ A passing run is `200` with `failing: []` — not an error.
 }
 ```
 
+### Native failures (#649)
+
+`failing_native` is additive and omitted when empty. Single-leaf envelopes
+without native runs keep their existing JSON bytes. Each non-passing native
+run contributes one entry, including `required: false` diagnostic runs even
+when the overall gate passes. The summary's bounded `failing_tests` index
+identifies individual failures; fetch `results` for the full normalized list.
+
+```jsonc
+"failing_native": [{
+  "run_id": "01…", "native_id": "rust-unit", "layer": "unit",
+  "outcome": "fail", "required": true,
+  "detail": "command exited with 1",
+  "failing_tests": [{"test_id": "stable identity", "name": "rejects invalid input", "file": "src/test.rs", "message": "masked message"}],
+  "evidence": [
+    {"id": "<sha>", "kind": "stdout", "url": "/api/runs/01…/artifact/<sha>"},
+    {"id": "<sha>", "kind": "stderr", "url": "/api/runs/01…/artifact/<sha>"},
+    {"id": "<sha>", "kind": "report", "url": "/api/runs/01…/artifact/<sha>"},
+    {"id": "<sha>", "kind": "results", "url": "/api/runs/01…/artifact/<sha>"}
+  ]
+}]
+```
+
+`run_id` is always present, including on a leaf. `layer` and `detail` are
+omitted when absent. Detail is masked at recording and limited to 2048
+Unicode characters plus a truncation marker in this projection. Test failure
+messages are the already masked, bounded summary messages. Evidence includes
+only recorded blobs, in stdout/stderr/report/results order. URLs resolve
+through the existing raw artifact route; no new endpoint or test verdict is
+introduced. Static exports copy these blobs and rewrite URLs relative to the
+export root. The per-check endpoint remains check-only.
+
 ### Semantics
 
 - **`gated_checks`** (#509, optional) — entries with `criterion_id`,
@@ -69,7 +101,10 @@ A passing run is `200` with `failing: []` — not an error.
   every such descendant, with
   descendants traversed in execution order (`started_at` ascending, then
   `run_id`). The top-level `verdict` is the existing three-state
-  run-set aggregate over tree leaves; if any leaf has no verdict yet, the
+  run-set aggregate over tree leaves, folded through `native_gate` with
+  required native outcomes recorded on suite parents. Leaf verdicts already
+  include their native gate. Diagnostic native outcomes do not change the
+  verdict; if any leaf has no verdict yet, the
   tree `verdict` is `null`, so an incomplete tree never reads as a pass.
   Nested `invocation` runs started from inside a check are that check's
   evidence, not tree members. Each tree item adds

@@ -52,6 +52,49 @@ export interface RunChildDetail {
   check_totals: RunCheckTotals;
 }
 
+export interface NativeTestFailure {
+  test_id: string;
+  name: string;
+  file?: string;
+  message?: string;
+}
+
+export interface NativeRunDetail {
+  run_id: string;
+  id: string;
+  layer?: string;
+  outcome: Verdict;
+  duration_ms: number;
+  required: boolean;
+  tests: number;
+  counts?: { passed: number; failed: number; errored: number; skipped: number };
+  detail?: string;
+  failing_tests?: NativeTestFailure[];
+  evidence: ArtifactRef[];
+}
+
+export interface LayerTotals {
+  layer: string;
+  tests: number;
+  passed: number;
+  failed: number;
+  errored?: number;
+  skipped?: number;
+  inconclusive: number;
+  duration_ms: number;
+}
+
+export interface FailingNative {
+  run_id: string;
+  native_id: string;
+  layer?: string;
+  outcome: Verdict;
+  required: boolean;
+  detail?: string;
+  failing_tests: NativeTestFailure[];
+  evidence: ArtifactRef[];
+}
+
 export interface RunDetail {
   claim_scope?: ClaimScope;
   body_verdict?: Verdict;
@@ -60,6 +103,8 @@ export interface RunDetail {
   started_at: string | null;
   duration_ms?: number | null;
   children?: RunChildDetail[];
+  native?: NativeRunDetail[];
+  layers?: LayerTotals[];
   inputs: Record<string, unknown>;
   verdict: Verdict | null;
   status: RunStatus;
@@ -235,6 +280,7 @@ export interface FailureEnvelope {
   verification: string;
   verdict: Verdict | null;
   failing: FailingCheck[];
+  failing_native?: FailingNative[];
 }
 
 export interface HistoryRun {

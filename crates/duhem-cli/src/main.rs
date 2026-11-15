@@ -193,8 +193,10 @@ enum Cmd {
         /// Limit the run to a subset of `(criterion, check)` pairs.
         ///
         /// Grammar: `AC-1` (every check under `AC-1`),
-        /// `AC-1::AC-1.2` (one pair), `AC-*::AC-*.1` (globbed). Repeat
-        /// the flag to OR patterns: `--filter AC-1 --filter AC-2`.
+        /// `AC-1::AC-1.2` (one pair), `AC-*::AC-*.1` (globbed), or
+        /// `native:<id>` for native runs. Repeat the flag to OR patterns.
+        /// When filters are present, native runs require a matching native filter;
+        /// all other native runs are excluded from execution and the gate.
         #[arg(long = "filter", value_name = "PATTERN")]
         filter: Vec<String>,
         /// Evidence store (SQLite DB) the run is recorded into.

@@ -37,11 +37,12 @@ pub struct FilterPattern {
     criterion: String,
     /// Check id glob. `None` means "all checks under the criterion".
     check: Option<String>,
+    native: Option<String>,
 }
 
 impl FilterPattern {
     fn matches(&self, criterion_id: &str, check_id: &str) -> bool {
-        if !glob_match(&self.criterion, criterion_id) {
+        if self.native.is_some() || !glob_match(&self.criterion, criterion_id) {
             return false;
         }
         match &self.check {
@@ -76,11 +77,23 @@ pub fn parse_pattern(spec: &str) -> Result<FilterPattern, String> {
         return Err("--filter: empty pattern".to_string());
     }
     let parts: Vec<&str> = spec.split("::").collect();
+    if let Some(native) = spec.strip_prefix("native:") {
+        if native.is_empty() {
+            return Err(format!("--filter `{spec}`: empty native run id"));
+        }
+        return Ok(FilterPattern {
+            verification: None,
+            criterion: String::new(),
+            check: None,
+            native: Some(native.to_string()),
+        });
+    }
     match parts.as_slice() {
         [c] => Ok(FilterPattern {
             verification: None,
             criterion: (*c).to_string(),
             check: None,
+            native: None,
         }),
         [c, k] => {
             if c.is_empty() {
@@ -93,6 +106,7 @@ pub fn parse_pattern(spec: &str) -> Result<FilterPattern, String> {
                 verification: None,
                 criterion: (*c).to_string(),
                 check: Some((*k).to_string()),
+                native: None,
             })
         }
         [v, c, k] => {
@@ -109,6 +123,7 @@ pub fn parse_pattern(spec: &str) -> Result<FilterPattern, String> {
                 verification: Some((*v).to_string()),
                 criterion: (*c).to_string(),
                 check: Some((*k).to_string()),
+                native: None,
             })
         }
         _ => Err(format!(
@@ -145,6 +160,59 @@ impl CliCheckFilter {
         Self {
             patterns: Vec::new(),
         }
+    }
+
+    pub fn without_criteria(&self) -> Self {
+        Self {
+            patterns: Vec::new(),
+        }
+    }
+
+    pub fn has_criterion_filters(&self) -> bool {
+        self.patterns.iter().any(|pattern| pattern.native.is_none())
+    }
+
+    pub fn has_native_filters(&self) -> bool {
+        self.patterns.iter().any(|pattern| pattern.native.is_some())
+    }
+
+    pub fn for_criteria(&self) -> Option<Self> {
+        let patterns: Vec<_> = self
+            .patterns
+            .iter()
+            .filter(|pattern| pattern.native.is_none())
+            .cloned()
+            .collect();
+        (!patterns.is_empty()).then_some(Self { patterns })
+    }
+
+    pub fn select_native(
+        &self,
+        runs: &[duhem_schema::NativeRun],
+    ) -> (Vec<duhem_schema::NativeRun>, Vec<String>) {
+        let selected_ids: std::collections::BTreeSet<_> = runs
+            .iter()
+            .filter(|run| {
+                self.patterns.iter().any(|pattern| {
+                    pattern
+                        .native
+                        .as_deref()
+                        .is_some_and(|glob| glob_match(glob, &run.id))
+                })
+            })
+            .map(|run| run.id.as_str())
+            .collect();
+        let selected = runs
+            .iter()
+            .filter(|run| selected_ids.contains(run.id.as_str()))
+            .cloned()
+            .collect();
+        let excluded = runs
+            .iter()
+            .filter(|run| !selected_ids.contains(run.id.as_str()))
+            .map(|run| run.id.clone())
+            .collect();
+        (selected, excluded)
     }
 
     /// Narrow this filter to one verification by name. Patterns that
@@ -215,6 +283,45 @@ fn glob_match_bytes(p: &[u8], t: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_patterns_match_ids_and_leave_criteria_unmatched() {
+        let filter = CliCheckFilter::parse(&["native:unit-*".into()]).unwrap();
+        assert!(!filter.matches("AC", "check"));
+        let runs = vec![
+            duhem_schema::NativeRun {
+                id: "unit-a".into(),
+                layer: None,
+                command: vec!["true".into()],
+                cwd: None,
+                env: Default::default(),
+                timeout: None,
+                required: true,
+                expect: None,
+                report: None,
+            },
+            duhem_schema::NativeRun {
+                id: "lint".into(),
+                layer: None,
+                command: vec!["true".into()],
+                cwd: None,
+                env: Default::default(),
+                timeout: None,
+                required: true,
+                expect: None,
+                report: None,
+            },
+        ];
+        let (selected, excluded) = filter.select_native(&runs);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|run| run.id.as_str())
+                .collect::<Vec<_>>(),
+            ["unit-a"]
+        );
+        assert_eq!(excluded, ["lint"]);
+    }
 
     #[test]
     fn parses_criterion_only_pattern() {

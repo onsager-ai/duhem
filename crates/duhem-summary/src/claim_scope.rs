@@ -34,6 +34,8 @@ pub struct ManifestSelection {
     pub filters: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub excluded: Vec<ExcludedLeaf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub excluded_native_runs: Vec<String>,
 }
 
 impl std::fmt::Display for ManifestSelection {

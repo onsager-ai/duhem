@@ -32,7 +32,11 @@ native command's cwd. A pass needs the expected exit, matching output and a pars
 report with no failures/errors; missing or malformed reports and timeouts are
 inconclusive. Skips are counted without failing. Summaries include actual test
 counts, bounded masked failures and blob addresses for the source report and full
-normalized results. CTRF and native selection filters are deferred.
+normalized results. Use `duhem run --filter native:<id>` to select native commands
+by exact or glob ID; repeated filters are ORed. Once any filter is supplied, native
+commands without a matching `native:` filter are excluded from execution and the
+gate (including with criterion-only filters), and the summary reports excluded IDs.
+CTRF is deferred.
 
 ## When to use this skill
 

@@ -80,6 +80,8 @@ pub struct Engine {
     /// matching checks execute; non-matching checks are skipped with
     /// no evidence emission.
     filter: Option<Box<dyn CheckFilter>>,
+    run_native: bool,
+    excluded_native_runs: Vec<String>,
     filter_patterns: Vec<String>,
     manifest_selection: Option<duhem_summary::ManifestSelection>,
     /// Optional u64 seed for runtime entropy (spec on issue #33). When
@@ -170,6 +172,8 @@ impl Engine {
             definition_path: None,
             definition_source: None,
             filter: None,
+            run_native: true,
+            excluded_native_runs: Vec::new(),
             filter_patterns: Vec::new(),
             manifest_selection: None,
             seed: None,
@@ -393,9 +397,12 @@ impl Engine {
                 }
             }
 
-            let native =
+            let native = if self.run_native {
                 crate::engine::native::run_native(&mut writer, &def.native, vd_dir.as_deref())
-                    .await?;
+                    .await?
+            } else {
+                Vec::new()
+            };
             crate::engine::session_scope::SessionScope::enter(&mut run_state, &def.session, None);
             run_state.register_process_cleanup(run_state.process_owner.clone(), &def.teardown);
 
@@ -1477,6 +1484,8 @@ criteria:
             definition_path: None,
             definition_source: None,
             filter: None,
+            run_native: true,
+            excluded_native_runs: Vec::new(),
             filter_patterns: Vec::new(),
             manifest_selection: None,
             seed: None,

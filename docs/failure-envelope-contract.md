@@ -64,11 +64,15 @@ A passing run is `200` with `failing: []` — not an error.
   summary shape, without per-run tags. The check timeline
   preserves the skipped step's condition and evaluated operands.
   None of these fields changes the recorded verdict.
-- **Tree semantics (#651)** — when the requested run has children,
-  `failure` includes checks from that run and every descendant, with
+- **Tree semantics (#651)** — when the requested run has manifest
+  (`origin: suite`) children, `failure` includes checks from that run and
+  every such descendant, with
   descendants traversed in execution order (`started_at` ascending, then
   `run_id`). The top-level `verdict` is the existing three-state
-  run-set aggregate over tree leaves. Each tree item adds
+  run-set aggregate over tree leaves; if any leaf has no verdict yet, the
+  tree `verdict` is `null`, so an incomplete tree never reads as a pass.
+  Nested `invocation` runs started from inside a check are that check's
+  evidence, not tree members. Each tree item adds
   `run_id` and `verification` for its source run. A leaf envelope keeps
   its existing JSON shape; these provenance fields are omitted. Per-check
   routes and envelopes requested for a child remain scoped to that run.

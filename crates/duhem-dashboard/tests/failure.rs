@@ -301,6 +301,37 @@ async fn parent_envelope_lists_descendant_failure_with_provenance() {
 }
 
 #[tokio::test]
+async fn nested_invocation_child_is_not_part_of_the_tree() {
+    // A failing control run started from inside a check (origin
+    // `invocation`) stays that check's evidence; the leaf's own envelope
+    // keeps its single-leaf shape and verdict.
+    let (_tmp, rw, ro) = common::open_stores().await;
+    const LEAF: &str = "01FAILENVELOPE00000000000J";
+    const NESTED: &str = "01FAILENVELOPE00000000000K";
+    seed_lineage(rw.clone(), LEAF, true, None, RunLineage::default()).await;
+    seed_lineage(
+        rw,
+        NESTED,
+        false,
+        None,
+        RunLineage {
+            parent_run_id: Some(LEAF.to_string()),
+            origin: Some(RunOrigin::Invocation),
+        },
+    )
+    .await;
+
+    let (status, json) = get_json(
+        EvidenceReader::new(ro),
+        &format!("/api/runs/{LEAF}/failure"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["verdict"], "pass");
+    assert_eq!(json["failing"], json!([]));
+}
+
+#[tokio::test]
 async fn passing_parent_tree_has_no_failing_checks() {
     let (_tmp, rw, ro) = common::open_stores().await;
     const ROOT: &str = "01FAILENVELOPE00000000000F";

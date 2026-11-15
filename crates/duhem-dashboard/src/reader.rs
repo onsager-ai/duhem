@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use duhem_evidence::{
-    Event, EventPayload, ObservationValue, RunRecord, RunStatus, Store, VerdictState,
+    Event, EventPayload, ObservationValue, RunOrigin, RunRecord, RunStatus, Store, VerdictState,
 };
 use thiserror::Error;
 
@@ -323,16 +323,19 @@ impl EvidenceReader {
                 })
                 .collect();
             leaves.sort_by_key(|record| (record.started_at, record.run_id.as_str()));
-            let leaf_verdicts = leaves
+            // An unjudged leaf (still running, aborted, orphaned) leaves
+            // the whole tree unjudged: an incomplete tree never reads as
+            // a pass.
+            let leaf_verdicts: Option<Vec<RunVerdict>> = leaves
                 .iter()
-                .filter_map(|record| {
+                .map(|record| {
                     record.verdict.map(|state| RunVerdict {
                         state,
                         criteria: Vec::new(),
                     })
                 })
                 .collect();
-            Some(aggregate_run_set(leaf_verdicts).state)
+            leaf_verdicts.map(|verdicts| aggregate_run_set(verdicts).state)
         } else {
             run.record.verdict
         };
@@ -547,9 +550,16 @@ pub fn events_to_jsonl(events: &[Event]) -> String {
     out
 }
 
+/// The run tree under `root_id`: the root plus its manifest (`suite`)
+/// children, recursively. Nested `invocation` runs started from inside a
+/// check are evidence of that check, not parts of the whole run (Duhem's
+/// own self-verification deliberately runs failing controls that way).
 fn descendant_run_ids(root_id: &str, records: &[RunRecord]) -> Vec<String> {
     let mut children: BTreeMap<&str, Vec<&RunRecord>> = BTreeMap::new();
     for record in records {
+        if record.lineage.origin != Some(RunOrigin::Suite) {
+            continue;
+        }
         if let Some(parent) = record.lineage.parent_run_id.as_deref() {
             children.entry(parent).or_default().push(record);
         }

@@ -29,6 +29,8 @@ use std::path::PathBuf;
 use duhem_judge::VerdictState;
 use serde::{Deserialize, Serialize};
 
+mod distributed;
+pub use distributed::{DistributedRun, ExpectedPartition, ShardIdentity};
 mod claim_scope;
 mod lifecycle;
 mod native;

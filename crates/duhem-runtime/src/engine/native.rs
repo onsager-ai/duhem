@@ -11,6 +11,12 @@ use duhem_summary::NativeRunSummary;
 
 use super::EngineError;
 
+/// Native suites (cargo test, pytest, Playwright) run for minutes, so the
+/// 5-second `cli/invoke` default does not apply; this only guards hangs.
+const DEFAULT_NATIVE_TIMEOUT_MS: u64 = 30 * 60 * 1000;
+/// Failure detail keeps the end of each stream; the full output is in the blobs.
+const DETAIL_TAIL_LINES: usize = 20;
+
 pub(crate) async fn run_native(
     writer: &mut EvidenceWriter,
     runs: &[NativeRun],
@@ -23,9 +29,10 @@ pub(crate) async fn run_native(
             .unwrap_or_else(|| Path::new("."))
             .join(run.cwd.as_deref().unwrap_or("."));
         let mut with = serde_json::json!({"command": run.command, "cwd": cwd, "env": run.env});
-        if let Some(timeout) = &run.timeout {
-            with["timeout"] = serde_json::to_value(timeout).expect("duration serializes");
-        }
+        with["timeout"] = match &run.timeout {
+            Some(timeout) => serde_json::to_value(timeout).expect("duration serializes"),
+            None => serde_json::json!(DEFAULT_NATIVE_TIMEOUT_MS),
+        };
         let with = serde_yml::to_value(with).expect("native command serializes");
         let boundaries = BTreeMap::new();
         let ctx = ActionCtx {
@@ -95,8 +102,10 @@ pub(crate) async fn run_native(
                 if !failures.is_empty() {
                     result.outcome = VerdictState::Fail;
                     result.detail = Some(writer.mask_text(&format!(
-                        "{}\nstdout: {stdout}\nstderr: {stderr}",
-                        failures.join("; ")
+                        "{}\nstdout: {}\nstderr: {}",
+                        failures.join("; "),
+                        tail(stdout),
+                        tail(stderr)
                     )));
                 }
             }
@@ -109,6 +118,17 @@ pub(crate) async fn run_native(
         results.push(result);
     }
     Ok(results)
+}
+
+fn tail(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    match lines.len().checked_sub(DETAIL_TAIL_LINES) {
+        Some(skipped) if skipped > 0 => format!(
+            "[{skipped} earlier lines in the output blob]\n{}",
+            lines[skipped..].join("\n")
+        ),
+        _ => lines.join("\n"),
+    }
 }
 
 fn check_output(
@@ -135,5 +155,17 @@ fn check_output(
                 Err(error) => failures.push(format!("invalid {stream} regex: {error}")),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn detail_keeps_only_the_output_tail() {
+        let long: String = (1..=25).map(|n| format!("line {n}\n")).collect();
+        let tail = super::tail(&long);
+        assert!(tail.starts_with("[5 earlier lines in the output blob]\nline 6\n"));
+        assert!(tail.ends_with("line 25"));
+        assert_eq!(super::tail("a\nb\n"), "a\nb");
     }
 }

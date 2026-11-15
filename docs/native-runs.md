@@ -24,8 +24,9 @@ native:
 argv list; use `[sh, -c, '...']` explicitly when shell syntax is needed. `cwd`
 is relative to the declaring document's directory and defaults to that directory.
 `env` adds explicit child environment values to the usual sanitized CLI environment.
-`timeout` accepts milliseconds or a duration such as `30s` or `2m`; omitted, the
-CLI subprocess runner's default is 5 seconds.
+`timeout` accepts milliseconds or a duration such as `30s` or `2m`; omitted, it
+defaults to 30 minutes. A failing run's detail shows the last 20 lines of stdout
+and stderr; the full masked output is stored as evidence blobs.
 
 `layer` is optional and accepts `unit`, `integration`, `e2e`, `static`, or `other`.
 `required` defaults to true. `expect.exit_code` defaults to zero. `matches` requires

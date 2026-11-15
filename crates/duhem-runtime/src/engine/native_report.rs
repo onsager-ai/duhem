@@ -35,7 +35,13 @@ pub(super) async fn collect(
         Ok(tests) => tests,
         Err(error) => {
             result.outcome = VerdictState::Inconclusive(InconclusiveCause::MissingObservation);
-            result.detail = Some(writer.mask_text(&error));
+            // Keep the exit-code/output detail: a missing report is often a
+            // build failure, and its output is the evidence that explains it.
+            let error = writer.mask_text(&error);
+            result.detail = Some(match result.detail.take() {
+                Some(detail) => format!("{error}\n{detail}"),
+                None => error,
+            });
             return Ok(());
         }
     };

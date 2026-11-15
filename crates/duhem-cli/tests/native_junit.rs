@@ -73,6 +73,12 @@ fn junit_outcomes_and_counts() {
         let (json, _tmp) = execute(xml, exit, extra, false);
         let native = &json["native"][0];
         assert_eq!(native["outcome"], outcome, "{json}");
+        if xml.is_none() && exit != 0 {
+            // A missing report keeps the exit-code evidence (e.g. a build failure).
+            let detail = native["detail"].as_str().unwrap();
+            assert!(detail.contains("cannot read JUnit report"), "{detail}");
+            assert!(detail.contains("expected exit code 0"), "{detail}");
+        }
         assert_eq!(json["criteria"][0]["verdict"], "pass");
         assert_eq!(native["report_path"], "report.xml");
         if native["counts"].is_object() {

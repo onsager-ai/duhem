@@ -743,10 +743,10 @@ export function VerdictBand({
             className="mt-1.5 flex flex-wrap gap-x-2 gap-y-0.5 text-sm text-muted-foreground"
           >
             <span className="font-medium text-foreground">{criteriaTally(run)}</span>
-            {run.status !== "running" && durationMs !== null && (
+            {run.status !== "running" && run.duration_ms != null && (
               <>
                 <span aria-hidden="true">·</span>
-                <span className="tabular-nums">took {formatDuration(durationMs)}</span>
+                <span className="tabular-nums">took {formatDuration(run.duration_ms)}</span>
               </>
             )}
             {stamp && (

@@ -194,13 +194,15 @@ export function RunSummary({ run }: { run: RunDetail }) {
   const criteria = tallyCriteria(run.criteria);
   const inputs = Object.entries(run.inputs);
   const [failureEnvelope, setFailureEnvelope] = useState<FailureEnvelope | null>(null);
+  const [failureError, setFailureError] = useState(false);
   useEffect(() => {
     setFailureEnvelope(null);
+    setFailureError(false);
     if (!run.children?.length) return;
     let live = true;
     fetchFailure(run.run_id)
       .then((envelope) => live && setFailureEnvelope(envelope))
-      .catch(() => {});
+      .catch(() => live && setFailureError(true));
     return () => {
       live = false;
     };
@@ -277,7 +279,15 @@ export function RunSummary({ run }: { run: RunDetail }) {
               })}
             </ol>
           ) : (
-            <p className="text-sm text-muted-foreground">No failures recorded.</p>
+            // Only a loaded envelope may claim absence; loading and fetch
+            // errors must not read as "no failures".
+            <p className="text-sm text-muted-foreground">
+              {failureEnvelope
+                ? "No failures recorded."
+                : failureError
+                  ? "Failures could not be loaded."
+                  : "Loading failures…"}
+            </p>
           )}
         </section>
       )}

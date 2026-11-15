@@ -28,11 +28,11 @@ pub fn ingest_router(store: Arc<SqliteStore>, token: Option<String>) -> Router {
 async fn ingest(State(state): State<IngestState>, headers: HeaderMap, body: Bytes) -> Response {
     if let Some(token) = &state.token {
         let expected = format!("Bearer {token}");
-        if headers
+        let supplied = headers
             .get("authorization")
-            .and_then(|value| value.to_str().ok())
-            != Some(expected.as_str())
-        {
+            .map(|value| value.as_bytes())
+            .unwrap_or_default();
+        if !constant_time_eq(supplied, expected.as_bytes()) {
             return StatusCode::UNAUTHORIZED.into_response();
         }
     }
@@ -57,5 +57,20 @@ async fn ingest(State(state): State<IngestState>, headers: HeaderMap, body: Byte
         Err(duhem_evidence::store::IngestError::Store(_)) => {
             (StatusCode::INTERNAL_SERVER_ERROR, "could not store bundle").into_response()
         }
+    }
+}
+
+/// Compare secrets without an early exit on the first differing byte.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn token_comparison() {
+        assert!(super::constant_time_eq(b"Bearer t", b"Bearer t"));
+        assert!(!super::constant_time_eq(b"Bearer t", b"Bearer u"));
+        assert!(!super::constant_time_eq(b"Bearer", b"Bearer t"));
     }
 }

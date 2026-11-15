@@ -240,19 +240,6 @@ async fn ship_tree(
     Ok(last_hash)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn deprecated_env_warning_is_once_per_name_and_process() {
-        assert!(mark_deprecated_env("OLD_URL_TEST"));
-        assert!(!mark_deprecated_env("OLD_URL_TEST"));
-        assert!(mark_deprecated_env("OLD_TOKEN_TEST"));
-        assert!(!mark_deprecated_env("OLD_TOKEN_TEST"));
-    }
-}
-
 /// Delivery is best-effort and never enters the verdict or reporter fold.
 pub async fn auto_send(store: &dyn duhem_evidence::Store, roots: &[String]) {
     let Some(url) = upload_url(None) else {
@@ -269,4 +256,17 @@ pub async fn auto_send(store: &dyn duhem_evidence::Store, roots: &[String]) {
         Err(_) => "delivery timed out".into(),
     };
     eprintln!("warning: auto-send: {}", error.replace(['\r', '\n'], " "));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deprecated_env_warning_is_once_per_name_and_process() {
+        assert!(mark_deprecated_env("OLD_URL_TEST"));
+        assert!(!mark_deprecated_env("OLD_URL_TEST"));
+        assert!(mark_deprecated_env("OLD_TOKEN_TEST"));
+        assert!(!mark_deprecated_env("OLD_TOKEN_TEST"));
+    }
 }

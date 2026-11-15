@@ -80,6 +80,9 @@ pub struct Engine {
     /// matching checks execute; non-matching checks are skipped with
     /// no evidence emission.
     filter: Option<Box<dyn CheckFilter>>,
+    run_native: bool,
+    native_only_vacuous_body: bool,
+    excluded_native_runs: Vec<String>,
     filter_patterns: Vec<String>,
     manifest_selection: Option<duhem_summary::ManifestSelection>,
     /// Optional u64 seed for runtime entropy (spec on issue #33). When
@@ -170,6 +173,9 @@ impl Engine {
             definition_path: None,
             definition_source: None,
             filter: None,
+            run_native: true,
+            native_only_vacuous_body: false,
+            excluded_native_runs: Vec::new(),
             filter_patterns: Vec::new(),
             manifest_selection: None,
             seed: None,
@@ -393,9 +399,12 @@ impl Engine {
                 }
             }
 
-            let native =
+            let native = if self.run_native {
                 crate::engine::native::run_native(&mut writer, &def.native, vd_dir.as_deref())
-                    .await?;
+                    .await?
+            } else {
+                Vec::new()
+            };
             crate::engine::session_scope::SessionScope::enter(&mut run_state, &def.session, None);
             run_state.register_process_cleanup(run_state.process_owner.clone(), &def.teardown);
 
@@ -571,6 +580,12 @@ impl Engine {
             down_result?;
 
             let mut run_verdict = aggregate_run(criterion_verdicts);
+            // A native-only selection (set by the CLI) judges no criteria: the
+            // body is vacuous and the gate comes from the selected native runs.
+            let native_only_vacuous = self.native_only_vacuous_body;
+            if native_only_vacuous {
+                run_verdict.state = VerdictState::Pass;
+            }
             let body = run_verdict.state;
             if cleanup.iter().any(|failure| failure.required) {
                 run_verdict.state = VerdictState::Fail;
@@ -579,7 +594,7 @@ impl Engine {
                 run_verdict.state,
                 native.iter().map(|run| (run.required, run.outcome)),
             );
-            let body_verdict = (body != run_verdict.state).then_some(body);
+            let body_verdict = (!native_only_vacuous && body != run_verdict.state).then_some(body);
             writer
                 .append(EventPayload::RunFinished {
                     body_verdict,
@@ -1477,6 +1492,9 @@ criteria:
             definition_path: None,
             definition_source: None,
             filter: None,
+            run_native: true,
+            native_only_vacuous_body: false,
+            excluded_native_runs: Vec::new(),
             filter_patterns: Vec::new(),
             manifest_selection: None,
             seed: None,

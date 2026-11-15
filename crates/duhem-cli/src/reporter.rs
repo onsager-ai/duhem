@@ -132,6 +132,13 @@ pub fn render(
                         excluded.criterion_id, excluded.check_id, excluded.reason
                     )?;
                 }
+                if !scope.excluded_native_runs.is_empty() {
+                    writeln!(
+                        out,
+                        "excluded native runs: {}",
+                        scope.excluded_native_runs.join(", ")
+                    )?;
+                }
             }
             if let Some(body) = outcome.body_verdict {
                 writeln!(out, "  body: {body}")?;
@@ -218,6 +225,13 @@ pub fn render_set(
                         out,
                         "  excluded {} ({})",
                         excluded.verification, excluded.reason
+                    )?;
+                }
+                if !selection.excluded_native_runs.is_empty() {
+                    writeln!(
+                        out,
+                        "excluded native runs: {}",
+                        selection.excluded_native_runs.join(", ")
                     )?;
                 }
             }

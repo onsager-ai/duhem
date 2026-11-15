@@ -100,6 +100,22 @@ impl Engine {
         self
     }
 
+    /// Whether this run executes the definition's native commands.
+    pub fn with_native_execution(mut self, enabled: bool) -> Self {
+        self.run_native = enabled;
+        self
+    }
+
+    pub fn with_native_only_vacuous_body(mut self, enabled: bool) -> Self {
+        self.native_only_vacuous_body = enabled;
+        self
+    }
+
+    pub fn with_excluded_native_runs(mut self, ids: Vec<String>) -> Self {
+        self.excluded_native_runs = ids;
+        self
+    }
+
     /// Retain CLI selection provenance without changing the filter's judgment.
     pub fn with_claim_provenance(
         mut self,

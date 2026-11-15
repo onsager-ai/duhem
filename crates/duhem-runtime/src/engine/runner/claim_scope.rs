@@ -10,6 +10,7 @@ impl Engine {
             manifest: self.manifest_selection.clone(),
             ..Default::default()
         };
+        scope.excluded_native_runs = self.excluded_native_runs.clone();
         scope.criteria.authored = definition.criteria.len() as u32;
         for criterion in &definition.criteria {
             let mut selected = 0;

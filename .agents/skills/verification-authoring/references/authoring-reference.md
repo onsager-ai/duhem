@@ -36,7 +36,12 @@ normalized results. Use `format: ctrf` for CTRF v0.2.0 JSON: `passed`/`failed`
 map to pass/fail, `skipped`/`pending` to skip, and `other` to error. Missing required
 test fields, unknown statuses and newer major versions are inconclusive; omitted
 `specVersion` is accepted. Suite hierarchies preserve test identity, and message
-and trace are masked together. Native selection filters are deferred.
+and trace are masked together.
+
+Use `duhem run --filter native:<id>` to select native commands by exact or glob ID;
+repeated filters are ORed. Once any filter is supplied, native commands without a
+matching `native:` filter are excluded from execution and the gate (including with
+criterion-only filters), and the summary reports excluded IDs.
 
 `duhem init` detects Cargo, package test scripts (npm/pnpm/yarn), pytest and Go in
 the target project and prints suggested `native:` entries for your root manifest.

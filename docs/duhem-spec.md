@@ -268,6 +268,8 @@ This is honesty about what verification can and cannot do. Localizing a holistic
 
 **Alignment note (2026-11-15, #649 — native runs).** Duhem is the verification runner: one entry point runs every verification layer, gates on all of them, aggregates statistics and indexes evidence, without replacing test frameworks. The principal chose option A: required native runs contribute only to the effective gate, preserving `body_verdict`; native results never satisfy criteria or enter check assertions or expressions, while `required: false` remains diagnostic. This follows the effective-gate precedent for required cleanup (§10.3.5; #567/#615). Holistic checks and independent judgment are unchanged: a test the agent wrote itself can block a run but can never close a criterion.
 
+**Alignment note (2026-11-15, #650 — distributed runs).** The principal decided that split and merge apply to every Duhem unit, not only native runs; each CI machine uses the existing `duhem run` command, with no artifact-import or manual-ship command. CI starts machines and owns the merge gate; automatic CI detection is convenience over `DUHEM_SHARD` and `DUHEM_RUN_ID`. Aggregation belongs to a Duhem server through one contract shared by the OSS dashboard and hosted hub. Distribution is CI-driven; queue mode remains a future possibility and a Duhem-managed worker pool is a separate product decision.
+
 ## 9. Workflow Stages
 
 A verification cycle proceeds through five stages. Each stage has a defined automation level.
@@ -1236,8 +1238,8 @@ pair — symmetric with leaf `setup:`/`teardown:` (§10.3, §10.3.4) and no new
 concept: the same `Vec<Step>` shape, the same non-judging semantics, the
 same value-based `if:` support (§10.3.3 Tier 1), and the same direct
 `call:` support (§10.3.4). Criterion `setup:` runs
-once before that criterion's checks; check `setup:` runs before that
-check's own `steps:` (and, like flow cleanups, on every retry attempt).
+once per shard that needs that criterion, before its checks; check `setup:` runs before that
+check's own `steps:` (and, like flow cleanups, on every retry attempt). Each shard needs its own environment so its lifecycle is isolated; sharing one mutable environment waits for #410's leases.
 
 ```yaml
 verification: Criterion and check lifecycle hooks
@@ -1352,6 +1354,24 @@ compatibility `cleanup` field remains.
 ### 10.4 Root manifest (`duhem.yml`)
 
 The root manifest is a single canonical file at the project root that aggregates Verification Definitions and provides shared configuration.
+
+#### Distributed runs
+
+CI starts the machines and owns the merge gate: a failed or missing shard fails the pipeline. Every machine runs the same `duhem run` and computes its own share. The Duhem server receives completed run trees, groups shards, re-judges from their events, and serves the combined view; it never assigns work. Thus a server outage cannot change a shard's verdict, exit code, local record, or CI gate.
+
+A shard is identified as `k/n` (one-based `k`) and each machine in the same CI invocation shares a run ID. Unless flags override them, `duhem run` detects shard identity from these CI variables:
+
+| CI | Shard index | Shard count | Shared run identity |
+| --- | --- | --- | --- |
+| GitLab CI | `CI_NODE_INDEX` | `CI_NODE_TOTAL` | `CI_PIPELINE_ID` (shared by the pipeline's parallel jobs) |
+| Buildkite | `BUILDKITE_PARALLEL_JOB` | `BUILDKITE_PARALLEL_JOB_COUNT` | `BUILDKITE_BUILD_ID` (shared by the build's parallel jobs) |
+| CircleCI | `CIRCLE_NODE_INDEX` | `CIRCLE_NODE_TOTAL` | `CIRCLE_WORKFLOW_ID` and `CIRCLE_BUILD_NUM` |
+
+GitHub Actions exposes `strategy.job-index` and `strategy.job-total` as workflow contexts rather than environment variables. Its documented recipe maps these contexts and a shared workflow run ID/attempt to `DUHEM_SHARD` and `DUHEM_RUN_ID`. The CI-neutral inputs are `DUHEM_SHARD=k/n` and `DUHEM_RUN_ID`, equivalently `--shard` and `--run-id`; explicit flags take precedence over generic variables, which take precedence over CI detection. The detected source is recorded. With no shard information, behavior is unchanged, and these generic inputs also allow local reproduction of a single shard.
+
+The deterministic partition uses the selected leaves, criteria, and native runs (#649) as units. A criterion is the smallest unit: its checks and `setup:` remain together. Every shard computes the same partition from the manifest digest, selection, and shard count `n`, without coordination. Shards are disjoint and together cover the selection. Each shard runs the enclosing lifecycle its units need, including `provision`, leaf `setup:`/`teardown:`, and cleanups; see §10.3.6.
+
+This reuses the run lineage model: one logical parent run, with child runs and verdict aggregation through `RunSetSummary`. The shared run ID identifies the parent and is permitted for manifest runs when sharding. Each shard records `origin: shard`, its `shard: k/n`, manifest digest, and expected partition so reports show what was planned.
 
 ```yaml
 # duhem.yml at project root
@@ -1831,6 +1851,13 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
   handle
 - Portable via `duhem export` (self-contained per-run bundle)
 
+#### Distributed run aggregation
+
+When `DUHEM_HUB_URL` points to a Duhem server, each `duhem run` sends its completed run tree automatically using the existing run-bundle contract (`docs/run-bundle-contract.md`). Bundles are content-hash idempotent, making identical retries safe. The OSS dashboard exposes the ingest endpoint used by the hosted hub, so both use one contract.
+
+The server creates the logical parent idempotently on first arrival and replays the event stream to recompute child and parent verdicts; it never trusts a shard's supplied summary. The parent remains `pending` until every expected shard arrives. If a shard never arrives or CI ends without it, the parent is `inconclusive` and names the missing units according to the claim-scope rule (#531); missing work never counts as a pass. The server rejects shards with a mismatched manifest digest or shard count under one run ID, and rejects conflicting duplicates. An identical resend is a no-op. It serves the aggregated report, totals, and failure envelope through the existing dashboard and `/failure` endpoints. Any combined commit status is informational; CI's parallel jobs remain the merge gate.
+
+Without a configured server, each shard records locally as today. Its result and the CI gate are unaffected; only the combined view is absent. A future queue mode may let CI-started machines claim units atomically from the server, with fixed partition as fallback; queue mode is not part of this design.
 
 
 ### Report definitions with no recorded run
@@ -2043,7 +2070,7 @@ Visual judgment needs full-frame/region observations, candidate/reference/diff a
 
 [Milestone M4](https://github.com/onsager-ai/duhem/milestone/4) includes the metric sampler/comparator draft [#582](https://github.com/onsager-ai/duhem/issues/582) and the lease/hermetic-port subset of [#410](https://github.com/onsager-ai/duhem/issues/410). Samples require declared measurement windows, units, cold/warm state and aggregation; runner-step duration is not a substitute for the product metric. The lease vocabulary decision remains with #410.
 
-Qualify isolated files, ports, databases, credentials and setup-through-cleanup ownership under concurrent recovery workloads. Existing isolated CI sharding can remain until native scheduling is qualified. Neither all of #410 nor broad native scheduling blocks the first real-binary pilot.
+Qualify isolated files, ports, databases, credentials and setup-through-cleanup ownership under concurrent recovery workloads. Distributed CI runs use the fixed, deterministic partition and per-shard environments defined in §10.4; the server aggregates results but does not schedule work. Queue-based scheduling remains a future possibility, and shared mutable environments wait for #410's leases. Neither all of #410 nor a Duhem-managed worker pool blocks the first real-binary pilot.
 
 ### Qualification sequence
 

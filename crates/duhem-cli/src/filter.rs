@@ -242,6 +242,17 @@ impl CliCheckFilter {
     }
 }
 
+pub fn native_selection(
+    filter: Option<&CliCheckFilter>,
+    runs: &[duhem_schema::NativeRun],
+) -> (Vec<duhem_schema::NativeRun>, Vec<String>) {
+    match filter {
+        None => (runs.to_vec(), Vec::new()),
+        Some(filter) if filter.has_native_filters() => filter.select_native(runs),
+        Some(_) => (Vec::new(), runs.iter().map(|run| run.id.clone()).collect()),
+    }
+}
+
 impl CheckFilter for CliCheckFilter {
     fn matches(&self, criterion_id: &str, check_id: &str) -> bool {
         self.patterns

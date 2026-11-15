@@ -106,6 +106,11 @@ impl Engine {
         self
     }
 
+    pub fn with_native_only_vacuous_body(mut self, enabled: bool) -> Self {
+        self.native_only_vacuous_body = enabled;
+        self
+    }
+
     pub fn with_excluded_native_runs(mut self, ids: Vec<String>) -> Self {
         self.excluded_native_runs = ids;
         self

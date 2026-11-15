@@ -58,7 +58,12 @@ matching as criterion IDs; `*` matches zero or more characters. Repeated
 
 When any `--filter` is supplied, native commands run only when a `native:` filter
 matches them. Criterion-only filters therefore skip every native command, and
-native commands not selected this way are excluded from the gate. Excluded IDs
+native commands not selected this way are excluded from the gate. If native-only
+filters select at least one native run and no criteria/checks, the empty body is
+vacuously passing and the overall verdict is the selected native runs' gate
+contribution. No `body_verdict` is reported, and claim scope still reports zero
+selected checks and excluded criteria. If no native run matches, the existing
+empty-selection inconclusive behavior remains. Excluded IDs
 appear in JSON selection/claim-scope output and as `excluded native runs: ...` in
 the default terminal report. A native pattern matching no declared ID behaves
 like an unmatched criterion filter: the selected checks (or no checks) still

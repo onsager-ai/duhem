@@ -21,7 +21,7 @@ use duhem_schema::{
     load_for_run as load_definition, validate_with_action_catalog,
 };
 
-use crate::filter::CliCheckFilter;
+use crate::filter::{CliCheckFilter, native_selection};
 use crate::inputs;
 use crate::profile;
 use crate::reporter::{self, Reporter};
@@ -283,36 +283,15 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             filters: raw_filter.clone(),
             ..Default::default()
         };
-        for leaf in leaves
-            .iter()
-            .filter(|leaf| authored_leaf_paths.iter().any(|path| path == &leaf.path))
-        {
-            let (_, excluded) = check_filter.as_ref().map_or_else(
-                || (leaf.definition.native.clone(), Vec::new()),
-                |filter| {
-                    if filter.has_native_filters() {
-                        filter.select_native(&leaf.definition.native)
-                    } else {
-                        (
-                            Vec::new(),
-                            leaf.definition
-                                .native
-                                .iter()
-                                .map(|run| run.id.clone())
-                                .collect(),
-                        )
-                    }
-                },
-            );
-            excluded_native_runs.extend(excluded);
-        }
         for path in &authored_leaf_paths {
             let reason = if !leaves.iter().any(|leaf| &leaf.path == path) {
                 Some("directory_selection")
-            } else if check_filter
-                .as_ref()
-                .is_some_and(|filter| filter.for_verification(&leaf_name(path)).is_none())
-            {
+            } else if check_filter.as_ref().is_some_and(|filter| {
+                filter.has_criterion_filters()
+                    && filter.for_criteria().is_some_and(|criteria| {
+                        criteria.for_verification(&leaf_name(path)).is_none()
+                    })
+            }) {
                 Some("verification_filter")
             } else {
                 None
@@ -327,21 +306,18 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             }
         }
         if let Scope::Manifest { native, .. } = &scope {
-            let (_, excluded) = check_filter.as_ref().map_or_else(
-                || (native.clone(), Vec::new()),
-                |filter| {
-                    if filter.has_native_filters() {
-                        filter.select_native(native)
-                    } else {
-                        (
-                            Vec::new(),
-                            native.iter().map(|run| run.id.clone()).collect(),
-                        )
-                    }
-                },
-            );
+            let (_, excluded) = native_selection(check_filter.as_ref(), native);
             excluded_native_runs.extend(excluded);
         }
+        for leaf in leaves
+            .iter()
+            .filter(|leaf| authored_leaf_paths.iter().any(|path| path == &leaf.path))
+        {
+            let (_, excluded) = native_selection(check_filter.as_ref(), &leaf.definition.native);
+            excluded_native_runs.extend(excluded);
+        }
+        let mut seen_native_ids = std::collections::BTreeSet::new();
+        excluded_native_runs.retain(|id| seen_native_ids.insert(id.clone()));
         selection.excluded_native_runs = excluded_native_runs.clone();
         selection
     });
@@ -462,19 +438,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             }
         }
         for (name, _path, definition, _inputs, _secrets) in &resolved {
-            let (selected, excluded) = check_filter.as_ref().map_or_else(
-                || (definition.native.clone(), Vec::new()),
-                |filter| {
-                    if filter.has_native_filters() {
-                        filter.select_native(&definition.native)
-                    } else {
-                        (
-                            Vec::new(),
-                            definition.native.iter().map(|run| run.id.clone()).collect(),
-                        )
-                    }
-                },
-            );
+            let (selected, excluded) = native_selection(check_filter.as_ref(), &definition.native);
             for run in selected {
                 let line = if is_manifest {
                     format!("WOULD RUN NATIVE: {name}::{}", run.id)
@@ -688,19 +652,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                         }
                     }
                 }
-                let (selected_native, _) = check_filter.as_ref().map_or_else(
-                    || (native.clone(), Vec::new()),
-                    |filter| {
-                        if !filter.has_native_filters() {
-                            (
-                                Vec::new(),
-                                native.iter().map(|run| run.id.clone()).collect(),
-                            )
-                        } else {
-                            filter.select_native(native)
-                        }
-                    },
-                );
+                let (selected_native, _) = native_selection(check_filter.as_ref(), native);
                 suite_native = match session
                     .run_native(&selected_native, &suite_secrets, true)
                     .await
@@ -720,6 +672,10 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             }
         }
     }
+    let selected_root_native = match &scope {
+        Scope::Manifest { native, .. } => native_selection(check_filter.as_ref(), native).0,
+        Scope::SingleLeaf => Vec::new(),
+    };
     let suite_managed = matches!(
         &scope,
         Scope::Manifest {
@@ -747,22 +703,15 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // signal a typo'd `--filter` would on any leaf — consistent
         // with `--dry-run` which already prints
         // `(no checks matched filter)` for the same case.
-        let (selected_leaf_native, excluded_leaf_native) = check_filter.as_ref().map_or_else(
-            || (def.native.clone(), Vec::new()),
-            |filter| {
-                if filter.has_native_filters() {
-                    filter.select_native(&def.native)
-                } else {
-                    (
-                        Vec::new(),
-                        def.native.iter().map(|run| run.id.clone()).collect(),
-                    )
-                }
-            },
-        );
+        let (selected_leaf_native, excluded_leaf_native) =
+            native_selection(check_filter.as_ref(), &def.native);
         if !excluded_leaf_native.is_empty() && !is_manifest {
             excluded_native_runs.extend(excluded_leaf_native.clone());
         }
+        let native_only_vacuous = check_filter.as_ref().is_some_and(|filter| {
+            !filter.has_criterion_filters()
+                && (!selected_leaf_native.is_empty() || !suite_native.is_empty())
+        });
         let mut def = def;
         def.native = selected_leaf_native;
         let run_leaf_native = check_filter.is_none()
@@ -849,6 +798,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             .keep_env(keep_env)
             .skip_env_down(suite_managed)
             .with_native_execution(run_leaf_native)
+            .with_native_only_vacuous_body(native_only_vacuous)
             .with_env(env_whitelist.clone())
             .with_inherited(
                 def.inputs

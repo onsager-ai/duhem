@@ -40,19 +40,101 @@ criteria:
     .unwrap();
     let output = run(&leaf, tmp.path(), &["native:a*"], "json");
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert!(
-        !output.status.success(),
-        "empty criterion aggregation remains inconclusive"
-    );
+    assert!(output.status.success(), "{summary}");
+    assert_eq!(summary["verdict"], "pass");
+    assert!(summary.get("body_verdict").is_none());
     assert!(tmp.path().join("alpha").exists());
     assert!(!tmp.path().join("beta").exists());
     assert_eq!(summary["claim_scope"]["checks"]["selected"], 0);
+    assert_eq!(summary["claim_scope"]["criteria"]["selected"], 0);
+    assert_eq!(
+        summary["claim_scope"]["excluded"].as_array().unwrap().len(),
+        1
+    );
     assert_eq!(summary["native"].as_array().unwrap().len(), 1);
     assert_eq!(summary["native"][0]["id"], "alpha");
     assert_eq!(
         summary["claim_scope"]["excluded_native_runs"],
         serde_json::json!(["beta"])
     );
+
+    let failing = tmp.path().join("failing.yml");
+    std::fs::write(
+        &failing,
+        r#"verification: native-filter
+native:
+  - {id: alpha, command: [sh, -c, 'exit 7']}
+criteria: []
+"#,
+    )
+    .unwrap();
+    let output = run(&failing, tmp.path(), &["native:alpha"], "json");
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(!output.status.success(), "{summary}");
+    assert_eq!(summary["verdict"], "fail");
+    assert!(summary.get("body_verdict").is_none());
+}
+
+#[test]
+fn unmatched_native_only_filter_keeps_empty_selection_inconclusive() {
+    let tmp = tempfile::tempdir().unwrap();
+    let leaf = tmp.path().join("leaf.yml");
+    std::fs::write(
+        &leaf,
+        "verification: unmatched\nnative: [{id: alpha, command: [sh, -c, 'touch alpha']}]\ncriteria: []\n",
+    )
+    .unwrap();
+    let output = run(&leaf, tmp.path(), &["native:missing"], "json");
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(!output.status.success(), "{summary}");
+    assert_eq!(summary["verdict"], "inconclusive:empty_aggregation");
+    assert!(summary["native"].as_array().unwrap().is_empty());
+    assert_eq!(summary["claim_scope"]["checks"]["selected"], 0);
+    assert_eq!(
+        summary["claim_scope"]["excluded_native_runs"],
+        serde_json::json!(["alpha"])
+    );
+}
+
+#[test]
+fn native_only_filter_passes_manifest_with_vacuous_leaf_bodies() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("alpha.yml"),
+        "verification: alpha\ncriteria:\n  - id: AC\n    description: excluded\n    checks: [{id: body, assertions: ['true']}]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("beta.yml"),
+        "verification: beta\ncriteria:\n  - id: AC\n    description: excluded\n    checks: [{id: body, assertions: ['true']}]\n",
+    )
+    .unwrap();
+    let up = tmp.path().join("up.sh");
+    std::fs::write(&up, "#!/bin/sh\nexit 0\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&up, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let manifest = tmp.path().join("duhem.yml");
+    std::fs::write(
+        &manifest,
+        "manifest_version: 1\nprovision: {up: ./up.sh}\nnative:\n  - {id: suite, command: [sh, -c, 'touch suite']}\n  - {id: other, command: [sh, -c, 'touch other']}\nverifications: [{path: alpha.yml}, {path: beta.yml}]\n",
+    )
+    .unwrap();
+    let output = run(&manifest, tmp.path(), &["native:suite"], "json");
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(output.status.success(), "{summary}");
+    assert_eq!(summary["verdict"], "pass");
+    assert!(tmp.path().join("suite").exists());
+    assert!(!tmp.path().join("other").exists());
+    assert_eq!(
+        summary["selection"]["excluded_native_runs"],
+        serde_json::json!(["other"])
+    );
+    assert_eq!(summary["runs"].as_array().unwrap().len(), 2);
+    for run in summary["runs"].as_array().unwrap() {
+        assert_eq!(run["claim_scope"]["checks"]["selected"], 0);
+        assert_eq!(run["verdict"], "pass");
+        assert!(run.get("body_verdict").is_none());
+    }
 }
 
 #[test]

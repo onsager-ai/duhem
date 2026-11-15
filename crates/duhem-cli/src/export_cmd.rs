@@ -2,22 +2,59 @@
 //! for one format — the [`duhem_evidence::RunBundle`].
 //!
 //! `export` writes the human-browsable directory layout; `ship`
-//! POSTs the canonical JSON envelope to a hub's ingest endpoint,
+//! POSTs the canonical JSON envelope to a server's ingest endpoint,
 //! keyed by the bundle's content hash so re-shipping the same run is
-//! a server-side no-op. The hub server itself is the closed-source
-//! sibling (#188 open-core seam) — this repo owns only the client
-//! and the wire contract (`tests/bundle_contract.rs` pins it).
+//! a server-side no-op.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use duhem_evidence::{RunBundle, SqliteStore};
 
-/// Environment variables the ship step reads. The URL names the hub
-/// ingest endpoint; the token authenticates (the OAuth/session flow
-/// that mints it is the hub's concern).
+/// Environment variables used by run auto-send and `duhem ship`.
+pub const SERVER_URL_ENV: &str = "DUHEM_SERVER_URL";
+pub const SERVER_TOKEN_ENV: &str = "DUHEM_SERVER_TOKEN";
 pub const HUB_URL_ENV: &str = "DUHEM_HUB_URL";
 pub const HUB_TOKEN_ENV: &str = "DUHEM_HUB_TOKEN";
+
+static DEPRECATION_WARNED: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashSet<&'static str>>,
+> = std::sync::OnceLock::new();
+
+pub fn warn_deprecated_env(old: &'static str, new: &'static str) {
+    let warned = DEPRECATION_WARNED.get_or_init(Default::default);
+    let mut warned = warned.lock().unwrap();
+    if warned.insert(old) {
+        eprintln!("warning: {old} is deprecated; use {new}");
+    }
+}
+
+fn env_value(new: &'static str, old: &'static str) -> Option<String> {
+    if let Ok(value) = std::env::var(new)
+        && !value.is_empty()
+    {
+        return Some(value);
+    }
+    let value = std::env::var(old).ok().filter(|value| !value.is_empty())?;
+    warn_deprecated_env(old, new);
+    Some(value)
+}
+
+fn upload_url(explicit: Option<&str>) -> Option<String> {
+    if let Some(url) = explicit.filter(|value| !value.is_empty()) {
+        return Some(url.to_string());
+    }
+    if let Ok(url) = std::env::var(SERVER_URL_ENV)
+        && !url.is_empty()
+    {
+        return Some(format!("{}/api/ingest", url.trim_end_matches('/')));
+    }
+    let url = std::env::var(HUB_URL_ENV)
+        .ok()
+        .filter(|value| !value.is_empty())?;
+    warn_deprecated_env(HUB_URL_ENV, SERVER_URL_ENV);
+    Some(url)
+}
 
 async fn open_and_bundle(run_id: &str, db: Option<&Path>) -> Result<RunBundle, String> {
     let db_path = match db {
@@ -59,24 +96,20 @@ pub async fn run_export(run_id: &str, db: Option<&Path>, out: Option<&Path>) -> 
     }
 }
 
-/// `duhem ship <run-id>`: POST the bundle to the hub. Without a hub
-/// URL configured this is a clean no-op success — the CI ship step
-/// can run unconditionally and only bites when the operator opted in.
+/// POST a run bundle to the configured server. Without a URL this is a clean no-op when requested.
 pub async fn run_ship(
     run_id: &str,
     db: Option<&Path>,
     hub_url: Option<&str>,
     quiet_unconfigured: bool,
 ) -> ExitCode {
-    let url = hub_url
-        .map(str::to_string)
-        .or_else(|| std::env::var(HUB_URL_ENV).ok().filter(|v| !v.is_empty()));
+    let url = upload_url(hub_url);
     let Some(url) = url else {
         if quiet_unconfigured {
-            println!("ship: no hub configured ({HUB_URL_ENV} unset); skipping");
+            println!("ship: no server configured ({SERVER_URL_ENV} unset); skipping");
             return ExitCode::SUCCESS;
         }
-        eprintln!("ship: no hub URL — pass --hub-url or set {HUB_URL_ENV}");
+        eprintln!("ship: no server URL — pass --hub-url or set {SERVER_URL_ENV}");
         return ExitCode::FAILURE;
     };
 
@@ -110,9 +143,6 @@ pub async fn run_ship(
 }
 
 /// The ingest client (#194): one POST of the canonical envelope.
-/// Idempotency: the `X-Duhem-Content-Hash` header carries the
-/// bundle's hash; a hub that has it already answers 2xx without
-/// re-storing. 2xx = shipped.
 pub async fn ship_bundle(
     bundle: &RunBundle,
     url: &str,
@@ -131,14 +161,12 @@ pub async fn ship_bundle(
         .header("x-duhem-bundle-version", bundle.bundle_version.to_string())
         .header("x-duhem-content-hash", &hash)
         .body(body);
-    // One bounded attempt; identical manual re-sends use the same hash.
     if let Some(token) = token {
         req = req.bearer_auth(token);
     }
     let res = req.send().await.map_err(|e| e.without_url().to_string())?;
     if !res.status().is_success() {
-        let status = res.status();
-        return Err(format!("hub answered {status}"));
+        return Err(format!("hub answered {}", res.status()));
     }
     Ok(hash)
 }
@@ -178,7 +206,7 @@ async fn ship_tree(
         index += 1;
     }
     let mut sent: Vec<String> = Vec::new();
-    let token = std::env::var(HUB_TOKEN_ENV).ok();
+    let token = env_value(SERVER_TOKEN_ENV, HUB_TOKEN_ENV);
     let mut last_hash = String::new();
     while sent.len() < ordered.len() {
         let id = ordered
@@ -208,12 +236,9 @@ async fn ship_tree(
 
 /// Delivery is best-effort and never enters the verdict or reporter fold.
 pub async fn auto_send(store: &dyn duhem_evidence::Store, roots: &[String]) {
-    let Ok(url) = std::env::var(HUB_URL_ENV) else {
+    let Some(url) = upload_url(None) else {
         return;
     };
-    if url.is_empty() {
-        return;
-    }
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         ship_tree(store, roots, &url),

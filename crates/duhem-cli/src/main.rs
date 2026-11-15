@@ -298,12 +298,13 @@ enum Cmd {
         #[arg(long = "viewport", value_name = "WIDTHxHEIGHT")]
         viewport: Option<duhem_schema::Viewport>,
     },
-    /// Browse run evidence in a read-only web dashboard.
+    /// Run the Duhem server to browse and collect run evidence.
     ///
     /// Shells out to the separate `duhem-dashboard` binary (specs
     /// #53 / #87); `dashboard.rs` owns binary resolution and the
     /// serve/export surface.
-    Dashboard(dashboard::DashboardOpts),
+    #[command(alias = "dashboard")]
+    Server(dashboard::DashboardOpts),
     /// Provision the Playwright sidecar + Chromium for `ui/*` checks.
     ///
     /// `duhem browser install` installs the embedded sidecar's npm
@@ -336,8 +337,8 @@ enum Cmd {
         /// copy's project store.
         #[arg(long = "db", value_name = "PATH")]
         db: Option<PathBuf>,
-        /// Hub ingest URL. Defaults to $DUHEM_HUB_URL; the bearer
-        /// token comes from $DUHEM_HUB_TOKEN.
+        /// Ingest URL. Defaults to $DUHEM_SERVER_URL + /api/ingest;
+        /// the bearer token comes from $DUHEM_SERVER_TOKEN.
         #[arg(long = "hub-url", value_name = "URL")]
         hub_url: Option<String>,
         /// Exit 0 (skip) instead of erroring when no hub URL is
@@ -391,7 +392,7 @@ fn main() -> ExitCode {
             format,
             provenance,
         }),
-        Some(Cmd::Dashboard(opts)) => dashboard::run(&opts.into()),
+        Some(Cmd::Server(opts)) => dashboard::run(&opts.into()),
         Some(Cmd::Browser(opts)) => {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()

@@ -22,7 +22,22 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::time::Duration;
 
-pub const URL_ENV_OVERRIDE: &str = "DUHEM_DASHBOARD_URL";
+pub const URL_ENV_OVERRIDE: &str = "DUHEM_SERVER_URL";
+pub const LEGACY_URL_ENV: &str = "DUHEM_DASHBOARD_URL";
+
+fn env_url() -> Option<String> {
+    if let Ok(url) = std::env::var(URL_ENV_OVERRIDE)
+        && !url.trim().is_empty()
+    {
+        return Some(url.trim().trim_end_matches('/').to_string());
+    }
+    let url = std::env::var(LEGACY_URL_ENV).ok()?;
+    if url.trim().is_empty() {
+        return None;
+    }
+    crate::export_cmd::warn_deprecated_env(LEGACY_URL_ENV, URL_ENV_OVERRIDE);
+    Some(url.trim().trim_end_matches('/').to_string())
+}
 
 /// Env override for the `--watch` opener binary (#305) — the test
 /// seam, and an escape hatch for exotic desktops. The URL is passed
@@ -37,10 +52,8 @@ const PROBE_TIMEOUT: Duration = Duration::from_millis(250);
 /// The dashboard base URL for the store at `db_path`, if one is
 /// resolvable right now. See the module docs for the ladder.
 pub fn resolve_dashboard_base(db_path: &Path) -> Option<String> {
-    if let Ok(url) = std::env::var(URL_ENV_OVERRIDE)
-        && !url.trim().is_empty()
-    {
-        return Some(url.trim().trim_end_matches('/').to_string());
+    if let Some(url) = env_url() {
+        return Some(url);
     }
     let advertised = std::fs::read_to_string(duhem_evidence::dashboard_addr_path(db_path)).ok()?;
     let base = advertised.trim().trim_end_matches('/');

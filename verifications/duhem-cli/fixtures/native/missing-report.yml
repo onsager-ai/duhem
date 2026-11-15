@@ -1,0 +1,21 @@
+# A real successful command removes its report instead of producing it (#649).
+verification: Missing native report
+native:
+  - id: greeting-unit
+    layer: unit
+    cwd: ../../../native-example/project
+    command: [node, --input-type=module, -e, "import { rmSync } from 'node:fs'; rmSync('missing.xml', { force: true });"]
+    report: {format: junit, path: missing.xml}
+criteria:
+  - id: GREETING
+    description: The greeting CLI welcomes the visitor by name.
+    checks:
+      - id: GREETING.1
+        steps:
+          - id: greet
+            uses: cli/invoke
+            with:
+              command: [node, verifications/native-example/project/cli.mjs, Ada]
+        assertions:
+          - $steps.greet.outputs.exit_code == 0
+          - $steps.greet.outputs.stdout == "Hello, Ada!\n"

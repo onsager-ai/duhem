@@ -41,8 +41,13 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: cargo test
-        run: cargo test --workspace
+      # Build the runner, then execute the workspace tests exactly once through
+      # its required native gate. A nonzero cargo exit still fails this step.
+      - name: cargo test (Duhem native gate)
+        run: |
+          cargo build -p duhem-cli
+          ./target/debug/duhem validate verifications/duhem-rust
+          ./target/debug/duhem run verifications/duhem-rust --no-live
 
       - name: file-budget lint
         run: cargo run -p xtask --quiet -- check-file-budget --mode=fail

@@ -125,6 +125,23 @@ jobs:
       - name: Validate every verifications/ suite
         run: ./scripts/validate-suites.sh "$PWD/target/release/duhem"
 
+      # node:test and its JUnit reporter ship in Node itself; no npm install.
+      - name: Use Node for the native worked example and controls
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Run native worked example
+        run: |
+          ./target/release/duhem run verifications/native-example \
+            --db .duhem/duhem.db
+
+      - name: Validate native failing controls
+        run: |
+          for control in verifications/duhem-cli/fixtures/native/*.yml; do
+            ./target/release/duhem validate "$control"
+          done
+
       # The VD runs the binary under test, so point `duhem_bin` at the
       # freshly built artifact rather than whatever is on PATH. A
       # non-pass verdict exits non-zero and fails the job.

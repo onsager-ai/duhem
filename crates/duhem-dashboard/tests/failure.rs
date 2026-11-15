@@ -236,8 +236,8 @@ async fn envelope_hands_an_agent_everything_to_react() {
                 "detail": "actual false, expected true"
             }],
             "artifacts": [
-                {"id": fc["artifacts"][0]["id"], "kind": "capture/screenshot", "url": format!("/api/runs/{RUN}/artifact/{}", fc["artifacts"][0]["id"])},
-                {"id": fc["artifacts"][1]["id"], "kind": "capture/network", "url": format!("/api/runs/{RUN}/artifact/{}", fc["artifacts"][1]["id"])},
+                {"id": fc["artifacts"][0]["id"], "kind": "capture/screenshot", "url": format!("/api/runs/{RUN}/artifact/{}", fc["artifacts"][0]["id"].as_str().unwrap())},
+                {"id": fc["artifacts"][1]["id"], "kind": "capture/network", "url": format!("/api/runs/{RUN}/artifact/{}", fc["artifacts"][1]["id"].as_str().unwrap())},
             ],
             "first_failing_request": fc["first_failing_request"],
         }))

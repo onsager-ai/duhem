@@ -303,29 +303,78 @@ impl EvidenceReader {
         let Some(run) = self.load(run_id).await? else {
             return Ok(None);
         };
-        let proj = project_run(&run);
+        let records = self.store.list_runs().await?;
+        let tree_ids = descendant_run_ids(run_id, &records);
+        let tree_wide = tree_ids.len() > 1;
+        let verdict = if tree_wide {
+            use duhem_judge::{RunVerdict, aggregate_run_set};
+            let by_id: BTreeMap<&str, &RunRecord> = records
+                .iter()
+                .map(|record| (record.run_id.as_str(), record))
+                .collect();
+            let mut leaves: Vec<&RunRecord> = tree_ids
+                .iter()
+                .filter_map(|id| by_id.get(id.as_str()).copied())
+                .filter(|record| {
+                    !records.iter().any(|candidate| {
+                        candidate.lineage.parent_run_id.as_deref() == Some(record.run_id.as_str())
+                            && tree_ids.iter().any(|tree_id| tree_id == &candidate.run_id)
+                    })
+                })
+                .collect();
+            leaves.sort_by_key(|record| (record.started_at, record.run_id.as_str()));
+            let leaf_verdicts = leaves
+                .iter()
+                .filter_map(|record| {
+                    record.verdict.map(|state| RunVerdict {
+                        state,
+                        criteria: Vec::new(),
+                    })
+                })
+                .collect();
+            Some(aggregate_run_set(leaf_verdicts).state)
+        } else {
+            run.record.verdict
+        };
         let mut failing = Vec::new();
-        for c in &proj.checks {
-            if c.verdict == Some(VerdictState::Pass) {
-                continue;
+        let mut gated_checks = Vec::new();
+        for member_id in tree_ids {
+            let member = if member_id == run_id {
+                run.clone()
+            } else {
+                let Some(member) = self.load(&member_id).await? else {
+                    continue;
+                };
+                member
+            };
+            let proj = project_run(&member);
+            for c in &proj.checks {
+                if c.verdict == Some(VerdictState::Pass) {
+                    continue;
+                }
+                let mut check = self.build_failing_check(&member_id, c).await?;
+                if tree_wide {
+                    check.run_id = Some(member_id.clone());
+                    check.verification = Some(verification_name(&member.record.verification));
+                }
+                failing.push(check);
             }
-            failing.push(self.build_failing_check(run_id, c).await?);
+            gated_checks.extend(
+                proj.checks
+                    .iter()
+                    .filter(|c| c.gated_judging_steps > 0)
+                    .map(|c| duhem_summary::CheckGatingSummary {
+                        criterion_id: c.criterion_id.clone(),
+                        check_id: c.check_id.clone(),
+                        gated_judging_steps: c.gated_judging_steps,
+                    }),
+            );
         }
-        let gated_checks = proj
-            .checks
-            .iter()
-            .filter(|c| c.gated_judging_steps > 0)
-            .map(|c| duhem_summary::CheckGatingSummary {
-                criterion_id: c.criterion_id.clone(),
-                check_id: c.check_id.clone(),
-                gated_judging_steps: c.gated_judging_steps,
-            })
-            .collect();
         Ok(Some(FailureEnvelope {
             gated_checks,
             run_id: run.record.run_id.clone(),
             verification: verification_name(&run.record.verification),
-            verdict: run.record.verdict,
+            verdict,
             failing,
         }))
     }
@@ -377,6 +426,8 @@ impl EvidenceReader {
             .collect();
         let first_failing_request = self.first_failing_request(&c.artifacts).await?;
         Ok(FailingCheck {
+            run_id: None,
+            verification: None,
             gated_judging_steps: c.gated_judging_steps,
             criterion_id: c.criterion_id.clone(),
             check_id: c.check_id.clone(),
@@ -494,6 +545,30 @@ pub fn events_to_jsonl(events: &[Event]) -> String {
         }
     }
     out
+}
+
+fn descendant_run_ids(root_id: &str, records: &[RunRecord]) -> Vec<String> {
+    let mut children: BTreeMap<&str, Vec<&RunRecord>> = BTreeMap::new();
+    for record in records {
+        if let Some(parent) = record.lineage.parent_run_id.as_deref() {
+            children.entry(parent).or_default().push(record);
+        }
+    }
+    fn visit(run_id: &str, children: &BTreeMap<&str, Vec<&RunRecord>>, output: &mut Vec<String>) {
+        output.push(run_id.to_string());
+        let mut descendants = children.get(run_id).cloned().unwrap_or_default();
+        descendants.sort_by_key(|record| (record.started_at, record.run_id.as_str()));
+        for child in descendants {
+            visit(&child.run_id, children, output);
+        }
+    }
+    if records.iter().any(|record| record.run_id == root_id) {
+        let mut output = Vec::new();
+        visit(root_id, &children, &mut output);
+        output
+    } else {
+        vec![root_id.to_string()]
+    }
 }
 
 fn sort_newest_first(entries: &mut [RunsListEntry]) {

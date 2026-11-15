@@ -287,7 +287,9 @@ pub struct AssertionDiff {
 /// contract (`docs/failure-envelope-contract.md`).
 #[derive(Debug, Clone, Serialize)]
 pub struct FailureEnvelope {
-    /// Includes passing checks whose judging steps were gated.
+    /// Includes passing checks whose judging steps were gated. Tree-wide
+    /// envelopes combine entries without per-run provenance because the
+    /// existing summary type has no source-run fields.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub gated_checks: Vec<duhem_summary::CheckGatingSummary>,
     pub run_id: String,
@@ -299,6 +301,12 @@ pub struct FailureEnvelope {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FailingCheck {
+    /// Present when this item is part of a tree-wide parent envelope.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    /// Present when this item is part of a tree-wide parent envelope.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification: Option<String>,
     #[serde(skip_serializing_if = "is_zero")]
     pub gated_judging_steps: u32,
     pub criterion_id: String,

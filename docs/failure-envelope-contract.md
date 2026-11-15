@@ -32,6 +32,8 @@ A passing run is `200` with `failing: []` — not an error.
   "verdict": "fail",
   "failing": [                          // one entry per non-passing check; [] on a pass
     {
+      "run_id": "01…",                 // present only in a tree-wide parent envelope
+      "verification": "checkout",      // verification name for this run
       "criterion_id": "AC-1",
       "check_id": "AC-1.1",
       "verdict": "fail",
@@ -58,9 +60,18 @@ A passing run is `200` with `failing: []` — not an error.
   checks. Omitted entirely when no judging steps were value-gated; static
   gates, upstream blocking, and lifecycle steps do not count. The scoped
   check response and each failing entry also carry `gated_judging_steps`
-  when non-zero. The check timeline
+  when non-zero. Tree envelopes combine these entries using this existing
+  summary shape, without per-run tags. The check timeline
   preserves the skipped step's condition and evaluated operands.
   None of these fields changes the recorded verdict.
+- **Tree semantics (#651)** — when the requested run has children,
+  `failure` includes checks from that run and every descendant, with
+  descendants traversed in execution order (`started_at` ascending, then
+  `run_id`). The top-level `verdict` is the existing three-state
+  run-set aggregate over tree leaves. Each tree item adds
+  `run_id` and `verification` for its source run. A leaf envelope keeps
+  its existing JSON shape; these provenance fields are omitted. Per-check
+  routes and envelopes requested for a child remain scoped to that run.
 - **`failing`** — every check whose recorded verdict is not `pass`
   (`fail` or `inconclusive:<cause>`). The scoped endpoint returns a
   single such object (not wrapped in `failing`).

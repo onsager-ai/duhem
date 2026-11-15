@@ -81,9 +81,9 @@ duhem init ./verifications/hello --name hello
 ```
 
 When init detects Cargo, a package test script, pytest or Go tests in the target
-project, it also proposes `native:` entries in a new project root `duhem.yml`.
-Review the commands and report paths before running them. Existing manifests are
-preserved. See [init test detection](./native-runs.md#detecting-existing-tests-with-init).
+project, it prints suggested `native:` entries to paste into your root manifest.
+Review commands and report paths first; the commands assume the project root as
+cwd. Detection does not change scaffold files or create a manifest. See [init test detection](./native-runs.md#detecting-existing-tests-with-init).
 
 This writes a runnable **Verification Definition (VD)** — three files:
 

@@ -86,6 +86,7 @@ impl std::str::FromStr for Kind {
 pub struct InitOutcome {
     pub created: Vec<PathBuf>,
     pub warnings: Vec<String>,
+    pub notes: Vec<String>,
 }
 
 pub struct InitArgs {
@@ -246,9 +247,7 @@ pub(crate) fn run_with_prompt(
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| name.clone());
-            if proposal.is_some() {
-                // The detected project root gets a real manifest below.
-            } else if manifest.exists() {
+            if manifest.exists() {
                 warnings.push(format!(
                     "left existing root manifest {} unchanged; add `{leaf}/duhem.yml` to its \
                      verifications list when the root-manifest loader spec lands",
@@ -289,26 +288,15 @@ pub(crate) fn run_with_prompt(
         }
     }
 
-    if let Some(proposal) = proposal {
-        let manifest = proposal.root.join("duhem.yml");
-        if manifest.exists() {
-            warnings.push(format!(
-                "native entries proposed from test setup detection; left existing root manifest {} unchanged; review and add these entries manually:\n{}",
-                manifest.display(),
-                serde_yml::to_string(&serde_json::json!({"native": proposal.runs}))
-                    .expect("native suggestions serialize")
-            ));
-        } else {
-            fs::write(&manifest, proposal.manifest(&target))
-                .map_err(|e| InitError::Io(format!("write {}: {e}", manifest.display())))?;
-            created.push(manifest.clone());
-            warnings.push(format!(
-                "proposed native entries from test setup detection in {}; review commands and report paths before running",
-                manifest.display()
-            ));
-        }
-    }
-    Ok(InitOutcome { created, warnings })
+    let notes = proposal
+        .map(|proposal| proposal.note())
+        .into_iter()
+        .collect();
+    Ok(InitOutcome {
+        created,
+        warnings,
+        notes,
+    })
 }
 
 fn write_template(
@@ -554,6 +542,9 @@ pub fn run_init(
             );
             let _ = stdout.flush();
 
+            for note in &outcome.notes {
+                eprintln!("{note}");
+            }
             if outcome.warnings.is_empty() {
                 ExitCode::SUCCESS
             } else {

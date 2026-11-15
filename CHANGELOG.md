@@ -29,7 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
-- [additive] `duhem init` detects Cargo, npm/pnpm/yarn, pytest and Go tests and proposes native entries in a reviewable root manifest. (#649)
+- [additive] `duhem init` detects Cargo, npm/pnpm/yarn, pytest and Go tests and prints suggested native entries for review without changing scaffold files. (#649)
 
 - [additive] native reports accept CTRF v0.2.0 with shared counts, masked evidence and failure navigation. (#649)
 

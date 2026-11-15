@@ -62,8 +62,9 @@ required test fields are inconclusive. Missing `specVersion` is accepted; newer
 major versions are inconclusive. Messages and traces are masked together.
 
 `duhem init` detects Cargo, package test scripts (npm/pnpm/yarn), pytest and Go,
-and proposes native entries in a new project root manifest for review. Existing
-manifests are preserved. Nextest JUnit is proposed only when the ci profile
+and prints suggested native entries for review and pasting into your root manifest.
+Commands assume the project root as cwd; detection leaves scaffold files and exit
+status unchanged. Nextest JUnit is proposed only when the ci profile
 explicitly configures `[profile.ci.junit] path = "junit.xml"`. Review generated
 commands and paths before running.
 

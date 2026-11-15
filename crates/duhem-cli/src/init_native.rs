@@ -127,22 +127,12 @@ fn detect_at(root: &Path) -> Vec<NativeRun> {
 }
 
 impl Proposal {
-    pub fn manifest(&self, target: &Path) -> String {
-        let leaf = fs::canonicalize(target)
-            .expect("created target exists")
-            .strip_prefix(&self.root)
-            .expect("detected root contains target")
-            .join("duhem.yml")
-            .to_string_lossy()
-            .replace('\\', "/");
-        let value = serde_json::json!({
-            "manifest_version": 1,
-            "native": self.runs,
-            "verifications": [leaf],
-        });
+    pub fn note(&self) -> String {
+        let yaml = serde_yml::to_string(&serde_json::json!({"native": self.runs}))
+            .expect("native suggestions serialize");
         format!(
-            "# Native entries proposed from test setup detection; review before running.\n{}",
-            serde_yml::to_string(&value).expect("manifest serializes")
+            "Detected existing tests; add these native runs to your root manifest (review first):\n# Commands assume project root as cwd: {}\n{yaml}",
+            self.root.display()
         )
     }
 }
@@ -167,27 +157,36 @@ mod tests {
     }
 
     #[test]
-    fn cargo_and_npm_scaffolds_load_and_validate() {
+    fn cargo_and_npm_suggestions_validate_without_changing_scaffold_files() {
         for (file, content, expected) in [
             ("Cargo.toml", "[workspace]\n", "cargo"),
             ("package.json", r#"{"scripts":{"test":"vitest"}}"#, "npm"),
         ] {
             for pattern in [Pattern::A, Pattern::B] {
                 let tmp = tempfile::tempdir().unwrap();
+                let baseline = scaffold(tmp.path(), pattern);
+                let files = baseline
+                    .created
+                    .iter()
+                    .map(|path| (path.clone(), fs::read(path).unwrap()))
+                    .collect::<Vec<_>>();
+                for path in baseline.created.iter().rev() {
+                    fs::remove_file(path).unwrap();
+                }
                 fs::write(tmp.path().join(file), content).unwrap();
                 let outcome = scaffold(tmp.path(), pattern);
-                assert!(outcome.warnings.iter().any(|text| text.contains("review")));
-                let loaded = duhem_schema::load(&tmp.path().join("duhem.yml")).unwrap();
-                let duhem_schema::Loaded::Manifest {
-                    manifest, leaves, ..
-                } = loaded
-                else {
-                    panic!("expected manifest")
-                };
-                duhem_schema::native::validate_native(&manifest.native).unwrap();
-                assert_eq!(manifest.native[0].command[0], expected);
-                assert_eq!(leaves.len(), 1);
-                duhem_schema::validate(&leaves[0].definition).unwrap();
+                assert_eq!(outcome.created, baseline.created);
+                assert_eq!(outcome.warnings, baseline.warnings);
+                for (path, bytes) in files {
+                    assert_eq!(fs::read(path).unwrap(), bytes);
+                }
+                assert!(!tmp.path().join("duhem.yml").exists());
+                let note = &outcome.notes[0];
+                let yaml = note.split_once('\n').unwrap().1;
+                let value: serde_yml::Value = serde_yml::from_str(yaml).unwrap();
+                let runs: Vec<NativeRun> = serde_yml::from_value(value["native"].clone()).unwrap();
+                duhem_schema::native::validate_native(&runs).unwrap();
+                assert_eq!(runs[0].command[0], expected);
             }
         }
     }
@@ -254,8 +253,8 @@ mod tests {
             fs::read_to_string(tmp.path().join("duhem.yml")).unwrap(),
             existing
         );
-        assert!(outcome.warnings[0].contains("rust-unit"));
-        assert!(outcome.warnings[0].contains("native:"));
+        assert!(outcome.notes[0].contains("rust-unit"));
+        assert!(outcome.notes[0].contains("native:"));
     }
 
     #[test]

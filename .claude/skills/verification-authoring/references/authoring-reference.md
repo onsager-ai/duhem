@@ -39,8 +39,9 @@ test fields, unknown statuses and newer major versions are inconclusive; omitted
 and trace are masked together. Native selection filters are deferred.
 
 `duhem init` detects Cargo, package test scripts (npm/pnpm/yarn), pytest and Go in
-the target project and proposes `native:` entries in a new project root manifest.
-Review commands and paths before running; existing manifests are preserved. Cargo
+the target project and prints suggested `native:` entries for your root manifest.
+Commands assume the project root as cwd. Review commands and paths before adding
+them; detection leaves scaffold files and exit status unchanged. Cargo
 uses exit-code `cargo test --workspace` unless nextest explicitly configures
 `[profile.ci.junit] path = "junit.xml"`, which enables its JUnit report. No detection
 preserves the previous scaffold output.

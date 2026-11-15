@@ -133,11 +133,12 @@ and bounded failure navigation are shared by both formats.
 
 `duhem init verifications/hello --name hello` walks from the target directory to
 the nearest project with detected tests, stopping at a repository or project
-boundary. Both scaffold patterns propose entries in that project's `duhem.yml`
-root manifest, with the generated leaf in `verifications`. Commands run relative
-to this project root. Init only writes YAML; it never runs tests or edits runner
-configuration. It prints a short review note (the existing warning exit code 3).
-Existing root manifests are preserved; add the suggested native entries manually.
+boundary. Both scaffold patterns print a ready-to-paste YAML `native:` block as an
+informational note on stderr. Commands assume the detected project root as cwd;
+put the entries in a manifest at that root, or set `cwd` relative to your manifest.
+Init never runs tests or edits runner configuration. Detection creates no files
+and changes neither the existing scaffold files nor the command's exit status.
+Review commands and report paths before adding the suggestions to your manifest.
 
 | Detected setup | Proposed command | Report |
 | --- | --- | --- |
@@ -152,4 +153,5 @@ lockfiles exist, pnpm takes precedence. Missing or malformed nextest JUnit confi
 uses `cargo test --workspace`; init does not assume nextest will emit a report.
 The path follows [nextest's documented JUnit configuration](https://nexte.st/docs/machine-readable/junit/).
 Review installed tools, command options and report paths before running. With no
-detected tests, init retains its previous output, including Pattern B's stub.
+detected tests, init prints no suggestion. Scaffold files are unchanged either way,
+including Pattern B's stub.

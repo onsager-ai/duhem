@@ -213,8 +213,9 @@ jobs:
 
       - name: Run bundle ingest worked example against the real dashboard
         run: |
+          # Own store: the duhem-dashboard VD below counts the roots in .duhem/duhem.db.
           ./target/release/duhem run verifications/bundle-ingest-example \
-            --db .duhem/duhem.db \
+            --db .duhem/bundle-ingest.db \
             --inputs duhem_bin="$PWD/target/release/duhem" \
             --inputs dashboard_bin="$PWD/target/release/duhem-dashboard" \
             --inputs store="${RUNNER_TEMP}/bundle-ingest-example.db"

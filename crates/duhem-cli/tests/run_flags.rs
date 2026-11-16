@@ -2276,6 +2276,7 @@ criteria:
         verifier_sha: Some("verifier-sha".to_string()),
         target_repo: Some("github.com/acme/target".to_string()),
         target_sha: Some("target-sha".to_string()),
+        ..RunScope::default()
     };
     let parent = EvidenceWriter::begin_scoped(
         store.clone(),

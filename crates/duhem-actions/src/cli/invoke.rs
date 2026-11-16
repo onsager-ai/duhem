@@ -222,6 +222,9 @@ where
     I: IntoIterator<Item = (String, String)>,
 {
     const OUTER_RUN_VARS: &[&str] = &[
+        "DUHEM_BRANCH",
+        "DUHEM_PR",
+        "DUHEM_CI_URL",
         "DUHEM_SHARD",
         "DUHEM_RUN_ID",
         "DUHEM_SERVER_URL",
@@ -256,6 +259,9 @@ mod tests {
     #[test]
     fn sanitized_environment_drops_outer_run_settings_and_keeps_other_duhem_vars() {
         let excluded = [
+            "DUHEM_BRANCH",
+            "DUHEM_PR",
+            "DUHEM_CI_URL",
             "DUHEM_SHARD",
             "DUHEM_RUN_ID",
             "DUHEM_SERVER_URL",

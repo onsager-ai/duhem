@@ -32,6 +32,9 @@ fn fixed_bundle() -> RunBundle {
             verifier_sha: Some("deadbeef".into()),
             target_repo: Some("github.com/acme/app".into()),
             target_sha: Some("cafef00d".into()),
+            branch: None,
+            pr: None,
+            ci_url: None,
             parent_run_id: None,
             origin: None,
             shard: None,
@@ -100,6 +103,78 @@ fn additive_lineage_and_plan_fields_round_trip_without_changing_v1() {
     let tmp = tempfile::tempdir().unwrap();
     bundle.write_dir(tmp.path()).unwrap();
     assert_eq!(RunBundle::from_dir(tmp.path()).unwrap(), bundle);
+}
+
+#[tokio::test]
+async fn ci_context_round_trips_and_old_bundles_still_ingest() {
+    use duhem_evidence::{RunScope, Store};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let producer = Arc::new(
+        SqliteStore::open(tmp.path().join("producer.db"))
+            .await
+            .unwrap(),
+    );
+    let receiver = SqliteStore::open(tmp.path().join("receiver.db"))
+        .await
+        .unwrap();
+    for with_context in [false, true] {
+        let run_id = if with_context { "01CI" } else { "01OLD" };
+        let scope = if with_context {
+            RunScope {
+                branch: Some("feature/login".into()),
+                pr: Some("42".into()),
+                ci_url: Some("https://github.com/acme/app/actions/runs/123".into()),
+                ..RunScope::default()
+            }
+        } else {
+            RunScope::default()
+        };
+        let mut writer = EvidenceWriter::begin_scoped(
+            producer.clone(),
+            run_id,
+            "x.yml",
+            BTreeMap::new(),
+            scope.clone(),
+        )
+        .await
+        .unwrap();
+        writer
+            .append(run_started("x.yml", BTreeMap::new()))
+            .await
+            .unwrap();
+        writer
+            .append(EventPayload::RunFinished {
+                body_verdict: None,
+                verdict: None,
+            })
+            .await
+            .unwrap();
+        let bundle = RunBundle::from_store(producer.as_ref(), run_id)
+            .await
+            .unwrap();
+        let bytes = bundle.wire_bytes().unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        if !with_context {
+            for field in ["branch", "pr", "ci_url"] {
+                assert!(json["run"].get(field).is_none());
+            }
+        }
+        let restored: RunBundle = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(restored, bundle);
+        receiver
+            .ingest_bundle(&restored, &restored.content_hash().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            receiver.get_run(run_id).await.unwrap().unwrap().scope,
+            scope
+        );
+        let exported = RunBundle::from_store(&receiver, run_id).await.unwrap();
+        assert_eq!(exported.run.branch, scope.branch);
+        assert_eq!(exported.run.pr, scope.pr);
+        assert_eq!(exported.run.ci_url, scope.ci_url);
+    }
 }
 
 #[test]

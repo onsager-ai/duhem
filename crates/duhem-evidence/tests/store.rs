@@ -787,6 +787,7 @@ fn scope_for(project: &str, target_sha: &str, verdict_target: &str) -> RunScope 
         verifier_sha: Some("deadbeef".to_string()),
         target_repo: Some(verdict_target.to_string()),
         target_sha: Some(target_sha.to_string()),
+        ..RunScope::default()
     }
 }
 

@@ -70,6 +70,12 @@ pub struct BundleRun {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ci_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<crate::RunOrigin>,
@@ -260,6 +266,9 @@ fn bundle_run(record: &RunRecord) -> BundleRun {
         verifier_sha: record.scope.verifier_sha.clone(),
         target_repo: record.scope.target_repo.clone(),
         target_sha: record.scope.target_sha.clone(),
+        branch: record.scope.branch.clone(),
+        pr: record.scope.pr.clone(),
+        ci_url: record.scope.ci_url.clone(),
         parent_run_id: record.lineage.parent_run_id.clone(),
         origin: record.lineage.origin,
         shard: None,

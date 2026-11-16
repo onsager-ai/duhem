@@ -27,6 +27,9 @@ The canonical wire form is the compact JSON serialization of
     "project_id": "github.com/acme/app",
     "verifier_repo": "github.com/onsager-ai/duhem", "verifier_sha": "…",
     "target_repo": "github.com/acme/app", "target_sha": "…",
+    // #673 CI context (all optional strings):
+    "branch": "feature/login", "pr": "42",
+    "ci_url": "https://github.com/acme/app/actions/runs/123",
     // #650 lineage and distributed plan (all optional):
     "parent_run_id": "01…", "origin": "shard", // suite | invocation | shard
     "shard": {"index": 1, "total": 2, "source": "env"},
@@ -43,6 +46,13 @@ from `events`; the normalized projections (criteria / checks /
 assertions / spans) are derivable server-side exactly as the local
 store derives them. Shipping is **replication, not dual-truth**: a
 bundle is immutable and identified by content.
+
+CI context fields are optional within v1; older bundles omit them and ingest
+with no CI context. `branch` is the source branch, `pr` is the forge-local
+pull/merge request identifier (a string), and `ci_url` links to the CI run or job.
+Detection prefers `DUHEM_BRANCH`, `DUHEM_PR` and `DUHEM_CI_URL` overrides, then
+GitHub Actions, GitLab and Buildkite environment variables. No local git branch
+is inferred outside CI. Nested check processes do not inherit these overrides.
 
 ## Identity & idempotency
 

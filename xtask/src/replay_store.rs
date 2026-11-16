@@ -1,8 +1,10 @@
 //! Exercise the server's bundle validation for every terminal run in a CI store.
-use std::path::Path;
+use std::{collections::BTreeSet, path::Path};
 
-use anyhow::{Result, bail};
-use duhem_evidence::{EventPayload, RunBundle, SqliteStore, Store};
+use anyhow::{Context, Result, bail};
+use duhem_evidence::{
+    EventPayload, ReplayError, RunBundle, RunRecord, SqliteStore, Store, Trace, replay,
+};
 
 pub fn run(args: Vec<String>) -> Result<()> {
     let [db] = args.as_slice() else {
@@ -14,46 +16,96 @@ pub fn run(args: Vec<String>) -> Result<()> {
 async fn check(db: &Path) -> Result<()> {
     let source = SqliteStore::open_read_only(db).await?;
     let scratch = tempfile::tempdir()?;
+    let target = SqliteStore::open(scratch.path().join("ingest.db")).await?;
+    check_runs(&source, &target, source.list_runs().await?).await
+}
+
+async fn check_runs(source: &dyn Store, target: &SqliteStore, runs: Vec<RunRecord>) -> Result<()> {
+    let mut processed = BTreeSet::new();
+    let mut ingested = BTreeSet::new();
     let mut finished = 0;
     let mut skipped = 0;
+    let mut blocked = 0;
     let mut divergences = 0;
-    for run in source.list_runs().await? {
-        let events = source.run_events(&run.run_id).await?;
-        if !events.iter().any(|event| {
-            matches!(
-                event.payload,
-                EventPayload::RunFinished { .. } | EventPayload::RunAborted { .. }
-            )
-        }) {
-            skipped += 1;
+    let mut tool_errors = 0;
+    while processed.len() < runs.len() {
+        let run = runs
+            .iter()
+            .find(|run| {
+                !processed.contains(&run.run_id)
+                    && run
+                        .lineage
+                        .parent_run_id
+                        .as_ref()
+                        .is_none_or(|parent| processed.contains(parent))
+            })
+            .context("replay-store tool error: missing parent or cyclic run lineage")?;
+        processed.insert(run.run_id.clone());
+        if run
+            .lineage
+            .parent_run_id
+            .as_ref()
+            .is_some_and(|parent| !ingested.contains(parent))
+        {
+            blocked += 1;
             continue;
         }
-        finished += 1;
         let result = async {
-            let bundle = RunBundle::from_store(&source, &run.run_id).await?;
-            // Independent targets avoid treating distinct runs from fixture
-            // scenarios as replication conflicts. All ingest validation still runs.
-            let target = SqliteStore::open(scratch.path().join(format!("{finished}.db"))).await?;
-            target
-                .ingest_bundle(&bundle, &bundle.content_hash()?)
-                .await?;
-            Ok::<_, anyhow::Error>(())
+            let events = source.run_events(&run.run_id).await?;
+            if !events.iter().any(|event| {
+                matches!(
+                    event.payload,
+                    EventPayload::RunFinished { .. } | EventPayload::RunAborted { .. }
+                )
+            }) {
+                return Ok(None);
+            }
+            let bundle = RunBundle::from_store(source, &run.run_id).await?;
+            let hash = bundle.content_hash()?;
+            match target.ingest_bundle(&bundle, &hash).await {
+                Ok(()) => Ok(Some(Ok(()))),
+                Err(error) => {
+                    // Ingest wraps replay errors as strings. Classify via the typed
+                    // replay result, never by matching a database error's wording.
+                    let trace = Trace::from_events(bundle.events.clone())?;
+                    if let Err(ReplayError::Divergence(divergence)) = replay(&trace) {
+                        Ok(Some(Err(divergence)))
+                    } else {
+                        Err(anyhow::Error::from(error))
+                    }
+                }
+            }
         }
         .await;
-        if let Err(error) = result {
-            eprintln!(
-                "replay-store: run {} verification {}: {error:#}",
-                run.run_id, run.verification
-            );
-            divergences += 1;
+        match result {
+            Ok(None) => skipped += 1,
+            Ok(Some(Ok(()))) => {
+                finished += 1;
+                ingested.insert(run.run_id.clone());
+            }
+            Ok(Some(Err(error))) => {
+                divergences += 1;
+                eprintln!(
+                    "replay-store divergence: run {} verification {}: {error}",
+                    run.run_id, run.verification
+                );
+            }
+            Err(error) => {
+                tool_errors += 1;
+                eprintln!(
+                    "replay-store tool error: run {} verification {}: {error:#}",
+                    run.run_id, run.verification
+                );
+            }
         }
     }
-    if divergences > 0 {
-        bail!(
-            "replay-store: {divergences} divergent run(s), {finished} finished, {skipped} unfinished skipped"
-        );
+    let summary = format!(
+        "{divergences} divergent run(s), {tool_errors} tool error(s), {finished} finished verified, {skipped} unfinished skipped, {blocked} descendants blocked"
+    );
+    if divergences > 0 || tool_errors > 0 {
+        bail!("replay-store: {summary}");
     }
-    println!("replay-store: {finished} finished run(s) verified, {skipped} unfinished skipped");
+    println!("replay-store: {summary}");
     Ok(())
 }
 
@@ -62,14 +114,34 @@ mod tests {
     use super::*;
     use std::{collections::BTreeMap, sync::Arc};
 
-    use duhem_evidence::{EvidenceWriter, VerdictState, run_started};
+    use duhem_evidence::{
+        EvidenceWriter, RunLineage, RunScope, SecretRegistry, VerdictState,
+        run_started_with_definition_and_lineage,
+    };
 
-    async fn record(store: Arc<SqliteStore>, id: &str, tampered: bool) {
-        let mut writer = EvidenceWriter::begin(store, id, "fixture.yml", BTreeMap::new())
-            .await
-            .unwrap();
+    async fn record(store: Arc<SqliteStore>, id: &str, parent: Option<&str>, tampered: bool) {
+        let lineage = RunLineage {
+            parent_run_id: parent.map(str::to_owned),
+            origin: None,
+        };
+        let mut writer = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
+            store,
+            id,
+            "fixture.yml",
+            BTreeMap::new(),
+            RunScope::default(),
+            lineage.clone(),
+            SecretRegistry::new(),
+        )
+        .await
+        .unwrap();
         writer
-            .append(run_started("fixture.yml", BTreeMap::new()))
+            .append(run_started_with_definition_and_lineage(
+                "fixture.yml",
+                BTreeMap::new(),
+                None,
+                lineage,
+            ))
             .await
             .unwrap();
         if id == "unfinished" {
@@ -126,11 +198,100 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let db = tmp.path().join("source.db");
         let store = Arc::new(SqliteStore::open(&db).await.unwrap());
-        record(store.clone(), "clean", false).await;
-        record(store.clone(), "unfinished", false).await;
+        record(store.clone(), "clean", None, false).await;
+        record(store.clone(), "unfinished", None, false).await;
         check(&db).await.unwrap();
-        record(store, "tampered", true).await;
+        record(store, "tampered", None, true).await;
         let error = check(&db).await.unwrap_err();
-        assert!(error.to_string().contains("1 divergent run(s)"));
+        assert!(
+            error
+                .to_string()
+                .contains("1 divergent run(s), 0 tool error(s)")
+        );
+    }
+
+    #[tokio::test]
+    async fn reverse_order_tree_is_ingested_parent_first() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = Arc::new(
+            SqliteStore::open(tmp.path().join("source.db"))
+                .await
+                .unwrap(),
+        );
+        let target = SqliteStore::open(tmp.path().join("target.db"))
+            .await
+            .unwrap();
+        record(source.clone(), "parent", None, false).await;
+        record(source.clone(), "child", Some("parent"), false).await;
+        record(source.clone(), "grandchild", Some("child"), false).await;
+        let mut runs = Vec::new();
+        for id in ["grandchild", "child", "parent"] {
+            runs.push(source.get_run(id).await.unwrap().unwrap());
+        }
+        check_runs(source.as_ref(), &target, runs).await.unwrap();
+        assert_eq!(target.list_runs().await.unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn store_failure_is_a_tool_error_not_a_divergence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = Arc::new(
+            SqliteStore::open(tmp.path().join("source.db"))
+                .await
+                .unwrap(),
+        );
+        record(source.clone(), "clean", None, false).await;
+        let target_path = tmp.path().join("target.db");
+        let _target = SqliteStore::open(&target_path).await.unwrap();
+        let read_only = SqliteStore::open_read_only(&target_path).await.unwrap();
+        let error = check_runs(
+            source.as_ref(),
+            &read_only,
+            source.list_runs().await.unwrap(),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("0 divergent run(s), 1 tool error(s)")
+        );
+    }
+
+    #[tokio::test]
+    async fn descendants_of_unfinished_and_rejected_parents_are_blocked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = Arc::new(
+            SqliteStore::open(tmp.path().join("source.db"))
+                .await
+                .unwrap(),
+        );
+        let target = SqliteStore::open(tmp.path().join("target.db"))
+            .await
+            .unwrap();
+        record(source.clone(), "unfinished", None, false).await;
+        record(source.clone(), "blocked-child", Some("unfinished"), false).await;
+        record(source.clone(), "tampered", None, true).await;
+        record(
+            source.clone(),
+            "blocked-grandchild",
+            Some("tampered"),
+            false,
+        )
+        .await;
+        let error = check_runs(source.as_ref(), &target, source.list_runs().await.unwrap())
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("1 divergent run(s), 0 tool error(s)")
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("1 unfinished skipped, 2 descendants blocked")
+        );
+        assert!(target.list_runs().await.unwrap().is_empty());
     }
 }

@@ -4,7 +4,6 @@ use std::{collections::BTreeMap, sync::Arc};
 use duhem_evidence::{EventPayload, RunBundle, SqliteStore, Trace, replay};
 use duhem_judge::{InconclusiveCause, VerdictState};
 use duhem_runtime::Engine;
-use duhem_schema::VerificationDefinition;
 
 #[tokio::test]
 async fn diagnostic_recovery_assertion_survives_bundle_and_ingest() {
@@ -18,7 +17,14 @@ async fn diagnostic_recovery_assertion_survives_bundle_and_ingest() {
         .await
         .unwrap();
     let yaml = include_str!("../../../verifications/duhem-cli/fixtures/step-groups-gate.yml");
-    let def = VerificationDefinition::from_yaml_str(yaml).unwrap();
+    let path = tmp.path().join("fixture.yml");
+    std::fs::write(&path, yaml).unwrap();
+    let duhem_schema::Loaded::Leaf {
+        definition: def, ..
+    } = duhem_schema::load(&path).unwrap()
+    else {
+        panic!("expected leaf");
+    };
     duhem_schema::validate_with_action_catalog(&def, &|uses| {
         duhem_actions::contract_for(uses).map(|contract| {
             contract

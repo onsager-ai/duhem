@@ -1,49 +1,17 @@
 # Self-verify — Duhem-on-Duhem regression coverage (epic #148).
 #
-# Drives the REAL `duhem` binary through the in-tree self-verification
-# Definitions and gates on the verdict. Two independent lanes:
+# Core CLI regression, native examples, and validation of every in-tree suite
+# now run through the root duhem.yml in CI's two-way `duhem run` job. That job
+# runs on every PR/push to main, including changes to this workflow, the root
+# manifest, scripts, toolchain, and verification definitions.
 #
-#   - cli-regression: the `verifications/duhem-cli` VD (`cli/invoke`) —
-#     the CLI contract (`--version` / `validate` / `init` / `run`) — plus
-#     a `duhem validate` pass over EVERY top-level directory under
-#     `verifications/` (`just validate-suites`; onsager-ai/duhem#505
-#     §2.9). Before that gate, 18 of 21 in-tree suites were run by no
-#     gate at all — free to rot silently while doubling as authoring
-#     documentation. Both are fully offline + page-free, so no Node /
-#     Playwright, and both reuse the one release build below.
-#   - dashboard-regression: the `verifications/duhem-dashboard` VD
-#     (`api/call` + `ui/*`) — the served dashboard's JSON API, SPA
-#     render, and SSE stream. Needs the SPA bundle embedded in the
-#     binary AND a real Chromium for the `ui/*` browser checks.
+# This workflow retains dashboard-regression (SPA + Chromium), sharding-example,
+# and verify-sharding-partition. Duhem verifying Duhem is regression coverage,
+# not an independent trust anchor (docs/duhem-spec.md §11.2).
 #
-# Black-box coverage that complements the white-box cargo tests in
-# `crates/duhem-cli/tests/` and `crates/duhem-dashboard/tests/`.
-#
-# NOT the Onsager dogfood. This workflow is intentionally separate from
-# `dogfood.yml`: per the Asymmetric-trust commitment
-# (`docs/duhem-spec.md` §11.2), Duhem verifying Duhem is a regression
-# safety net, not an independent trust anchor — the Onsager seam holds
-# that role. See the caveat headers in the VDs' `duhem.yml`.
-#
-# A `changes` job scopes each lane to its own paths, but the two lanes
-# are scoped asymmetrically on purpose:
-#
-#   - cli-regression watches the whole `crates/**` tree. Many workspace
-#     crates can affect the CLI's visible output — not only the ones
-#     `duhem-cli` depends on directly today — and an allowlist of crate
-#     names is exactly the kind of thing that silently goes stale as the
-#     dependency graph evolves (onsager-ai/duhem#400). The lane is fully
-#     offline + page-free (no Node / Playwright), so watching more paths
-#     is cheap. It also watches the whole `verifications/**` tree (not
-#     just its own VD's directory) because its `validate-suites` step
-#     validates every suite in that tree, and a crates-only PR must run
-#     it too — the failure mode being guarded is a Duhem change that
-#     invalidates a consumer's VD.
-#   - dashboard-regression stays narrow (`crates/duhem-dashboard/**`
-#     only): its SPA-build + Chromium-install cost is real, so it only
-#     runs when the dashboard crate itself changes.
-#
-# Do not "tidy" this asymmetry away — it is deliberate, not an oversight.
+# The `changes` filter deliberately keeps the sharding lane broad (crates/** and
+# verifications/**) while dashboard-regression stays narrow: its SPA build and
+# Chromium install are expensive. Preserve that asymmetry.
 
 name: self-verify
 
@@ -54,6 +22,9 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'verifications/**'
+      - 'duhem.yml'
+      - 'scripts/**'
+      - '.github/workflows/ci.yml'
       - '.github/workflows/self-verify.yml'
   push:
     branches: [main]
@@ -62,6 +33,9 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'verifications/**'
+      - 'duhem.yml'
+      - 'scripts/**'
+      - '.github/workflows/ci.yml'
       - '.github/workflows/self-verify.yml'
 
 concurrency:
@@ -95,6 +69,9 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'verifications/**'
+              - 'duhem.yml'
+              - 'scripts/**'
+              - '.github/workflows/ci.yml'
               - '.github/workflows/self-verify.yml'
             dashboard:
               - 'crates/duhem-dashboard/**'
@@ -166,81 +143,6 @@ jobs:
           assert all(len(partition["units"]) > 0 for partition in partitions)
           print(f"two disjoint shards cover all {expected} expected units")
           PY
-
-  cli-regression:
-    name: cli regression
-    needs: changes
-    if: ${{ needs.changes.outputs.cli == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Show toolchain
-        run: |
-          rustup show active-toolchain
-          cargo --version
-          rustc --version
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Build duhem CLI
-        run: cargo build --release -p duhem-cli
-
-      # Structural + catalog-aware `duhem validate` over every top-level
-      # directory under `verifications/` — no provisioning, no
-      # network/browser/DB, so it belongs in this offline lane. Reuses
-      # the binary built above; collects every failing suite instead of
-      # stopping at the first. (onsager-ai/duhem#505 §2.9)
-      - name: Validate every verifications/ suite
-        run: ./scripts/validate-suites.sh "$PWD/target/release/duhem"
-
-      # node:test and its JUnit reporter ship in Node itself; no npm install.
-      - name: Use Node for the native worked example and controls
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-
-      - name: Run native worked example
-        run: |
-          ./target/release/duhem run verifications/native-example \
-            --db .duhem/duhem.db
-
-      - name: Validate native failing controls
-        run: |
-          for control in verifications/duhem-cli/fixtures/native/*.yml; do
-            ./target/release/duhem validate "$control"
-          done
-
-      # The VD runs the binary under test, so point `duhem_bin` at the
-      # freshly built artifact rather than whatever is on PATH. A
-      # non-pass verdict exits non-zero and fails the job.
-      - name: Run duhem-cli regression VD
-        run: |
-          ./target/release/duhem run verifications/duhem-cli \
-            --db .duhem/duhem.db \
-            --inputs duhem_bin="$PWD/target/release/duhem"
-
-      - name: Run owned-process example against a real local HTTP service
-        run: |
-          ./target/release/duhem run verifications/owned-process-example \
-            --db .duhem/duhem.db \
-            --inputs state_file="${RUNNER_TEMP}/owned-process-example-state"
-          test ! -e "${RUNNER_TEMP}/owned-process-example-state"
-
-      - name: Run check-conditions example against in-memory SQLite
-        run: |
-          ./target/release/duhem run verifications/check-conditions-example \
-            --db .duhem/duhem.db
-
-      - name: Run flow-cleanup example against local processes
-        run: |
-          ./target/release/duhem run verifications/flow-cleanup-example \
-            --db .duhem/duhem.db
-
-      - name: Run step-groups example (local processes)
-        run: |
-          ./target/release/duhem run verifications/step-groups-example \
-            --db .duhem/duhem.db
 
   dashboard-regression:
     name: dashboard regression

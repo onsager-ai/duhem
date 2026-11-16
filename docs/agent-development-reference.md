@@ -139,6 +139,20 @@ Non-trivial changes start as a GitHub spec issue on this repo and
 follow the SDD loop. The skills enforce the discipline; this file
 just points at them.
 
+Core CI uses the root `duhem.yml`: after `cargo build -p duhem-cli`, run
+`./target/debug/duhem run duhem.yml --no-live --db .duhem/duhem.db` from the
+repository root with Node 24 on PATH. Two matrix jobs, `duhem run (1/2)` and
+`duhem run (2/2)`, partition the native Rust/xtask gates and CLI/example suites.
+Both job statuses gate merge; automatic delivery to the Duhem server is
+informational. This replaces `rust` and `cli regression`, while browser,
+dashboard and the sharding-example partition checks stay separate. The manifest
+also validates every top-level suite and native failing-control fixture.
+
+`just check` remains the fast development loop; it does not replace the full
+`just preflight` merge-preview gate or CI. Follow the session's local execution
+limits and use CI when local builds/tests are prohibited. See the
+`duhem-dev-process` check-gate section for commands and PR-base context.
+
 | Stage                          | Skill                                    |
 |--------------------------------|------------------------------------------|
 | Decide what to build           | `.agents/skills/duhem-dev-process`       |

@@ -153,7 +153,7 @@ pub struct RootManifest {
 /// behavior (`timeout` → the engine's 5s default, `max_wait` → the
 /// engine's 60s ceiling, `inconclusive_policy` → `block`, `retry.max`
 /// → `0`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ManifestDefaults {
     /// Name of a profile under the sibling `profiles:` block

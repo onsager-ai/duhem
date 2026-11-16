@@ -140,7 +140,7 @@ follow the SDD loop. The skills enforce the discipline; this file
 just points at them.
 
 Core CI uses the root `duhem.yml`: after `cargo build -p duhem-cli`, run
-`./target/debug/duhem run duhem.yml --no-live --db .duhem/ci.db` from the
+`./target/debug/duhem run duhem.yml --no-live --db .duhem/duhem.db` from the
 repository root with Node 24 on PATH. Two matrix jobs, `duhem run (1/2)` and
 `duhem run (2/2)`, partition the native Rust/xtask gates and CLI/example suites.
 Both job statuses gate merge; automatic delivery to the Duhem server is

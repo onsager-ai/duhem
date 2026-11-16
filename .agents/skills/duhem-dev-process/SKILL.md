@@ -179,7 +179,7 @@ Core CI builds the debug CLI and uses one repository entry point:
 
 ```bash
 ./target/debug/duhem validate duhem.yml
-./target/debug/duhem run duhem.yml --no-live --db .duhem/ci.db
+./target/debug/duhem run duhem.yml --no-live --db .duhem/duhem.db
 ```
 
 `CI / duhem run (1/2)` and `CI / duhem run (2/2)` replace the former

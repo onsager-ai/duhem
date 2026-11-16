@@ -31,7 +31,7 @@ The Rust suite owns the single required `cargo test --workspace` native gate.
 The manifest also runs fmt/clippy and xtask checks, validates every top-level
 suite and native-control fixture, and is split across CI's `duhem run (1/2)`
 and `duhem run (2/2)` jobs. Build the debug CLI and use Node 24, then run
-`./target/debug/duhem run duhem.yml --no-live --db .duhem/ci.db` from the repo
+`./target/debug/duhem run duhem.yml --no-live --db .duhem/duhem.db` from the repo
 root. Browser/dashboard and sharding-example checks retain separate jobs. (#672)
 
 The [per-row validation example](for-each-rows-example/duhem.yml) applies

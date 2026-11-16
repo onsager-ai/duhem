@@ -1,6 +1,6 @@
 # Duhem-on-Duhem regression coverage, not an independent trust anchor (#672).
 # Build target/debug/duhem, put Node 24 on PATH, then run from the repo root:
-#   ./target/debug/duhem run duhem.yml --no-live --db .duhem/ci.db
+#   ./target/debug/duhem run duhem.yml --no-live --db .duhem/duhem.db
 manifest_version: 1
 
 # A single profile is selected automatically; keys bind only declared inputs.

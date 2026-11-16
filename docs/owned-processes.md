@@ -14,7 +14,8 @@ identity and recovery through ordinary VD assertions.
 (string array), `cwd`, `env`, `ready`, `stop_timeout` and `kill_timeout`.
 There is no implicit shell and stdin is closed. Relative paths use Duhem's
 invocation directory, matching `cli/invoke`. The child receives the sanitized
-inherited environment (`PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_*`, `DUHEM_*`),
+inherited environment (`PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_*`, and
+`DUHEM_*` except outer-run shard/run identity and server delivery settings),
 then authored `env`; runtime store/lineage variables take precedence.
 Declare credential inputs `secret: true` before passing them through `env`
 or readiness headers.

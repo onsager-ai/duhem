@@ -489,18 +489,30 @@ async fn run_script(script: &Path, vd_dir: Option<&Path>) -> (i32, Duration, Vec
     (exit_code, started.elapsed(), output.stdout, output.stderr)
 }
 
-/// Whitelist for the sanitized child environment. Per the issue
-/// alignment: `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_*`, and
-/// `DUHEM_*`. Everything else (including attacker-shaped vars like
-/// `LD_PRELOAD`) is dropped before the script is forked.
+/// Whitelist for the sanitized child environment: `PATH`, `HOME`,
+/// `TMPDIR`, `LANG`, `LC_*`, and `DUHEM_*` except outer-run identity
+/// and delivery settings. Keep its exclusions in sync with
+/// `duhem-actions`' `cli/invoke::sanitized_env_vars`. Everything else
+/// (including attacker-shaped vars like `LD_PRELOAD`) is dropped before
+/// the script is forked.
 pub(crate) fn sanitized_env_vars<I>(iter: I) -> Vec<(String, String)>
 where
     I: IntoIterator<Item = (String, String)>,
 {
     let exact: HashSet<&str> = ["PATH", "HOME", "TMPDIR", "LANG"].into_iter().collect();
+    const OUTER_RUN_VARS: &[&str] = &[
+        "DUHEM_SHARD",
+        "DUHEM_RUN_ID",
+        "DUHEM_SERVER_URL",
+        "DUHEM_SERVER_TOKEN",
+        "DUHEM_HUB_URL",
+        "DUHEM_HUB_TOKEN",
+        "DUHEM_DASHBOARD_URL",
+    ];
     iter.into_iter()
         .filter(|(k, _)| {
-            exact.contains(k.as_str()) || k.starts_with("LC_") || k.starts_with("DUHEM_")
+            (exact.contains(k.as_str()) || k.starts_with("LC_") || k.starts_with("DUHEM_"))
+                && !OUTER_RUN_VARS.contains(&k.as_str())
         })
         .collect()
 }
@@ -586,6 +598,13 @@ mod tests {
             ("LANG".into(), "C.UTF-8".into()),
             ("LC_ALL".into(), "C".into()),
             ("DUHEM_RUN_ID".into(), "01J".into()),
+            ("DUHEM_SHARD".into(), "1/2".into()),
+            ("DUHEM_SERVER_URL".into(), "https://server".into()),
+            ("DUHEM_SERVER_TOKEN".into(), "secret".into()),
+            ("DUHEM_HUB_URL".into(), "https://hub".into()),
+            ("DUHEM_HUB_TOKEN".into(), "secret".into()),
+            ("DUHEM_DASHBOARD_URL".into(), "https://dashboard".into()),
+            ("DUHEM_HOME".into(), "/tmp/duhem".into()),
             // The attacker-shaped vars the spec explicitly names.
             ("LD_PRELOAD".into(), "/evil.so".into()),
             ("RANDOM_OTHER".into(), "x".into()),
@@ -598,7 +617,18 @@ mod tests {
         assert!(out.contains(&"HOME".to_string()));
         assert!(out.contains(&"LANG".to_string()));
         assert!(out.contains(&"LC_ALL".to_string()));
-        assert!(out.contains(&"DUHEM_RUN_ID".to_string()));
+        assert!(!out.contains(&"DUHEM_RUN_ID".to_string()));
+        assert!(out.contains(&"DUHEM_HOME".to_string()));
+        for key in [
+            "DUHEM_SHARD",
+            "DUHEM_SERVER_URL",
+            "DUHEM_SERVER_TOKEN",
+            "DUHEM_HUB_URL",
+            "DUHEM_HUB_TOKEN",
+            "DUHEM_DASHBOARD_URL",
+        ] {
+            assert!(!out.contains(&key.to_string()), "{key} leaked");
+        }
         assert!(!out.contains(&"LD_PRELOAD".to_string()));
         assert!(!out.contains(&"RANDOM_OTHER".to_string()));
     }

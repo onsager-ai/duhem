@@ -42,10 +42,12 @@
 //!
 //! Environment: the child starts from a cleared environment populated
 //! with the same whitelist the provisioning scripts use (`PATH`,
-//! `HOME`, `TMPDIR`, `LANG`, `LC_*`, `DUHEM_*`; source of truth is
-//! `duhem-runtime`'s `engine::env::sanitized_env_vars`) plus any
-//! explicit `env:`. This keeps `cli/invoke` at the same trust level as
-//! the operator-authored `up:` / `down:` scripts.
+//! `HOME`, `TMPDIR`, `LANG`, `LC_*`, and `DUHEM_*`), except outer-run
+//! identity and delivery variables (`DUHEM_SHARD`, `DUHEM_RUN_ID`,
+//! `DUHEM_SERVER_URL`, `DUHEM_SERVER_TOKEN`, `DUHEM_HUB_URL`,
+//! `DUHEM_HUB_TOKEN`, `DUHEM_DASHBOARD_URL`); source of truth is
+//! `duhem-runtime`'s `engine::env::sanitized_env_vars`. Explicit `env:`
+//! entries are added after sanitization and can set any variable.
 
 use std::collections::BTreeMap;
 use std::process::Stdio;
@@ -211,19 +213,29 @@ pub(crate) async fn execute(with: With) -> Result<ActionResult, ActionError> {
 }
 
 /// Whitelist for the child environment — the same set the provisioning
-/// scripts get (`PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_*`, `DUHEM_*`).
-/// Duplicated from `duhem-runtime`'s `engine::env::sanitized_env_vars`
-/// to keep this action crate free of a runtime dependency; the runtime
-/// copy is the source of truth.
+/// scripts get (`PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_*`, `DUHEM_*`),
+/// excluding outer-run identity and delivery settings. Keep this list in
+/// sync with `duhem-runtime`'s `engine::env::sanitized_env_vars`; the
+/// action crate has no runtime dependency.
 fn sanitized_env_vars<I>(iter: I) -> Vec<(String, String)>
 where
     I: IntoIterator<Item = (String, String)>,
 {
+    const OUTER_RUN_VARS: &[&str] = &[
+        "DUHEM_SHARD",
+        "DUHEM_RUN_ID",
+        "DUHEM_SERVER_URL",
+        "DUHEM_SERVER_TOKEN",
+        "DUHEM_HUB_URL",
+        "DUHEM_HUB_TOKEN",
+        "DUHEM_DASHBOARD_URL",
+    ];
     iter.into_iter()
         .filter(|(k, _)| {
-            matches!(k.as_str(), "PATH" | "HOME" | "TMPDIR" | "LANG")
+            (matches!(k.as_str(), "PATH" | "HOME" | "TMPDIR" | "LANG")
                 || k.starts_with("LC_")
-                || k.starts_with("DUHEM_")
+                || k.starts_with("DUHEM_"))
+                && !OUTER_RUN_VARS.contains(&k.as_str())
         })
         .collect()
 }
@@ -239,6 +251,29 @@ mod tests {
 
     fn parse_with(s: &str) -> With {
         serde_yml::from_value(yaml(s)).expect("With deserialization")
+    }
+
+    #[test]
+    fn sanitized_environment_drops_outer_run_settings_and_keeps_other_duhem_vars() {
+        let excluded = [
+            "DUHEM_SHARD",
+            "DUHEM_RUN_ID",
+            "DUHEM_SERVER_URL",
+            "DUHEM_SERVER_TOKEN",
+            "DUHEM_HUB_URL",
+            "DUHEM_HUB_TOKEN",
+            "DUHEM_DASHBOARD_URL",
+        ];
+        let mut raw: Vec<_> = excluded
+            .iter()
+            .map(|name| ((*name).to_string(), "outer".to_string()))
+            .collect();
+        raw.push(("DUHEM_HOME".into(), "/tmp/duhem".into()));
+        let out = sanitized_env_vars(raw);
+        assert!(out.contains(&("DUHEM_HOME".into(), "/tmp/duhem".into())));
+        for name in excluded {
+            assert!(!out.iter().any(|(key, _)| key == name), "{name} leaked");
+        }
     }
 
     #[test]
@@ -336,6 +371,19 @@ mod tests {
             Err(ActionError::Process(_)) => {}
             other => panic!("expected ActionError::Process, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn explicit_env_can_set_excluded_server_url() {
+        let r = execute(parse_with(
+            r#"{ command: 'printf %s "$DUHEM_SERVER_URL"', env: { DUHEM_SERVER_URL: explicit } }"#,
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            r.outputs.get("stdout").and_then(|v| v.as_str()),
+            Some("explicit")
+        );
     }
 
     #[tokio::test]

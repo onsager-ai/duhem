@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] Processes a check starts no longer inherit the outer run's shard, run id and server settings, so nested `duhem run` fixtures neither join the outer shard nor upload themselves. (#673)
 - [clarifying] A rejected upload (auto-send or `duhem ship`) reports the server's reason along with the HTTP status. (#673)
 
 ## v0.9.0 — 2026-11-16

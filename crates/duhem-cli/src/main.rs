@@ -11,6 +11,7 @@
 //! `DUHEM_HEADED` env var (spec #151), not a flag.
 
 mod browser_cmd;
+mod ci_link;
 mod contract_check;
 mod coverage_cmd;
 mod dashboard;

@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] Auto-send skips unfinished runs and keeps sending the rest of the tree after a rejected run, summarizing what was skipped. (#673)
+
 - [additive] Run evidence records the effective inconclusive policy so replay and server ingest preserve manifest `warn` and `pass` verdicts without changing raw check results. (#673)
 
 - [clarifying] Processes a check starts no longer inherit the outer run's shard, run id and server settings, so nested `duhem run` fixtures neither join the outer shard nor upload themselves. (#673)

@@ -80,13 +80,34 @@ describe("computeStats", () => {
 describe("verificationSummaries", () => {
   const summaries = verificationSummaries(entries);
 
-  it("groups by verification, alphabetical, with latest lifecycle", () => {
+  it("groups top-level runs by verification, alphabetical, with latest lifecycle", () => {
     expect(summaries.map((v) => v.name)).toEqual(["api", "checkout", "login"]);
     const login = summaries.find((v) => v.name === "login")!;
-    expect(login.runs).toBe(4);
+    expect(login.runs).toBe(1);
     expect(login.latest?.run_id).toBe("login");
-    expect(login.recent).toEqual(["pass", "pass", "fail", "fail"]); // oldest→newest
+    expect(login.recent).toEqual(["fail"]);
     const checkout = summaries.find((v) => v.name === "checkout")!;
     expect(checkout.status).toBe("running");
+  });
+
+  it("does not list child runs as verifications", () => {
+    const nested = verificationSummaries([
+      {
+        ...leaf("manifest", "full-suite", "pass", "2026-06-12T10:00:00Z"),
+        kind: "run-set",
+        children: [
+          leaf("manifest-child", "manifest-child", "pass", "2026-06-12T10:00:01Z"),
+          {
+            ...leaf("nested-invocation", "fixture", "fail", "2026-06-12T10:00:02Z"),
+            parent_run_id: "manifest-child",
+            origin: "invocation",
+          },
+        ],
+      },
+    ]);
+
+    expect(nested.map((v) => v.name)).toEqual(["full-suite"]);
+    expect(nested[0].runs).toBe(1);
+    expect(nested[0].latest?.run_id).toBe("manifest");
   });
 });

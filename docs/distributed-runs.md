@@ -92,8 +92,8 @@ keeps these components unchanged, include your attempt identifier explicitly.
 
 CI's own shard job statuses are the merge gate: a failed or missing shard fails
 the pipeline. A Duhem server's combined view is informational and does not
-replace that gate. Set `DUHEM_SERVER_URL` (the base URL) and
-`DUHEM_SERVER_TOKEN` from repository secrets when you want runs sent to a shared
+replace that gate. Set `DUHEM_SERVER_URL` (the base URL, a repository variable) and
+`DUHEM_SERVER_TOKEN` (a repository secret) when you want runs sent to a shared
 server; omit both when you do not. Deprecated `DUHEM_HUB_URL` still takes a full
 ingest URL, and `DUHEM_HUB_TOKEN` remains its token alias.
 
@@ -112,8 +112,8 @@ jobs:
     env:
       DUHEM_SHARD: ${{ matrix.shard }}/2
       DUHEM_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-      DUHEM_SERVER_URL: ${{ secrets.DUHEM_HUB_URL }}
-      DUHEM_SERVER_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
+      DUHEM_SERVER_URL: ${{ vars.DUHEM_SERVER_URL }}
+      DUHEM_SERVER_TOKEN: ${{ secrets.DUHEM_SERVER_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - name: Run verification

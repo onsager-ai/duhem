@@ -71,8 +71,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   # Every completed invocation replicates its tree; delivery never gates CI.
-  DUHEM_SERVER_URL: ${{ secrets.DUHEM_HUB_URL }}
-  DUHEM_SERVER_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
+  DUHEM_SERVER_URL: ${{ vars.DUHEM_SERVER_URL }}
+  DUHEM_SERVER_TOKEN: ${{ secrets.DUHEM_SERVER_TOKEN }}
 
 jobs:
   # Per-lane path scoping. Workflow-level `on.paths` only decides

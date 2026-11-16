@@ -24,9 +24,15 @@ Two kinds of directory live here, for two kinds of reader:
 The [native greeting example](native-example/) combines an exit-code run with
 output expectations, real Node tests producing JUnit, and an independent CLI
 criterion. The CLI suite drives required-failure, missing-report, and diagnostic
-controls against the same project. Self-verification CI runs the example and
-controls. The [Rust verification](duhem-rust/duhem.yml) wraps CI's existing
-`cargo test --workspace` invocation in a required native gate. (#649)
+controls against the same project. The [root CI manifest](../duhem.yml) runs
+these alongside the CLI regression, owned-process, check-conditions,
+flow-cleanup, step-groups, and [Rust verification](duhem-rust/duhem.yml) suites.
+The Rust suite owns the single required `cargo test --workspace` native gate.
+The manifest also runs fmt/clippy and xtask checks, validates every top-level
+suite and native-control fixture, and is split across CI's `duhem run (1/2)`
+and `duhem run (2/2)` jobs. Build the debug CLI and use Node 24, then run
+`./target/debug/duhem run duhem.yml --no-live --db .duhem/ci.db` from the repo
+root. Browser/dashboard and sharding-example checks retain separate jobs. (#672)
 
 The [per-row validation example](for-each-rows-example/duhem.yml) applies
 the same assertions to every row with bounded `for_each:` (#521).

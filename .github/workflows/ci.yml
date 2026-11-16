@@ -14,16 +14,28 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  rust:
-    name: rust
+  verify:
+    name: duhem run (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
+    strategy:
+      # Keep evidence from both partitions even when one fails.
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    env:
+      DUHEM_SHARD: ${{ matrix.shard }}/2
+      DUHEM_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      DUHEM_SERVER_URL: ${{ vars.DUHEM_SERVER_URL }}
+      DUHEM_SERVER_TOKEN: ${{ secrets.DUHEM_SERVER_TOKEN }}
+      # Native commands retain DUHEM_*; GitHub's variables are sanitized.
+      DUHEM_CI_BASE_REF: ${{ github.base_ref }}
+      DUHEM_CI_EVENT_NAME: ${{ github.event_name }}
+      DUHEM_DX_IMPACT_NONE: ${{ contains(github.event.pull_request.body, '<!-- dx:none -->') && '1' || '' }}
+      DUHEM_CHANGELOG_CLARIFYING: ${{ contains(github.event.pull_request.body, '<!-- schema:clarifying -->') && '1' || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
-          # Full history (not the default shallow clone) so the
-          # schema-changelog-check xtask can resolve the merge-base
-          # against `origin/$GITHUB_BASE_REF` for any PR age. Small
-          # repo — the extra fetch is cheap.
+          # Diff-scoped native checks need the PR base and full merge history.
           fetch-depth: 0
 
       # rust-toolchain.toml pins the channel + components (rustfmt + clippy).
@@ -35,83 +47,39 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: cargo fmt
-        run: cargo fmt --all -- --check
+      # node:test and its JUnit reporter ship in Node itself; no npm install.
+      - name: Use Node for the native worked example and controls
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
 
-      - name: cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Build duhem CLI
+        run: cargo build -p duhem-cli
 
-      # Build the runner, then execute the workspace tests exactly once through
-      # its required native gate. A nonzero cargo exit still fails this step.
-      - name: cargo test (Duhem native gate)
-        run: |
-          cargo build -p duhem-cli
-          ./target/debug/duhem validate verifications/duhem-rust
-          ./target/debug/duhem run verifications/duhem-rust --no-live --db .duhem/ci-rust.db
+      - name: Validate core CI manifest
+        run: ./target/debug/duhem validate duhem.yml
 
-      # The terminal shows the last 20 lines of cargo's output; the full masked
-      # stdout/stderr are evidence blobs in this store.
-      - name: Upload Rust test evidence
+      - name: Run core CI through Duhem
+        run: ./target/debug/duhem run duhem.yml --no-live --db .duhem/ci.db
+
+      # The owned-process VD tears this state down; preserve its former
+      # post-run assertion on both machines (including a failing shard).
+      - name: Check owned-process cleanup
+        if: always()
+        run: test ! -e .duhem/owned-process-example-state
+
+      - name: Upload core CI evidence
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: rust-test-evidence
+          name: core-ci-evidence-${{ matrix.shard }}
           path: .duhem/
+          include-hidden-files: true
           if-no-files-found: ignore
-
-      - name: file-budget lint
-        run: cargo run -p xtask --quiet -- check-file-budget --mode=fail
-
-      # Schema-versioning discipline (per the spec issue that introduced
-      # `duhem_schema::SCHEMA_VERSION`). schema-drift: every fenced YAML
-      # example under `docs/duhem-spec.md` §10 must parse + validate
-      # against the current `SCHEMA_VERSION`. schema-changelog-check
-      # without `--lint` is the PR-only, diff-scoped touch gate below.
-      - name: spec/code drift check
-        run: cargo run -p xtask --quiet -- schema-drift
-
-      - name: constraint catalog drift check
-        run: cargo run -p xtask --quiet -- constraint-catalog --mode=fail
-
-      # The generated action reference (docs/action-reference.md) is built
-      # from the action contracts; a contract change that isn't regenerated
-      # drifts the authoring reference away from what `duhem validate`
-      # enforces. (#248)
-      - name: action-reference drift check
-        run: cargo run -p xtask --quiet -- action-reference --check
-
-      # The user-facing authoring skill published under
-      # templates/product-repo/.claude/skills/ is a sanitized sibling of
-      # Duhem's internal dev skills; it must not leak internal dev context
-      # (dogfood framing, seam/trust internals, dev-skill names). (#287)
-      - name: skill-scrub (published skills ↔ no internal vocab)
-        run: cargo run -p xtask --quiet -- skill-scrub
-
-      # DX-currency gate (#288). readme-framing hard-fails; the currency
-      # check is warn-only for now (flip to --mode=fail after a bake).
-      # A PR that changes user-visible surface with no DX-doc update can
-      # declare it deliberate with a `<!-- dx:none -->` marker in the body.
-      - name: dx-drift (DX surfaces ↔ product currency)
-        env:
-          DUHEM_DX_IMPACT_NONE: ${{ contains(github.event.pull_request.body, '<!-- dx:none -->') && '1' || '' }}
-        run: cargo run -p xtask --quiet -- dx-drift --mode=warn
-
-      # Whole-file changelog structure and release coverage run on every
-      # event; unlike the diff-scoped touch gate, this has no escape hatch.
-      - name: changelog whole-file lint
-        run: cargo run -p xtask --quiet -- schema-changelog-check --lint
-
-      # Schema/evidence touches require an `## Unreleased` entry. A
-      # clarifying PR may explicitly bypass only this diff-scoped gate.
-      - name: changelog touch check
-        if: github.event_name == 'pull_request'
-        env:
-          DUHEM_CHANGELOG_CLARIFYING: ${{ contains(github.event.pull_request.body, '<!-- schema:clarifying -->') && '1' || '' }}
-        run: cargo run -p xtask --quiet -- schema-changelog-check
 
   # Browser-backed integration suites (`tests/ui_smoke.rs`,
   # `tests/api_observe_smoke.rs`) are `#[ignore]`d because they need a
-  # real Chromium, so the `rust` job's `cargo test` skips them. Without
+  # real Chromium, so the core run's `cargo test` skips them. Without
   # this lane, selector-engine / sidecar-protocol breakage rides through
   # CI green — exactly how the #75 `:has-text` regression shipped. Kept a
   # distinct job so the ~4-min Chromium install doesn't slow the fast

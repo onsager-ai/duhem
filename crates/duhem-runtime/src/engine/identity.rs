@@ -139,7 +139,39 @@ pub(crate) fn resolve_scope_with(
         verifier_sha,
         target_repo,
         target_sha,
+        branch: ci_env(source, "DUHEM_BRANCH")
+            .or_else(|| ci_env(source, "GITHUB_HEAD_REF"))
+            .or_else(|| ci_env(source, "GITHUB_REF_NAME"))
+            .or_else(|| ci_env(source, "CI_COMMIT_REF_NAME"))
+            .or_else(|| ci_env(source, "BUILDKITE_BRANCH")),
+        pr: ci_env(source, "DUHEM_PR")
+            .or_else(|| {
+                let reference = ci_env(source, "GITHUB_REF")?;
+                let number = reference
+                    .strip_prefix("refs/pull/")?
+                    .strip_suffix("/merge")?;
+                (!number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()))
+                    .then(|| number.to_string())
+            })
+            .or_else(|| ci_env(source, "CI_MERGE_REQUEST_IID"))
+            .or_else(|| ci_env(source, "BUILDKITE_PULL_REQUEST").filter(|pr| pr != "false")),
+        ci_url: ci_env(source, "DUHEM_CI_URL")
+            .or_else(|| {
+                let server = ci_env(source, "GITHUB_SERVER_URL")?;
+                let repo = ci_env(source, "GITHUB_REPOSITORY")?;
+                let run = ci_env(source, "GITHUB_RUN_ID")?;
+                Some(format!(
+                    "{}/{repo}/actions/runs/{run}",
+                    server.trim_end_matches('/')
+                ))
+            })
+            .or_else(|| ci_env(source, "CI_JOB_URL"))
+            .or_else(|| ci_env(source, "BUILDKITE_BUILD_URL")),
     }
+}
+
+fn ci_env(source: &dyn IdentitySource, key: &str) -> Option<String> {
+    source.env(key).filter(|value| !value.trim().is_empty())
 }
 
 /// Normalize a git remote URL to `host/owner/repo`:
@@ -286,6 +318,104 @@ mod tests {
             Some("github.com/onsager-ai/duhem")
         );
         assert_eq!(scope.verifier_sha.as_deref(), Some("v0.1.0"));
+    }
+
+    #[test]
+    fn ci_context_detection_and_overrides() {
+        type EnvFacts<'a> = &'a [(&'a str, &'a str)];
+        type Case<'a> = (
+            EnvFacts<'a>,
+            Option<&'a str>,
+            Option<&'a str>,
+            Option<&'a str>,
+        );
+        let cases: &[Case<'_>] = &[
+            (
+                &[
+                    ("GITHUB_HEAD_REF", "feature"),
+                    ("GITHUB_REF_NAME", "42/merge"),
+                    ("GITHUB_REF", "refs/pull/42/merge"),
+                    ("GITHUB_SERVER_URL", "https://github.com"),
+                    ("GITHUB_REPOSITORY", "acme/app"),
+                    ("GITHUB_RUN_ID", "123"),
+                ],
+                Some("feature"),
+                Some("42"),
+                Some("https://github.com/acme/app/actions/runs/123"),
+            ),
+            (
+                &[
+                    ("GITHUB_HEAD_REF", ""),
+                    ("GITHUB_REF_NAME", "main"),
+                    ("GITHUB_REF", "refs/heads/main"),
+                    ("GITHUB_SERVER_URL", "https://github.example/"),
+                    ("GITHUB_REPOSITORY", "acme/app"),
+                    ("GITHUB_RUN_ID", "456"),
+                ],
+                Some("main"),
+                None,
+                Some("https://github.example/acme/app/actions/runs/456"),
+            ),
+            (
+                &[
+                    ("CI_COMMIT_REF_NAME", "gitlab-feature"),
+                    ("CI_MERGE_REQUEST_IID", "7"),
+                    ("CI_JOB_URL", "https://gitlab.example/job/7"),
+                ],
+                Some("gitlab-feature"),
+                Some("7"),
+                Some("https://gitlab.example/job/7"),
+            ),
+            (
+                &[
+                    ("BUILDKITE_BRANCH", "buildkite-feature"),
+                    ("BUILDKITE_PULL_REQUEST", "8"),
+                    (
+                        "BUILDKITE_BUILD_URL",
+                        "https://buildkite.com/acme/app/builds/8",
+                    ),
+                ],
+                Some("buildkite-feature"),
+                Some("8"),
+                Some("https://buildkite.com/acme/app/builds/8"),
+            ),
+            (
+                &[
+                    ("BUILDKITE_BRANCH", "main"),
+                    ("BUILDKITE_PULL_REQUEST", "false"),
+                ],
+                Some("main"),
+                None,
+                None,
+            ),
+            (
+                &[
+                    ("DUHEM_BRANCH", "override"),
+                    ("DUHEM_PR", "99"),
+                    ("DUHEM_CI_URL", "https://ci/99"),
+                    ("GITHUB_HEAD_REF", "feature"),
+                    ("GITHUB_REF", "refs/pull/42/merge"),
+                    ("CI_JOB_URL", "https://gitlab/job"),
+                ],
+                Some("override"),
+                Some("99"),
+                Some("https://ci/99"),
+            ),
+            (&[], None, None, None),
+        ];
+        for (env, branch, pr, ci_url) in cases {
+            let src = FakeSource {
+                env: env
+                    .iter()
+                    .map(|(key, value)| (key.to_string(), value.to_string()))
+                    .collect(),
+                ..FakeSource::default()
+            };
+            let scope = resolve_scope_with(&src, None, Path::new("/work"), None);
+            assert_eq!(scope.branch.as_deref(), *branch, "{env:?}");
+            assert_eq!(scope.pr.as_deref(), *pr, "{env:?}");
+            assert_eq!(scope.ci_url.as_deref(), *ci_url, "{env:?}");
+        }
     }
 
     #[test]

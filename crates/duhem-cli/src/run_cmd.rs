@@ -942,9 +942,18 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     };
     // Nested invocations are included when their enclosing invocation finishes;
     // uploading their still-running ancestor here would violate immutability.
-    if invocation_parent.is_none() {
-        crate::export_cmd::auto_send(store.as_ref(), &send_roots).await;
-    }
+    let delivery = if invocation_parent.is_none() {
+        crate::export_cmd::auto_send(store.as_ref(), &send_roots).await
+    } else {
+        None
+    };
+    let linked_run_id = shard_plan
+        .as_ref()
+        .and_then(|plan| plan.metadata.parent_run_id.as_deref())
+        .unwrap_or(&send_roots[0]);
+    let shard = shard_plan
+        .as_ref()
+        .and_then(|plan| plan.metadata.shard.as_ref());
 
     // Reporter rendering:
     //
@@ -959,6 +968,17 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     let mut stdout = std::io::stdout().lock();
     if !is_manifest {
         let (_, outcome) = &leaf_outcomes[0];
+        if let Some(delivery) = &delivery {
+            crate::ci_link::report(
+                delivery,
+                linked_run_id,
+                &leaf_defs[0].verification,
+                outcome.verdict.state,
+                &leaf_outcomes,
+                &suite_native,
+                shard,
+            );
+        }
         if let Err(e) = reporter::render(
             &reporter,
             &mut stdout,
@@ -1000,6 +1020,17 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         set_verdict.state,
         suite_native.iter().map(|run| (run.required, run.outcome)),
     );
+    if let Some(delivery) = &delivery {
+        crate::ci_link::report(
+            delivery,
+            linked_run_id,
+            &target.to_string_lossy(),
+            set_verdict.state,
+            &leaf_outcomes,
+            &suite_native,
+            shard,
+        );
+    }
     if let Err(e) = reporter::render_set(
         &reporter,
         &mut stdout,

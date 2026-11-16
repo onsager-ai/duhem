@@ -29,6 +29,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 
+import { CiContext } from "@/components/CiContext";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { EmptyState, ErrorState } from "@/components/states";
 import { Button } from "@/components/ui/button";
@@ -192,13 +193,20 @@ const columns: ColumnDef<RunsListEntry>[] = [
     accessorFn: (r) => r.verification,
     header: ({ column }) => <SortHeader column={column}>Verification</SortHeader>,
     cell: ({ row }) => (
-      <Link
-        to={`/verification/${encodeURIComponent(row.original.verification)}`}
-        className="block max-w-[24ch] truncate hover:underline"
-        title={row.original.verification}
-      >
-        {row.original.verification}
-      </Link>
+      <div className="min-w-0 space-y-1">
+        <Link
+          to={`/verification/${encodeURIComponent(row.original.verification)}`}
+          className="block max-w-[24ch] truncate hover:underline"
+          title={row.original.verification}
+        >
+          {row.original.verification}
+        </Link>
+        <CiContext
+          branch={row.original.branch}
+          pr={row.original.pr}
+          ci_url={row.original.ci_url}
+        />
+      </div>
     ),
   },
   {
@@ -365,6 +373,17 @@ export default function RunsList() {
   const { runs, error } = useRunsData();
   const [params, setParams] = useSearchParams();
 
+  const repo = params.get("repo") ?? "";
+  const branch = params.get("branch") ?? "";
+  const pr = params.get("pr") ?? "";
+  const scopedRuns = useMemo(
+    () => (runs ?? []).filter((entry) =>
+      (!repo || entry.target_repo === repo) &&
+      (!branch || entry.branch === branch) &&
+      (!pr || entry.pr === pr),
+    ),
+    [runs, repo, branch, pr],
+  );
   const verification = params.get("verification") ?? "";
   const verdicts = params.getAll("verdict");
   const statuses = params.getAll("status");
@@ -382,10 +401,10 @@ export default function RunsList() {
 
   const filteredLeaves = useMemo(
     () =>
-      flatLeaves(runs ?? []).filter((entry) =>
+      flatLeaves(scopedRuns).filter((entry) =>
         matchesFilters(entry, verification, verdicts, statuses, from, to),
       ),
-    [runs, verification, verdicts, statuses, from, to],
+    [scopedRuns, verification, verdicts, statuses, from, to],
   );
   const filteredGroups = useMemo(
     () => {
@@ -405,11 +424,11 @@ export default function RunsList() {
           kind: children.length > 0 ? "run-set" : "leaf",
         };
       };
-      return (runs ?? [])
+      return scopedRuns
         .map(filterTree)
         .filter((entry): entry is RunsListEntry => entry !== null);
     },
-    [runs, verification, verdicts, statuses, from, to],
+    [scopedRuns, verification, verdicts, statuses, from, to],
   );
 
   const update = (mutate: (p: URLSearchParams) => void) => {
@@ -424,6 +443,7 @@ export default function RunsList() {
     setParams(next, { replace: true });
   };
   const hasFilters =
+    Boolean(repo || branch || pr) ||
     Boolean(verification) ||
     verdicts.length > 0 ||
     statuses.length > 0 ||
@@ -472,6 +492,20 @@ export default function RunsList() {
       </nav>
 
       <div className="flex flex-wrap items-center gap-2">
+        {(["repo", "branch", "pr"] as const).map((name) => (
+          <Input
+            key={name}
+            aria-label={name === "pr" ? "PR" : name}
+            placeholder={name === "pr" ? "PR" : name === "repo" ? "Repository" : "Branch"}
+            value={params.get(name) ?? ""}
+            className="h-8 w-[11rem]"
+            onChange={(e) =>
+              update((p) =>
+                e.target.value ? p.set(name, e.target.value) : p.delete(name),
+              )
+            }
+          />
+        ))}
         <Select
           value={verification || ALL}
           onValueChange={(v) =>

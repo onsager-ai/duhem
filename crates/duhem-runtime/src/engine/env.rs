@@ -501,6 +501,9 @@ where
 {
     let exact: HashSet<&str> = ["PATH", "HOME", "TMPDIR", "LANG"].into_iter().collect();
     const OUTER_RUN_VARS: &[&str] = &[
+        "DUHEM_BRANCH",
+        "DUHEM_PR",
+        "DUHEM_CI_URL",
         "DUHEM_SHARD",
         "DUHEM_RUN_ID",
         "DUHEM_SERVER_URL",
@@ -598,6 +601,9 @@ mod tests {
             ("LANG".into(), "C.UTF-8".into()),
             ("LC_ALL".into(), "C".into()),
             ("DUHEM_RUN_ID".into(), "01J".into()),
+            ("DUHEM_BRANCH".into(), "outer".into()),
+            ("DUHEM_PR".into(), "123".into()),
+            ("DUHEM_CI_URL".into(), "https://ci/job".into()),
             ("DUHEM_SHARD".into(), "1/2".into()),
             ("DUHEM_SERVER_URL".into(), "https://server".into()),
             ("DUHEM_SERVER_TOKEN".into(), "secret".into()),
@@ -620,6 +626,9 @@ mod tests {
         assert!(!out.contains(&"DUHEM_RUN_ID".to_string()));
         assert!(out.contains(&"DUHEM_HOME".to_string()));
         for key in [
+            "DUHEM_BRANCH",
+            "DUHEM_PR",
+            "DUHEM_CI_URL",
             "DUHEM_SHARD",
             "DUHEM_SERVER_URL",
             "DUHEM_SERVER_TOKEN",

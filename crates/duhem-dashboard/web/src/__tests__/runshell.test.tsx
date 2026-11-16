@@ -20,6 +20,9 @@ afterEach(() => {
 
 // pegasus-register-shaped run: 4 checks — 2 pass, 1 fail, 1 inconclusive.
 const RUN = {
+  branch: undefined as string | undefined,
+  pr: undefined as string | undefined,
+  ci_url: undefined as string | undefined,
   run_id: "R1",
   verification: "pegasus-register",
   started_at: "2026-07-22T14:03:00.000Z",
@@ -150,6 +153,21 @@ function LocationProbe() {
 }
 
 describe("run report tree", () => {
+  it("shows recorded branch, PR and CI link in the run header", async () => {
+    stub({
+      ...RUN,
+      branch: "feature/login",
+      pr: "42",
+      ci_url: "https://github.com/acme/app/actions/runs/123",
+    });
+    renderAt("/run/R1");
+    expect(await screen.findByText("feature/login")).toBeTruthy();
+    expect(screen.getByText("PR #42")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "CI" }).getAttribute("href")).toBe(
+      "https://github.com/acme/app/actions/runs/123",
+    );
+  });
+
   it("renders parent children in order and tree failures without the empty-criteria message", async () => {
     const checkTotals = { pass: 0, fail: 1, inconclusive: 0, pending: 0, total: 1 };
     const children: RunDetail["children"] = [

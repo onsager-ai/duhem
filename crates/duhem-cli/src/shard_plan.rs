@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 
-use duhem_evidence::{EvidenceWriter, RunLineage, RunOrigin, Store};
+use duhem_evidence::{EvidenceWriter, RunLineage, RunOrigin, RunScope, Store};
 use duhem_runtime::CheckFilter;
 use duhem_schema::{Loaded, LoadedLeaf, NativeRun};
 use duhem_summary::{DistributedRun, ExpectedPartition, ManifestSelection};
@@ -15,6 +15,7 @@ use crate::shard::{Detection, partition};
 pub struct Plan {
     pub metadata: DistributedRun,
     owned: BTreeSet<String>,
+    scope: RunScope,
 }
 
 /// JSON encoding frames identifiers without relying on an escaping convention.
@@ -115,7 +116,28 @@ impl Plan {
                     .collect(),
             }),
         };
-        Self { metadata, owned }
+        // The logical parent is the top-level dashboard row, so record CI
+        // context there as well as on each shard.
+        let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+        let (declared, vd_dir) = match scope {
+            Scope::Manifest {
+                project,
+                manifest_dir,
+                ..
+            } => (project.as_ref(), manifest_dir.as_deref()),
+            Scope::SingleLeaf => (
+                leaves
+                    .first()
+                    .and_then(|leaf| leaf.definition.project.as_ref()),
+                leaves.first().and_then(|leaf| leaf.path.parent()),
+            ),
+        };
+        let scope = duhem_runtime::resolve_scope(declared, &cwd, vd_dir);
+        Self {
+            metadata,
+            owned,
+            scope,
+        }
     }
 
     pub fn key(path: &Path, scope: &Scope) -> String {
@@ -187,8 +209,14 @@ impl Plan {
             .as_deref()
             .expect("shard parent");
         if store.get_run(id).await?.is_none() {
-            let mut writer =
-                EvidenceWriter::begin(store, id, &path.to_string_lossy(), BTreeMap::new()).await?;
+            let mut writer = EvidenceWriter::begin_scoped(
+                store,
+                id,
+                &path.to_string_lossy(),
+                BTreeMap::new(),
+                self.scope.clone(),
+            )
+            .await?;
             writer
                 .append(duhem_evidence::run_started(
                     path.to_string_lossy(),

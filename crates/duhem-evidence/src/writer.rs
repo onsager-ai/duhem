@@ -185,6 +185,9 @@ impl EvidenceWriter {
         mask_optional(&secrets, &mut scope.verifier_sha);
         mask_optional(&secrets, &mut scope.target_repo);
         mask_optional(&secrets, &mut scope.target_sha);
+        mask_optional(&secrets, &mut scope.branch);
+        mask_optional(&secrets, &mut scope.pr);
+        mask_optional(&secrets, &mut scope.ci_url);
         store
             .begin_run(&RunMeta {
                 run_id: run_id.clone(),

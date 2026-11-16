@@ -151,13 +151,16 @@ fn row_to_run_record(row: &sqlx::sqlite::SqliteRow) -> Result<RunRecord, StoreEr
             verifier_sha: row.get("verifier_sha"),
             target_repo: row.get("target_repo"),
             target_sha: row.get("target_sha"),
+            branch: row.get("branch"),
+            pr: row.get("pr"),
+            ci_url: row.get("ci_url"),
         },
     })
 }
 
 const RUN_SELECT: &str = "SELECT r.run_id, r.verification, r.schema_version, r.inputs, \
      r.started_at, r.parent_run_id, CASE WHEN r.shard_origin = 1 THEN 'shard' ELSE r.origin END AS origin, r.project_id, r.verifier_repo, r.verifier_sha, \
-     r.target_repo, r.target_sha, v.verdict, t.status AS terminal_status, t.terminal_at, t.duration_ms, \
+     r.target_repo, r.target_sha, r.branch, r.pr, r.ci_url, v.verdict, t.status AS terminal_status, t.terminal_at, t.duration_ms, \
      (SELECT MAX(b.received_at) FROM bundle_receipts b WHERE b.run_id = r.run_id) AS received_at, \
      EXISTS(SELECT 1 FROM runs c WHERE c.parent_run_id = r.run_id AND c.shard_origin = 1) AS logical_parent, \
      COALESCE((SELECT MAX(e.ts) FROM events e WHERE e.run_id = r.run_id \
@@ -428,8 +431,8 @@ pub(super) async fn begin_run(
     sqlx::query(
         "INSERT INTO runs (run_id, verification, schema_version, inputs, started_at, \
              parent_run_id, origin, workspace_id, project_id, verification_id, verifier_repo, \
-             verifier_sha, target_repo, target_sha, shard_origin) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'local', ?, ?, ?, ?, ?, ?, ?)",
+             verifier_sha, target_repo, target_sha, branch, pr, ci_url, shard_origin) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'local', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&meta.run_id)
     .bind(&meta.verification)
@@ -444,6 +447,9 @@ pub(super) async fn begin_run(
     .bind(&meta.scope.verifier_sha)
     .bind(&meta.scope.target_repo)
     .bind(&meta.scope.target_sha)
+    .bind(&meta.scope.branch)
+    .bind(&meta.scope.pr)
+    .bind(&meta.scope.ci_url)
     .bind(meta.lineage.origin == Some(RunOrigin::Shard))
     .execute(&mut *connection)
     .await?;

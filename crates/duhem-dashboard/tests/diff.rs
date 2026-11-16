@@ -45,6 +45,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, screenshot: boo
         verifier_sha: None,
         target_repo: Some(TARGET.into()),
         target_sha: Some(if pass { "sha-good" } else { "sha-bad" }.into()),
+        ..RunScope::default()
     };
     let mut w = EvidenceWriter::begin_scoped(store, run_id, DEF, BTreeMap::new(), scope)
         .await

@@ -161,6 +161,9 @@ impl SqliteStore {
                 verifier_sha: run.verifier_sha.clone(),
                 target_repo: run.target_repo.clone(),
                 target_sha: run.target_sha.clone(),
+                branch: run.branch.clone(),
+                pr: run.pr.clone(),
+                ci_url: run.ci_url.clone(),
             },
         };
         // Acquire SQLite's writer reservation before checking the receipt, including

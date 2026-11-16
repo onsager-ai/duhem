@@ -57,6 +57,34 @@ function leaf(
 }
 
 describe("RunsList", () => {
+  it("filters CI context on top-level runs before showing descendants", async () => {
+    stubRuns([
+      {
+        ...leaf("matching-root", "pass"),
+        target_repo: "github.com/acme/app",
+        branch: "feature/login",
+        pr: "42",
+        kind: "run-set",
+        children: [leaf("matching-child", "pass")],
+      },
+      {
+        ...leaf("other-root", "pass"),
+        branch: "main",
+        kind: "run-set",
+        children: [{ ...leaf("other-child", "pass"), branch: "feature/login", pr: "42" }],
+      },
+    ]);
+    renderRuns(<RunsList />, "/runs?repo=github.com%2Facme%2Fapp&branch=feature%2Flogin&pr=42");
+    expect(await screen.findByText("matching-root")).toBeTruthy();
+    expect(screen.getByText("matching-child")).toBeTruthy();
+    expect(screen.queryByText("other-root")).toBeNull();
+    expect(screen.queryByText("other-child")).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: "PR" }), { target: { value: "99" } });
+    expect(await screen.findByText("No runs match the filters")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(await screen.findByText("other-root")).toBeTruthy();
+  });
+
   it("renders the empty state", async () => {
     stubRuns([]);
     renderRuns(<RunsList />);

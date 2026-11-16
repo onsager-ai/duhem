@@ -5,7 +5,9 @@ native:
   - id: cargo-test
     layer: unit
     cwd: ../..
-    command: [cargo, test, --workspace]
+    # Tests spawn complete Duhem runs; only the outer CI run is sharded and
+    # delivered to the server. Preserve the exact cargo command after isolation.
+    command: [env, -u, DUHEM_SHARD, -u, DUHEM_RUN_ID, -u, DUHEM_SERVER_URL, -u, DUHEM_SERVER_TOKEN, cargo, test, --workspace]
     # Native subprocesses sanitize the inherited environment. Preserve CI's
     # compiler policy and color setting explicitly, including the build cache key.
     env: {RUSTFLAGS: '-D warnings', CARGO_TERM_COLOR: always}

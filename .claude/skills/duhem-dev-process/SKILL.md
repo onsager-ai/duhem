@@ -175,6 +175,29 @@ the collision patterns to watch, and the CI-failure table they reference.
 
 ### Check gate
 
+Core CI builds the debug CLI and uses one repository entry point:
+
+```bash
+./target/debug/duhem validate duhem.yml
+./target/debug/duhem run duhem.yml --no-live --db .duhem/duhem.db
+```
+
+`CI / duhem run (1/2)` and `CI / duhem run (2/2)` replace the former
+`CI / rust` and `self-verify / cli regression` checks (#672). Each machine
+sets `DUHEM_SHARD` and shares a `DUHEM_RUN_ID`; both shard statuses gate merge.
+Server delivery is informational. The root manifest preserves fmt, clippy,
+workspace tests, all xtask checks, every-suite validation and the former CLI
+regression examples. `dx-drift --mode=warn` remains non-required. Diff checks
+receive PR base/event context through `DUHEM_CI_BASE_REF` and
+`DUHEM_CI_EVENT_NAME`. Node 24 runs the native greeting example and controls.
+Nested CLI fixtures and workspace tests clear the outer shard/run identity so
+they still exercise complete runs. Browser, dashboard, and sharding-example
+partition checks keep their separate jobs.
+
+When local build/test execution is prohibited, use CI for these gates and report
+`just preflight` as unrun; manifest validation with an installed/released binary
+can still catch schema mistakes. Do not claim a CI-only check passed locally.
+
 The pre-push gate is:
 
 ```bash

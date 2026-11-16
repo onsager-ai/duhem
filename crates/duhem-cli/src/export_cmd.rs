@@ -171,8 +171,18 @@ pub async fn ship_bundle(
         req = req.bearer_auth(token);
     }
     let res = req.send().await.map_err(|e| e.without_url().to_string())?;
-    if !res.status().is_success() {
-        return Err(format!("server answered {}", res.status()));
+    let status = res.status();
+    if !status.is_success() {
+        // Surface the server's reason (bounded, one line); a body read
+        // failure still reports the status.
+        let reason = res.text().await.unwrap_or_default();
+        let reason: String = reason.split_whitespace().collect::<Vec<_>>().join(" ");
+        let reason: String = reason.chars().take(300).collect();
+        return Err(if reason.is_empty() {
+            format!("server answered {status}")
+        } else {
+            format!("server answered {status}: {reason}")
+        });
     }
     Ok(hash)
 }

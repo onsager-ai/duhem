@@ -408,6 +408,57 @@ fn unreachable_hub_only_warns_and_preserves_pass_and_fail_exit_codes() {
     }
 }
 
+#[test]
+fn rejected_upload_warns_with_server_reason() {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("leaf.yml");
+    leaf(&path, true);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    // One-request server that rejects the bundle with a reason.
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut length = 0usize;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if line == "\r\n" || line.is_empty() {
+                break;
+            }
+            if let Some((name, value)) = line.split_once(':')
+                && name.eq_ignore_ascii_case("content-length")
+            {
+                length = value.trim().parse().unwrap();
+            }
+        }
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).unwrap();
+        let reason = "invalid run identity";
+        write!(
+            reader.get_mut(),
+            "HTTP/1.1 400 Bad Request\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{reason}",
+            reason.len()
+        )
+        .unwrap();
+    });
+    let output = command(&path, &tmp.path().join("duhem.db"))
+        .env("DUHEM_SERVER_URL", &base)
+        .env_remove("DUHEM_HUB_URL")
+        .env_remove("DUHEM_SERVER_TOKEN")
+        .output()
+        .unwrap();
+    server.join().unwrap();
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr
+            .contains("warning: auto-send: server answered 400 Bad Request: invalid run identity"),
+        "{stderr}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn aggregate_preserves_failures_native_gates_and_empty_shards() {
     let tmp = tempfile::tempdir().unwrap();

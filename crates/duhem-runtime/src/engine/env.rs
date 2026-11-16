@@ -289,6 +289,7 @@ impl SuiteEnvironment {
                         writer
                             .append(EventPayload::RunAborted {
                                 signal: signal.to_string(),
+                                error: None,
                             })
                             .await?;
                         writer.finish().await?;
@@ -354,6 +355,7 @@ impl SuiteEnvironment {
                 self.writer
                     .append(EventPayload::RunAborted {
                         signal: signal.to_string(),
+                        error: None,
                     })
                     .await?;
                 Err(EngineError::Aborted {
@@ -391,6 +393,7 @@ impl SuiteEnvironment {
                     self.writer
                         .append(EventPayload::RunAborted {
                             signal: signal.to_string(),
+                            error: None,
                         })
                         .await?;
                     self.writer.finish().await?;

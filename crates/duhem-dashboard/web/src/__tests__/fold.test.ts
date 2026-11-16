@@ -22,6 +22,17 @@ const trace: TraceEvent[] = [
 ];
 
 describe("foldRun", () => {
+  it("retains an engine abort error without inventing a run verdict", () => {
+    const done = foldRun("r1", [
+      ...trace.slice(0, 6),
+      { seq: 6, ts: "2026-06-10T10:00:06.000Z", kind: "run_aborted", signal: "", error: "unresolved reference" },
+    ]);
+    expect(done.status).toBe("aborted");
+    expect(done.verdict).toBeNull();
+    expect(done.error).toBe("unresolved reference");
+    expect(carryFetched(done, { ...done, error: undefined }).error).toBe(done.error);
+  });
+
   it("is running with no verdict until run_finished arrives", () => {
     const partial = foldRun("r1", trace.slice(0, 4));
     expect(partial.status).toBe("running");

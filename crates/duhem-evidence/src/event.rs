@@ -515,10 +515,13 @@ pub enum EventPayload {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         verdict: Option<VerdictState>,
     },
-    /// The runtime observed an operator termination signal and sealed
-    /// the run before exiting.
+    /// The runtime sealed the run after an operator signal or engine error.
+    /// Aborts carry no run verdict.
     RunAborted {
+        /// Operator signal, or empty when an engine error caused the abort.
         signal: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
 }
 
@@ -581,6 +584,16 @@ mod tests {
 
     fn ts() -> DateTime<Utc> {
         "2026-05-08T12:00:00.000Z".parse().unwrap()
+    }
+
+    #[test]
+    fn legacy_operator_abort_omits_error_on_roundtrip() {
+        let legacy = serde_json::json!({"kind": "run_aborted", "signal": "SIGTERM"});
+        let payload: EventPayload = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(
+            matches!(&payload, EventPayload::RunAborted { signal, error: None } if signal == "SIGTERM")
+        );
+        assert_eq!(serde_json::to_value(payload).unwrap(), legacy);
     }
 
     #[test]

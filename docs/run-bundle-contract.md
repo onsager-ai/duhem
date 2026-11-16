@@ -95,8 +95,15 @@ non-loopback listen host requires a nonempty server token. Deprecated
 alias. Default server and static-export mode stay
 read-only. Ingest limits the request body to 16 MiB, validates the version,
 canonical content hash, event sequence, header/event agreement and artifact
-hashes, then replays judged event streams before committing. Unjudged suite
-containers and logical parents stay unjudged. The supplied header verdict,
+hashes, then replays judged event streams before committing. A terminal
+`run_aborted` seals an operator abort or engine error without a run verdict.
+Its optional `error` records the engine error; `signal` remains the operator
+signal and is empty for engine errors. Older operator aborts omit `error`.
+Aborted-trace replay validates every completed check and criterion judgment,
+allows unfinished scopes, and never derives a run verdict. Ingest accepts
+these traces only with exactly one terminal event, last, and rejects divergent
+completed judgments. The dashboard displays the aborted status and recorded
+error. Unjudged suite containers and logical parents stay unjudged. The supplied header verdict,
 finish time and duration are never used as judgment inputs. Receipts, events,
 blobs and their normal projections commit atomically; an identical receipt is
 a no-op. Serve remotely behind TLS when sending a bearer token.

@@ -696,6 +696,7 @@ async fn leaf_setup_abort_is_not_overwritten_by_scoped_setup_completion() {
     writer
         .append(EventPayload::RunAborted {
             signal: "leaf setup failed".into(),
+            error: None,
         })
         .await
         .unwrap();

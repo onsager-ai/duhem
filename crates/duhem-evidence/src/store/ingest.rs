@@ -84,7 +84,12 @@ impl SqliteStore {
                 }
             )
         });
-        if judged {
+        if matches!(
+            trace.events().last().map(|event| &event.payload),
+            Some(EventPayload::RunAborted { .. })
+        ) {
+            crate::replay_aborted(&trace).map_err(invalid)?;
+        } else if judged {
             // Replay recomputes check, criterion and run verdicts and rejects divergence.
             crate::replay(&trace).map_err(invalid)?;
         } else if trace

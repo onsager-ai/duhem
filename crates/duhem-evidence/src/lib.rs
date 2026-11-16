@@ -38,7 +38,7 @@ pub use event::{
     StepOutcome, StepPhase, VerdictState,
 };
 pub use reader::{ReadError, Trace};
-pub use replay::{ReplayDivergence, ReplayError, ReplayedRun, replay};
+pub use replay::{ReplayDivergence, ReplayError, ReplayedRun, replay, replay_aborted};
 pub use secret::{COMMON_SECRET_WORDS, MaskedText, SHORT_SECRET_THRESHOLD, SecretRegistry};
 pub use session::{
     SESSION_EVIDENCE_OBSERVATION, SESSION_EVIDENCE_VERSION, STEP_SCREENSHOT_OBSERVATION,

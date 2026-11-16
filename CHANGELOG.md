@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Engine errors seal runs with an aborted terminal carrying optional error text; aborted replay and server ingest validate completed judgments without inventing a run verdict, and the dashboard displays the error. (#680)
+
 - [additive] Assertion evidence marks recovery and cleanup diagnostics so replay and server ingest preserve the runtime's check verdicts; CI replays every finished stored run. (#683)
 - [clarifying] A server rejects uploads carrying fields it doesn't know with a clear "upgrade the server" error instead of a hash mismatch; clients send their version. (#673)
 - [additive] Runs record CI context (branch, PR, CI job URL) detected from GitHub Actions, GitLab and Buildkite, carried in RunBundle v1; the dashboard shows it and filters runs by repo, branch and PR. (#673)

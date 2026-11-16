@@ -140,6 +140,7 @@ export interface RunDetail {
   verdict: Verdict | null;
   status: RunStatus;
   setup_aborted: boolean;
+  error?: string;
   /** `true` when the run recorded its VD source snapshot (#302); the
    *  client then fetches it from `definitionUrl`. */
   has_definition: boolean;

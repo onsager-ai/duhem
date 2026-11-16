@@ -60,6 +60,7 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
     .await
     .unwrap();
     w.append(EventPayload::AssertionEvaluated {
+        diagnostic: false,
         operands: None,
         check_id: "AC-1.1".into(),
         iteration: None,
@@ -164,6 +165,7 @@ async fn dropped_writer_loses_nothing_and_run_stays_unfinished() {
             .unwrap();
         for i in 0..9 {
             w.append(EventPayload::AssertionEvaluated {
+                diagnostic: false,
                 operands: None,
                 check_id: format!("C{i}"),
                 iteration: None,
@@ -366,6 +368,7 @@ async fn stepless_check_owner_projects_and_replays() {
         .unwrap();
     writer
         .append(EventPayload::AssertionEvaluated {
+            diagnostic: false,
             operands: None,
             check_id: "AC-1.1".into(),
             iteration: None,

@@ -62,6 +62,15 @@ jobs:
       - name: Run core CI through Duhem
         run: ./target/debug/duhem run duhem.yml --no-live --db .duhem/duhem.db
 
+      - name: Replay every finished run through server ingest
+        if: always()
+        run: |
+          if [ -f .duhem/duhem.db ]; then
+            cargo run -p xtask -- replay-store .duhem/duhem.db
+          else
+            echo 'replay-store: no store produced; nothing to replay'
+          fi
+
       # The owned-process VD tears this state down; preserve its former
       # post-run assertion on both machines (including a failing shard).
       - name: Check owned-process cleanup

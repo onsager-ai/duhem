@@ -440,6 +440,10 @@ pub enum EventPayload {
     },
     AssertionEvaluated {
         check_id: String,
+        /// Recovery/cleanup assertion retained for diagnostics, excluded from judgment.
+        /// Absent in legacy evidence, where every recorded assertion contributes.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        diagnostic: bool,
         /// Values observed during the explicit assertion's actual evaluation.
         /// An empty map still identifies an explicit assertion. Absent for
         /// implicit judgments and legacy evidence; missing values are not null.

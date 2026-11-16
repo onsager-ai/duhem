@@ -4639,6 +4639,7 @@ dependencies = [
  "base64",
  "chrono",
  "duhem-actions",
+ "duhem-evidence",
  "duhem-schema",
  "proc-macro2",
  "regex",
@@ -4646,7 +4647,9 @@ dependencies = [
  "serde_json",
  "serde_yml",
  "syn",
+ "tempfile",
  "tiktoken-rs",
+ "tokio",
 ]
 
 [[package]]

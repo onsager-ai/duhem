@@ -115,6 +115,7 @@ async fn seed_lineage(
         )
     };
     w.append(EventPayload::AssertionEvaluated {
+        diagnostic: false,
         operands: None,
         check_id: "AC-1.1".into(),
         iteration: None,

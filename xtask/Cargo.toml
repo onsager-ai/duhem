@@ -14,6 +14,9 @@ anyhow.workspace = true
 base64 = "0.22"
 chrono.workspace = true
 duhem-actions = { path = "../crates/duhem-actions" }
+duhem-evidence = { path = "../crates/duhem-evidence" }
+tokio.workspace = true
+tempfile = "3"
 duhem-schema = { path = "../crates/duhem-schema" }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 regex.workspace = true

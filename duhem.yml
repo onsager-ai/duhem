@@ -1,0 +1,87 @@
+# Duhem-on-Duhem regression coverage, not an independent trust anchor (#672).
+# Build target/debug/duhem, put Node 24 on PATH, then run from the repo root:
+#   ./target/debug/duhem run duhem.yml --no-live --db .duhem/ci.db
+manifest_version: 1
+
+# A single profile is selected automatically; keys bind only declared inputs.
+profiles:
+  ci:
+    # Inner CLI regression invocations must run their whole fixture, not inherit
+    # the outer run's shard or logical identity.
+    duhem_bin: ./scripts/ci-duhem.sh
+    state_file: .duhem/owned-process-example-state
+
+native:
+  - id: cargo-fmt
+    layer: static
+    command: [cargo, fmt, --all, --, --check]
+    env: &rust-env {RUSTFLAGS: '-D warnings', CARGO_TERM_COLOR: always}
+  - id: cargo-clippy
+    layer: static
+    command: [cargo, clippy, --workspace, --all-targets, --, -D, warnings]
+    env: *rust-env
+    timeout: 360m
+  # cargo-test stays in verifications/duhem-rust so it executes exactly once.
+  - id: file-budget
+    layer: static
+    command: [cargo, run, -p, xtask, --quiet, --, check-file-budget, --mode=fail]
+    env: *rust-env
+  - id: schema-drift
+    layer: static
+    command: [cargo, run, -p, xtask, --quiet, --, schema-drift]
+    env: *rust-env
+  - id: constraint-catalog
+    layer: static
+    command: [cargo, run, -p, xtask, --quiet, --, constraint-catalog, --mode=fail]
+    env: *rust-env
+  - id: action-reference
+    layer: static
+    command: [cargo, run, -p, xtask, --quiet, --, action-reference, --check]
+    env: *rust-env
+  - id: skill-scrub
+    layer: static
+    command: [cargo, run, -p, xtask, --quiet, --, skill-scrub]
+    env: *rust-env
+  - id: dx-drift
+    layer: static
+    # Native env is literal and GitHub variables are sanitized; CI supplies the
+    # PR base through a DUHEM_ variable, which survives that boundary.
+    command: [sh, -c, 'GITHUB_BASE_REF="${DUHEM_CI_BASE_REF:-}" exec cargo run -p xtask --quiet -- dx-drift --mode=warn']
+    env: *rust-env
+    required: false
+  - id: changelog-lint
+    layer: static
+    command: [cargo, run, -p, xtask, --quiet, --, schema-changelog-check, --lint]
+    env: *rust-env
+  - id: changelog-touch
+    layer: static
+    # Preserve the former PR-only touch gate; whole-file lint runs on all events.
+    command:
+      - sh
+      - -c
+      - |
+        if [ "${DUHEM_CI_EVENT_NAME:-}" = pull_request ]; then
+          GITHUB_BASE_REF="${DUHEM_CI_BASE_REF:-}" exec cargo run -p xtask --quiet -- schema-changelog-check
+        fi
+    env: *rust-env
+  - id: validate-suites
+    layer: static
+    command: [bash, scripts/validate-suites.sh, ./target/debug/duhem]
+  - id: validate-native-controls
+    layer: static
+    command:
+      - sh
+      - -ec
+      - |
+        for control in verifications/duhem-cli/fixtures/native/*.yml; do
+          ./target/debug/duhem validate "$control"
+        done
+
+verifications:
+  - path: verifications/duhem-rust/duhem.yml
+  - path: verifications/duhem-cli/duhem.yml
+  - path: verifications/native-example/duhem.yml
+  - path: verifications/owned-process-example/duhem.yml
+  - path: verifications/check-conditions-example/duhem.yml
+  - path: verifications/flow-cleanup-example/duhem.yml
+  - path: verifications/step-groups-example/duhem.yml

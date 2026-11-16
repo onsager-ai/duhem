@@ -60,7 +60,7 @@ jobs:
         run: ./target/debug/duhem validate duhem.yml
 
       - name: Run core CI through Duhem
-        run: ./target/debug/duhem run duhem.yml --no-live --db .duhem/ci.db
+        run: ./target/debug/duhem run duhem.yml --no-live --db .duhem/duhem.db
 
       # The owned-process VD tears this state down; preserve its former
       # post-run assertion on both machines (including a failing shard).

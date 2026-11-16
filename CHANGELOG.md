@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+## v0.9.0 — 2026-11-16
+
 - [additive] `duhem server` (alias `duhem dashboard`) and one `DUHEM_SERVER_URL`/`DUHEM_SERVER_TOKEN` setting; DUHEM_HUB_URL, DUHEM_HUB_TOKEN and DUHEM_DASHBOARD_URL remain as deprecated aliases. (#667)
 
 - [additive] Dashboard aggregates distributed runs with pending coverage, configurable missing-shard grace, conflict rejection, per-shard provenance and missing units in failure envelopes. (#650)

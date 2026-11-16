@@ -74,6 +74,95 @@ async fn runs_list_single_leaf_run() {
 }
 
 #[tokio::test]
+async fn runs_list_filters_top_level_ci_context_and_preserves_children() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    for (id, repo, branch, pr, parent) in [
+        ("ROOT", "github.com/acme/app", "feature/login", "42", None),
+        (
+            "CHILD",
+            "github.com/acme/other",
+            "nested",
+            "99",
+            Some("ROOT"),
+        ),
+        ("OTHER", "github.com/acme/other", "main", "43", None),
+    ] {
+        let lineage = RunLineage {
+            parent_run_id: parent.map(str::to_string),
+            origin: parent.map(|_| RunOrigin::Invocation),
+        };
+        let mut writer = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
+            rw.clone(),
+            id,
+            "x.yml",
+            BTreeMap::new(),
+            RunScope {
+                target_repo: Some(repo.into()),
+                branch: Some(branch.into()),
+                pr: Some(pr.into()),
+                ci_url: Some("https://github.com/acme/app/actions/runs/123".into()),
+                ..RunScope::default()
+            },
+            lineage.clone(),
+            SecretRegistry::new(),
+        )
+        .await
+        .unwrap();
+        writer
+            .append(run_started_with_definition_and_lineage(
+                "x.yml",
+                BTreeMap::new(),
+                None,
+                lineage,
+            ))
+            .await
+            .unwrap();
+        writer
+            .append(EventPayload::RunFinished {
+                body_verdict: None,
+                verdict: None,
+            })
+            .await
+            .unwrap();
+    }
+    let reader = EvidenceReader::new(ro);
+    for query in [
+        "pr=42",
+        "branch=feature%2Flogin",
+        "repo=github.com%2Facme%2Fapp",
+        "repo=github.com%2Facme%2Fapp&branch=feature%2Flogin&pr=42",
+    ] {
+        let (status, json) = get_json(reader.clone(), &format!("/api/runs?{query}")).await;
+        assert_eq!(status, StatusCode::OK);
+        let rows = json.as_array().unwrap();
+        assert_eq!(rows.len(), 1, "{query}");
+        assert_eq!(rows[0]["run_id"], "ROOT");
+        assert_eq!(rows[0]["branch"], "feature/login");
+        assert_eq!(rows[0]["pr"], "42");
+        assert_eq!(rows[0]["children"][0]["run_id"], "CHILD");
+    }
+    for query in [
+        "pr=99",
+        "branch=nested",
+        "branch=feature",
+        "branch=main&pr=42",
+    ] {
+        let (status, json) = get_json(reader.clone(), &format!("/api/runs?{query}")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json, serde_json::json!([]), "{query}");
+    }
+    let (status, json) = get_json(reader, "/api/runs/ROOT").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["target_repo"], "github.com/acme/app");
+    assert_eq!(json["branch"], "feature/login");
+    assert_eq!(json["pr"], "42");
+    assert_eq!(
+        json["ci_url"],
+        "https://github.com/acme/app/actions/runs/123"
+    );
+}
+
+#[tokio::test]
 async fn check_artifact_surfaces_secret_mask_occurrence_counts() {
     let (_tmp, rw, ro) = common::open_stores().await;
     let run_id = "01J0000000000000000000000S";

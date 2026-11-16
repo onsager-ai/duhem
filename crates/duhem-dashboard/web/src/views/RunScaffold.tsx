@@ -38,6 +38,7 @@ import {
   type SuiteStatus,
 } from "../suite-tree";
 import { VerdictBadge, formatDuration } from "../ui";
+import { CiContext } from "../components/CiContext";
 import { VerdictMark } from "../components/brand/VerdictMark";
 import { DefinitionProvider, useVd } from "./definition-context";
 import { useCollapseOnScroll } from "../hooks/use-collapse-on-scroll";
@@ -752,6 +753,7 @@ export function VerdictBand({
             >
               {run.run_id}
             </code>
+            <CiContext branch={run.branch} pr={run.pr} ci_url={run.ci_url} />
             {run.status === "running" && (
               <span className="text-xs text-muted-foreground">{connection}</span>
             )}

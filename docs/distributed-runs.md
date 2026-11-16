@@ -88,6 +88,27 @@ that passes `CI_NODE_INDEX` directly to its one-based `--shard` flag.
 Use a new shared identity for each logical invocation; if a provider's retry
 keeps these components unchanged, include your attempt identifier explicitly.
 
+## Find runs by CI context
+
+Runs record optional branch, PR and CI URL fields from GitHub Actions, GitLab
+and Buildkite. `DUHEM_BRANCH`, `DUHEM_PR` and `DUHEM_CI_URL` override detection.
+GitHub uses the PR source branch (`GITHUB_HEAD_REF`) or `GITHUB_REF_NAME`, the
+number in `GITHUB_REF=refs/pull/<n>/merge`, and the Actions run URL. GitLab uses
+`CI_COMMIT_REF_NAME`, `CI_MERGE_REQUEST_IID` and `CI_JOB_URL`; Buildkite uses
+`BUILDKITE_BRANCH`, `BUILDKITE_PULL_REQUEST` (except `false`) and
+`BUILDKITE_BUILD_URL`. Local runs have no CI context unless explicitly overridden.
+
+The run header and runs list show branch, PR and a CI link. Use the list's
+Repository, Branch and PR inputs to find a pipeline. The API accepts exact,
+combined filters on top-level runs, preserving their descendants:
+
+```text
+GET /api/runs?repo=github.com%2Facme%2Fapp&branch=feature%2Flogin&pr=42
+```
+
+`repo` matches the recorded `target_repo`. The `.json` endpoint accepts the same
+filters. Old runs without CI context remain visible in the unfiltered list.
+
 ## CI recipes
 
 CI's own shard job statuses are the merge gate: a failed or missing shard fails

@@ -605,6 +605,10 @@ which stays on your side (local or CI), never in the server.
   and `DUHEM_SERVER_TOKEN` to upload evidence and print a server link. GitHub
   Actions also gets a job summary with the verdict, counts and link; sharded
   jobs link to the combined run. See the [CI recipes](./distributed-runs.md#ci-recipes).
+  CI runs carry branch, PR and a CI link into the dashboard; use its Repository,
+  Branch and PR filters to find a run. `DUHEM_BRANCH`, `DUHEM_PR` and
+  `DUHEM_CI_URL` override detected values. See
+  [distributed runs](./distributed-runs.md#find-runs-by-ci-context).
 - **The full model.** [`docs/duhem-spec.md`](./duhem-spec.md) —
   especially §7 (Core Concepts) and §8 (Holistic Verification).
 

@@ -13,11 +13,15 @@ import type { ClaimScope, CriterionDetail, LifecycleBlock, RunDetail, TraceEvent
 export type FoldUnknowable = Pick<
   RunDetail,
   "verification" | "started_at" | "inputs" | "has_definition" | "viewport"
-> & Pick<RunDetail, "duration_ms" | "children" | "native" | "layers" | "shards" | "check_totals">;
+> & Pick<RunDetail, "duration_ms" | "children" | "native" | "layers" | "shards" | "check_totals" | "target_repo" | "branch" | "pr" | "ci_url">;
 
 /** Overlay the fetched detail's fold-unknowable fields onto a live fold. */
 export function carryFetched(folded: RunDetail, fetched: RunDetail): RunDetail {
   const carried: FoldUnknowable = {
+    target_repo: fetched.target_repo,
+    branch: fetched.branch,
+    pr: fetched.pr,
+    ci_url: fetched.ci_url,
     verification: fetched.verification,
     started_at: fetched.started_at,
     duration_ms: fetched.duration_ms,

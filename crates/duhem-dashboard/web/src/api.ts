@@ -11,6 +11,10 @@ export type Verdict = string; // "pass" | "fail" | "inconclusive:<cause>"
 export type RunStatus = "pending" | "running" | "finished" | "aborted" | "orphaned";
 
 export interface RunsListEntry {
+  target_repo?: string;
+  branch?: string;
+  pr?: string;
+  ci_url?: string;
   run_id: string;
   verification: string;
   started_at: string | null;
@@ -117,6 +121,10 @@ export interface ShardCoverage {
 }
 
 export interface RunDetail {
+  target_repo?: string;
+  branch?: string;
+  pr?: string;
+  ci_url?: string;
   shards?: ShardCoverage;
   check_totals?: RunCheckTotals;
   claim_scope?: ClaimScope;

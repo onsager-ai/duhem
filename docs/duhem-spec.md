@@ -1895,6 +1895,14 @@ paths have no entry. A present empty map means no resolved path/helper
 values were recorded. Legacy evidence and implicit judgments omit the map.
 Registered secrets are masked before storage and live delivery.
 
+Assertions about recovery or cleanup steps that execute after a failure are
+retained with `assertion_evaluated.diagnostic: true`. They describe recovery
+observations and do not enter the check's judgment, matching the runtime's
+existing cleanup exemption (§10.3.2). Replay excludes exactly these marked
+outcomes. The optional field defaults to false for older evidence; replay never
+infers an exemption from the recorded verdict. This is evidence of the existing
+judgment boundary, not a change to assertion aggregation (#683).
+
 The dashboard lists explicit assertions after check steps and before
 teardown. Selecting an assertion opens its recorded details, including
 assertions correlated with a single step. Legacy reports display their

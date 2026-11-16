@@ -85,6 +85,7 @@ impl Engine {
                     );
                     writer
                         .append(EventPayload::AssertionEvaluated {
+                            diagnostic: false,
                             operands: None,
                             check_id: check.id.clone(),
                             assertion_index: control_index as u32,
@@ -145,6 +146,7 @@ impl Engine {
                     });
                     writer
                         .append(EventPayload::AssertionEvaluated {
+                            diagnostic: false,
                             operands: None,
                             check_id: check.id.clone(),
                             assertion_index: control_index as u32,
@@ -281,6 +283,7 @@ impl Engine {
                     VerdictState::Inconclusive(duhem_judge::InconclusiveCause::EmptyAggregation);
                 writer
                     .append(EventPayload::AssertionEvaluated {
+                        diagnostic: false,
                         operands: None,
                         check_id: check.id.clone(),
                         assertion_index: index as u32,

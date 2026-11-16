@@ -199,6 +199,7 @@ pub async fn write_passing_run(
     .unwrap();
 
     w.append(EventPayload::AssertionEvaluated {
+        diagnostic: false,
         operands: None,
         check_id: "AC-1.1".into(),
         iteration: None,
@@ -340,6 +341,7 @@ pub async fn write_replay_run(store: Arc<SqliteStore>, run_id: &str) -> (String,
     .await
     .unwrap();
     w.append(EventPayload::AssertionEvaluated {
+        diagnostic: false,
         operands: None,
         check_id: "AC-1.1".into(),
         iteration: None,
@@ -406,6 +408,7 @@ pub async fn write_failing_run(store: Arc<SqliteStore>, run_id: &str, definition
     .await
     .unwrap();
     w.append(EventPayload::AssertionEvaluated {
+        diagnostic: false,
         operands: None,
         check_id: "AC-1.1".into(),
         iteration: None,

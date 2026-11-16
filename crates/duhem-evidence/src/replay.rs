@@ -140,8 +140,12 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                 iteration,
                 state,
                 detail,
+                diagnostic,
                 ..
             } => {
+                if *diagnostic {
+                    continue;
+                }
                 assertions_by_check
                     .entry(check_id.clone())
                     .or_default()

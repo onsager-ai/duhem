@@ -954,6 +954,7 @@ criteria:
                     1,
                     100,
                     EventPayload::AssertionEvaluated {
+                        diagnostic: false,
                         operands: None,
                         check_id: "AC-1.1".into(),
                         iteration: None,
@@ -976,6 +977,7 @@ criteria:
                     3,
                     1700,
                     EventPayload::AssertionEvaluated {
+                        diagnostic: false,
                         operands: None,
                         check_id: "AC-2.1".into(),
                         iteration: None,
@@ -1155,6 +1157,7 @@ criteria:
                 3,
                 300,
                 EventPayload::AssertionEvaluated {
+                    diagnostic: false,
                     operands: None,
                     check_id: "AC-1.1".into(),
                     iteration: None,

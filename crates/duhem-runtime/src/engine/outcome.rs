@@ -479,8 +479,10 @@ pub(crate) async fn evaluate_explicit_assertions(
             };
             (eval_to_state(&r), detail)
         };
+        let cleanup_assertion = references_cleanup_step(&expr, check, cleanup_steps);
         writer
             .append(EventPayload::AssertionEvaluated {
+                diagnostic: cleanup_assertion,
                 check_id: check.id.clone(),
                 operands: Some(operands),
                 iteration,
@@ -495,7 +497,6 @@ pub(crate) async fn evaluate_explicit_assertions(
                 expr: Some(assertion.display()),
             })
             .await?;
-        let cleanup_assertion = references_cleanup_step(&expr, check, cleanup_steps);
         if !cleanup_assertion && !matches!(state, VerdictState::Pass) {
             failed.push(FailedAssertion {
                 expr: assertion.display(),
@@ -620,6 +621,7 @@ pub(crate) async fn append_implicit_judgment(
             };
         writer
             .append(EventPayload::AssertionEvaluated {
+                diagnostic: false,
                 check_id: check_id.to_string(),
                 operands: None,
                 iteration,

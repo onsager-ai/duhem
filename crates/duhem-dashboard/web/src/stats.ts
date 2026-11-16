@@ -102,7 +102,7 @@ export function verificationSummaries(
   entries: RunsListEntry[],
 ): VerificationSummary[] {
   const byVerification = new Map<string, RunsListEntry[]>();
-  for (const e of flatLeaves(entries)) {
+  for (const e of entries) {
     const list = byVerification.get(e.verification) ?? [];
     list.push(e);
     byVerification.set(e.verification, list);

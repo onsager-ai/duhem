@@ -326,24 +326,35 @@ async fn ship_tree(
 }
 
 /// Delivery is best-effort and never enters the verdict or reporter fold.
-pub async fn auto_send(store: &dyn duhem_evidence::Store, roots: &[String]) {
-    let Some(url) = upload_url(None) else {
-        return;
-    };
+pub struct AutoSend {
+    pub base: Option<String>,
+    pub result: Result<(), String>,
+}
+
+pub async fn auto_send(store: &dyn duhem_evidence::Store, roots: &[String]) -> Option<AutoSend> {
+    let url = upload_url(None)?;
+    // Derive from the resolved ingest URL so legacy URLs and precedence
+    // exactly match delivery. An arbitrary legacy endpoint has no known UI.
+    let base = url.strip_suffix("/api/ingest").map(str::to_owned);
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         ship_tree(store, roots, &url),
     )
     .await;
     let error = match result {
-        Ok(Ok(outcome)) => match outcome.warning() {
-            Some(warning) => warning,
-            None => return,
-        },
-        Ok(Err(error)) => error,
-        Err(_) => "delivery timed out".into(),
+        Ok(Ok(outcome)) => outcome.warning(),
+        Ok(Err(error)) => Some(error),
+        Err(_) => Some("delivery timed out".into()),
     };
-    eprintln!("warning: auto-send: {}", error.replace(['\r', '\n'], " "));
+    let result = match error {
+        Some(error) => {
+            let error = error.replace(['\r', '\n'], " ");
+            eprintln!("warning: auto-send: {error}");
+            Err(error)
+        }
+        None => Ok(()),
+    };
+    Some(AutoSend { base, result })
 }
 
 #[cfg(test)]

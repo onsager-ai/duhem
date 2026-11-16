@@ -54,6 +54,10 @@ Detection prefers `DUHEM_BRANCH`, `DUHEM_PR` and `DUHEM_CI_URL` overrides, then
 GitHub Actions, GitLab and Buildkite environment variables. No local git branch
 is inferred outside CI. Nested check processes do not inherit these overrides.
 
+## Compatibility
+
+The server must be at least as new as the client. Uploads containing fields a server does not know are rejected with `this run comes from a newer Duhem (client <version>); upgrade this server (<version>) to at least the client's version`; the client sends its Duhem version in `X-Duhem-Version`.
+
 ## Identity & idempotency
 
 The bundle's **content hash** is the lowercase-hex SHA-256 of the

@@ -92,6 +92,7 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     let mut native_outcomes = Vec::new();
     let mut process_setup = crate::replay_process::ProcessSetup::default();
     let mut saw_run_started = false;
+    let mut inconclusive_policy = duhem_judge::InconclusivePolicy::default();
 
     // A step owner is stronger than the additive check_finished fallback,
     // regardless of event order. Preserve the existing hard error for two
@@ -122,11 +123,15 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
             EventPayload::NativeRunFinished { result } => {
                 native_outcomes.push((result.required, result.outcome))
             }
-            EventPayload::RunStarted { .. } => {
+            EventPayload::RunStarted {
+                inconclusive_policy: policy,
+                ..
+            } => {
                 if saw_run_started {
                     return Err(ReplayError::OutOfOrder("more than one run_started".into()));
                 }
                 saw_run_started = true;
+                inconclusive_policy = policy.unwrap_or_default();
             }
             EventPayload::StepStarted { .. } => {}
             EventPayload::AssertionEvaluated {
@@ -314,7 +319,11 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     for criterion_id in &criterion_order {
         let recorded = recorded_criteria[criterion_id];
         let checks = checks_by_criterion.remove(criterion_id).unwrap_or_default();
-        let state = aggregate_criterion(&checks);
+        let (state, _) = duhem_judge::apply_inconclusive_policy(
+            criterion_id,
+            aggregate_criterion(&checks),
+            inconclusive_policy,
+        );
         if state != recorded {
             return Err(ReplayDivergence::Criterion {
                 criterion_id: criterion_id.clone(),

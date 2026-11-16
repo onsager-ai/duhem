@@ -320,15 +320,21 @@ impl Engine {
         }
         writer.start_heartbeats();
 
-        writer
-            .append(run_started_with_viewport(
-                evidence_path.clone(),
-                inputs.clone(),
-                self.definition_source.clone(),
-                self.lineage.clone(),
-                self.viewport.clone(),
-            ))
-            .await?;
+        let mut started = run_started_with_viewport(
+            evidence_path.clone(),
+            inputs.clone(),
+            self.definition_source.clone(),
+            self.lineage.clone(),
+            self.viewport.clone(),
+        );
+        if let EventPayload::RunStarted {
+            inconclusive_policy,
+            ..
+        } = &mut started
+        {
+            *inconclusive_policy = Some(self.inconclusive_policy);
+        }
+        writer.append(started).await?;
 
         let execution = async {
             let scope = self.declared_claim_scope(def);

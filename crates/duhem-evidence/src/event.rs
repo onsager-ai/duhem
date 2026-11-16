@@ -251,6 +251,10 @@ pub enum EventPayload {
         /// explicit JSON `null`. Absent only on older/page-free records.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         viewport: Option<serde_json::Value>,
+        /// Effective manifest policy used when aggregating criteria. Legacy
+        /// traces omit it and replay with the default blocking policy.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inconclusive_policy: Option<duhem_judge::InconclusivePolicy>,
     },
     /// Periodic proof that the runtime still owns this unterminated run.
     RunHeartbeat,
@@ -593,6 +597,7 @@ mod tests {
                 origin: None,
                 definition: None,
                 viewport: None,
+                inconclusive_policy: None,
             },
         };
         let line = serde_json::to_string(&evt).unwrap();
@@ -636,6 +641,30 @@ mod tests {
             legacy,
             EventPayload::RunStarted { viewport: None, .. }
         ));
+    }
+
+    #[test]
+    fn run_started_policy_is_optional_and_closed() {
+        let legacy = serde_json::to_value(crate::run_started("v.yml", BTreeMap::new())).unwrap();
+        assert!(legacy.get("inconclusive_policy").is_none());
+        for (name, policy) in [
+            ("block", duhem_judge::InconclusivePolicy::Block),
+            ("warn", duhem_judge::InconclusivePolicy::Warn),
+            ("pass", duhem_judge::InconclusivePolicy::Pass),
+        ] {
+            let mut wire = legacy.clone();
+            wire["inconclusive_policy"] = serde_json::json!(name);
+            let event: EventPayload = serde_json::from_value(wire.clone()).unwrap();
+            assert!(matches!(
+                event,
+                EventPayload::RunStarted { inconclusive_policy: Some(actual), .. }
+                    if actual == policy
+            ));
+            assert_eq!(serde_json::to_value(event).unwrap(), wire);
+        }
+        let mut unknown = legacy;
+        unknown["inconclusive_policy"] = serde_json::json!("ignore");
+        assert!(serde_json::from_value::<EventPayload>(unknown).is_err());
     }
 
     #[test]

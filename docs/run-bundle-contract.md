@@ -127,3 +127,12 @@ returns HTTP 409 for mismatched manifest digests or shard totals under a parent,
 and for a different content hash at an already stored shard index. Identical
 content remains a no-op and does not advance the server receipt time. CI attempts
 with distinct identities, including `GITHUB_RUN_ATTEMPT`, create distinct parents.
+
+The `run_started` event records the effective manifest `inconclusive_policy`
+(`block`, `warn`, or `pass`) used by the runtime. Replay checks raw check verdicts
+first, then applies that policy to each criterion through the same judge function
+as a live run. This lets a nested run using `warn` or `pass` ingest without
+mistaking its softened criterion verdict for a divergence. Missing policy on
+legacy events means `block`; replay never infers a permissive policy from a
+recorded verdict. The optional field is additive within RunBundle v1; older
+readers must understand the policy to re-judge runs that use it. (#673)

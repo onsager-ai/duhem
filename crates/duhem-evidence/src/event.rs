@@ -644,6 +644,30 @@ mod tests {
     }
 
     #[test]
+    fn run_started_policy_is_optional_and_closed() {
+        let legacy = serde_json::to_value(crate::run_started("v.yml", BTreeMap::new())).unwrap();
+        assert!(legacy.get("inconclusive_policy").is_none());
+        for (name, policy) in [
+            ("block", duhem_judge::InconclusivePolicy::Block),
+            ("warn", duhem_judge::InconclusivePolicy::Warn),
+            ("pass", duhem_judge::InconclusivePolicy::Pass),
+        ] {
+            let mut wire = legacy.clone();
+            wire["inconclusive_policy"] = serde_json::json!(name);
+            let event: EventPayload = serde_json::from_value(wire.clone()).unwrap();
+            assert!(matches!(
+                event,
+                EventPayload::RunStarted { inconclusive_policy: Some(actual), .. }
+                    if actual == policy
+            ));
+            assert_eq!(serde_json::to_value(event).unwrap(), wire);
+        }
+        let mut unknown = legacy;
+        unknown["inconclusive_policy"] = serde_json::json!("ignore");
+        assert!(serde_json::from_value::<EventPayload>(unknown).is_err());
+    }
+
+    #[test]
     fn step_observation_inline_vs_blob() {
         let inline = Event {
             session_source: None,

@@ -479,10 +479,46 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
             .bearer_auth("test-token")
             .header("content-type", "application/json")
             .header("x-duhem-bundle-version", "1")
+            .header("x-duhem-version", env!("CARGO_PKG_VERSION"))
             .header("x-duhem-content-hash", bundle.content_hash().unwrap())
             .body(bundle.wire_bytes().unwrap())
     };
     assert_eq!(post(&standalone).send().await.unwrap().status(), 204);
+    for (location, key) in [
+        ("top-level", "future_field"),
+        ("event payload", "future_field"),
+    ] {
+        let mut raw: serde_json::Value =
+            serde_json::from_slice(&standalone.wire_bytes().unwrap()).unwrap();
+        if location == "top-level" {
+            raw[key] = serde_json::json!(true);
+        } else {
+            raw["events"][0]["future_field"] = serde_json::json!({"nested": true});
+        }
+        let response = client
+            .post(&url)
+            .bearer_auth("test-token")
+            .header("content-type", "application/json")
+            .header("x-duhem-bundle-version", "1")
+            .header("x-duhem-version", "99.0.0")
+            .header("x-duhem-content-hash", standalone.content_hash().unwrap())
+            .json(&raw)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 400, "{location}");
+        let message = response.text().await.unwrap();
+        assert!(
+            message.contains(
+                "this run comes from a newer Duhem (client 99.0.0); upgrade this server ("
+            ),
+            "{location}: {message}"
+        );
+        assert!(
+            message.ends_with("to at least the client's version"),
+            "{message}"
+        );
+    }
     for kind in ["digest", "total", "duplicate"] {
         let mut conflict = standalone.clone();
         conflict.run.run_id = format!("conflict-{kind}");

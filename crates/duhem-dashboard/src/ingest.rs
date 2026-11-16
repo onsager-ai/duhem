@@ -45,10 +45,26 @@ async fn ingest(State(state): State<IngestState>, headers: HeaderMap, body: Byte
     let Some(hash) = header("x-duhem-content-hash") else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    let bundle: RunBundle = match serde_json::from_slice(&body) {
+    let raw: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(raw) => raw,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    let bundle: RunBundle = match serde_json::from_value(raw.clone()) {
         Ok(bundle) => bundle,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
     };
+    let known = match serde_json::to_value(&bundle) {
+        Ok(known) => known,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    if !contains_only_known_keys(&raw, &known) {
+        let client_version = header("x-duhem-version").unwrap_or("unknown");
+        let message = format!(
+            "this run comes from a newer Duhem (client {client_version}); upgrade this server ({}) to at least the client's version",
+            env!("CARGO_PKG_VERSION")
+        );
+        return (StatusCode::BAD_REQUEST, message).into_response();
+    }
     match state.store.ingest_bundle(&bundle, hash).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(duhem_evidence::store::IngestError::Invalid(message)) => {
@@ -60,6 +76,27 @@ async fn ingest(State(state): State<IngestState>, headers: HeaderMap, body: Byte
         Err(duhem_evidence::store::IngestError::Store(_)) => {
             (StatusCode::INTERNAL_SERVER_ERROR, "could not store bundle").into_response()
         }
+    }
+}
+
+/// Check that every raw object key exists in the corresponding known value.
+fn contains_only_known_keys(raw: &serde_json::Value, known: &serde_json::Value) -> bool {
+    match (raw, known) {
+        (serde_json::Value::Object(raw), serde_json::Value::Object(known)) => {
+            raw.iter().all(|(key, value)| {
+                known
+                    .get(key)
+                    .is_some_and(|known| contains_only_known_keys(value, known))
+            })
+        }
+        (serde_json::Value::Array(raw), serde_json::Value::Array(known)) => {
+            raw.len() == known.len()
+                && raw
+                    .iter()
+                    .zip(known)
+                    .all(|(raw, known)| contains_only_known_keys(raw, known))
+        }
+        _ => true,
     }
 }
 

@@ -172,6 +172,7 @@ pub async fn ship_bundle(
         .post(url)
         .header("content-type", "application/json")
         .header("x-duhem-bundle-version", bundle.bundle_version.to_string())
+        .header("x-duhem-version", env!("CARGO_PKG_VERSION"))
         .header("x-duhem-content-hash", &hash)
         .body(body);
     if let Some(token) = token {

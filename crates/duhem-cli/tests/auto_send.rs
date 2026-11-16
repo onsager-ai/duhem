@@ -64,6 +64,60 @@ fn leaf(path: &Path, passing: bool) {
     std::fs::write(path, format!("verification: ingest-test\ncriteria:\n  - id: A\n    description: first\n    checks: [{{id: a, assertions: ['{passing}']}}]\n  - id: B\n    description: second\n    checks: [{{id: b, assertions: ['true']}}]\n")).unwrap();
 }
 
+fn ship_command(db: &Path, url: &str) -> Command {
+    let isolated = command(&db.with_extension("yml"), db);
+    let mut ship = Command::new(isolated.get_program());
+    for (key, value) in isolated.get_envs() {
+        match value {
+            Some(value) => ship.env(key, value),
+            None => ship.env_remove(key),
+        };
+    }
+    ship.args(["ship", "root", "--db"])
+        .arg(db)
+        .args(["--server-url", url])
+        .env("DUHEM_SERVER_TOKEN", "test-token");
+    ship
+}
+
+async fn stored_run(store: Arc<SqliteStore>, id: &str, parent: Option<&str>, finished: bool) {
+    use duhem_evidence::{EventPayload, EvidenceWriter, RunLineage, RunOrigin};
+    let lineage = RunLineage {
+        parent_run_id: parent.map(str::to_owned),
+        origin: parent.map(|_| RunOrigin::Invocation),
+    };
+    let mut writer = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
+        store,
+        id,
+        "fixture.yml",
+        Default::default(),
+        Default::default(),
+        lineage.clone(),
+        Default::default(),
+    )
+    .await
+    .unwrap();
+    writer
+        .append(duhem_evidence::run_started_with_definition_and_lineage(
+            "fixture.yml",
+            Default::default(),
+            None,
+            lineage,
+        ))
+        .await
+        .unwrap();
+    if finished {
+        writer
+            .append(EventPayload::RunFinished {
+                body_verdict: None,
+                verdict: None,
+            })
+            .await
+            .unwrap();
+    }
+    writer.finish().await.unwrap();
+}
+
 fn assert_pass(output: &Output) {
     assert!(
         output.status.success(),
@@ -76,6 +130,151 @@ fn assert_pass(output: &Output) {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ship_skips_unfinished_children_and_their_finished_descendants() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("local.db");
+    let local = Arc::new(SqliteStore::open(&db).await.unwrap());
+    stored_run(local.clone(), "root", None, true).await;
+    stored_run(local.clone(), "unfinished", Some("root"), false).await;
+    stored_run(local.clone(), "blocked", Some("unfinished"), true).await;
+    stored_run(local, "sibling", Some("root"), true).await;
+    let (url, remote, task) = server(&tmp.path().join("remote.db"), true).await;
+    let output = ship_command(&db, &url).output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("sent 2 of 4 runs; skipped 1 unfinished; skipped 1 descendants"),
+        "{stderr}"
+    );
+    let runs = remote.list_runs().await.unwrap();
+    assert_eq!(runs.len(), 2);
+    assert!(remote.get_run("root").await.unwrap().is_some());
+    assert!(remote.get_run("sibling").await.unwrap().is_some());
+    task.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rejected_child_blocks_its_descendants_but_not_later_siblings() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("local.db");
+    let local = Arc::new(SqliteStore::open(&db).await.unwrap());
+    stored_run(local.clone(), "root", None, true).await;
+    stored_run(local.clone(), "rejected", Some("root"), true).await;
+    stored_run(local.clone(), "blocked", Some("rejected"), true).await;
+    stored_run(local, "sibling", Some("root"), true).await;
+    let (url, remote, task) = server(&tmp.path().join("remote.db"), true).await;
+    // A different existing run with this id makes real ingest reject the child.
+    stored_run(remote.clone(), "rejected", None, true).await;
+    let output = ship_command(&db, &url).output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(
+            "sent 2 of 4 runs; skipped 1 descendants; rejected 1: rejected: server answered"
+        ),
+        "{stderr}"
+    );
+    assert_eq!(
+        stderr
+            .lines()
+            .filter(|line| line.starts_with("warning: ship:"))
+            .count(),
+        1
+    );
+    assert!(remote.get_run("root").await.unwrap().is_some());
+    assert!(remote.get_run("sibling").await.unwrap().is_some());
+    assert!(remote.get_run("blocked").await.unwrap().is_none());
+    task.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_send_continues_after_a_rejected_nested_run() {
+    let tmp = tempfile::tempdir().unwrap();
+    let child = tmp.path().join("child.yml");
+    leaf(&child, true);
+    let path = tmp.path().join("parent.yml");
+    let child_command = |id: &str| {
+        format!(
+            "[{:?}, run, {:?}, --no-live, --run-id, {id}]",
+            env!("CARGO_BIN_EXE_duhem"),
+            child
+        )
+    };
+    std::fs::write(&path, format!(
+        "verification: parent\ncriteria:\n  - id: A\n    description: nested runs pass\n    checks:\n      - id: a\n        steps:\n          - id: rejected\n            uses: cli/invoke\n            with: {{command: {}}}\n          - id: sibling\n            uses: cli/invoke\n            with: {{command: {}}}\n        assertions: ['$steps.rejected.outputs.exit_code == 0', '$steps.sibling.outputs.exit_code == 0']\n",
+        child_command("rejected"), child_command("sibling")
+    )).unwrap();
+    let (url, remote, task) = server(&tmp.path().join("remote.db"), true).await;
+    stored_run(remote.clone(), "rejected", None, true).await;
+    let output = command(&path, &tmp.path().join("local.db"))
+        .env("DUHEM_SERVER_URL", url.strip_suffix("/api/ingest").unwrap())
+        .env("DUHEM_SERVER_TOKEN", "test-token")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["verdict"], "pass");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(
+            "warning: auto-send: sent 2 of 3 runs; rejected 1: rejected: server answered"
+        ),
+        "{stderr}"
+    );
+    assert_eq!(
+        stderr
+            .lines()
+            .filter(|line| line.starts_with("warning: auto-send:"))
+            .count(),
+        1
+    );
+    assert!(remote.get_run("sibling").await.unwrap().is_some());
+    assert_eq!(remote.list_runs().await.unwrap().len(), 3);
+    task.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_send_skips_an_unfinished_nested_engine_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let child = tmp.path().join("child.yml");
+    std::fs::write(&child, "verification: unfinished\ncriteria:\n  - id: A\n    description: engine error\n    checks:\n      - id: a\n        steps:\n          - id: missing\n            uses: cli/invoke\n            if: failure\n            with: {command: ['true']}\n          - id: error\n            uses: cli/invoke\n            with: {command: [sh, -c, $steps.missing.outputs.stdout]}\n        assertions: ['true']\n").unwrap();
+    let path = tmp.path().join("parent.yml");
+    std::fs::write(&path, format!("verification: parent\ncriteria:\n  - id: A\n    description: nested engine error is expected\n    checks:\n      - id: a\n        steps:\n          - id: nested\n            uses: cli/invoke\n            with:\n              command: [{:?}, run, {:?}, --no-live]\n        assertions: ['$steps.nested.outputs.exit_code != 0']\n", env!("CARGO_BIN_EXE_duhem"), child)).unwrap();
+    let db = tmp.path().join("local.db");
+    let (url, remote, task) = server(&tmp.path().join("remote.db"), true).await;
+    let output = command(&path, &db)
+        .env("DUHEM_SERVER_URL", url.strip_suffix("/api/ingest").unwrap())
+        .env("DUHEM_SERVER_TOKEN", "test-token")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("warning: auto-send: sent 1 of 2 runs; skipped 1 unfinished"),
+        "{stderr}"
+    );
+    assert_eq!(
+        stderr
+            .lines()
+            .filter(|line| line.starts_with("warning: auto-send:"))
+            .count(),
+        1
+    );
+    assert_eq!(remote.list_runs().await.unwrap().len(), 1);
+    let local = SqliteStore::open_read_only(db).await.unwrap();
+    assert_eq!(local.list_runs().await.unwrap().len(), 2);
+    task.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -453,8 +652,11 @@ fn rejected_upload_warns_with_server_reason() {
     assert!(output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr
-            .contains("warning: auto-send: server answered 400 Bad Request: invalid run identity"),
+        stderr.contains("warning: auto-send: sent 0 of 1 runs; rejected 1:"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("server answered 400 Bad Request: invalid run identity"),
         "{stderr}"
     );
 }

@@ -134,8 +134,15 @@ pub async fn run_ship(
         }
     };
     match ship_tree(&store, &[run_id.to_string()], &url).await {
-        Ok(hash) => {
-            println!("shipped run {run_id} to {url} (content hash {hash})");
+        Ok(outcome) => {
+            if let Some(warning) = outcome.warning() {
+                eprintln!("warning: ship: {warning}");
+                return ExitCode::FAILURE;
+            }
+            println!(
+                "shipped run {run_id} to {url} (content hash {})",
+                outcome.last_hash
+            );
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -187,12 +194,45 @@ pub async fn ship_bundle(
     Ok(hash)
 }
 
-/// Parents first, then every descendant (including nested invocations).
+#[derive(Default)]
+struct ShipOutcome {
+    total: usize,
+    sent: usize,
+    unfinished: usize,
+    blocked: usize,
+    rejected: Vec<String>,
+    last_hash: String,
+}
+
+impl ShipOutcome {
+    fn warning(&self) -> Option<String> {
+        if self.sent == self.total {
+            return None;
+        }
+        let mut warning = format!("sent {} of {} runs", self.sent, self.total);
+        if self.unfinished > 0 {
+            warning.push_str(&format!("; skipped {} unfinished", self.unfinished));
+        }
+        if self.blocked > 0 {
+            warning.push_str(&format!("; skipped {} descendants", self.blocked));
+        }
+        if !self.rejected.is_empty() {
+            warning.push_str(&format!(
+                "; rejected {}: {}",
+                self.rejected.len(),
+                self.rejected.join("; ")
+            ));
+        }
+        Some(warning)
+    }
+}
+
+/// Parents first, then every eligible descendant (including nested invocations).
 async fn ship_tree(
     store: &dyn duhem_evidence::Store,
     roots: &[String],
     url: &str,
-) -> Result<String, String> {
+) -> Result<ShipOutcome, String> {
     let records = store.list_runs().await.map_err(|e| e.to_string())?;
     let mut ordered = Vec::new();
     let mut stack = roots.to_vec();
@@ -221,14 +261,18 @@ async fn ship_tree(
         }
         index += 1;
     }
-    let mut sent: Vec<String> = Vec::new();
+    let mut processed = Vec::new();
+    let mut sent = Vec::new();
     let token = env_value(SERVER_TOKEN_ENV, HUB_TOKEN_ENV);
-    let mut last_hash = String::new();
-    while sent.len() < ordered.len() {
+    let mut outcome = ShipOutcome {
+        total: ordered.len(),
+        ..Default::default()
+    };
+    while processed.len() < ordered.len() {
         let id = ordered
             .iter()
             .find(|id| {
-                !sent.contains(*id)
+                !processed.contains(*id)
                     && records
                         .iter()
                         .find(|record| &record.run_id == *id)
@@ -237,17 +281,48 @@ async fn ship_tree(
                                 .lineage
                                 .parent_run_id
                                 .as_ref()
-                                .is_none_or(|parent| sent.contains(parent))
+                                .is_none_or(|parent| processed.contains(parent))
                         })
             })
             .ok_or_else(|| "missing parent or cyclic run lineage".to_string())?;
-        let bundle = RunBundle::from_store(store, id)
-            .await
-            .map_err(|e| e.to_string())?;
-        last_hash = ship_bundle(&bundle, url, token.as_deref()).await?;
-        sent.push(id.clone());
+        let record = records.iter().find(|record| &record.run_id == id).unwrap();
+        processed.push(id.clone());
+        if record
+            .lineage
+            .parent_run_id
+            .as_ref()
+            .is_some_and(|parent| !sent.contains(parent))
+        {
+            outcome.blocked += 1;
+            continue;
+        }
+        // Logical shard parents are intentionally pending and accepted by ingest.
+        // Aborted runs have a terminal event too; running/orphaned runs do not.
+        if matches!(
+            record.status,
+            duhem_evidence::RunStatus::Running | duhem_evidence::RunStatus::Orphaned
+        ) {
+            outcome.unfinished += 1;
+            continue;
+        }
+        let result = match RunBundle::from_store(store, id).await {
+            Ok(bundle) => ship_bundle(&bundle, url, token.as_deref()).await,
+            Err(error) => Err(error.to_string()),
+        };
+        match result {
+            Ok(hash) => {
+                outcome.last_hash = hash;
+                outcome.sent += 1;
+                sent.push(id.clone());
+            }
+            Err(error) => {
+                let reason = error.split_whitespace().collect::<Vec<_>>().join(" ");
+                let reason: String = reason.chars().take(350).collect();
+                outcome.rejected.push(format!("{id}: {reason}"));
+            }
+        }
     }
-    Ok(last_hash)
+    Ok(outcome)
 }
 
 /// Delivery is best-effort and never enters the verdict or reporter fold.
@@ -261,7 +336,10 @@ pub async fn auto_send(store: &dyn duhem_evidence::Store, roots: &[String]) {
     )
     .await;
     let error = match result {
-        Ok(Ok(_)) => return,
+        Ok(Ok(outcome)) => match outcome.warning() {
+            Some(warning) => warning,
+            None => return,
+        },
         Ok(Err(error)) => error,
         Err(_) => "delivery timed out".into(),
     };

@@ -322,7 +322,14 @@ mod tests {
 
     #[test]
     fn ci_context_detection_and_overrides() {
-        let cases: &[(&[(&str, &str)], Option<&str>, Option<&str>, Option<&str>)] = &[
+        type EnvFacts<'a> = &'a [(&'a str, &'a str)];
+        type Case<'a> = (
+            EnvFacts<'a>,
+            Option<&'a str>,
+            Option<&'a str>,
+            Option<&'a str>,
+        );
+        let cases: &[Case<'_>] = &[
             (
                 &[
                     ("GITHUB_HEAD_REF", "feature"),

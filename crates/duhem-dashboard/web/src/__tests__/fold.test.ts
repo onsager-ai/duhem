@@ -171,6 +171,16 @@ describe("carryFetched", () => {
     expect(merged.viewport).toEqual({ width: 1280, height: 720 });
   });
 
+  it("keeps CI context across live events", () => {
+    const context = {
+      target_repo: "github.com/acme/app",
+      branch: "feature/login",
+      pr: "42",
+      ci_url: "https://github.com/acme/app/actions/runs/123",
+    };
+    expect(carryFetched(foldRun("r1", trace), { ...fetched, ...context })).toMatchObject(context);
+  });
+
   it("leaves execution progress to the fold", () => {
     const merged = carryFetched(foldRun("r1", trace), fetched);
     // The fold owns these even though `fetched` still says "running".

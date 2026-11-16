@@ -5,6 +5,9 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 const ENV_KEYS: &[&str] = &[
+    "DUHEM_BRANCH",
+    "DUHEM_PR",
+    "DUHEM_CI_URL",
     "DUHEM_SHARD",
     "DUHEM_RUN_ID",
     "CI_NODE_INDEX",
@@ -194,6 +197,9 @@ async fn two_shards_cover_manifest_once_keep_criteria_whole_and_persist_plan() {
         let db = tmp.path().join(format!("shard-{k}.db"));
         let value = summary(
             command(&manifest, &db)
+                .env("DUHEM_BRANCH", "feature/ci-context")
+                .env("DUHEM_PR", "42")
+                .env("DUHEM_CI_URL", "https://ci.example/run/123")
                 .args([
                     "--shard",
                     &format!("{k}/2"),
@@ -274,13 +280,16 @@ async fn two_shards_cover_manifest_once_keep_criteria_whole_and_persist_plan() {
             record.lineage.parent_run_id.as_deref(),
             value["parent_run_id"].as_str()
         );
-        assert!(
-            store
-                .get_run(value["parent_run_id"].as_str().unwrap())
-                .await
-                .unwrap()
-                .is_some()
-        );
+        let logical_parent = store
+            .get_run(value["parent_run_id"].as_str().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        for scope in [&record.scope, &logical_parent.scope] {
+            assert_eq!(scope.branch.as_deref(), Some("feature/ci-context"));
+            assert_eq!(scope.pr.as_deref(), Some("42"));
+            assert_eq!(scope.ci_url.as_deref(), Some("https://ci.example/run/123"));
+        }
         let events = store
             .run_events(value["run_id"].as_str().unwrap())
             .await

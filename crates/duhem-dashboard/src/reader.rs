@@ -575,6 +575,10 @@ fn lineage_entry(
     children.sort_by_key(|child| (child.started_at, child.run_id.clone()));
     let has_children = !children.is_empty();
     RunsListEntry {
+        target_repo: record.scope.target_repo.clone(),
+        branch: record.scope.branch.clone(),
+        pr: record.scope.pr.clone(),
+        ci_url: record.scope.ci_url.clone(),
         run_id: record.run_id.clone(),
         verification: verification_name(&record.verification),
         started_at: Some(record.started_at),
@@ -806,6 +810,10 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         .collect();
 
     RunDetail {
+        target_repo: run.record.scope.target_repo.clone(),
+        branch: run.record.scope.branch.clone(),
+        pr: run.record.scope.pr.clone(),
+        ci_url: run.record.scope.ci_url.clone(),
         claim_scope: duhem_evidence::claim_scope::claim_scope(&run.events),
         body_verdict,
         run_id: run.record.run_id.clone(),

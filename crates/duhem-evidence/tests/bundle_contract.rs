@@ -162,6 +162,9 @@ async fn ci_context_round_trips_and_old_bundles_still_ingest() {
         }
         let restored: RunBundle = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(restored, bundle);
+        let export_dir = tmp.path().join(run_id);
+        restored.write_dir(&export_dir).unwrap();
+        assert_eq!(RunBundle::from_dir(&export_dir).unwrap(), restored);
         receiver
             .ingest_bundle(&restored, &restored.content_hash().unwrap())
             .await

@@ -3,7 +3,7 @@ use std::{collections::BTreeSet, path::Path};
 
 use anyhow::{Context, Result, bail};
 use duhem_evidence::{
-    EventPayload, ReplayError, RunBundle, RunRecord, SqliteStore, Store, Trace, replay,
+    ReplayError, RunBundle, RunRecord, RunStatus, SqliteStore, Store, Trace, replay,
 };
 
 pub fn run(args: Vec<String>) -> Result<()> {
@@ -24,6 +24,7 @@ async fn check_runs(source: &dyn Store, target: &SqliteStore, runs: Vec<RunRecor
     let mut processed = BTreeSet::new();
     let mut ingested = BTreeSet::new();
     let mut finished = 0;
+    let mut pending = 0;
     let mut skipped = 0;
     let mut blocked = 0;
     let mut divergences = 0;
@@ -51,13 +52,9 @@ async fn check_runs(source: &dyn Store, target: &SqliteStore, runs: Vec<RunRecor
             continue;
         }
         let result = async {
-            let events = source.run_events(&run.run_id).await?;
-            if !events.iter().any(|event| {
-                matches!(
-                    event.payload,
-                    EventPayload::RunFinished { .. } | EventPayload::RunAborted { .. }
-                )
-            }) {
+            // Mirror duhem-cli/src/export_cmd.rs::ship_tree: pending logical
+            // shard parents are eligible and ingest accepts their lone header.
+            if matches!(run.status, RunStatus::Running | RunStatus::Orphaned) {
                 return Ok(None);
             }
             let bundle = RunBundle::from_store(source, &run.run_id).await?;
@@ -80,7 +77,11 @@ async fn check_runs(source: &dyn Store, target: &SqliteStore, runs: Vec<RunRecor
         match result {
             Ok(None) => skipped += 1,
             Ok(Some(Ok(()))) => {
-                finished += 1;
+                if run.status == RunStatus::Pending {
+                    pending += 1;
+                } else {
+                    finished += 1;
+                }
                 ingested.insert(run.run_id.clone());
             }
             Ok(Some(Err(error))) => {
@@ -100,10 +101,13 @@ async fn check_runs(source: &dyn Store, target: &SqliteStore, runs: Vec<RunRecor
         }
     }
     let summary = format!(
-        "{divergences} divergent run(s), {tool_errors} tool error(s), {finished} finished verified, {skipped} unfinished skipped, {blocked} descendants blocked"
+        "{divergences} divergent run(s), {tool_errors} tool error(s), {finished} finished verified, {pending} pending parents ingested, {skipped} unfinished skipped, {blocked} descendants blocked"
     );
     if divergences > 0 || tool_errors > 0 {
         bail!("replay-store: {summary}");
+    }
+    if !runs.is_empty() && finished == 0 {
+        bail!("replay-store verified nothing: {summary}");
     }
     println!("replay-store: {summary}");
     Ok(())
@@ -115,14 +119,14 @@ mod tests {
     use std::{collections::BTreeMap, sync::Arc};
 
     use duhem_evidence::{
-        EvidenceWriter, RunLineage, RunScope, SecretRegistry, VerdictState,
-        run_started_with_definition_and_lineage,
+        EventPayload, EvidenceWriter, RunLineage, RunOrigin, RunScope, SecretRegistry,
+        VerdictState, run_started_with_definition_and_lineage,
     };
 
     async fn record(store: Arc<SqliteStore>, id: &str, parent: Option<&str>, tampered: bool) {
         let lineage = RunLineage {
             parent_run_id: parent.map(str::to_owned),
-            origin: None,
+            origin: (id == "shard").then_some(RunOrigin::Shard),
         };
         let mut writer = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
             store,
@@ -146,6 +150,23 @@ mod tests {
             .unwrap();
         if id == "unfinished" {
             return;
+        }
+        if id == "shard" {
+            writer
+                .append(EventPayload::ClaimScopeDeclared {
+                    scope: Box::new(
+                        serde_json::from_value(serde_json::json!({
+                            "criteria": {"authored": 1, "selected": 1, "executed": 0},
+                            "checks": {"authored": 1, "selected": 1, "executed": 0},
+                            "shard": {"index": 1, "total": 2, "source": "env"},
+                            "manifest_digest": "a".repeat(64),
+                            "expected_partition": {"units": ["leaf"], "total_units": 2}
+                        }))
+                        .unwrap(),
+                    ),
+                })
+                .await
+                .unwrap();
         }
         writer
             .append(EventPayload::AssertionEvaluated {
@@ -207,6 +228,51 @@ mod tests {
             error
                 .to_string()
                 .contains("1 divergent run(s), 0 tool error(s)")
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_logical_parent_allows_shard_and_leaf_verification() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = Arc::new(
+            SqliteStore::open(tmp.path().join("source.db"))
+                .await
+                .unwrap(),
+        );
+        let target = SqliteStore::open(tmp.path().join("target.db"))
+            .await
+            .unwrap();
+        record(source.clone(), "unfinished", None, false).await;
+        record(source.clone(), "shard", Some("unfinished"), false).await;
+        record(source.clone(), "leaf", Some("shard"), false).await;
+        assert_eq!(
+            source.get_run("unfinished").await.unwrap().unwrap().status,
+            RunStatus::Pending
+        );
+        let mut runs = Vec::new();
+        for id in ["leaf", "shard", "unfinished"] {
+            runs.push(source.get_run(id).await.unwrap().unwrap());
+        }
+        check_runs(source.as_ref(), &target, runs).await.unwrap();
+        assert_eq!(target.list_runs().await.unwrap().len(), 3);
+        assert_eq!(
+            target.get_run("leaf").await.unwrap().unwrap().verdict,
+            Some(VerdictState::Pass)
+        );
+    }
+
+    #[tokio::test]
+    async fn nonempty_store_with_no_verified_runs_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join("source.db");
+        let source = Arc::new(SqliteStore::open(&db).await.unwrap());
+        record(source, "unfinished", None, false).await;
+        assert!(
+            check(&db)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("replay-store verified nothing")
         );
     }
 

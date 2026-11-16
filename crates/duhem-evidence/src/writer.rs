@@ -552,6 +552,7 @@ pub fn run_started_with_viewport(
         origin: lineage.origin,
         definition,
         viewport,
+        inconclusive_policy: None,
     }
 }
 

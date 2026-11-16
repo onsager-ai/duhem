@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Run evidence records the effective inconclusive policy so replay and server ingest preserve manifest `warn` and `pass` verdicts without changing raw check results. (#673)
+
 - [clarifying] A rejected upload (auto-send or `duhem ship`) reports the server's reason along with the HTTP status. (#673)
 
 ## v0.9.0 — 2026-11-16

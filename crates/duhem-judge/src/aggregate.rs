@@ -144,7 +144,8 @@ pub fn aggregate_run(verdicts: Vec<CriterionVerdict>) -> RunVerdict {
 /// one to the other so this crate stays free of a schema dependency —
 /// the mechanical-judgment firewall (§11.2) keeps the verdict logic
 /// shippable on its own.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum InconclusivePolicy {
     /// Today's behavior: a criterion-level `inconclusive` stays
     /// `inconclusive` and does not pass.

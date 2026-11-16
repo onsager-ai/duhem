@@ -251,6 +251,10 @@ pub enum EventPayload {
         /// explicit JSON `null`. Absent only on older/page-free records.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         viewport: Option<serde_json::Value>,
+        /// Effective manifest policy used when aggregating criteria. Legacy
+        /// traces omit it and replay with the default blocking policy.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inconclusive_policy: Option<duhem_judge::InconclusivePolicy>,
     },
     /// Periodic proof that the runtime still owns this unterminated run.
     RunHeartbeat,
@@ -593,6 +597,7 @@ mod tests {
                 origin: None,
                 definition: None,
                 viewport: None,
+                inconclusive_policy: None,
             },
         };
         let line = serde_json::to_string(&evt).unwrap();

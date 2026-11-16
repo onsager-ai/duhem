@@ -1,4 +1,4 @@
-//! `duhem dashboard` integration tests (#87).
+//! `duhem server` integration tests (#87, #667).
 //!
 //! The fast tests stub the child with a shell script via
 //! `DUHEM_DASHBOARD_BIN` so they assert the CLI's own behavior
@@ -41,13 +41,7 @@ fn serve_mode_forwards_flags_and_propagates_exit_code() {
     let status = Command::new(duhem_bin())
         .env("DUHEM_DASHBOARD_BIN", &bin)
         .args([
-            "dashboard",
-            "--db",
-            "ev.db",
-            "--port",
-            "8123",
-            "--host",
-            "0.0.0.0",
+            "server", "--db", "ev.db", "--port", "8123", "--host", "0.0.0.0",
         ])
         .status()
         .unwrap();
@@ -57,6 +51,72 @@ fn serve_mode_forwards_flags_and_propagates_exit_code() {
         argv.lines().collect::<Vec<_>>(),
         vec!["--db", "ev.db", "--port", "8123", "--host", "0.0.0.0"]
     );
+}
+
+#[test]
+fn dashboard_alias_forwards_same_flags() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (bin, argv_log) = fake_dashboard(tmp.path(), 0);
+    let output = Command::new(duhem_bin())
+        .env("DUHEM_DASHBOARD_BIN", &bin)
+        .args([
+            "dashboard",
+            "--ingest",
+            "--ingest-token",
+            "secret",
+            "--shard-timeout",
+            "42",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        std::fs::read_to_string(argv_log)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+        vec![
+            "--shard-timeout",
+            "42",
+            "--ingest",
+            "--ingest-token",
+            "secret"
+        ]
+    );
+}
+
+#[test]
+fn server_and_dashboard_help_match() {
+    let server = Command::new(duhem_bin())
+        .args(["server", "--help"])
+        .output()
+        .unwrap();
+    let dashboard = Command::new(duhem_bin())
+        .args(["dashboard", "--help"])
+        .output()
+        .unwrap();
+    assert!(server.status.success());
+    assert!(dashboard.status.success());
+    let server_help = String::from_utf8_lossy(&server.stdout);
+    let dashboard_help = String::from_utf8_lossy(&dashboard.stdout);
+    for option in [
+        "--db",
+        "--port",
+        "--host",
+        "--ingest",
+        "--ingest-token",
+        "--shard-timeout",
+        "export",
+    ] {
+        assert!(
+            server_help.contains(option),
+            "missing {option} from server help: {server_help}"
+        );
+        assert!(
+            dashboard_help.contains(option),
+            "missing {option} from alias help: {dashboard_help}"
+        );
+    }
 }
 
 #[test]
@@ -104,7 +164,7 @@ fn missing_binary_fails_with_guidance() {
     assert!(stderr.contains("DUHEM_DASHBOARD_BIN"), "stderr: {stderr}");
 }
 
-/// Real end-to-end: `duhem dashboard` boots the actual server and
+/// Real end-to-end: `duhem server` boots the actual server and
 /// `/api/runs` answers. Needs `cargo build -p duhem-dashboard` first
 /// (CI dashboard lane); resolution uses the target-dir sibling of the
 /// `duhem` test binary's target dir.
@@ -139,7 +199,7 @@ fn dashboard_serve_end_to_end() {
     use std::os::unix::process::CommandExt;
     let mut child = Command::new(duhem_bin())
         .env("DUHEM_DASHBOARD_BIN", &dashboard_bin)
-        .args(["dashboard", "--port", "0", "--db"])
+        .args(["server", "--port", "0", "--db"])
         .arg(&db_path)
         .stdout(Stdio::piped())
         .process_group(0)

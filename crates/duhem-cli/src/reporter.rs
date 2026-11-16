@@ -348,7 +348,7 @@ fn write_failures(
         // Failure-evidence captures (spec #202): point at the picture
         // so a human or agent can look at the failing page without
         // trace-reading. Sha prefixes locate the blobs in the store;
-        // `duhem dashboard` renders them inline on the check page.
+        // `duhem server` renders them inline on the check page.
         if !f.captures.is_empty() {
             let refs = f
                 .captures
@@ -356,7 +356,7 @@ fn write_failures(
                 .map(|c| format!("{} {}", c.kind, &c.sha256[..12.min(c.sha256.len())]))
                 .collect::<Vec<_>>()
                 .join(", ");
-            writeln!(out, "    evidence: {refs} (view: duhem dashboard)")?;
+            writeln!(out, "    evidence: {refs} (view: duhem server)")?;
         }
         // Resolved hook chain (#441 Part B): setup/teardown can come
         // from leaf, criterion, check, and fixtures — print the

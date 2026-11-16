@@ -40,6 +40,8 @@ fn command(path: &Path, db: &Path) -> Command {
         .arg(path)
         .current_dir(path.parent().unwrap());
     for key in [
+        "DUHEM_SERVER_URL",
+        "DUHEM_SERVER_TOKEN",
         "DUHEM_HUB_URL",
         "DUHEM_HUB_TOKEN",
         "DUHEM_SHARD",
@@ -97,8 +99,8 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
         let db = tmp.path().join(format!("shard-{}.db", &shard[..1]));
         let output = command(&manifest, &db)
             .args(["--shard", shard, "--run-id", "same-invocation"])
-            .env("DUHEM_HUB_URL", &url)
-            .env("DUHEM_HUB_TOKEN", "test-token")
+            .env("DUHEM_SERVER_URL", &url[..url.len() - "/api/ingest".len()])
+            .env("DUHEM_SERVER_TOKEN", "test-token")
             .output()
             .unwrap();
         assert_pass(&output);
@@ -315,8 +317,8 @@ async fn ordinary_run_auto_sends_and_ingest_requires_auth_and_opt_in() {
     leaf(&path, true);
     let (url, store, task) = server(&tmp.path().join("enabled.db"), true).await;
     let output = command(&path, &tmp.path().join("local.db"))
-        .env("DUHEM_HUB_URL", &url)
-        .env("DUHEM_HUB_TOKEN", "test-token")
+        .env("DUHEM_SERVER_URL", &url[..url.len() - "/api/ingest".len()])
+        .env("DUHEM_SERVER_TOKEN", "test-token")
         .output()
         .unwrap();
     assert_pass(&output);
@@ -387,6 +389,8 @@ fn unreachable_hub_only_warns_and_preserves_pass_and_fail_exit_codes() {
             .unwrap();
         let sent = command(&path, &tmp.path().join(format!("sent-{passing}.db")))
             .env("DUHEM_HUB_URL", &url)
+            .env_remove("DUHEM_SERVER_URL")
+            .env_remove("DUHEM_SERVER_TOKEN")
             .output()
             .unwrap();
         assert_eq!(baseline.status.code(), sent.status.code());
@@ -427,6 +431,8 @@ async fn aggregate_preserves_failures_native_gates_and_empty_shards() {
             ])
             .env("DUHEM_HUB_URL", &url)
             .env("DUHEM_HUB_TOKEN", "test-token")
+            .env_remove("DUHEM_SERVER_URL")
+            .env_remove("DUHEM_SERVER_TOKEN")
             .output()
             .unwrap();
         assert!(

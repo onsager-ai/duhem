@@ -1,6 +1,6 @@
 # Duhem — the dashboard web surface (self-regression)
 
-Acceptance criteria for the `duhem dashboard` product surface, verified
+Acceptance criteria for the `duhem server` product surface, verified
 black-box by driving the **real** dashboard binary — its embedded
 React/Vite SPA, its JSON API, and its live SSE stream — over a **real**
 run's evidence (`duhem.yml` is the derivative mechanism; these criteria
@@ -14,7 +14,7 @@ here means "no dashboard regression detected", never "independently
 attested". The asymmetric Onsager seam holds the trust role
 (`docs/duhem-spec.md` §11.2).
 
-Target: this repo's own `duhem dashboard`. No mocks at the boundary
+Target: this repo's own `duhem server`. No mocks at the boundary
 (`docs/duhem-spec.md` §8) — `provision.up` produces a genuine run
 through the real `duhem run` pipeline, then serves it with the real
 dashboard binary. The SPA only renders a verdict because the API

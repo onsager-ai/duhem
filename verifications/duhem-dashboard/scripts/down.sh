@@ -30,7 +30,7 @@ fi
 if [ -f "$PID_FILE" ]; then
   PID=$(cat "$PID_FILE" 2>/dev/null || true)
   if [ -n "${PID:-}" ]; then
-    echo "down.sh: stopping duhem dashboard process group (pid $PID)"
+    echo "down.sh: stopping duhem server process group (pid $PID)"
     # `up.sh` started the wrapper via `setsid`, so the wrapper and the
     # `duhem-dashboard` listener share a process group (pgid == pid).
     # Signal the whole group so the listener dies with the wrapper.

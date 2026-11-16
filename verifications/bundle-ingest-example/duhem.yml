@@ -14,6 +14,9 @@ inputs:
   url:
     type: string
     default: http://127.0.0.1:8787/api/runs
+  server_url:
+    type: string
+    default: http://127.0.0.1:8787
   ingest_url:
     type: string
     default: http://127.0.0.1:8787/api/ingest
@@ -42,8 +45,8 @@ criteria:
               # inherited lineage/store so it can finish and upload independently.
               command: [env, -u, DUHEM_PARENT_RUN_ID, -u, DUHEM_PARENT_DB_PATH, $inputs.duhem_bin, run, verifications/sharding-example, --no-live, --no-env-file]
               env:
-                DUHEM_HUB_URL: $inputs.ingest_url
-                DUHEM_HUB_TOKEN: example-token
+                DUHEM_SERVER_URL: $inputs.server_url
+                DUHEM_SERVER_TOKEN: example-token
           - id: received
             uses: api/call
             with: {method: GET, url: $inputs.url}
@@ -52,8 +55,8 @@ criteria:
             with:
               command: [env, -u, DUHEM_PARENT_RUN_ID, -u, DUHEM_PARENT_DB_PATH, $inputs.duhem_bin, run, verifications/sharding-example, --shard, 1/2, --run-id, ingest-aggregation-example, --no-live, --no-env-file]
               env:
-                DUHEM_HUB_URL: $inputs.ingest_url
-                DUHEM_HUB_TOKEN: example-token
+                DUHEM_SERVER_URL: $inputs.server_url
+                DUHEM_SERVER_TOKEN: example-token
           - id: pending
             uses: api/call
             with: {method: GET, url: $inputs.url}
@@ -62,8 +65,8 @@ criteria:
             with:
               command: [env, -u, DUHEM_PARENT_RUN_ID, -u, DUHEM_PARENT_DB_PATH, $inputs.duhem_bin, run, verifications/sharding-example, --shard, 2/2, --run-id, ingest-aggregation-example, --no-live, --no-env-file]
               env:
-                DUHEM_HUB_URL: $inputs.ingest_url
-                DUHEM_HUB_TOKEN: example-token
+                DUHEM_SERVER_URL: $inputs.server_url
+                DUHEM_SERVER_TOKEN: example-token
           - id: aggregated
             uses: api/call
             with: {method: GET, url: $inputs.url}

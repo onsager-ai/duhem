@@ -181,9 +181,9 @@ the reporter); `--live` / `--no-live` force it either way — a forced
 capture keeps plain append lines, plus a `… still in cli/invoke (12s)`
 heartbeat once a step is stuck past 10s, so logs stay grep-able.
 
-**Watch it live.** If `duhem dashboard` is serving the same store (or
-`DUHEM_DASHBOARD_URL` points at one), `duhem run` prints the run's
-dashboard deep link on stderr *before* the run starts:
+**Watch it live.** If `duhem server` is serving the same store (or
+`DUHEM_SERVER_URL` points at one), `duhem run` prints the run's
+server deep link on stderr *before* the run starts:
 
 ```
 live: http://127.0.0.1:7878/#/run/01JC…

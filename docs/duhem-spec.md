@@ -1778,7 +1778,7 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 
 **Authoring Surface**
 
-- CLI for local authoring (`duhem-cli` — `duhem init`, `duhem validate`, `duhem resolve`, `duhem run`, `duhem dashboard`)
+- CLI for local authoring (`duhem-cli` — `duhem init`, `duhem validate`, `duhem resolve`, `duhem run`, `duhem server`)
 - Web UI for browsing past runs, evidence, and verdicts (`duhem-dashboard` — serve + static export, live SSE)
 - VS Code extension for inline criterion editing and check preview (roadmap)
 
@@ -1853,7 +1853,7 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 
 #### Distributed run aggregation
 
-When `DUHEM_HUB_URL` points to a Duhem server, each `duhem run` sends its completed run tree automatically using the existing run-bundle contract (`docs/run-bundle-contract.md`). Bundles are content-hash idempotent, making identical retries safe. The OSS dashboard exposes the ingest endpoint used by the hosted hub, so both use one contract.
+When `DUHEM_SERVER_URL` (the server base URL) is set, each `duhem run` sends its completed run tree to `<base>/api/ingest` using the existing run-bundle contract (`docs/run-bundle-contract.md`). `DUHEM_SERVER_TOKEN` supplies the bearer token. Bundles are content-hash idempotent, making identical retries safe. The OSS server exposes the ingest endpoint used by the hosted service, so both use one contract. `DUHEM_DASHBOARD_URL`, `DUHEM_HUB_URL`, and `DUHEM_HUB_TOKEN` remain deprecated aliases.
 
 The server creates the logical parent idempotently on first arrival and replays the event stream to recompute child and parent verdicts; it never trusts a shard's supplied summary. The parent remains `pending` until every expected shard arrives. If a shard never arrives or CI ends without it, the parent is `inconclusive` and names the missing units according to the claim-scope rule (#531); missing work never counts as a pass. The server rejects shards with a mismatched manifest digest or shard count under one run ID, and rejects conflicting duplicates. An identical resend is a no-op. It serves the aggregated report, totals, and failure envelope through the existing dashboard and `/failure` endpoints. Any combined commit status is informational; CI's parallel jobs remain the merge gate.
 

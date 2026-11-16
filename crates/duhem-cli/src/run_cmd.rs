@@ -58,8 +58,8 @@ pub struct RunArgs {
     /// `Some(false)` from `--live` / `--no-live`; `None` = auto
     /// (on iff stderr is a TTY).
     pub live: Option<bool>,
-    /// Open the dashboard's live run page in a browser (#305),
-    /// once per invocation. Warns and continues when no dashboard
+    /// Open the server's live run page in a browser (#305),
+    /// once per invocation. Warns and continues when no server
     /// base resolves.
     pub watch: bool,
     pub capture: duhem_runtime::CapturePolicy,
@@ -437,7 +437,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     let invocation_parent = run_store.parent;
 
     // Live on-ramp (#298): if a dashboard is serving this store (or
-    // the operator exported DUHEM_DASHBOARD_URL), each leaf's live
+    // the operator exported DUHEM_SERVER_URL), each leaf's live
     // deep link is printed before its run starts. Resolved once per
     // invocation; None costs nothing downstream.
     let dashboard_base = crate::live_link::resolve_dashboard_base(&db_path);
@@ -445,7 +445,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // base it degrades to a warning, never a failed run.
     if watch && dashboard_base.is_none() {
         eprintln!(
-            "warning: --watch: no dashboard is serving this store — start `duhem dashboard` or set DUHEM_DASHBOARD_URL"
+            "warning: --watch: no server is serving this store — start `duhem server` or set DUHEM_SERVER_URL"
         );
     }
 
@@ -793,7 +793,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // Run-id pinning: an operator `--run-id` wins; otherwise, when
         // a live link is printable, mint the id here (the same ULID
         // mint the engine would run) so the URL exists before the run
-        // does. With no dashboard in sight the engine mints as before.
+        // does. With no server in sight the engine mints as before.
         let run_id: Option<String> = match pinned_run_id.as_deref() {
             Some(id) => Some(id.to_string()),
             None if dashboard_base.is_some() => Some(duhem_evidence::new_run_id()),

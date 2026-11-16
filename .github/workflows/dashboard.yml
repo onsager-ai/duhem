@@ -2,7 +2,7 @@
 # component tests, then re-runs the duhem-dashboard crate tests with
 # the *real* bundle embedded (the fast `rust` lane in ci.yml covers
 # the same tests against the build.rs placeholder), and finishes with
-# the `duhem dashboard` end-to-end that boots the actual server.
+# the `duhem server` end-to-end that boots the actual server.
 #
 # Kept as a separate workflow with a paths filter so the Node
 # toolchain only spins up when the dashboard actually changed
@@ -69,7 +69,7 @@ jobs:
       - name: crate tests (real bundle embedded)
         run: cargo test -p duhem-dashboard
 
-      - name: duhem dashboard end-to-end
+      - name: duhem server end-to-end
         run: |
           cargo build -p duhem-dashboard -p duhem-cli
           cargo test -p duhem-cli --test dashboard_cmd -- --ignored

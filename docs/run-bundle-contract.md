@@ -54,14 +54,14 @@ safe.
 
 ## Transport
 
-`POST <DUHEM_HUB_URL>` with:
+`POST <DUHEM_SERVER_URL>/api/ingest` with:
 
 | Header | Value |
 |--------|-------|
 | `Content-Type` | `application/json` |
 | `X-Duhem-Bundle-Version` | `1` |
 | `X-Duhem-Content-Hash` | the content hash |
-| `Authorization` | `Bearer <DUHEM_HUB_TOKEN>` (when configured) |
+| `Authorization` | `Bearer <DUHEM_SERVER_TOKEN>` (when configured) |
 
 2xx = ingested (or already present). `duhem run` automatically sends each
 completed invocation when the URL is set, including ordinary unsharded runs.
@@ -72,10 +72,13 @@ on stderr and cannot change the verdict, local evidence or exit code. Nested
 invocations are delivered with their enclosing invocation after it finishes.
 Dry runs and failures before execution produce no upload.
 
-The OSS dashboard enables `POST /api/ingest` only with `--ingest`. Set
-`DUHEM_HUB_URL=http://127.0.0.1:7878/api/ingest` to use it. `--ingest-token`
-requires the matching `DUHEM_HUB_TOKEN` bearer token; a non-loopback listen host
-requires a nonempty token. Default dashboard and static-export mode stay
+The OSS server enables `POST /api/ingest` only with `--ingest`. Set
+`DUHEM_SERVER_URL=http://127.0.0.1:7878` (the base URL) to use it;
+`duhem ship` and auto-send append `/api/ingest`. `--ingest-token` configures the
+server bearer token; `DUHEM_SERVER_TOKEN` configures the client bearer token. A
+non-loopback listen host requires a nonempty server token. Deprecated
+`DUHEM_HUB_URL` remains a full ingest URL, with `DUHEM_HUB_TOKEN` as its token
+alias. Default server and static-export mode stay
 read-only. Ingest limits the request body to 16 MiB, validates the version,
 canonical content hash, event sequence, header/event agreement and artifact
 hashes, then replays judged event streams before committing. Unjudged suite

@@ -1,7 +1,7 @@
 # `duhem-dashboard`
 
 Duhem-on-Duhem regression coverage (epic #148): drives the **real**
-`duhem dashboard` web surface — its embedded React/Vite SPA, its JSON
+`duhem server` web surface — its embedded React/Vite SPA, its JSON
 API, and its live SSE stream — over a **real** run's evidence, and
 mechanically asserts the contract a dashboard operator depends on.
 Black-box, whole-binary coverage that complements the white-box tests
@@ -36,7 +36,7 @@ trust role.
 No mocks at the boundary (`docs/duhem-spec.md` §8): `provision.up`
 runs the offline `fixture/dashboard-fixture.yml` through the real
 `duhem run` pipeline to record a genuine run in the production evidence
-store (#189), then launches the real `duhem dashboard` over it.
+store (#189), then launches the real `duhem server` over it.
 
 ## Holistic posture & the fixture
 
@@ -47,12 +47,12 @@ store (#189), then launches the real `duhem dashboard` over it.
    `pass`) through `duhem run --db <scratch>/duhem.db --run-id
    dashboard-fixture-run`, recording a real run and synchronized
    screenshot/video replay evidence under a deterministic id.
-2. Launches `duhem dashboard --db <scratch>/duhem.db --port <port>`
+2. Launches `duhem server --db <scratch>/duhem.db --port <port>`
    (serve mode), backgrounded in its own process group.
 
 `scripts/down.sh` signals that process group (and a targeted `pkill`
 fallback) so the wrapper and the `duhem-dashboard` listener die
-together — `duhem dashboard` is a thin wrapper that spawns the server as
+together — `duhem server` is a thin wrapper that spawns the server as
 a child, so the wrapper pid alone is not enough.
 
 ## Operator setup
@@ -78,7 +78,7 @@ So unlike the `duhem-cli` VD — whose `duhem_bin` is consumed directly by
 
 | Env var | Default | Purpose |
 | ------- | ------- | ------- |
-| `DUHEM_BIN` | `duhem` (PATH) | The `duhem` binary under test. `duhem dashboard` resolves the sibling `duhem-dashboard` next to it. |
+| `DUHEM_BIN` | `duhem` (PATH) | The `duhem` binary under test. `duhem server` resolves the sibling `duhem-dashboard` next to it. |
 | `DUHEM_DASHBOARD_PORT` | `7878` | Listen port. **MUST** match the `:7878` baked into the VD's URL inputs. |
 
 The VD `inputs` (`runs_url`, `run_detail_url`, `live_url`,

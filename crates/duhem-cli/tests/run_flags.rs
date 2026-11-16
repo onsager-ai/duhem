@@ -2008,13 +2008,13 @@ criteria:
     );
 }
 
-/// #298: with a dashboard base configured, `duhem run` prints the live
-/// deep link on STDERR before the run — and stdout keeps the default
+/// #298: the new server base wins over the deprecated dashboard base;
+/// `duhem run` prints the live deep link on STDERR and stdout keeps the default
 /// reporter contract. Not `#[ignore]`d:
 /// the fixture is page-free, and page-free runs skip the browser
 /// launch entirely (`needs_browser` in `run_cmd.rs`).
 #[test]
-fn live_link_prints_on_stderr_when_dashboard_base_is_set() {
+fn server_base_wins_over_legacy_live_link_base() {
     let tmp = tempfile::tempdir().unwrap();
     let path = fixture(&tmp, ONE_CRITERION);
     let db = tmp.path().join("duhem.db");
@@ -2024,6 +2024,7 @@ fn live_link_prints_on_stderr_when_dashboard_base_is_set() {
         .arg(&path)
         .arg("--db")
         .arg(&db)
+        .env("DUHEM_SERVER_URL", "http://127.0.0.1:9999")
         .env("DUHEM_DASHBOARD_URL", "http://127.0.0.1:7878")
         .output()
         .expect("spawn duhem");
@@ -2032,12 +2033,40 @@ fn live_link_prints_on_stderr_when_dashboard_base_is_set() {
     assert_eq!(out.stdout, ONE_PASS_DEFAULT_REPORT);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("live: http://127.0.0.1:7878/#/run/"),
+        stderr.contains("live: http://127.0.0.1:9999/#/run/"),
         "stderr should carry the live deep link: {stderr}"
     );
 }
 
-/// #298 flip side: no dashboard base resolvable → no live line, no
+#[test]
+fn legacy_live_link_base_still_works_and_warns() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = fixture(&tmp, ONE_CRITERION);
+    let db = tmp.path().join("duhem.db");
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg(&path)
+        .arg("--db")
+        .arg(&db)
+        .env_remove("DUHEM_SERVER_URL")
+        .env("DUHEM_DASHBOARD_URL", "http://127.0.0.1:7878")
+        .output()
+        .expect("spawn duhem");
+
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("live: http://127.0.0.1:7878/#/run/"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("DUHEM_DASHBOARD_URL is deprecated"),
+        "{stderr}"
+    );
+}
+
+/// #298 flip side: no server base resolvable → no live line, no
 /// stderr noise at all.
 #[test]
 fn no_dashboard_base_means_no_live_line() {
@@ -2050,6 +2079,7 @@ fn no_dashboard_base_means_no_live_line() {
         .arg(&path)
         .arg("--db")
         .arg(&db)
+        .env_remove("DUHEM_SERVER_URL")
         .env_remove("DUHEM_DASHBOARD_URL")
         .output()
         .expect("spawn duhem");
@@ -2198,6 +2228,7 @@ fn watch_without_dashboard_base_warns_and_runs() {
         .arg("--db")
         .arg(&db)
         .arg("--watch")
+        .env_remove("DUHEM_SERVER_URL")
         .env_remove("DUHEM_DASHBOARD_URL")
         .output()
         .expect("spawn duhem");
@@ -2205,7 +2236,7 @@ fn watch_without_dashboard_base_warns_and_runs() {
     assert!(out.status.success());
     assert_eq!(out.stdout, ONE_PASS_DEFAULT_REPORT);
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("--watch: no dashboard"),
+        String::from_utf8_lossy(&out.stderr).contains("--watch: no server"),
         "expected the no-base warning"
     );
 }

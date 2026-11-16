@@ -167,7 +167,7 @@ pub fn run(args: &DashboardArgs) -> ExitCode {
         },
         Err(e) => {
             eprintln!(
-                "duhem dashboard: cannot launch `{}`: {e}\n\
+                "duhem server: cannot launch `{}`: {e}\n\
                  install the duhem-dashboard binary next to `duhem`, put it on PATH, \
                  or point {BIN_ENV_OVERRIDE} at it",
                 bin.display()

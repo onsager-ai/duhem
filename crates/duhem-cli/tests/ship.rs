@@ -90,8 +90,10 @@ fn ship_posts_the_bundle_with_hash_and_token() {
     let out = Command::new(bin())
         .args(["ship", &run_id, "--db"])
         .arg(&db)
-        .args(["--hub-url", &url])
-        .env("DUHEM_HUB_TOKEN", "sekret")
+        .args(["--server-url", &url])
+        .env("DUHEM_SERVER_URL", "http://127.0.0.1:1/configured")
+        .env("DUHEM_SERVER_TOKEN", "sekret")
+        .env("DUHEM_HUB_TOKEN", "old-token")
         .output()
         .expect("spawn duhem");
     assert!(
@@ -117,6 +119,106 @@ fn ship_posts_the_bundle_with_hash_and_token() {
 }
 
 #[test]
+fn server_base_url_appends_ingest_and_new_token_wins() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("duhem.db");
+    let run_id = seed_store(&db);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}/", listener.local_addr().unwrap());
+    let captured = stub_hub(listener);
+    let out = Command::new(bin())
+        .args(["ship", &run_id, "--db"])
+        .arg(&db)
+        .env("DUHEM_SERVER_URL", &base)
+        .env("DUHEM_HUB_URL", "http://127.0.0.1:1/legacy")
+        .env("DUHEM_SERVER_TOKEN", "new-token")
+        .env("DUHEM_HUB_TOKEN", "old-token")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let head = captured.join().unwrap().to_ascii_lowercase();
+    assert!(head.starts_with("post /api/ingest"), "head: {head}");
+    assert!(
+        head.contains("authorization: bearer new-token"),
+        "head: {head}"
+    );
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("deprecated"));
+}
+
+#[test]
+fn legacy_hub_url_and_token_still_work_and_warn_for_both_aliases() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("duhem.db");
+    let run_id = seed_store(&db);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/ingest", listener.local_addr().unwrap());
+    let captured = stub_hub(listener);
+    let out = Command::new(bin())
+        .args(["ship", &run_id, "--db"])
+        .arg(&db)
+        .env("DUHEM_HUB_URL", &url)
+        .env("DUHEM_HUB_TOKEN", "legacy-token")
+        .env_remove("DUHEM_SERVER_URL")
+        .env_remove("DUHEM_SERVER_TOKEN")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let head = captured.join().unwrap().to_ascii_lowercase();
+    assert!(head.starts_with("post /ingest"), "head: {head}");
+    assert!(
+        head.contains("authorization: bearer legacy-token"),
+        "head: {head}"
+    );
+    let warnings = String::from_utf8_lossy(&out.stderr)
+        .lines()
+        .filter(|line| line.contains("is deprecated"))
+        .count();
+    assert_eq!(
+        warnings,
+        2,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn legacy_token_is_fallback_when_new_token_is_unset() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("duhem.db");
+    let run_id = seed_store(&db);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let captured = stub_hub(listener);
+    let out = Command::new(bin())
+        .args(["ship", &run_id, "--db"])
+        .arg(&db)
+        .env("DUHEM_SERVER_URL", &base)
+        .env("DUHEM_HUB_TOKEN", "fallback-token")
+        .env_remove("DUHEM_SERVER_TOKEN")
+        .output()
+        .expect("spawn duhem");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let head = captured.join().unwrap().to_ascii_lowercase();
+    assert!(
+        head.contains("authorization: bearer fallback-token"),
+        "head: {head}"
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("DUHEM_HUB_TOKEN is deprecated"));
+}
+
+#[test]
 fn ship_if_configured_no_ops_without_a_hub() {
     let tmp = tempfile::tempdir().unwrap();
     let db = tmp.path().join("duhem.db");
@@ -126,6 +228,7 @@ fn ship_if_configured_no_ops_without_a_hub() {
         .args(["ship", &run_id, "--db"])
         .arg(&db)
         .arg("--if-configured")
+        .env_remove("DUHEM_SERVER_URL")
         .env_remove("DUHEM_HUB_URL")
         .output()
         .expect("spawn duhem");
@@ -146,12 +249,13 @@ fn ship_without_hub_and_without_opt_out_errors() {
     let out = Command::new(bin())
         .args(["ship", &run_id, "--db"])
         .arg(&db)
+        .env_remove("DUHEM_SERVER_URL")
         .env_remove("DUHEM_HUB_URL")
         .output()
         .expect("spawn duhem");
     assert!(!out.status.success());
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("DUHEM_HUB_URL"),
+        String::from_utf8_lossy(&out.stderr).contains("DUHEM_SERVER_URL"),
         "stderr should name the remedy"
     );
 }

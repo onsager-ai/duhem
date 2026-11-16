@@ -319,8 +319,8 @@ runs:
         echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
         exit "$RC"
 
-    # Opt-in hub replication (#194): ship the run bundle when the
-    # caller configured a hub (DUHEM_HUB_URL secret/var + token).
+    # Opt-in server replication (#194): ship the run bundle when the
+    # caller configured DUHEM_SERVER_URL (base URL) and token.
     # `--if-configured` makes this a clean no-op otherwise, and
     # `if: always()` ships red runs too — failure evidence is the
     # point. Never gates the verdict: a ship failure warns, the
@@ -334,8 +334,8 @@ runs:
       continue-on-error: true
       env:
         DUHEM_BIN: ${{ steps.src.outputs.src }}/target/release/duhem
-        DUHEM_HUB_URL: ${{ env.DUHEM_HUB_URL }}
-        DUHEM_HUB_TOKEN: ${{ env.DUHEM_HUB_TOKEN }}
+        DUHEM_SERVER_URL: ${{ env.DUHEM_SERVER_URL }}
+        DUHEM_SERVER_TOKEN: ${{ env.DUHEM_SERVER_TOKEN }}
         RUN_ID: ${{ steps.run.outputs.run-id }}
       run: |
         "$DUHEM_BIN" ship "$RUN_ID" --db .duhem/duhem.db --if-configured

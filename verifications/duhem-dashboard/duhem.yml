@@ -1,11 +1,11 @@
 # ============================================================================
-# Duhem-on-Duhem — the `duhem dashboard` web surface (REGRESSION coverage,
+# Duhem-on-Duhem — the `duhem server` web surface (REGRESSION coverage,
 # part of #148)
 # ============================================================================
 #
 # SELF-REFERENCE CAVEAT — READ BEFORE TRUSTING A GREEN RUN.
 #
-# This Verification Definition drives the REAL `duhem dashboard` — its
+# This Verification Definition drives the REAL `duhem server` — its
 # real embedded React/Vite SPA, its real JSON API, and its real live
 # SSE stream — over a REAL run's evidence, and mechanically asserts the
 # contract a dashboard operator depends on. It is self-referential:
@@ -30,7 +30,7 @@
 # HOLISTIC POSTURE (`docs/duhem-spec.md` §8): no mocks. `provision.up`
 # produces a REAL run by executing the offline `fixture/` VD through the
 # real `duhem run` pipeline (recording a genuine run in the production
-# evidence store, #189), then launches the real `duhem dashboard`
+# evidence store, #189), then launches the real `duhem server`
 # binary serving that store. AC-1 hits the live JSON API, AC-2 drives
 # the real embedded SPA in a real browser, AC-3 reads the real SSE
 # stream. The SPA only renders a verdict because the API actually served
@@ -43,7 +43,7 @@
 #   cd crates/duhem-actions/sidecar && npm ci && npx playwright install chromium && cd -
 #   DUHEM_BIN="$PWD/target/debug/duhem" \
 #     ./target/debug/duhem run verifications/duhem-dashboard
-# (DUHEM_BIN is read by scripts/up.sh; `duhem dashboard` resolves the
+# (DUHEM_BIN is read by scripts/up.sh; `duhem server` resolves the
 # sibling `duhem-dashboard` binary next to it.)
 
 verification: Duhem — the dashboard web surface (self-regression)
@@ -422,7 +422,7 @@ criteria:
                   trap 'rm -rf "$tmp"' EXIT
                   duhem_bin="${DUHEM_BIN:-duhem}"
                   "$duhem_bin" run "$1" --no-live --reporter quiet >/dev/null
-                  "$duhem_bin" dashboard --db "$DUHEM_PARENT_DB_PATH" export --out "$tmp/export" >/dev/null
+                  "$duhem_bin" server --db "$DUHEM_PARENT_DB_PATH" export --out "$tmp/export" >/dev/null
                   node -e '
                     const roots = require(process.argv[1]);
                     const flatten = (rows) => rows.flatMap(

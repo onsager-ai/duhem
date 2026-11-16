@@ -118,10 +118,29 @@ replace that gate. Set `DUHEM_SERVER_URL` (the base URL, a repository variable) 
 server; omit both when you do not. Deprecated `DUHEM_HUB_URL` still takes a full
 ingest URL, and `DUHEM_HUB_TOKEN` remains its token alias.
 
+After the upload, `duhem run` prints the server run link and delivery outcome
+on stderr, including with `--reporter json`:
+
+```text
+server: https://verification.example/#/run/<run-id> (sent)
+```
+
+Every shard links to the same combined logical parent. An unsharded run links
+to itself; a manifest links to its parent run. Failed uploads still print the
+link with `(upload failed: <reason>)`; the link may have no evidence until a
+successful resend. With no server configured, no server link or job summary is
+written. For legacy `DUHEM_HUB_URL`, a dashboard link is available only when the
+URL ends in `/api/ingest`.
+
 ### GitHub Actions
 
 `DUHEM_SHARD` uses Duhem's one-based `k/n` form. The same `DUHEM_RUN_ID`
 is shared by both jobs and changes on each run attempt.
+When a server is configured, Duhem also appends the verification name, verdict,
+check counts, native run/test counts when present, shard (`k/n`) and server link
+to `GITHUB_STEP_SUMMARY`. Each job reports its own verdict and counts; the link
+opens the combined run. Existing summary content is preserved, and a summary
+write failure only warns.
 
 ```yaml
 jobs:

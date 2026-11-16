@@ -30,6 +30,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 
 - [additive] Runs record CI context (branch, PR, CI job URL) detected from GitHub Actions, GitLab and Buildkite, carried in RunBundle v1; the dashboard shows it and filters runs by repo, branch and PR. (#673)
+- [additive] With a server configured, `duhem run` prints the run's server link (the combined run when sharded) and adds a summary with the link to the GitHub Actions job summary. (#673)
 
 - [clarifying] Auto-send skips unfinished runs and keeps sending the rest of the tree after a rejected run, summarizing what was skipped. (#673)
 

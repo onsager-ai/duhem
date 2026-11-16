@@ -40,6 +40,7 @@ fn command(path: &Path, db: &Path) -> Command {
         .arg(path)
         .current_dir(path.parent().unwrap());
     for key in [
+        "GITHUB_STEP_SUMMARY",
         "DUHEM_SERVER_URL",
         "DUHEM_SERVER_TOKEN",
         "DUHEM_HUB_URL",
@@ -294,15 +295,41 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
     assert_pass(&baseline);
     let baseline: serde_json::Value = serde_json::from_slice(&baseline.stdout).unwrap();
     let (url, store, server) = server(&tmp.path().join("server.db"), true).await;
+    let parent_id = duhem_evidence::distributed::logical_run_id("same-invocation");
+    let link = format!(
+        "{}/#/run/{parent_id}",
+        url.strip_suffix("/api/ingest").unwrap()
+    );
+    let summary = tmp.path().join("summary.md");
+    std::fs::write(&summary, "Existing summary\n").unwrap();
     for shard in ["1/2", "2/2"] {
         let db = tmp.path().join(format!("shard-{}.db", &shard[..1]));
         let output = command(&manifest, &db)
-            .args(["--shard", shard, "--run-id", "same-invocation"])
+            .env("DUHEM_SHARD", shard)
+            .env("DUHEM_RUN_ID", "same-invocation")
+            .env("GITHUB_STEP_SUMMARY", &summary)
             .env("DUHEM_SERVER_URL", &url[..url.len() - "/api/ingest".len()])
             .env("DUHEM_SERVER_TOKEN", "test-token")
             .output()
             .unwrap();
         assert_pass(&output);
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_ne!(json["run_id"], parent_id);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let lines: Vec<_> = stderr
+            .lines()
+            .filter(|line| line.starts_with("server:"))
+            .collect();
+        assert_eq!(lines, [format!("server: {link} (sent)")]);
+        let block = std::fs::read_to_string(&summary).unwrap();
+        assert!(block.starts_with("Existing summary\n"));
+        assert!(block.contains(&format!("Shard: {shard}")), "{block}");
+        assert_eq!(
+            block
+                .matches(&format!("[View run](<{link}>) (sent)"))
+                .count(),
+            if shard == "1/2" { 1 } else { 2 }
+        );
         if shard == "1/2" {
             let parent = store
                 .list_runs()
@@ -515,7 +542,9 @@ async fn ordinary_run_auto_sends_and_ingest_requires_auth_and_opt_in() {
     let path = tmp.path().join("leaf.yml");
     leaf(&path, true);
     let (url, store, task) = server(&tmp.path().join("enabled.db"), true).await;
+    let summary = tmp.path().join("summary.md");
     let output = command(&path, &tmp.path().join("local.db"))
+        .env("GITHUB_STEP_SUMMARY", &summary)
         .env("DUHEM_SERVER_URL", &url[..url.len() - "/api/ingest".len()])
         .env("DUHEM_SERVER_TOKEN", "test-token")
         .output()
@@ -524,6 +553,29 @@ async fn ordinary_run_auto_sends_and_ingest_requires_auth_and_opt_in() {
     let runs = store.list_runs().await.unwrap();
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].verdict, Some(VerdictState::Pass));
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["run_id"], runs[0].run_id);
+    let link = format!(
+        "{}/#/run/{}",
+        url.strip_suffix("/api/ingest").unwrap(),
+        runs[0].run_id
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .lines()
+            .any(|line| line == format!("server: {link} (sent)"))
+    );
+    let block = std::fs::read_to_string(summary).unwrap();
+    assert!(block.contains("### Duhem: ingest-test"), "{block}");
+    assert!(block.contains("Verdict: pass"), "{block}");
+    assert!(
+        block.contains("Checks: 2 total, 2 passed, 0 failed, 0 inconclusive"),
+        "{block}"
+    );
+    assert!(
+        block.contains(&format!("[View run](<{link}>) (sent)")),
+        "{block}"
+    );
     let bundle = RunBundle::from_store(store.as_ref(), &runs[0].run_id)
         .await
         .unwrap();
@@ -597,6 +649,16 @@ fn unreachable_hub_only_warns_and_preserves_pass_and_fail_exit_codes() {
         let baseline: serde_json::Value = serde_json::from_slice(&baseline.stdout).unwrap();
         let result: serde_json::Value = serde_json::from_slice(&sent.stdout).unwrap();
         assert_eq!(baseline["verdict"], result["verdict"]);
+        let link = format!(
+            "{}/#/run/{}",
+            url.strip_suffix("/api/ingest").unwrap(),
+            result["run_id"].as_str().unwrap()
+        );
+        assert!(
+            String::from_utf8_lossy(&sent.stderr)
+                .lines()
+                .any(|line| line.starts_with(&format!("server: {link} (upload failed: ")))
+        );
         assert_eq!(
             String::from_utf8_lossy(&sent.stderr)
                 .lines()
@@ -605,6 +667,125 @@ fn unreachable_hub_only_warns_and_preserves_pass_and_fail_exit_codes() {
             1
         );
     }
+}
+
+#[test]
+fn no_server_leaves_job_summary_untouched() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("leaf.yml");
+    leaf(&path, true);
+    let summary = tmp.path().join("summary.md");
+    for existing in [false, true] {
+        if existing {
+            std::fs::write(&summary, "Previous job step\n").unwrap();
+        }
+        let output = command(&path, &tmp.path().join(format!("local-{existing}.db")))
+            .env("GITHUB_STEP_SUMMARY", &summary)
+            .output()
+            .unwrap();
+        assert_pass(&output);
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap();
+        assert!(
+            !String::from_utf8_lossy(&output.stderr)
+                .lines()
+                .any(|line| line.starts_with("server:"))
+        );
+        if existing {
+            assert_eq!(
+                std::fs::read_to_string(&summary).unwrap(),
+                "Previous job step\n"
+            );
+        } else {
+            assert!(!summary.exists());
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manifest_legacy_link_names_parent_and_summary_failure_only_warns() {
+    let tmp = tempfile::tempdir().unwrap();
+    leaf(&tmp.path().join("leaf.yml"), true);
+    let manifest = tmp.path().join("duhem.yml");
+    std::fs::write(
+        tmp.path().join("input.xml"),
+        include_str!("../../duhem-runtime/tests/fixtures/junit/pass.xml"),
+    )
+    .unwrap();
+    std::fs::write(&manifest, "manifest_version: 1\nnative:\n  - id: smoke\n    command: [sh, -c, 'cat input.xml > report.xml']\n    report: {format: junit, path: report.xml}\nverifications: [{path: leaf.yml}]\n").unwrap();
+    let (url, store, task) = server(&tmp.path().join("remote.db"), true).await;
+    let summary = tmp.path().join("summary.md");
+    for bad_summary in [false, true] {
+        let output = command(
+            &manifest,
+            &tmp.path().join(format!("local-{bad_summary}.db")),
+        )
+        .env("DUHEM_HUB_URL", &url)
+        .env("DUHEM_HUB_TOKEN", "test-token")
+        .env(
+            "GITHUB_STEP_SUMMARY",
+            if bad_summary { tmp.path() } else { &summary },
+        )
+        .output()
+        .unwrap();
+        assert_pass(&output);
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let id = json["run_id"].as_str().unwrap();
+        assert!(
+            store
+                .get_run(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .lineage
+                .parent_run_id
+                .is_none()
+        );
+        let link = format!("{}/#/run/{id}", url.strip_suffix("/api/ingest").unwrap());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr
+                .lines()
+                .any(|line| line == format!("server: {link} (sent)")),
+            "{stderr}"
+        );
+        if bad_summary {
+            assert!(stderr.contains("warning: could not append GitHub job summary:"));
+        } else {
+            let block = std::fs::read_to_string(&summary).unwrap();
+            assert!(block.contains("duhem.yml"), "{block}");
+            assert!(
+                block.contains("Native runs: 1 total, 1 passed, 0 failed, 0 inconclusive"),
+                "{block}"
+            );
+            assert!(
+                block.contains("Native tests: 1 passed, 0 failed, 0 errored, 1 skipped"),
+                "{block}"
+            );
+            assert!(block.contains(&link), "{block}");
+        }
+    }
+    task.abort();
+}
+
+#[test]
+fn unknown_legacy_endpoint_does_not_invent_dashboard_link() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("leaf.yml");
+    leaf(&path, true);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/custom-ingest", listener.local_addr().unwrap());
+    drop(listener);
+    let summary = tmp.path().join("summary.md");
+    let output = command(&path, &tmp.path().join("local.db"))
+        .env("DUHEM_HUB_URL", url)
+        .env("GITHUB_STEP_SUMMARY", &summary)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("warning: auto-send:"));
+    assert!(!stderr.lines().any(|line| line.starts_with("server:")));
+    assert!(!summary.exists());
 }
 
 #[test]

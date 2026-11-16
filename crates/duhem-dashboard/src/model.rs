@@ -84,6 +84,8 @@ pub struct RunDetail {
     pub inputs: serde_json::Map<String, serde_json::Value>,
     pub verdict: Option<VerdictState>,
     pub status: RunStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
     /// `true` when the trace carries `setup_finished { aborted: true }`
     /// (#20) — the run never reached its checks.
     pub setup_aborted: bool,

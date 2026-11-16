@@ -171,6 +171,7 @@ export function foldRun(runId: string, events: TraceEvent[]): RunDetail {
         break;
       case "run_aborted":
         detail.status = "aborted";
+        detail.error = typeof evt.error === "string" ? evt.error : undefined;
         break;
     }
   }

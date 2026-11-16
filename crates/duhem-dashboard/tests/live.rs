@@ -130,6 +130,7 @@ async fn aborted_terminal_closes_the_stream() {
     writer
         .append(EventPayload::RunAborted {
             signal: "SIGTERM".into(),
+            error: None,
         })
         .await
         .unwrap();

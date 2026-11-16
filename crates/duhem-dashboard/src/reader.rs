@@ -822,6 +822,10 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         inputs,
         verdict: run_verdict,
         status: run.record.status,
+        error: run.events.iter().find_map(|event| match &event.payload {
+            EventPayload::RunAborted { error, .. } => error.clone(),
+            _ => None,
+        }),
         setup_aborted,
         has_definition,
         viewport,

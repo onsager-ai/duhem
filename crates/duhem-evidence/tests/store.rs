@@ -225,6 +225,7 @@ async fn aborted_terminal_marker_is_distinct_from_an_orphan() {
         .unwrap();
     w.append(EventPayload::RunAborted {
         signal: "SIGTERM".into(),
+        error: None,
     })
     .await
     .unwrap();

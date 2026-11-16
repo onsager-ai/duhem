@@ -887,6 +887,11 @@ export function RunScaffold({
             connection={connection}
             collapsed={collapsed}
           />
+          {run.error && (
+            <p role="alert" className="my-2 break-words text-sm text-destructive">
+              {run.error}
+            </p>
+          )}
           <RunTabs run={run} active={active} />
         </header>
 

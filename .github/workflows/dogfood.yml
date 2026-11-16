@@ -26,8 +26,8 @@ env:
   # Server replication (#194 ship step in the action; hosted server
   # per onsager-ai/duhem-hub#6): with the secrets set, every dogfood run
   # ships its bundle; without them the step is a clean no-op.
-  DUHEM_SERVER_URL: ${{ secrets.DUHEM_HUB_URL }}
-  DUHEM_SERVER_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
+  DUHEM_SERVER_URL: ${{ vars.DUHEM_SERVER_URL }}
+  DUHEM_SERVER_TOKEN: ${{ secrets.DUHEM_SERVER_TOKEN }}
 
 jobs:
   wiring:

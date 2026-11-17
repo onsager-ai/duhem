@@ -200,6 +200,15 @@ enum Cmd {
         /// Grammar: `AC-1` (every check under `AC-1`),
         /// `AC-1::AC-1.2` (one pair), `AC-*::AC-*.1` (globbed), or
         /// `native:<id>` for native runs. Repeat the flag to OR patterns.
+        /// Excluded criteria aggregate to `inconclusive:empty_aggregation`,
+        /// so a filtered run that excludes a whole criterion never has a
+        /// top-level `pass`, even if every selected check passes. To gate
+        /// selected checks in
+        /// CI, use `--reporter json`: require a nonzero
+        /// `claim_scope.checks.selected`, all selected checks recorded
+        /// (`claim_scope.checks.executed` and `totals.total` equal selected),
+        /// and `totals.passed == totals.total` with no failed or inconclusive
+        /// checks. The run verdict remains inconclusive for excluded criteria.
         /// When filters are present, native runs require a matching native filter;
         /// all other native runs are excluded from execution and the gate.
         #[arg(long = "filter", value_name = "PATTERN")]

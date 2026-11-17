@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] Document that filtered runs with excluded criteria remain `inconclusive:empty_aggregation` and show how to gate selected checks from JSON claim scope and totals. (#644)
+
 - [additive] Engine errors seal runs with an aborted terminal carrying optional error text; aborted replay and server ingest validate completed judgments without inventing a run verdict, and the dashboard displays the error. (#680)
 
 - [additive] Assertion evidence marks recovery and cleanup diagnostics so replay and server ingest preserve the runtime's check verdicts; CI replays every finished stored run. (#683)

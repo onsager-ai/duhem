@@ -36,7 +36,7 @@ mod run_detail;
 mod tree;
 
 use diff::{CheckProjection, diff_criteria, project_run};
-use tree::{descendant_run_ids, tree_verdict};
+use tree::{descendant_run_ids, run_numbers, tree_verdict};
 
 mod lifecycle;
 mod mime;
@@ -142,10 +142,11 @@ impl EvidenceReader {
                     .push(record.run_id.as_str());
             }
         }
+        let numbers = run_numbers(&records);
         let mut entries: Vec<RunsListEntry> = records
             .iter()
             .filter(|record| record.lineage.parent_run_id.is_none())
-            .map(|record| lineage_entry(record, &by_id, &child_ids))
+            .map(|record| lineage_entry(record, &by_id, &child_ids, &numbers))
             .collect();
         for entry in &mut entries {
             if let Some(coverage) = self.coverage(&entry.run_id, &records, Utc::now()).await? {
@@ -564,13 +565,14 @@ fn lineage_entry(
     record: &RunRecord,
     by_id: &BTreeMap<&str, &RunRecord>,
     child_ids: &BTreeMap<&str, Vec<&str>>,
+    numbers: &BTreeMap<&str, u32>,
 ) -> RunsListEntry {
     let mut children: Vec<RunsListEntry> = child_ids
         .get(record.run_id.as_str())
         .into_iter()
         .flatten()
         .filter_map(|id| by_id.get(id).copied())
-        .map(|child| lineage_entry(child, by_id, child_ids))
+        .map(|child| lineage_entry(child, by_id, child_ids, numbers))
         .collect();
     children.sort_by_key(|child| (child.started_at, child.run_id.clone()));
     let has_children = !children.is_empty();
@@ -581,6 +583,10 @@ fn lineage_entry(
         ci_url: record.scope.ci_url.clone(),
         run_id: record.run_id.clone(),
         verification: verification_name(&record.verification),
+        run_number: numbers
+            .get(record.run_id.as_str())
+            .copied()
+            .unwrap_or_default(),
         started_at: Some(record.started_at),
         duration_ms: record.duration_ms,
         verdict: record.verdict,
@@ -818,6 +824,8 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         body_verdict,
         run_id: run.record.run_id.clone(),
         verification: run.verification(),
+        // Needs every run of the verification; `run_detail` fills it.
+        run_number: 0,
         started_at: run.started_at(),
         inputs,
         verdict: run_verdict,

@@ -3,10 +3,11 @@ import { ClaimScopeNotice } from "../components/ClaimScopeNotice";
 // Run report (#86): the run summary panel — a check-verdict roll-up,
 // run metadata, and inputs — rendered inside the shared RunScaffold
 // tree (criteria → checks in the rail, this summary in the panel).
-// Live runs (#84) fold their SSE stream in RunScaffold's `useRun`.
+// Live runs (#84) fold their SSE stream in RunScaffold's `useRun`; this
+// pane reads the run from the `/run/:runId` layout route (#694).
 
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   fetchFailure,
   traceUrl,
@@ -16,7 +17,7 @@ import {
 } from "../api";
 import { lifecycleFailure, lifecycleHref, lifecycleScopePath } from "../lifecycle";
 import { formatDuration, formatStartedAt } from "../ui";
-import { RunScaffold } from "./RunScaffold";
+import { useScaffoldRun } from "./RunScaffold";
 import { NativeFailures, NativeRuns } from "./NativeRuns";
 import { Shards } from "./Shards";
 
@@ -115,8 +116,7 @@ export function StatusDonut({ tally }: { tally: StatusTally }) {
 }
 
 export default function RunPage() {
-  const { runId = "" } = useParams();
-  return <RunScaffold runId={runId}>{(run) => <RunSummary run={run} />}</RunScaffold>;
+  return <RunSummary run={useScaffoldRun()} />;
 }
 
 // The Summary panel: a check-verdict roll-up, where the run came from,
@@ -186,6 +186,48 @@ function StatusBreakdown({
           ) : null,
         )}
       </div>
+    </section>
+  );
+}
+
+// Setup and cleanup outcomes beside the check and criterion tiles (#694):
+// a failed required cleanup fails the run while every check passes, so
+// the tiles alone would read as all-clear. Counts only; recorded status
+// and policy, never re-judged.
+export function LifecycleTally({ blocks }: { blocks: LifecycleBlock[] }) {
+  const rows = [
+    { phase: "setup" as const, label: "Setup" },
+    { phase: "teardown" as const, label: "Cleanup" },
+  ]
+    .map(({ phase, label }) => {
+      const phaseBlocks = blocks.filter((block) => block.phase === phase);
+      const failed = phaseBlocks.filter((block) => block.status !== "passed");
+      return {
+        phase,
+        label,
+        total: phaseBlocks.length,
+        passed: phaseBlocks.length - failed.length,
+        failed: failed.length,
+        required: failed.filter((block) => block.cleanup_policy === "required").length,
+      };
+    })
+    .filter((row) => row.total > 0);
+  return (
+    <section aria-labelledby="status-lifecycle" data-testid="lifecycle-tally">
+      <h3 id="status-lifecycle" className="mb-2 text-sm font-semibold">
+        Lifecycle
+      </h3>
+      <dl className="space-y-1 text-sm">
+        {rows.map((row) => (
+          <div key={row.phase} className="flex flex-wrap gap-x-2" data-testid={`lifecycle-tally-${row.phase}`}>
+            <dt className="text-muted-foreground">{row.label}</dt>
+            <dd className="tabular-nums">
+              {row.passed} passed · <span className={row.failed > 0 ? "text-fail" : undefined}>{row.failed} failed</span>
+              {row.phase === "teardown" && row.required > 0 && ` (${row.required} required)`}
+            </dd>
+          </div>
+        ))}
+      </dl>
     </section>
   );
 }
@@ -331,6 +373,11 @@ export function RunSummary({ run }: { run: RunDetail }) {
           <div className="border-t pt-4">
             <StatusBreakdown label="Criteria" tally={criteria} />
           </div>
+          {(run.lifecycle?.length ?? 0) > 0 && (
+            <div className="border-t pt-4">
+              <LifecycleTally blocks={run.lifecycle ?? []} />
+            </div>
+          )}
         </div>
       )}
 

@@ -7,15 +7,9 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { definitionUrl, fetchDefinition } from "../api";
-import { RunScaffold } from "./RunScaffold";
-
 export default function DefinitionPage() {
   const { runId = "" } = useParams();
-  return (
-    <RunScaffold runId={runId} activeDefinition>
-      {() => <DefinitionView runId={runId} />}
-    </RunScaffold>
-  );
+  return <DefinitionView runId={runId} />;
 }
 
 function DefinitionView({ runId }: { runId: string }) {

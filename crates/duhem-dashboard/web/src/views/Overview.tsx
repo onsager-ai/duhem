@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useRunsData } from "@/runs-context";
+import { RunNumberLink } from "@/components/RunIdentity";
 import { computeStats } from "@/stats";
 import { formatStartedAt, StatusBadge, VerdictBadge } from "@/ui";
 
@@ -150,18 +151,15 @@ export default function Overview() {
                   key={r.run_id}
                   className="flex items-center gap-3 py-2 text-sm"
                 >
-                  <Link
-                    to={`/run/${encodeURIComponent(r.run_id)}`}
-                    className="truncate font-mono text-xs text-foreground hover:underline"
-                  >
-                    {r.run_id}
-                  </Link>
+                  {/* The number is per verification, so the name stays
+                      visible at every width (#694). */}
                   <Link
                     to={`/verification/${encodeURIComponent(r.verification)}`}
-                    className="hidden truncate text-muted-foreground hover:text-foreground sm:block"
+                    className="min-w-0 truncate text-muted-foreground hover:text-foreground"
                   >
                     {r.verification}
                   </Link>
+                  <RunNumberLink run={r} className="shrink-0 text-foreground" />
                   <span className="ml-auto hidden shrink-0 text-xs text-muted-foreground md:block">
                     {formatStartedAt(r.started_at)}
                   </span>

@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use duhem_evidence::{RunOrigin, RunRecord, VerdictState};
+use duhem_evidence::{RunOrigin, RunRecord, VerdictState, verification_name};
 
 use crate::model::{RunCheckTotals, RunDetail};
 
@@ -178,4 +178,24 @@ pub(super) fn check_totals(detail: &RunDetail) -> RunCheckTotals {
         }
     }
     totals
+}
+
+/// Each run's 1-based ordinal among the runs of the same verification,
+/// ordered by `(started_at, run_id)` — the `run_number` display aid.
+pub(super) fn run_numbers(records: &[RunRecord]) -> BTreeMap<&str, u32> {
+    let mut by_verification: BTreeMap<String, Vec<&RunRecord>> = BTreeMap::new();
+    for record in records {
+        by_verification
+            .entry(verification_name(&record.verification))
+            .or_default()
+            .push(record);
+    }
+    let mut numbers = BTreeMap::new();
+    for runs in by_verification.values_mut() {
+        runs.sort_by(|a, b| (a.started_at, &a.run_id).cmp(&(b.started_at, &b.run_id)));
+        for (index, record) in runs.iter().enumerate() {
+            numbers.insert(record.run_id.as_str(), index as u32 + 1);
+        }
+    }
+    numbers
 }

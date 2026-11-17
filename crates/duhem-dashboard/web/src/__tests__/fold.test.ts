@@ -155,6 +155,7 @@ describe("carryFetched", () => {
   const fetched: RunDetail = {
     run_id: "r1",
     verification: "verifications/login.yml",
+    run_number: 1,
     started_at: "2026-06-10T10:00:00.000Z",
     duration_ms: 5,
     children: [],

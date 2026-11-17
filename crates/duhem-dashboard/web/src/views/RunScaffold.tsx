@@ -3,9 +3,25 @@
 // inside Results. The criteria → checks rail is deliberately scoped to
 // Results; Summary and Definition get the full content width.
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronRight, FileText, ListChecks, LayoutList } from "lucide-react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  FileText,
+  LayoutList,
+  ListChecks,
+  PanelLeft,
+} from "lucide-react";
+import {
+  Link,
+  Outlet,
+  useMatch,
+  useNavigate,
+  useOutletContext,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 
 import {
   fetchCheck,
@@ -23,7 +39,16 @@ import { groupLoops, stepNavigation } from "../step-presentation";
 import { LoopGroup } from "../components/LoopGroup";
 import { RailSplitter } from "../components/RailSplitter";
 import { LifecycleRailRow } from "../components/LifecycleRailRow";
-import { lifecycleAtCheck, lifecycleAtCriterion, lifecycleHref, lifecycleKey } from "../lifecycle";
+import {
+  lifecycleAtCheck,
+  lifecycleAtCriterion,
+  lifecycleFailure,
+  lifecycleFailures,
+  lifecycleHref,
+  lifecycleKey,
+  lifecycleScopePath,
+  lifecycleTarget,
+} from "../lifecycle";
 import { useRailWidth } from "../hooks/use-rail-width";
 import { flowOrigin } from "../definition";
 import { cn } from "@/lib/utils";
@@ -40,13 +65,14 @@ import {
 import { VerdictBadge, formatDuration } from "../ui";
 import { CiContext } from "../components/CiContext";
 import { VerdictMark } from "../components/brand/VerdictMark";
+import { CopyRunId, runNumberLabel } from "../components/RunIdentity";
 import { DefinitionProvider, useVd } from "./definition-context";
-import { useCollapseOnScroll } from "../hooks/use-collapse-on-scroll";
 import {
   criteriaTally,
   finishedAt,
   firstFailedAssertion,
   firstFailedCheck,
+  firstFailedLifecycle,
   utcStamp,
   verdictWord,
   type BandTone,
@@ -168,6 +194,8 @@ function TreeGroup({
   activePair,
   activeCriterion,
   activeStep,
+  collapsed,
+  onToggle,
 }: {
   runId: string;
   group: SuiteCriterionNode;
@@ -176,6 +204,8 @@ function TreeGroup({
   activePair?: string;
   activeCriterion?: string;
   activeStep?: string;
+  collapsed: boolean;
+  onToggle: () => void;
 }) {
   const criterion = useMemo(
     () => ({
@@ -186,7 +216,7 @@ function TreeGroup({
   );
   const { contextOnly } = group;
   const hasChildren = criterion.checks.length > 0 || lifecycle.some((block) => lifecycleAtCriterion(block, criterion.id));
-  const [open, setOpen] = useState(hasChildren);
+  const open = hasChildren && !collapsed;
   const vd = useVd();
   const [search] = useSearchParams();
   const selectedLifecycle = activeLifecycle ?? search.get("lifecycle");
@@ -237,7 +267,7 @@ function TreeGroup({
         {hasChildren ? (
           <button
             type="button"
-            onClick={() => setOpen((o) => !o)}
+            onClick={onToggle}
             aria-expanded={open}
             aria-label={`${open ? "Collapse" : "Expand"} ${criterion.id}`}
             className="mt-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
@@ -486,35 +516,95 @@ export function RunTree({
       return next;
     });
   };
+  // Collapsed criterion ids; every group starts open. Held here, not per
+  // group, so expand-all / collapse-all can reach every group at once.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const toggleGroup = (id: string) => {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  // The chips count checks only. A failed required cleanup fails the run
+  // while every check passes, so name it here rather than let `fail 0`
+  // read as all-clear.
+  const cleanupFailures = lifecycleFailures(run).requiredCleanup;
   return (
     <>
-      <div
-        role="group"
-        aria-label="Filter suites by status"
-        data-testid="suite-filter"
-        className="flex flex-wrap gap-1.5 border-b py-2 pr-3"
-      >
-        {SUITE_STATUSES.map((status) => {
-          const active = activeStatuses.has(status);
-          return (
-            <Button
-              key={status}
-              type="button"
-              size="sm"
-              variant={active ? "secondary" : "outline"}
-              className="h-7 rounded-full px-2.5 capitalize"
-              aria-pressed={active}
-              aria-label={`${status}, ${counts[status]} check${counts[status] === 1 ? "" : "s"}`}
-              data-testid={`suite-filter-${status}`}
-              onClick={() => toggleStatus(status)}
-            >
-              {status}
-              <Badge variant={status} className="min-w-5 px-1 tabular-nums">
-                {counts[status]}
-              </Badge>
-            </Button>
-          );
-        })}
+      <div className="border-b py-2 pr-3">
+        <div className="flex items-start gap-1.5">
+          <div
+            role="group"
+            aria-label="Filter suites by status"
+            data-testid="suite-filter"
+            className="flex min-w-0 flex-1 flex-wrap gap-1.5"
+          >
+            {SUITE_STATUSES.map((status) => {
+              const active = activeStatuses.has(status);
+              return (
+                <Button
+                  key={status}
+                  type="button"
+                  size="sm"
+                  variant={active ? "secondary" : "outline"}
+                  className="h-7 rounded-full px-2.5 capitalize"
+                  aria-pressed={active}
+                  aria-label={`${status}, ${counts[status]} check${counts[status] === 1 ? "" : "s"}`}
+                  data-testid={`suite-filter-${status}`}
+                  onClick={() => toggleStatus(status)}
+                >
+                  {status}
+                  <Badge variant={status} className="min-w-5 px-1 tabular-nums">
+                    {counts[status]}
+                  </Badge>
+                </Button>
+              );
+            })}
+          </div>
+          {tree.length > 0 && (
+            <div className="flex shrink-0 gap-0.5">
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-7"
+                aria-label="Expand all criteria"
+                title="Expand all criteria"
+                onClick={() => setCollapsed(new Set())}
+              >
+                <ChevronsUpDown className="size-3.5" aria-hidden="true" />
+              </Button>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-7"
+                aria-label="Collapse all criteria"
+                title="Collapse all criteria"
+                onClick={() => setCollapsed(new Set(tree.map((group) => group.criterion.id)))}
+              >
+                <ChevronsDownUp className="size-3.5" aria-hidden="true" />
+              </Button>
+            </div>
+          )}
+        </div>
+        {cleanupFailures.length > 0 && (
+          <p data-testid="suite-filter-cleanup" className="mt-1.5 text-xs text-fail">
+            {cleanupFailures.length === 1
+              ? "Required cleanup failed: "
+              : `${cleanupFailures.length} required cleanups failed: `}
+            {cleanupFailures.map((block, index) => (
+              <span key={lifecycleKey(block)}>
+                {index > 0 && ", "}
+                <Link to={lifecycleTarget(run, block)} className="font-mono hover:underline">
+                  {lifecycleScopePath(block)}
+                </Link>
+              </span>
+            ))}
+          </p>
+        )}
       </div>
       <nav
         aria-label="criteria and checks"
@@ -534,6 +624,8 @@ export function RunTree({
             activePair={activePair}
             activeCriterion={activeCriterion}
             activeStep={activeStep}
+            collapsed={collapsed.has(group.criterion.id)}
+            onToggle={() => toggleGroup(group.criterion.id)}
           />
         ))}
         {(run.lifecycle ?? []).filter((block) => block.scope.length === 0 && block.phase === "teardown").map((block) => (
@@ -633,12 +725,13 @@ const TONE_TEXT: Record<BandTone, string> = {
 // The first failure target comes from the tree envelope on parents and
 // from the run's recorded check order on leaves. Leaf assertion detail is
 // fetched from the check endpoint; parent targets link to that same page.
-function useFirstFailure(run: RunDetail): {
-  runId: string;
-  criterionId: string;
-  checkId: string;
-  failure: FirstFailure | null;
-} | null {
+// With no failed check, a failed setup or required cleanup is the first
+// failure (#694): its link and detail come from the recorded block.
+type BandFailure =
+  | { kind: "check"; runId: string; criterionId: string; checkId: string; failure: FirstFailure | null }
+  | { kind: "lifecycle"; to: string; label: string; detail?: string };
+
+function useFirstFailure(run: RunDetail): BandFailure | null {
   const target = useMemo(() => firstFailedCheck(run), [run]);
   const [failure, setFailure] = useState<FirstFailure | null>(null);
   const [treeFailure, setTreeFailure] = useState<{
@@ -674,26 +767,33 @@ function useFirstFailure(run: RunDetail): {
     };
   }, [run.run_id, parentRun, target?.criterionId, target?.checkId]);
   if (parentRun) {
-    return treeFailure ? { ...treeFailure, failure: null } : null;
+    return treeFailure ? { kind: "check", ...treeFailure, failure: null } : null;
   }
-  if (!target) return null;
-  return { runId: run.run_id, criterionId: target.criterionId, checkId: target.checkId, failure };
+  if (target) {
+    return { kind: "check", runId: run.run_id, criterionId: target.criterionId, checkId: target.checkId, failure };
+  }
+  const block = firstFailedLifecycle(run);
+  if (!block) return null;
+  const policy = block.phase === "setup" ? "setup" : "required cleanup";
+  return {
+    kind: "lifecycle",
+    to: lifecycleTarget(run, block),
+    label: `${lifecycleScopePath(block)} ${policy}`,
+    detail: lifecycleFailure(block),
+  };
 }
 
-// The run header's verdict band (#563) — the image people share.
-// Expanded, it reads in a thumbnail: a 40px verdict mark, the verdict as
-// a word at display size, a summary line, and on fail the first failure.
-// Collapsed (the reader has scrolled), it is the single-line header it
-// replaced. Brand §8: no gradients, shadows or glows; monochrome apart
-// from the verdict colour.
+// The run header's verdict band (#563, compact-only since #694): one line
+// with the verdict mark and word, verification, run number, tally,
+// duration and finish time, plus a truncated first-failure line on fail.
+// Brand §8: no gradients, shadows or glows; monochrome apart from the
+// verdict colour.
 export function VerdictBand({
   run,
   connection,
-  collapsed = false,
 }: {
   run: RunDetail;
   connection: ConnectionState;
-  collapsed?: boolean;
 }) {
   const { word, tone } = verdictWord(run.verdict, run.status);
   const cause =
@@ -708,151 +808,158 @@ export function VerdictBand({
   const started = utcStamp(run.started_at);
   const stamp = finished ?? started;
   return (
-    <div
-      data-testid="verdict-band"
-      data-collapsed={collapsed ? "true" : "false"}
-      className={cn("flex min-w-0", collapsed ? "items-center gap-2" : "items-start gap-3 sm:gap-5")}
-    >
-      {/* Appendix B verdict mark; aria-hidden — the verdict word beside
-          it announces the verdict as text. */}
-      <VerdictMark
-        verdict={run.verdict}
-        status={run.status}
-        className={collapsed ? "size-6" : "mt-1 size-10"}
-      />
-      <div className={cn("min-w-0 flex-1", !collapsed && "pb-3")}>
+    <div data-testid="verdict-band" className="min-w-0">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+        {/* Appendix B verdict mark; aria-hidden — the verdict word beside
+            it announces the verdict as text. */}
+        <VerdictMark verdict={run.verdict} status={run.status} className="size-5 shrink-0" />
         {/* The verdict word stays inside this heading: the
             self-verification VD locates `{role: heading, text: pass}`. */}
-        <h2
-          className={cn(
-            "flex min-w-0 font-semibold tracking-tight",
-            collapsed ? "flex-wrap items-center gap-x-2 gap-y-1 text-base" : "flex-col gap-0.5",
-          )}
-        >
-          <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-            <span
-              data-testid="verdict-word"
-              data-tone={tone}
-              className={cn(TONE_TEXT[tone], collapsed ? "text-base" : "text-3xl leading-tight sm:text-4xl")}
-            >
-              {word}
-            </span>
-            {cause && (
-              <span className="font-mono text-xs font-normal text-muted-foreground" title={run.verdict ?? undefined}>
-                {cause}
-              </span>
-            )}
+        <h2 className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-base font-semibold tracking-tight">
+          <span data-testid="verdict-word" data-tone={tone} className={TONE_TEXT[tone]}>
+            {word}
           </span>
-          <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm font-normal">
-            <span className="min-w-0 truncate font-medium text-foreground">
-              {run.verification}
+          {cause && (
+            <span className="font-mono text-xs font-normal text-muted-foreground" title={run.verdict ?? undefined}>
+              {cause}
             </span>
-            <code
-              className="max-w-[22ch] truncate font-mono text-xs text-muted-foreground"
-              title={run.run_id}
-            >
-              {run.run_id}
-            </code>
-            <CiContext branch={run.branch} pr={run.pr} ci_url={run.ci_url} />
-            {run.status === "running" && (
-              <span className="text-xs text-muted-foreground">{connection}</span>
-            )}
+          )}
+          <span className="min-w-0 truncate text-sm font-medium text-foreground">
+            {run.verification}
+          </span>
+          <span
+            data-testid="run-number"
+            className="font-mono text-xs font-normal tabular-nums text-muted-foreground"
+            title={run.run_id}
+          >
+            {runNumberLabel(run)}
           </span>
         </h2>
-        {!collapsed && (
-          <p
-            data-testid="verdict-summary"
-            className="mt-1.5 flex flex-wrap gap-x-2 gap-y-0.5 text-sm text-muted-foreground"
-          >
-            <span className="font-medium text-foreground">{criteriaTally(run)}</span>
-            {run.status !== "running" && run.duration_ms != null && (
-              <>
-                <span aria-hidden="true">·</span>
-                <span className="tabular-nums">took {formatDuration(run.duration_ms)}</span>
-              </>
-            )}
-            {stamp && (
-              <>
-                <span aria-hidden="true">·</span>
-                <span className="tabular-nums" data-testid="verdict-time">
-                  {finished ? "finished " : "started "}
-                  <time dateTime={stamp.iso} title={stamp.iso}>
-                    {stamp.text}
-                  </time>
-                </span>
-              </>
-            )}
-          </p>
-        )}
-        {!collapsed && first && (
-          <Link
-            to={checkHref(first.runId, first.criterionId, first.checkId)}
-            data-testid="first-failure"
-            // Not the bare check id: the Results tree's check link is
-            // named exactly `chk.id`, and VDs click `{role: link, name:
-            // <id>}`. The name is the visible text's opening words, so
-            // Label in Name (WCAG 2.5.3) holds. The id stays visible; the
-            // detail is in `title`.
-            aria-label="First failure"
-            title={first.failure?.full}
-            className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-sm text-sm hover:underline"
-          >
-            <span className="text-muted-foreground">First failure</span>
-            <span className="font-mono font-medium text-foreground">{first.checkId}</span>
-            {first.failure?.expected !== undefined ? (
-              <>
-                <span className="text-muted-foreground">expected</span>
-                <code data-testid="first-failure-expected" className="font-mono text-foreground [overflow-wrap:anywhere]">
-                  {first.failure.expected}
-                </code>
-                <span className="text-muted-foreground">observed</span>
-                <code data-testid="first-failure-observed" className="font-mono text-fail [overflow-wrap:anywhere]">
-                  {first.failure.observed}
-                </code>
-              </>
-            ) : first.failure?.reason !== undefined ? (
-              <span data-testid="first-failure-reason" className="text-foreground [overflow-wrap:anywhere]">
-                {first.failure.reason}
+        <CopyRunId runId={run.run_id} />
+        <span
+          data-testid="verdict-summary"
+          className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm text-muted-foreground"
+        >
+          <span aria-hidden="true">·</span>
+          <span className="font-medium text-foreground">{criteriaTally(run)}</span>
+          {run.status !== "running" && run.duration_ms != null && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="tabular-nums">took {formatDuration(run.duration_ms)}</span>
+            </>
+          )}
+          {stamp && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="tabular-nums" data-testid="verdict-time">
+                {finished ? "finished " : "started "}
+                <time dateTime={stamp.iso} title={stamp.iso}>
+                  {stamp.text}
+                </time>
               </span>
-            ) : null}
-          </Link>
+            </>
+          )}
+        </span>
+        <CiContext branch={run.branch} pr={run.pr} ci_url={run.ci_url} />
+        {run.status === "running" && (
+          <span className="text-xs text-muted-foreground">{connection}</span>
         )}
       </div>
+      {first?.kind === "check" && (
+        <Link
+          to={checkHref(first.runId, first.criterionId, first.checkId)}
+          data-testid="first-failure"
+          // Not the bare check id: the Results tree's check link is
+          // named exactly `chk.id`, and VDs click `{role: link, name:
+          // <id>}`. The name is the visible text's opening words, so
+          // Label in Name (WCAG 2.5.3) holds. The id stays visible; the
+          // detail is in `title`.
+          aria-label="First failure"
+          title={first.failure?.full}
+          className="block min-w-0 truncate rounded-sm text-sm hover:underline"
+        >
+          <span className="text-muted-foreground">First failure</span>{" "}
+          <span className="font-mono font-medium text-foreground">{first.checkId}</span>
+          {first.failure?.expected !== undefined ? (
+            <>
+              {" "}<span className="text-muted-foreground">expected</span>{" "}
+              <code data-testid="first-failure-expected" className="font-mono text-foreground">
+                {first.failure.expected}
+              </code>{" "}
+              <span className="text-muted-foreground">observed</span>{" "}
+              <code data-testid="first-failure-observed" className="font-mono text-fail">
+                {first.failure.observed}
+              </code>
+            </>
+          ) : first.failure?.reason !== undefined ? (
+            <>
+              {" "}<span data-testid="first-failure-reason" className="text-foreground">
+                {first.failure.reason}
+              </span>
+            </>
+          ) : null}
+        </Link>
+      )}
+      {first?.kind === "lifecycle" && (
+        <Link
+          to={first.to}
+          data-testid="first-failure"
+          aria-label="First failure"
+          title={first.detail}
+          className="block min-w-0 truncate rounded-sm text-sm hover:underline"
+        >
+          <span className="text-muted-foreground">First failure</span>{" "}
+          <span className="font-mono font-medium text-foreground">{first.label}</span>
+          {first.detail && (
+            <>
+              {" "}<span data-testid="first-failure-reason" className="text-foreground">
+                {first.detail}
+              </span>
+            </>
+          )}
+        </Link>
+      )}
     </div>
   );
 }
 
-// The run report frame. `children` is the detail panel, given the
-// resolved run so a page can derive from it (RunPage's donut, inputs).
-export function RunScaffold({
-  runId,
-  activeLifecycle,
-  activePair,
-  activeCriterion,
-  activeStep,
-  activeDefinition,
-  activeResults,
-  children,
-}: {
-  runId: string;
-  activeLifecycle?: string;
-  activePair?: string;
-  activeCriterion?: string;
-  activeStep?: string;
-  activeDefinition?: boolean;
-  activeResults?: boolean;
-  children: (run: RunDetail) => ReactNode;
-}) {
+/** The run the enclosing `/run/:runId` layout resolved. Child panes read
+ *  it here instead of fetching it again (#694). */
+export function useScaffoldRun(): RunDetail {
+  return useOutletContext<RunDetail>();
+}
+
+/** The `/run/:runId` layout route element. Keyed by run, so moving to a
+ *  different run starts fresh while child navigation inside one run keeps
+ *  the scaffold, its fetch, live stream and rail state mounted. */
+export function RunLayout() {
+  const { runId = "" } = useParams();
+  return <RunScaffold key={runId} runId={runId} />;
+}
+
+// The run report frame: header, tabs and, on Results, the rail. The
+// active child route renders through `<Outlet>` with the resolved run as
+// outlet context. Which tab, criterion, check, step or lifecycle block is
+// active is read from the URL, so the frame never has to remount to
+// follow navigation.
+export function RunScaffold({ runId }: { runId: string }) {
   const { run, error, connection } = useRun(runId);
   const railWidth = useRailWidth();
   const workspaceRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLElement>(null);
-  const collapsed = useCollapseOnScroll(workspaceRef);
+  // The active child, matched explicitly against the full (decoded) path.
+  const [search] = useSearchParams();
+  const onResults = useMatch("/run/:runId/results") !== null;
+  const onDefinition = useMatch("/run/:runId/definition") !== null;
+  const activePair = useMatch("/run/:runId/check/:pair")?.params.pair;
+  const activeCriterion = useMatch("/run/:runId/criterion/:criterionId")?.params.criterionId;
+  const activeLifecycle = useMatch("/run/:runId/lifecycle/:blockKey")?.params.blockKey;
+  const activeStep = activePair ? (search.get("step") ?? undefined) : undefined;
   const loaded = run !== null;
   // The Results panes size to the viewport minus the sticky header. The
-  // expanded band is taller than the single-line header, so its measured
-  // height feeds `--run-header-h`; the fallback (no ResizeObserver, first
-  // paint) is the collapsed height, which keeps the prior 10.5rem total.
+  // header wraps on narrow widths and grows a first-failure line on fail,
+  // so its measured height feeds `--run-header-h`; the fallback (no
+  // ResizeObserver, first paint) is the single-line height.
   useEffect(() => {
     const header = headerRef.current;
     const workspace = workspaceRef.current;
@@ -867,32 +974,43 @@ export function RunScaffold({
   if (error) return <p className="error">{error}</p>;
   if (run === null) return <p className="text-sm text-muted-foreground">Loading…</p>;
 
-  const active: RunTab = activeDefinition
+  const active: RunTab = onDefinition
     ? "definition"
-    : activeResults || activePair || activeCriterion
+    : onResults || activePair || activeCriterion || activeLifecycle
       ? "results"
       : "summary";
+  const railShown = !railWidth.hidden;
   return (
     <DefinitionProvider runId={runId} enabled={run.has_definition}>
       <div ref={workspaceRef} className="run-workspace -my-6 min-w-0 max-w-full md:-my-8">
         <header
           ref={headerRef}
-          className={cn(
-            "run-workspace-header sticky top-14 z-30 -mx-4 mb-2 border-b bg-background/95 px-4 backdrop-blur md:-mx-8 md:px-8",
-            collapsed ? "pt-2" : "pt-4",
-          )}
+          className="run-workspace-header sticky top-14 z-30 -mx-4 mb-2 border-b bg-background/95 px-4 pt-2 backdrop-blur md:-mx-8 md:px-8"
         >
-          <VerdictBand
-            run={run}
-            connection={connection}
-            collapsed={collapsed}
-          />
+          <VerdictBand run={run} connection={connection} />
           {run.error && (
-            <p role="alert" className="my-2 break-words text-sm text-destructive">
+            <p role="alert" className="my-1 break-words text-sm text-destructive">
               {run.error}
             </p>
           )}
-          <RunTabs run={run} active={active} />
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <RunTabs run={run} active={active} />
+            {active === "results" && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground"
+                aria-expanded={railShown}
+                aria-controls="run-results-rail"
+                data-testid="rail-toggle"
+                onClick={() => railWidth.setHidden(railShown)}
+              >
+                <PanelLeft className="size-3.5" aria-hidden="true" />
+                {railShown ? "Hide criteria" : "Show criteria"}
+              </Button>
+            )}
+          </div>
         </header>
 
         {active === "results" ? (
@@ -902,10 +1020,20 @@ export function RunScaffold({
             </p>
           ) : (
           <div
-            className="run-results-grid grid min-w-0 max-w-full md:grid-cols-[var(--run-rail-width,17rem)_0.75rem_minmax(0,1fr)]"
+            className={cn(
+              "run-results-grid grid min-w-0 max-w-full",
+              railShown && "md:grid-cols-[var(--run-rail-width,17rem)_0.75rem_minmax(0,1fr)]",
+            )}
+            data-rail={railShown ? "shown" : "hidden"}
             style={{ "--run-rail-width": `${railWidth.width}px` } as React.CSSProperties}
           >
-            <aside className="min-w-0 max-w-full border-b md:grid md:max-h-[calc(100vh_-_99px_-_var(--run-header-h,69px))] md:grid-rows-[auto_minmax(0,1fr)] md:border-b-0">
+            {/* Hidden, not unmounted: filters and open groups survive a
+                hide/show round trip. */}
+            <aside
+              id="run-results-rail"
+              hidden={!railShown}
+              className="min-w-0 max-w-full border-b md:grid md:max-h-[calc(100vh_-_99px_-_var(--run-header-h,69px))] md:grid-rows-[auto_minmax(0,1fr)] md:border-b-0"
+            >
               <RunTree
                 run={run}
                 activeLifecycle={activeLifecycle}
@@ -914,20 +1042,29 @@ export function RunScaffold({
                 activeStep={activeStep}
               />
             </aside>
-            <RailSplitter
-              width={railWidth.width}
-              min={railWidth.min}
-              max={railWidth.max}
-              onChange={railWidth.setRailWidth}
-              onReset={railWidth.resetRailWidth}
-            />
-            <section className="run-results-detail min-w-0 py-3 md:max-h-[calc(100vh_-_99px_-_var(--run-header-h,69px))] md:overflow-y-auto md:py-0 md:pl-4">
-              {children(run)}
+            {railShown && (
+              <RailSplitter
+                width={railWidth.width}
+                min={railWidth.min}
+                max={railWidth.max}
+                onChange={railWidth.setRailWidth}
+                onReset={railWidth.resetRailWidth}
+              />
+            )}
+            <section
+              className={cn(
+                "run-results-detail min-w-0 py-3 md:max-h-[calc(100vh_-_99px_-_var(--run-header-h,69px))] md:overflow-y-auto md:py-0",
+                railShown && "md:pl-4",
+              )}
+            >
+              <Outlet context={run} />
             </section>
           </div>
           )
         ) : (
-          <section className="min-w-0">{children(run)}</section>
+          <section className="min-w-0">
+            <Outlet context={run} />
+          </section>
         )}
       </div>
     </DefinitionProvider>

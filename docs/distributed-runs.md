@@ -109,6 +109,11 @@ GET /api/runs?repo=github.com%2Facme%2Fapp&branch=feature%2Flogin&pr=42
 `repo` matches the recorded `target_repo`. The `.json` endpoint accepts the same
 filters. Old runs without CI context remain visible in the unfiltered list.
 
+Each list row and `GET /api/runs/:id` also carry `run_number`: the run's
+1-based position among that store's runs of the same verification, ordered by
+start time and then run ID. The dashboard shows it as `#N`. It is a display aid
+that depends on what the store holds; use `run_id` to identify a run.
+
 ## CI recipes
 
 CI's own shard job statuses are the merge gate: a failed or missing shard fails

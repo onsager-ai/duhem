@@ -1,9 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Routes } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import type { TraceEvent } from "../api";
 import { parseDefinition } from "../definition";
-import CheckPage, { Timeline } from "../views/CheckPage";
+import { Timeline } from "../views/CheckPage";
+import { runRoutes } from "../views/run-routes";
 
 const definition = `
 criteria:
@@ -51,7 +52,7 @@ function report(count?: number, step?: string, hasDefinition = true, omitOwners 
     }));
   }));
   return render(<MemoryRouter initialEntries={[`/run/r/check/AC-1::C${step ? `?step=${encodeURIComponent(step)}` : ""}`]}>
-    <Routes><Route path="/run/:runId/check/:pair" element={<CheckPage />} /></Routes>
+    <Routes>{runRoutes}</Routes>
   </MemoryRouter>);
 }
 

@@ -4,13 +4,13 @@ import { lifecycleFailure, lifecycleKey, lifecycleScopePath } from "../lifecycle
 import { formatDuration } from "../ui";
 import { LifecycleStatusBadge } from "../components/LifecycleStatusBadge";
 import { Timeline } from "./CheckPage";
-import { RunScaffold } from "./RunScaffold";
+import { useScaffoldRun } from "./RunScaffold";
 
 export function LifecycleEvidence({ block }: { block: LifecycleBlock }) {
   const failure = lifecycleFailure(block);
   const failing = block.failing_step === undefined ? undefined : block.steps[block.failing_step];
   return (
-    <div className="run-detail-surface min-w-0 space-y-4" data-testid="lifecycle-detail">
+    <div className="run-detail-surface run-detail-runway min-w-0 space-y-4" data-testid="lifecycle-detail">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="font-mono text-base font-semibold break-all">{lifecycleScopePath(block)} / {block.phase}</h2>
         <LifecycleStatusBadge status={block.status} />
@@ -38,10 +38,6 @@ function LifecycleFromRun({ run, keyValue }: { run: RunDetail; keyValue: string 
 }
 
 export default function LifecyclePage() {
-  const { runId = "", blockKey = "" } = useParams();
-  return (
-    <RunScaffold runId={runId} activeResults activeLifecycle={blockKey}>
-      {(run) => <LifecycleFromRun run={run} keyValue={blockKey} />}
-    </RunScaffold>
-  );
+  const { blockKey = "" } = useParams();
+  return <LifecycleFromRun run={useScaffoldRun()} keyValue={blockKey} />;
 }

@@ -242,6 +242,51 @@ async fn runs_list_does_not_group_unrelated_runs_with_the_same_basename() {
 }
 
 #[tokio::test]
+async fn run_number_counts_runs_per_verification_in_start_order() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    common::write_passing_run(
+        rw.clone(),
+        "01J0000000000000000000000A",
+        "verifications/login/duhem.yml",
+    )
+    .await;
+    common::write_passing_run(
+        rw.clone(),
+        "01J0000000000000000000000B",
+        "verifications/signup.yml",
+    )
+    .await;
+    common::write_failing_run(
+        rw,
+        "01J0000000000000000000000C",
+        "verifications/login/duhem.yml",
+    )
+    .await;
+    let reader = EvidenceReader::new(ro);
+
+    let (status, json) = get_json(reader.clone(), "/api/runs").await;
+    assert_eq!(status, StatusCode::OK);
+    let numbers: BTreeMap<&str, u64> = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            (
+                row["run_id"].as_str().unwrap(),
+                row["run_number"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(numbers["01J0000000000000000000000A"], 1);
+    assert_eq!(numbers["01J0000000000000000000000B"], 1);
+    assert_eq!(numbers["01J0000000000000000000000C"], 2);
+
+    let (status, detail) = get_json(reader, "/api/runs/01J0000000000000000000000C").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["run_number"], 2);
+}
+
+#[tokio::test]
 async fn runs_list_nests_recorded_suite_and_invocation_children() {
     let (_tmp, rw, ro) = common::open_stores().await;
     let root_id = "01J0000000000000000000000R";

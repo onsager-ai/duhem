@@ -5,12 +5,13 @@
 // falls back to the default.
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Routes } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import ResultsPage from "../views/ResultsPage";
+import { runRoutes } from "../views/run-routes";
 import { RAIL_WIDTH_DEFAULT, RAIL_WIDTH_STEP } from "../hooks/use-rail-width";
 
 const STORAGE_KEY = "duhem-rail-width";
+const HIDDEN_KEY = "duhem-rail-hidden";
 
 // jsdom does not implement PointerEvent; MouseEvent carries the same
 // `clientX` / `button` the splitter's drag handlers read, so it stands
@@ -27,6 +28,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   try {
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(HIDDEN_KEY);
   } catch {
     /* ignore */
   }
@@ -35,6 +37,7 @@ afterEach(() => {
 const RUN = {
   run_id: "R1",
   verification: "pegasus-register",
+  run_number: 1,
   started_at: "2026-07-22T14:03:00.000Z",
   duration_ms: 1200,
   children: [],
@@ -58,9 +61,7 @@ function stub() {
 function renderResults() {
   return render(
     <MemoryRouter initialEntries={["/run/R1/results"]}>
-      <Routes>
-        <Route path="/run/:runId/results" element={<ResultsPage />} />
-      </Routes>
+      <Routes>{runRoutes}</Routes>
     </MemoryRouter>,
   );
 }
@@ -204,5 +205,44 @@ describe("run report rail splitter", () => {
     expect(splitter.getAttribute("aria-valuenow")).toBe(
       String(RAIL_WIDTH_DEFAULT + RAIL_WIDTH_STEP),
     );
+  });
+});
+
+describe("run report rail toggle (#694)", () => {
+  it("hides the rail so the detail pane takes the full width, and shows it again", async () => {
+    stub();
+    const { container } = renderResults();
+    await findSplitter();
+    const grid = container.querySelector(".run-results-grid") as HTMLElement;
+    const rail = container.querySelector("#run-results-rail") as HTMLElement;
+    const toggle = screen.getByRole("button", { name: "Hide criteria" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(grid.className).toContain("md:grid-cols-");
+
+    fireEvent.click(toggle);
+    expect(rail.hidden).toBe(true);
+    expect(screen.queryByRole("separator", { name: "Resize the step list" })).toBeNull();
+    expect(grid.className).not.toContain("md:grid-cols-");
+    expect(grid.getAttribute("data-rail")).toBe("hidden");
+    // Hidden, not unmounted: the same rail comes back with its state.
+    expect(container.querySelector("#run-results-rail")).toBe(rail);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show criteria" }));
+    expect(rail.hidden).toBe(false);
+    expect(await findSplitter()).toBeTruthy();
+  });
+
+  it("remembers a hidden rail across a remount", async () => {
+    stub();
+    const first = renderResults();
+    await findSplitter();
+    fireEvent.click(screen.getByRole("button", { name: "Hide criteria" }));
+    expect(localStorage.getItem(HIDDEN_KEY)).toBe("true");
+    first.unmount();
+
+    stub();
+    const { container } = renderResults();
+    expect(await screen.findByRole("button", { name: "Show criteria" })).toBeTruthy();
+    expect((container.querySelector("#run-results-rail") as HTMLElement).hidden).toBe(true);
   });
 });

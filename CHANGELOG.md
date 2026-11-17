@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Dashboard runs list and run detail carry `run_number`, shown as a per-verification number with the ULID copyable; the run header is one compact line that names a failed setup or required cleanup, the run page keeps one scaffold across tabs and checks, and the Results rail can be hidden or collapsed. (#694)
+
 ## v0.9.1 — 2026-11-17
 
 - [clarifying] Document that filtered runs with excluded criteria remain `inconclusive:empty_aggregation` and show how to gate selected checks from JSON claim scope and totals. (#644)

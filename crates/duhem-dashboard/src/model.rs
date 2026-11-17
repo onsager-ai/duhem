@@ -38,6 +38,10 @@ pub struct RunsListEntry {
     /// is addressable via `/api/runs/:run_id`.
     pub run_id: String,
     pub verification: String,
+    /// 1-based position among this store's runs of the same
+    /// verification, ordered by `(started_at, run_id)`. A display aid
+    /// only: it shifts if the store changes; `run_id` is the identifier.
+    pub run_number: u32,
     pub started_at: Option<DateTime<Utc>>,
     pub duration_ms: Option<u64>,
     /// Judge-owned outcome. A finished unjudged run legitimately has
@@ -70,6 +74,8 @@ pub struct RunDetail {
     pub body_verdict: Option<VerdictState>,
     pub run_id: String,
     pub verification: String,
+    /// Same derivation as [`RunsListEntry::run_number`].
+    pub run_number: u32,
     pub started_at: Option<DateTime<Utc>>,
     pub duration_ms: Option<u64>,
     pub children: Vec<RunChildDetail>,

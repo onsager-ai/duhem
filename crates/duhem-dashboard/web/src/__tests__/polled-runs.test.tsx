@@ -24,6 +24,7 @@ function leaf(
   return {
     run_id: id,
     verification: "login",
+    run_number: 1,
     started_at: "2026-06-10T10:00:00.000Z",
     duration_ms: 1234,
     verdict,
@@ -61,6 +62,7 @@ describe("RunsList polling (#298)", () => {
         {
           run_id: "login",
           verification: "login",
+          run_number: 1,
           started_at: child.started_at,
           duration_ms: child.duration_ms,
           verdict: "fail",
@@ -80,9 +82,9 @@ describe("RunsList polling (#298)", () => {
     );
 
     const expand = await screen.findByRole("button", { name: "Expand" });
-    expect(screen.queryByText("child-run")).toBeNull();
+    expect(screen.queryByTitle("child-run")).toBeNull();
     fireEvent.click(expand);
-    expect(screen.getByText("child-run")).toBeTruthy();
+    expect(screen.getByTitle("child-run")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Collapse" })).toBeTruthy();
   });
 
@@ -105,12 +107,12 @@ describe("RunsList polling (#298)", () => {
 
     // Initial fetch: only the finished run.
     await act(() => vi.advanceTimersByTimeAsync(0));
-    expect(screen.getByText("old-run")).toBeTruthy();
-    expect(screen.queryByText("new-run")).toBeNull();
+    expect(screen.getByTitle("old-run")).toBeTruthy();
+    expect(screen.queryByTitle("new-run")).toBeNull();
 
     // One interval later the in-flight run has appeared, running.
     await act(() => vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS));
-    expect(screen.getByText("new-run")).toBeTruthy();
+    expect(screen.getByTitle("new-run")).toBeTruthy();
     const runningBadge = [...document.querySelectorAll('[data-slot="badge"]')].find(
       (b) => b.textContent?.trim() === "running",
     );
@@ -175,12 +177,12 @@ describe("RunsList polling (#298)", () => {
       </MemoryRouter>,
     );
     await act(() => vi.advanceTimersByTimeAsync(0));
-    expect(screen.getByText("kept-run")).toBeTruthy();
+    expect(screen.getByTitle("kept-run")).toBeTruthy();
 
     await act(() => vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS));
     expect(calls).toBe(2);
     // Still the data, not an error flash.
-    expect(screen.getByText("kept-run")).toBeTruthy();
+    expect(screen.getByTitle("kept-run")).toBeTruthy();
     expect(screen.queryByText(/went away/)).toBeNull();
   });
 });

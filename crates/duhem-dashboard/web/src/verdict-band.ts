@@ -2,8 +2,9 @@
 // value here is presentation over the judge's recorded verdicts — the
 // band never re-judges; it only names what the run detail already says.
 
-import type { CheckDetail, RunDetail, RunStatus, Verdict } from "./api";
+import type { CheckDetail, LifecycleBlock, RunDetail, RunStatus, Verdict } from "./api";
 import { compactValue, failureParts } from "./format";
+import { lifecycleFailures } from "./lifecycle";
 import { verdictFamily } from "./ui";
 
 export type BandTone = "pass" | "fail" | "inconclusive" | "live" | "none";
@@ -26,8 +27,28 @@ export function verdictWord(
   return { word: "No verdict", tone: "none" };
 }
 
-/** Count passing criteria for leaves or passing direct children for parents. */
-export function criteriaTally(run: Pick<RunDetail, "criteria" | "children">): string {
+/** Count passing criteria for leaves or passing direct children for
+ *  parents, then name failed setup and required cleanup: those decide the
+ *  gate too, so "1 of 1 criterion passes" alone would contradict a
+ *  failed run (#694). */
+export function criteriaTally(run: Pick<RunDetail, "criteria" | "children" | "lifecycle">): string {
+  const failures = lifecycleFailures(run);
+  const suffix = [
+    countPhrase(failures.setup.length, "setup failed", "setups failed"),
+    countPhrase(failures.requiredCleanup.length, "required cleanup failed", "required cleanups failed"),
+  ]
+    .filter(Boolean)
+    .map((part) => ` · ${part}`)
+    .join("");
+  return bodyTally(run) + suffix;
+}
+
+function countPhrase(count: number, one: string, many: string): string {
+  if (count === 0) return "";
+  return count === 1 ? one : `${count} ${many}`;
+}
+
+function bodyTally(run: Pick<RunDetail, "criteria" | "children">): string {
   const children = run.children ?? [];
   if (children.length > 0) {
     const passed = children.filter((child) => child.verdict === "pass").length;
@@ -73,6 +94,14 @@ export function firstFailedCheck(
     if (check) return { criterionId: criterion.id, checkId: check.id };
   }
   return null;
+}
+
+/** The first failed setup or required cleanup block in recorded order —
+ *  the first failure to name when no check failed. */
+export function firstFailedLifecycle(run: Pick<RunDetail, "lifecycle">): LifecycleBlock | null {
+  const failures = lifecycleFailures(run);
+  const gating = new Set([...failures.setup, ...failures.requiredCleanup]);
+  return (run.lifecycle ?? []).find((block) => gating.has(block)) ?? null;
 }
 
 export interface FirstFailure {

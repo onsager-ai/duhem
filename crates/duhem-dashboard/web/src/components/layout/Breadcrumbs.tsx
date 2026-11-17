@@ -1,6 +1,9 @@
 import { Fragment } from "react";
 import { Link, useLocation } from "react-router-dom";
 
+import type { RunsListEntry } from "@/api";
+import { useOptionalRunsData } from "@/runs-context";
+
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -20,8 +23,24 @@ function truncId(id: string): string {
   return id.length > 14 ? `${id.slice(0, 12)}…` : id;
 }
 
+function findRun(runs: RunsListEntry[], runId: string): RunsListEntry | undefined {
+  for (const run of runs) {
+    if (run.run_id === runId) return run;
+    const child = findRun(run.children ?? [], runId);
+    if (child) return child;
+  }
+  return undefined;
+}
+
+/** `verification #N` once the shared runs list knows the run (#694),
+ *  else the truncated ULID. */
+function runCrumbLabel(runId: string, runs: RunsListEntry[] | null): string {
+  const run = runs ? findRun(runs, runId) : undefined;
+  return run ? `${run.verification} #${run.run_number}` : truncId(runId);
+}
+
 // Derive breadcrumbs from the hash-router path. Kept exported for tests.
-export function crumbsFor(pathname: string): Crumb[] {
+export function crumbsFor(pathname: string, runs: RunsListEntry[] | null = null): Crumb[] {
   const seg = pathname.split("/").filter(Boolean).map(decodeURIComponent);
   if (seg.length === 0) return [{ label: "Overview" }];
   const [a, b, c, d] = seg;
@@ -34,9 +53,9 @@ export function crumbsFor(pathname: string): Crumb[] {
     ];
   }
   if (a === "run" && b) {
-    const runs: Crumb = { label: "Runs", to: "/runs" };
+    const runsCrumb: Crumb = { label: "Runs", to: "/runs" };
     const run: Crumb = {
-      label: truncId(b),
+      label: runCrumbLabel(b, runs),
       title: b,
       to: `/run/${encodeURIComponent(b)}`,
     };
@@ -45,19 +64,20 @@ export function crumbsFor(pathname: string): Crumb[] {
       // leaf — the run crumb already carries the run, and the criterion
       // is visible in the run's tree rail.
       const checkId = (d ?? "").split("::").pop() ?? d ?? "";
-      return [runs, run, { label: checkId, title: d }];
+      return [runsCrumb, run, { label: checkId, title: d }];
     }
     if (c === "criterion") {
-      return [runs, run, { label: d ?? "", title: d }];
+      return [runsCrumb, run, { label: d ?? "", title: d }];
     }
-    if (c === "diff") return [runs, run, { label: "diff" }];
-    return [runs, { label: truncId(b), title: b }];
+    if (c === "diff") return [runsCrumb, run, { label: "diff" }];
+    return [runsCrumb, { label: runCrumbLabel(b, runs), title: b }];
   }
   return [{ label: "Overview" }];
 }
 
 export function Breadcrumbs() {
-  const crumbs = crumbsFor(useLocation().pathname);
+  const runs = useOptionalRunsData()?.runs ?? null;
+  const crumbs = crumbsFor(useLocation().pathname, runs);
   return (
     <Breadcrumb>
       <BreadcrumbList>

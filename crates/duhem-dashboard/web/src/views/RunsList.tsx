@@ -44,6 +44,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useRunsData } from "@/runs-context";
+import { CopyRunId, RunNumberLink } from "@/components/RunIdentity";
 import { flatLeaves } from "@/stats";
 import {
   formatDuration,
@@ -156,13 +157,8 @@ const columns: ColumnDef<RunsListEntry>[] = [
                 )}
               />
             </button>
-            <Link
-              to={`/run/${encodeURIComponent(e.run_id)}`}
-              className="block max-w-[22ch] truncate font-mono text-xs font-semibold hover:underline sm:max-w-[30ch]"
-              title={e.run_id}
-            >
-              {e.run_id}
-            </Link>
+            <RunNumberLink run={e} className="font-semibold" />
+            <CopyRunId runId={e.run_id} />
             <span className="text-xs text-muted-foreground">
               {e.children?.length ?? 0} children
             </span>
@@ -174,13 +170,8 @@ const columns: ColumnDef<RunsListEntry>[] = [
       }
       return (
         <div className="flex items-center gap-1.5" style={pad}>
-          <Link
-            to={`/run/${encodeURIComponent(e.run_id)}`}
-            className="block max-w-[22ch] truncate font-mono text-xs hover:underline sm:max-w-[30ch]"
-            title={e.run_id}
-          >
-            {e.run_id}
-          </Link>
+          <RunNumberLink run={e} />
+          <CopyRunId runId={e.run_id} />
           {e.origin && (
             <span className="text-xs text-muted-foreground">{e.origin}</span>
           )}

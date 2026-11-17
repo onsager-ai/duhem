@@ -43,6 +43,13 @@ repeated filters are ORed. Once any filter is supplied, native commands without 
 matching `native:` filter are excluded from execution and the gate (including with
 criterion-only filters), and the summary reports excluded IDs.
 
+A `--filter` that leaves out a whole criterion never gives a top-level `pass`. The
+excluded criterion aggregates to `inconclusive:empty_aggregation` by design: a partial
+selection must not claim full coverage. To gate CI on the selected checks only, read
+`--reporter json`. Require a nonzero `claim_scope.checks.selected`, require
+`claim_scope.checks.executed` and `totals.total` to equal it, and require
+`totals.passed == totals.total`.
+
 `duhem init` detects Cargo, package test scripts (npm/pnpm/yarn), pytest and Go in
 the target project and prints suggested `native:` entries for your root manifest.
 Commands assume the project root as cwd. Review commands and paths before adding

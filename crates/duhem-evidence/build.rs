@@ -11,8 +11,10 @@ fn main() {
         .ok()
         .filter(|commit| !commit.is_empty())
         .or_else(git_commit);
-    let version =
-        duhem_evidence_build_version::format(env!("CARGO_PKG_VERSION"), commit.as_deref());
+    let version = duhem_evidence_build_version::format_build_version(
+        env!("CARGO_PKG_VERSION"),
+        commit.as_deref(),
+    );
     println!("cargo:rustc-env=DUHEM_BUILD_VERSION={version}");
 }
 

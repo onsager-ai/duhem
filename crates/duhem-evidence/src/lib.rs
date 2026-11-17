@@ -19,6 +19,7 @@
 //! - Portability is `duhem export` — a self-contained bundle of the
 //!   run header, event stream, and artifacts.
 
+#[cfg(test)]
 mod build_version;
 
 /// Version of this build, including its short Git commit when available.

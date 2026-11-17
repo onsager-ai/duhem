@@ -74,7 +74,7 @@ Scaffold a Verification Definition, validate it, and run one. The scaffold's def
 duhem init ./verifications/sample --name sample
 
 # structurally validate it, then run it end-to-end
-duhem validate ./verifications/sample/duhem.yml
+duhem validate ./verifications/sample
 duhem run      ./verifications/sample
 
 # (or run the repo's fully-offline worked example)

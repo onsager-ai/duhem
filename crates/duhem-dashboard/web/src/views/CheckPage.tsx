@@ -18,7 +18,6 @@ import { fetchCheck, type ArtifactRef, type CheckDetail, type LifecycleBlock, ty
 import { VerdictBadge, formatDuration, isImageArtifact } from "../ui";
 import { assertionKey, isExplicitAssertion, compactValue, deliveryLayerLabel, describeWith, failureParts, formatEvent, groupTimeline, stepDuration, stepStatus, summarizeCheck, type TimelineNode } from "../format";
 import { EventIcon } from "../components/EventIcon";
-import { RunScaffold } from "./RunScaffold";
 import { useVd } from "./definition-context";
 import { type LoopNode, groupLoops, stepNavigation as navigationForStep } from "../step-presentation";
 import { LoopGroup } from "../components/LoopGroup";
@@ -551,7 +550,7 @@ function StepGroup({
   // landing scroll (selecting a step from the rail); it does nothing
   // for a reader manually scrolling through an open body, which is
   // what #435 reports. A bottom-runway fix alone
-  // (`.run-detail-surface`'s `padding-bottom`, `styles.css`) would
+  // (`.run-detail-runway`'s `padding-bottom`, `styles.css`) would
   // still have to *guess* this summary's own height to size the
   // runway — it wraps to more than one line whenever the detail text
   // or an HTTP-status chip pushes it, so there is no fixed constant to
@@ -1692,16 +1691,10 @@ function ReplayView({
 
 export default function CheckPage() {
   const { runId = "", pair = "" } = useParams();
-  const [params] = useSearchParams();
-  const activeStep = params.get("step") ?? undefined;
-  // The check evidence renders inside the shared run tree, with this
-  // check's node active in the rail. No back link — the rail (and the
-  // breadcrumb) carry the way back.
-  return (
-    <RunScaffold runId={runId} activePair={pair} activeStep={activeStep}>
-      {() => <CheckEvidence runId={runId} pair={pair} />}
-    </RunScaffold>
-  );
+  // The check evidence renders inside the `/run/:runId` layout's run tree,
+  // with this check's node active in the rail. No back link — the rail
+  // (and the breadcrumb) carry the way back.
+  return <CheckEvidence runId={runId} pair={pair} />;
 }
 
 function StepSelectionSync({
@@ -1816,9 +1809,21 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
       setError(`bad check reference: ${pair}`);
       return;
     }
-    setCheck(null);
-    setError(null);
-    fetchCheck(runId, criterionId, checkId).then(setCheck, (e) => setError(String(e)));
+    // The previous check stays on screen until this one resolves (#694):
+    // no "Loading…" swap between rail clicks. `live` drops a response
+    // that a later selection has overtaken.
+    let live = true;
+    fetchCheck(runId, criterionId, checkId).then(
+      (detail) => {
+        if (!live) return;
+        setCheck(detail);
+        setError(null);
+      },
+      (e) => live && setError(String(e)),
+    );
+    return () => {
+      live = false;
+    };
   }, [runId, pair]);
 
   useEffect(() => setRawExpandedSteps(new Set()), [runId]);
@@ -1893,8 +1898,15 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
     });
   };
 
+  // Setup, steps and teardown share one wrapper so the bottom runway
+  // (`.run-detail-runway`, styles.css) follows the last section rather
+  // than sitting between the steps and the teardown (#694).
   return (
-    <>
+    <div
+      className="run-detail-runway"
+      data-testid="check-evidence"
+      aria-busy={`${check.criterion_id}::${check.check_id}` !== pair}
+    >
       <LifecycleSections blocks={(check.lifecycle ?? []).filter((block) => block.phase === "setup")} />
       <div ref={surfaceRef} className="run-detail-surface">
         <StepSelectionSync
@@ -1965,6 +1977,6 @@ function CheckEvidence({ runId, pair }: { runId: string; pair: string }) {
         )}
       </div>
       <LifecycleSections blocks={(check.lifecycle ?? []).filter((block) => block.phase === "teardown")} />
-    </>
+    </div>
   );
 }

@@ -1,19 +1,23 @@
-// The run header's verdict band (#563): the verdict as a word at display
-// size, a summary line, the first failure on fail, and a collapsed
-// single-line state once the reader scrolls. Every case here was checked
-// by breaking the component first.
+// The run header's verdict band (#563, compact-only since #694): the
+// verdict word in the heading, the run number, a summary on the same line,
+// and the first failure on fail — a failed check, or else a failed setup
+// or required cleanup. Every case here was checked by breaking the
+// component first.
 
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { CheckDetail, RunDetail } from "../api";
-import { RunScaffold, VerdictBand } from "../views/RunScaffold";
+import type { CheckDetail, LifecycleBlock, RunDetail } from "../api";
+import { lifecycleKey } from "../lifecycle";
+import { VerdictBand } from "../views/RunScaffold";
+import { runRoutes } from "../views/run-routes";
 import {
   criteriaTally,
   finishedAt,
   firstFailedAssertion,
   firstFailedCheck,
+  firstFailedLifecycle,
   utcStamp,
   verdictWord,
 } from "../verdict-band";
@@ -27,6 +31,7 @@ function run(overrides: Partial<RunDetail> = {}): RunDetail {
   return {
     run_id: "R1",
     verification: "pegasus-register",
+    run_number: 1,
     started_at: "2026-07-22T14:03:00.000Z",
     duration_ms: 1200,
     children: [],
@@ -99,13 +104,44 @@ function stubFetch(checkDetail: CheckDetail = FAILED_CHECK) {
   return fetchMock;
 }
 
-function renderBand(detail: RunDetail, props: { collapsed?: boolean } = {}) {
+function renderBand(detail: RunDetail) {
   return render(
     <MemoryRouter>
-      <VerdictBand run={detail} connection="connected" {...props} />
+      <VerdictBand run={detail} connection="connected" />
     </MemoryRouter>,
   );
 }
+
+function block(
+  phase: LifecycleBlock["phase"],
+  status: LifecycleBlock["status"],
+  overrides: Partial<LifecycleBlock> = {},
+): LifecycleBlock {
+  const seq = phase === "setup" ? 10 : 90;
+  return {
+    phase,
+    status,
+    scope: [],
+    started_at: "2026-07-22T14:03:00.000Z",
+    duration_ms: 5,
+    steps: [{ index: 0, uses: "cli/exec", outcome: status === "passed" ? "ok" : "error", detail: status === "passed" ? undefined : "exit 1", duration_ms: 5 }],
+    failing_step: status === "passed" ? undefined : 0,
+    timeline: [{ seq, ts: "2026-07-22T14:03:00.000Z", kind: "step_started" }],
+    ...overrides,
+  };
+}
+
+// The #694 report: the body passed, a required cleanup failed, so the
+// gate failed while every criterion and check passes.
+const CLEANUP_FAILED = run({
+  verdict: "fail",
+  body_verdict: "pass",
+  criteria: [{ id: "AC-1", verdict: "pass", checks: [{ id: "AC-1.1", verdict: "pass" }] }],
+  lifecycle: [
+    block("setup", "passed"),
+    block("teardown", "failed", { cleanup_policy: "required" }),
+  ],
+});
 
 // Mirrors the self-verification VD's `{role: heading, text: pass}`:
 // Playwright's `role=heading >> internal:has-text="pass"i` — a heading
@@ -146,6 +182,31 @@ describe("verdict band derivations", () => {
         check_totals: { pass: 0, fail: 1, inconclusive: 0, pending: 0, total: 1 },
       }],
     }))).toBe("0 of 1 run passes");
+  });
+
+  it("names a failed required cleanup and a failed setup after the body tally", () => {
+    expect(criteriaTally(CLEANUP_FAILED)).toBe("1 of 1 criterion passes · required cleanup failed");
+    expect(criteriaTally(run({
+      lifecycle: [
+        block("teardown", "failed", { cleanup_policy: "required" }),
+        block("teardown", "aborted", { cleanup_policy: "required" }),
+      ],
+    }))).toBe("2 of 2 criteria pass · 2 required cleanups failed");
+    expect(criteriaTally(run({ criteria: [], lifecycle: [block("setup", "failed")] }))).toBe(
+      "No criteria recorded · setup failed",
+    );
+    // Diagnostic cleanup is evidence only; it does not gate the run.
+    expect(criteriaTally(run({
+      lifecycle: [block("teardown", "failed", { cleanup_policy: "diagnostic_only" })],
+    }))).toBe("2 of 2 criteria pass");
+  });
+
+  it("finds the first failed setup or required cleanup in recorded order", () => {
+    expect(firstFailedLifecycle(CLEANUP_FAILED)).toBe(CLEANUP_FAILED.lifecycle![1]);
+    expect(firstFailedLifecycle(run())).toBeNull();
+    expect(firstFailedLifecycle(run({
+      lifecycle: [block("teardown", "failed", { cleanup_policy: "diagnostic_only" })],
+    }))).toBeNull();
   });
 
   it("finds the first failed check in criteria order, skipping non-fail verdicts", () => {
@@ -229,19 +290,21 @@ describe("verdict band timestamps", () => {
 });
 
 describe("VerdictBand", () => {
-  it("renders a pass at display size inside the heading", () => {
+  it("renders a pass on one compact line inside the heading", () => {
     stubFetch();
     renderBand(run());
     const word = screen.getByTestId("verdict-word");
     expect(word.textContent).toBe("Passed");
     expect(word.className).toContain("text-pass");
-    expect(word.className).toContain("text-3xl");
+    // Compact only (#694): no display-size word, no expanded state.
+    expect(word.className).not.toContain("text-3xl");
+    expect(screen.getByTestId("verdict-band").hasAttribute("data-collapsed")).toBe(false);
     // The VD's `{role: heading, text: pass}` still resolves.
     expect(headingWithText(/pass/i)).toBeTruthy();
     expect(headingWithText(/pass/i)?.contains(word)).toBe(true);
     const mark = screen.getByTestId("verdict-band").querySelector("svg");
     expect(mark?.getAttribute("data-verdict")).toBe("pass");
-    expect(mark?.getAttribute("class")).toContain("size-10");
+    expect(mark?.getAttribute("class")).toContain("size-5");
     const summary = screen.getByTestId("verdict-summary");
     expect(summary.textContent).toContain("2 of 2 criteria pass");
     expect(summary.textContent).toContain("took 1.2s");
@@ -280,7 +343,7 @@ describe("VerdictBand", () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(line.textContent).toBe("First failureAC-5.2");
+    expect(line.textContent).toBe("First failure AC-5.2");
     expect(screen.queryByTestId("first-failure-expected")).toBeNull();
   });
 
@@ -305,69 +368,65 @@ describe("VerdictBand", () => {
     const word = screen.getByTestId("verdict-word");
     expect(word.textContent).toBe("Running");
     expect(word.className).toContain("text-live");
-    expect(screen.getByRole("heading").textContent).toContain("connected");
+    expect(screen.getByTestId("verdict-band").textContent).toContain("connected");
     expect(screen.getByTestId("verdict-band").querySelector("svg")?.getAttribute("data-verdict")).toBe("running");
     const summary = screen.getByTestId("verdict-summary").textContent ?? "";
     expect(summary).not.toContain("took");
     expect(summary).toContain("started");
   });
 
-  it("collapses to a single line that keeps the verdict in the heading", () => {
+  it("names the run by verification and number, the ULID in its tooltip", () => {
     stubFetch();
-    renderBand(FAILING, { collapsed: true });
-    expect(screen.getByTestId("verdict-band").getAttribute("data-collapsed")).toBe("true");
-    expect(screen.queryByTestId("verdict-summary")).toBeNull();
-    expect(screen.queryByTestId("first-failure")).toBeNull();
-    expect(screen.getByRole("heading", { name: /^Failed\s*pegasus-register\s*R1$/ })).toBeTruthy();
-    expect(screen.getByTestId("verdict-word").className).toContain("text-base");
-    expect(screen.getByTestId("verdict-band").querySelector("svg")?.getAttribute("class")).toContain("size-6");
+    renderBand(run({ run_id: "01M7M0E6RUNULID", run_number: 28, verdict: "fail" }));
+    expect(screen.getByRole("heading", { name: /^Failed\s*pegasus-register\s*#28$/ })).toBeTruthy();
+    const number = screen.getByTestId("run-number");
+    expect(number.textContent).toBe("#28");
+    expect(number.getAttribute("title")).toBe("01M7M0E6RUNULID");
+    expect(screen.getByRole("button", { name: "Copy run ID" }).getAttribute("data-run-id")).toBe(
+      "01M7M0E6RUNULID",
+    );
+  });
+
+  it("says why a run with a passing body failed and links the failed cleanup", () => {
+    const fetchMock = stubFetch();
+    renderBand(CLEANUP_FAILED);
+    expect(screen.getByTestId("verdict-word").textContent).toBe("Failed");
+    expect(screen.getByTestId("verdict-summary").textContent).toContain(
+      "1 of 1 criterion passes · required cleanup failed",
+    );
+    const line = screen.getByTestId("first-failure");
+    expect(line.getAttribute("href")).toBe(
+      `/run/R1/lifecycle/${encodeURIComponent(lifecycleKey(CLEANUP_FAILED.lifecycle![1]))}`,
+    );
+    expect(line.textContent).toBe("First failure leaf required cleanup exit 1");
+    // Derived from the recorded block: no check detail is fetched.
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/checks/"))).toBe(false);
+  });
+
+  it("links a failed check-scoped cleanup through its check page", () => {
+    stubFetch();
+    renderBand(run({
+      verdict: "fail",
+      criteria: [{ id: "AC-1", verdict: "pass", checks: [{ id: "AC-1.1", verdict: "pass" }] }],
+      lifecycle: [block("teardown", "failed", {
+        cleanup_policy: "required",
+        scope: [{ kind: "criterion", id: "AC-1" }, { kind: "check", id: "AC-1.1" }],
+      })],
+    }));
+    expect(screen.getByTestId("first-failure").getAttribute("href")).toBe(
+      `/run/R1/check/${encodeURIComponent("AC-1::AC-1.1")}?lifecycle=90`,
+    );
   });
 });
 
 describe("RunScaffold verdict band", () => {
-  function scroll(el: Element, top: number, runway = 400) {
-    Object.defineProperty(el, "scrollTop", { configurable: true, value: top });
-    Object.defineProperty(el, "clientHeight", { configurable: true, value: 300 });
-    Object.defineProperty(el, "scrollHeight", { configurable: true, value: 300 + runway });
-    act(() => {
-      fireEvent.scroll(el);
-    });
-  }
-
   function renderScaffold() {
     return render(
-      <MemoryRouter>
-        <RunScaffold runId="R1" activeResults>
-          {() => <div data-testid="pane-body">body</div>}
-        </RunScaffold>
+      <MemoryRouter initialEntries={["/run/R1/results"]}>
+        <Routes>{runRoutes}</Routes>
       </MemoryRouter>,
     );
   }
-
-  it("collapses when a Results pane scrolls and expands back at the top", async () => {
-    stubFetch();
-    const { container } = renderScaffold();
-    const band = await screen.findByTestId("verdict-band");
-    expect(band.getAttribute("data-collapsed")).toBe("false");
-    const pane = container.querySelector(".run-results-detail")!;
-    scroll(pane, 10);
-    expect(screen.getByTestId("verdict-band").getAttribute("data-collapsed")).toBe("false");
-    scroll(pane, 120);
-    expect(screen.getByTestId("verdict-band").getAttribute("data-collapsed")).toBe("true");
-    // Hysteresis: partway back up stays collapsed; only the top expands.
-    scroll(pane, 10);
-    expect(screen.getByTestId("verdict-band").getAttribute("data-collapsed")).toBe("true");
-    scroll(pane, 0);
-    expect(screen.getByTestId("verdict-band").getAttribute("data-collapsed")).toBe("false");
-  });
-
-  it("does not collapse a pane too short to stay scrolled once it grows", async () => {
-    stubFetch();
-    const { container } = renderScaffold();
-    await screen.findByTestId("verdict-band");
-    scroll(container.querySelector(".run-results-detail")!, 60, 80);
-    expect(screen.getByTestId("verdict-band").getAttribute("data-collapsed")).toBe("false");
-  });
 
   it("leaves the failed check's id naming only its Results-tree link", async () => {
     // Duhem compiles `{role: link, name: X}` to Playwright's public

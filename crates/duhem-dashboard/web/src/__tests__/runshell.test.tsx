@@ -4,14 +4,10 @@
 // is open. Replaces the former per-run tab-bar tests.
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunDetail } from "../api";
-import RunPage from "../views/RunPage";
-import CheckPage from "../views/CheckPage";
-import CriterionPage from "../views/CriterionPage";
-import DefinitionPage from "../views/DefinitionPage";
-import ResultsPage from "../views/ResultsPage";
+import { runRoutes } from "../views/run-routes";
 
 afterEach(() => {
   cleanup();
@@ -25,6 +21,7 @@ const RUN = {
   ci_url: undefined as string | undefined,
   run_id: "R1",
   verification: "pegasus-register",
+  run_number: 1,
   started_at: "2026-07-22T14:03:00.000Z",
   duration_ms: 1200,
   children: [],
@@ -136,13 +133,7 @@ function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <LocationProbe />
-      <Routes>
-        <Route path="/run/:runId" element={<RunPage />} />
-        <Route path="/run/:runId/results" element={<ResultsPage />} />
-        <Route path="/run/:runId/criterion/:criterionId" element={<CriterionPage />} />
-        <Route path="/run/:runId/check/:pair" element={<CheckPage />} />
-        <Route path="/run/:runId/definition" element={<DefinitionPage />} />
-      </Routes>
+      <Routes>{runRoutes}</Routes>
     </MemoryRouter>,
   );
 }
@@ -225,12 +216,12 @@ describe("run report tree", () => {
     stub();
     renderAt("/run/R1");
     // The run header is a heading carrying the verdict word, then the
-    // verification and run id on its secondary line (#563) — the
+    // verification and run number on the same line (#563, #694) — the
     // self-verification VD asserts the verdict is rendered inside a
     // heading.
     await waitFor(() =>
       expect(
-        screen.getByRole("heading", { name: /^Failed\s*pegasus-register\s*R1$/ }),
+        screen.getByRole("heading", { name: /^Failed\s*pegasus-register\s*#1$/ }),
       ).toBeTruthy(),
     );
   });
@@ -865,4 +856,92 @@ criteria:
     expect(screen.getByTestId("replay").querySelector("img")?.getAttribute("src")).toBe("user1.png");
   });
 
+});
+
+describe("persistent run scaffold (#694)", () => {
+  const runFetches = () =>
+    (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([url]) => String(url) === "api/runs/R1.json",
+    );
+
+  it("fetches the run once and keeps one header across tab and rail navigation", async () => {
+    stub();
+    renderAt("/run/R1");
+    const band = await screen.findByTestId("verdict-band");
+    fireEvent.click(screen.getByRole("tab", { name: "Results" }));
+    const tree = await screen.findByTestId("run-tree");
+    fireEvent.click(within(tree).getByRole("link", { name: "AC-6.1" }));
+    await waitFor(() =>
+      expect(within(tree).getByRole("link", { name: "AC-6.1" }).getAttribute("aria-current")).toBe("page"),
+    );
+    fireEvent.click(within(tree).getByRole("link", { name: /^AC-7(?!\.)/ }));
+    expect(await screen.findByTestId("criterion-detail")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Summary" }));
+    expect(await screen.findByTestId("run-summary")).toBeTruthy();
+    // A remounted scaffold would refetch and render a new header node.
+    expect(screen.getByTestId("verdict-band")).toBe(band);
+    expect(runFetches()).toHaveLength(1);
+  });
+
+  it("keeps rail group state while moving between checks", async () => {
+    stub();
+    renderAt("/run/R1/check/AC-5%3A%3AAC-5.1");
+    const tree = await screen.findByTestId("run-tree");
+    fireEvent.click(within(tree).getByRole("button", { name: "Collapse AC-6" }));
+    expect(within(tree).queryByRole("link", { name: "AC-6.1" })).toBeNull();
+    fireEvent.click(within(tree).getByRole("link", { name: "AC-5.2" }));
+    await waitFor(() =>
+      expect(within(tree).getByRole("link", { name: "AC-5.2" }).getAttribute("aria-current")).toBe("page"),
+    );
+    expect(screen.getByTestId("run-tree")).toBe(tree);
+    expect(within(tree).queryByRole("link", { name: "AC-6.1" })).toBeNull();
+  });
+
+  it("keeps the previous check on screen until the next one loads", async () => {
+    // Both the pane and the rail fetch the newly selected check.
+    const pending: (() => void)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = String(url);
+        if (path.includes("/failure.json")) return new Response(JSON.stringify({ failing: [] }));
+        if (path.endsWith("/definition")) return new Response(DEFINITION);
+        if (path.includes(encodeURIComponent("AC-5::AC-5.2"))) {
+          await new Promise<void>((resolve) => {
+            pending.push(resolve);
+          });
+          return new Response(JSON.stringify({ ...CHECK, check_id: "AC-5.2", verdict: "pass" }));
+        }
+        if (path.includes("/checks/")) return new Response(JSON.stringify(CHECK));
+        return new Response(JSON.stringify(RUN));
+      }),
+    );
+    renderAt("/run/R1/check/AC-5%3A%3AAC-5.1");
+    const evidence = await screen.findByTestId("check-evidence");
+    await waitFor(() => expect(evidence.textContent).toContain("AC-5.1"));
+    fireEvent.click(within(screen.getByTestId("run-tree")).getByRole("link", { name: "AC-5.2" }));
+    await waitFor(() => expect(pending.length).toBeGreaterThan(0));
+    expect(screen.queryByText("Loading…")).toBeNull();
+    expect(screen.getByTestId("check-evidence").getAttribute("aria-busy")).toBe("true");
+    expect(screen.getByTestId("check-evidence").querySelector(".check-context h2")?.textContent).toContain("AC-5.1");
+    await act(async () => {
+      pending.forEach((resolve) => resolve());
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("check-evidence").querySelector(".check-context h2")?.textContent).toContain("AC-5.2"),
+    );
+    expect(screen.getByTestId("check-evidence").getAttribute("aria-busy")).toBe("false");
+  });
+
+  it("collapses and expands every criterion group at once", async () => {
+    stub();
+    renderAt("/run/R1/results");
+    const tree = await screen.findByTestId("run-tree");
+    expect(screen.getAllByTestId("check-children")).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all criteria" }));
+    expect(screen.queryAllByTestId("check-children")).toHaveLength(0);
+    expect(within(tree).getAllByRole("button", { name: /^Expand AC-/ })).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: "Expand all criteria" }));
+    expect(screen.getAllByTestId("check-children")).toHaveLength(3);
+  });
 });

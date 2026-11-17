@@ -894,8 +894,11 @@ li.ev.step-group.tone-skipped > details > summary .ev-label { color: var(--lg-mu
 }
 /* #503 / #435 — runway. `.run-results-detail` (the actual scroll
  * container, `md:overflow-y-auto`, RunScaffold.tsx) has no bottom
- * padding of its own; this pads `.run-detail-surface`, the plain
- * content div it scrolls (CheckPage.tsx's `surfaceRef`). Padding an
+ * padding of its own; this pads `.run-detail-runway`, the plain
+ * content div it scrolls — on a check, the wrapper around its setup
+ * sections, `.run-detail-surface` (CheckPage.tsx's `surfaceRef`) and
+ * teardown sections, so the runway always comes after the last rendered
+ * section (#694; it used to sit between the steps and the teardown). Padding an
  * inner element still grows the outer scroller's `scrollHeight` — that
  * IS the runway — so once the LAST rendered node's tail has scrolled
  * up to just past the sticky `check-context` header, the scroller is
@@ -931,9 +934,9 @@ li.ev.step-group.tone-skipped > details > summary .ev-label { color: var(--lg-mu
  * range itself ends exactly when the trailing content clears it, so a
  * taller `check-context` does not change how much runway is needed).
  * `.run-results-detail`'s visible height is at most `calc(100vh -
- * 10.5rem)` — the collapsed single-line header; the expanded verdict
- * band (#563) only shortens it (RunScaffold.tsx sizes it from the
- * measured `--run-header-h`, duplicated here for lack of a shared token) with
+ * 10.5rem)` — the single-line run header; a header that wraps or adds
+ * its first-failure line only shortens it (RunScaffold.tsx sizes it from
+ * the measured `--run-header-h`, duplicated here for lack of a shared token) with
  * a 1rem margin for subpixel/scrollbar rounding — confirmed against
  * both that same worst case and a realistic mid-list step (a
  * screenshot capture) that continuous forward scrolling now always
@@ -946,7 +949,7 @@ li.ev.step-group.tone-skipped > details > summary .ev-label { color: var(--lg-mu
  * its own) never grows a scrollbar it doesn't need; the runway only
  * exists while there is a step body it could actually apply to. */
 @media (min-width: 768px) {
-  .run-detail-surface:has(ol.timeline li.ev.step-group > details[open]) {
+  .run-detail-runway:has(ol.timeline li.ev.step-group > details[open]) {
     padding-bottom: calc(100vh - 9.5rem);
   }
 }

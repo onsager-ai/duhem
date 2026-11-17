@@ -1,8 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Routes, useLocation } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import type { CheckDetail, RunDetail, TraceEvent } from "../api";
-import CheckPage, { Timeline } from "../views/CheckPage";
+import { Timeline } from "../views/CheckPage";
+import { runRoutes } from "../views/run-routes";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const event = (seq: number, kind: string, fields: Record<string, unknown>): TraceEvent => ({ seq, ts: "2026-10-30T00:00:00Z", kind, ...fields });
@@ -32,14 +33,14 @@ it("keeps legacy explicit assertions readable without inventing values", () => {
 function Location() { const location = useLocation(); return <output data-testid="location">{location.search}</output>; }
 
 it("lists every explicit assertion after steps and navigates to standalone and step-owned details", async () => {
-  const run: RunDetail = { run_id: "R", verification: "case.yml", started_at: null, duration_ms: null, children: [], inputs: {}, verdict: "fail", status: "finished", setup_aborted: false, has_definition: false,
+  const run: RunDetail = { run_id: "R", verification: "case.yml", run_number: 1, started_at: null, duration_ms: null, children: [], inputs: {}, verdict: "fail", status: "finished", setup_aborted: false, has_definition: false,
     criteria: [{ id: "AC", verdict: "fail", checks: [{ id: "C", verdict: "fail" }] }] };
   const check: CheckDetail = { criterion_id: "AC", check_id: "C", verdict: "fail", spans: [], timeline: events, artifacts: [] };
   vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("/checks/") ? check : run), { status: 200 })));
   const scroll = vi.fn();
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { value: scroll, configurable: true });
   render(<MemoryRouter initialEntries={["/run/R/check/AC%3A%3AC"]}>
-    <Routes><Route path="/run/:runId/check/:pair" element={<CheckPage />} /></Routes><Location />
+    <Routes>{runRoutes}</Routes><Location />
   </MemoryRouter>);
   await waitFor(() => expect(screen.getAllByTestId("assertion-rail-row")).toHaveLength(3));
   const rows = screen.getAllByTestId("assertion-rail-row");

@@ -98,7 +98,7 @@ describe("#558 review regressions", () => {
 
   it("clears lifecycle selection when a step row is clicked", async () => {
     const run: RunDetail = {
-      run_id: "r1", verification: "example", started_at: null, duration_ms: null, children: [], inputs: {}, verdict: "pass",
+      run_id: "r1", verification: "example", run_number: 1, started_at: null, duration_ms: null, children: [], inputs: {}, verdict: "pass",
       status: "finished", setup_aborted: false, has_definition: false,
       lifecycle: [block(20, "setup", [criterion, check])],
       criteria: [{ id: "AC-1", verdict: "pass", checks: [{ id: "AC-1.1", verdict: "pass" }] }],
@@ -120,7 +120,7 @@ describe("#558 review regressions", () => {
 
   it("clears lifecycle selection when arrowing between steps", async () => {
     const run: RunDetail = {
-      run_id: "r1", verification: "example", started_at: null, duration_ms: null, children: [], inputs: {}, verdict: "pass",
+      run_id: "r1", verification: "example", run_number: 1, started_at: null, duration_ms: null, children: [], inputs: {}, verdict: "pass",
       status: "finished", setup_aborted: false, has_definition: false,
       lifecycle: [block(20, "setup", [criterion, check])],
       criteria: [{ id: "AC-1", verdict: "pass", checks: [{ id: "AC-1.1", verdict: "pass" }] }],

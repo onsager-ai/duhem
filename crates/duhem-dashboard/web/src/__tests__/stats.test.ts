@@ -12,6 +12,7 @@ function leaf(
   return {
     run_id,
     verification,
+    run_number: 1,
     started_at,
     duration_ms: 1000,
     verdict,

@@ -1,4 +1,4 @@
-import type { LifecycleBlock, LifecycleScopeSegment } from "./api";
+import type { LifecycleBlock, LifecycleScopeSegment, RunDetail } from "./api";
 
 export function lifecycleScopePath(block: Pick<LifecycleBlock, "scope">): string {
   return block.scope.length === 0
@@ -42,4 +42,37 @@ export function lifecycleAtCheck(block: LifecycleBlock, criterionId: string, che
   return block.scope.length > 0 &&
     !lifecycleAtCriterion(block, criterionId) &&
     lifecycleEnclosesCheck(block.scope, criterionId, checkId);
+}
+
+/** The page that shows `block`: its own lifecycle route for leaf and
+ *  criterion blocks, or the enclosing check with `?lifecycle=` for blocks
+ *  scoped inside a check (the lifecycle route only serves the former). */
+export function lifecycleTarget(run: Pick<RunDetail, "run_id" | "criteria">, block: LifecycleBlock): string {
+  if (block.scope.length <= 1) return lifecycleHref(run.run_id, block);
+  for (const criterion of run.criteria) {
+    const check = criterion.checks.find((item) => lifecycleAtCheck(block, criterion.id, item.id));
+    if (check) {
+      const pair = encodeURIComponent(`${criterion.id}::${check.id}`);
+      return `/run/${encodeURIComponent(run.run_id)}/check/${pair}?lifecycle=${encodeURIComponent(lifecycleKey(block))}`;
+    }
+  }
+  return `/run/${encodeURIComponent(run.run_id)}/results`;
+}
+
+/** Recorded lifecycle blocks that did not pass, split by what they gate:
+ *  a failed setup stops the work it encloses, and a failed `required`
+ *  cleanup fails the run gate (spec §10.3.5). Diagnostic cleanup is
+ *  evidence only and is left out. Read straight from the recorded block
+ *  status and policy; nothing is re-judged. */
+export function lifecycleFailures(run: Pick<RunDetail, "lifecycle">): {
+  setup: LifecycleBlock[];
+  requiredCleanup: LifecycleBlock[];
+} {
+  const failed = (run.lifecycle ?? []).filter((block) => block.status !== "passed");
+  return {
+    setup: failed.filter((block) => block.phase === "setup"),
+    requiredCleanup: failed.filter(
+      (block) => block.phase === "teardown" && block.cleanup_policy === "required",
+    ),
+  };
 }

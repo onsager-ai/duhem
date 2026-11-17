@@ -6,6 +6,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RunsList, { matchesFilters, triageRank } from "../views/RunsList";
+import { crumbsFor } from "../components/layout/Breadcrumbs";
 import { RunsProvider } from "../runs-context";
 import {
   Artifacts,
@@ -48,6 +49,7 @@ function leaf(
   return {
     run_id: id,
     verification: "login",
+    run_number: 1,
     started_at: "2026-06-10T10:00:00.000Z",
     duration_ms: 1234,
     verdict,
@@ -75,14 +77,14 @@ describe("RunsList", () => {
       },
     ]);
     renderRuns(<RunsList />, "/runs?repo=github.com%2Facme%2Fapp&branch=feature%2Flogin&pr=42");
-    expect(await screen.findByText("matching-root")).toBeTruthy();
-    expect(screen.getByText("matching-child")).toBeTruthy();
-    expect(screen.queryByText("other-root")).toBeNull();
-    expect(screen.queryByText("other-child")).toBeNull();
+    expect(await screen.findByTitle("matching-root")).toBeTruthy();
+    expect(screen.getByTitle("matching-child")).toBeTruthy();
+    expect(screen.queryByTitle("other-root")).toBeNull();
+    expect(screen.queryByTitle("other-child")).toBeNull();
     fireEvent.change(screen.getByRole("textbox", { name: "PR" }), { target: { value: "99" } });
     expect(await screen.findByText("No runs match the filters")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(await screen.findByText("other-root")).toBeTruthy();
+    expect(await screen.findByTitle("other-root")).toBeTruthy();
   });
 
   it("renders the empty state", async () => {
@@ -94,10 +96,29 @@ describe("RunsList", () => {
   it("renders a single leaf row", async () => {
     stubRuns([leaf("01JRUNA", "pass")]);
     const { container } = renderRuns(<RunsList />);
-    await waitFor(() => expect(screen.getByText("01JRUNA")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTitle("01JRUNA")).toBeTruthy());
     // The verdict renders as a shadcn Badge carrying the verdict text.
     const badges = [...container.querySelectorAll('[data-slot="badge"]')];
     expect(badges.some((badge) => badge.textContent === "pass")).toBe(true);
+  });
+
+  it("labels each run by its per-verification number, the ULID in its tooltip (#694)", async () => {
+    stubRuns([
+      { ...leaf("01M7M0E6AAAAAAAAAAAAAAAAAB", "fail"), run_number: 28, started_at: "2026-06-11T10:00:00.000Z" },
+      { ...leaf("01M7M0E6AAAAAAAAAAAAAAAAAA", "pass"), run_number: 27 },
+    ]);
+    renderRuns(<RunsList />);
+    const latest = await screen.findByRole("link", { name: "#28" });
+    expect(latest.getAttribute("title")).toBe("01M7M0E6AAAAAAAAAAAAAAAAAB");
+    // URLs keep the ULID; the number is display only.
+    expect(latest.getAttribute("href")).toBe("/run/01M7M0E6AAAAAAAAAAAAAAAAAB");
+    expect(screen.getByRole("link", { name: "#27" }).getAttribute("title")).toBe(
+      "01M7M0E6AAAAAAAAAAAAAAAAAA",
+    );
+    expect(screen.queryByText("01M7M0E6AAAAAAAAAAAAAAAAAB")).toBeNull();
+    expect(
+      screen.getAllByRole("button", { name: "Copy run ID" }).map((button) => button.getAttribute("data-run-id")),
+    ).toEqual(["01M7M0E6AAAAAAAAAAAAAAAAAB", "01M7M0E6AAAAAAAAAAAAAAAAAA"]);
   });
 
   it("defaults to a flat newest-first view including run-set leaves", async () => {
@@ -110,9 +131,9 @@ describe("RunsList", () => {
       leaf("01JRUNC", null, "running"),
     ]);
     const { container } = renderRuns(<RunsList />);
-    await waitFor(() => expect(screen.getByText("01JRUNC")).toBeTruthy());
-    expect(screen.getByText("01JRUNA")).toBeTruthy();
-    expect(screen.getByText("01JRUNB")).toBeTruthy();
+    await waitFor(() => expect(screen.getByTitle("01JRUNC")).toBeTruthy());
+    expect(screen.getByTitle("01JRUNA")).toBeTruthy();
+    expect(screen.getByTitle("01JRUNB")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
     // Lifecycle is a separate badge from the absent verdict.
     const badges = [...container.querySelectorAll('[data-slot="badge"]')];
@@ -129,9 +150,9 @@ describe("RunsList", () => {
     ]);
     renderRuns(<RunsList />, "/runs?view=verification");
     const expand = await screen.findByRole("button", { name: "Expand" });
-    expect(screen.queryByText("01JRUNA")).toBeNull();
+    expect(screen.queryByTitle("01JRUNA")).toBeNull();
     fireEvent.click(expand);
-    expect(screen.getByText("01JRUNA")).toBeTruthy();
+    expect(screen.getByTitle("01JRUNA")).toBeTruthy();
   });
 
   it("renders recorded lineage recursively", async () => {
@@ -155,10 +176,10 @@ describe("RunsList", () => {
     renderRuns(<RunsList />, "/runs?view=verification");
 
     fireEvent.click(await screen.findByRole("button", { name: "Expand" }));
-    expect(screen.getByText("suite-child")).toBeTruthy();
-    expect(screen.queryByText("invocation-child")).toBeNull();
+    expect(screen.getByTitle("suite-child")).toBeTruthy();
+    expect(screen.queryByTitle("invocation-child")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Expand" }));
-    expect(screen.getByText("invocation-child")).toBeTruthy();
+    expect(screen.getByTitle("invocation-child")).toBeTruthy();
     expect(screen.getByText("invocation")).toBeTruthy();
   });
 
@@ -195,6 +216,21 @@ describe("RunsList", () => {
       "default",
     );
     expect((screen.getByLabelText("from") as HTMLInputElement).value).toBe("2026-06-01");
+  });
+});
+
+describe("crumbsFor", () => {
+  it("names the run crumb by verification and number once the list knows it (#694)", () => {
+    const child = { ...leaf("01JCHILD", "pass"), verification: "signup", run_number: 4 };
+    const runs = [{ ...leaf("01JROOT", "pass"), kind: "run-set" as const, children: [child] }];
+    expect(crumbsFor("/run/01JCHILD/check/AC-1%3A%3AAC-1.1", runs)[1]).toEqual({
+      label: "signup #4",
+      title: "01JCHILD",
+      to: "/run/01JCHILD",
+    });
+    expect(crumbsFor("/run/01JROOT", runs)[1]).toEqual({ label: "login #1", title: "01JROOT" });
+    // Before the list loads, or for a run it lacks, the truncated ULID.
+    expect(crumbsFor("/run/01M7M0E6AAAAAAAAAAAAAAAAAB")[1].label).toBe("01M7M0E6AAAA…");
   });
 });
 

@@ -1,7 +1,8 @@
 // The run report rail's draggable width (#436): a per-viewer convenience
 // persisted to localStorage, clamped between the pre-#436 default (the
 // readable minimum) and ~60% of the viewport so the detail pane stays
-// usable. Mirrors `use-width-mode.ts`'s try/catch persistence.
+// usable. Mirrors `use-width-mode.ts`'s try/catch persistence. Whether the
+// rail is hidden (#694) is remembered the same way, under its own key.
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -11,6 +12,7 @@ export const RAIL_WIDTH_DEFAULT = 272;
 export const RAIL_WIDTH_STEP = 16;
 const RAIL_WIDTH_MAX_RATIO = 0.6;
 const STORAGE_KEY = "duhem-rail-width";
+const HIDDEN_KEY = "duhem-rail-hidden";
 
 function computeMax(): number {
   const viewport =
@@ -34,17 +36,26 @@ function readStored(max: number): number {
   }
 }
 
-function persist(width: number) {
+function persist(key: string, value: string) {
   try {
-    localStorage.setItem(STORAGE_KEY, String(width));
+    localStorage.setItem(key, value);
   } catch {
     /* private mode / storage disabled — in-memory only */
+  }
+}
+
+function readHidden(): boolean {
+  try {
+    return localStorage.getItem(HIDDEN_KEY) === "true";
+  } catch {
+    return false;
   }
 }
 
 export function useRailWidth() {
   const [max, setMax] = useState(computeMax);
   const [width, setWidth] = useState(() => readStored(computeMax()));
+  const [hidden, setHiddenState] = useState(readHidden);
 
   useEffect(() => {
     const onResize = () => setMax(computeMax());
@@ -63,7 +74,7 @@ export function useRailWidth() {
       setWidth((current) => {
         const clamped = clamp(next, max);
         if (clamped === current) return current;
-        persist(clamped);
+        persist(STORAGE_KEY, String(clamped));
         return clamped;
       });
     },
@@ -75,8 +86,15 @@ export function useRailWidth() {
     [setRailWidth],
   );
 
+  const setHidden = useCallback((next: boolean) => {
+    setHiddenState(next);
+    persist(HIDDEN_KEY, String(next));
+  }, []);
+
   return {
     width,
+    hidden,
+    setHidden,
     min: RAIL_WIDTH_DEFAULT,
     max,
     setRailWidth,

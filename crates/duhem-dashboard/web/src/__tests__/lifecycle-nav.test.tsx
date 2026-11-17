@@ -1,12 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CheckDetail, LifecycleBlock, RunDetail } from "../api";
 import { lifecycleEnclosesCheck, lifecycleKey } from "../lifecycle";
 import { RunTree } from "../views/RunScaffold";
 import { LifecycleEvidence } from "../views/LifecyclePage";
-import CheckPage from "../views/CheckPage";
-import { LifecycleList } from "../views/RunPage";
+import { runRoutes } from "../views/run-routes";
+import { LifecycleList, RunSummary } from "../views/RunPage";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -35,7 +35,7 @@ const blocks = [
 ];
 
 const run: RunDetail = {
-  run_id: "run-1", verification: "example", started_at: null, duration_ms: null, children: [], inputs: {}, verdict: "pass",
+  run_id: "run-1", verification: "example", run_number: 1, started_at: null, duration_ms: null, children: [], inputs: {}, verdict: "pass",
   status: "finished", setup_aborted: false, has_definition: false,
   lifecycle: blocks,
   criteria: [{ id: "AC-1", verdict: "pass", checks: [{ id: "AC-1.1", verdict: "pass" }] }],
@@ -91,7 +91,7 @@ describe("lifecycle navigation", () => {
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { value: scroll, configurable: true });
     const { container } = render(
       <MemoryRouter initialEntries={[`/run/run-1/check/AC-1%3A%3AAC-1.1?lifecycle=${lifecycleKey(blocks[2])}`]}>
-        <Routes><Route path="/run/:runId/check/:pair" element={<CheckPage />} /></Routes>
+        <Routes>{runRoutes}</Routes>
       </MemoryRouter>,
     );
     await waitFor(() => expect(screen.getAllByTestId("check-lifecycle-setup")).toHaveLength(4));
@@ -104,5 +104,51 @@ describe("lifecycle navigation", () => {
     ]);
     expect(setups[3].compareDocumentPosition(container.querySelector(".run-detail-surface")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await waitFor(() => expect(scroll).toHaveBeenCalledWith({ block: "start" }));
+  });
+
+  it("puts the bottom runway after the teardown, not between steps and teardown (#694)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(
+      url.includes("/checks/")
+        ? { criterion_id: "AC-1", check_id: "AC-1.1", verdict: "pass", spans: [], timeline: [], artifacts: [], lifecycle: blocks } satisfies CheckDetail
+        : run,
+    ), { status: 200 })));
+    const { container } = render(
+      <MemoryRouter initialEntries={["/run/run-1/check/AC-1%3A%3AAC-1.1"]}>
+        <Routes>{runRoutes}</Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getAllByTestId("check-lifecycle-teardown")).toHaveLength(3));
+    const surface = container.querySelector(".run-detail-surface")!;
+    const teardowns = screen.getAllByTestId("check-lifecycle-teardown");
+    // The runway is the bottom padding of `.run-detail-runway` (styles.css),
+    // so the runway follows whatever that element renders last.
+    const runway = container.querySelector(".run-detail-runway")!;
+    expect(runway).toBeTruthy();
+    expect(runway.contains(surface)).toBe(true);
+    expect(surface.classList.contains("run-detail-runway")).toBe(false);
+    expect(runway.lastElementChild?.contains(teardowns[teardowns.length - 1])).toBe(true);
+    expect(surface.compareDocumentPosition(teardowns[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("names a failed required cleanup beside the check-only filter chips (#694)", () => {
+    const required = { ...blocks[6], cleanup_policy: "required" as const };
+    render(<MemoryRouter><RunTree run={{ ...run, lifecycle: [...blocks.slice(0, 6), required] }} /><Location /></MemoryRouter>);
+    const note = screen.getByTestId("suite-filter-cleanup");
+    expect(note.textContent).toBe("Required cleanup failed: leaf");
+    fireEvent.click(screen.getByRole("link", { name: "leaf" }));
+    expect(screen.getByTestId("location").textContent).toBe("/run/run-1/lifecycle/60");
+  });
+
+  it("leaves the chips alone when only diagnostic cleanup failed", () => {
+    const diagnostic = { ...blocks[6], cleanup_policy: "diagnostic_only" as const };
+    render(<MemoryRouter><RunTree run={{ ...run, lifecycle: [...blocks.slice(0, 6), diagnostic] }} /></MemoryRouter>);
+    expect(screen.queryByTestId("suite-filter-cleanup")).toBeNull();
+  });
+
+  it("counts setup and cleanup outcomes beside the Summary tiles (#694)", () => {
+    const required = { ...blocks[6], cleanup_policy: "required" as const };
+    render(<MemoryRouter><RunSummary run={{ ...run, lifecycle: [...blocks.slice(0, 6), required] }} /></MemoryRouter>);
+    expect(screen.getByTestId("lifecycle-tally-setup").textContent).toBe("Setup4 passed · 0 failed");
+    expect(screen.getByTestId("lifecycle-tally-teardown").textContent).toBe("Cleanup2 passed · 1 failed (1 required)");
   });
 });

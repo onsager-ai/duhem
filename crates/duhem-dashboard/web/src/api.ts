@@ -17,6 +17,9 @@ export interface RunsListEntry {
   ci_url?: string;
   run_id: string;
   verification: string;
+  /** 1-based position among the store's runs of this verification, by
+   *  start time. Display only; `run_id` identifies the run. */
+  run_number: number;
   started_at: string | null;
   duration_ms: number | null;
   verdict: Verdict | null;
@@ -131,6 +134,7 @@ export interface RunDetail {
   body_verdict?: Verdict;
   run_id: string;
   verification: string;
+  run_number: number;
   started_at: string | null;
   duration_ms?: number | null;
   children?: RunChildDetail[];

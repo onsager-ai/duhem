@@ -6,7 +6,7 @@ import { carryFetched, foldRun } from "../fold";
 import { RunSummary } from "../views/RunPage";
 
 const run: RunDetail = {
-  run_id: "root", verification: "native", started_at: null, inputs: {},
+  run_id: "root", verification: "native", run_number: 1, started_at: null, inputs: {},
   verdict: "pass", status: "finished", setup_aborted: false, has_definition: false, criteria: [],
   native: [{
     run_id: "child", id: "rust-unit", layer: "unit", outcome: "fail", required: false,

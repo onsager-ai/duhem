@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 
 import type { RunDetail } from "../api";
 import { VerdictBadge } from "../ui";
-import { RunScaffold } from "./RunScaffold";
+import { useScaffoldRun } from "./RunScaffold";
 import { useVd } from "./definition-context";
 
 function causeLabel(verdict: string | null): string {
@@ -68,10 +68,6 @@ function CriterionEvidence({
 }
 
 export default function CriterionPage() {
-  const { runId = "", criterionId = "" } = useParams();
-  return (
-    <RunScaffold runId={runId} activeCriterion={criterionId}>
-      {(run) => <CriterionEvidence run={run} criterionId={criterionId} />}
-    </RunScaffold>
-  );
+  const { criterionId = "" } = useParams();
+  return <CriterionEvidence run={useScaffoldRun()} criterionId={criterionId} />;
 }

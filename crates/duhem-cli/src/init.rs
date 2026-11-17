@@ -526,16 +526,18 @@ pub fn run_init(
             }
             // The per-feature `duhem.yml` is always the first entry
             // `run` pushes (Pattern A: only one; Pattern B: pushed
-            // before the parent root manifest). Use that as the
-            // next-command pointer.
-            let vd_path = outcome
+            // before the parent root manifest). Point users at its
+            // directory, which both commands accept.
+            let vd_dir = outcome
                 .created
                 .first()
-                .cloned()
-                .unwrap_or_else(|| PathBuf::from("<verification>/duhem.yml"));
+                .and_then(|manifest| manifest.parent())
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("<verification>"));
             let _ = writeln!(stdout, "\nNext:");
-            let _ = writeln!(stdout, "  duhem validate {}", vd_path.display());
-            let _ = writeln!(stdout, "  duhem run      {}", vd_path.display());
+            let _ = writeln!(stdout, "  duhem validate {}", vd_dir.display());
+            let _ = writeln!(stdout, "  duhem run      {}", vd_dir.display());
             let _ = writeln!(
                 stdout,
                 "\nAuthoring guide: https://github.com/onsager-ai/duhem/blob/main/docs/getting-started.md"

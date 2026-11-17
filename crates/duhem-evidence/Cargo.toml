@@ -5,6 +5,7 @@ edition.workspace = true
 repository.workspace = true
 publish = false
 description = "Append-only run trace + blob writer for verification evidence."
+build = "build.rs"
 
 [dependencies]
 duhem-judge = { path = "../duhem-judge" }

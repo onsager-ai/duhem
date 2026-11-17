@@ -477,7 +477,7 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
             .bearer_auth("test-token")
             .header("content-type", "application/json")
             .header("x-duhem-bundle-version", "1")
-            .header("x-duhem-version", env!("CARGO_PKG_VERSION"))
+            .header("x-duhem-version", duhem_evidence::BUILD_VERSION)
             .header("x-duhem-content-hash", bundle.content_hash().unwrap())
             .body(bundle.wire_bytes().unwrap())
     };
@@ -498,7 +498,7 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
             .bearer_auth("test-token")
             .header("content-type", "application/json")
             .header("x-duhem-bundle-version", "1")
-            .header("x-duhem-version", "99.0.0")
+            .header("x-duhem-version", "99.0.0+abc1234")
             .header("x-duhem-content-hash", standalone.content_hash().unwrap())
             .json(&raw)
             .send()
@@ -508,8 +508,11 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
         let message = response.text().await.unwrap();
         assert!(
             message.contains(
-                "this run comes from a newer Duhem (client 99.0.0); upgrade this server ("
-            ),
+                "this run comes from a newer Duhem (client 99.0.0+abc1234); upgrade this server ("
+            ) && message.contains(&format!(
+                "upgrade this server ({})",
+                duhem_evidence::BUILD_VERSION
+            )),
             "{location}: {message}"
         );
         assert!(

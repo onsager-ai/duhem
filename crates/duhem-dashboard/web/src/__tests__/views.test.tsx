@@ -2,11 +2,12 @@
 // ordering, artifact rendering.
 
 import type { ReactElement } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RunsList, { matchesFilters, triageRank } from "../views/RunsList";
-import { crumbsFor } from "../components/layout/Breadcrumbs";
+import { Breadcrumbs, crumbsFor } from "../components/layout/Breadcrumbs";
+import { publishRunBreadcrumbDetail } from "../run-breadcrumb";
 import { RunsProvider } from "../runs-context";
 import {
   Artifacts,
@@ -31,6 +32,7 @@ function renderRuns(ui: ReactElement, path = "/runs") {
 
 afterEach(() => {
   cleanup();
+  publishRunBreadcrumbDetail("01M7M0E6AAAAAAAAAAAAAAAAAB", null);
   vi.unstubAllGlobals();
 });
 
@@ -236,6 +238,24 @@ describe("crumbsFor", () => {
       verification: "signup",
       run_number: 4,
     })[1].label).toBe("signup #4");
+  });
+});
+
+describe("Breadcrumbs run detail subscription", () => {
+  it("shows the published run detail and returns to Run when it clears", () => {
+    const runId = "01M7M0E6AAAAAAAAAAAAAAAAAB";
+    render(
+      <MemoryRouter initialEntries={[`/run/${runId}`]}>
+        <Breadcrumbs />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Run")).toBeTruthy();
+    act(() => publishRunBreadcrumbDetail(runId, { verification: "signup", run_number: 4 }));
+    expect(screen.getByText("signup #4")).toBeTruthy();
+
+    act(() => publishRunBreadcrumbDetail(runId, null));
+    expect(screen.getByText("Run")).toBeTruthy();
   });
 });
 

@@ -945,13 +945,17 @@ export function RunLayout() {
 // follow navigation.
 export function RunScaffold({ runId }: { runId: string }) {
   const { run, error, connection } = useRun(runId);
+  const runVerification = run?.verification;
+  const runNumber = run?.run_number;
   useEffect(() => {
     publishRunBreadcrumbDetail(
       runId,
-      run ? { verification: run.verification, run_number: run.run_number } : null,
+      runVerification !== undefined && runNumber !== undefined
+        ? { verification: runVerification, run_number: runNumber }
+        : null,
     );
     return () => publishRunBreadcrumbDetail(runId, null);
-  }, [runId, run]);
+  }, [runId, runVerification, runNumber]);
   const railWidth = useRailWidth();
   const workspaceRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLElement>(null);

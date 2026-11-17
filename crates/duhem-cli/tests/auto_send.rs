@@ -509,7 +509,10 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
         assert!(
             message.contains(
                 "this run comes from a newer Duhem (client 99.0.0+abc1234); upgrade this server ("
-            ) && message.contains(&format!("server {}", duhem_evidence::BUILD_VERSION)),
+            ) && message.contains(&format!(
+                "upgrade this server ({})",
+                duhem_evidence::BUILD_VERSION
+            )),
             "{location}: {message}"
         );
         assert!(

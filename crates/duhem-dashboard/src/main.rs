@@ -19,7 +19,7 @@ use duhem_evidence::SqliteStore;
 
 /// Read-only web dashboard over the Duhem evidence store.
 #[derive(Debug, Parser)]
-#[command(name = "duhem-dashboard", version)]
+#[command(name = "duhem-dashboard", version = duhem_evidence::BUILD_VERSION)]
 struct Cli {
     /// Evidence store (SQLite DB) to read runs from. Defaults to the
     /// working copy's project store under the duhem state dir.

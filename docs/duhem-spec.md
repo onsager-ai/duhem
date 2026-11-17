@@ -221,6 +221,14 @@ One execution of a verification against an artifact. Runs are idempotent given a
 
 A run's runtime-owned lifecycle is independent of its judge-owned verdict. Lifecycle is `running`, `finished`, `aborted`, or `orphaned`: the runtime emits a heartbeat every 10 seconds, writes a terminal marker on normal completion or a trapped termination signal, and readers classify an unterminated run as `orphaned` after 30 seconds without a heartbeat. `orphaned` is read-time policy, not a stored fact. A run may be `finished` without a verdict — notably the suite container that records shared environment provisioning but has no criteria to judge. Viewer connection state is neither lifecycle nor evidence; it remains local to each live SSE client.
 
+`duhem run` selects its evidence store in this order: the inherited parent
+store (`DUHEM_PARENT_RUN_ID` and `DUHEM_PARENT_DB_PATH`), an explicit `--db`,
+then the project default under the Duhem state directory (`DUHEM_HOME`
+honored). A nested run inherits its parent's append-only
+store so its `parent_run_id` and `origin: invocation` resolve in the same
+verification act, as established by #358. If an explicit `--db` differs from
+that inherited path, the CLI warns and continues in the parent store.
+
 ### 7.10 Native run
 
 A *native run* is the project's own verification (a test framework, an end-to-end runner or a static tool) executed by Duhem under `native:`. It is the project's own evidence, not independent verification: it can block the run gate and can be linked for navigation, but it is never a check and never satisfies a criterion. The name describes where the evidence comes from, not a policy, so it stays accurate if a later spec changes the native role.

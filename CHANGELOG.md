@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] `duhem run` documents nested evidence-store precedence and warns when an explicit `--db` is overridden by the parent store. (#634)
 - [clarifying] Document VS Code YAML schema setup with a CLI-version-matched release URL, workspace mapping and the limits of JSON Schema validation. (#392)
 - [clarifying] CLI and dashboard versions and upload skew errors include the build commit when available. (#687)
 

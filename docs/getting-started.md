@@ -64,7 +64,7 @@ To map the schema across workspace files instead, add this to
 Keep the schema tag matched to the installed CLI version. JSON Schema checks
 the document's structure and field types; it cannot check all rules enforced
 by Duhem, such as whether an action exists or references resolve. Run
-`duhem validate duhem.yml` for Duhem's full validation.
+`duhem validate .` for Duhem's full validation.
 
 ### Environment files and operational knobs
 

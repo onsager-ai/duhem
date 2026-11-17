@@ -21,12 +21,11 @@ fn main() {
 fn git_commit() -> Option<String> {
     let head_path = git_path("HEAD")?;
     println!("cargo:rerun-if-changed={}", head_path.display());
-    if let Ok(head) = std::fs::read_to_string(&head_path) {
-        if let Some(reference) = head.strip_prefix("ref: ").map(str::trim) {
-            if let Some(reference_path) = git_path(reference) {
-                println!("cargo:rerun-if-changed={}", reference_path.display());
-            }
-        }
+    if let Ok(head) = std::fs::read_to_string(&head_path)
+        && let Some(reference) = head.strip_prefix("ref: ").map(str::trim)
+        && let Some(reference_path) = git_path(reference)
+    {
+        println!("cargo:rerun-if-changed={}", reference_path.display());
     }
 
     Command::new("git")

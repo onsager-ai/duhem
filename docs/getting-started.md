@@ -36,6 +36,36 @@ To manage the browser yourself (air-gapped hosts, a pinned system
 Chromium), set `DUHEM_NO_BROWSER_INSTALL=1` to turn auto-provision off and
 `DUHEM_BROWSER_EXECUTABLE=/path/to/chrome` to point at your binary.
 
+### Editor support
+
+For YAML completion and structural validation in VS Code, install the
+`redhat.vscode-yaml` extension. Use the schema tag that matches your
+installed CLI version from `duhem --version`; the examples below use `v0.9.0`.
+Add this comment to the top of an individual `duhem.yml`:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/onsager-ai/duhem/v0.9.0/schema/duhem.schema.json
+```
+
+To map the schema across workspace files instead, add this to
+`.vscode/settings.json`:
+
+```json
+{
+  "yaml.schemas": {
+    "https://raw.githubusercontent.com/onsager-ai/duhem/v0.9.0/schema/duhem.schema.json": [
+      "duhem.yml",
+      "**/duhem.yml"
+    ]
+  }
+}
+```
+
+Keep the schema tag matched to the installed CLI version. JSON Schema checks
+the document's structure and field types; it cannot check all rules enforced
+by Duhem, such as whether an action exists or references resolve. Run
+`duhem validate duhem.yml` for Duhem's full validation.
+
 ### Environment files and operational knobs
 
 `duhem run` loads the nearest `.env` starting at the root-manifest directory

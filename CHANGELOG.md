@@ -30,6 +30,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 ## Unreleased
 
 - [clarifying] Document that filtered runs with excluded criteria remain `inconclusive:empty_aggregation` and show how to gate selected checks from JSON claim scope and totals. (#644)
+- [clarifying] Document VS Code YAML schema setup with a CLI-version-matched release URL, workspace mapping and the limits of JSON Schema validation. (#392)
 - [clarifying] CLI and dashboard versions and upload skew errors include the build commit when available. (#687)
 
 - [additive] Engine errors seal runs with an aborted terminal carrying optional error text; aborted replay and server ingest validate completed judgments without inventing a run verdict, and the dashboard displays the error. (#680)

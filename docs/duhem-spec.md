@@ -223,8 +223,8 @@ A run's runtime-owned lifecycle is independent of its judge-owned verdict. Lifec
 
 `duhem run` selects its evidence store in this order: the inherited parent
 store (`DUHEM_PARENT_RUN_ID` and `DUHEM_PARENT_DB_PATH`), an explicit `--db`,
-then the project default (`.duhem/duhem.db` under the current working
-directory or `DUHEM_HOME`). A nested run inherits its parent's append-only
+then the project default under the Duhem state directory (`DUHEM_HOME`
+honored). A nested run inherits its parent's append-only
 store so its `parent_run_id` and `origin: invocation` resolve in the same
 verification act, as established by #358. If an explicit `--db` differs from
 that inherited path, the CLI warns and continues in the parent store.

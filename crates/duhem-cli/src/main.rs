@@ -49,7 +49,7 @@ use crate::reporter_config::PluginRegistry;
 
 /// Duhem — holistic verification for AI-delivered software.
 #[derive(Debug, Parser)]
-#[command(name = "duhem", version = VERSION_STRING, about, long_about = None)]
+#[command(name = "duhem", version = VERSION_STRING.as_str(), about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,
@@ -58,12 +58,13 @@ struct Cli {
 /// `--version` output. Bakes the Verification Definition schema version
 /// in alongside the CLI version so authors can see at a glance which
 /// schema `duhem validate` / `duhem run` will parse against.
-const VERSION_STRING: &str = concat!(
-    env!("CARGO_PKG_VERSION"),
-    " (schema v",
-    duhem_schema::schema_version!(),
-    ")"
-);
+static VERSION_STRING: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    format!(
+        "{} (schema v{})",
+        duhem_evidence::BUILD_VERSION,
+        duhem_schema::schema_version!()
+    )
+});
 
 #[derive(Debug, Subcommand)]
 enum Cmd {

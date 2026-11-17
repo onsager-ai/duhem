@@ -108,7 +108,10 @@ fn ship_posts_the_bundle_with_hash_and_token() {
     assert!(head.starts_with("post /ingest"), "head: {head}");
     assert!(head.contains("x-duhem-bundle-version: 1"), "head: {head}");
     assert!(
-        head.contains(&format!("x-duhem-version: {}", env!("CARGO_PKG_VERSION"))),
+        head.contains(&format!(
+            "x-duhem-version: {}",
+            duhem_evidence::BUILD_VERSION
+        )),
         "head: {head}"
     );
     assert!(head.contains("x-duhem-content-hash: "), "head: {head}");

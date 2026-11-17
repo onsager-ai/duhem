@@ -67,6 +67,7 @@ import { CiContext } from "../components/CiContext";
 import { VerdictMark } from "../components/brand/VerdictMark";
 import { CopyRunId, runNumberLabel } from "../components/RunIdentity";
 import { DefinitionProvider, useVd } from "./definition-context";
+import { publishRunBreadcrumbDetail } from "../run-breadcrumb";
 import {
   criteriaTally,
   finishedAt,
@@ -944,6 +945,13 @@ export function RunLayout() {
 // follow navigation.
 export function RunScaffold({ runId }: { runId: string }) {
   const { run, error, connection } = useRun(runId);
+  useEffect(() => {
+    publishRunBreadcrumbDetail(
+      runId,
+      run ? { verification: run.verification, run_number: run.run_number } : null,
+    );
+    return () => publishRunBreadcrumbDetail(runId, null);
+  }, [runId, run]);
   const railWidth = useRailWidth();
   const workspaceRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLElement>(null);

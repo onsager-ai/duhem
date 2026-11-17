@@ -229,8 +229,13 @@ describe("crumbsFor", () => {
       to: "/run/01JCHILD",
     });
     expect(crumbsFor("/run/01JROOT", runs)[1]).toEqual({ label: "login #1", title: "01JROOT" });
-    // Before the list loads, or for a run it lacks, the truncated ULID.
-    expect(crumbsFor("/run/01M7M0E6AAAAAAAAAAAAAAAAAB")[1].label).toBe("01M7M0E6AAAA…");
+    // Before either source loads, the crumb stays neutral and does not expose a ULID prefix.
+    expect(crumbsFor("/run/01M7M0E6AAAAAAAAAAAAAAAAAB")[1].label).toBe("Run");
+    expect(crumbsFor("/run/01M7M0E6AAAAAAAAAAAAAAAAAB", [])[1].label).toBe("Run");
+    expect(crumbsFor("/run/01M7M0E6AAAAAAAAAAAAAAAAAB", [], {
+      verification: "signup",
+      run_number: 4,
+    })[1].label).toBe("signup #4");
   });
 });
 

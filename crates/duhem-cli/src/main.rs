@@ -59,7 +59,7 @@ struct Cli {
 /// in alongside the CLI version so authors can see at a glance which
 /// schema `duhem validate` / `duhem run` will parse against.
 const VERSION_STRING: &str = concat!(
-    env!("CARGO_PKG_VERSION"),
+    duhem_evidence::BUILD_VERSION,
     " (schema v",
     duhem_schema::schema_version!(),
     ")"

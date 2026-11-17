@@ -214,9 +214,10 @@ enum Cmd {
         #[arg(long = "filter", value_name = "PATTERN")]
         filter: Vec<String>,
         /// Evidence store (SQLite DB) the run is recorded into.
-        /// Defaults to the working copy's project store under the
-        /// duhem state dir (`DUHEM_HOME` honored); created and
-        /// migrated if missing.
+        /// A nested run always inherits its parent's store, even when
+        /// `--db` is supplied. Otherwise this path wins over the project
+        /// default under the duhem state dir (`DUHEM_HOME` honored).
+        /// Created and migrated if missing.
         #[arg(long = "db", value_name = "PATH")]
         db: Option<PathBuf>,
         /// Shared logical identity when sharding (also allowed on manifests).

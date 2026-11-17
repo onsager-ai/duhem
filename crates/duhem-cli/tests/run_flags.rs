@@ -224,6 +224,8 @@ fn default_reporter_prints_verdict_then_check_totals() {
         .arg(&path)
         .arg("--db")
         .arg(&db)
+        .env_remove(duhem_runtime::PARENT_RUN_ID_ENV)
+        .env_remove(duhem_runtime::PARENT_DB_PATH_ENV)
         .output()
         .expect("spawn duhem");
 
@@ -300,6 +302,8 @@ fn json_reporter_emits_leaf_shape_for_duhem_yml() {
         .arg("json")
         .arg("--db")
         .arg(&db)
+        .env_remove(duhem_runtime::PARENT_RUN_ID_ENV)
+        .env_remove(duhem_runtime::PARENT_DB_PATH_ENV)
         .output()
         .expect("spawn duhem");
 
@@ -327,6 +331,11 @@ fn json_reporter_emits_leaf_shape_for_duhem_yml() {
         db.to_str().unwrap(),
         "store should be the --db path, got {:?}",
         v["store"],
+    );
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("warning: `--db` path"),
+        "a standalone --db should not warn: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
 }
 
@@ -2303,6 +2312,13 @@ criteria:
         out.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains(&ignored_child_db.display().to_string()));
+    assert!(stderr.contains(&parent_db.display().to_string()));
+    assert!(
+        stderr.contains("parent store"),
+        "expected precedence warning: {stderr}"
     );
     assert!(
         !ignored_child_db.exists(),

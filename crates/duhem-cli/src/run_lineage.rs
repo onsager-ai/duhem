@@ -27,6 +27,15 @@ pub(crate) async fn open(explicit_db: Option<&Path>) -> Result<RunStore, String>
     });
     // Nested runs cannot detach from their parent's verification act:
     // the inherited path wins over an invoked argv's explicit --db.
+    if let (Some(parent_path), Some(explicit_path)) = (parent_db.as_deref(), explicit_db)
+        && parent_path != explicit_path
+    {
+        eprintln!(
+            "warning: `--db` path {} is ignored for a nested run; recording in the parent store {} so the child remains part of its parent's verification act",
+            explicit_path.display(),
+            parent_path.display()
+        );
+    }
     let db_path = match (parent_db, explicit_db) {
         (Some(path), _) => path,
         (None, Some(path)) => path.to_path_buf(),

@@ -1,6 +1,6 @@
 //! Small run-detail projections kept out of the evidence reader fold.
 
-use super::tree::{check_totals, descendant_run_ids, suite_children, tree_verdict};
+use super::tree::{check_totals, descendant_run_ids, run_numbers, suite_children, tree_verdict};
 use super::{ReaderError, build_run_detail, distributed, native};
 use crate::model::{RunChildDetail, RunDetail};
 use chrono::Utc;
@@ -58,6 +58,10 @@ impl super::EvidenceReader {
         let mut detail = build_run_detail(&run);
         native::populate(self, &run, &tree_ids, &mut detail).await?;
         detail.children = children;
+        detail.run_number = run_numbers(&records)
+            .get(run_id)
+            .copied()
+            .unwrap_or_default();
         if tree_wide {
             detail.verdict = tree_verdict(self.store.as_ref(), &records, &tree_ids).await?;
         }

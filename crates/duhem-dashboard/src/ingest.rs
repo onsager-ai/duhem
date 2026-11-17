@@ -61,7 +61,7 @@ async fn ingest(State(state): State<IngestState>, headers: HeaderMap, body: Byte
         let client_version = header("x-duhem-version").unwrap_or("unknown");
         let message = format!(
             "this run comes from a newer Duhem (client {client_version}); upgrade this server ({}) to at least the client's version",
-            env!("CARGO_PKG_VERSION")
+            duhem_evidence::BUILD_VERSION
         );
         return (StatusCode::BAD_REQUEST, message).into_response();
     }

@@ -193,8 +193,8 @@ describe("RunsList", () => {
     const { container } = renderRuns(<RunsList />, "/runs?view=triage");
     await screen.findByTestId("triage-view");
     const firstTable = container.querySelector('[aria-label="Runs needing attention"]');
-    const ids = [...(firstTable?.querySelectorAll("tbody a[href*='/run/']") ?? [])].map(
-      (link) => link.textContent,
+    const ids = [...(firstTable?.querySelectorAll("tbody a[href*='/run/'][title]") ?? [])].map(
+      (link) => link.getAttribute("title"),
     );
     expect(ids).toEqual(["live-run", "fail-run", "inc-run"]);
     expect(screen.getByRole("region", { name: "Passing history" })).toBeTruthy();

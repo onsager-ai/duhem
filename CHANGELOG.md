@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+## v0.9.1 — 2026-11-17
+
 - [clarifying] Document that filtered runs with excluded criteria remain `inconclusive:empty_aggregation` and show how to gate selected checks from JSON claim scope and totals. (#644)
 - [clarifying] `duhem run` documents nested evidence-store precedence and warns when an explicit `--db` is overridden by the parent store. (#634)
 - [clarifying] Document VS Code YAML schema setup with a CLI-version-matched release URL, workspace mapping and the limits of JSON Schema validation. (#392)

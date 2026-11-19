@@ -224,6 +224,28 @@
       ],
       "type": "object"
     },
+    "Include": {
+      "anyOf": [
+        {
+          "description": "Existing relative-path form; resolved beside the declaring document.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Only `pages:` and `flows:` may appear in the imported document.",
+          "properties": {
+            "catalog": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "catalog"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "A local partial manifest, or a catalog-only import anchored at the suite root."
+    },
     "InconclusivePolicy": {
       "description": "How a criterion-level `inconclusive` verdict is treated at run aggregation (spec #66). Closed enum.",
       "oneOf": [
@@ -695,9 +717,9 @@
           "type": "object"
         },
         "includes": {
-          "description": "Other manifest files whose config this one composes in (`docs/duhem-spec.md` §10.4, spec #67). Each path is relative to *this* manifest's parent directory and resolves to a **partial** manifest (every field optional, no `manifest_version:`) — see [`PartialRootManifest`]. Same path discipline as `verifications:` entries: no absolute paths, no `..` escape.\n\nComposition is **root-wins**: an include fills only the keys this manifest leaves absent (for nested maps like `profiles:`, key-by-key, still root-wins per leaf key). Manifest `inputs:` declarations overlay by input name. `verifications:` (and `includes:` themselves) are *concatenated* rather than overlaid — the root's entries first, then each include's, in declared order. Nested includes are resolved depth-first up to depth 3; cycles are a hard error. The typical shape is a team-shared `.duhem.shared.yml` plus a gitignored per-developer `.duhem.local.yml`. Additive: a manifest without `includes:` behaves byte-identically to before.",
+          "description": "Other manifest files whose config this one composes in (`docs/duhem-spec.md` §10.4, spec #67). Each path is relative to *this* manifest's parent directory and resolves to a **partial** manifest (every field optional, no `manifest_version:`) — see [`PartialRootManifest`]. Same path discipline as `verifications:` entries: no absolute paths, no `..` escape. A mapping `{ catalog: shared.yml }` instead imports only `pages:` and `flows:` from the suite root: the nearest ancestor directory with a discoverable root manifest, or this root's directory if none exists, capped at `.git`. The anchor is fixed for nested includes. Catalog paths refuse absolute paths, `..`, and symlink escapes; catalog files reject every key except `pages:`/`flows:`.\n\nComposition is **root-wins**: an include fills only the keys this manifest leaves absent (for nested maps like `profiles:`, key-by-key, still root-wins per leaf key). Manifest `inputs:` declarations overlay by input name. `verifications:` (and `includes:` themselves) are *concatenated* rather than overlaid — the root's entries first, then each include's, in declared order. Nested includes are resolved depth-first up to depth 3; cycles are a hard error. The typical shape is a team-shared `.duhem.shared.yml` plus a gitignored per-developer `.duhem.local.yml`. Additive: a manifest without `includes:` behaves byte-identically to before.",
           "items": {
-            "type": "string"
+            "$ref": "#/definitions/Include"
           },
           "type": "array"
         },

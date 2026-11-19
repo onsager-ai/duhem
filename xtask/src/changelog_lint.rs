@@ -218,10 +218,41 @@ fn lint_entry(line: &str, line_number: usize, violations: &mut Vec<Violation>) {
 }
 
 fn has_placeholder_ref(line: &str) -> bool {
-    line.to_ascii_lowercase().contains("#tbd")
-        || line.contains("(#)")
-        || line.contains("#N")
-        || line.contains("#N/A")
+    static BACKTICKS: OnceLock<Regex> = OnceLock::new();
+    let backticks = BACKTICKS.get_or_init(|| Regex::new(r"`+").expect("backtick regex is valid"));
+    let mut runs = backticks.find_iter(line);
+    let mut prose_start = 0;
+
+    while let Some(open) = runs.next() {
+        // Code spans close with a backtick run of the same length. An
+        // unmatched run is literal prose, so it must not hide placeholders.
+        let mut closing_runs = runs.clone();
+        if let Some(close) = closing_runs.find(|close| close.len() == open.len()) {
+            if has_placeholder_token(&line[prose_start..open.start()]) {
+                return true;
+            }
+            prose_start = close.end();
+            runs = closing_runs;
+        }
+    }
+    has_placeholder_token(&line[prose_start..])
+}
+
+fn has_placeholder_token(prose: &str) -> bool {
+    static PLACEHOLDER: OnceLock<Regex> = OnceLock::new();
+    let placeholder = PLACEHOLDER.get_or_init(|| {
+        Regex::new(r"#(?i:TBD)|#N/A|#N|\(#\)").expect("placeholder regex is valid")
+    });
+    placeholder.find_iter(prose).any(|token| {
+        !prose[..token.start()]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_alphanumeric)
+            && !prose[token.end()..]
+                .chars()
+                .next()
+                .is_some_and(char::is_alphanumeric)
+    })
 }
 
 fn entry_regex() -> &'static Regex {
@@ -407,6 +438,86 @@ mod tests {
                 messages(&source, &[])
                     .iter()
                     .any(|message| message.contains("placeholder refs"))
+            );
+        }
+    }
+
+    #[test]
+    fn run_number_code_span_is_not_a_placeholder_ref() {
+        let entry = "- [additive] Lists show runs as `#N` with the ULID copyable. (#694)";
+        assert!(messages(entry, &[]).is_empty());
+    }
+
+    #[test]
+    fn anchors_and_values_in_code_spans_are_not_placeholder_refs() {
+        let entry = "- [clarifying] Mentions `#Nested` and `#NaN`. (#12)";
+        assert!(messages(entry, &[]).is_empty());
+    }
+
+    #[test]
+    fn code_spans_ignore_all_placeholder_forms() {
+        for text in [
+            "`#TBD` and `#tbd` and `(#)` and `#N` and `#N/A`",
+            "``#N with a ` backtick``",
+            "```#TBD with `` backticks```",
+            "`#N with `` backticks`",
+        ] {
+            let entry = format!("- [clarifying] Mentions {text}. (#12)");
+            assert!(messages(&entry, &[]).is_empty(), "{entry}");
+        }
+    }
+
+    #[test]
+    fn placeholder_prefixes_in_non_reference_text_are_accepted() {
+        for text in [
+            "#Nested",
+            "#NaN",
+            "#N2",
+            "#N/Anything",
+            "#TBDone",
+            "#tbd2",
+            "(#)suffix",
+            "word#N",
+            "word#TBD",
+            "#Né",
+            "é#N",
+        ] {
+            let entry = format!("- [clarifying] Mentions {text}. (#12)");
+            assert!(messages(&entry, &[]).is_empty(), "{entry}");
+        }
+    }
+
+    #[test]
+    fn standalone_placeholder_refs_in_prose_are_rejected() {
+        for text in ["#N", "#N/A", "#TBD", "#tbd", "#TbD", "(#)"] {
+            let entry = format!("- [additive] See {text} for details. (#12)");
+            assert!(
+                messages(&entry, &[])
+                    .iter()
+                    .any(|message| message.contains("placeholder refs")),
+                "{entry}"
+            );
+        }
+    }
+
+    #[test]
+    fn code_spans_do_not_hide_placeholders_in_surrounding_prose() {
+        for text in [
+            "#N before `code`",
+            "`code` then #N",
+            "`code` then #N then `more code`",
+            "`#N` then #TBD",
+            "`#N` then (#)",
+            "`#N` then #N/A",
+            "`unclosed #N",
+            "``mismatched #N`",
+        ] {
+            let entry = format!("- [additive] Mentions {text}. (#12)");
+            assert!(
+                messages(&entry, &[])
+                    .iter()
+                    .any(|message| message.contains("placeholder refs")),
+                "{entry}"
             );
         }
     }

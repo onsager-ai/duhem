@@ -46,6 +46,8 @@ pub enum LoadError {
     AbsolutePath { manifest: PathBuf, entry: PathBuf },
     #[error("{manifest}: entry path `{entry}` escapes the manifest's parent directory via `..`")]
     PathEscape { manifest: PathBuf, entry: PathBuf },
+    #[error("{manifest}: catalog `{entry}` resolves outside the suite root")]
+    CatalogEscaped { manifest: PathBuf, entry: PathBuf },
     #[error("{manifest}: self-reference cycle on `{entry}`")]
     SelfReference { manifest: PathBuf, entry: PathBuf },
     #[error("{manifest}: glob pattern `{pattern}` is invalid: {source}")]

@@ -682,6 +682,26 @@ requested leaf. A leaf with an unresolved `$pages.*` or `call:` name and
 no discoverable manifest fails at validate/run time naming exactly what
 it needs.
 
+For an independently run scoped manifest, use a catalog-only import:
+
+```yaml
+# .duhem/regression/duhem.yml
+manifest_version: 1
+includes:
+  - catalog: shared.yml
+verifications:
+  - path: check.yml
+```
+
+With an enclosing `.duhem/duhem.yml`, this reads `.duhem/shared.yml`,
+which may contain only `pages:` and `flows:`. The anchor is the nearest
+ancestor root manifest's directory, bounded by `.git`, or the scoped root's
+own directory if none exists. Imports in nested partials keep the same
+anchor. Paths refuse absolute paths, `..`, and symlinks escaping the anchor.
+The enclosing suite's provisioning, profiles and verification list are not
+inherited. Ordinary string includes remain relative to the declaring file;
+root entries win over imports, and leaf-local catalog entries win last.
+
 ### Secret inputs and acquired credentials
 
 Never commit a credential as an input `default:` or pass it in a

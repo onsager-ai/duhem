@@ -1,0 +1,17 @@
+verification: Shared sign-in catalog from an independent scope
+spec_ref: https://github.com/onsager-ai/duhem/issues/379
+criteria:
+  - id: AC-1
+    description: A scoped suite can use shared sign-in behavior when run independently.
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/navigate
+            with:
+              url: "data:text/html,<label>Username<input aria-label='Username'></label><label>Password<input aria-label='Password' type='password'></label><button onclick=\"document.querySelector('h1').hidden=false\">Sign In</button><h1 hidden>Welcome</h1>"
+          - id: login
+            description: Sign in using the shared flow and page catalog
+            call: sign_in
+            with: { user: first@example.com, password: first-secret }
+        assertions:
+          - $steps.login.outputs.signed_in == true

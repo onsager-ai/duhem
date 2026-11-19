@@ -35,6 +35,16 @@ fn init_then_validate_passes() {
         "init stderr: {}",
         String::from_utf8_lossy(&init.stderr)
     );
+    let stdout = String::from_utf8(init.stdout).expect("utf8 init stdout");
+    let target_path = target.display().to_string();
+    assert!(
+        stdout.contains(&format!("  duhem validate {target_path}\n")),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!("  duhem run      {target_path}\n")),
+        "{stdout}"
+    );
 
     let validate = Command::new(bin())
         .args(["validate"])
@@ -47,6 +57,35 @@ fn init_then_validate_passes() {
         String::from_utf8_lossy(&validate.stderr)
     );
     assert_eq!(validate.stdout, b"OK\n");
+}
+
+#[test]
+fn pattern_b_init_next_commands_use_feature_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("feature");
+    let init = Command::new(bin())
+        .args(["init"])
+        .arg(&target)
+        .args(["--pattern", "B", "--name", "feature"])
+        .output()
+        .expect("spawn init");
+    assert_eq!(
+        init.status.code(),
+        Some(3),
+        "init stderr: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let stdout = String::from_utf8(init.stdout).expect("utf8 init stdout");
+    let target_path = target.display().to_string();
+    assert!(
+        stdout.contains(&format!("  duhem validate {target_path}\n")),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!("  duhem run      {target_path}\n")),
+        "{stdout}"
+    );
 }
 
 /// Full `init → validate → run` against `https://example.com`.

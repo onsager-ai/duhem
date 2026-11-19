@@ -1,3 +1,9 @@
+# Shared `pages:` locator catalog — worked example (#366)
+#
+# Share a two-level locator catalog through `includes:` and use the same
+# entry from sibling leaves. Read `pages.yml` for the catalog, then
+# `first/duhem.yml` and `second/duhem.yml` for its consumers, and
+# `parameterized/duhem.yml` for a parameterized entry (#495).
 manifest_version: 1
 includes:
   - pages.yml

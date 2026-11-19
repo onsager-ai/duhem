@@ -1,3 +1,8 @@
+# Parameterized `flows:` sign-in — worked example (#367)
+#
+# Reuse one parameterized sign-in sequence from sibling leaves while
+# keeping expanded-step evidence. Read `flows.yml` for the catalog, then
+# `first/duhem.yml` and `second/duhem.yml` for its consumers.
 manifest_version: 1
 includes:
   - flows.yml

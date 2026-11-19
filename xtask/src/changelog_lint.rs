@@ -220,19 +220,25 @@ fn lint_entry(line: &str, line_number: usize, violations: &mut Vec<Violation>) {
 fn has_placeholder_ref(line: &str) -> bool {
     static BACKTICKS: OnceLock<Regex> = OnceLock::new();
     let backticks = BACKTICKS.get_or_init(|| Regex::new(r"`+").expect("backtick regex is valid"));
-    let mut runs = backticks.find_iter(line);
+    let runs: Vec<_> = backticks.find_iter(line).collect();
+    let mut index = 0;
     let mut prose_start = 0;
 
-    while let Some(open) = runs.next() {
+    while index < runs.len() {
+        let open = &runs[index];
+        index += 1;
         // Code spans close with a backtick run of the same length. An
         // unmatched run is literal prose, so it must not hide placeholders.
-        let mut closing_runs = runs.clone();
-        if let Some(close) = closing_runs.find(|close| close.len() == open.len()) {
+        if let Some(offset) = runs[index..]
+            .iter()
+            .position(|close| close.len() == open.len())
+        {
+            let close = &runs[index + offset];
             if has_placeholder_token(&line[prose_start..open.start()]) {
                 return true;
             }
             prose_start = close.end();
-            runs = closing_runs;
+            index += offset + 1;
         }
     }
     has_placeholder_token(&line[prose_start..])

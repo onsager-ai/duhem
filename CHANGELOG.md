@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+## v0.9.2 — 2026-11-20
+
 - [additive] Scoped root manifests can import shared flows and pages with repository-root-anchored `includes: [{catalog: .duhem/shared.yml}]`, without symlinks or inheriting parent provisioning and verifications. (#379)
 - [clarifying] `duhem init` prints the directory form in its `Next:` hint. (#698)
 - [additive] Dashboard runs list and run detail carry `run_number`, shown as a per-verification number with the ULID copyable; the run header is one compact line that names a failed setup or required cleanup, the run page keeps one scaffold across tabs and checks, and the Results rail can be hidden or collapsed. (#694)

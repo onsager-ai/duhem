@@ -59,7 +59,7 @@ runs:
           echo "version=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
           echo "is_release=true" >> "$GITHUB_OUTPUT"
           echo "npm_tag=latest" >> "$GITHUB_OUTPUT"
-          echo "Release ${TAG_VERSION} (publish enabled if NPM_TOKEN present)"
+          echo "Release ${TAG_VERSION} (publish enabled)"
         else
           echo "version=${CARGO_VERSION}" >> "$GITHUB_OUTPUT"
           echo "is_release=false" >> "$GITHUB_OUTPUT"

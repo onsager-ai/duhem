@@ -10,8 +10,8 @@
  *   node npm/scripts/publish.mjs --target main      [--tag latest] [--dry-run]
  *
  * `--dry-run` runs `npm publish --dry-run` (packs + validates, never uploads).
- * Real publishes require NODE_AUTH_TOKEN in the environment (set by the
- * workflow from secrets.NPM_TOKEN); the workflow gates this on a real tag.
+ * Real publishes authenticate through npm trusted publishing (GitHub OIDC,
+ * `id-token: write` in release.yml); the workflow gates this on a real tag.
  */
 
 import { execFileSync } from 'node:child_process';

@@ -5,14 +5,15 @@
 #
 # Triggers:
 #   push tag v*        — real release: build, attach to GitHub Release, and
-#                        publish to npm IFF secrets.NPM_TOKEN is configured.
+#                        publish to npm.
 #   workflow_dispatch  — dry-run: build + package + `npm publish --dry-run`,
-#                        but NEVER publish and NEVER cut a Release. Lets the
-#                        whole pipeline be verified before NPM_TOKEN exists.
+#                        but NEVER publish and NEVER cut a Release.
 #
-# Publish guard: the `meta` job folds is-release (real tag) AND token-present
-# into a single `publish` output. A dry-run, or a tag pushed before the token
-# is added, packages everything but uploads nothing.
+# npm publishing uses trusted publishing (GitHub OIDC): no npm token is
+# stored. Each package (`duhem` and every `@duhem/cli-*`) must list this
+# repository and `release.yml` as its trusted publisher on npmjs.com, and the
+# publish jobs need `id-token: write`. npm 11.5.1+ is required; Node 24 ships it.
+# Only a real tag publishes; a dry-run packages everything but uploads nothing.
 
 name: Release
 
@@ -33,7 +34,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       is-release: ${{ steps.version.outputs.is-release }}
       npm-tag: ${{ steps.version.outputs.npm-tag }}
-      publish: ${{ steps.gate.outputs.publish }}
+      publish: ${{ steps.version.outputs.is-release }}
     steps:
       - uses: actions/checkout@v7
 
@@ -43,20 +44,6 @@ jobs:
           event-name: ${{ github.event_name }}
           ref: ${{ github.ref }}
 
-      # secrets.* is not available in job/step `if:` — read it into an env var
-      # here and fold token-presence + is-release into one boolean output that
-      # downstream publish steps gate on.
-      - id: gate
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ "${{ steps.version.outputs.is-release }}" = "true" ] && [ -n "$NPM_TOKEN" ]; then
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-            echo "Publish ENABLED (real tag + NPM_TOKEN present)."
-          else
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "Publish DISABLED (dry-run, or NPM_TOKEN not configured). Build + package only."
-          fi
 
   build:
     name: Build ${{ matrix.platform }}
@@ -149,6 +136,11 @@ jobs:
     name: Publish platform packages
     needs: [meta, build]
     runs-on: ubuntu-latest
+    # Trusted publishing: npm exchanges this job's OIDC token for a
+    # short-lived publish credential and records provenance.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -172,14 +164,17 @@ jobs:
 
       - name: Publish platform packages
         if: needs.meta.outputs.publish == 'true'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: node npm/scripts/publish.mjs --target platforms --tag ${{ needs.meta.outputs.npm-tag }}
 
   publish-main:
     name: Publish main package
     needs: [meta, build, publish-platforms]
     runs-on: ubuntu-latest
+    # Trusted publishing: npm exchanges this job's OIDC token for a
+    # short-lived publish credential and records provenance.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -201,6 +196,4 @@ jobs:
 
       - name: Publish main package
         if: needs.meta.outputs.publish == 'true'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: node npm/scripts/publish.mjs --target main --tag ${{ needs.meta.outputs.npm-tag }}

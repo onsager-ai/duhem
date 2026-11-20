@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::manifest::{LoadError, RootManifest};
-use crate::manifest_compose::walk_ancestors_for_manifest_excluding;
 use crate::manifest_path::{canonical_or_self, validate_entry_path};
 use crate::verification::{FlowCatalog, PageCatalog};
 
@@ -19,20 +18,16 @@ struct Catalog {
     flows: FlowCatalog,
 }
 
-/// The nearest enclosing manifest supplies an anchor, never inherited config.
+/// The nearest repository root supplies an anchor, independent of manifests.
 /// Keep this fixed for all imports in one composition, including nested partials.
-fn suite_root(root_manifest: &Path) -> Result<PathBuf, LoadError> {
+fn suite_root(root_manifest: &Path) -> PathBuf {
     let parent = root_manifest.parent().unwrap_or_else(|| Path::new("."));
-    if !parent.join(".git").exists()
-        && let Some(ancestor) = parent.parent()
-    {
-        match walk_ancestors_for_manifest_excluding(ancestor, Some(root_manifest)) {
-            Ok(manifest) => return Ok(manifest.parent().unwrap().to_path_buf()),
-            Err(LoadError::ManifestNotFound { .. }) => {}
-            Err(error) => return Err(error),
+    for ancestor in parent.ancestors() {
+        if ancestor.join(".git").exists() {
+            return ancestor.to_path_buf();
         }
     }
-    Ok(parent.to_path_buf())
+    parent.to_path_buf()
 }
 
 pub(crate) fn merge_catalog(
@@ -42,7 +37,7 @@ pub(crate) fn merge_catalog(
     effective: &mut RootManifest,
 ) -> Result<(), LoadError> {
     validate_entry_path(declaring_path, catalog)?;
-    let root = suite_root(root_manifest)?;
+    let root = suite_root(root_manifest);
     let path = root.join(catalog);
     let canonical = std::fs::canonicalize(&path).map_err(|source| LoadError::Io {
         path: path.clone(),

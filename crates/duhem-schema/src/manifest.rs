@@ -39,10 +39,11 @@ pub struct RootManifest {
     /// `manifest_version:`) — see [`PartialRootManifest`]. Same path
     /// discipline as `verifications:` entries: no absolute paths, no
     /// `..` escape.
-    /// A mapping `{ catalog: shared.yml }` instead imports only `pages:`
-    /// and `flows:` from the suite root: the nearest ancestor directory
-    /// with a discoverable root manifest, or this root's directory if
-    /// none exists, capped at `.git`. The anchor is fixed for nested
+    /// A mapping `{ catalog: .duhem/shared.yml }` instead imports only `pages:`
+    /// and `flows:` from the repository root: the nearest ancestor directory
+    /// of the invoked root manifest containing a `.git` directory or file,
+    /// or the invoked root's own directory if none exists. Other manifests
+    /// do not affect this anchor. The anchor is fixed for nested
     /// includes. Catalog paths refuse absolute paths, `..`, and symlink
     /// escapes; catalog files reject every key except `pages:`/`flows:`.
     ///

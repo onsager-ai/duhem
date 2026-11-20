@@ -1471,13 +1471,13 @@ effective fixed dimensions or the headed window-tracking mode in its
 Leaves consume suite inputs by declaring `inputs: { base_url: { inherit: true }, db_password: { inherit: true, secret: true } }`. Values resolve from `--inputs` → selected `profiles:` entry → the manifest declaration's process `env:` → its `default:`, and the manifest declaration's `type` is enforced. `inherit: true` rejects a leaf-local `type:` or `default:`. A manifest input not inherited by any leaf produces an authoring warning, not an error. `secret: true` still cannot be combined with `default:`.
 
 **Catalog imports from independently runnable scopes (#379).** A manifest
-may use `includes: [{catalog: shared.yml}]` to import only `pages:` and
-`flows:` from a shared file. Its suite root is the directory of the nearest
-ancestor root manifest (`duhem.yml` or `.duhem.yml`, identified by its
-`verifications:` key), searching strictly above the invoked root's directory
-and stopping at `.git`. If none is found, the invoked root's own directory
-is the anchor. Discovery only identifies that directory; no configuration,
-provisioning, or verification entries from the enclosing manifest are loaded.
+may use `includes: [{catalog: .duhem/shared.yml}]` to import only `pages:` and
+`flows:` from a shared file. The anchor is the repository root: the nearest
+ancestor directory of the invoked root manifest containing `.git`, whether
+a directory or a file for worktrees. If none is found, the invoked root's
+own directory is the anchor. Adding, moving or deleting other manifests
+does not affect it. No configuration, provisioning, or verification entries
+from other manifests are loaded.
 All catalog imports, including those in nested ordinary includes, use this
 same anchor. The catalog file accepts only `pages:` and `flows:`; other
 keys, including `includes:`, are errors. Paths must be relative, contain no

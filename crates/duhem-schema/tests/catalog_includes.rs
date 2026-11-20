@@ -27,7 +27,8 @@ fn scoped(dir: &Path, includes: &str) -> PathBuf {
 #[test]
 fn scoped_root_loads_catalog_without_loading_parent_siblings() {
     let tmp = tempfile::tempdir().unwrap();
-    // Parent discovery reads its shape, not its configuration or listed leaves.
+    write(tmp.path(), ".git", "gitdir: irrelevant\n");
+    // Ancestor manifests never supply configuration or verification entries.
     write(
         tmp.path(),
         "duhem.yml",
@@ -61,6 +62,7 @@ fn scoped_root_loads_catalog_without_loading_parent_siblings() {
 #[test]
 fn root_first_then_first_catalog_and_leaf_local_precedence() {
     let tmp = tempfile::tempdir().unwrap();
+    write(tmp.path(), ".git", "gitdir: irrelevant\n");
     write(
         tmp.path(),
         "duhem.yml",
@@ -109,6 +111,7 @@ fn root_first_then_first_catalog_and_leaf_local_precedence() {
 #[test]
 fn nested_partial_uses_invoked_roots_anchor() {
     let tmp = tempfile::tempdir().unwrap();
+    write(tmp.path(), ".git", "gitdir: irrelevant\n");
     write(
         tmp.path(),
         "duhem.yml",
@@ -125,42 +128,50 @@ fn nested_partial_uses_invoked_roots_anchor() {
 }
 
 #[test]
-fn no_enclosing_manifest_uses_own_directory_at_git_boundary() {
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::create_dir(tmp.path().join("scope")).unwrap();
-    write(tmp.path(), "scope/.git", "gitdir: irrelevant\n");
-    write(tmp.path(), "scope/shared.yml", CATALOG);
-    let path = scoped(tmp.path(), "[{catalog: shared.yml}]");
-    assert!(load(&path).is_ok());
-}
-
-#[test]
-fn closest_enclosing_manifest_wins() {
+fn no_git_uses_invoked_roots_own_directory_despite_ancestor_manifest() {
     let tmp = tempfile::tempdir().unwrap();
     write(
         tmp.path(),
         "duhem.yml",
         "manifest_version: 1\nverifications: []\n",
     );
+    write(tmp.path(), "shared.yml", "invalid: ancestor catalog\n");
+    write(tmp.path(), "scope/shared.yml", CATALOG);
+    let path = scoped(tmp.path(), "[{catalog: shared.yml}]");
+    assert!(load(&path).is_ok());
+}
+
+#[test]
+fn intermediate_manifests_do_not_move_repository_anchor() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(tmp.path().join(".git")).unwrap();
     write(
         tmp.path(),
-        "shared.yml",
-        &CATALOG.replace("Shared", "Outer"),
-    );
-    write(
-        tmp.path(),
-        "nested/.duhem.yml",
+        "duhem.yml",
         "manifest_version: 1\nverifications: []\n",
     );
-    write(tmp.path(), "nested/shared.yml", CATALOG);
-    let path = scoped(&tmp.path().join("nested"), "[{catalog: shared.yml}]");
-    let Loaded::Manifest { manifest, .. } = load(&path).unwrap() else {
-        panic!("expected manifest");
-    };
-    assert_eq!(
-        manifest.pages["login"]["submit"]["name"].as_str(),
-        Some("Shared")
+    write(tmp.path(), "shared.yml", CATALOG);
+    write(
+        tmp.path(),
+        "nested/shared.yml",
+        &CATALOG.replace("Shared", "Intermediate"),
     );
+    let path = scoped(&tmp.path().join("nested"), "[{catalog: shared.yml}]");
+    for intermediate in [Some("nested/duhem.yml"), Some("nested/.duhem.yml"), None] {
+        if let Some(name) = intermediate {
+            write(tmp.path(), name, "manifest_version: 1\nverifications: []\n");
+        }
+        let Loaded::Manifest { manifest, .. } = load(&path).unwrap() else {
+            panic!("expected manifest");
+        };
+        assert_eq!(
+            manifest.pages["login"]["submit"]["name"].as_str(),
+            Some("Shared")
+        );
+        if let Some(name) = intermediate {
+            std::fs::remove_file(tmp.path().join(name)).unwrap();
+        }
+    }
 }
 
 #[test]

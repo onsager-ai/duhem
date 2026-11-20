@@ -688,15 +688,16 @@ For an independently run scoped manifest, use a catalog-only import:
 # .duhem/regression/duhem.yml
 manifest_version: 1
 includes:
-  - catalog: shared.yml
+  - catalog: .duhem/shared.yml
 verifications:
   - path: check.yml
 ```
 
-With an enclosing `.duhem/duhem.yml`, this reads `.duhem/shared.yml`,
-which may contain only `pages:` and `flows:`. The anchor is the nearest
-ancestor root manifest's directory, bounded by `.git`, or the scoped root's
-own directory if none exists. Imports in nested partials keep the same
+This reads `.duhem/shared.yml` from the repository root. That file may
+contain only `pages:` and `flows:`. The anchor is the nearest ancestor
+directory of the invoked root manifest containing a `.git` directory or
+file, or the invoked root's own directory if none exists. Other manifests
+do not affect the anchor. Imports in nested partials keep the same
 anchor. Paths refuse absolute paths, `..`, and symlinks escaping the anchor.
 The enclosing suite's provisioning, profiles and verification list are not
 inherited. Ordinary string includes remain relative to the declaring file;

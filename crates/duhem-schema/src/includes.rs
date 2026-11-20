@@ -16,6 +16,16 @@ use crate::manifest_path::{canonical_or_self, validate_entry_path};
 use crate::provision::Provision;
 use crate::verification::{FlowCatalog, InputDecl, PageCatalog, SchemaError};
 
+/// A local partial manifest, or a catalog-only import anchored at the suite root.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum Include {
+    /// Existing relative-path form; resolved beside the declaring document.
+    Path(PathBuf),
+    /// Only `pages:` and `flows:` may appear in the imported document.
+    Catalog { catalog: PathBuf },
+}
+
 /// An `includes:` target — a manifest fragment composed into a root
 /// manifest (spec #67). Structurally a [`RootManifest`] with every
 /// field optional and **no** `manifest_version:`: the document version
@@ -26,10 +36,11 @@ use crate::verification::{FlowCatalog, InputDecl, PageCatalog, SchemaError};
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PartialRootManifest {
-    /// Nested includes, resolved depth-first relative to *this*
-    /// include's parent directory. See [`RootManifest::includes`].
+    /// Nested includes: paths resolve relative to this partial, while
+    /// catalog imports keep the invoked root's suite anchor.
+    /// See [`RootManifest::includes`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub includes: Vec<PathBuf>,
+    pub includes: Vec<Include>,
     /// Shared suite provisioning lifecycle to fill in when the root manifest
     /// declares none. See [`RootManifest::provision`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -93,12 +104,26 @@ pub const MAX_INCLUDE_DEPTH: usize = 3;
 pub(crate) fn resolve_includes(
     declaring_path: &Path,
     declaring_parent: &Path,
-    includes: &[PathBuf],
+    includes: &[Include],
     effective: &mut RootManifest,
     chain: &mut Vec<PathBuf>,
     depth: usize,
 ) -> Result<(), LoadError> {
     for include in includes {
+        let include = match include {
+            Include::Path(path) => path,
+            Include::Catalog { catalog } => {
+                if depth + 1 > MAX_INCLUDE_DEPTH {
+                    return Err(LoadError::IncludeDepthExceeded {
+                        manifest: declaring_path.to_path_buf(),
+                        target: catalog.clone(),
+                        max: MAX_INCLUDE_DEPTH,
+                    });
+                }
+                crate::catalogs::merge_catalog(declaring_path, &chain[0], catalog, effective)?;
+                continue;
+            }
+        };
         // Same path discipline as `verifications:` entries: no
         // absolute paths, no `..` escape out of the manifest tree.
         validate_entry_path(declaring_path, include)?;

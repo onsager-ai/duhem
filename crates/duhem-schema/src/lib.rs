@@ -7,6 +7,7 @@
 //! derivative.
 
 pub mod assertion;
+mod catalogs;
 pub mod criterion;
 pub mod expr;
 mod flows;
@@ -51,7 +52,7 @@ pub use expr::{
     BinOp, Expr, ExprStr, Literal, ParseError, Path, PathRoot, RuntimeHelper, RuntimeHelperArity,
     UnaryOp, authored_runtime_helper_names,
 };
-pub use includes::PartialRootManifest;
+pub use includes::{Include, PartialRootManifest};
 pub use jsonschema::json_schema;
 pub use manifest::{
     InconclusivePolicy, LoadError, Loaded, LoadedLeaf, ManifestDefaults, ManifestEntry,

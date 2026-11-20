@@ -1,0 +1,5 @@
+manifest_version: 1
+includes:
+  - catalog: verifications/catalog-includes-example/shared.yml
+verifications:
+  - path: check.yml

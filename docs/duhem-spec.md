@@ -1470,6 +1470,25 @@ effective fixed dimensions or the headed window-tracking mode in its
 
 Leaves consume suite inputs by declaring `inputs: { base_url: { inherit: true }, db_password: { inherit: true, secret: true } }`. Values resolve from `--inputs` → selected `profiles:` entry → the manifest declaration's process `env:` → its `default:`, and the manifest declaration's `type` is enforced. `inherit: true` rejects a leaf-local `type:` or `default:`. A manifest input not inherited by any leaf produces an authoring warning, not an error. `secret: true` still cannot be combined with `default:`.
 
+**Catalog imports from independently runnable scopes (#379).** A manifest
+may use `includes: [{catalog: .duhem/shared.yml}]` to import only `pages:` and
+`flows:` from a shared file. The anchor is the repository root: the nearest
+ancestor directory of the invoked root manifest containing `.git`, whether
+a directory or a file for worktrees. If none is found, the invoked root's
+own directory is the anchor. Adding, moving or deleting other manifests
+does not affect it. No configuration, provisioning, or verification entries
+from other manifests are loaded.
+All catalog imports, including those in nested ordinary includes, use this
+same anchor. The catalog file accepts only `pages:` and `flows:`; other
+keys, including `includes:`, are errors. Paths must be relative, contain no
+`..`, and resolve inside the anchor even through symlinks. Missing files
+are errors. Existing string includes remain relative to their declaring
+file with their existing absolute-path and parent-traversal refusals.
+Catalogs fill absent keys in include order under the existing root-wins
+rules; leaf-local entries still win. A catalog import counts as one include
+level toward the existing depth-three limit and cannot import further files.
+See the [worked example](../verifications/catalog-includes-example/README.md).
+
 `pages:` is a two-level catalog (`page → element → locator`) with no
 intervening `locators:` key. It may be declared by the root, an
 `includes:` fragment, or a leaf; include composition is root-wins by

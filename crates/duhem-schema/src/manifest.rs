@@ -39,6 +39,13 @@ pub struct RootManifest {
     /// `manifest_version:`) — see [`PartialRootManifest`]. Same path
     /// discipline as `verifications:` entries: no absolute paths, no
     /// `..` escape.
+    /// A mapping `{ catalog: .duhem/shared.yml }` instead imports only `pages:`
+    /// and `flows:` from the repository root: the nearest ancestor directory
+    /// of the invoked root manifest containing a `.git` directory or file,
+    /// or the invoked root's own directory if none exists. Other manifests
+    /// do not affect this anchor. The anchor is fixed for nested
+    /// includes. Catalog paths refuse absolute paths, `..`, and symlink
+    /// escapes; catalog files reject every key except `pages:`/`flows:`.
     ///
     /// Composition is **root-wins**: an include fills only the keys
     /// this manifest leaves absent (for nested maps like
@@ -52,7 +59,7 @@ pub struct RootManifest {
     /// per-developer `.duhem.local.yml`. Additive: a manifest without
     /// `includes:` behaves byte-identically to before.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub includes: Vec<PathBuf>,
+    pub includes: Vec<crate::includes::Include>,
     /// Optional provisioning lifecycle shared by the whole suite. When present, the
     /// runtime provisions it **once** (`up:` + `ready:`) before any leaf
     /// runs and tears it down **once** after the last leaf — instead of

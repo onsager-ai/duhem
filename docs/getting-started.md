@@ -508,6 +508,28 @@ are not loaded or run; the run stays scoped to the one you asked for.
 If no manifest is found and the leaf still references an undeclared
 `$pages.*` name or flow, it fails naming exactly what's missing.
 
+**Running a scoped manifest as its own root.** To share catalogs without
+symlinks, put a catalog-only file at `.duhem/shared.yml` in your repository:
+
+```yaml
+# .duhem/regression/duhem.yml
+manifest_version: 1
+includes:
+  - catalog: .duhem/shared.yml
+verifications:
+  - path: check.yml
+```
+
+The shared file may contain only `pages:` and `flows:`. Catalog paths resolve
+from the repository root: the nearest ancestor directory of the invoked root
+manifest containing a `.git` directory or file. If none exists, they resolve
+from the invoked root's own directory. Other manifests do not affect this
+anchor. A catalog path cannot
+be absolute, contain `..`, or escape that directory through a symlink.
+Parent provisioning, profiles and verification lists are not inherited.
+Ordinary string includes still resolve beside their declaring file.
+See the [runnable example](../verifications/catalog-includes-example/README.md).
+
 ## 5. Author a real check
 
 Point it at *your* system by changing three things in `duhem.yml`:

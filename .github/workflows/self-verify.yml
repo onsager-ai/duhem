@@ -206,3 +206,78 @@ jobs:
         run: |
           ./target/release/duhem run verifications/duhem-dashboard \
             --db .duhem/duhem.db
+
+  eval-task-example:
+    name: eval task example and Harbor adapter
+    needs: changes
+    if: ${{ needs.changes.outputs.cli == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Build Duhem CLI
+        run: cargo build --release -p duhem-cli
+      - name: Validate the worked example
+        run: ./target/release/duhem validate verifications/eval-task-example
+      - name: Check reference and wrong candidate verdicts
+        run: |
+          set -euo pipefail
+          vd=verifications/eval-task-example/duhem.yml
+          reference="$PWD/verifications/eval-task-example/candidates/reference"
+          wrong="$PWD/verifications/eval-task-example/candidates/wrong"
+          ./target/release/duhem run "$vd" --inputs "workspace=$reference" --reporter json > "$RUNNER_TEMP/reference.json"
+          set +e
+          ./target/release/duhem run "$vd" --inputs "workspace=$wrong" --reporter json > "$RUNNER_TEMP/wrong.json"
+          wrong_status=$?
+          set -e
+          test "$wrong_status" -ne 0
+          python3 - "$RUNNER_TEMP/reference.json" "$RUNNER_TEMP/wrong.json" <<'PY'
+          import json
+          import sys
+
+          reference, wrong = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:])
+          assert reference["verdict"] == "pass", reference
+          assert {item["id"]: item["verdict"] for item in reference["criteria"]} == {"AC-1": "pass", "AC-2": "pass"}
+          assert wrong["verdict"] == "fail", wrong
+          assert {item["id"]: item["verdict"] for item in wrong["criteria"]} == {"AC-1": "fail", "AC-2": "pass"}
+          PY
+      - name: Check Harbor adapter pass, fail and inconclusive mapping
+        env:
+          DUHEM_BIN: ${{ github.workspace }}/target/release/duhem
+        run: |
+          set -euo pipefail
+          adapter="$PWD/verifications/eval-task-example/test.sh"
+          reference="$PWD/verifications/eval-task-example/candidates/reference"
+          wrong="$PWD/verifications/eval-task-example/candidates/wrong"
+          mkdir -p "$RUNNER_TEMP/eval-pass" "$RUNNER_TEMP/eval-fail" "$RUNNER_TEMP/eval-inconclusive"
+          (cd "$RUNNER_TEMP/eval-pass" && TASK_WORKSPACE="$reference" VERIFIER_LOGS="$PWD/logs" "$adapter")
+          (cd "$RUNNER_TEMP/eval-fail" && TASK_WORKSPACE="$wrong" VERIFIER_LOGS="$PWD/logs" "$adapter")
+          python3 - "$RUNNER_TEMP/eval-pass/reward.json" "$RUNNER_TEMP/eval-fail/reward.json" <<'PY'
+          import json
+          import sys
+
+          passed, failed = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:])
+          assert passed == {"duhem": 1, "AC-1": 1, "AC-2": 1}, passed
+          assert failed == {"duhem": 0, "AC-1": 0, "AC-2": 1}, failed
+          PY
+          test -s "$RUNNER_TEMP/eval-pass/logs/run-bundle/bundle.json"
+          test -s "$RUNNER_TEMP/eval-fail/logs/run-bundle/bundle.json"
+          set +e
+          (cd "$RUNNER_TEMP/eval-inconclusive" && env -u TASK_WORKSPACE DUHEM_BIN="$DUHEM_BIN" VERIFIER_LOGS="$PWD/logs" "$adapter")
+          inconclusive_status=$?
+          set -e
+          test "$inconclusive_status" -ne 0
+          test ! -e "$RUNNER_TEMP/eval-inconclusive/reward.json"
+          test -s "$RUNNER_TEMP/eval-inconclusive/logs/run-summary.json"
+          python3 - "$RUNNER_TEMP/eval-inconclusive/logs/run-summary.json" <<'PY'
+          import json
+          import sys
+
+          summary = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert summary["verdict"].startswith("inconclusive"), summary
+          PY
+          test -s "$RUNNER_TEMP/eval-inconclusive/logs/run-bundle/bundle.json"

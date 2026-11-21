@@ -104,6 +104,15 @@ enclosing `.git`), so `duhem run` from anywhere in the repo finds it;
 Self-gate the suite in your product's own CI: run `duhem run` on the PR
 and let the verdict gate merge.
 
+## Eval tasks
+
+For model or agent evaluation, turn each promise in the task brief into a
+stable criterion and keep the VD outside the candidate sandbox. If a
+library-only change has no observable surface, have the brief name its public
+API and test it with a probe crate through `cli/invoke`; otherwise leave it
+ungraded by Duhem. See [Eval tasks as Verification Definitions](https://github.com/onsager-ai/duhem/blob/main/docs/eval-tasks.md)
+for the Harbor adapter contract.
+
 ## The two-layer structure
 
 Duhem deliberately separates a feature's commitments from the mechanism

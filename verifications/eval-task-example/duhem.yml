@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/onsager-ai/duhem/v0.9.3/schema/duhem.schema.json
+# Eval task as an ordinary leaf VD. Run from repository root with:
+# TASK_WORKSPACE=verifications/eval-task-example/candidates/reference duhem run verifications/eval-task-example
+verification: Eval task example — readiness promise
+
+inputs:
+  workspace: {type: string, env: TASK_WORKSPACE}
+
+criteria:
+  - id: AC-1
+    description: The candidate reports that it is ready.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: run
+            uses: cli/invoke
+            with:
+              command: [node, app.mjs]
+              cwd: $inputs.workspace
+        assertions:
+          - matches: {value: $steps.run.outputs.stdout, pattern: '^ready\\n$'}
+  - id: AC-2
+    description: The candidate command exits successfully.
+    checks:
+      - id: AC-2.1
+        steps:
+          - id: run
+            uses: cli/invoke
+            with:
+              command: [node, app.mjs]
+              cwd: $inputs.workspace
+        assertions:
+          - eq: [$steps.run.outputs.exit_code, 0]

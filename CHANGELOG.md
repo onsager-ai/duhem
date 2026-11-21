@@ -29,6 +29,10 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+## v0.9.3 — 2026-11-21
+
+- [clarifying] No schema change; republishes the v0.9.2 contents to npm, where v0.9.2 published only some platform packages. (#710)
+
 ## v0.9.2 — 2026-11-20
 
 - [additive] Scoped root manifests can import shared flows and pages with repository-root-anchored `includes: [{catalog: .duhem/shared.yml}]`, without symlinks or inheriting parent provisioning and verifications. (#379)

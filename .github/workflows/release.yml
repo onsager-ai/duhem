@@ -164,6 +164,10 @@ jobs:
 
       - name: Publish platform packages
         if: needs.meta.outputs.publish == 'true'
+        # Verbose so a refused trusted-publishing (OIDC) exchange is logged
+        # instead of surfacing only as a bare E404 on the upload.
+        env:
+          NPM_CONFIG_LOGLEVEL: verbose
         run: node npm/scripts/publish.mjs --target platforms --tag ${{ needs.meta.outputs.npm-tag }}
 
   publish-main:
@@ -196,4 +200,8 @@ jobs:
 
       - name: Publish main package
         if: needs.meta.outputs.publish == 'true'
+        # Verbose so a refused trusted-publishing (OIDC) exchange is logged
+        # instead of surfacing only as a bare E404 on the upload.
+        env:
+          NPM_CONFIG_LOGLEVEL: verbose
         run: node npm/scripts/publish.mjs --target main --tag ${{ needs.meta.outputs.npm-tag }}

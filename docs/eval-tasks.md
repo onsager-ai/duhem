@@ -46,7 +46,9 @@ example, `npm install --global duhem@0.9.3`. The task's `tests/test.sh` invokes
 | `inconclusive` | Write no reward file and exit non-zero; Harbor records a verifier error, never a score of 0. |
 
 Include one `reward.json` key per criterion, with `1` for pass and `0` for
-fail, so Harbor can show which promise failed. Keep any LLM grader scores under
+fail, so Harbor can show which promise failed. Omit the key of a criterion
+that is inconclusive in a run whose overall verdict is still `pass` or `fail`;
+the run's `duhem` reward still applies. Keep any LLM grader scores under
 separate `llm_*` keys written by a separate grader; they never contribute to
 Duhem's verdict or `duhem` reward. Copy the run bundle into the verifier logs
 so the verdict and its evidence sit beside the Harbor transcript. Do not

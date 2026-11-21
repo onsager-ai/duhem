@@ -18,7 +18,7 @@ criteria:
               command: [node, app.mjs]
               cwd: $inputs.workspace
         assertions:
-          - matches: {value: $steps.run.outputs.stdout, pattern: '^ready\\n$'}
+          - matches: {value: $steps.run.outputs.stdout, pattern: '^ready\n$'}
   - id: AC-2
     description: The candidate command exits successfully.
     checks:
@@ -30,4 +30,4 @@ criteria:
               command: [node, app.mjs]
               cwd: $inputs.workspace
         assertions:
-          - eq: [$steps.run.outputs.exit_code, 0]
+          - $steps.run.outputs.exit_code == 0

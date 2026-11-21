@@ -54,6 +54,9 @@ if verdict not in ("pass", "fail"):
 reward = {"duhem": int(verdict == "pass")}
 for criterion in summary["criteria"]:
     criterion_verdict = criterion["verdict"]
+    # An inconclusive criterion is ungraded: omit its key, keep the run's 0 or 1.
+    if criterion_verdict.startswith("inconclusive"):
+        continue
     if criterion_verdict not in ("pass", "fail"):
         raise SystemExit(f"unsupported criterion verdict: {criterion_verdict}")
     reward[criterion["id"]] = int(criterion_verdict == "pass")

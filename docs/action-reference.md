@@ -541,3 +541,34 @@ Stop the old generation before restarting a current-check process.
   with: { handle: $setup.server.outputs.handle }
 ```
 
+## `llm/*`
+
+### `llm/score`
+
+Record a rubric score as evidence without contributing to the verdict.
+
+| `with:` field | required | values |
+|---|:---:|---|
+| `provider` | yes | `anthropic` \| `openai` |
+| `model` | yes | — |
+| `base_url` | no | — |
+| `api_key` | yes | — |
+| `rubric` | yes | — |
+| `observations` | yes | — |
+| `range` | yes | — |
+| `timeout` | no | — |
+
+**outputs:** (none)
+
+```yaml
+- id: quality
+  uses: llm/score
+  with:
+    provider: openai
+    model: gpt-4o-mini
+    api_key: $inputs.scoring_key
+    rubric: Score how clearly the response explains its answer.
+    observations: [$steps.answer.outputs.stdout]
+    range: { min: 0, max: 10 }
+```
+

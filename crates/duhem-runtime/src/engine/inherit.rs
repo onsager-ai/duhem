@@ -42,7 +42,11 @@ pub(crate) fn first_unbound_inherited(
             for assertion in &check.assertions {
                 assertion.walk_exprs(|e| visit_input_refs(&e.parsed, &mut consider));
             }
-            for step in &check.steps {
+            for step in check
+                .steps
+                .iter()
+                .filter(|step| !duhem_schema::score::is_score(step))
+            {
                 walk_with_input_refs(&step.with, &mut consider);
             }
         }

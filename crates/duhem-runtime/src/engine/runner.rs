@@ -130,6 +130,7 @@ pub struct Engine {
     /// built-in `DEFAULT_TIMEOUT` (5s) applies. `None` keeps today's
     /// behavior.
     default_timeout: Option<Duration>,
+    no_scores: bool,
     /// Effective ceiling for `ui/wait` fixed delays. Manifest
     /// `defaults.max_wait` may raise or lower the built-in 60s policy.
     max_wait: Duration,
@@ -157,6 +158,7 @@ mod claim_scope;
 mod masking;
 mod missing_input;
 mod process_cleanup;
+mod score_observations;
 mod signal;
 pub(crate) use signal::termination_signal;
 
@@ -191,6 +193,7 @@ impl Engine {
             env: BTreeMap::new(),
             inherited: std::collections::HashSet::new(),
             default_timeout: None,
+            no_scores: false,
             max_wait: Duration::from_secs(60),
             inconclusive_policy: InconclusivePolicy::Block,
             retry: None,
@@ -234,19 +237,18 @@ impl Engine {
         def: &VerificationDefinition,
         inputs: BTreeMap<String, serde_json::Value>,
     ) -> Result<RunOutcome, EngineError> {
-        if self.secrets.is_empty() {
-            for (name, decl) in &def.inputs {
-                if decl.secret
-                    && let Some(value) = inputs.get(name)
-                {
-                    self.secrets.register_json(name.clone(), value);
-                }
+        for (name, decl) in &def.inputs {
+            if decl.secret
+                && let Some(value) = inputs.get(name)
+            {
+                self.secrets.register_json(name.clone(), value);
             }
         }
+        let score_only_keys = duhem_schema::score::score_only_keys(def);
         let missing_declared = def
             .inputs
             .iter()
-            .filter(|(_, decl)| !decl.inherit)
+            .filter(|(name, decl)| !decl.inherit && !score_only_keys.contains(*name))
             .map(|(name, _)| name)
             .find(|name| !inputs.contains_key(*name))
             .cloned();
@@ -1563,6 +1565,7 @@ criteria:
             env: BTreeMap::new(),
             inherited: std::collections::HashSet::new(),
             default_timeout: None,
+            no_scores: false,
             max_wait: Duration::from_secs(60),
             inconclusive_policy: InconclusivePolicy::Block,
             retry: None,

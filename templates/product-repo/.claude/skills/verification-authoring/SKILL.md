@@ -657,6 +657,13 @@ silent pass. If a criterion seems to require non-mechanical judgment,
 split it until each piece is mechanical, or note explicitly that it
 can't be Duhem-verified today — don't paper over it.
 
+Use `llm/score` to record optional feedback on a declared rubric, such as
+clarity of an explanation. Keep observable acceptance requirements in
+mechanical assertions. Score steps send their rubric and declared observations
+to the provider. Assertions and step conditions cannot read score outputs.
+Use `duhem describe llm/score` for the action fields and pass
+`duhem run --no-scores` to skip scoring.
+
 ### 6. Self-validate
 
 Before saving, walk through — then let `duhem validate` close the loop:

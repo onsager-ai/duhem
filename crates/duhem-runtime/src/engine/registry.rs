@@ -29,7 +29,7 @@ use duhem_actions::Page;
 use duhem_actions::{
     Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertUrl, Back, Call,
     CaptureSession, Click, DbObserve, Emulate, Extract, Focus, Forward, Invoke, Navigate, Observe,
-    ObserveConsole, Poll, Press, Query, Seed, Select, Stream, Type, Wait,
+    ObserveConsole, Poll, Press, Query, Score, Seed, Select, Stream, Type, Wait,
 };
 use serde::Deserialize;
 use serde::de::Error as _;
@@ -336,6 +336,7 @@ pub(crate) fn default_registry() -> ActionRegistry {
     insert(&mut m, ConcreteAction::new(Box::new(Poll)));
     insert(&mut m, ConcreteAction::new(Box::new(Stream)));
     insert(&mut m, ConcreteAction::new(Box::new(Invoke)));
+    insert(&mut m, ConcreteAction::new(Box::new(Score)));
     insert(&mut m, ConcreteAction::new(Box::new(Query)));
     insert(&mut m, ConcreteAction::new(Box::new(DbObserve)));
     insert(&mut m, ConcreteAction::new(Box::new(Seed)));
@@ -378,6 +379,7 @@ mod tests {
                 "db/observe",
                 "db/query",
                 "db/seed",
+                "llm/score",
                 "process/inspect",
                 "process/restart",
                 "process/start",

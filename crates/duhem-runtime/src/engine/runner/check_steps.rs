@@ -22,6 +22,7 @@ impl Engine {
     ) -> Result<(), EngineError> {
         for idx in indices {
             let step = &check.steps[idx];
+            let score_step = duhem_schema::score::is_score(step);
             if let Some(id) = &step.id {
                 contexts.boundaries.remove(id);
             }
@@ -33,11 +34,21 @@ impl Engine {
                 .or_default();
             // An unresolvable condition makes this check inconclusive
             // rather than aborting the run (#440 R2); see below.
-            let (gate, unresolved_condition) =
+            let (gate, unresolved_condition) = if score_step && self.no_scores {
+                (
+                    Some(duhem_evidence::StepOutcome::Skipped {
+                        reason: "disabled by --no-scores".into(),
+                        condition: None,
+                        operands: None,
+                    }),
+                    None,
+                )
+            } else {
                 match evaluate_in_check(step, idx, failed_by.as_deref(), groups, ctx) {
                     Ok(gate) => (gate, None),
                     Err(detail) => (None, Some(detail)),
-                };
+                }
+            };
             let cleanup_step = failed_by.is_some() && gate.is_none();
             if cleanup_step {
                 cleanup_steps.insert(idx);
@@ -93,14 +104,15 @@ impl Engine {
             }
 
             let known = self.registry.contains_key(step.uses_name());
-            let step_started_ms = if will_run && !matches!(self.capture, CapturePolicy::Off) {
-                match check_browser.as_ref() {
-                    Some(cb) => Some(storyboard.step_started(&cb.page).await),
-                    None => None,
-                }
-            } else {
-                None
-            };
+            let step_started_ms =
+                if !score_step && will_run && !matches!(self.capture, CapturePolicy::Off) {
+                    match check_browser.as_ref() {
+                        Some(cb) => Some(storyboard.step_started(&cb.page).await),
+                        None => None,
+                    }
+                } else {
+                    None
+                };
 
             // Resolved here so the secret pass below reaches the same
             // action's contract without a second registry lookup. The
@@ -123,7 +135,7 @@ impl Engine {
 
             // A dispatched call to a flow with `cleanup:` registers it on this
             // check attempt (#615); one gated off by `if:` registers nothing.
-            if gate.is_none() {
+            if !score_step && gate.is_none() {
                 ctx.run_state().register_flow_cleanups(
                     step,
                     &crate::engine::flow_cleanup::RegisteredAt::Check(
@@ -143,7 +155,13 @@ impl Engine {
                     uses: step.uses_name().to_string(),
                     // Layer comes only from the executed action's catalog (#192).
                     layer: duhem_actions::layer_for_uses(step.uses_name()).map(str::to_string),
-                    with: with_to_evidence_map(&resolved_with),
+                    with: {
+                        let mut evidence = with_to_evidence_map(&resolved_with);
+                        if score_step {
+                            evidence.remove("api_key");
+                        }
+                        evidence
+                    },
                     flow: {
                         let mut flow = crate::engine::flow::origin(step);
                         if let Some(flow) = &mut flow {
@@ -154,6 +172,12 @@ impl Engine {
                     group: crate::engine::flow::group_path(step),
                 })
                 .await?;
+
+            if score_step && let Some(id) = &step.id {
+                writer
+                    .append_observation(idx as u32, "score_step_id", serde_json::json!(id))
+                    .await?;
+            }
 
             if let Some(duhem_evidence::StepOutcome::Skipped {
                 reason,
@@ -204,7 +228,7 @@ impl Engine {
                     outcome: Some(Outcome::Error),
                     detail: Some(detail),
                 };
-                if failed_by.is_none() {
+                if !score_step && failed_by.is_none() {
                     *failed_by = Some(display_step_label(step, idx));
                 }
                 continue;
@@ -223,10 +247,10 @@ impl Engine {
                         detail: Some(detail),
                     })
                     .await?;
-                if !cleanup_step && stored_error.is_none() {
+                if !score_step && !cleanup_step && stored_error.is_none() {
                     *stored_error = Some(error);
                 }
-                if failed_by.is_none() {
+                if !score_step && failed_by.is_none() {
                     *failed_by = Some(display_step_label(step, idx));
                 }
                 continue;
@@ -253,9 +277,19 @@ impl Engine {
                         && let Err(error) = enforce_wait_ceiling(&resolved_with, self.max_wait)
                     {
                         Some(Err(error))
+                    } else if score_step
+                        && let Err(cause) = super::score_observations::resolve(
+                            &step.with,
+                            &mut resolved_with,
+                            writer,
+                        )
+                        .await
+                    {
+                        Some(Ok(duhem_actions::ActionResult::error()
+                            .with_output("missing_cause", serde_json::json!(cause))))
                     } else {
                         let page_ref: Option<&Page> = check_browser.as_ref().map(|cb| &cb.page);
-                        let start = match page_ref {
+                        let start = match page_ref.filter(|_| !score_step) {
                             Some(page) => page.session_time_ms().await.ok(),
                             None => None,
                         };
@@ -305,7 +339,7 @@ impl Engine {
                     // `capture/` prefix is refused rather than bound —
                     // the runtime backstop for #532 — and recorded as
                     // evidence below rather than dropped silently.
-                    if let Some(id) = step.id.as_deref() {
+                    if !score_step && let Some(id) = step.id.as_deref() {
                         let refused = crate::engine::extract::record_step_outputs(
                             &step.outputs,
                             &r.outputs,
@@ -359,6 +393,11 @@ impl Engine {
             }
 
             let raw_detail = match (&execution, &outcome) {
+                (Some(Ok(result)), _) if score_step => result
+                    .outputs
+                    .get("missing_cause")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned),
                 (Some(Err(error)), _) => {
                     Some(format!("action `{}` failed: {error}", step.uses_name()))
                 }
@@ -410,7 +449,7 @@ impl Engine {
                 false,
             )
             .map(|outcome| outcome.state);
-            if failed_by.is_none() && step_failed(&outcome, judgment) {
+            if !score_step && failed_by.is_none() && step_failed(&outcome, judgment) {
                 *failed_by = Some(display_step_label(step, idx));
             }
         }

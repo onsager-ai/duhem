@@ -75,6 +75,7 @@ fn validate_lowered(
     crate::validate_sessions::validate(v, outputs_for, &mut errs);
     crate::validate_flow_values::validate(v, outputs_for, &mut errs);
     crate::validate_process::validate(v, &mut errs);
+    crate::score::validate(v, &mut errs);
 
     errs.extend(
         crate::flows::validate_authored(v)
@@ -449,6 +450,9 @@ pub(crate) fn effective_outputs(
     s: &Step,
     outputs_for: &dyn Fn(&str) -> Vec<String>,
 ) -> HashSet<String> {
+    if crate::score::is_score(s) {
+        return HashSet::new();
+    }
     let mut set: HashSet<String> = s.outputs.keys().cloned().collect();
     if let Some(uses) = s.uses.as_deref() {
         set.extend(outputs_for(uses));

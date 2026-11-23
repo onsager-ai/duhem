@@ -29,6 +29,7 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Add `llm/score` for rubric scores in evidence and `duhem run --no-scores` to skip them. Verdicts remain deterministic. (#708)
 - [clarifying] Document eval tasks as Verification Definitions, with a Harbor adapter guide and executable reference example. (#707)
 
 ## v0.9.3 — 2026-11-21

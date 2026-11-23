@@ -44,6 +44,9 @@ pub use ui::{
 };
 pub use with::TimeoutSpec;
 
+mod score;
+pub use score::Score;
+
 /// Every built-in action's contract — the single source of truth for
 /// `duhem describe` / `duhem actions` and validate-time field checking.
 pub fn catalog() -> Vec<ActionContract> {
@@ -71,6 +74,7 @@ pub fn catalog() -> Vec<ActionContract> {
         DbObserve.contract(),
         Seed.contract(),
         Invoke.contract(),
+        Score.contract(),
     ];
     contracts.extend(process::contracts());
     contracts
@@ -88,11 +92,11 @@ mod catalog_tests {
     #[test]
     fn catalog_is_complete_with_unique_uses() {
         let cat = catalog();
-        assert_eq!(cat.len(), 27, "expected 27 action contracts");
+        assert_eq!(cat.len(), 28, "expected 28 action contracts");
         let mut uses: Vec<&str> = cat.iter().map(|c| c.uses).collect();
         uses.sort();
         uses.dedup();
-        assert_eq!(uses.len(), 27, "every `uses` is unique");
+        assert_eq!(uses.len(), 28, "every `uses` is unique");
     }
 
     #[test]

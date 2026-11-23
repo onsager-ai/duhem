@@ -81,6 +81,11 @@ fn render() -> String {
         s.push_str(&format!("## `{family}/*`\n\n"));
         for c in acts {
             s.push_str(&format!("### `{}`\n\n{}\n\n", c.uses, c.summary));
+            if c.uses == "llm/score" {
+                s.push_str(
+                    "Follow the [worked scoring example](../verifications/llm-score-example/README.md) to run both provider shapes locally or try a live provider.\n\n",
+                );
+            }
             s.push_str("| `with:` field | required | values |\n|---|:---:|---|\n");
             for f in &c.with {
                 let req = if f.required { "yes" } else { "no" };

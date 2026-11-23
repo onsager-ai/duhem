@@ -324,3 +324,69 @@ jobs:
               'llm_["AC-2","first","shared"]': 0.75,
           }, reward
           PY
+
+  llm-score-example:
+    name: llm score example
+    needs: changes
+    if: ${{ needs.changes.outputs.cli == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Duhem CLI
+        run: cargo build --release -p duhem-cli
+      - name: Validate both worked definitions
+        run: |
+          ./target/release/duhem validate verifications/llm-score-example/duhem.yml
+          ./target/release/duhem validate verifications/llm-score-example/real-provider.yml
+      - name: Check scored and skipped runs and mask the fixture key
+        env:
+          SCORE_EXAMPLE_STUB_KEY: duhem-score-example-dummy-key
+        run: |
+          set -euo pipefail
+          duhem=./target/release/duhem
+          vd=verifications/llm-score-example/duhem.yml
+          output_dir="$RUNNER_TEMP/llm-score-example"
+          mkdir -p "$output_dir"
+          db="$output_dir/runs.db"
+          # Both commands must exit 0. The skipped run needs no scoring key.
+          "$duhem" run "$vd" --no-live --db "$db" --reporter json > "$output_dir/scored.json"
+          env -u SCORE_EXAMPLE_STUB_KEY "$duhem" run "$vd" --no-live --db "$db" \
+            --reporter json --no-scores > "$output_dir/skipped.json"
+          run_id=$(jq -er '.run_id' "$output_dir/scored.json")
+          "$duhem" export "$run_id" --db "$db" --out "$output_dir/bundle"
+          python3 - "$output_dir" <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import sys
+
+          root = Path(sys.argv[1])
+          bundle = root / "bundle"
+          scored = json.loads((root / "scored.json").read_bytes())
+          skipped = json.loads((root / "skipped.json").read_bytes())
+          for report in (scored, skipped):
+              assert report["verdict"] == "pass", report
+              assert report["totals"] == {"total": 1, "passed": 1, "failed": 0, "inconclusive": 0}, report
+
+          expected = {
+              "anthropic_clarity": {"value": 8},
+              "openai_clarity": {"value": 3},
+              "out_of_range": {"missing_cause": "provider score was outside the declared range"},
+          }
+          assert scored["scores"] == {"AC-1": {"AC-1.1": expected}}, scored
+          assert skipped["scores"] == {"AC-1": {"AC-1.1": {
+              step: {"missing_cause": "disabled by --no-scores"} for step in expected
+          }}}, skipped
+
+          key = os.environ["SCORE_EXAMPLE_STUB_KEY"].encode()
+          for path in (root / "scored.json", root / "skipped.json", *bundle.rglob("*")):
+              if path.is_file():
+                  assert key not in path.read_bytes(), f"Unmasked fixture key in {path.name}"
+          assert json.loads((bundle / "bundle.json").read_bytes())["run"]["scores"] == scored["scores"]
+          events = [json.loads(line) for line in (bundle / "events.jsonl").read_bytes().splitlines()]
+          models = {event["value"] for event in events if event.get("output_name") == "model"}
+          assert models == {"fixture-anthropic-reported", "fixture-openai-reported"}, models
+          assert any(event.get("output_name") == "reason" and
+                     event.get("value", "").startswith("Fixture reply for ") for event in events)
+          PY

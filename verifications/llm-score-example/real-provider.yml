@@ -1,0 +1,25 @@
+verification: Mechanical answer with a live OpenAI rubric score
+spec_ref: https://github.com/onsager-ai/duhem/issues/708
+inputs:
+  scoring_key: {type: string, secret: true, env: OPENAI_API_KEY}
+  model: {type: string, default: gpt-4o-mini}
+criteria:
+  - id: AC-1
+    description: The answer identifies Paris as the capital of France.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: answer
+            uses: cli/invoke
+            with: {command: [printf, '%s', 'Paris is the capital of France.']}
+          - id: openai_clarity
+            uses: llm/score
+            with:
+              provider: openai
+              model: $inputs.model
+              api_key: $inputs.scoring_key
+              rubric: Score how clearly the answer is worded.
+              observations: [$steps.answer.outputs.stdout]
+              range: {min: 0, max: 10}
+        assertions:
+          - $steps.answer.outputs.stdout == 'Paris is the capital of France.'

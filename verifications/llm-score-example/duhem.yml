@@ -1,0 +1,55 @@
+verification: Mechanical answer with optional rubric scores
+spec_ref: https://github.com/onsager-ai/duhem/issues/708
+inputs:
+  scoring_key: {type: string, secret: true, env: SCORE_EXAMPLE_STUB_KEY}
+criteria:
+  - id: AC-1
+    description: The answer identifies Paris as the capital of France.
+    checks:
+      - id: AC-1.1
+        setup:
+          - id: score_server
+            uses: process/start
+            with:
+              command: python3
+              args: [-u, verifications/llm-score-example/server.py]
+              env: {PORT: '8770'}
+              ready:
+                http: {url: 'http://127.0.0.1:8770/health', status: 200}
+                timeout: 5s
+        steps:
+          - id: answer
+            uses: cli/invoke
+            with: {command: [printf, '%s', 'Paris is the capital of France.']}
+          - id: anthropic_clarity
+            uses: llm/score
+            with:
+              provider: anthropic
+              base_url: http://127.0.0.1:8770/v1
+              model: fixture-anthropic
+              api_key: $inputs.scoring_key
+              rubric: Score how clearly the answer is worded.
+              observations: [$steps.answer.outputs.stdout]
+              range: {min: 0, max: 10}
+          - id: openai_clarity
+            uses: llm/score
+            with:
+              provider: openai
+              base_url: http://127.0.0.1:8770/v1
+              model: fixture-openai
+              api_key: $inputs.scoring_key
+              rubric: Score how clearly the answer is worded.
+              observations: [$steps.answer.outputs.stdout]
+              range: {min: 0, max: 10}
+          - id: out_of_range
+            uses: llm/score
+            with:
+              provider: openai
+              base_url: http://127.0.0.1:8770/v1
+              model: fixture-out-of-range
+              api_key: $inputs.scoring_key
+              rubric: Score how clearly the answer is worded.
+              observations: [$steps.answer.outputs.stdout]
+              range: {min: 0, max: 10}
+        assertions:
+          - $steps.answer.outputs.stdout == 'Paris is the capital of France.'

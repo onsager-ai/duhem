@@ -237,13 +237,11 @@ impl Engine {
         def: &VerificationDefinition,
         inputs: BTreeMap<String, serde_json::Value>,
     ) -> Result<RunOutcome, EngineError> {
-        if self.secrets.is_empty() {
-            for (name, decl) in &def.inputs {
-                if decl.secret
-                    && let Some(value) = inputs.get(name)
-                {
-                    self.secrets.register_json(name.clone(), value);
-                }
+        for (name, decl) in &def.inputs {
+            if decl.secret
+                && let Some(value) = inputs.get(name)
+            {
+                self.secrets.register_json(name.clone(), value);
             }
         }
         let score_only_keys = duhem_schema::score::score_only_keys(def);

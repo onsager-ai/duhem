@@ -23,7 +23,7 @@ criteria:
         steps:
           - id: before
             uses: cli/invoke
-            with: {command: printf, args: [candidate]}
+            with: {command: [printf, candidate]}
           - id: quality
             uses: llm/score
             with:
@@ -37,7 +37,7 @@ criteria:
               timeout: TIMEOUT
           - id: after
             uses: cli/invoke
-            with: {command: printf, args: [observed]}
+            with: {command: [printf, observed]}
         assertions:
           - "$steps.after.outputs.stdout == 'observed'"
 "#;

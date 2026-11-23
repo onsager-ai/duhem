@@ -135,7 +135,7 @@ impl Engine {
 
             // A dispatched call to a flow with `cleanup:` registers it on this
             // check attempt (#615); one gated off by `if:` registers nothing.
-            if gate.is_none() {
+            if !score_step && gate.is_none() {
                 ctx.run_state().register_flow_cleanups(
                     step,
                     &crate::engine::flow_cleanup::RegisteredAt::Check(

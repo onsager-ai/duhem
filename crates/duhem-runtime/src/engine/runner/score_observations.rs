@@ -72,3 +72,51 @@ async fn read_workspace_file(path: &str) -> Result<String, String> {
         .await
         .map_err(|_| "could not read UTF-8 observation file".into())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeMap, sync::Arc};
+
+    use duhem_evidence::{ObservationValue, SqliteStore};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn a_blob_must_be_referenced_by_the_current_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteStore::open(dir.path().join("test.db")).await.unwrap());
+        let mut origin =
+            EvidenceWriter::begin(store.clone(), "origin", "test.yml", BTreeMap::new())
+                .await
+                .unwrap();
+        let current = EvidenceWriter::begin(store, "current", "test.yml", BTreeMap::new())
+            .await
+            .unwrap();
+        let sha = origin.write_blob(b"observation text").await.unwrap();
+        origin
+            .append(duhem_evidence::EventPayload::StepObservation {
+                step_index: 0,
+                output_name: "capture".into(),
+                value: ObservationValue::Blob {
+                    blob_sha256: sha.0.clone(),
+                    mask_counts: BTreeMap::new(),
+                },
+            })
+            .await
+            .unwrap();
+        let with: Value =
+            serde_yml::from_str(&format!("observations: [{{evidence: '{}'}}]", sha.0)).unwrap();
+        let mut resolved = with.clone();
+        assert!(
+            resolve(&with, &mut resolved, &current)
+                .await
+                .unwrap_err()
+                .contains("current-run")
+        );
+        resolve(&with, &mut resolved, &origin).await.unwrap();
+        assert_eq!(
+            resolved["observations"][0].as_str(),
+            Some("observation text")
+        );
+    }
+}

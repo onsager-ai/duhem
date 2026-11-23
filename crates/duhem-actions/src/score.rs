@@ -140,7 +140,7 @@ fn parse_reply(text: &str) -> Result<Reply, &'static str> {
     }
 
     match objects.len() {
-        0 => Err("provider reply contained no JSON object"),
+        0 => Err("provider did not return JSON; no object was found"),
         1 => serde_json::from_value::<Reply>(objects.remove(0))
             .map_err(|_| "provider did not return JSON with numeric score and string reason"),
         _ => Err("provider reply contained multiple JSON objects"),
@@ -353,7 +353,7 @@ mod tests {
     fn reports_prose_without_a_json_object() {
         assert!(matches!(
             parse_reply("There is no structured score here."),
-            Err("provider reply contained no JSON object")
+            Err("provider did not return JSON; no object was found")
         ));
     }
 

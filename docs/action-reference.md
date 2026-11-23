@@ -545,7 +545,7 @@ Stop the old generation before restarting a current-check process.
 
 ### `llm/score`
 
-Record a rubric score as evidence without contributing to the verdict.
+Record a rubric score in the non-verdict `scores` report and in step evidence. The report keys each score by criterion, check, and step ID.
 
 | `with:` field | required | values |
 |---|:---:|---|

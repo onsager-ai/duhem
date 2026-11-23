@@ -32,6 +32,7 @@ pub mod event;
 pub mod reader;
 pub mod replay;
 mod replay_process;
+pub mod scores;
 pub mod secret;
 pub mod session;
 pub mod store;

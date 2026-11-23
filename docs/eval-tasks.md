@@ -37,9 +37,16 @@ their reasons in the VD's history.
 Use [`llm/score`](action-reference.md#llmscore) for qualities that call for
 subjective feedback, such as clarity of an explanation. Keep measurable
 requirements in mechanical criteria. A score step sends its rubric and explicit
-observations to the configured provider. Its result appears in step evidence
-and cannot feed assertions or change the verdict. To run the mechanical gate
-without contacting score providers, pass `duhem run --no-scores`.
+observations to the configured provider. To run the mechanical gate without
+contacting score providers, pass `duhem run --no-scores`.
+
+The terminal report and dashboard show **Scores (non-verdict)**. Read
+`scores[criterion_id][check_id][step_id]` in a JSON `RunSummary`, or the same
+field under `run` in `bundle.json`. Each entry contains `{"value": 7.5}` or
+`{"missing_cause": "disabled by --no-scores"}`. Each key shows the last
+completed execution of that step. The trace retains earlier iterations and
+retry attempts. Runs without recorded scores or missing-score outcomes omit
+the block. Scores are separate from assertions and verdict counts.
 
 ## Harbor adapter contract
 
@@ -57,11 +64,14 @@ example, `npm install --global duhem@0.9.3`. The task's `tests/test.sh` invokes
 Include one `reward.json` key per criterion, with `1` for pass and `0` for
 fail, so Harbor can show which promise failed. Omit the key of a criterion
 that is inconclusive in a run whose overall verdict is still `pass` or `fail`;
-the run's `duhem` reward still applies. Keep any LLM grader scores under
-separate `llm_*` keys written by a separate grader; they never contribute to
-Duhem's verdict or `duhem` reward. Copy the run bundle into the verifier logs
-so the verdict and its evidence sit beside the Harbor transcript. Do not
-require `duhem server` or extra network access for grading.
+the run's `duhem` reward still applies. The adapter copies present scores to
+`llm_<step_id>` keys and omits missing scores. For a reused step ID or a key
+that matches a criterion reward, the suffix becomes the compact JSON array
+`[criterion_id,check_id,step_id]`. If that key is taken, the adapter appends
+`#` until it is unique. These rewards leave the `duhem` reward unchanged.
+The adapter copies the run bundle into the verifier logs so the verdict and
+its evidence sit beside the Harbor transcript. Mechanical grading requires
+only the local Duhem CLI. Score steps contact their configured providers.
 
 See the [executable worked example](../verifications/eval-task-example/README.md)
 for a small CLI candidate, a deliberately failing candidate and the reference

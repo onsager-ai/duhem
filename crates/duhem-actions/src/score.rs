@@ -92,7 +92,7 @@ impl Action for Score {
     fn contract(&self) -> ActionContract {
         ActionContract {
             uses: USES,
-            summary: "Record a rubric score as evidence without contributing to the verdict.",
+            summary: "Record a rubric score in the non-verdict `scores` report and in step evidence. The report keys each score by criterion, check, and step ID.",
             with: vec![
                 FieldSpec::enum_of("provider", true, &["anthropic", "openai"]),
                 FieldSpec::required("model"),

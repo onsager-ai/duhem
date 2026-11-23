@@ -109,6 +109,9 @@ impl SqliteStore {
         {
             return Err(invalid("unjudged container contains judgment evidence"));
         }
+        if !run.scores.is_empty() && run.scores != crate::scores::scores(trace.events()) {
+            return Err(invalid("scores in run header disagree with events"));
+        }
         let distributed = crate::claim_scope::claim_scope(&bundle.events)
             .map(|scope| scope.distributed)
             .unwrap_or_default();

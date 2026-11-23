@@ -149,6 +149,7 @@ pub fn render(
             write_native(out, &outcome.native)?;
             write_warnings(out, &outcome.warnings)?;
             write_cleanup(out, &outcome.cleanup)?;
+            write_scores(out, &summary.scores)?;
             write_totals(out, check_totals(outcome), &summary.lifecycle)?;
             Ok(())
         }
@@ -205,6 +206,7 @@ pub fn render_set(
                 write_cleanup(out, &outcome.cleanup)?;
                 write_gated_checks(out, outcome)?;
                 write_native(out, &outcome.native)?;
+                write_scores(out, &duhem_evidence::scores::scores(events))?;
                 let lifecycle = fold_lifecycle(events);
                 write_failed_lifecycle(out, &lifecycle, &[])?;
             }
@@ -760,6 +762,20 @@ fn fold_lifecycle(events: &[duhem_evidence::Event]) -> Vec<LifecycleBlock> {
     fold.into_blocks()
 }
 
+fn write_scores(out: &mut dyn Write, scores: &duhem_summary::Scores) -> std::io::Result<()> {
+    if !scores.is_empty() {
+        writeln!(out, "Scores (non-verdict)")?;
+        for (criterion, checks) in scores {
+            for (check, steps) in checks {
+                for (id, score) in steps {
+                    writeln!(out, "  {criterion} / {check} / {id}: {score}")?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 mod native;
 use native::{native_check_duration, write_native};
 
@@ -799,6 +815,7 @@ fn build_summary(
         store_db.to_path_buf(),
     )
     .with_totals(check_totals(o))
+    .with_scores(duhem_evidence::scores::scores(events))
     .with_native(o.native.clone(), native_check_duration(events))
     .with_claim_scope(duhem_evidence::claim_scope::claim_scope(events))
     .with_verification(events.iter().find_map(|event| match &event.payload {

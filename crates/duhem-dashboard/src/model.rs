@@ -70,6 +70,8 @@ pub struct RunDetail {
     pub ci_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub claim_scope: Option<duhem_summary::ClaimScope>,
+    #[serde(skip_serializing_if = "duhem_summary::Scores::is_empty")]
+    pub scores: duhem_summary::Scores,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body_verdict: Option<VerdictState>,
     pub run_id: String,

@@ -24,7 +24,7 @@
 //! so consumers — including reference plugins — can deserialize without
 //! pulling in the CLI, runtime, or evidence layers.
 
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use duhem_judge::VerdictState;
 use serde::{Deserialize, Serialize};
@@ -87,6 +87,9 @@ pub struct RunSummary {
     /// and older plugins ignore this field.
     #[serde(default)]
     pub totals: CheckTotals,
+    /// Non-verdict scores, independent of check totals and failures.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub scores: Scores,
     /// Checks with a smaller judged claim set, including passing checks.
     /// Omitted when every judging step ran; additive to contract v2.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -155,6 +158,7 @@ impl RunSummary {
             criteria,
             store,
             totals: CheckTotals::default(),
+            scores: Scores::new(),
             gated_checks: Vec::new(),
             failures: Vec::new(),
             warnings: Vec::new(),
@@ -205,6 +209,11 @@ impl RunSummary {
         self
     }
 
+    pub fn with_scores(mut self, scores: Scores) -> Self {
+        self.scores = scores;
+        self
+    }
+
     /// Attach run warnings (builder style). Empty by default.
     pub fn with_warnings(mut self, warnings: Vec<String>) -> Self {
         self.warnings = warnings;
@@ -224,6 +233,26 @@ impl RunSummary {
     pub fn with_lifecycle(mut self, lifecycle: Vec<LifecycleBlock>) -> Self {
         self.lifecycle = lifecycle;
         self
+    }
+}
+
+/// Non-verdict scores keyed by criterion ID, check ID, then score step ID.
+pub type Scores = BTreeMap<String, BTreeMap<String, BTreeMap<String, Score>>>;
+
+/// A numeric score or the recorded cause for its absence.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum Score {
+    Present { value: serde_json::Number },
+    Missing { missing_cause: String },
+}
+
+impl std::fmt::Display for Score {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Present { value } => write!(f, "{value}"),
+            Self::Missing { missing_cause } => write!(f, "missing ({missing_cause})"),
+        }
     }
 }
 

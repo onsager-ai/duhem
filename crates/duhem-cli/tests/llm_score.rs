@@ -73,11 +73,14 @@ async fn reply(
         "out-of-range" => json!({"score": 11, "reason": "invalid"}).to_string(),
         _ => "not JSON".into(),
     };
-    let body = if uri.path().ends_with("/messages") {
+    let mut body = if uri.path().ends_with("/messages") {
         json!({"model": "reported-anthropic", "content": [{"type": "text", "text": text}]})
     } else {
         json!({"model": "reported-openai", "choices": [{"message": {"content": text}}]})
     };
+    if model == "high" {
+        body["fixture_padding"] = json!(format!("{}{KEY}", "x".repeat(5000)));
+    }
     (StatusCode::OK, Json(body))
 }
 
@@ -213,6 +216,62 @@ async fn providers_and_missing_scores_preserve_the_mechanical_exit_code() {
         );
         let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(summary["verdict"], "pass", "{name}: {summary}");
+        assert_eq!(
+            summary["totals"],
+            json!({"total": 1, "passed": 1, "failed": 0, "inconclusive": 0}),
+            "{name}: {summary}"
+        );
+        assert_eq!(summary["failures"], json!([]), "{name}: {summary}");
+        let score = &summary["scores"]["AC-1"]["AC-1.1"]["quality"];
+        match name {
+            "high" => assert_eq!(score, &json!({"value": 10.0})),
+            "low" => assert_eq!(score, &json!({"value": 0.0})),
+            _ => assert!(
+                score["missing_cause"]
+                    .as_str()
+                    .is_some_and(|cause| cause.contains(evidence)),
+                "{name}: {score}"
+            ),
+        }
+        if name == "high" || name == "disabled" {
+            let out = tmp.path().join(format!("{name}-bundle"));
+            let export = Command::new(env!("CARGO_BIN_EXE_duhem"))
+                .args(["export", summary["run_id"].as_str().unwrap(), "--db"])
+                .arg(tmp.path().join(format!("{name}.db")))
+                .arg("--out")
+                .arg(&out)
+                .output()
+                .unwrap();
+            assert!(
+                export.status.success(),
+                "{}",
+                String::from_utf8_lossy(&export.stderr)
+            );
+            let bundle = duhem_evidence::RunBundle::from_dir(&out).unwrap();
+            assert_eq!(
+                serde_json::to_value(&bundle.run.scores).unwrap(),
+                summary["scores"]
+            );
+            if name == "high" {
+                assert!(
+                    !String::from_utf8(bundle.wire_bytes().unwrap())
+                        .unwrap()
+                        .contains(KEY)
+                );
+                assert_eq!(
+                    bundle.artifacts.len(),
+                    1,
+                    "large raw response should be in the bundle"
+                );
+                for artifact in std::fs::read_dir(out.join("artifacts")).unwrap() {
+                    let text = std::fs::read_to_string(artifact.unwrap().path()).unwrap();
+                    assert!(
+                        !text.contains(KEY),
+                        "provider echoed the key into a bundle artifact"
+                    );
+                }
+            }
+        }
         let score_outcome = events
             .iter()
             .find_map(|event| match &event.payload {

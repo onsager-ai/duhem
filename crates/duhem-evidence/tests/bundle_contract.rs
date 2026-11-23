@@ -40,6 +40,7 @@ fn fixed_bundle() -> RunBundle {
             shard: None,
             manifest_digest: None,
             expected_partition: None,
+            scores: Default::default(),
         },
         events: vec![Event {
             session_source: None,

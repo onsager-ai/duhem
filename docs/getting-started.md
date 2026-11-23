@@ -44,11 +44,11 @@ Chromium), set `DUHEM_NO_BROWSER_INSTALL=1` to turn auto-provision off and
 
 For YAML completion and structural validation in VS Code, install the
 `redhat.vscode-yaml` extension. Use the schema tag that matches your
-installed CLI version from `duhem --version`; the examples below use `v0.9.4`.
+installed CLI version from `duhem --version`; the examples below use `v0.9.5`.
 Add this comment to the top of an individual `duhem.yml`:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/onsager-ai/duhem/v0.9.4/schema/duhem.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/onsager-ai/duhem/v0.9.5/schema/duhem.schema.json
 ```
 
 To map the schema across workspace files instead, add this to
@@ -57,7 +57,7 @@ To map the schema across workspace files instead, add this to
 ```json
 {
   "yaml.schemas": {
-    "https://raw.githubusercontent.com/onsager-ai/duhem/v0.9.4/schema/duhem.schema.json": [
+    "https://raw.githubusercontent.com/onsager-ai/duhem/v0.9.5/schema/duhem.schema.json": [
       "duhem.yml",
       "**/duhem.yml"
     ]

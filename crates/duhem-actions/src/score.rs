@@ -67,17 +67,83 @@ impl Provider {
         }
     }
 
-    fn content(self, response: &Value) -> Option<&str> {
-        match self {
+    fn content(self, response: &Value) -> Result<&str, &'static str> {
+        let text = match self {
             Self::Anthropic => response
-                .get("content")?
-                .as_array()?
-                .iter()
-                .find(|block| block.get("type").and_then(Value::as_str) == Some("text"))?
-                .get("text")?
-                .as_str(),
-            Self::Openai => response.pointer("/choices/0/message/content")?.as_str(),
+                .get("content")
+                .and_then(Value::as_array)
+                .and_then(|blocks| {
+                    blocks
+                        .iter()
+                        .find(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+                })
+                .and_then(|block| block.get("text"))
+                .and_then(Value::as_str)
+                .ok_or("provider reply had no text content block")?,
+            Self::Openai => response
+                .pointer("/choices/0/message/content")
+                .and_then(Value::as_str)
+                .ok_or("provider reply had no text content")?,
+        };
+        if text.trim().is_empty() {
+            return Err("provider reply had empty text content");
         }
+        Ok(text)
+    }
+}
+
+fn parse_reply(text: &str) -> Result<Reply, &'static str> {
+    if let Ok(reply) = serde_json::from_str::<Reply>(text) {
+        return Ok(reply);
+    }
+
+    let mut objects = Vec::new();
+    let bytes = text.as_bytes();
+    let mut offset = 0;
+    while let Some(start) = bytes[offset..].iter().position(|byte| *byte == b'{') {
+        let start = offset + start;
+        let mut depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut end = None;
+        for (index, byte) in bytes.iter().enumerate().skip(start) {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if *byte == b'\\' {
+                    escaped = true;
+                } else if *byte == b'"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            match *byte {
+                b'"' => in_string = true,
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(index + 1);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(end) = end else {
+            break;
+        };
+        if let Ok(Value::Object(object)) = serde_json::from_slice(&bytes[start..end]) {
+            objects.push(Value::Object(object));
+        }
+        offset = end;
+    }
+
+    match objects.len() {
+        0 => Err("provider reply contained no JSON object"),
+        1 => serde_json::from_value::<Reply>(objects.remove(0))
+            .map_err(|_| "provider did not return JSON with numeric score and string reason"),
+        _ => Err("provider reply contained multiple JSON objects"),
     }
 }
 
@@ -104,7 +170,7 @@ impl Action for Score {
     fn contract(&self) -> ActionContract {
         ActionContract {
             uses: USES,
-            summary: "Record a rubric score in the non-verdict `scores` report and in step evidence. The report keys each score by criterion, check, and step ID. Requests default to a 60s timeout; set `timeout:` to override it.",
+            summary: "Record a rubric score in the non-verdict `scores` report and in step evidence. The report keys each score by criterion, check, and step ID. Requests default to a 60s timeout; set `timeout:` to override it. Replies may be strict JSON, one fenced JSON object, or prose containing one JSON object; multiple objects are rejected.",
             with: vec![
                 FieldSpec::enum_of("provider", true, &["anthropic", "openai"]),
                 FieldSpec::required("model"),
@@ -211,13 +277,12 @@ impl Action for Score {
         let reply = response
             .ok()
             .as_ref()
+            .ok_or("provider response was not valid JSON")
             .and_then(|body| args.provider.content(body))
-            .and_then(|text| serde_json::from_str::<Reply>(text).ok());
-        let Some(reply) = reply else {
-            return Ok(result.with_output(
-                "missing_cause",
-                json!("provider did not return JSON with numeric score and string reason"),
-            ));
+            .and_then(parse_reply);
+        let reply = match reply {
+            Ok(reply) => reply,
+            Err(cause) => return Ok(result.with_output("missing_cause", json!(cause))),
         };
         if !(args.range.min..=args.range.max).contains(&reply.score) {
             return Ok(result.with_output(
@@ -261,5 +326,73 @@ mod tests {
             recorded_timeout_ms(Some(TimeoutSpec(Duration::from_secs(2)))),
             2_000
         );
+    }
+
+    #[test]
+    fn parses_plain_json() {
+        let reply = parse_reply(r#"{"score":8.5,"reason":"clear"}"#).unwrap();
+        assert_eq!(reply.score, 8.5);
+        assert_eq!(reply.reason, "clear");
+    }
+
+    #[test]
+    fn parses_json_in_a_code_fence() {
+        let reply = parse_reply("```json\n{\"score\":8,\"reason\":\"clear\"}\n```").unwrap();
+        assert_eq!(reply.score, 8.0);
+        assert_eq!(reply.reason, "clear");
+    }
+
+    #[test]
+    fn parses_one_json_object_embedded_in_prose() {
+        let reply = parse_reply("Result: {\"score\":7,\"reason\":\"clear\"} Thanks.").unwrap();
+        assert_eq!(reply.score, 7.0);
+        assert_eq!(reply.reason, "clear");
+    }
+
+    #[test]
+    fn reports_prose_without_a_json_object() {
+        assert_eq!(
+            parse_reply("There is no structured score here.").unwrap_err(),
+            "provider reply contained no JSON object"
+        );
+    }
+
+    #[test]
+    fn rejects_multiple_json_objects() {
+        assert_eq!(
+            parse_reply(
+                "First {\"score\":7,\"reason\":\"one\"}; second {\"score\":8,\"reason\":\"two\"}"
+            )
+            .unwrap_err(),
+            "provider reply contained multiple JSON objects"
+        );
+    }
+
+    #[test]
+    fn anthropic_without_text_block_has_a_specific_cause() {
+        let response = json!({"content": [{"type": "thinking"}]});
+        assert_eq!(
+            Provider::Anthropic.content(&response),
+            Err("provider reply had no text content block")
+        );
+    }
+
+    #[test]
+    fn empty_anthropic_text_content_has_a_specific_cause() {
+        let response = json!({"content": [{"type": "text", "text": "  "}]});
+        assert_eq!(
+            Provider::Anthropic.content(&response),
+            Err("provider reply had empty text content")
+        );
+    }
+
+    #[test]
+    fn openai_text_uses_the_shared_reply_parser() {
+        let response = json!({
+            "choices": [{"message": {"content": "```\n{\"score\":9,\"reason\":\"clear\"}\n```"}}]
+        });
+        let reply = parse_reply(Provider::Openai.content(&response).unwrap()).unwrap();
+        assert_eq!(reply.score, 9.0);
+        assert_eq!(reply.reason, "clear");
     }
 }

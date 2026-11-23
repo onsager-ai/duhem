@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [clarifying] Accept one JSON object from fenced or prose `llm/score` replies and reject ambiguous replies. (#708)
+
 ## v0.9.5 — 2026-11-23
 
 - [additive] Default `llm/score` provider requests to a 60s timeout; explicit `timeout:` values still override it. (#708)

@@ -545,7 +545,7 @@ Stop the old generation before restarting a current-check process.
 
 ### `llm/score`
 
-Record a rubric score in the non-verdict `scores` report and in step evidence. The report keys each score by criterion, check, and step ID. Requests default to a 60s timeout; set `timeout:` to override it.
+Record a rubric score in the non-verdict `scores` report and in step evidence. The report keys each score by criterion, check, and step ID. Requests default to a 60s timeout; set `timeout:` to override it. Replies may be strict JSON, one fenced JSON object, or prose containing one JSON object; multiple objects are rejected.
 
 Follow the [worked scoring example](../verifications/llm-score-example/README.md) to run both provider shapes locally or try a live provider.
 

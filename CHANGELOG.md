@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Default `llm/score` provider requests to a 60s timeout; explicit `timeout:` values still override it. (#708)
+
 ## v0.9.4 — 2026-11-23
 
 - [clarifying] Add a worked rubric-scoring example with both provider shapes, missing scores, and a live OpenAI variant. (#708)

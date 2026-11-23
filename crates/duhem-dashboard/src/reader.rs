@@ -821,6 +821,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         pr: run.record.scope.pr.clone(),
         ci_url: run.record.scope.ci_url.clone(),
         claim_scope: duhem_evidence::claim_scope::claim_scope(&run.events),
+        scores: duhem_evidence::scores::scores(&run.events),
         body_verdict,
         run_id: run.record.run_id.clone(),
         verification: run.verification(),

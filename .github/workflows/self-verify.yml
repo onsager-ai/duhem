@@ -281,3 +281,46 @@ jobs:
           assert summary["verdict"].startswith("inconclusive"), summary
           PY
           test -s "$RUNNER_TEMP/eval-inconclusive/logs/run-bundle/bundle.json"
+      - name: Check Harbor adapter score rewards
+        env:
+          DUHEM_BIN: ${{ github.workspace }}/target/release/duhem
+        run: |
+          set -euo pipefail
+          adapter="$PWD/verifications/eval-task-example/test.sh"
+          reference="$PWD/verifications/eval-task-example/candidates/reference"
+          # Exercise score mapping with a deterministic report fixture. Run
+          # and export still exercise the real CLI and its evidence store.
+          cat > "$RUNNER_TEMP/duhem-with-scores" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [[ "$1" != "run" ]]; then
+            exec "$REAL_DUHEM" "$@"
+          fi
+          report="$("$REAL_DUHEM" "$@")"
+          python3 - "$report" <<'PY'
+          import json
+          import sys
+
+          summary = json.loads(sys.argv[1])
+          summary["scores"] = {
+              "AC-1": {"first": {"quality": {"value": 0}, "missing": {"missing_cause": "timeout"}, "shared": {"value": 0.5}}},
+              "AC-2": {"first": {"shared": {"value": 0.75}}},
+          }
+          print(json.dumps(summary))
+          PY
+          SH
+          chmod +x "$RUNNER_TEMP/duhem-with-scores"
+          mkdir -p "$RUNNER_TEMP/eval-scored"
+          (cd "$RUNNER_TEMP/eval-scored" && TASK_WORKSPACE="$reference" VERIFIER_LOGS="$PWD/logs" REAL_DUHEM="$DUHEM_BIN" DUHEM_BIN="$RUNNER_TEMP/duhem-with-scores" "$adapter")
+          python3 - "$RUNNER_TEMP/eval-scored/reward.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as source:
+              reward = json.load(source)
+          assert reward == {
+              "duhem": 1, "AC-1": 1, "AC-2": 1, "llm_quality": 0,
+              'llm_["AC-1","first","shared"]': 0.5,
+              'llm_["AC-2","first","shared"]': 0.75,
+          }, reward
+          PY

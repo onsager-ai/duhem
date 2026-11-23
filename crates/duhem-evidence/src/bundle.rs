@@ -85,6 +85,9 @@ pub struct BundleRun {
     pub manifest_digest: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_partition: Option<duhem_summary::ExpectedPartition>,
+    /// Non-verdict scores folded from the recorded step evidence.
+    #[serde(default, skip_serializing_if = "duhem_summary::Scores::is_empty")]
+    pub scores: duhem_summary::Scores,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -128,6 +131,7 @@ impl RunBundle {
             });
         }
         let mut run = bundle_run(&record);
+        run.scores = crate::scores::scores(&events);
         if let Some(scope) = crate::claim_scope::claim_scope(&events) {
             run.shard = scope.distributed.shard;
             run.manifest_digest = scope.distributed.manifest_digest;
@@ -274,6 +278,7 @@ fn bundle_run(record: &RunRecord) -> BundleRun {
         shard: None,
         manifest_digest: None,
         expected_partition: None,
+        scores: Default::default(),
     }
 }
 

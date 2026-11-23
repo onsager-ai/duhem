@@ -172,6 +172,16 @@ fn render(s: &RunSummary, out: &mut dyn io::Write) -> io::Result<()> {
             writeln!(out, "  {check}")?;
         }
     }
+    if !s.scores.is_empty() {
+        writeln!(out, "\nScores (non-verdict)")?;
+        for (criterion, checks) in &s.scores {
+            for (check, steps) in checks {
+                for (id, score) in steps {
+                    writeln!(out, "  {criterion} / {check} / {id}: {score}")?;
+                }
+            }
+        }
+    }
     if !s.cleanup.is_empty() {
         writeln!(out)?;
         writeln!(out, "CLEANUP")?;
@@ -335,12 +345,22 @@ mod tests {
             String::from_utf8(out).unwrap(),
             "run r — pass\nCRITERION  VERDICT\n------------------\nstore: . (run r)\n"
         );
-        assert!(
-            serde_json::to_value(summary)
-                .unwrap()
-                .get("gated_checks")
-                .is_none()
-        );
+        let json = serde_json::to_value(summary).unwrap();
+        assert!(json.get("gated_checks").is_none());
+        assert!(json.get("scores").is_none());
+    }
+
+    #[test]
+    fn renders_scores_in_their_own_section() {
+        let summary = RunSummary::new("r", VerdictState::Pass, vec![], PathBuf::from("."))
+            .with_scores(serde_json::from_value(serde_json::json!({
+                "AC-1": {"check": {"quality": {"value": 0}, "clarity": {"missing_cause": "timeout"}}}
+            })).unwrap());
+        let mut out = Vec::new();
+        render(&summary, &mut out).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.starts_with("run r — pass\n"));
+        assert!(out.contains("Scores (non-verdict)\n  AC-1 / check / clarity: missing (timeout)\n  AC-1 / check / quality: 0\n"));
     }
 
     #[test]

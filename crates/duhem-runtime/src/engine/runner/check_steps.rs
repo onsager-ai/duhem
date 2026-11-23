@@ -175,7 +175,14 @@ impl Engine {
 
             if score_step && let Some(id) = &step.id {
                 writer
-                    .append_observation(idx as u32, "score_step_id", serde_json::json!(id))
+                    // The score projection reads the ID as inline metadata.
+                    .append(EventPayload::StepObservation {
+                        step_index: idx as u32,
+                        output_name: "score_step_id".into(),
+                        value: duhem_evidence::ObservationValue::Inline {
+                            value: serde_json::json!(id),
+                        },
+                    })
                     .await?;
             }
 

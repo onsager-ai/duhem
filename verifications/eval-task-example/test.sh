@@ -34,6 +34,7 @@ import json
 import os
 import sys
 import tempfile
+from collections import Counter
 
 summary_path, verdict_path = sys.argv[1:]
 with open(summary_path, encoding="utf-8") as source:
@@ -60,6 +61,27 @@ for criterion in summary["criteria"]:
     if criterion_verdict not in ("pass", "fail"):
         raise SystemExit(f"unsupported criterion verdict: {criterion_verdict}")
     reward[criterion["id"]] = int(criterion_verdict == "pass")
+
+scores = [
+    (criterion_id, check_id, step_id, score)
+    for criterion_id, checks in summary.get("scores", {}).items()
+    for check_id, steps in checks.items()
+    for step_id, score in steps.items()
+]
+step_counts = Counter(step_id for _, _, step_id, _ in scores)
+verdict_keys = {"duhem"} | {criterion["id"] for criterion in summary["criteria"]}
+reserved = verdict_keys | {f"llm_{step_id}" for step_id in step_counts}
+for criterion_id, check_id, step_id, score in scores:
+    if "value" not in score:
+        continue
+    key = f"llm_{step_id}"
+    if step_counts[step_id] > 1 or key in verdict_keys:
+        identity = json.dumps([criterion_id, check_id, step_id], separators=(",", ":"))
+        key = f"llm_{identity}"
+        while key in reserved:
+            key += "#"
+        reserved.add(key)
+    reward[key] = score["value"]
 
 fd, temporary = tempfile.mkstemp(prefix="reward.", dir=".", text=True)
 try:

@@ -123,6 +123,8 @@ export interface ShardCoverage {
   missing: MissingShard[];
 }
 
+type Score = { value: number } | { missing_cause: string };
+
 export interface RunDetail {
   target_repo?: string;
   branch?: string;
@@ -131,6 +133,8 @@ export interface RunDetail {
   shards?: ShardCoverage;
   check_totals?: RunCheckTotals;
   claim_scope?: ClaimScope;
+  /** Non-verdict scores indexed by criterion, check and step ID. */
+  scores?: Record<string, Record<string, Record<string, Score>>>;
   body_verdict?: Verdict;
   run_id: string;
   verification: string;

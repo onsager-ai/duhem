@@ -388,6 +388,25 @@ export function RunSummary({ run }: { run: RunDetail }) {
         </p>
       )}
 
+      {run.scores && (
+        <section aria-labelledby="run-scores-heading" className="space-y-2">
+          <h2 id="run-scores-heading" className="font-semibold">Scores (non-verdict)</h2>
+          <dl className="space-y-2 break-words">
+            {Object.entries(run.scores).flatMap(([criterion, checks]) =>
+              Object.entries(checks).flatMap(([check, steps]) =>
+                Object.entries(steps).map(([id, score]) => (
+                  <div key={JSON.stringify([criterion, check, id])}>
+                    <dt className="font-medium">{id}</dt>
+                    <dd>{"value" in score ? score.value : `Missing (${score.missing_cause})`}</dd>
+                    <dd className="text-muted-foreground">{criterion} / {check}</dd>
+                  </div>
+                )),
+              ),
+            )}
+          </dl>
+        </section>
+      )}
+
       {/* Provenance + evidence links. */}
       <dl className="grid gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
         <div>

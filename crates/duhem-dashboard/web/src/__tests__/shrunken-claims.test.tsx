@@ -61,3 +61,18 @@ it("renders the evaluated condition and operands in the step timeline", () => {
   expect(timeline.container.textContent).toContain("$steps.count_rows.outputs.count > 0");
   expect(timeline.container.textContent).toContain("$steps.count_rows.outputs.count = 0");
 });
+
+it("shows present and missing scores separately from the check verdicts", () => {
+  const run = foldRun("r", events);
+  const report = render(<MemoryRouter><RunSummary run={run} /></MemoryRouter>);
+  expect(report.queryByRole("heading", { name: "Scores (non-verdict)" })).toBeNull();
+  const verdictSummary = report.getByRole("region", { name: "Checks" }).textContent;
+  const scored: RunDetail = { ...run, scores: {
+    "AC-1": { C: { quality: { value: 0 }, clarity: { missing_cause: "timed out" } } },
+  } };
+  report.rerender(<MemoryRouter><RunSummary run={scored} /></MemoryRouter>);
+  const scores = report.getByRole("region", { name: "Scores (non-verdict)" });
+  expect(scores.textContent).toContain("quality0");
+  expect(scores.textContent).toContain("clarityMissing (timed out)");
+  expect(report.getByRole("region", { name: "Checks" }).textContent).toBe(verdictSummary);
+});

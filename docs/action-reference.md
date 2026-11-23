@@ -545,7 +545,7 @@ Stop the old generation before restarting a current-check process.
 
 ### `llm/score`
 
-Record a rubric score in the non-verdict `scores` report and in step evidence. The report keys each score by criterion, check, and step ID.
+Record a rubric score in the non-verdict `scores` report and in step evidence. The report keys each score by criterion, check, and step ID. Requests default to a 60s timeout; set `timeout:` to override it.
 
 Follow the [worked scoring example](../verifications/llm-score-example/README.md) to run both provider shapes locally or try a live provider.
 

@@ -6,13 +6,25 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::action::DEFAULT_TIMEOUT;
 use crate::{Action, ActionContract, ActionCtx, ActionError, ActionResult, FieldSpec, TimeoutSpec};
 
 pub struct Score;
 
 const USES: &str = duhem_schema::score::ACTION;
 const MAX_TOKENS: u32 = 1024;
+const DEFAULT_SCORE_TIMEOUT: Duration = Duration::from_secs(60);
+
+fn effective_timeout(timeout: Option<TimeoutSpec>) -> Duration {
+    timeout.map_or(DEFAULT_SCORE_TIMEOUT, Duration::from)
+}
+
+fn request_params(model: &str, endpoint: &str, timeout: Duration, range: &Range) -> Value {
+    json!({
+        "model": model, "temperature": 0, "max_tokens": MAX_TOKENS,
+        "endpoint": endpoint, "timeout_ms": timeout.as_millis(),
+        "range": {"min": range.min, "max": range.max},
+    })
+}
 
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -92,7 +104,7 @@ impl Action for Score {
     fn contract(&self) -> ActionContract {
         ActionContract {
             uses: USES,
-            summary: "Record a rubric score in the non-verdict `scores` report and in step evidence. The report keys each score by criterion, check, and step ID.",
+            summary: "Record a rubric score in the non-verdict `scores` report and in step evidence. The report keys each score by criterion, check, and step ID. Requests default to a 60s timeout; set `timeout:` to override it.",
             with: vec![
                 FieldSpec::enum_of("provider", true, &["anthropic", "openai"]),
                 FieldSpec::required("model"),
@@ -145,7 +157,7 @@ impl Action for Score {
             .unwrap_or(default_base)
             .trim_end_matches('/');
         let endpoint = format!("{base}/{path}");
-        let timeout = args.timeout.map_or(DEFAULT_TIMEOUT, Duration::from);
+        let timeout = effective_timeout(args.timeout);
         result = result
             .with_output(
                 "prompt_hash",
@@ -153,11 +165,7 @@ impl Action for Score {
             )
             .with_output(
                 "request_params",
-                json!({
-                    "model": args.model, "temperature": 0, "max_tokens": MAX_TOKENS,
-                    "endpoint": endpoint, "timeout_ms": timeout.as_millis(),
-                    "range": {"min": args.range.min, "max": args.range.max},
-                }),
+                request_params(&args.model, &endpoint, timeout, &args.range),
             );
         let client = match reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -221,5 +229,37 @@ impl Action for Score {
         Ok(result
             .with_output("score", json!(reply.score))
             .with_output("reason", json!(reply.reason)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn recorded_timeout_ms(timeout: Option<TimeoutSpec>) -> u128 {
+        request_params(
+            "model",
+            "https://example.test",
+            effective_timeout(timeout),
+            &Range {
+                min: 0.0,
+                max: 10.0,
+            },
+        )["timeout_ms"]
+            .as_u64()
+            .expect("timeout_ms") as u128
+    }
+
+    #[test]
+    fn defaults_to_60_second_timeout() {
+        assert_eq!(recorded_timeout_ms(None), 60_000);
+    }
+
+    #[test]
+    fn explicit_timeout_overrides_default() {
+        assert_eq!(
+            recorded_timeout_ms(Some(TimeoutSpec(Duration::from_secs(2)))),
+            2_000
+        );
     }
 }

@@ -270,10 +270,11 @@ pub fn score_only_keys(def: &VerificationDefinition) -> HashSet<String> {
         serde_yml::to_value(&def.pages),
         serde_yml::to_value(&def.provision),
         serde_yml::to_value(&def.native),
-    ] {
-        if let Ok(config) = config {
-            crate::source::walk_with_refs(&config, &mut Vec::new(), &mut |expr, _, _| remove(expr));
-        }
+    ]
+    .into_iter()
+    .flatten()
+    {
+        crate::source::walk_with_refs(&config, &mut Vec::new(), &mut |expr, _, _| remove(expr));
     }
     keys
 }
@@ -347,7 +348,7 @@ mod tests {
         let def = VerificationDefinition::from_yaml_str(&src).unwrap();
         assert_eq!(score_only_keys(&def), HashSet::from(["key".to_string()]));
         let def = VerificationDefinition::from_yaml_str(
-            &src.replace("1 == 1", "$inputs.key == 'expected'"),
+            &src.replace("'1 == 1'", r#""$inputs.key == 'expected'""#),
         )
         .unwrap();
         assert!(score_only_keys(&def).is_empty());

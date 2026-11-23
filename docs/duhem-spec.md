@@ -1675,8 +1675,9 @@ Linux/macOS use owned process groups; unsupported platforms reject before spawn.
 
 #### Non-verdict scoring
 
-`llm/score` is a check-body action that records one rubric score under its
-required step `id`. It is unavailable in setup, teardown, cleanup and
+- `llm/score` — record one rubric score under the required step `id`.
+
+This action is unavailable in setup, teardown, cleanup and
 provisioning. Every check still requires a mechanical claim. Score results are
 evidence only. Validation rejects any `$steps` expression targeting a score step,
 including assertion operands, conditions, iteration sources and action inputs.

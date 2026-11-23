@@ -351,21 +351,20 @@ mod tests {
 
     #[test]
     fn reports_prose_without_a_json_object() {
-        assert_eq!(
-            parse_reply("There is no structured score here.").unwrap_err(),
-            "provider reply contained no JSON object"
-        );
+        assert!(matches!(
+            parse_reply("There is no structured score here."),
+            Err("provider reply contained no JSON object")
+        ));
     }
 
     #[test]
     fn rejects_multiple_json_objects() {
-        assert_eq!(
+        assert!(matches!(
             parse_reply(
                 "First {\"score\":7,\"reason\":\"one\"}; second {\"score\":8,\"reason\":\"two\"}"
-            )
-            .unwrap_err(),
-            "provider reply contained multiple JSON objects"
-        );
+            ),
+            Err("provider reply contained multiple JSON objects")
+        ));
     }
 
     #[test]

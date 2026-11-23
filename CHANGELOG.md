@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+## v0.9.4 — 2026-11-23
+
 - [clarifying] Add a worked rubric-scoring example with both provider shapes, missing scores, and a live OpenAI variant. (#708)
 - [additive] Report non-verdict `scores` in RunSummary, run bundles, the terminal and dashboard, and map present scores to Harbor rewards. (#708)
 - [additive] Add `llm/score` for rubric scores in evidence and `duhem run --no-scores` to skip them. Verdicts remain deterministic. (#708)

@@ -48,6 +48,10 @@ completed execution of that step. The trace retains earlier iterations and
 retry attempts. Runs without recorded scores or missing-score outcomes omit
 the block. Scores are separate from assertions and verdict counts.
 
+The [worked scoring example](../verifications/llm-score-example/README.md)
+shows scores from both provider shapes, an out-of-range reply and a run with
+`--no-scores`. It also includes a live OpenAI definition for manual runs.
+
 ## Harbor adapter contract
 
 Install Duhem at an exact pinned version when building the Harbor image; for

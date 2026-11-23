@@ -547,6 +547,8 @@ Stop the old generation before restarting a current-check process.
 
 Record a rubric score in the non-verdict `scores` report and in step evidence. The report keys each score by criterion, check, and step ID.
 
+Follow the [worked scoring example](../verifications/llm-score-example/README.md) to run both provider shapes locally or try a live provider.
+
 | `with:` field | required | values |
 |---|:---:|---|
 | `provider` | yes | `anthropic` \| `openai` |

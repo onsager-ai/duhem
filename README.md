@@ -17,7 +17,7 @@ Duhem is the verification runner for AI-built software: one entry point runs eve
 
 - **Runnable specs.** A Verification Definition is one artifact: readable intent bound to runnable checks. The thing you read *is* the thing that runs *is* the thing that gates the merge — spec, tests, and code can't drift apart.
 - **Holistic, no mocks.** Duhem drives the real shipped artifact through its real interfaces — the whole delivery web at once. A green means the real system worked, not that a stand-in did.
-- **Mechanical judgment — no LLM in the verdict.** AI can help draft criteria; a human owns them; pass/fail is deterministic. No AI grading its own homework, no confident-but-wrong green.
+- **Mechanical judgment — no LLM in the verdict.** Humans own the criteria, and Duhem evaluates them deterministically. Optional score steps record rubric-based evidence separately from the verdict.
 - **Built for agent-native development.** You write *what* to verify, not the program that verifies it — anchored to intent, not implementation, so it doesn't rot when an agent refactors underneath.
 
 ## It caught a real one
@@ -117,7 +117,7 @@ For a real-world example — including the `provision.up:` / `down:` hooks Duhem
 - **Criteria vs. checks.** *Criteria* are the human commitment about what "done" means; they are stable and survive implementation churn. *Checks* are how Duhem verifies that commitment; they are derivative and may change as the implementation does. Conflating the two is a defect.
 - **Verification Definition (VD).** A YAML document (criteria + checks + inputs, optionally `setup`, leaf `teardown`, and `provision` hooks) describing one workload to verify. `duhem init` scaffolds one; `verifications/` holds worked examples.
 - **The manifest (`duhem.yml`).** Composes one or more VDs into a suite and carries shared configuration — `defaults:` (timeout / inconclusive policy / retry), `includes:`, `profiles:`, reusable `pages:` locators, and reusable `flows:` step sequences invoked from a check with `call:`. A single-file VD *is* a manifest with one leaf.
-- **The verdict.** Deterministic aggregation of structured assertions into `pass` / `fail` / `inconclusive`. No LLM in the loop.
+- **The verdict.** Deterministic aggregation of structured assertions into `pass` / `fail` / `inconclusive`. Use `--no-scores` to skip optional rubric scoring.
 - **Step gating.** Steps default to `if: success`; use `if: always` for
   per-attempt cleanup or `if: failure` for diagnostics. These cleanup
   steps also drain after an engine error before the original error aborts

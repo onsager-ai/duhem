@@ -32,6 +32,15 @@ frozen VD, treat that as ambiguity in the brief or VD for a human to settle.
 Never fit the check to the reference solution. Record human resolutions and
 their reasons in the VD's history.
 
+## Add a rubric score
+
+Use [`llm/score`](action-reference.md#llmscore) for qualities that call for
+subjective feedback, such as clarity of an explanation. Keep measurable
+requirements in mechanical criteria. A score step sends its rubric and explicit
+observations to the configured provider. Its result appears in step evidence
+and cannot feed assertions or change the verdict. To run the mechanical gate
+without contacting score providers, pass `duhem run --no-scores`.
+
 ## Harbor adapter contract
 
 Install Duhem at an exact pinned version when building the Harbor image; for

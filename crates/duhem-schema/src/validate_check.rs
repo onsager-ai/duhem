@@ -73,7 +73,9 @@ pub(super) fn validate_check(
             } else {
                 effective_outputs(s, outputs_for)
             };
-            step_outputs.insert(id.as_str(), outputs);
+            if !crate::score::is_score(s) {
+                step_outputs.insert(id.as_str(), outputs);
+            }
         }
     }
 

@@ -6,6 +6,12 @@
 use super::*;
 
 impl Engine {
+    /// Skip every non-verdict score step in this run.
+    pub fn with_no_scores(mut self, no_scores: bool) -> Self {
+        self.no_scores = no_scores;
+        self
+    }
+
     /// Attach the registry populated alongside CLI input resolution
     /// (spec #346). It is applied before the evidence run header is
     /// opened and shared with the post-commit live-progress stream.

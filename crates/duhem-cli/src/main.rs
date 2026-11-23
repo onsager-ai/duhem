@@ -255,6 +255,9 @@ enum Cmd {
         /// `--filter` resolves to the pairs you expect (spec on #33).
         #[arg(long = "dry-run", default_value_t = false)]
         dry_run: bool,
+        /// Skip non-verdict score steps.
+        #[arg(long)]
+        no_scores: bool,
         /// Skip `provision.up:` and readiness probing. Use when the
         /// operator brought the SUT up out-of-band. Teardown still
         /// runs unless `--keep-env` is also passed. Has no effect on
@@ -453,6 +456,7 @@ fn main() -> ExitCode {
             reporter,
             profile,
             dry_run,
+            no_scores,
             no_env_up,
             keep_env,
             live,
@@ -515,6 +519,7 @@ fn main() -> ExitCode {
                 reporter: resolved_reporter,
                 profile,
                 dry_run,
+                no_scores,
                 no_env_up,
                 keep_env,
                 // Tri-state: forced on / forced off / auto (TTY).

@@ -52,6 +52,7 @@ pub struct RunArgs {
     pub reporter: Reporter,
     pub profile: Option<String>,
     pub dry_run: bool,
+    pub no_scores: bool,
     pub no_env_up: bool,
     pub keep_env: bool,
     /// Live per-criterion progress on stderr (#299): `Some(true)` /
@@ -79,6 +80,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         reporter,
         profile: requested_profile,
         dry_run,
+        no_scores,
         no_env_up,
         keep_env,
         live,
@@ -688,10 +690,10 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // dependency + startup cost) entirely. `uses_requires_page` is
         // the same classifier the engine uses to gate the per-check
         // browser, so this never starves a UI step of a page.
-        let has_missing_input = def
-            .inputs
-            .iter()
-            .any(|(name, decl)| !decl.inherit && !inputs.contains_key(name));
+        let score_only_keys = duhem_schema::score::score_only_keys(&def);
+        let has_missing_input = def.inputs.iter().any(|(name, decl)| {
+            !decl.inherit && !score_only_keys.contains(name) && !inputs.contains_key(name)
+        });
         let selected_criteria: Vec<_> = def
             .criteria
             .iter()
@@ -764,6 +766,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             )
             .with_capture(capture)
             .with_secret_registry(secrets.clone())
+            .with_no_scores(no_scores)
             .with_child_store_path(db_path.clone());
         for warning in secrets.warnings() {
             eprintln!("warning: {warning}");

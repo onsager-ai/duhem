@@ -72,7 +72,7 @@ fn render() -> String {
     );
 
     let cat = catalog();
-    for family in ["ui", "api", "db", "cli", "process"] {
+    for family in ["ui", "api", "db", "cli", "process", "llm"] {
         let prefix = format!("{family}/");
         let acts: Vec<_> = cat.iter().filter(|c| c.uses.starts_with(&prefix)).collect();
         if acts.is_empty() {

@@ -179,7 +179,7 @@ pub(crate) fn implicit_judgment_for_step(
     environment_failed: bool,
     browser_missing: bool,
 ) -> Option<ImplicitOutcome> {
-    if evidence.skip_reason.is_some() {
+    if duhem_schema::score::is_score(step) || evidence.skip_reason.is_some() {
         return None;
     }
 

@@ -72,7 +72,7 @@ Duhem is opinionated about three things:
 - **Not a test framework.** Duhem runs and reads a project’s native tests but does not replace its test frameworks. Its own checks are authored by AI under human review against whole-system behavior, not against decomposed units.
 - **Not a code review tool.** Code review evaluates source. Duhem evaluates behavior of the delivery web.
 - **Not a QA replacement service.** Services like QA Wolf provide test-writing labor. Duhem provides verification infrastructure.
-- **Not an AI judge.** Duhem never asks an LLM “did this pass?” The verdict is mechanical.
+- **Not an AI judge.** Duhem never asks an LLM “did this pass?” The verdict is mechanical. Optional score steps can record rubric-based evidence alongside it.
 
 ### How Duhem differs from adjacent products
 
@@ -181,7 +181,7 @@ with another true observation in a passing disjunction. The two coincide
 only when an unbound judging output is promoted into an implicit
 assertion.
 
-- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Every evaluated assertion carries the same three-state `VerdictState` as the final verdict. An assertion that is not evaluated because one of its operands comes from a step skipped by an outcome gate (`success`, `failure`, `always`) is omitted; absence is not a fourth state. An operand from a step skipped by a *value-based* `if:` is not omitted: see the unresolvable-condition and gated-output rules below. A step that terminates in `error` or `timeout` contributes an `inconclusive` judgment naming that step, whether or not its action judges. Execution failure of an actuator is an observability gap, not an absence: the steps it was meant to enable never ran, so the check's claims were never exercised. A check whose step sequence aborted therefore cannot aggregate to `pass`. Gated-out steps (`if:` did not match) and cleanup steps (`if: always` after a failure) are exempt — they contribute nothing, as above. An environment failure likewise contributes an `inconclusive` judgment for every non-exempt step, not only judging ones: when the environment never came up, no step observed anything. Aggregation applies fail → inconclusive → pass precedence directly, and an empty assertion set becomes `inconclusive:empty_aggregation`. A check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
+- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Every evaluated assertion carries the same three-state `VerdictState` as the final verdict. An assertion that is not evaluated because one of its operands comes from a step skipped by an outcome gate (`success`, `failure`, `always`) is omitted; absence is not a fourth state. An operand from a step skipped by a *value-based* `if:` is not omitted: see the unresolvable-condition and gated-output rules below. A step that terminates in `error` or `timeout` contributes an `inconclusive` judgment naming that step, whether or not its action judges, except for `llm/score`. A score step contributes no assertion, cannot change any verdict or exit code, and its outcome cannot block or enable later steps. Execution failure of an actuator is an observability gap, not an absence: the steps it was meant to enable never ran, so the check's claims were never exercised. A check whose step sequence aborted therefore cannot aggregate to `pass`. Gated-out steps (`if:` did not match) and cleanup steps (`if: always` after a failure) are exempt — they contribute nothing, as above. An environment failure likewise contributes an `inconclusive` judgment for every non-exempt step, not only judging ones: when the environment never came up, no step observed anything. Aggregation applies fail → inconclusive → pass precedence directly, and an empty assertion set becomes `inconclusive:empty_aggregation`. A check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the verdict.
 - **Conditional claim-set legibility:** absence is not a fourth state; gated steps still contribute nothing. A check records its non-zero count of **judging** steps gated by **value-based** conditions (static gates, upstream blocking, and lifecycle steps never count), and the run report, default/pretty reporters, and agent failure envelope expose that smaller claim set even when the verdict is `pass`. Value-based gating records the authored condition and the operand values actually evaluated in `StepOutcome::Skipped`; upstream failure blocking carries no condition evaluation. These optional fields are omitted, never null. A check with no value-gated judging steps gains no new output, and older traces render unchanged. This clarifies legibility only: verdict aggregation remains the same deterministic, LLM-free evaluation.
 - **Unresolvable conditions and gated outputs (value-based `if:` on check steps, #440):** a check-step condition that cannot be evaluated (an operand absent at run time) is never treated as `false` or `true`. The step records `error` with detail naming the step and the unresolvable reference, so the check is `inconclusive:missing_observation` through the ordinary execution-failure rule above; the run continues and other checks and criteria record their own verdicts. A later step `if:` or an `assertions:` entry that reads `$steps.<gated>.outputs.*` of a step gated by a value-based condition is likewise evaluated and finds no observation, so it is `inconclusive:missing_observation` rather than a silent pass or omission. Lifecycle steps keep their own rule (§10.3.3): the step fails and dependents are inconclusive. No new inconclusive cause is introduced.
 - **Per-criterion verdict**: aggregated from its checks (any check `fail` → criterion `fail`; any `inconclusive` and no `fail` → criterion `inconclusive`; all `pass` → criterion `pass`).
@@ -319,7 +319,7 @@ Output: a verification environment that includes the actual web the artifact dep
 
 Duhem executes each check against the holistic environment. Steps perform actions and capture observations across the web. Assertions are evaluated as pure predicates. Each check produces a verdict and evidence.
 
-No AI is in the execution loop. No AI evaluates whether a check passed.
+The runner can execute an explicitly declared score step (`llm/score`, §10.5) to produce non-verdict evidence. Score steps run by default. Use `duhem run --no-scores` to record them as skipped without contacting their providers. The judge evaluates whether a check passed using deterministic assertions.
 
 Output: per-check verdicts, per-criterion aggregations, run-level verdict, evidence trace.
 
@@ -1673,6 +1673,35 @@ All four are non-judging. Setup spawn/readiness failure makes dependent checks i
 
 Linux/macOS use owned process groups; unsupported platforms reject before spawn. Detached daemons, interactive protocols and port leases are outside the contract. See [exact lifecycle/log/timeout semantics](owned-processes.md) and the [executable HTTP/restart example](../verifications/owned-process-example/duhem.yml). These actions first shipped in v0.7.1; they are not in v0.7.0 or earlier tags.
 
+#### Non-verdict scoring
+
+`llm/score` is a check-body action that records one rubric score under its
+required step `id`. It is unavailable in setup, teardown, cleanup and
+provisioning. Every check still requires a mechanical claim. Score results are
+evidence only. Validation rejects any `$steps` expression targeting a score step,
+including assertion operands, conditions, iteration sources and action inputs.
+
+Under `with:`, declare the provider (`anthropic` or `openai`), model, rubric,
+`observations:` list, and numeric `range: {min, max}` with `min < max`. Use a
+whole `$inputs.<name>` reference to a `secret: true` input for `api_key`. If the
+key is missing and used only in score steps, the mechanical checks still run.
+If a mechanical check also needs the key, the usual input rules apply.
+
+Each observation is a `$steps.<id>.outputs.<name>` path, `{file: path}` for a
+UTF-8 file relative to the invocation's working directory, or
+`{evidence: sha256}` for a UTF-8 blob referenced by evidence already recorded in
+the current run. Duhem sends the rubric, declared bounds and selected
+observations to the provider. File paths must stay inside the working directory.
+
+Anthropic uses the Messages API and OpenAI uses Chat Completions. An optional
+`base_url` replaces the provider's API base (normally `https://api.anthropic.com/v1`
+or `https://api.openai.com/v1`). Each request uses temperature 0 and no retries.
+The model must reply with a JSON object containing a numeric `score` inside the
+inclusive range and a string `reason`. An invalid response, HTTP failure or
+timeout records a missing score with its cause. The evidence records the
+provider, reported model, request parameters, prompt hash and raw response when
+available. The API key is masked.
+
 #### Planned (Phase 2+ — §14)
 
 Roadmap surfaces that are **not** registered today; a `uses:` naming one fails catalog-aware validation. They are listed here so authors can see the intended direction, not author against them yet.
@@ -1845,7 +1874,7 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 **Judge** (`duhem-judge`)
 
 - Pure deterministic evaluator of assertions over observed state
-- No LLM in the loop
+- No LLM in the verdict
 - Open source, auditable
 
 **Evidence Store** (`duhem-evidence`)
@@ -1967,16 +1996,23 @@ recorded expression and result without inventing operand values.
 
 ### 11.2 Trust Boundary
 
-The critical architectural commitment: **the judge is structurally independent of any AI**. The judge’s input is observed state and frozen check spec; its output is a verdict produced by deterministic evaluation. AI may participate in stages 1, 2, 3 (authoring, translation, environment provisioning) but never in stage 4 (execution and judgment).
+The critical architectural commitment: **the judge is structurally independent of any AI**. The judge’s input is observed state and frozen check spec; its output is a verdict produced by deterministic evaluation. AI may participate in stages 1, 2 and 3 and may produce score evidence in Stage 4. Validation and runtime keep score evidence outside the judge’s inputs.
 
 This is enforced architecturally — the judge service has no LLM dependency. It can run fully air-gapped from AI infrastructure.
 
 Because Duhem is open-source (Apache-2.0), this commitment is directly auditable — anyone can read the judge's source and confirm it has no LLM dependency. Several reinforcing measures keep that auditability concrete:
 
-- **Open judge source**: `crates/duhem-judge` is open-source. The verdict-computation path can be read end to end; the absence of an LLM in the loop is a fact of the code, not a promise in prose.
+- **Open judge source**: `crates/duhem-judge` is open-source. The verdict-computation path can be read end to end; the verdict path has no LLM or HTTP dependency.
 - **Documented judge logic**: The decision rules used by the judge are also documented in §10.6 (assertion forms), §10.7 (runtime expressions), and the `crates/duhem-judge` aggregation doc comments, so a verdict can be reasoned about without reading the full source. (Extracting these into a single standalone "judge decision reference" remains a goal.)
 - **Reproducible runs**: Every run produces a complete evidence trace. Given identical environment state and a frozen check spec, replays must produce identical verdicts. Determinism is verifiable empirically by customers.
 - **Self-hostable judge**: Because the judge is open-source, customers requiring infrastructure isolation can build and run it entirely within their own infrastructure, removing any cloud-trust dependency. `duhem-judge` is a library crate today; a standalone judge binary remains a future packaging step.
+
+**Alignment (#708, 2026-11-23).** Eval tasks need subjective quality scores
+alongside mechanical correctness. The user chose to record both in one run and
+accepted that a score displayed beside a verdict may be mistaken for a grade.
+Reports must label scores as non-verdict evidence. The judge remains deterministic
+over structured assertions, and validation prevents assertions or execution gates
+from reading score outputs.
 
 #### Duhem is a tool: product Verification Definitions live with the product
 
@@ -1984,7 +2020,7 @@ Because Duhem is open-source (Apache-2.0), this commitment is directly auditable
 
 What the platform must keep true is narrower than "all checks live in one repo":
 
-- **Mechanical judgment is unchanged.** The judge still has no LLM in the loop; a verdict is deterministic over observed state and a frozen check spec (above). This is the anchor of a trustworthy `pass`, and co-location does not touch it.
+- **Mechanical judgment is unchanged.** The judge still has no LLM in the verdict; a verdict is deterministic over observed state and a frozen check spec (above). This is the anchor of a trustworthy `pass`, and co-location does not touch it.
 - **Duhem's own contract stays consistent and self-verified.** The schema, judge, action catalog, and reference docs are the contract that product-side VDs consume. Duhem's self-verification suite gates that contract; as long as it holds, the tool is trustworthy independent of where any product's VDs live.
 - **The dogfood inverts into drift monitoring.** Running each product's real VDs with the current Duhem is how we catch a Duhem change that would break a consumer — a regression in the tool, surfaced continuously as Duhem develops — rather than a seam policing the product.
 
@@ -2002,7 +2038,7 @@ The reference implementation is open-source under Apache-2.0 from v0.1.0 onward.
 
 Rationale:
 
-- The verifier of AI claims earns trust by being readable. An open judge makes the "no LLM in the loop" commitment auditable in the code rather than asserted in prose.
+- The verifier of AI claims earns trust by being readable. An open judge makes the "no LLM in the verdict" commitment auditable in the code rather than asserted in prose.
 - A stable, open schema is more valuable as an open standard than as proprietary IP — it encourages ecosystem tooling, third-party action types, and external auditing. Schema-as-open-spec mirrors successful precedents: OpenAPI, GraphQL, JSON Schema.
 - Low-friction adoption: `npx duhem` / `npm i -g duhem` and a GitHub-Releases binary, no signup required.
 

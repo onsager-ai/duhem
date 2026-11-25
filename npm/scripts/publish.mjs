@@ -15,9 +15,9 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { cpSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { config, mainDir, platformDir } from './lib.mjs';
+import { config, mainDir, platformDir, ROOT } from './lib.mjs';
 
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
@@ -74,6 +74,7 @@ if (target === 'platforms') {
   }
   console.log(`\npublished ${config.platforms.length} platform package(s)${dryRun ? ' (dry-run)' : ''}`);
 } else if (target === 'main') {
+  cpSync(join(ROOT, 'schema'), join(mainDir(), 'schema'), { recursive: true });
   publish(mainDir(), config.mainPackage.name);
   console.log(`\npublished ${config.mainPackage.name}${dryRun ? ' (dry-run)' : ''}`);
 } else {

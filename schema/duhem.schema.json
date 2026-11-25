@@ -1,4 +1,5 @@
 {
+  "$id": "https://raw.githubusercontent.com/onsager-ai/duhem/main/schema/duhem.schema.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "Assertion": {

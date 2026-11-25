@@ -159,7 +159,12 @@ pub fn json_schema() -> serde_json::Value {
         schema: root,
     };
 
-    serde_json::to_value(&root_schema).expect("schema serializes to JSON")
+    let mut schema = serde_json::to_value(&root_schema).expect("schema serializes to JSON");
+    schema["$id"] = serde_json::Value::String(
+        "https://raw.githubusercontent.com/onsager-ai/duhem/main/schema/duhem.schema.json"
+            .to_string(),
+    );
+    schema
 }
 
 #[cfg(test)]

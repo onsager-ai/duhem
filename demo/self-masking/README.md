@@ -9,12 +9,15 @@ the same gate then confirms the fix.
 
 ## Run it
 
-Needs `node` and `duhem` on your `PATH` (from a source checkout,
-`DUHEM=./target/debug/duhem`).
+You need Bash, `curl`, Node.js, and [`duhem`](../../README.md#install) on your `PATH`. Free up local port 8477 before running the demo.
+
+From the root of a Duhem checkout:
 
 ```sh
-./run.sh
+./demo/self-masking/run.sh
 ```
+
+For a source build, prefix that command with `DUHEM=./target/debug/duhem`.
 
 You'll see the gate go **red** on the broken build — Duhem drives the
 real front and fails `AC-2` while `/health` still reports healthy — then
@@ -40,8 +43,6 @@ pass
 | `duhem.yml` | The Verification Definition. `AC-1` checks health; `AC-2` checks the front actually serves the app. |
 | `run.sh` | Starts the app and runs the gate twice — broken, then fixed. The source the README demo is captured from. |
 | `render-svg.mjs` | Renders the real output into the animated `demo.svg` — crisp, embeds on GitHub (`node render-svg.mjs`, no deps). `--at <ms>` emits one static frame. |
-| `render-gif.sh` | Assembles those frames into `demo.gif` for surfaces that don't animate SVG (e.g. the npm page). Needs a full `ffmpeg` + a Chromium. |
+| `render-gif.sh` | Assembles those frames into `demo.gif`. Requires `ffmpeg` and Chromium. |
 
-`demo.svg` / `demo.gif` are generated artifacts; the README embeds the
-GIF (animates on both GitHub and npm). Every line shown is real output
-from the two runs above — only the pacing is synthesized.
+The project README embeds the generated GIF. It shows the output of the two runs above, with timing adjusted for the recording.

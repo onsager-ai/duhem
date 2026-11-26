@@ -40,7 +40,7 @@ When a check fails, `duhem server` shows which assertion did not hold — expect
 
 ## Install
 
-The `duhem` CLI ships on npm and as prebuilt binaries on GitHub Releases.
+Install with npm (Node.js 18 or later) or download a prebuilt binary from GitHub Releases.
 
 ```sh
 # global install
@@ -50,7 +50,7 @@ npm i -g duhem
 npx duhem --version
 ```
 
-Prebuilt binaries for each platform are attached to every [GitHub Release](https://github.com/onsager-ai/duhem/releases) — download, unpack, and put `duhem` on your `PATH`.
+The [latest GitHub release](https://github.com/onsager-ai/duhem/releases/latest) has archives for macOS (Apple silicon and Intel), Linux with glibc (ARM64 and x64), and Windows (x64). Download the matching archive, unpack it, and add the directory containing `duhem` and `duhem-dashboard` to your `PATH`. The release also includes `SHA256SUMS.txt` to verify your download.
 
 > Prefer a source build? A Rust toolchain gives you the CLI without npm: `cargo build -p duhem-cli` produces `target/debug/duhem`. Substitute `cargo run -p duhem-cli --` for `duhem` in the commands below.
 
@@ -66,43 +66,24 @@ The `duhem` binary embeds the sidecar source, so `browser install` works whereve
 
 ## Quickstart
 
-Scaffold a Verification Definition, validate it, and run one. The scaffold's default check is **browser-free** (an `api/call`), so `duhem run` goes green with only a network connection — no Chromium (add `--kind ui` for the browser-driven variant). New to Duhem? The [**getting-started guide**](docs/getting-started.md) walks this end-to-end and shows how to author your own check. Copy-paste the whole sequence:
+With `duhem` on your `PATH`, run these commands from an empty directory. The scaffold creates a Verification Definition with one HTTP check against `https://example.com`. The check needs network access and runs without Chromium. The [getting-started guide](docs/getting-started.md) shows how to adapt the check to your own app.
 
 ```sh
-# scaffold a new VD skeleton — a browser-free api/call check that runs
-# green against https://example.com (network only, no browser)
 duhem init ./verifications/sample --name sample
-
-# structurally validate it, then run it end-to-end
 duhem validate ./verifications/sample
-duhem run      ./verifications/sample
-
-# (or run the repo's fully-offline worked example)
-duhem run verifications/defaults-example
+duhem run ./verifications/sample
 ```
 
-`duhem run` prints a per-leaf line and the run verdict:
+`duhem validate` prints `OK`. When the endpoint returns HTTP 200, `duhem run` prints `pass` and reports one passed check. To see a real failure and its evidence, try the [demo above](#it-caught-a-real-one).
 
-```text
-checks: pass
-pass
-```
-
-That green just proves the pipeline runs end-to-end against a live endpoint. The point is what a *real* check catches — see [It caught a real one](#it-caught-a-real-one) for a regression Duhem refused to pass while everything else called it healthy.
-
-Preview what a run would execute — without launching anything — with `--dry-run`:
+Use `--dry-run` to preview what the scaffold would execute without making the HTTP request:
 
 ```sh
-duhem run verifications/defaults-example --dry-run
-```
-
-```text
-WOULD RUN: checks::AC-1::AC-1.1
-WOULD RUN: checks::AC-2::AC-2.1
+duhem run ./verifications/sample --dry-run
 ```
 
 For the composed values behind that plan, use
-`duhem resolve . --provenance`; add `--format json` for the stable
+`duhem resolve ./verifications/sample --provenance`; add `--format json` for the stable
 machine-readable form. It resolves includes, profiles, inputs, named
 `pages:` locators, and
 default timeouts without running provisioning or opening a browser,
@@ -110,7 +91,7 @@ and masks every secret as `••••••`.
 
 `duhem run` auto-discovers the manifest: with no path it walks the current directory and its ancestors (capped at the enclosing `.git`) for a `duhem.yml` / `.duhem.yml`, so `cd anywhere-in-the-repo && duhem run` finds the repo-root manifest — same as `git`, `cargo`, `pnpm`. Pass an explicit path to override, or `-f path/to/manifest.yml` for an out-of-tree manifest.
 
-For a real-world example — including the `provision.up:` / `down:` hooks Duhem sequences around a check — see [`verifications/duhem-dashboard/`](verifications/duhem-dashboard/). Product suites live co-located in their own repos under `.duhem/`; [`templates/product-repo/`](templates/product-repo/) is the drop-in skeleton.
+From a Duhem checkout, run `duhem run verifications/defaults-example` for an offline example of how a suite handles an unavailable command. See the [example index](verifications/) for more worked examples, including [Duhem’s own dashboard checks](verifications/duhem-dashboard/). To add Duhem to your own repo, start with the [adoption template](templates/product-repo/).
 
 ## Core concepts
 

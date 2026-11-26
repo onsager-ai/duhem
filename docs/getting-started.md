@@ -20,12 +20,14 @@ fields, output matching, and summary format. For CI parallel runs, see the
 
 ## 1. Install
 
+With Node.js 18 or later and npm:
+
 ```bash
 npm i -g duhem
 duhem --version
 ```
 
-That's everything for browser-free checks (`api/*`, `db/*`, `cli/*`).
+You can also [install a prebuilt binary](../README.md#install). Either installation is enough to run the first HTTP check in this guide.
 Browser-driven `ui/*` checks additionally need Node ≥ 20 and a Chromium
 sidecar. `duhem run` provisions it automatically the first time a `ui/*`
 check needs it, so this step is **optional** — run it to pre-warm the

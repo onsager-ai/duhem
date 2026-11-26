@@ -47,6 +47,8 @@ evidence. CTRF v0.2.0 pending tests count as skipped; other outcomes count as er
 
 ## Run it locally
 
+The example leaf runs `echo` to demonstrate the structure of a check. Before making this suite a required check, replace that command and its assertions with checks against your product.
+
 ```bash
 duhem validate .duhem/duhem.yml    # schema-check the suite
 duhem run .duhem/duhem.yml         # run it; exit 0 == pass
@@ -90,15 +92,15 @@ jobs:
       - uses: actions/checkout@v4
       # …bring your product's real environment up (build, serve, seed)…
       - name: Install duhem
-        run: npm i -g @onsager/duhem   # or download a release binary
+        run: npm install -g duhem@0.9.6
       - name: Verify
         run: duhem run .duhem/duhem.yml
 ```
 
-**Via `duhem/run` (batteries included).** Use the composite action with
-`verification-source: workspace` so it resolves your co-located VD from
-your checkout. It sets up Node + Chromium, parses the verdict, and can
-ship evidence to a hub — worth it for UI-heavy suites.
+**Via the `duhem/run` composite action.** Use `verification-source: workspace`
+to run the Verification Definition from your checkout. The action builds Duhem
+at the pinned release tag, installs Node.js and Chromium, and exposes the verdict
+and evidence store path as workflow outputs.
 
 ```yaml
 # .github/workflows/duhem.yml
@@ -111,13 +113,13 @@ jobs:
       - uses: actions/checkout@v4
       # …bring your product's real environment up…
       - name: Verify
-        uses: onsager-ai/duhem/.github/actions/run@v0.1
+        uses: onsager-ai/duhem/.github/actions/run@v0.9.6
         with:
           verification-source: workspace
           verification-path: .duhem/duhem.yml
 ```
 
-Then add the `duhem` check as required in branch protection. To split a larger
+Then make the workflow's `verify` job a required status check in your branch settings. To split a larger
 suite across CI machines, see the
 [distributed run CI recipes](https://github.com/onsager-ai/duhem/blob/main/docs/distributed-runs.md#ci-recipes).
 

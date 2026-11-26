@@ -7,6 +7,10 @@
 .vscode/
 tmp/
 npm/duhem/schema/
+npm/duhem/LICENSE
+npm/duhem/NOTICE
+npm/platforms/*/LICENSE
+npm/platforms/*/NOTICE
 
 # Local Duhem run evidence (written by `duhem run`). Root-anchored so a
 # committed `.duhem/` VD suite (Pattern D, `templates/product-repo/`) is

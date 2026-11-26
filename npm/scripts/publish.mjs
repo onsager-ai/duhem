@@ -9,13 +9,14 @@
  *   node npm/scripts/publish.mjs --target platforms [--tag latest] [--dry-run]
  *   node npm/scripts/publish.mjs --target main      [--tag latest] [--dry-run]
  *
- * `--dry-run` runs `npm publish --dry-run` (packs + validates, never uploads).
+ * `--dry-run` checks the attribution files in the generated npm tarball.
  * Real publishes authenticate through npm trusted publishing (GitHub OIDC,
  * `id-token: write` in release.yml); the workflow gates this on a real tag.
  */
 
 import { execFileSync } from 'node:child_process';
-import { cpSync, readFileSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { config, mainDir, platformDir, ROOT } from './lib.mjs';
 
@@ -51,7 +52,30 @@ function alreadyPublished(name, version) {
   }
 }
 
+const attributionFiles = ['LICENSE', 'NOTICE'];
+
+function verifyDryRun(dir, name) {
+  const scratch = mkdtempSync(join(tmpdir(), 'duhem-pack-'));
+  try {
+    const [{ filename }] = JSON.parse(execFileSync('npm', [
+      'pack', '--json', '--pack-destination', scratch,
+    ], { cwd: dir, encoding: 'utf8' }));
+    const archive = join(scratch, filename);
+    for (const file of attributionFiles) {
+      const packed = execFileSync('tar', ['-xOf', archive, `package/${file}`]);
+      if (!packed.equals(readFileSync(join(ROOT, file)))) {
+        throw new Error(`${name}: packed ${file} differs from the repository copy`);
+      }
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
 function publish(dir, name) {
+  for (const file of attributionFiles) {
+    copyFileSync(join(ROOT, file), join(dir, file));
+  }
   const version = pkgVersion(dir);
   if (!dryRun && alreadyPublished(name, version)) {
     console.error(
@@ -62,9 +86,13 @@ function publish(dir, name) {
     );
     process.exit(1);
   }
+  if (dryRun) {
+    verifyDryRun(dir, name);
+    console.log(`  verified LICENSE and NOTICE in ${name}`);
+    return;
+  }
   const argv = ['publish', '--access', 'public', '--tag', tag];
-  if (dryRun) argv.push('--dry-run');
-  console.log(`  ${dryRun ? '[dry-run] ' : ''}npm ${argv.join(' ')}  (${name})`);
+  console.log(`  npm ${argv.join(' ')}  (${name})`);
   execFileSync('npm', argv, { cwd: dir, stdio: 'inherit' });
 }
 
@@ -72,11 +100,11 @@ if (target === 'platforms') {
   for (const p of config.platforms) {
     publish(platformDir(p), p.package);
   }
-  console.log(`\npublished ${config.platforms.length} platform package(s)${dryRun ? ' (dry-run)' : ''}`);
+  console.log(`\n${dryRun ? 'verified' : 'published'} ${config.platforms.length} platform package(s)`);
 } else if (target === 'main') {
   cpSync(join(ROOT, 'schema'), join(mainDir(), 'schema'), { recursive: true });
   publish(mainDir(), config.mainPackage.name);
-  console.log(`\npublished ${config.mainPackage.name}${dryRun ? ' (dry-run)' : ''}`);
+  console.log(`\n${dryRun ? 'verified' : 'published'} ${config.mainPackage.name}`);
 } else {
   console.error(`unknown --target "${target}" (expected: platforms | main)`);
   process.exit(1);

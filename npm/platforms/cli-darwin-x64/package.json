@@ -11,6 +11,7 @@
   ],
   "main": "duhem",
   "files": [
+    "NOTICE",
     "duhem",
     "duhem-dashboard",
     "postinstall.js"

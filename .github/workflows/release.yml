@@ -6,14 +6,13 @@
 # Triggers:
 #   push tag v*        — real release: build, attach to GitHub Release, and
 #                        publish to npm.
-#   workflow_dispatch  — dry-run: build + package + `npm publish --dry-run`,
-#                        but NEVER publish and NEVER cut a Release.
+#   workflow_dispatch  — dry-run: build, package, and verify archives.
 #
 # npm publishing uses trusted publishing (GitHub OIDC): no npm token is
 # stored. Each package (`duhem` and every `@duhem/cli-*`) must list this
 # repository and `release.yml` as its trusted publisher on npmjs.com, and the
 # publish jobs need `id-token: write`. npm 11.5.1+ is required; Node 24 ships it.
-# Only a real tag publishes; a dry-run packages everything but uploads nothing.
+# Only a real tag publishes. A dry run verifies npm and GitHub release archives.
 
 name: Release
 
@@ -79,7 +78,6 @@ jobs:
   github-release:
     name: GitHub Release
     needs: [meta, build]
-    if: needs.meta.outputs.is-release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -113,18 +111,25 @@ jobs:
               cp "$src" "$stage/$bin"
               if [ "$plat" != "windows-x64" ]; then chmod +x "$stage/$bin"; fi
             done
-            cp LICENSE "$stage/LICENSE" 2>/dev/null || true
+            cp LICENSE NOTICE "$stage/"
             cp README.md "$stage/README.md" 2>/dev/null || true
             if [ "$plat" = "windows-x64" ]; then
               (cd "$stage" && zip -qr "../release/${stage}.zip" .)
+              for file in LICENSE NOTICE; do
+                unzip -p "release/${stage}.zip" "$file" | cmp - "$file"
+              done
             else
               tar -czf "release/${stage}.tar.gz" -C "$stage" .
+              for file in LICENSE NOTICE; do
+                tar -xOf "release/${stage}.tar.gz" "./$file" | cmp - "$file"
+              done
             fi
           done
           (cd release && sha256sum * > SHA256SUMS.txt)
           ls -la release
 
       - name: Create / update GitHub Release
+        if: needs.meta.outputs.is-release == 'true'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}

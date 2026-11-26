@@ -8,13 +8,7 @@ Spec: [`onsager-ai/duhem#36`](https://github.com/onsager-ai/duhem/issues/36).
 Product context: `docs/duhem-spec.md` §12.1 (GitHub integration)
 and §11.2 (trust boundary).
 
-> **Phase 0 status.** This action is the wiring for the first
-> deployment — the Onsager dashboard create-spec-plan Verification
-> Definition. The action surface generalizes to additional VDs and
-> additional consumers as Phase 1 alpha customers adopt it
-> (`docs/duhem-spec.md` §14). Pre-`v1`, the action lives at
-> `onsager-ai/duhem/.github/actions/run@v0.<n>` tags; consumers
-> should pin to a tag, never `@main`.
+Reference the action by a [Duhem release tag](https://github.com/onsager-ai/duhem/releases), for example `onsager-ai/duhem/.github/actions/run@v0.9.6`.
 
 ## Inputs
 
@@ -42,58 +36,9 @@ Outputs are set in both cases, so downstream `if: failure()` steps
 can still read `verdict` / `store` / `run-id` to post comments or
 upload evidence.
 
-## Usage (from `onsager-ai/onsager`)
+## Usage
 
-The intended consumer pattern. The Onsager workflow checks out
-the PR, builds and serves Onsager locally, then calls the action
-pinned to a Duhem release tag:
-
-```yaml
-# onsager-ai/onsager/.github/workflows/duhem-create-spec-plan.yml
-name: duhem / create-spec-plan
-
-on:
-  pull_request:
-
-jobs:
-  verify:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Build + serve Onsager
-        run: |
-          # Onsager-side build steps that bring the `just dev` stack up
-          # (dashboard on http://localhost:5173, portal on :3002) and
-          # seed a workflow so the Create Plan compile gate has a valid
-          # spec kind. The specifics live in the Onsager-side companion
-          # work.
-          ./scripts/serve-for-duhem.sh &
-
-      - name: Verify
-        id: duhem
-        uses: onsager-ai/duhem/.github/actions/run@v0.1
-        with:
-          # Default `verification-source: duhem` resolves this inside the
-          # duhem checkout at the pinned tag (a self-verification VD, or
-          # a centralized one). A product self-gating on its OWN
-          # co-located `.duhem/` VD passes `verification-source: workspace`
-          # instead — see "Two trust postures" above.
-          verification-path: verifications/duhem-cli/duhem.yml
-          inputs: |
-            repo_dir=.
-
-      - name: Surface evidence on red
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: duhem-evidence
-          path: ${{ steps.duhem.outputs.store }}
-```
-
-Onsager-side branch protection on `main` then adds the
-`duhem / create-spec-plan` status check as required. An Onsager PR
-cannot merge past a Duhem `fail`.
+For checks in your own repository, use the [workflow in the adoption template](../../../templates/product-repo/README.md#mode-a--self-gate-on-your-own-prs). It uses `verification-source: workspace` and shows where to start your product before the verification step. The default `verification-source: duhem` mode runs a definition from the pinned Duhem release instead. See the source options below.
 
 ## Two trust postures (`verification-source`)
 
@@ -121,9 +66,7 @@ A drop-in `.duhem/` skeleton + CODEOWNERS + Mode A CI snippet lives in
 Mode A adopters who want no GitHub Action at all can skip this action
 entirely and run the CLI directly in their CI —
 `duhem run .duhem/duhem.yml` resolves workspace-local paths natively.
-The action's value over direct-CLI is the batteries (Node + Chromium
-setup, verdict parsing, opt-in hub shipping), which matter most for
-UI-heavy suites.
+The action installs Node.js and Chromium and exposes the verdict and evidence as workflow outputs.
 
 **Mode B** (Duhem's dogfood CI monitors drift by running a product's
 co-located suite with a freshly-built `duhem`) does not use this action
@@ -172,9 +115,7 @@ What the action does **not** do (in the default `duhem` posture):
 
 Two checks keep the boundary honest:
 
-1. **Pinned ref.** Consumers reference the action at a tag
-   (`@v0.1`), not at `@main`. A Duhem-side change cannot ship into
-   the consumer's verdict pipeline without a coordinated tag bump.
+1. **Pinned ref.** Consumers reference the action at a release tag such as `@v0.9.6`. Updating Duhem in a consumer's verdict pipeline requires updating that reference.
 2. **CODEOWNERS on `verifications/**`.** Edits to a VD on this
    repo require a Duhem maintainer's approval. A consumer PR that
    tries to open a Duhem PR re-authoring its own check still

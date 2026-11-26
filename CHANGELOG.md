@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+## v0.9.7 — 2026-11-26
+
 - [additive] Include the generated Verification Definition schema in npm packages and identify it with a canonical `$id`. (#392)
 
 ## v0.9.6 — 2026-11-23

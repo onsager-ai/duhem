@@ -13,32 +13,29 @@ Duhem follows a lightweight spec-driven loop. The short version:
 
 **Hard rule: no spec, no PR** — with one exception. A genuinely **trivial** change (typo, doc-only, formatting, one-line obvious fix) may skip the spec issue; label the PR `trivial`. When in doubt, write the spec.
 
-If a change introduces new product surface (a new action type, a new schema field, a new CLI command, new judge behavior), the spec must include or link a worked Verification Definition example that exercises it. A surface with no example can't be dogfooded.
+If a change adds an action type, schema field, CLI command, or verdict behavior, the spec must include or link a worked Verification Definition that exercises it.
 
 ## Build and test
 
-Duhem uses [`just`](https://github.com/casey/just) as its task runner over a Cargo workspace.
+Start with Git, [rustup](https://rustup.rs/), and the [`just` task runner](https://github.com/casey/just). Rustup selects the Rust toolchain and components in [`rust-toolchain.toml`](rust-toolchain.toml) when you run Cargo from the checkout. Install Node.js 24 with npm to reproduce the core CI runs and work on the dashboard.
 
 ```sh
 just build       # cargo build --workspace
 just check       # fast inner loop: lint + tests
-just preflight   # the pre-push gate: everything CI runs
+just preflight   # check the merge with origin/main after committing
 just test        # cargo test --workspace (skips #[ignore]'d tests)
 just lint        # static checks (advisory changelog mode)
 just self-verify # run Duhem against its own Verification Definitions
 ```
 
-**`just preflight` is what you should run before pushing.** `just check`
-is the fast inner-loop gate; passing it does *not* mean CI will pass.
-Two things differ, and both have bitten real branches:
+Run `just preflight` before pushing, with your changes committed and the worktree clean. It fetches `origin/main` and runs the checks on a temporary merge of your branch and that ref. If `origin` points to a fork, sync the fork's `main` with Duhem upstream first.
+
+Use `just check` for quick local feedback. The preflight and CI checks cover more:
 
 - `schema-changelog-check` runs advisory (`--lint`) inside `just lint`
   so an in-progress change is not blocked on a CHANGELOG entry it does
   not have yet. CI runs it strict.
-- Nothing in `just check` runs Duhem's own self-verification suite.
-  That is where the expensive breakage hides: a change can pass every
-  static check and every unit test while breaking the Verification
-  Definitions Duhem uses to verify itself.
+- Preflight runs Duhem's CLI checks against a freshly built binary and validates the Verification Definitions under `verifications/`.
 
 `just preflight` runs:
 
@@ -47,14 +44,13 @@ Two things differ, and both have bitten real branches:
 - the file-budget check (`xtask check-file-budget`)
 - `xtask skill-scrub` and `xtask dx-drift`
 - `cargo test --workspace`
-- `just self-verify` — `verifications/duhem-cli` against a freshly built CLI
+- `just self-verify` and `just validate-suites`
 - `xtask schema-changelog-check` in its strict form
-- `xtask schema-drift` — docs §10 yaml blocks vs the live schema
-- `xtask action-reference --check` — generated reference vs action contracts
+- `xtask schema-drift` — spec examples against the live schema
+- `xtask constraint-catalog --mode=fail` — spec catalogs against their code counterparts
+- `xtask action-reference --check` — generated reference against action contracts
 
-The only things CI runs that `preflight` does not are the browser lanes
-(`just test browser-actions`) and the dashboard suite (`just dashboard
-test`), which need Chromium and Node respectively.
+CI runs its core checks in two jobs using the repository's `duhem.yml`. It also runs separate browser, dashboard, and sharding-example checks. See the [development reference](docs/agent-development-reference.md#contributing) for the CI commands.
 
 Browser-backed (`ui/*`) test lanes need Node ≥ 20 plus the Playwright sidecar's Chromium, installed once per host:
 
@@ -87,7 +83,7 @@ The repo's development process lives under [`.claude/skills/`](.claude/skills/):
 
 - **`duhem-dev-process`** — the end-to-end SDD loop (spec → branch → implement → PR → merge), the check gate, and the CI-failure table.
 - **`verification-authoring`** — how to author Verification Definitions (criteria + checks), enforcing the Holistic Verification Principle and the criteria-vs-checks separation.
-- **[Product regression migration](docs/product-regression-migration.md)** — the current Duhem producer/consumer contract, capability inventory, and qualification sequence for #575.
+- **[Getting started](docs/getting-started.md)** — install Duhem, run a check, and write a Verification Definition.
 
 ## Sign-off / CLA
 

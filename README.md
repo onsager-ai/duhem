@@ -13,29 +13,29 @@
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/schema-v0.x-blue.svg" alt="Schema"></a>
 </p>
 
-Duhem is the verification runner for AI-built software: one entry point runs every verification layer, gates on all of them, aggregates statistics and indexes evidence. It runs native test frameworks without replacing them, alongside mechanically judged holistic checks.
+## The health check passed. The web front was down.
 
-- **Runnable specs.** A Verification Definition is one artifact: readable intent bound to runnable checks. The thing you read *is* the thing that runs *is* the thing that gates the merge — spec, tests, and code can't drift apart.
-- **Holistic, no mocks.** Duhem drives the real shipped artifact through its real interfaces — the whole delivery web at once. A green means the real system worked, not that a stand-in did.
-- **Mechanical judgment — no LLM in the verdict.** Humans own the criteria, and Duhem evaluates them deterministically. Optional score steps record rubric-based evidence separately from the verdict.
-- **Built for agent-native development.** You write *what* to verify, not the program that verifies it — anchored to intent, not implementation, so it doesn't rot when an agent refactors underneath.
+Crawlab Pro runs a Duhem suite on its `:edge` image before promoting it to `:stable`. One build omitted `envsubst`, so the startup script rendered an empty nginx config and the web front stopped serving on its expected port. The backend still reported healthy. Duhem blocked promotion, and the same gate verified the fix. [Read the incident write-up](https://marvinzhang.dev/blog/introducing-duhem).
 
-## It caught a real one
+Duhem is a free, open-source release gate under the [Apache-2.0 license](LICENSE). Add it alongside your existing CI tests to check the artifact you plan to ship through its real interfaces. You define the criteria, and structured assertions determine the verdict. Optional rubric scores are recorded separately as evidence.
 
-Crawlab Pro gates its `:edge` image on a Duhem suite before promoting to `:stable`. On one build the gate went red: the environment wouldn't come up. The cause was almost invisible — a new image shipped without `envsubst`, so the startup script silently rendered an **empty** nginx config and the whole web front went dead on its expected port. The backend was fine and the product's *own* healthcheck reported **healthy**. A human clicking through, or the container's self-check, would have shipped it. Duhem didn't — no working front, no green. The bug was fixed, the same gate verified the fix, and it now runs automatically on every build; the bad build never reached a stable user.
+## Try the HTTP-only demo
 
-**It caught a self-masking regression that everything else — including the product's own healthcheck — was calling healthy.** Full write-up: [*Your AI Says "All Tests Pass" — But Do They?*](https://marvinzhang.dev/blog/introducing-duhem).
+This reproduction serves HTTP 200 from both `/health` and `/`. In the broken build, `/` serves the nginx welcome page. Duhem fails the assertion for the page title, then passes when the same check sees the fixed page.
+
+Run it with Node.js 18+, Git, Bash and `curl` on your PATH. The demo needs no browser.
+
+```sh
+npm i -g duhem
+git clone https://github.com/onsager-ai/duhem.git
+cd duhem/demo/self-masking
+./run.sh
+```
+
+See the [demo README](demo/self-masking/README.md) for the expected output and the Verification Definition that drives it.
 
 <p align="center">
   <img src="demo/self-masking/demo.gif" alt="Terminal recording: /health returns healthy, but 'duhem run' fails because the web front serves the wrong page; after the fix, 'duhem run' passes." width="600">
-  <br>
-  <em>A runnable reproduction — <a href="demo/self-masking/"><code>demo/self-masking/</code></a>: <code>/health</code> stays green while the web front breaks, so a real <code>duhem run</code> fails, then passes once the fix ships.</em>
-</p>
-
-When a check fails, `duhem server` shows which assertion did not hold — expected beside observed — next to the steps and evidence the run recorded:
-
-<p align="center">
-  <img src="docs/images/dashboard-failing-run.png" alt="The Duhem dashboard on a failing run: the run header shows a fail verdict, the results tree marks criteria AC-1 and AC-2 as pass and AC-3 as fail, and the selected check AC-3.1 shows its failed assertion with expected &quot;7 / 7&quot; beside observed &quot;6 / 6&quot;, above the step timeline." width="800">
 </p>
 
 ## Install
@@ -74,7 +74,7 @@ duhem validate ./verifications/sample
 duhem run ./verifications/sample
 ```
 
-`duhem validate` prints `OK`. When the endpoint returns HTTP 200, `duhem run` prints `pass` and reports one passed check. To see a real failure and its evidence, try the [demo above](#it-caught-a-real-one).
+`duhem validate` prints `OK`. When the endpoint returns HTTP 200, `duhem run` prints `pass` and reports one passed check. To see a real failure and its evidence, try the [demo above](#try-the-http-only-demo).
 
 Use `--dry-run` to preview what the scaffold would execute without making the HTTP request:
 
@@ -94,6 +94,14 @@ and masks every secret as `••••••`.
 From a Duhem checkout, run `duhem run verifications/defaults-example` for an offline example of how a suite handles an unavailable command. See the [example index](verifications/) for more worked examples, including [Duhem’s own dashboard checks](verifications/duhem-dashboard/). To add Duhem to your own repo, start with the [adoption template](templates/product-repo/).
 
 ## Core concepts
+
+A Verification Definition keeps readable criteria together with the checks that verify them. Duhem can run native test commands alongside checks of the running system, and it records the results and evidence of each run.
+
+When a check fails, `duhem server` shows the failed assertion with expected and observed values alongside the recorded steps and evidence.
+
+<p align="center">
+  <img src="docs/images/dashboard-failing-run.png" alt="The Duhem dashboard on a failing run: the run header shows a fail verdict, the results tree marks criteria AC-1 and AC-2 as pass and AC-3 as fail, and the selected check AC-3.1 shows its failed assertion with expected &quot;7 / 7&quot; beside observed &quot;6 / 6&quot;, above the step timeline." width="800">
+</p>
 
 - **Criteria vs. checks.** *Criteria* are the human commitment about what "done" means; they are stable and survive implementation churn. *Checks* are how Duhem verifies that commitment; they are derivative and may change as the implementation does. Conflating the two is a defect.
 - **Verification Definition (VD).** A YAML document (criteria + checks + inputs, optionally `setup`, leaf `teardown`, and `provision` hooks) describing one workload to verify. `duhem init` scaffolds one; `verifications/` holds worked examples.
